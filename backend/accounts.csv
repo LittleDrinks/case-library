@@ -1,0 +1,5 @@
+username,password,role,nickname,must_change_password,status
+test0001,default123456,admin,曾军,true,active
+test0002,default123456,admin,隋宁,true,active
+test0003,default123456,admin,杨旭晨_admin,true,active
+test0004,default123456,normal,杨旭晨_normal,true,active

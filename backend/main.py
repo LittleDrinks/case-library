@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """FastAPI entry point for the case library."""
 
-import hashlib
 import os
 import sys
 import time
@@ -9,7 +8,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -18,7 +17,7 @@ from case_processor import process_new_case
 from database import (
     count_cases,
     create_case,
-    create_user,
+    change_user_password,
     decrement_like_count,
     delete_case,
     get_all_cases,
@@ -27,6 +26,7 @@ from database import (
     get_reviews,
     get_statistics,
     get_user_by_username,
+    authenticate_user,
     increment_like_count,
     increment_view_count,
     init_db,
@@ -48,6 +48,11 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(status_code=400, content={"success": False, "detail": str(exc)})
+
+
 def get_current_user(headers):
     auth_header = headers.get("authorization") or headers.get("Authorization")
     if not auth_header:
@@ -56,7 +61,10 @@ def get_current_user(headers):
     try:
         token = auth_header.replace("Bearer ", "").replace("bearer ", "")
         username = token.split("_")[0]
-        return get_user_by_username(username)
+        user = get_user_by_username(username)
+        if user and user.get("status") == "active":
+            return user
+        return None
     except Exception as exc:
         print(f"Failed to resolve current user: {exc}")
         return None
@@ -73,12 +81,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.post("/api/auth/login")
 async def login(username: str = Form(...), password: str = Form(...)):
-    user = get_user_by_username(username)
+    user = authenticate_user(username, password)
     if not user:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    if password_hash != user["password"]:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     token = f"{user['username']}_{int(time.time())}"
@@ -87,31 +91,26 @@ async def login(username: str = Form(...), password: str = Form(...)):
         "data": {
             "id": user["id"],
             "username": user["username"],
-            "role": user.get("role", "user"),
+            "role": user.get("role", "normal"),
+            "nickname": user.get("nickname", ""),
+            "must_change_password": bool(user.get("must_change_password", False)),
+            "status": user.get("status", "active"),
             "token": token,
         },
     }
 
 
-@app.post("/api/auth/register")
-async def register(username: str = Form(...), password: str = Form(...)):
-    if get_user_by_username(username):
-        raise HTTPException(status_code=400, detail="用户名已存在")
-
-    if not username or len(username) < 3:
-        raise HTTPException(status_code=400, detail="用户名长度不能少于3位")
-
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="密码长度不能少于6位")
-
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    user_id = create_user(username, password_hash, "user")
-
-    return {
-        "success": True,
-        "message": "注册成功",
-        "data": {"id": user_id, "username": username, "role": "user"},
-    }
+@app.post("/api/auth/change-password")
+async def change_password(
+    username: str = Form(...),
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+):
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="新密码长度不能少于8位")
+    if not change_user_password(username, old_password, new_password):
+        raise HTTPException(status_code=400, detail="用户名或原密码错误")
+    return {"success": True, "message": "密码修改成功"}
 
 
 @app.get("/api/cases")
@@ -123,13 +122,15 @@ async def list_cases(
     request: Request = None,
 ):
     current_user = get_current_user(dict(request.headers)) if request else None
-
     if author and current_user:
         if current_user.get("role") != "admin" and current_user.get("username") != author:
             raise HTTPException(status_code=403, detail="无权查看该用户案例")
 
-    cases = get_all_cases(status, offset, limit, author)
-    return {"success": True, "data": cases, "total": count_cases(status, author)}
+    return {
+        "success": True,
+        "data": get_all_cases(status, offset, limit, author),
+        "total": count_cases(status, author),
+    }
 
 
 @app.get("/api/cases/{case_id}")
@@ -138,8 +139,8 @@ async def get_case_detail(case_id: int, increment_view: bool = True):
     if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
 
-    if increment_view:
-        increment_view_count(case_id)
+    if increment_view and not increment_view_count(case_id):
+        raise HTTPException(status_code=404, detail="案例不存在")
 
     return {"success": True, "data": case}
 
@@ -155,18 +156,18 @@ async def create_new_case(
     status: str = Form("pending_review"),
     auto_process: bool = Form(False),
 ):
-    type = type or "TYPE_A"
-    theme = theme or "铸魂育人"
+    case_type = type or "TYPE_A"
+    case_theme = theme or "铸魂育人"
 
     if auto_process:
-        case_ids = process_new_case(content, title, author, department, type, theme)
+        case_ids = process_new_case(content, title, author, department, case_type, case_theme)
         return {"success": True, "message": "案例创建成功", "case_ids": case_ids}
 
     case_id = create_case(
         {
             "title": title,
-            "type": type,
-            "theme": theme,
+            "type": case_type,
+            "theme": case_theme,
             "content": content,
             "author": author,
             "department": department,
@@ -202,7 +203,9 @@ async def _update_existing_case_impl(
             case_data[field] = value
 
     if not update_case(case_id, case_data, updated_by, change_reason):
-        raise HTTPException(status_code=404, detail="案例更新失败")
+        if get_case(case_id):
+            raise HTTPException(status_code=400, detail="案例没有实际变更")
+        raise HTTPException(status_code=404, detail="案例不存在")
 
     return {"success": True, "message": "案例更新成功"}
 
@@ -265,6 +268,8 @@ async def delete_case_endpoint(case_id: int):
 @app.post("/api/cases/{case_id}/submit")
 async def submit_case_for_review(case_id: int):
     if not submit_for_review(case_id):
+        if get_case(case_id):
+            raise HTTPException(status_code=400, detail="案例状态未发生变化")
         raise HTTPException(status_code=404, detail="案例不存在")
     return {"success": True, "message": "案例已提交审核"}
 
@@ -279,14 +284,15 @@ async def like_case(case_id: int):
 @app.post("/api/cases/{case_id}/unlike")
 async def unlike_case(case_id: int):
     if not decrement_like_count(case_id):
+        if get_case(case_id):
+            raise HTTPException(status_code=400, detail="点赞数已经为0")
         raise HTTPException(status_code=404, detail="案例不存在")
     return {"success": True, "message": "取消点赞成功"}
 
 
 @app.get("/api/search")
 async def search_cases_endpoint(q: str, status: Optional[str] = "approved"):
-    results = search_engine.search(q, status)
-    return {"success": True, "data": results, "query": q}
+    return {"success": True, "data": search_engine.search(q, status), "query": q}
 
 
 @app.get("/api/search/advanced")
@@ -297,14 +303,16 @@ async def advanced_search(
     keyword: Optional[str] = None,
     limit: int = 50,
 ):
-    results = search_engine.advanced_filter(
-        type_filter=type,
-        theme_filter=theme,
-        status_filter=status,
-        keyword_filter=keyword,
-        limit=limit,
-    )
-    return {"success": True, "data": results}
+    return {
+        "success": True,
+        "data": search_engine.advanced_filter(
+            type_filter=type,
+            theme_filter=theme,
+            status_filter=status,
+            keyword_filter=keyword,
+            limit=limit,
+        ),
+    }
 
 
 @app.get("/api/recommendations/{case_id}")
@@ -325,10 +333,14 @@ async def get_latest_cases(limit: int = 10):
 @app.post("/api/reviews/{case_id}")
 async def review_case_endpoint(
     case_id: int,
+    request: Request,
     reviewer: str = Form(...),
     comment: str = Form(...),
     status: str = Form(...),
 ):
+    current_user = get_current_user(dict(request.headers))
+    if not current_user or current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可以审核案例")
     if not review_case(case_id, reviewer, comment, status):
         raise HTTPException(status_code=400, detail="审核失败")
     return {"success": True, "message": "审核完成"}
@@ -364,8 +376,9 @@ async def get_constants():
                 "draft": "草稿",
                 "pending_review": "待审核",
                 "approved": "已通过",
-                "approved_pending_deploy": "已通过",
-                "needs_revision": "需修改",
+                "rejected": "已退回",
+                "approved_pending_deploy": "待发布",
+                "deployed": "已发布",
                 "deleted": "已删除",
             },
         },

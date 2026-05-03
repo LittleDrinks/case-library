@@ -8,10 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import bcrypt
 from bson import ObjectId
 from dotenv import load_dotenv
-from pymongo import ASCENDING, DESCENDING, MongoClient, TEXT
-from pymongo.errors import DuplicateKeyError
+from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument, TEXT
+from pymongo.errors import DuplicateKeyError, ServerSelectionTimeoutError
 
 
 load_dotenv()
@@ -23,6 +24,22 @@ SQLITE_DB_PATH = os.getenv(
     "SQLITE_DB_PATH",
     str(Path(__file__).resolve().parent.parent / "data" / "cases.db"),
 )
+
+CASE_STATUSES = {
+    "draft",
+    "pending_review",
+    "approved",
+    "rejected",
+    "needs_revision",
+    "approved_pending_deploy",
+    "deployed",
+    "deleted",
+}
+REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "needs_revision"}
+USER_ROLES = {"normal", "admin"}
+USER_STATUSES = {"active", "no_active"}
+COUNTER_COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
+VERSIONED_FIELDS = ["title", "type", "theme", "content", "author", "department", "keywords"]
 
 _client: Optional[MongoClient] = None
 
@@ -102,39 +119,126 @@ def serialize_case(case: Optional[Dict]) -> Optional[Dict]:
     return case
 
 
-def _next_id(collection_name: str) -> int:
-    db = get_db()
-    last_doc = db[collection_name].find_one(
-        {"id": {"$type": "number"}},
-        sort=[("id", DESCENDING)],
-        projection={"id": 1},
-    )
-    return int(last_doc["id"]) + 1 if last_doc and "id" in last_doc else 1
-
-
-def _insert_with_generated_id(collection_name: str, doc: Dict) -> int:
-    db = get_db()
-    collection = db[collection_name]
-    for _ in range(5):
-        doc["id"] = _next_id(collection_name)
-        try:
-            collection.insert_one(doc)
-            return int(doc["id"])
-        except DuplicateKeyError:
-            continue
-    raise RuntimeError(f"Unable to allocate id for {collection_name}")
-
-
 def _now() -> datetime:
     return datetime.now()
 
 
+def _validate_case_status(status: Optional[str]):
+    if status is not None and status not in CASE_STATUSES:
+        raise ValueError(f"Invalid case status: {status}")
+
+
+def _validate_review_status(status: Optional[str]):
+    if status is not None and status not in REVIEW_STATUSES:
+        raise ValueError(f"Invalid review status: {status}")
+
+
+def _validate_user_role(role: Optional[str]):
+    if role is not None and role not in USER_ROLES:
+        raise ValueError(f"Invalid user role: {role}")
+
+
+def _normalize_user_role(role: Optional[str]) -> str:
+    if role == "user":
+        return "normal"
+    return role or "normal"
+
+
+def _validate_user_status(status: Optional[str]):
+    if status is not None and status not in USER_STATUSES:
+        raise ValueError(f"Invalid user status: {status}")
+
+
+def hash_password(password: str) -> str:
+    if not password:
+        raise ValueError("Password cannot be empty")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    if not password or not password_hash:
+        return False
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _normalize_review_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized in ("approve", "approved"):
+        return "approved"
+    if normalized in ("reject", "rejected", "needs_revision"):
+        return "rejected"
+    if normalized == "pending":
+        return "pending"
+    raise ValueError(f"Invalid review status: {status}")
+
+
+def _max_legacy_id(collection_name: str) -> int:
+    doc = get_db()[collection_name].find_one(
+        {"id": {"$type": "number"}},
+        sort=[("id", DESCENDING)],
+        projection={"id": 1},
+    )
+    return int(doc["id"]) if doc and doc.get("id") is not None else 0
+
+
+def sync_counter(collection_name: str):
+    """Make a counter at least as large as the current maximum legacy id."""
+    if collection_name not in COUNTER_COLLECTIONS:
+        raise ValueError(f"Unknown counter collection: {collection_name}")
+
+    max_id = _max_legacy_id(collection_name)
+    get_db().counters.update_one(
+        {"_id": collection_name},
+        {"$max": {"seq": max_id}},
+        upsert=True,
+    )
+
+
+def sync_all_counters():
+    for collection_name in COUNTER_COLLECTIONS:
+        sync_counter(collection_name)
+
+
+def next_sequence(collection_name: str) -> int:
+    """Atomically allocate the next integer id for a collection."""
+    sync_counter(collection_name)
+    result = get_db().counters.find_one_and_update(
+        {"_id": collection_name},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    if not result or "seq" not in result:
+        raise RuntimeError(f"Unable to allocate id for {collection_name}")
+    return int(result["seq"])
+
+
+def _insert_with_generated_id(collection_name: str, doc: Dict) -> int:
+    doc["id"] = next_sequence(collection_name)
+    result = get_db()[collection_name].insert_one(doc)
+    if not result.acknowledged:
+        raise RuntimeError(f"Insert into {collection_name} was not acknowledged")
+    return int(doc["id"])
+
+
 def init_db():
     """Initialize MongoDB indexes. This never drops data."""
-    db = get_db()
-    get_mongo_client().admin.command("ping")
+    try:
+        client = get_mongo_client()
+        client.admin.command("ping")
+    except ServerSelectionTimeoutError as exc:
+        raise RuntimeError(
+            f"Cannot connect to MongoDB at {MONGODB_URI}. "
+            "Start MongoDB or set MONGODB_URI correctly."
+        ) from exc
 
+    db = get_db()
+    db.users.create_index([("id", ASCENDING)], unique=True)
     db.users.create_index([("username", ASCENDING)], unique=True)
+    db.users.create_index([("role", ASCENDING), ("status", ASCENDING)])
 
     db.cases.create_index([("id", ASCENDING)], unique=True)
     db.cases.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
@@ -146,40 +250,182 @@ def init_db():
         default_language="none",
     )
 
+    db.reviews.create_index([("id", ASCENDING)], unique=True)
     db.reviews.create_index([("case_id", ASCENDING), ("review_at", DESCENDING)])
+    db.versions.create_index([("id", ASCENDING)], unique=True)
     db.versions.create_index([("case_id", ASCENDING), ("version_number", DESCENDING)])
+    db.deployments.create_index([("id", ASCENDING)], unique=True)
     db.deployments.create_index([("case_id", ASCENDING), ("deployed_at", DESCENDING)])
 
+    sync_all_counters()
     print(f"MongoDB initialized: {MONGODB_URI}/{MONGODB_DB_NAME}")
 
 
 def get_user_by_username(username: str) -> Optional[Dict]:
     user = get_db().users.find_one({"username": username})
-    return serialize_doc(user)
+    serialized = serialize_doc(user)
+    if serialized:
+        serialized["role"] = _normalize_user_role(serialized.get("role"))
+        serialized.setdefault("nickname", "")
+        serialized.setdefault("status", "active")
+        serialized["must_change_password"] = bool(serialized.get("must_change_password", False))
+    return serialized
 
 
-def create_user(username: str, password_hash: str, role: str = "user") -> int:
+def create_user(
+    username: str,
+    password: str,
+    role: str = "normal",
+    nickname: str = "",
+    must_change_password: bool = True,
+    status: str = "active",
+) -> int:
+    _validate_user_role(role)
+    _validate_user_status(status)
+    if not username:
+        raise ValueError("Username cannot be empty")
+
     doc = {
         "username": username,
-        "password": password_hash,
+        "password": hash_password(password),
         "role": role,
+        "nickname": nickname,
+        "must_change_password": bool(must_change_password),
+        "status": status,
         "created_at": _now(),
+        "updated_at": _now(),
     }
-    return _insert_with_generated_id("users", doc)
+    try:
+        return _insert_with_generated_id("users", doc)
+    except DuplicateKeyError as exc:
+        raise ValueError(f"Username already exists: {username}") from exc
 
 
 def get_users_count() -> int:
     return get_db().users.count_documents({})
 
 
+def serialize_user_public(user: Optional[Dict]) -> Optional[Dict]:
+    if not user:
+        return None
+    serialized = serialize_doc(user) or {}
+    serialized.pop("password", None)
+    serialized["must_change_password"] = bool(serialized.get("must_change_password", False))
+    serialized["role"] = _normalize_user_role(serialized.get("role"))
+    serialized.setdefault("nickname", "")
+    serialized.setdefault("status", "active")
+    return serialized
+
+
+def list_users() -> List[Dict]:
+    cursor = get_db().users.find({}).sort("username", ASCENDING)
+    return [serialize_user_public(user) for user in cursor]
+
+
+def authenticate_user(username: str, password: str) -> Optional[Dict]:
+    user = get_db().users.find_one({"username": username})
+    if not user:
+        return None
+    if user.get("status") != "active":
+        return None
+    if not verify_password(password, user.get("password", "")):
+        return None
+    user["role"] = _normalize_user_role(user.get("role"))
+    return serialize_doc(user)
+
+
+def set_user_password(username: str, new_password: str, must_change_password: bool = True) -> bool:
+    result = get_db().users.update_one(
+        {"username": username},
+        {
+            "$set": {
+                "password": hash_password(new_password),
+                "must_change_password": bool(must_change_password),
+                "updated_at": _now(),
+            }
+        },
+    )
+    return result.matched_count > 0 and result.modified_count > 0
+
+
+def change_user_password(username: str, old_password: str, new_password: str) -> bool:
+    user = get_db().users.find_one({"username": username, "status": "active"})
+    if not user or not verify_password(old_password, user.get("password", "")):
+        return False
+    result = get_db().users.update_one(
+        {"username": username},
+        {
+            "$set": {
+                "password": hash_password(new_password),
+                "must_change_password": False,
+                "updated_at": _now(),
+            }
+        },
+    )
+    return result.matched_count > 0 and result.modified_count > 0
+
+
+def update_user_fields(
+    username: str,
+    role: Optional[str] = None,
+    nickname: Optional[str] = None,
+    status: Optional[str] = None,
+) -> bool:
+    if role is not None:
+        _validate_user_role(role)
+    if status is not None:
+        _validate_user_status(status)
+
+    updates = {}
+    if role is not None:
+        updates["role"] = role
+    if nickname is not None:
+        updates["nickname"] = nickname
+    if status is not None:
+        updates["status"] = status
+    if not updates:
+        return False
+    updates["updated_at"] = _now()
+
+    result = get_db().users.update_one({"username": username}, {"$set": updates})
+    return result.matched_count > 0 and result.modified_count > 0
+
+
+def rename_user(old_username: str, new_username: str) -> bool:
+    if not old_username or not new_username:
+        raise ValueError("Username cannot be empty")
+    try:
+        result = get_db().users.update_one(
+            {"username": old_username},
+            {"$set": {"username": new_username, "updated_at": _now()}},
+        )
+        return result.matched_count > 0 and result.modified_count > 0
+    except DuplicateKeyError as exc:
+        raise ValueError(f"Username already exists: {new_username}") from exc
+
+
+def delete_user(username: str) -> bool:
+    result = get_db().users.delete_one({"username": username})
+    return result.deleted_count > 0
+
+
+def clear_users() -> int:
+    result = get_db().users.delete_many({})
+    sync_counter("users")
+    return int(result.deleted_count)
+
+
 def create_case(case_data: Dict) -> int:
+    status = case_data.get("status", "draft")
+    _validate_case_status(status)
+
     now = _now()
     doc = {
         "title": case_data.get("title", ""),
         "type": case_data.get("type", ""),
         "theme": case_data.get("theme", ""),
         "content": case_data.get("content", ""),
-        "status": case_data.get("status", "draft"),
+        "status": status,
         "author": case_data.get("author", ""),
         "department": case_data.get("department", ""),
         "keywords": _normalize_keywords(case_data.get("keywords", [])),
@@ -207,7 +453,6 @@ def create_case(case_data: Dict) -> int:
         "created_at": now,
     }
     _insert_with_generated_id("versions", version_doc)
-
     return case_id
 
 
@@ -215,9 +460,7 @@ def get_case(case_id: int, include_deleted: bool = False) -> Optional[Dict]:
     query: Dict[str, Any] = {"id": int(case_id)}
     if not include_deleted:
         query["status"] = {"$ne": "deleted"}
-
-    case = get_db().cases.find_one(query)
-    return serialize_case(case)
+    return serialize_case(get_db().cases.find_one(query))
 
 
 def _case_list_filter(
@@ -232,10 +475,11 @@ def _case_list_filter(
 
     if status and status not in ("all", ""):
         if status == "rejected":
-            query["status"] = "needs_revision"
+            query["status"] = {"$in": ["rejected", "needs_revision"]}
         elif status in ("approved", "approved_all"):
             query["status"] = {"$in": ["approved", "approved_pending_deploy"]}
         else:
+            _validate_case_status(status)
             query["status"] = status
     elif not author:
         query["status"] = {"$nin": ["draft", "deleted"]}
@@ -245,7 +489,10 @@ def _case_list_filter(
         if existing_status is None:
             query["status"] = {"$ne": "deleted"}
         elif isinstance(existing_status, dict):
-            existing_status.setdefault("$ne", "deleted")
+            if "$nin" in existing_status:
+                existing_status["$nin"] = list(set(existing_status["$nin"]) | {"deleted"})
+            else:
+                existing_status.setdefault("$ne", "deleted")
         elif existing_status == "deleted":
             query["status"] = {"$ne": "deleted"}
 
@@ -258,10 +505,9 @@ def get_all_cases(
     limit: int = 50,
     author: Optional[str] = None,
 ) -> List[Dict]:
-    db = get_db()
     query = _case_list_filter(status=status, author=author)
     cursor = (
-        db.cases.find(query)
+        get_db().cases.find(query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
@@ -273,11 +519,22 @@ def count_cases(status: Optional[str] = None, author: Optional[str] = None) -> i
     return get_db().cases.count_documents(_case_list_filter(status=status, author=author))
 
 
+def _values_differ(field: str, current: Dict, new_value: Any) -> bool:
+    current_value = current.get(field)
+    if field == "keywords":
+        current_value = _normalize_keywords(current_value)
+        new_value = _normalize_keywords(new_value)
+    return current_value != new_value
+
+
 def update_case(case_id: int, case_data: Dict, updated_by: str = "system", change_reason: str = "") -> bool:
     db = get_db()
     current = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not current:
         return False
+
+    if "status" in case_data:
+        _validate_case_status(case_data.get("status"))
 
     allowed_fields = [
         "title",
@@ -295,28 +552,39 @@ def update_case(case_id: int, case_data: Dict, updated_by: str = "system", chang
     if "keywords" in case_data:
         updates["keywords"] = _normalize_keywords(case_data.get("keywords"))
 
-    updates["updated_at"] = _now()
-
-    result = db.cases.update_one({"id": int(case_id)}, {"$set": updates})
-    if result.matched_count == 0:
+    changed_updates = {
+        field: value for field, value in updates.items() if _values_differ(field, current, value)
+    }
+    if not changed_updates:
         return False
 
-    updated = db.cases.find_one({"id": int(case_id)})
-    max_version = db.versions.find_one(
-        {"case_id": int(case_id)},
-        sort=[("version_number", DESCENDING)],
-        projection={"version_number": 1},
+    version_changed = any(field in changed_updates for field in VERSIONED_FIELDS)
+    changed_updates["updated_at"] = _now()
+
+    result = db.cases.update_one(
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"$set": changed_updates},
     )
-    new_version = int(max_version["version_number"]) + 1 if max_version else 1
-    version_doc = {
-        "case_id": int(case_id),
-        "version_number": new_version,
-        "content": (updated or {}).get("content", ""),
-        "changed_by": updated_by,
-        "change_reason": change_reason,
-        "created_at": _now(),
-    }
-    _insert_with_generated_id("versions", version_doc)
+    if result.matched_count == 0 or result.modified_count == 0:
+        return False
+
+    if version_changed:
+        updated = db.cases.find_one({"id": int(case_id)})
+        max_version = db.versions.find_one(
+            {"case_id": int(case_id)},
+            sort=[("version_number", DESCENDING)],
+            projection={"version_number": 1},
+        )
+        new_version = int(max_version["version_number"]) + 1 if max_version else 1
+        version_doc = {
+            "case_id": int(case_id),
+            "version_number": new_version,
+            "content": (updated or {}).get("content", ""),
+            "changed_by": updated_by,
+            "change_reason": change_reason,
+            "created_at": _now(),
+        }
+        _insert_with_generated_id("versions", version_doc)
 
     return True
 
@@ -335,12 +603,11 @@ def delete_case(case_id: int) -> Dict:
         }
 
     result = db.cases.update_one(
-        {"id": int(case_id)},
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$set": {"status": "deleted", "is_in_library": False, "updated_at": _now()}},
     )
-
     return {
-        "success": result.modified_count > 0,
+        "success": result.matched_count > 0 and result.modified_count > 0,
         "was_in_library": bool(case.get("is_in_library", False)),
         "view_count": int(case.get("view_count") or 0),
         "like_count": int(case.get("like_count") or 0),
@@ -351,14 +618,15 @@ def delete_case(case_id: int) -> Dict:
 
 def submit_for_review(case_id: int) -> bool:
     db = get_db()
-    if not db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}}):
+    case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
+    if not case:
         return False
 
     result = db.cases.update_one(
-        {"id": int(case_id)},
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$set": {"status": "pending_review", "updated_at": _now()}},
     )
-    if result.matched_count == 0:
+    if result.matched_count == 0 or result.modified_count == 0:
         return False
 
     review_doc = {
@@ -377,24 +645,22 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
     if not db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}}):
         return False
 
-    normalized = (status or "").strip().lower()
-    if normalized in ("approve", "approved"):
+    review_status = _normalize_review_status(status)
+    if review_status == "approved":
         new_status = "approved"
         is_approved = True
         is_in_library = True
-    elif normalized in ("reject", "rejected", "needs_revision"):
-        new_status = "needs_revision"
-        is_approved = False
-        is_in_library = False
-    elif normalized == "pending":
-        new_status = "pending_review"
+    elif review_status == "rejected":
+        new_status = "rejected"
         is_approved = False
         is_in_library = False
     else:
-        return False
+        new_status = "pending_review"
+        is_approved = False
+        is_in_library = False
 
     result = db.cases.update_one(
-        {"id": int(case_id)},
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
         {
             "$set": {
                 "status": new_status,
@@ -411,7 +677,7 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
         "case_id": int(case_id),
         "reviewer": reviewer,
         "comment": comment,
-        "status": status,
+        "status": review_status,
         "review_at": _now(),
     }
     _insert_with_generated_id("reviews", review_doc)
@@ -433,7 +699,7 @@ def increment_view_count(case_id: int) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$inc": {"view_count": 1}},
     )
-    return result.matched_count > 0
+    return result.matched_count > 0 and result.modified_count > 0
 
 
 def increment_like_count(case_id: int) -> bool:
@@ -441,18 +707,27 @@ def increment_like_count(case_id: int) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$inc": {"like_count": 1}},
     )
-    return result.matched_count > 0
+    return result.matched_count > 0 and result.modified_count > 0
 
 
 def decrement_like_count(case_id: int) -> bool:
     db = get_db()
+    case_exists = db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}, limit=1) > 0
+    if not case_exists:
+        return False
+
     result = db.cases.update_one(
         {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$gt": 0}},
         {"$inc": {"like_count": -1}},
     )
-    if result.matched_count > 0:
+    if result.modified_count > 0:
         return True
-    return db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}) > 0
+
+    correction = db.cases.update_one(
+        {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$lt": 0}},
+        {"$set": {"like_count": 0}},
+    )
+    return correction.modified_count > 0
 
 
 def _status_search_filter(status: Optional[str]) -> Dict[str, Any]:
@@ -461,7 +736,8 @@ def _status_search_filter(status: Optional[str]) -> Dict[str, Any]:
     if status in ("approved", "approved_all"):
         return {"status": {"$in": ["approved", "approved_pending_deploy"]}}
     if status == "rejected":
-        return {"status": "needs_revision"}
+        return {"status": {"$in": ["rejected", "needs_revision"]}}
+    _validate_case_status(status)
     return {"status": status}
 
 
@@ -478,13 +754,8 @@ def search_cases(
     regex = {"$regex": escaped, "$options": "i"}
     mongo_query: Dict[str, Any] = {
         **_status_search_filter(status),
-        "$or": [
-            {"title": regex},
-            {"content": regex},
-            {"keywords": regex},
-        ],
+        "$or": [{"title": regex}, {"content": regex}, {"keywords": regex}],
     }
-
     cursor = (
         get_db().cases.find(mongo_query)
         .sort("created_at", DESCENDING)
@@ -528,10 +799,7 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> List[Dict]:
     query = {
         "id": {"$ne": int(case_id)},
         "status": {"$in": ["approved", "approved_pending_deploy"]},
-        "$or": [
-            {"type": current_case.get("type")},
-            {"theme": current_case.get("theme")},
-        ],
+        "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
     }
     cursor = get_db().cases.find(query).limit(max(0, int(limit) * 3))
     cases = [serialize_case(row) for row in cursor]
@@ -547,7 +815,11 @@ def get_trending_cases(limit: int = 10) -> List[Dict]:
 
 
 def get_latest_cases(limit: int = 10) -> List[Dict]:
-    cursor = get_db().cases.find(_status_search_filter("approved")).sort("created_at", DESCENDING).limit(max(0, int(limit)))
+    cursor = (
+        get_db().cases.find(_status_search_filter("approved"))
+        .sort("created_at", DESCENDING)
+        .limit(max(0, int(limit)))
+    )
     return [serialize_case(row) for row in cursor]
 
 
@@ -555,9 +827,7 @@ def get_statistics() -> Dict:
     db = get_db()
     approved_filter = {"status": {"$in": ["approved", "approved_pending_deploy"]}}
 
-    stats: Dict[str, Any] = {}
-    stats["total_cases"] = db.cases.count_documents(approved_filter)
-
+    stats: Dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
     stats["by_type"] = {
         row["_id"]: row["count"]
         for row in db.cases.aggregate(

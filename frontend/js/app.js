@@ -2316,103 +2316,114 @@ async function updateCase() {
 // ============ 用户认证 ============
 
 // 打开登录弹窗
+
 function openLoginModal() {
   document.getElementById("login-modal").classList.add("active");
 }
 
-// 关闭登录弹窗
 function closeLoginModal() {
   document.getElementById("login-modal").classList.remove("active");
   document.getElementById("login-username").value = "";
   document.getElementById("login-password").value = "";
 }
 
-// 打开注册弹窗
-function openRegisterModal() {
-  closeLoginModal();
-  document.getElementById("register-modal").classList.add("active");
+function getDisplayName() {
+  if (!currentUser) return "";
+  return currentUser.nickname || currentUser.username || "";
 }
 
-// 关闭注册弹窗
-function closeRegisterModal() {
-  document.getElementById("register-modal").classList.remove("active");
-  document.getElementById("register-username").value = "";
-  document.getElementById("register-password").value = "";
-  document.getElementById("register-password-confirm").value = "";
+function getAvatarChar() {
+  const name = getDisplayName().trim();
+  return name ? Array.from(name)[0].toUpperCase() : "?";
 }
 
-// 用户注册
-async function register() {
-  const username = document.getElementById("register-username").value;
-  const password = document.getElementById("register-password").value;
-  const passwordConfirm = document.getElementById("register-password-confirm").value;
+function toggleUserMenu(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const dropdown = document.getElementById("user-dropdown");
+  if (dropdown) dropdown.classList.toggle("active");
+}
 
-  if (!username.trim()) {
-    alert("请输入用户名");
+function closeUserMenu() {
+  const dropdown = document.getElementById("user-dropdown");
+  if (dropdown) dropdown.classList.remove("active");
+}
+
+function openChangePasswordModal(force = false) {
+  const modal = document.getElementById("change-password-modal");
+  const tip = document.getElementById("force-password-tip");
+  const cancelButton = document.getElementById("change-password-cancel");
+  if (!modal) return;
+  modal.dataset.force = force ? "true" : "false";
+  if (tip) tip.style.display = force ? "block" : "none";
+  if (cancelButton) cancelButton.style.display = force ? "none" : "inline-block";
+  document.getElementById("old-password").value = "";
+  document.getElementById("new-password").value = "";
+  document.getElementById("confirm-new-password").value = "";
+  modal.classList.add("active");
+  closeUserMenu();
+}
+
+function closeChangePasswordModal() {
+  const modal = document.getElementById("change-password-modal");
+  if (!modal) return;
+  if (modal.dataset.force === "true" && currentUser && currentUser.must_change_password) {
+    alert("\u9996\u6b21\u767b\u5f55\u5fc5\u987b\u4fee\u6539\u5bc6\u7801\u540e\u624d\u80fd\u7ee7\u7eed\u4f7f\u7528\u3002");
+    return;
+  }
+  modal.classList.remove("active");
+}
+
+async function changePassword() {
+  if (!currentUser) {
+    alert("\u8bf7\u5148\u767b\u5f55");
     return;
   }
 
-  if (!password || !passwordConfirm) {
-    alert("请输入密码");
+  const oldPassword = document.getElementById("old-password").value;
+  const newPassword = document.getElementById("new-password").value;
+  const confirmPassword = document.getElementById("confirm-new-password").value;
+
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    alert("\u8bf7\u586b\u5199\u5b8c\u6574\u5bc6\u7801\u4fe1\u606f");
     return;
   }
-
-  if (password !== passwordConfirm) {
-    alert("两次输入的密码不一致");
+  if (newPassword.length < 8) {
+    alert("\u65b0\u5bc6\u7801\u81f3\u5c11\u9700\u89818\u4f4d");
     return;
   }
-
-  if (password.length < 6) {
-    alert("密码至少需要6个字符");
+  if (newPassword !== confirmPassword) {
+    alert("\u4e24\u6b21\u8f93\u5165\u7684\u65b0\u5bc6\u7801\u4e0d\u4e00\u81f4");
     return;
   }
 
   const formData = new FormData();
-  formData.append("username", username);
-  formData.append("password", password);
+  formData.append("username", currentUser.username);
+  formData.append("old_password", oldPassword);
+  formData.append("new_password", newPassword);
 
-  try {
-    const response = await fetch(`${API_BASE}/auth/register`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success) {
-        alert("注册成功！您的账户已创建，默认权限为普通用户。");
-        closeRegisterModal();
-        openLoginModal();
-      } else {
-        alert(data.error || data.detail || "注册失败");
-      }
-    } else {
-      try {
-        const errorData = await response.json();
-        alert("注册失败: " + (errorData.detail || errorData.error || "未知错误"));
-      } catch {
-        const errorText = await response.text();
-        console.error("注册失败:", response.status, errorText);
-        alert(`注册失败 (状态码: ${response.status})`);
-      }
+  const data = await formRequest("/auth/change-password", formData);
+  if (data.success) {
+    currentUser.must_change_password = false;
+    localStorage.setItem("currentUser", JSON.stringify(currentUser));
+    const modal = document.getElementById("change-password-modal");
+    if (modal) {
+      modal.dataset.force = "false";
+      modal.classList.remove("active");
     }
-  } catch (error) {
-    console.error("注册失败:", error);
-    alert("注册失败，请检查网络连接或后端服务是否启动");
+    updateAuthUI();
+    alert("\u5bc6\u7801\u4fee\u6539\u6210\u529f");
+  } else {
+    alert(data.detail || data.error || "\u5bc6\u7801\u4fee\u6539\u5931\u8d25");
   }
 }
 
-// 用户登录
 async function login() {
   const username = document.getElementById("login-username").value;
   const password = document.getElementById("login-password").value;
 
-  console.log("开始登录流程");
-  console.log("用户名:", username);
-  console.log("密码:", password ? "***" : "(空)");
-
   if (!username.trim() || !password.trim()) {
-    alert("请输入用户名和密码");
+    alert("\u8bf7\u8f93\u5165\u7528\u6237\u540d\u548c\u5bc6\u7801");
     return;
   }
 
@@ -2420,90 +2431,84 @@ async function login() {
   formData.append("username", username);
   formData.append("password", password);
 
-  console.log("发送登录请求到:", `${API_BASE}/auth/login`);
-
   const data = await formRequest("/auth/login", formData);
-
-  console.log("登录响应:", data);
-
   if (data.success && data.data) {
-    // 保存token和用户信息
     authToken = data.data.token;
     currentUser = {
       id: data.data.id,
       username: data.data.username,
       role: data.data.role,
+      nickname: data.data.nickname || data.data.username,
+      must_change_password: !!data.data.must_change_password,
+      status: data.data.status || "active",
     };
 
-    // 存储到localStorage
     localStorage.setItem("authToken", authToken);
     localStorage.setItem("currentUser", JSON.stringify(currentUser));
-
-    // 更新UI
     updateAuthUI();
     closeLoginModal();
-    alert("登录成功！");
+
+    if (currentUser.must_change_password) {
+      openChangePasswordModal(true);
+    }
   } else {
-    console.error("登录失败:", data);
-    alert(data.error || data.detail || "登录失败，请检查用户名和密码");
+    alert(data.error || data.detail || "\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7528\u6237\u540d\u6216\u5bc6\u7801");
   }
 }
 
 // 用户登出
 function logout() {
-  // 清除当前用户的草稿（使用sessionStorage）
   if (currentUser) {
     const draftKey = `caseDraft_${currentUser.username}`;
     sessionStorage.removeItem(draftKey);
   }
-  
-  // 清除所有可能的草稿键（兼容旧版本）
   sessionStorage.removeItem("caseDraft");
-  
-  // 清除本地存储
   localStorage.removeItem("authToken");
   localStorage.removeItem("currentUser");
-
-  // 清除全局变量
   authToken = null;
   currentUser = null;
-
-  // 更新UI
+  closeUserMenu();
   updateAuthUI();
-
-  // 跳转到首页
   navigateTo("home");
-  alert("已退出登录");
 }
 
 // 更新认证相关的UI
 function updateAuthUI() {
   const navLogin = document.getElementById("nav-login");
   const navLogout = document.getElementById("nav-logout");
+  const navUserMenu = document.getElementById("nav-user-menu");
+  const navUserAvatar = document.getElementById("nav-user-avatar");
+  const userDropdownName = document.getElementById("user-dropdown-name");
+  const userDropdownRole = document.getElementById("user-dropdown-role");
   const navMyCases = document.getElementById("nav-my-cases");
   const navReview = document.getElementById("nav-review");
   const navCreate = document.getElementById("nav-create");
 
   if (currentUser) {
-    // 已登录状态
-    navLogin.style.display = "none";
-    navLogout.style.display = "inline-block";
-    navMyCases.style.display = "inline-block";
-    navCreate.style.display = "inline-block";
-
-    // 只有管理员才显示审核管理
-    if (currentUser.role === "admin") {
-      navReview.style.display = "inline-block";
-    } else {
-      navReview.style.display = "none";
+    if (navLogin) navLogin.style.display = "none";
+    if (navLogout) navLogout.style.display = "none";
+    if (navUserMenu) navUserMenu.style.display = "inline-flex";
+    if (navUserAvatar) navUserAvatar.textContent = getAvatarChar();
+    if (userDropdownName) userDropdownName.textContent = getDisplayName();
+    if (userDropdownRole) {
+      userDropdownRole.textContent = currentUser.role === "admin" ? "\u7ba1\u7406\u5458" : "";
+      userDropdownRole.style.display = currentUser.role === "admin" ? "block" : "none";
     }
+    if (navMyCases) navMyCases.style.display = "inline-block";
+    if (navCreate) navCreate.style.display = "inline-block";
+
+    if (navReview) navReview.style.display = currentUser.role === "admin" ? "inline-block" : "none";
   } else {
-    // 未登录状态
-    navLogin.style.display = "inline-block";
-    navLogout.style.display = "none";
-    navMyCases.style.display = "none";
-    navReview.style.display = "none";
-    navCreate.style.display = "inline-block";
+    if (navLogin) {
+      navLogin.textContent = "\u767b\u5f55/\u6ce8\u518c";
+      navLogin.style.display = "inline-block";
+    }
+    if (navLogout) navLogout.style.display = "none";
+    if (navUserMenu) navUserMenu.style.display = "none";
+    closeUserMenu();
+    if (navMyCases) navMyCases.style.display = "none";
+    if (navReview) navReview.style.display = "none";
+    if (navCreate) navCreate.style.display = "inline-block";
   }
 }
 
@@ -2516,6 +2521,9 @@ function checkAuthStatus() {
     authToken = savedToken;
     currentUser = JSON.parse(savedUser);
     updateAuthUI();
+    if (currentUser && currentUser.must_change_password) {
+      setTimeout(() => openChangePasswordModal(true), 0);
+    }
   }
 }
 
@@ -2594,5 +2602,14 @@ document.addEventListener("click", (e) => {
       console.log('Global click handler - view detail button clicked for case:', caseId);
       toggleCaseDetail(caseId);
     }
+  }
+});
+
+
+// User menu outside click
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("nav-user-menu");
+  if (menu && !menu.contains(e.target)) {
+    closeUserMenu();
   }
 });

@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from database import SQLITE_DB_PATH, get_db, init_db
+from database import SQLITE_DB_PATH, get_db, init_db, sync_all_counters
 
 
 TABLES = ["users", "cases", "reviews", "versions", "deployments"]
@@ -154,6 +154,8 @@ def main():
             summaries[table_name] = migrate_collection(table_name, rows)
     finally:
         conn.close()
+
+    sync_all_counters()
 
     print("\nMigration summary")
     for table_name in TABLES:
