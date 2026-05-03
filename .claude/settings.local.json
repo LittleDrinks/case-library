@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python \"D:\\\\桌面\\\\强国有我大思政课案例库1\\\\migrate.py\")",
+      "Bash(python -c \"import database; print\\('database.py OK'\\)\")",
+      "Bash(python -c \"import search_engine; print\\('search_engine.py OK'\\)\")",
+      "Bash(python -c \"import main; print\\('main.py OK'\\)\")"
+    ]
+  }
+}
