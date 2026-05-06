@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from database import SQLITE_DB_PATH, get_db, init_db, sync_all_counters
+from database import SQLITE_DB_PATH, format_beijing_datetime, get_db, init_db, sync_all_counters
 
 
 TABLES = ["users", "cases", "reviews", "versions", "deployments"]
@@ -103,7 +103,7 @@ def clean_doc(table_name: str, row: Dict) -> Dict:
         if field in doc:
             parsed = parse_datetime(doc.get(field))
             if parsed is not None:
-                doc[field] = parsed
+                doc[field] = format_beijing_datetime(doc.get(field))
             elif doc.get(field) in (None, ""):
                 doc.pop(field, None)
 

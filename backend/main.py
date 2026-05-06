@@ -31,6 +31,7 @@ from database import (
     increment_view_count,
     init_db,
     review_case,
+    set_case_hidden,
     submit_for_review,
     update_case,
 )
@@ -68,6 +69,10 @@ def get_current_user(headers):
     except Exception as exc:
         print(f"Failed to resolve current user: {exc}")
         return None
+
+
+def get_case_owner_username(case: dict) -> str:
+    return case.get("owner_username") or case.get("author") or ""
 
 
 init_db()
@@ -122,21 +127,49 @@ async def list_cases(
     request: Request = None,
 ):
     current_user = get_current_user(dict(request.headers)) if request else None
-    if author and current_user:
+    if status == "draft" and not author:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="请先登录")
+        author = current_user.get("username")
+
+    if author:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="请先登录")
         if current_user.get("role") != "admin" and current_user.get("username") != author:
             raise HTTPException(status_code=403, detail="无权查看该用户案例")
+        if status == "draft" and current_user.get("username") != author:
+            raise HTTPException(status_code=403, detail="无权查看该用户草稿")
+
+    is_admin = bool(current_user and current_user.get("role") == "admin")
+    is_self_view = bool(
+        author and current_user and current_user.get("username") == author
+    )
+    is_public_library = (status == "approved") and not author
+    include_hidden = (is_admin or is_self_view) and not is_public_library
 
     return {
         "success": True,
-        "data": get_all_cases(status, offset, limit, author),
-        "total": count_cases(status, author),
+        "data": get_all_cases(status, offset, limit, author, include_hidden=include_hidden),
+        "total": count_cases(status, author, include_hidden=include_hidden),
     }
 
 
 @app.get("/api/cases/{case_id}")
-async def get_case_detail(case_id: int, increment_view: bool = True):
+async def get_case_detail(case_id: int, increment_view: bool = True, request: Request = None):
     case = get_case(case_id)
     if not case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+
+    current_user = get_current_user(dict(request.headers)) if request else None
+    owner_username = get_case_owner_username(case)
+    is_admin = bool(current_user and current_user.get("role") == "admin")
+    is_owner = bool(current_user and current_user.get("username") == owner_username)
+
+    if case.get("status") == "draft":
+        if not is_owner:
+            raise HTTPException(status_code=403, detail="无权查看该草稿")
+
+    if case.get("is_hidden") and not (is_admin or is_owner):
         raise HTTPException(status_code=404, detail="案例不存在")
 
     if increment_view and not increment_view_count(case_id):
@@ -147,6 +180,7 @@ async def get_case_detail(case_id: int, increment_view: bool = True):
 
 @app.post("/api/cases")
 async def create_new_case(
+    request: Request,
     title: str = Form(...),
     content: str = Form(...),
     author: str = Form(""),
@@ -156,6 +190,17 @@ async def create_new_case(
     status: str = Form("pending_review"),
     auto_process: bool = Form(False),
 ):
+    current_user = get_current_user(dict(request.headers))
+    owner_username = ""
+    if status == "draft":
+        if not current_user:
+            raise HTTPException(status_code=401, detail="请先登录后再保存草稿")
+        owner_username = current_user.get("username", "")
+    elif current_user:
+        owner_username = current_user.get("username", "")
+    if current_user and not author:
+        author = current_user.get("nickname") or current_user.get("username", "")
+
     case_type = type or "TYPE_A"
     case_theme = theme or "铸魂育人"
 
@@ -170,6 +215,7 @@ async def create_new_case(
             "theme": case_theme,
             "content": content,
             "author": author,
+            "owner_username": owner_username,
             "department": department,
             "status": status,
         }
@@ -188,7 +234,20 @@ async def _update_existing_case_impl(
     status: Optional[str],
     updated_by: str,
     change_reason: str,
+    current_user: Optional[dict],
 ):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="请先登录")
+
+    existing_case = get_case(case_id)
+    if not existing_case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    owner_username = get_case_owner_username(existing_case)
+    if current_user.get("role") != "admin" and current_user.get("username") != owner_username:
+        raise HTTPException(status_code=403, detail="无权修改该案例")
+    if existing_case.get("status") == "draft" and current_user.get("username") != owner_username:
+        raise HTTPException(status_code=403, detail="无权修改该草稿")
+
     case_data = {}
     for field, value in {
         "title": title,
@@ -213,6 +272,7 @@ async def _update_existing_case_impl(
 @app.put("/api/cases/{case_id}")
 async def update_existing_case(
     case_id: int,
+    request: Request,
     title: Optional[str] = Form(None),
     content: Optional[str] = Form(None),
     author: Optional[str] = Form(None),
@@ -223,14 +283,16 @@ async def update_existing_case(
     updated_by: str = Form("system"),
     change_reason: str = Form(""),
 ):
+    current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, status, updated_by, change_reason
+        case_id, title, content, author, department, type, theme, status, updated_by, change_reason, current_user
     )
 
 
 @app.post("/api/cases/{case_id}")
 async def update_existing_case_post_compat(
     case_id: int,
+    request: Request,
     title: Optional[str] = Form(None),
     content: Optional[str] = Form(None),
     author: Optional[str] = Form(None),
@@ -241,13 +303,27 @@ async def update_existing_case_post_compat(
     updated_by: str = Form("system"),
     change_reason: str = Form(""),
 ):
+    current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, status, updated_by, change_reason
+        case_id, title, content, author, department, type, theme, status, updated_by, change_reason, current_user
     )
 
 
 @app.delete("/api/cases/{case_id}")
-async def delete_case_endpoint(case_id: int):
+async def delete_case_endpoint(case_id: int, request: Request):
+    current_user = get_current_user(dict(request.headers))
+    if not current_user:
+        raise HTTPException(status_code=401, detail="请先登录")
+
+    case = get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    owner_username = get_case_owner_username(case)
+    if current_user.get("role") != "admin" and current_user.get("username") != owner_username:
+        raise HTTPException(status_code=403, detail="无权删除该案例")
+    if case.get("status") == "draft" and current_user.get("username") != owner_username:
+        raise HTTPException(status_code=403, detail="无权删除该草稿")
+
     result = delete_case(case_id)
     if not result.get("success"):
         raise HTTPException(status_code=404, detail="案例不存在")
@@ -266,11 +342,21 @@ async def delete_case_endpoint(case_id: int):
 
 
 @app.post("/api/cases/{case_id}/submit")
-async def submit_case_for_review(case_id: int):
-    if not submit_for_review(case_id):
-        if get_case(case_id):
-            raise HTTPException(status_code=400, detail="案例状态未发生变化")
+async def submit_case_for_review(case_id: int, request: Request):
+    current_user = get_current_user(dict(request.headers))
+    if not current_user:
+        raise HTTPException(status_code=401, detail="请先登录")
+
+    case = get_case(case_id, include_deleted=True)
+    if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
+
+    owner_username = get_case_owner_username(case)
+    if current_user.get("role") != "admin" and current_user.get("username") != owner_username:
+        raise HTTPException(status_code=403, detail="无权提交该案例")
+
+    if not submit_for_review(case_id):
+        raise HTTPException(status_code=400, detail="案例状态不允许提交审核")
     return {"success": True, "message": "案例已提交审核"}
 
 
@@ -330,6 +416,29 @@ async def get_latest_cases(limit: int = 10):
     return {"success": True, "data": search_engine.get_latest(limit)}
 
 
+@app.post("/api/cases/{case_id}/visibility")
+async def toggle_case_visibility(
+    case_id: int,
+    request: Request,
+    hidden: bool = Form(...),
+):
+    current_user = get_current_user(dict(request.headers))
+    if not current_user or current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可以隐藏或展示案例")
+
+    if not get_case(case_id):
+        raise HTTPException(status_code=404, detail="案例不存在")
+
+    if not set_case_hidden(case_id, hidden):
+        raise HTTPException(status_code=400, detail="操作失败")
+
+    return {
+        "success": True,
+        "message": "案例已隐藏" if hidden else "案例已展示",
+        "is_hidden": bool(hidden),
+    }
+
+
 @app.post("/api/reviews/{case_id}")
 async def review_case_endpoint(
     case_id: int,
@@ -376,10 +485,7 @@ async def get_constants():
                 "draft": "草稿",
                 "pending_review": "待审核",
                 "approved": "已通过",
-                "rejected": "已退回",
-                "approved_pending_deploy": "待发布",
-                "deployed": "已发布",
-                "deleted": "已删除",
+                "needs_revision": "已驳回",
             },
         },
     }
@@ -395,6 +501,8 @@ async def read_index():
 
 @app.get("/{path:path}")
 async def catch_all(path: str):
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
     file_path = os.path.join(FRONTEND_DIR, path)
     if os.path.exists(file_path) and os.path.isfile(file_path):
         return FileResponse(file_path)

@@ -224,7 +224,7 @@
       <!-- 创建案例 -->
       <div id="page-create" class="page">
         <div class="container">
-          <h2 class="page-title">创建新案例</h2>
+          <h2 class="page-title">创建案例</h2>
           <form class="case-form" id="create-case-form" onsubmit="event.preventDefault(); submitCase();">
             <div class="form-group">
               <label for="case-title">案例标题 *</label>
@@ -374,6 +374,13 @@
               onclick="switchMyCasesTab('needs_revision')"
             >
               已驳回
+            </button>
+            <button
+              class="tab"
+              data-tab="draft"
+              onclick="switchMyCasesTab('draft')"
+            >
+              我的草稿
             </button>
             <button
               class="tab"
@@ -542,13 +549,6 @@
                 onclick="closeReviewModal()"
               >
                 取消
-              </button>
-              <button
-                type="button"
-                class="btn btn-info"
-                onclick="saveReviewDraft()"
-              >
-                保存草稿
               </button>
               <button
                 type="button"

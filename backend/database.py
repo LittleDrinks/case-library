@@ -4,7 +4,7 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,17 +29,15 @@ CASE_STATUSES = {
     "draft",
     "pending_review",
     "approved",
-    "rejected",
     "needs_revision",
-    "approved_pending_deploy",
-    "deployed",
-    "deleted",
 }
 REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "needs_revision"}
 USER_ROLES = {"normal", "admin"}
 USER_STATUSES = {"active", "no_active"}
 COUNTER_COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
 VERSIONED_FIELDS = ["title", "type", "theme", "content", "author", "department", "keywords"]
+DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 _client: Optional[MongoClient] = None
 
@@ -60,9 +58,59 @@ def get_db():
     return get_db_connection()
 
 
+def normalize_to_beijing_datetime(value: Any) -> Any:
+    """Normalize datetime-like values to a naive UTC+8 wall-clock datetime.
+
+    PyMongo reads BSON dates as naive UTC datetimes by default. Plain strings
+    without timezone metadata are treated as already being Beijing wall time.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return value.astimezone(BEIJING_TZ).replace(tzinfo=None)
+        return value.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ).replace(tzinfo=None)
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return value
+
+        parse_text = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(parse_text)
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+                try:
+                    parsed = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    parsed = None
+            if parsed is None:
+                return value
+
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+            return normalize_to_beijing_datetime(parsed)
+        return parsed.replace(tzinfo=None)
+
+    return value
+
+
+def format_beijing_datetime(value: Any) -> Any:
+    normalized = normalize_to_beijing_datetime(value)
+    if isinstance(normalized, datetime):
+        return normalized.strftime("%Y-%m-%d %H:%M:%S")
+    return normalized
+
+
+def _normalize_datetime_fields(doc: Dict[str, Any]) -> Dict[str, Any]:
+    for field in DATETIME_FIELDS:
+        if field in doc:
+            doc[field] = format_beijing_datetime(doc[field])
+    return doc
+
+
 def serialize_datetime(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.isoformat(sep=" ", timespec="seconds")
+        return format_beijing_datetime(value)
     return value
 
 
@@ -74,6 +122,8 @@ def serialize_doc(doc: Optional[Dict]) -> Optional[Dict]:
     for key, value in doc.items():
         if isinstance(value, ObjectId):
             serialized[key] = str(value)
+        elif key in DATETIME_FIELDS:
+            serialized[key] = format_beijing_datetime(value)
         elif isinstance(value, datetime):
             serialized[key] = serialize_datetime(value)
         elif isinstance(value, list):
@@ -114,13 +164,19 @@ def serialize_case(case: Optional[Dict]) -> Optional[Dict]:
     case["keywords"] = _normalize_keywords(case.get("keywords"))
     case["is_approved"] = bool(case.get("is_approved", False))
     case["is_in_library"] = bool(case.get("is_in_library", False))
+    case["is_hidden"] = bool(case.get("is_hidden", False))
     case["view_count"] = int(case.get("view_count") or 0)
     case["like_count"] = int(case.get("like_count") or 0)
+    if case.get("status") == "draft":
+        case["display_at"] = case.get("updated_at") or case.get("created_at")
+    else:
+        case["display_at"] = case.get("submitted_at") or case.get("created_at")
     return case
 
 
-def _now() -> datetime:
-    return datetime.now()
+def _now() -> str:
+    """Return the current UTC+8 wall-clock time as a plain string."""
+    return format_beijing_datetime(datetime.now(timezone.utc))
 
 
 def _validate_case_status(status: Optional[str]):
@@ -218,6 +274,7 @@ def next_sequence(collection_name: str) -> int:
 
 def _insert_with_generated_id(collection_name: str, doc: Dict) -> int:
     doc["id"] = next_sequence(collection_name)
+    _normalize_datetime_fields(doc)
     result = get_db()[collection_name].insert_one(doc)
     if not result.acknowledged:
         raise RuntimeError(f"Insert into {collection_name} was not acknowledged")
@@ -243,6 +300,7 @@ def init_db():
     db.cases.create_index([("id", ASCENDING)], unique=True)
     db.cases.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
     db.cases.create_index([("author", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)])
+    db.cases.create_index([("owner_username", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)])
     db.cases.create_index([("type", ASCENDING), ("theme", ASCENDING)])
     db.cases.create_index(
         [("title", TEXT), ("content", TEXT), ("keywords", TEXT)],
@@ -258,6 +316,9 @@ def init_db():
     db.deployments.create_index([("case_id", ASCENDING), ("deployed_at", DESCENDING)])
 
     sync_all_counters()
+    repair = backfill_owner_username()
+    if repair["fixed"]:
+        print(f"Backfilled owner_username on {repair['fixed']} legacy case(s)")
     print(f"MongoDB initialized: {MONGODB_URI}/{MONGODB_DB_NAME}")
 
 
@@ -338,11 +399,11 @@ def set_user_password(username: str, new_password: str, must_change_password: bo
     result = get_db().users.update_one(
         {"username": username},
         {
-            "$set": {
+            "$set": _normalize_datetime_fields({
                 "password": hash_password(new_password),
                 "must_change_password": bool(must_change_password),
                 "updated_at": _now(),
-            }
+            })
         },
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -355,11 +416,11 @@ def change_user_password(username: str, old_password: str, new_password: str) ->
     result = get_db().users.update_one(
         {"username": username},
         {
-            "$set": {
+            "$set": _normalize_datetime_fields({
                 "password": hash_password(new_password),
                 "must_change_password": False,
                 "updated_at": _now(),
-            }
+            })
         },
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -387,7 +448,7 @@ def update_user_fields(
         return False
     updates["updated_at"] = _now()
 
-    result = get_db().users.update_one({"username": username}, {"$set": updates})
+    result = get_db().users.update_one({"username": username}, {"$set": _normalize_datetime_fields(updates)})
     return result.matched_count > 0 and result.modified_count > 0
 
 
@@ -397,7 +458,7 @@ def rename_user(old_username: str, new_username: str) -> bool:
     try:
         result = get_db().users.update_one(
             {"username": old_username},
-            {"$set": {"username": new_username, "updated_at": _now()}},
+            {"$set": _normalize_datetime_fields({"username": new_username, "updated_at": _now()})},
         )
         return result.matched_count > 0 and result.modified_count > 0
     except DuplicateKeyError as exc:
@@ -427,12 +488,14 @@ def create_case(case_data: Dict) -> int:
         "content": case_data.get("content", ""),
         "status": status,
         "author": case_data.get("author", ""),
+        "owner_username": case_data.get("owner_username", ""),
         "department": case_data.get("department", ""),
         "keywords": _normalize_keywords(case_data.get("keywords", [])),
         "created_at": case_data.get("created_at") or now,
         "updated_at": case_data.get("updated_at") or now,
         "is_approved": bool(case_data.get("is_approved", False)),
         "is_in_library": bool(case_data.get("is_in_library", False)),
+        "is_hidden": bool(case_data.get("is_hidden", False)),
         "view_count": int(case_data.get("view_count") or 0),
         "like_count": int(case_data.get("like_count") or 0),
     }
@@ -463,24 +526,50 @@ def get_case(case_id: int, include_deleted: bool = False) -> Optional[Dict]:
     return serialize_case(get_db().cases.find_one(query))
 
 
+def _author_aliases(author: str) -> List[str]:
+    """Return the username plus any non-empty nickname so legacy cases that
+    stored the nickname in the `author` field still match."""
+    aliases = {author}
+    user = get_db().users.find_one({"username": author}, projection={"nickname": 1})
+    if user:
+        nickname = user.get("nickname") or ""
+        if nickname:
+            aliases.add(nickname)
+    return [a for a in aliases if a]
+
+
+def _apply_hidden_filter(query: Dict[str, Any], include_hidden: bool) -> Dict[str, Any]:
+    if include_hidden:
+        return query
+    query["is_hidden"] = {"$ne": True}
+    return query
+
+
 def _case_list_filter(
     status: Optional[str] = None,
     author: Optional[str] = None,
     include_deleted: bool = False,
+    include_hidden: bool = True,
 ) -> Dict[str, Any]:
     query: Dict[str, Any] = {}
 
     if author:
-        query["author"] = author
+        aliases = _author_aliases(author)
+        query["$or"] = [
+            {"owner_username": author},
+            {"author": {"$in": aliases}},
+        ]
 
     if status and status not in ("all", ""):
         if status == "rejected":
-            query["status"] = {"$in": ["rejected", "needs_revision"]}
+            query["status"] = "needs_revision"
         elif status in ("approved", "approved_all"):
-            query["status"] = {"$in": ["approved", "approved_pending_deploy"]}
+            query["status"] = "approved"
         else:
             _validate_case_status(status)
             query["status"] = status
+    elif status == "all":
+        query["status"] = {"$nin": ["draft", "deleted"]}
     elif not author:
         query["status"] = {"$nin": ["draft", "deleted"]}
 
@@ -496,6 +585,7 @@ def _case_list_filter(
         elif existing_status == "deleted":
             query["status"] = {"$ne": "deleted"}
 
+    _apply_hidden_filter(query, include_hidden)
     return query
 
 
@@ -504,8 +594,9 @@ def get_all_cases(
     offset: int = 0,
     limit: int = 50,
     author: Optional[str] = None,
+    include_hidden: bool = True,
 ) -> List[Dict]:
-    query = _case_list_filter(status=status, author=author)
+    query = _case_list_filter(status=status, author=author, include_hidden=include_hidden)
     cursor = (
         get_db().cases.find(query)
         .sort("created_at", DESCENDING)
@@ -515,8 +606,22 @@ def get_all_cases(
     return [serialize_case(row) for row in cursor]
 
 
-def count_cases(status: Optional[str] = None, author: Optional[str] = None) -> int:
-    return get_db().cases.count_documents(_case_list_filter(status=status, author=author))
+def count_cases(
+    status: Optional[str] = None,
+    author: Optional[str] = None,
+    include_hidden: bool = True,
+) -> int:
+    return get_db().cases.count_documents(
+        _case_list_filter(status=status, author=author, include_hidden=include_hidden)
+    )
+
+
+def set_case_hidden(case_id: int, hidden: bool) -> bool:
+    result = get_db().cases.update_one(
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"$set": _normalize_datetime_fields({"is_hidden": bool(hidden), "updated_at": _now()})},
+    )
+    return result.matched_count > 0
 
 
 def _values_differ(field: str, current: Dict, new_value: Any) -> bool:
@@ -563,7 +668,7 @@ def update_case(case_id: int, case_data: Dict, updated_by: str = "system", chang
 
     result = db.cases.update_one(
         {"id": int(case_id), "status": {"$ne": "deleted"}},
-        {"$set": changed_updates},
+        {"$set": _normalize_datetime_fields(changed_updates)},
     )
     if result.matched_count == 0 or result.modified_count == 0:
         return False
@@ -602,12 +707,14 @@ def delete_case(case_id: int) -> Dict:
             "theme": None,
         }
 
-    result = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
-        {"$set": {"status": "deleted", "is_in_library": False, "updated_at": _now()}},
-    )
+    result = db.cases.delete_one({"id": int(case_id)})
+    if result.deleted_count > 0:
+        db.reviews.delete_many({"case_id": int(case_id)})
+        db.versions.delete_many({"case_id": int(case_id)})
+        db.deployments.delete_many({"case_id": int(case_id)})
+
     return {
-        "success": result.matched_count > 0 and result.modified_count > 0,
+        "success": result.deleted_count > 0,
         "was_in_library": bool(case.get("is_in_library", False)),
         "view_count": int(case.get("view_count") or 0),
         "like_count": int(case.get("like_count") or 0),
@@ -618,13 +725,15 @@ def delete_case(case_id: int) -> Dict:
 
 def submit_for_review(case_id: int) -> bool:
     db = get_db()
-    case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
-    if not case:
-        return False
+    now = _now()
 
     result = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
-        {"$set": {"status": "pending_review", "updated_at": _now()}},
+        {"id": int(case_id), "status": {"$in": ["draft", "needs_revision"]}},
+        {
+            "$set": _normalize_datetime_fields(
+                {"status": "pending_review", "updated_at": now, "submitted_at": now}
+            )
+        },
     )
     if result.matched_count == 0 or result.modified_count == 0:
         return False
@@ -651,7 +760,7 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
         is_approved = True
         is_in_library = True
     elif review_status == "rejected":
-        new_status = "rejected"
+        new_status = "needs_revision"
         is_approved = False
         is_in_library = False
     else:
@@ -662,12 +771,12 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
     result = db.cases.update_one(
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {
-            "$set": {
+            "$set": _normalize_datetime_fields({
                 "status": new_status,
                 "is_approved": is_approved,
                 "is_in_library": is_in_library,
                 "updated_at": _now(),
-            }
+            })
         },
     )
     if result.matched_count == 0:
@@ -682,6 +791,49 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
     }
     _insert_with_generated_id("reviews", review_doc)
     return True
+
+
+def backfill_owner_username() -> Dict[str, int]:
+    """Repair legacy cases that are missing `owner_username`.
+
+    For each case where `owner_username` is missing/empty, look up a user whose
+    `nickname` or `username` matches the case's `author` field and copy that
+    user's `username` into `owner_username`. Without this, "我的提交" cannot
+    locate cases the user authored before `owner_username` was tracked.
+    """
+    db = get_db()
+    nickname_to_username: Dict[str, str] = {}
+    username_set: set = set()
+    for user in db.users.find({}, projection={"username": 1, "nickname": 1}):
+        username = user.get("username") or ""
+        nickname = user.get("nickname") or ""
+        if username:
+            username_set.add(username)
+        if nickname and username and nickname not in nickname_to_username:
+            nickname_to_username[nickname] = username
+
+    missing_filter = {
+        "$or": [
+            {"owner_username": {"$exists": False}},
+            {"owner_username": None},
+            {"owner_username": ""},
+        ]
+    }
+
+    fixed = 0
+    skipped = 0
+    for case in db.cases.find(missing_filter, projection={"id": 1, "author": 1}):
+        author = (case.get("author") or "").strip()
+        resolved = nickname_to_username.get(author) or (author if author in username_set else "")
+        if not resolved:
+            skipped += 1
+            continue
+        db.cases.update_one(
+            {"id": case["id"]},
+            {"$set": _normalize_datetime_fields({"owner_username": resolved, "updated_at": _now()})},
+        )
+        fixed += 1
+    return {"fixed": fixed, "skipped": skipped}
 
 
 def get_case_versions(case_id: int) -> List[Dict]:
@@ -732,11 +884,13 @@ def decrement_like_count(case_id: int) -> bool:
 
 def _status_search_filter(status: Optional[str]) -> Dict[str, Any]:
     if not status or status == "all":
-        return {"status": {"$ne": "deleted"}}
+        return {"status": {"$nin": ["draft", "deleted"]}}
     if status in ("approved", "approved_all"):
-        return {"status": {"$in": ["approved", "approved_pending_deploy"]}}
+        return {"status": "approved"}
     if status == "rejected":
-        return {"status": {"$in": ["rejected", "needs_revision"]}}
+        return {"status": "needs_revision"}
+    if status == "draft":
+        return {"status": "__private_draft__"}
     _validate_case_status(status)
     return {"status": status}
 
@@ -754,6 +908,7 @@ def search_cases(
     regex = {"$regex": escaped, "$options": "i"}
     mongo_query: Dict[str, Any] = {
         **_status_search_filter(status),
+        "is_hidden": {"$ne": True},
         "$or": [{"title": regex}, {"content": regex}, {"keywords": regex}],
     }
     cursor = (
@@ -774,6 +929,7 @@ def filter_cases(
     offset: int = 0,
 ) -> List[Dict]:
     query = _status_search_filter(status_filter)
+    query["is_hidden"] = {"$ne": True}
     if type_filter:
         query["type"] = type_filter
     if theme_filter:
@@ -798,7 +954,8 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> List[Dict]:
 
     query = {
         "id": {"$ne": int(case_id)},
-        "status": {"$in": ["approved", "approved_pending_deploy"]},
+        "status": "approved",
+        "is_hidden": {"$ne": True},
         "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
     }
     cursor = get_db().cases.find(query).limit(max(0, int(limit) * 3))
@@ -808,15 +965,17 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> List[Dict]:
 
 
 def get_trending_cases(limit: int = 10) -> List[Dict]:
-    cursor = get_db().cases.find(_status_search_filter("approved"))
+    query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
+    cursor = get_db().cases.find(query)
     cases = [serialize_case(row) for row in cursor]
     cases.sort(key=lambda item: (item.get("view_count", 0) + item.get("like_count", 0)), reverse=True)
     return cases[:limit]
 
 
 def get_latest_cases(limit: int = 10) -> List[Dict]:
+    query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
     cursor = (
-        get_db().cases.find(_status_search_filter("approved"))
+        get_db().cases.find(query)
         .sort("created_at", DESCENDING)
         .limit(max(0, int(limit)))
     )
@@ -825,7 +984,7 @@ def get_latest_cases(limit: int = 10) -> List[Dict]:
 
 def get_statistics() -> Dict:
     db = get_db()
-    approved_filter = {"status": {"$in": ["approved", "approved_pending_deploy"]}}
+    approved_filter = {"status": "approved"}
 
     stats: Dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
     stats["by_type"] = {

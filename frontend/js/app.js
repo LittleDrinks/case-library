@@ -6,15 +6,97 @@ const API_BASE = "http://localhost:8001/api";
 let currentUser = null;
 let authToken = null;
 
+// Unified in-page dialog for user-facing messages and confirmations.
+function ensureAppDialog() {
+  let overlay = document.getElementById("app-dialog-overlay");
+  if (overlay) return overlay;
+
+  overlay = document.createElement("div");
+  overlay.id = "app-dialog-overlay";
+  overlay.className = "app-dialog-overlay";
+  overlay.innerHTML = `
+    <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
+      <div class="app-dialog-header">
+        <h3 id="app-dialog-title" class="app-dialog-title">提示</h3>
+      </div>
+      <div id="app-dialog-message" class="app-dialog-message"></div>
+      <div class="app-dialog-actions">
+        <button type="button" id="app-dialog-cancel" class="btn btn-secondary app-dialog-cancel">取消</button>
+        <button type="button" id="app-dialog-ok" class="btn btn-primary app-dialog-ok">确定</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function showAppDialog({ message, title = "提示", confirm = false, okText = "确定", cancelText = "取消" }) {
+  return new Promise((resolve) => {
+    const openDialog = () => {
+      const overlay = ensureAppDialog();
+      const titleEl = overlay.querySelector("#app-dialog-title");
+      const messageEl = overlay.querySelector("#app-dialog-message");
+      const okBtn = overlay.querySelector("#app-dialog-ok");
+      const cancelBtn = overlay.querySelector("#app-dialog-cancel");
+
+      titleEl.textContent = title;
+      messageEl.textContent = message || "";
+      okBtn.textContent = okText;
+      cancelBtn.textContent = cancelText;
+      cancelBtn.style.display = confirm ? "inline-flex" : "none";
+      overlay.classList.add("active");
+
+      const cleanup = (result) => {
+        overlay.classList.remove("active");
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        overlay.removeEventListener("click", onOverlayClick);
+        document.removeEventListener("keydown", onKeyDown);
+        resolve(result);
+      };
+
+      const onOk = () => cleanup(true);
+      const onCancel = () => cleanup(false);
+      const onOverlayClick = (event) => {
+        if (event.target === overlay && confirm) cleanup(false);
+      };
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") cleanup(false);
+        if (event.key === "Enter") cleanup(true);
+      };
+
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      overlay.addEventListener("click", onOverlayClick);
+      document.addEventListener("keydown", onKeyDown);
+      okBtn.focus();
+    };
+
+    if (document.body) {
+      openDialog();
+    } else {
+      document.addEventListener("DOMContentLoaded", openDialog, { once: true });
+    }
+  });
+}
+
+function showMessage(message, title = "提示") {
+  return showAppDialog({ message, title, confirm: false });
+}
+
+function showConfirm(message, title = "确认") {
+  return showAppDialog({ message, title, confirm: true });
+}
+
 // 全局错误处理
 window.addEventListener('error', function(e) {
   console.error('Global error caught:', e.error);
-  alert('发生错误: ' + e.error.message);
+  showMessage('发生错误: ' + e.error.message);
 });
 
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
-  alert('发生异步错误: ' + (e.reason?.message || e.reason));
+  showMessage('发生异步错误: ' + (e.reason?.message || e.reason));
 });
 
 // 类型名称映射
@@ -28,18 +110,14 @@ const STATUS_NAMES = {
   draft: "草稿",
   pending_review: "待审核",
   approved: "已通过",
-  approved_pending_deploy: "已通过",
-  needs_revision: "需修改",
-  deleted: "已删除",
+  needs_revision: "已驳回",
 };
 
 const STATUS_CLASSES = {
   draft: "status-draft",
   pending_review: "status-pending",
   approved: "status-approved",
-  approved_pending_deploy: "status-approved",
   needs_revision: "status-revision",
-  deleted: "status-draft",
 };
 
 // ============ 工具函数 ============
@@ -116,7 +194,13 @@ async function formRequest(url, formData, method = "POST") {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("HTTP Error:", response.status, errorText);
-      return { success: false, error: `服务器错误: ${response.status}` };
+      let detail = "";
+      try {
+        detail = JSON.parse(errorText).detail || "";
+      } catch (parseError) {
+        detail = errorText;
+      }
+      return { success: false, error: detail || `服务器错误: ${response.status}`, status: response.status };
     }
 
     const data = await response.json();
@@ -128,9 +212,79 @@ async function formRequest(url, formData, method = "POST") {
   }
 }
 
+function clearCaseEditState() {
+  localStorage.removeItem("editingCaseId");
+  localStorage.removeItem("fromMyCases");
+  localStorage.removeItem("resubmitCase");
+  localStorage.removeItem("isEditingMode");
+  localStorage.removeItem("editingCaseData");
+}
+
+function cloneFormData(formData) {
+  const cloned = new FormData();
+  formData.forEach((value, key) => cloned.append(key, value));
+  return cloned;
+}
+
+async function saveCaseFormData(formData, { fallbackToCreate = true } = {}) {
+  const editingCaseId = localStorage.getItem("editingCaseId");
+  if (!editingCaseId) {
+    return { data: await formRequest("/cases", formData), wasEditing: false };
+  }
+
+  const createFormData = cloneFormData(formData);
+  const updateData = await formRequest(`/cases/${editingCaseId}`, formData);
+  if (updateData.success || updateData.status !== 404 || !fallbackToCreate) {
+    return { data: updateData, wasEditing: true };
+  }
+
+  clearCaseEditState();
+  return { data: await formRequest("/cases", createFormData), wasEditing: false, recoveredFromMissingEdit: true };
+}
+
 function formatDate(dateStr) {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("zh-CN");
+  if (!dateStr) return "";
+  const s = String(dateStr).trim();
+  if (!s) return "";
+  const match = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?/);
+  return match ? `${match[1]} ${match[2]}` : s;
+}
+
+function getBeijingNowString() {
+  const now = new Date();
+  const beijing = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
+}
+
+function getDefaultAuthorName() {
+  let user = currentUser;
+  if (!user) {
+    try {
+      const savedUser = localStorage.getItem("currentUser");
+      user = savedUser ? JSON.parse(savedUser) : null;
+    } catch (error) {
+      user = null;
+    }
+  }
+
+  const nickname = (user?.nickname || "").trim();
+  const username = (user?.username || "").trim();
+  return nickname || username;
+}
+
+function fillDefaultAuthorIfEmpty() {
+  const authorField = document.getElementById("case-author");
+  const defaultAuthor = getDefaultAuthorName();
+  if (authorField && defaultAuthor && !authorField.value.trim()) {
+    authorField.value = defaultAuthor;
+  }
+}
+
+function scheduleDefaultAuthorFill() {
+  fillDefaultAuthorIfEmpty();
+  requestAnimationFrame(fillDefaultAuthorIfEmpty);
+  setTimeout(fillDefaultAuthorIfEmpty, 50);
 }
 
 // ============ 页面导航 ============
@@ -138,10 +292,25 @@ function formatDate(dateStr) {
 // 存储当前页面状态
 let lastNavigatedPage = "home";
 
-function navigateTo(page) {
+function navigateTo(page, options = {}) {
   try {
     console.log("navigateTo called with page:", page, "last:", lastNavigatedPage);
     lastNavigatedPage = page;
+    try { localStorage.setItem("lastPage", page); } catch (e) {}
+
+    // 通过导航栏（或任何未显式 preserveEdit 的入口）进入"创建案例"时，
+    // 强制清除编辑状态，保证只有从"我的提交"点击修改才进入编辑模式。
+    if (page === "create" && !options.preserveEdit) {
+      localStorage.removeItem("editingCaseId");
+      localStorage.removeItem("fromMyCases");
+      localStorage.removeItem("resubmitCase");
+      localStorage.removeItem("isEditingMode");
+      localStorage.removeItem("editingCaseData");
+      const pageTitleEl = document.querySelector("#page-create .page-title");
+      if (pageTitleEl) pageTitleEl.textContent = "创建新案例";
+      const submitBtnEl = document.querySelector("#page-create .btn-primary");
+      if (submitBtnEl) submitBtnEl.textContent = "提交案例";
+    }
     
     // 隐藏所有页面
     document
@@ -164,7 +333,7 @@ function navigateTo(page) {
     // 权限检查：审核管理页面只有管理员可以访问
     if (page === "review") {
       if (!currentUser || currentUser.role !== "admin") {
-        alert("您没有权限访问审核管理页面");
+        showMessage("您没有权限访问审核管理页面");
         navigateToHome();
         return;
       }
@@ -192,7 +361,7 @@ function navigateTo(page) {
       
       // 最终检查
       if (!currentUser) {
-        alert("请先登录后再创建案例");
+        showMessage("请先登录后再创建案例");
         openLoginModal();
         return;
       }
@@ -213,14 +382,16 @@ function navigateTo(page) {
       }
       
       if (!justSubmitted && !isEditing) {
+        scheduleDefaultAuthorFill();
         // 只有在不是刚提交且不是编辑状态时才加载草稿
         loadDraft();
+        scheduleDefaultAuthorFill();
       } else {
         if (justSubmitted) {
           localStorage.removeItem("justSubmittedCase");
           // 强制清空表单，确保下一次创建案例时表单为空
           document.getElementById("case-title").value = "";
-          document.getElementById("case-author").value = "";
+          document.getElementById("case-author").value = getDefaultAuthorName();
           document.getElementById("case-department").value = "";
           document.getElementById("case-content").value = "";
           // 下拉框使用selectedIndex重置
@@ -236,6 +407,7 @@ function navigateTo(page) {
           if (submitBtn) submitBtn.textContent = "提交案例";
         }
       }
+      scheduleDefaultAuthorFill();
     }
 
     // 设置导航链接激活状态
@@ -250,11 +422,31 @@ function navigateTo(page) {
     if (page === "review") loadReviewCases();
     if (page === "stats") loadStats();
     if (page === "my-cases") loadMyCases();
+
+    // 通过导航栏进入"创建案例"时，覆盖 loadDraft 加载的内容，
+    // 确保表单除作者外都是初始状态。
+    if (page === "create" && !options.preserveEdit) {
+      const titleEl = document.getElementById("case-title");
+      if (titleEl) titleEl.value = "";
+      const deptEl = document.getElementById("case-department");
+      if (deptEl) deptEl.value = "";
+      const contentEl = document.getElementById("case-content");
+      if (contentEl) contentEl.value = "";
+      const typeEl = document.getElementById("case-type");
+      if (typeEl) typeEl.selectedIndex = 0;
+      const themeEl = document.getElementById("case-theme");
+      if (themeEl) themeEl.selectedIndex = 0;
+      const autoProcessEl = document.getElementById("auto-process");
+      if (autoProcessEl) autoProcessEl.checked = true;
+      const authorEl = document.getElementById("case-author");
+      if (authorEl) authorEl.value = (typeof getDefaultAuthorName === "function" ? getDefaultAuthorName() : "");
+      if (typeof scheduleDefaultAuthorFill === "function") scheduleDefaultAuthorFill();
+    }
     
     console.log("Navigation to", page, "completed");
   } catch (error) {
     console.error("navigateTo error:", error);
-    alert("导航发生错误: " + error.message);
+    showMessage("导航发生错误: " + error.message);
     navigateToHome();
   }
 }
@@ -450,14 +642,14 @@ async function openCaseDetail(caseId) {
     
     if (!data || !data.success) {
       console.error("Failed to load case detail:", data?.message);
-      alert("加载案例详情失败: " + (data?.message || "未知错误"));
+      showMessage("加载案例详情失败: " + (data?.message || "未知错误"));
       return;
     }
     
     const c = data.data;
     if (!c) {
       console.error("Case data is null");
-      alert("案例数据为空");
+      showMessage("案例数据为空");
       return;
     }
     
@@ -467,7 +659,7 @@ async function openCaseDetail(caseId) {
     
     if (!modalTitle || !modalBody || !caseModal) {
       console.error("Modal elements not found");
-      alert("模态框元素未找到");
+      showMessage("模态框元素未找到");
       return;
     }
     
@@ -506,7 +698,7 @@ async function openCaseDetail(caseId) {
     console.log("Modal opened successfully");
   } catch (error) {
     console.error("openCaseDetail error:", error);
-    alert("打开案例详情时发生错误: " + error.message);
+    showMessage("打开案例详情时发生错误: " + error.message);
   }
 }
 
@@ -544,7 +736,7 @@ async function likeCase(caseId) {
         updateLikeUI(caseId, false);
       } else {
         console.error("Unlike API failed:", data);
-        alert("取消点赞失败: " + (data.error || "未知错误"));
+        showMessage("取消点赞失败: " + (data.error || "未知错误"));
       }
     } else {
       console.log("Attempting to like case:", caseId);
@@ -558,12 +750,12 @@ async function likeCase(caseId) {
         updateLikeUI(caseId, true);
       } else {
         console.error("Like API failed:", data);
-        alert("点赞失败: " + (data.error || "未知错误"));
+        showMessage("点赞失败: " + (data.error || "未知错误"));
       }
     }
   } catch (error) {
     console.error("likeCase error:", error);
-    alert("点赞操作发生错误: " + error.message);
+    showMessage("点赞操作发生错误: " + error.message);
   } finally {
     // 移除处理标志
     likeProcessing.delete(caseId);
@@ -641,13 +833,14 @@ async function submitCase() {
     }
 
     const title = document.getElementById("case-title").value;
+    const author = document.getElementById("case-author").value || getDefaultAuthorName();
     const department = document.getElementById("case-department").value;
     const content = document.getElementById("case-content").value;
     const caseType = document.getElementById("case-type").value;
     const caseTheme = document.getElementById("case-theme").value;
 
     if (!title.trim()) {
-      alert("请填写案例标题！");
+      showMessage("请填写案例标题！");
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "提交案例";
@@ -656,7 +849,7 @@ async function submitCase() {
     }
     
     if (!content.trim()) {
-      alert("请填写案例内容！");
+      showMessage("请填写案例内容！");
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "提交案例";
@@ -665,7 +858,7 @@ async function submitCase() {
     }
     
     if (!caseType || caseType === "") {
-      alert("请选择案例类型！");
+      showMessage("请选择案例类型！");
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "提交案例";
@@ -674,7 +867,7 @@ async function submitCase() {
     }
     
     if (!caseTheme || caseTheme === "") {
-      alert("请选择案例主题！");
+      showMessage("请选择案例主题！");
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "提交案例";
@@ -683,7 +876,7 @@ async function submitCase() {
     }
 
     if (!currentUser) {
-      alert("请先登录后再提交案例！");
+      showMessage("请先登录后再提交案例！");
       openLoginModal();
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -695,36 +888,40 @@ async function submitCase() {
     const formData = new FormData();
     formData.append("title", title);
     formData.append("content", content);
-    formData.append("author", currentUser.username);
+    formData.append("author", author);
     formData.append("department", department);
     formData.append("type", caseType);
     formData.append("theme", caseTheme);
     formData.append("auto_process", false);
     formData.append("status", "pending_review");
 
-    const response = await fetch(`${API_BASE}/cases`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${authToken}`
-      },
-      body: formData
-    });
-    
-    const data = await response.json();
+    const { data, wasEditing } = await saveCaseFormData(formData);
     
     if (data.success) {
-      alert("案例创建成功！");
+      showMessage(wasEditing ? "案例已重新提交！" : "案例创建成功！");
       
       const form = document.getElementById("create-case-form");
       if (form) {
         form.reset();
       }
+
+      if (currentUser) {
+        const draftKey = `caseDraft_${currentUser.username}`;
+        localStorage.removeItem(draftKey);
+        sessionStorage.removeItem(draftKey);
+      }
+      clearCaseEditState();
       
       if (document.getElementById("auto-process")) {
         document.getElementById("auto-process").checked = true;
       }
+
+      if (typeof loadMyCases === "function") {
+        await loadMyCases();
+      }
+      navigateTo("my-cases");
     } else {
-      alert(data.error || "创建失败，请重试");
+      showMessage(data.error || "创建失败，请重试");
     }
 
     if (submitBtn) {
@@ -733,7 +930,7 @@ async function submitCase() {
     }
   } catch (error) {
     console.error("提交失败:", error);
-    alert("提交案例时发生错误: " + error.message);
+    showMessage("提交案例时发生错误: " + error.message);
     
     const submitBtn = document.querySelector("#page-create .btn-primary");
     if (submitBtn) {
@@ -765,6 +962,7 @@ function resetCaseForm() {
 
   const form = document.getElementById("create-case-form");
   if (form) form.reset();
+  fillDefaultAuthorIfEmpty();
 }
 
 function createNewCaseMode() {
@@ -803,7 +1001,7 @@ function resetForm() {
   const autoProcessField = document.getElementById("auto-process");
   
   if (titleField) titleField.value = "";
-  if (authorField) authorField.value = "";
+  if (authorField) authorField.value = getDefaultAuthorName();
   if (deptField) deptField.value = "";
   if (contentField) contentField.value = "";
   if (typeField) typeField.selectedIndex = 0;
@@ -849,9 +1047,9 @@ function resetForm() {
   console.log("✅ 案例提交成功！表单已完全重置，进入新建案例状态");
 }
 
-function fullResetCaseForm() {
+async function fullResetCaseForm() {
   const hasContent = document.getElementById("case-title")?.value || document.getElementById("case-content")?.value;
-  if (hasContent && !confirm("确定要放弃当前内容，创建新案例吗？")) {
+  if (hasContent && !(await showConfirm("确定要放弃当前内容，创建新案例吗？"))) {
     return;
   }
 
@@ -892,15 +1090,16 @@ function fullResetCaseForm() {
 
   const form = document.getElementById("create-case-form");
   if (form) form.reset();
+  fillDefaultAuthorIfEmpty();
 
   console.log("表单已全量重置，草稿/编辑状态已清除");
 }
 
 // 创建新案例（放弃当前编辑，开始全新案例）
-function createNewCase() {
+async function createNewCase() {
   // 确认用户操作
   if (document.getElementById("case-title").value || document.getElementById("case-content").value) {
-    if (!confirm("确定要放弃当前内容，创建新案例吗？")) {
+    if (!(await showConfirm("确定要放弃当前内容，创建新案例吗？"))) {
       return;
     }
   }
@@ -934,7 +1133,7 @@ function createNewCase() {
   const autoProcessEl = document.getElementById("auto-process");
   
   if (titleEl) titleEl.value = "";
-  if (authorEl) authorEl.value = "";
+  if (authorEl) authorEl.value = getDefaultAuthorName();
   if (deptEl) deptEl.value = "";
   if (contentEl) contentEl.value = "";
   if (typeEl) typeEl.value = "";
@@ -950,49 +1149,63 @@ function createNewCase() {
   
   // 6. 重置表单
   document.getElementById("create-case-form")?.reset();
+  fillDefaultAuthorIfEmpty();
   
   console.log("已重置为新案例模式，可以开始创建新案例");
 }
 
 async function saveDraft() {
   const title = document.getElementById("case-title").value;
-  const author = document.getElementById("case-author").value;
+  const author = document.getElementById("case-author").value || getDefaultAuthorName();
   const department = document.getElementById("case-department").value;
   const content = document.getElementById("case-content").value;
   const caseType = document.getElementById("case-type").value;
   const caseTheme = document.getElementById("case-theme").value;
-  const autoProcessCheckbox = document.getElementById("auto-process");
-    const autoProcess = autoProcessCheckbox ? autoProcessCheckbox.checked : false;
 
   if (!title.trim() && !content.trim()) {
-    alert("请至少填写标题或内容！");
+    showMessage("请至少填写标题或内容！");
     return;
   }
 
   if (!currentUser) {
-    alert("请先登录后再保存草稿！");
+    showMessage("请先登录后再保存草稿！");
     return;
   }
 
-  const draft = {
-    title,
-    author,
-    department,
-    content,
-    caseType,
-    caseTheme,
-    autoProcess,
-    savedAt: new Date().toISOString()
-  };
+  const formData = new FormData();
+  formData.append("title", title.trim() || "未命名草稿");
+  formData.append("content", content);
+  formData.append("author", author);
+  formData.append("department", department);
+  formData.append("type", caseType || "TYPE_A");
+  formData.append("theme", caseTheme || "强国建设");
+  formData.append("auto_process", false);
+  formData.append("status", "draft");
 
-  // 保存到localStorage，使用用户名作为键名的一部分，跨页面刷新仍然有效
-  const draftKey = `caseDraft_${currentUser.username}`;
   try {
-    localStorage.setItem(draftKey, JSON.stringify(draft));
-    alert("草稿保存成功！");
+    const { data, wasEditing } = await saveCaseFormData(formData);
+
+    if (!data.success) {
+      showMessage(data.error || "草稿保存失败，请稍后再试");
+      return;
+    }
+
+    const draftKey = `caseDraft_${currentUser.username}`;
+    localStorage.removeItem(draftKey);
+    sessionStorage.removeItem(draftKey);
+
+    if (!wasEditing && data.case_id) {
+      localStorage.setItem("editingCaseId", String(data.case_id));
+      localStorage.setItem("fromMyCases", "true");
+      localStorage.setItem("isEditingMode", "true");
+    }
+
+    showMessage("草稿保存成功！");
+    navigateTo("my-cases");
+    switchMyCasesTab("draft");
   } catch (error) {
     console.error("保存草稿失败:", error);
-    alert("草稿保存失败，请检查存储空间");
+    showMessage("草稿保存失败: " + error.message);
   }
 }
 
@@ -1018,7 +1231,7 @@ function loadDraft() {
     localStorage.removeItem("justSubmittedCase");
     // 强制清空所有表单字段
     document.getElementById("case-title").value = "";
-    document.getElementById("case-author").value = "";
+    document.getElementById("case-author").value = getDefaultAuthorName();
     document.getElementById("case-department").value = "";
     document.getElementById("case-content").value = "";
     // 下拉框使用selectedIndex重置
@@ -1065,7 +1278,7 @@ function loadDraft() {
     }
     
     // 提示用户
-    const savedDate = new Date(draft.savedAt).toLocaleString("zh-CN");
+    const savedDate = formatDate(draft.savedAt);
     console.log(`已加载 ${savedDate} 保存的草稿`);
   } catch (error) {
     console.error("加载草稿失败:", error);
@@ -1119,7 +1332,10 @@ function renderReviewCases(cases, containerId = "review-list") {
                     <div class="case-type">${TYPE_NAMES[c.type] || c.type}</div>
                     <div class="case-title">${c.title}</div>
                 </div>
-                <span class="status-badge ${STATUS_CLASSES[c.status] || ''}">${STATUS_NAMES[c.status] || c.status}</span>
+                <div class="case-badges">
+                    <span class="status-badge ${STATUS_CLASSES[c.status] || ''}">${STATUS_NAMES[c.status] || c.status}</span>
+                    ${c.status === "approved" ? `<span class="status-badge ${c.is_hidden ? 'status-hidden' : 'status-visible'}">${c.is_hidden ? '已隐藏' : '未隐藏'}</span>` : ""}
+                </div>
             </div>
             <div class="case-card-body">
                 <div class="case-meta">
@@ -1144,10 +1360,20 @@ function renderReviewCases(cases, containerId = "review-list") {
                 `
                     : ""
                 }
+                ${
+                  c.status === "approved"
+                    ? `
+                    <button type="button" class="btn ${c.is_hidden ? 'btn-primary' : 'btn-warning'} btn-sm" onclick="toggleCaseVisibility(${c.id}, ${c.is_hidden ? 'false' : 'true'})">${c.is_hidden ? '展示' : '隐藏'}</button>
+                `
+                    : ""
+                }
                 </div>
             </div>
             <div class="case-detail" id="case-detail-${containerId}-${c.id}">
                 <div class="detail-content">
+                    <div class="detail-row">
+                        <strong>提交账号：</strong>${c.owner_username || '未知'}
+                    </div>
                     <div class="detail-row">
                         <strong>作者：</strong>${c.author || '未知'}
                     </div>
@@ -1180,7 +1406,7 @@ function renderReviewCases(cases, containerId = "review-list") {
       }
     )
     .join("");
-  
+
   container.innerHTML = html;
   console.log('Review cases rendered with detail expand/collapse functionality');
   
@@ -1262,10 +1488,7 @@ function openReviewModal(caseId) {
   }
   
   document.getElementById("review-case-id").value = caseId;
-  
-  // 加载当前案例的草稿（如果有的话）
-  loadReviewDraft(caseId);
-  
+
   document.getElementById("review-modal").classList.add("active");
 }
 
@@ -1273,55 +1496,6 @@ function closeReviewModal() {
   document.getElementById("review-modal").classList.remove("active");
   document.getElementById("reviewer-name").value = "";
   document.getElementById("review-comment").value = "";
-}
-
-function saveReviewDraft() {
-  const caseId = document.getElementById("review-case-id").value;
-  const reviewer = document.getElementById("reviewer-name").value;
-  const comment = document.getElementById("review-comment").value;
-  const status = document.querySelector('input[name="review-status"]:checked')?.value || 'approve';
-  
-  if (!reviewer.trim() && !comment.trim()) {
-    alert("没有需要保存的内容");
-    return;
-  }
-  
-  const draft = {
-    caseId: caseId,
-    reviewer: reviewer,
-    comment: comment,
-    status: status,
-    savedAt: new Date().toISOString()
-  };
-  
-  localStorage.setItem(`reviewDraft_${caseId}`, JSON.stringify(draft));
-  alert("草稿已保存");
-}
-
-function loadReviewDraft(caseId) {
-  const draftStr = localStorage.getItem(`reviewDraft_${caseId}`);
-  if (!draftStr) return;
-  
-  try {
-    const draft = JSON.parse(draftStr);
-    
-    if (draft.reviewer) {
-      document.getElementById("reviewer-name").value = draft.reviewer;
-    }
-    if (draft.comment) {
-      document.getElementById("review-comment").value = draft.comment;
-    }
-    if (draft.status) {
-      const radio = document.querySelector(`input[name="review-status"][value="${draft.status}"]`);
-      if (radio) {
-        radio.checked = true;
-      }
-    }
-    
-    console.log("Loaded review draft for case", caseId);
-  } catch (e) {
-    console.error("Failed to load review draft:", e);
-  }
 }
 
 async function submitReview() {
@@ -1334,7 +1508,7 @@ async function submitReview() {
     ).value;
 
     if (!reviewer.trim() || !comment.trim()) {
-      alert("请填写完整信息！");
+      showMessage("请填写完整信息！");
       return;
     }
 
@@ -1345,17 +1519,30 @@ async function submitReview() {
 
     const data = await formRequest(`/reviews/${caseId}`, formData);
     if (data.success) {
-      alert("审核完成！");
-      
-      // 清除已提交的草稿
-      localStorage.removeItem(`reviewDraft_${caseId}`);
-      
+      showMessage("审核完成！");
       closeReviewModal();
       loadReviewCases();
     }
   } catch (error) {
     console.error("submitReview error:", error);
-    alert("提交审核时发生错误: " + error.message);
+    showMessage("提交审核时发生错误: " + error.message);
+  }
+}
+
+async function toggleCaseVisibility(caseId, hidden) {
+  try {
+    const formData = new FormData();
+    formData.append("hidden", hidden ? "true" : "false");
+    const data = await formRequest(`/cases/${caseId}/visibility`, formData);
+    if (data.success) {
+      showMessage(data.message || (hidden ? "案例已隐藏" : "案例已展示"));
+      loadReviewCases();
+    } else {
+      showMessage("操作失败：" + (data.error || data.detail || "未知错误"));
+    }
+  } catch (error) {
+    console.error("toggleCaseVisibility error:", error);
+    showMessage("操作失败：" + error.message);
   }
 }
 
@@ -1419,7 +1606,8 @@ async function loadMyCases() {
   console.log("加载我的案例，当前用户:", currentUser.username);
   console.log("当前用户ID:", currentUser.id);
   
-  const url = `/cases?author=${encodeURIComponent(currentUser.username)}&status=all`;
+  const statusParam = currentMyCasesTab || "pending_review";
+  const url = `/cases?author=${encodeURIComponent(currentUser.username)}&status=${encodeURIComponent(statusParam)}`;
   
   const data = await apiRequest(url);
   console.log("我的案例数据:", data);
@@ -1446,7 +1634,8 @@ function renderMyCases(cases, containerId) {
     "all": "提交记录",
     "pending_review": "待审核",
     "approved": "已通过",
-    "needs_revision": "已驳回"
+    "needs_revision": "已驳回",
+    "draft": "我的草稿"
   };
   
   // 前端过滤：确保只显示当前tab对应的案例
@@ -1492,12 +1681,15 @@ function renderMyCases(cases, containerId) {
                     <span>👁️ ${c.view_count || 0}</span>
                     <span>❤️ ${c.like_count || 0}</span>
                 </div>
-                <span class="status-badge ${STATUS_CLASSES[c.status] || ''}">${STATUS_NAMES[c.status] || c.status}</span>
+                <div class="case-badges">
+                    <span class="status-badge ${STATUS_CLASSES[c.status] || ''}">${STATUS_NAMES[c.status] || c.status}</span>
+                    ${c.status === "approved" ? `<span class="status-badge ${c.is_hidden ? 'status-hidden' : 'status-visible'}">${c.is_hidden ? '已隐藏' : '未隐藏'}</span>` : ""}
+                </div>
             </div>
             <div class="case-actions">
                 <button type="button" class="btn btn-secondary btn-view-detail" data-case-id="${c.id}">查看详情</button>
                 ${
-                  c.status !== "approved"
+                  c.status !== "approved" || (currentUser && currentUser.role === "admin")
                     ? `
                     <button type="button" class="btn btn-primary btn-edit-case" onclick="event.preventDefault(); event.stopPropagation(); editMyCase(${c.id})">修改</button>
                 `
@@ -1529,6 +1721,11 @@ function renderMyCases(cases, containerId) {
                         ${c.keywords.map(k => `<span class="keyword-tag">${k}</span>`).join('')}
                     </div>
                     ` : ''}
+                    ${c.status === "approved" || c.status === "needs_revision" ? `
+                    <div class="detail-row review-info" id="review-info-${containerId}-${c.id}" data-loaded="false" data-case-id="${c.id}">
+                        <strong>审核信息：</strong><span class="review-info-placeholder">加载中…</span>
+                    </div>
+                    ` : ''}
                     <div class="detail-actions">
                         <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCaseDetail(${c.id}, '${containerId}')">收起详情</button>
                     </div>
@@ -1539,7 +1736,7 @@ function renderMyCases(cases, containerId) {
       }
     )
     .join("");
-  
+
   container.querySelectorAll('.btn-view-detail').forEach(btn => {
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -1548,9 +1745,52 @@ function renderMyCases(cases, containerId) {
       if (caseId) {
         console.log('My cases view detail button clicked for case:', caseId);
         toggleCaseDetail(caseId, containerId);
+        loadReviewInfoIfNeeded(caseId, containerId);
       }
     });
   });
+}
+
+async function loadReviewInfoIfNeeded(caseId, containerId) {
+  const slot = document.getElementById(`review-info-${containerId}-${caseId}`);
+  if (!slot) return;
+  if (slot.dataset.loaded === "true") return;
+  slot.dataset.loaded = "true";
+
+  try {
+    const data = await apiRequest(`/reviews/${caseId}`);
+    const placeholder = slot.querySelector('.review-info-placeholder');
+    if (!data || !data.success || !Array.isArray(data.data)) {
+      if (placeholder) placeholder.textContent = "暂无审核信息";
+      return;
+    }
+
+    const decisive = data.data.find(r => r.status === "approved" || r.status === "rejected");
+    if (!decisive) {
+      if (placeholder) placeholder.textContent = "暂无审核信息";
+      return;
+    }
+
+    const resultText = decisive.status === "approved" ? "通过" : "驳回";
+    const reviewer = decisive.reviewer || "未知";
+    const comment = decisive.comment || "（无意见）";
+    const reviewAt = formatDate(decisive.review_at) || "";
+
+    slot.innerHTML = `
+      <strong>审核信息：</strong>
+      <div class="review-info-body">
+        <div><strong>审核人：</strong>${reviewer}</div>
+        <div><strong>审核结果：</strong>${resultText}</div>
+        <div><strong>审核意见：</strong>${comment}</div>
+        ${reviewAt ? `<div><strong>审核时间：</strong>${reviewAt}</div>` : ""}
+      </div>
+    `;
+  } catch (error) {
+    console.error("加载审核信息失败:", error);
+    slot.dataset.loaded = "false";
+    const placeholder = slot.querySelector('.review-info-placeholder');
+    if (placeholder) placeholder.textContent = "加载失败";
+  }
 }
 
 // 从我的案例进入编辑模式
@@ -1588,7 +1828,9 @@ function editMyCase(caseId) {
     const fullUrl = `${API_BASE}/cases/${caseId}?increment_view=false`;
     console.log("Loading case from:", fullUrl);
     
-    fetch(fullUrl)
+    fetch(fullUrl, {
+      headers: authToken ? { "Authorization": `Bearer ${authToken}` } : {}
+    })
       .then(response => {
         console.log("Response status:", response.status);
         if (!response.ok) {
@@ -1627,7 +1869,7 @@ function editMyCase(caseId) {
           console.log("Form filled successfully");
         } else {
           console.error("API returned error:", data.message);
-          alert("加载案例失败: " + (data.message || "未知错误"));
+          showMessage("加载案例失败: " + (data.message || "未知错误"));
           localStorage.removeItem("editingCaseId");
           localStorage.removeItem("fromMyCases");
           localStorage.removeItem("resubmitCase");
@@ -1635,7 +1877,7 @@ function editMyCase(caseId) {
       })
       .catch(error => {
         console.error("Failed to load case:", error);
-        alert("加载案例失败: " + error.message);
+        showMessage("加载案例失败: " + error.message);
         localStorage.removeItem("editingCaseId");
         localStorage.removeItem("fromMyCases");
         localStorage.removeItem("resubmitCase");
@@ -1643,7 +1885,7 @@ function editMyCase(caseId) {
     
   } catch (error) {
     console.error("editMyCase error:", error);
-    alert("编辑案例时发生错误: " + error.message);
+    showMessage("编辑案例时发生错误: " + error.message);
     localStorage.removeItem("editingCaseId");
     localStorage.removeItem("fromMyCases");
     localStorage.removeItem("resubmitCase");
@@ -1655,7 +1897,7 @@ async function deleteMyCase(caseId) {
   try {
     console.log("deleteMyCase called with caseId:", caseId);
     
-    const confirmDelete = confirm("确定要删除这个案例吗？此操作不可撤销！");
+    const confirmDelete = await showConfirm("确定要删除这个案例吗？此操作不可撤销！");
     if (!confirmDelete) {
       console.log("用户取消删除");
       return;
@@ -1671,7 +1913,7 @@ async function deleteMyCase(caseId) {
     const data = await response.json();
     
     if (data.success) {
-      alert("案例删除成功！");
+      showMessage("案例删除成功！");
       await loadMyCases();
       
       if (data.deleted_stats && data.deleted_stats.was_in_library) {
@@ -1686,11 +1928,11 @@ async function deleteMyCase(caseId) {
         }
       }
     } else {
-      alert("删除失败: " + (data.error || "未知错误"));
+      showMessage("删除失败: " + (data.error || "未知错误"));
     }
   } catch (error) {
     console.error("deleteMyCase error:", error);
-    alert("删除案例时发生错误: " + error.message);
+    showMessage("删除案例时发生错误: " + error.message);
   }
 }
 
@@ -1699,7 +1941,7 @@ async function deleteCaseFromReview(caseId) {
   try {
     console.log("deleteCaseFromReview called with caseId:", caseId);
     
-    const confirmDelete = confirm("确定要删除这个已通过的案例吗？此操作不可撤销！");
+    const confirmDelete = await showConfirm("确定要删除这个已通过的案例吗？此操作不可撤销！");
     if (!confirmDelete) {
       console.log("用户取消删除");
       return;
@@ -1715,7 +1957,7 @@ async function deleteCaseFromReview(caseId) {
     const data = await response.json();
     
     if (data.success) {
-      alert("案例删除成功！");
+      showMessage("案例删除成功！");
       loadReviewCases();
       
       if (data.deleted_stats && data.deleted_stats.was_in_library) {
@@ -1730,11 +1972,11 @@ async function deleteCaseFromReview(caseId) {
         }
       }
     } else {
-      alert("删除失败: " + (data.error || "未知错误"));
+      showMessage("删除失败: " + (data.error || "未知错误"));
     }
   } catch (error) {
     console.error("deleteCaseFromReview error:", error);
-    alert("删除案例时发生错误: " + error.message);
+    showMessage("删除案例时发生错误: " + error.message);
   }
 }
 
@@ -1804,11 +2046,11 @@ async function loadAndFillCaseData(caseId) {
       
       console.log("Form filled successfully");
     } else {
-      alert("加载案例数据失败，请刷新页面重试");
+      showMessage("加载案例数据失败，请刷新页面重试");
     }
   } catch (error) {
     console.error("loadAndFillCaseData error:", error);
-    alert("加载案例数据失败: " + error.message);
+    showMessage("加载案例数据失败: " + error.message);
   }
 }
 
@@ -1856,7 +2098,7 @@ function goToCreatePage() {
     console.log("goToCreatePage completed");
   } catch (error) {
     console.error("goToCreatePage error:", error);
-    alert("导航发生错误: " + error.message);
+    showMessage("导航发生错误: " + error.message);
   }
 }
 
@@ -1955,7 +2197,7 @@ async function resubmitCase(caseId) {
       goToCreatePage();
       
     } else {
-      alert("加载案例失败，请稍后再试");
+      showMessage("加载案例失败，请稍后再试");
       // 清除编辑状态
       localStorage.removeItem("editingCaseId");
       localStorage.removeItem("fromMyCases");
@@ -1963,7 +2205,7 @@ async function resubmitCase(caseId) {
     }
   } catch (error) {
     console.error("resubmitCase error:", error);
-    alert("重新提交案例时发生错误: " + error.message);
+    showMessage("重新提交案例时发生错误: " + error.message);
     // 清除编辑状态
     localStorage.removeItem("editingCaseId");
     localStorage.removeItem("fromMyCases");
@@ -1984,12 +2226,12 @@ function saveSubmitDraft() {
   const autoProcess = document.getElementById("submit-auto-process") ? document.getElementById("submit-auto-process").checked : true;
 
   if (!title.trim() && !content.trim()) {
-    alert("请至少填写标题或内容！");
+    showMessage("请至少填写标题或内容！");
     return;
   }
 
   if (!currentUser) {
-    alert("请先登录后再保存草稿！");
+    showMessage("请先登录后再保存草稿！");
     return;
   }
 
@@ -2001,17 +2243,17 @@ function saveSubmitDraft() {
     caseType,
     caseTheme,
     autoProcess,
-    savedAt: new Date().toISOString()
+    savedAt: getBeijingNowString()
   };
 
   // 保存到localStorage，使用用户名作为键名的一部分，跨页面刷新仍然有效
   const draftKey = `caseDraft_${currentUser.username}`;
   try {
     localStorage.setItem(draftKey, JSON.stringify(draft));
-    alert("草稿保存成功！");
+    showMessage("草稿保存成功！");
   } catch (error) {
     console.error("保存草稿失败:", error);
-    alert("草稿保存失败，请检查存储空间");
+    showMessage("草稿保存失败，请检查存储空间");
   }
 }
 
@@ -2065,7 +2307,7 @@ function loadSubmitDraft() {
     }
     
     // 提示用户
-    const savedDate = new Date(draft.savedAt).toLocaleString("zh-CN");
+    const savedDate = formatDate(draft.savedAt);
     console.log(`已加载 ${savedDate} 保存的草稿`);
   } catch (error) {
     console.error("加载草稿失败:", error);
@@ -2114,18 +2356,18 @@ async function submitNewCase() {
   const autoProcess = document.getElementById("submit-auto-process") ? document.getElementById("submit-auto-process").checked : true;
 
   if (!title.trim() || !content.trim()) {
-    alert("请填写标题和内容！");
+    showMessage("请填写标题和内容！");
     return;
   }
 
   if (!autoProcess && (!caseType || !caseTheme)) {
-    alert("请选择案例类型和案例主题！");
+    showMessage("请选择案例类型和案例主题！");
     return;
   }
 
   // 确保用户已登录
   if (!currentUser) {
-    alert("请先登录后再提交案例！");
+    showMessage("请先登录后再提交案例！");
     openLoginModal();
     return;
   }
@@ -2133,8 +2375,7 @@ async function submitNewCase() {
   const formData = new FormData();
   formData.append("title", title);
   formData.append("content", content);
-  // 始终使用当前登录用户的用户名作为作者，确保"我的案例"能正确查询
-  formData.append("author", currentUser.username);
+  formData.append("author", author || getDefaultAuthorName());
   formData.append("department", department);
   formData.append("type", caseType);
   formData.append("theme", caseTheme);
@@ -2143,7 +2384,7 @@ async function submitNewCase() {
 
   console.log("提交新案例数据:", {
     title,
-    author: currentUser.username,
+    author: author || getDefaultAuthorName(),
     department,
     type: caseType,
     theme: caseTheme,
@@ -2156,7 +2397,7 @@ async function submitNewCase() {
   console.log("提交新案例响应:", data);
   
   if (data.success) {
-    alert(data.message || "案例提交成功！");
+    showMessage(data.message || "案例提交成功！");
     
     // 清除当前用户的草稿（使用sessionStorage）
     if (currentUser) {
@@ -2179,7 +2420,7 @@ async function submitNewCase() {
     
     navigateTo("my-cases");
   } else {
-    alert(data.error || "案例提交失败，请稍后再试");
+    showMessage(data.error || "案例提交失败，请稍后再试");
   }
 }
 
@@ -2217,11 +2458,11 @@ async function editCase(caseId) {
     // 更新提交按钮文本
     const submitBtn = document.querySelector("#page-create .btn-primary");
     if (submitBtn) submitBtn.textContent = "保存修改";
-    
-    // 导航到创建案例页面
-    navigateTo("create");
+
+    // 导航到创建案例页面（保留编辑状态，避免被默认清除）
+    navigateTo("create", { preserveEdit: true });
   } else {
-    alert("加载案例失败，请稍后再试");
+    showMessage("加载案例失败，请稍后再试");
   }
 }
 
@@ -2229,7 +2470,7 @@ async function editCase(caseId) {
 async function updateCase() {
   const caseId = localStorage.getItem("editingCaseId");
   if (!caseId) {
-    alert("未找到要修改的案例");
+    showMessage("未找到要修改的案例");
     return;
   }
   
@@ -2242,18 +2483,18 @@ async function updateCase() {
   const autoProcess = document.getElementById("submit-auto-process") ? document.getElementById("submit-auto-process").checked : true;
 
   if (!title.trim() || !content.trim()) {
-    alert("请填写标题和内容！");
+    showMessage("请填写标题和内容！");
     return;
   }
 
   if (!autoProcess && (!caseType || !caseTheme)) {
-    alert("请选择案例类型和案例主题！");
+    showMessage("请选择案例类型和案例主题！");
     return;
   }
 
   // 确保用户已登录
   if (!currentUser) {
-    alert("请先登录后再修改案例！");
+    showMessage("请先登录后再修改案例！");
     openLoginModal();
     return;
   }
@@ -2261,8 +2502,7 @@ async function updateCase() {
   const formData = new FormData();
   formData.append("title", title);
   formData.append("content", content);
-  // 始终使用当前登录用户的用户名作为作者，确保"我的案例"能正确查询
-  formData.append("author", currentUser.username);
+  formData.append("author", author || getDefaultAuthorName());
   formData.append("department", department);
   formData.append("type", caseType);
   formData.append("theme", caseTheme);
@@ -2272,7 +2512,7 @@ async function updateCase() {
   console.log("修改案例数据:", {
     caseId,
     title,
-    author: currentUser.username,
+    author: author || getDefaultAuthorName(),
     department,
     type: caseType,
     theme: caseTheme,
@@ -2285,7 +2525,7 @@ async function updateCase() {
   console.log("修改案例响应:", data);
   
   if (data.success) {
-    alert(data.message || "案例修改成功！");
+    showMessage(data.message || "案例修改成功！");
     
     // 清除当前用户的草稿（使用sessionStorage）
     if (currentUser) {
@@ -2309,7 +2549,7 @@ async function updateCase() {
     
     navigateTo("my-cases");
   } else {
-    alert(data.error || "案例修改失败，请稍后再试");
+    showMessage(data.error || "案例修改失败，请稍后再试");
   }
 }
 
@@ -2368,7 +2608,7 @@ function closeChangePasswordModal() {
   const modal = document.getElementById("change-password-modal");
   if (!modal) return;
   if (modal.dataset.force === "true" && currentUser && currentUser.must_change_password) {
-    alert("\u9996\u6b21\u767b\u5f55\u5fc5\u987b\u4fee\u6539\u5bc6\u7801\u540e\u624d\u80fd\u7ee7\u7eed\u4f7f\u7528\u3002");
+    showMessage("\u9996\u6b21\u767b\u5f55\u5fc5\u987b\u4fee\u6539\u5bc6\u7801\u540e\u624d\u80fd\u7ee7\u7eed\u4f7f\u7528\u3002");
     return;
   }
   modal.classList.remove("active");
@@ -2376,7 +2616,7 @@ function closeChangePasswordModal() {
 
 async function changePassword() {
   if (!currentUser) {
-    alert("\u8bf7\u5148\u767b\u5f55");
+    showMessage("\u8bf7\u5148\u767b\u5f55");
     return;
   }
 
@@ -2385,15 +2625,15 @@ async function changePassword() {
   const confirmPassword = document.getElementById("confirm-new-password").value;
 
   if (!oldPassword || !newPassword || !confirmPassword) {
-    alert("\u8bf7\u586b\u5199\u5b8c\u6574\u5bc6\u7801\u4fe1\u606f");
+    showMessage("\u8bf7\u586b\u5199\u5b8c\u6574\u5bc6\u7801\u4fe1\u606f");
     return;
   }
   if (newPassword.length < 8) {
-    alert("\u65b0\u5bc6\u7801\u81f3\u5c11\u9700\u89818\u4f4d");
+    showMessage("\u65b0\u5bc6\u7801\u81f3\u5c11\u9700\u89818\u4f4d");
     return;
   }
   if (newPassword !== confirmPassword) {
-    alert("\u4e24\u6b21\u8f93\u5165\u7684\u65b0\u5bc6\u7801\u4e0d\u4e00\u81f4");
+    showMessage("\u4e24\u6b21\u8f93\u5165\u7684\u65b0\u5bc6\u7801\u4e0d\u4e00\u81f4");
     return;
   }
 
@@ -2412,9 +2652,9 @@ async function changePassword() {
       modal.classList.remove("active");
     }
     updateAuthUI();
-    alert("\u5bc6\u7801\u4fee\u6539\u6210\u529f");
+    showMessage("\u5bc6\u7801\u4fee\u6539\u6210\u529f");
   } else {
-    alert(data.detail || data.error || "\u5bc6\u7801\u4fee\u6539\u5931\u8d25");
+    showMessage(data.detail || data.error || "\u5bc6\u7801\u4fee\u6539\u5931\u8d25");
   }
 }
 
@@ -2423,7 +2663,7 @@ async function login() {
   const password = document.getElementById("login-password").value;
 
   if (!username.trim() || !password.trim()) {
-    alert("\u8bf7\u8f93\u5165\u7528\u6237\u540d\u548c\u5bc6\u7801");
+    showMessage("\u8bf7\u8f93\u5165\u7528\u6237\u540d\u548c\u5bc6\u7801");
     return;
   }
 
@@ -2447,12 +2687,13 @@ async function login() {
     localStorage.setItem("currentUser", JSON.stringify(currentUser));
     updateAuthUI();
     closeLoginModal();
+    scheduleDefaultAuthorFill();
 
     if (currentUser.must_change_password) {
       openChangePasswordModal(true);
     }
   } else {
-    alert(data.error || data.detail || "\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7528\u6237\u540d\u6216\u5bc6\u7801");
+    showMessage(data.error || data.detail || "\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7528\u6237\u540d\u6216\u5bc6\u7801");
   }
 }
 
@@ -2496,6 +2737,7 @@ function updateAuthUI() {
     }
     if (navMyCases) navMyCases.style.display = "inline-block";
     if (navCreate) navCreate.style.display = "inline-block";
+    scheduleDefaultAuthorFill();
 
     if (navReview) navReview.style.display = currentUser.role === "admin" ? "inline-block" : "none";
   } else {
@@ -2521,6 +2763,7 @@ function checkAuthStatus() {
     authToken = savedToken;
     currentUser = JSON.parse(savedUser);
     updateAuthUI();
+    scheduleDefaultAuthorFill();
     if (currentUser && currentUser.must_change_password) {
       setTimeout(() => openChangePasswordModal(true), 0);
     }
@@ -2532,20 +2775,28 @@ function checkAuthStatus() {
 document.addEventListener("DOMContentLoaded", () => {
   // 检查登录状态
   checkAuthStatus();
-  
+
   // 如果用户刚提交完案例，自动跳转到"我的案例"页面
   const justSubmitted = localStorage.getItem("justSubmittedCase");
   if (justSubmitted === "true" && currentUser) {
     localStorage.removeItem("justSubmittedCase");
     localStorage.removeItem("forceReset");
-    
+
     // 延迟一下确保页面完全加载
     setTimeout(() => {
       navigateTo('my-cases');
     }, 500);
     return;
   }
-  
+
+  // F5 刷新后恢复到上次访问的页面（导航栏状态保持）
+  const VALID_PAGES = ["home", "cases", "create", "review", "stats", "my-cases"];
+  const savedPage = localStorage.getItem("lastPage");
+  if (savedPage && VALID_PAGES.includes(savedPage) && savedPage !== "home") {
+    navigateTo(savedPage);
+    return;
+  }
+
   // 加载首页数据
   loadHomeData();
 });
