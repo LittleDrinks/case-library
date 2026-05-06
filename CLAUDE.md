@@ -38,25 +38,27 @@ No lint configuration exists in this project.
 ## Architecture
 
 ### Stack
-- **Backend:** Python/FastAPI + SQLite, served via Uvicorn on port 8001
+- **Backend:** Python/FastAPI + MongoDB (via `pymongo`), served via Uvicorn on port 8001
 - **Frontend:** Vanilla HTML/CSS/JS (no framework), served as static files from `frontend/`
-- **Database:** `data/cases.db` (SQLite)
+- **Database:** MongoDB. Connection is configured via `MONGODB_URI` (default `mongodb://localhost:27017`) and `MONGODB_DB_NAME` (default `case_library`), loaded from `.env` in `backend/database.py`. The legacy `data/cases.db` SQLite file is only read by the one-shot migration script `backend/migrate_sqlite_to_mongo.py` and is not used at runtime.
 
 ### Backend modules (`backend/`)
 - `main.py` — All FastAPI routes (~10+ route groups); the only entry point
-- `database.py` — All SQLite schema definitions and query functions
-- `search_engine.py` — TF-IDF full-text search and recommendation logic
+- `database.py` — MongoDB data access layer: connection, index creation in `init_db()`, integer-id allocation via the `counters` collection, and all query/mutation helpers
+- `search_engine.py` — Thin wrapper around `database.py` search/recommendation helpers (regex-based, not TF-IDF)
 - `case_processor.py` — Case classification and processing helpers
+- `migrate_sqlite_to_mongo.py`, `migrate_timestamps.py`, `init_users.py`, `demo.py`, `account_admin.py`, `smoke_test_mongo.py`, `test_submit_flow.py` — one-shot migration / seeding / admin / smoke-test scripts
 
 ### Database schema
-Key tables: `cases`, `users`, `reviews`, `versions`, `deployments`, `case_index`
+Key MongoDB collections: `cases`, `users`, `reviews`, `versions`, `deployments`, `counters`. Each business collection has an integer `id` field allocated from `counters` (in addition to Mongo's `_id`). Indexes (created in `database.py:init_db()`) include unique indexes on `id` / `username`, plus compound indexes on `(status, created_at)`, `(author, status, created_at)`, `(owner_username, status, created_at)`, and a TEXT index `cases_text_idx` over `title`/`content`/`keywords`. The `deployments` collection has indexes defined but no write path in current code.
 
-Case status workflow:
+Case status workflow (values defined in `CASE_STATUSES` in `backend/database.py`):
 ```
-draft → pending_review → approved_pending_deploy → approved (in library)
-                                  ↓
-                           needs_revision → pending_review
+draft → pending_review → approved (in library)
+            ↑                ↓
+            └── needs_revision (on rejection)
 ```
+On approval, `review_case` also sets `is_approved=true` and `is_in_library=true` on the case document.
 
 ### Case type system
 - **TYPE_A** (思政课教学案例): Ideological theory teaching cases

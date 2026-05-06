@@ -19,7 +19,7 @@ client = TestClient(main.app)
 
 
 def auth(username: str):
-    return {"Authorization": f"Bearer {username}_testtoken"}
+    return {"Authorization": f"Bearer {main.create_auth_token(username)}"}
 
 
 def make_case(owner: str, status: str = "draft") -> int:

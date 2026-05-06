@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """FastAPI entry point for the case library."""
 
+import base64
+import hashlib
+import hmac
+import json
 import os
+import secrets
 import sys
 import time
 from typing import Optional
@@ -54,25 +59,91 @@ async def value_error_handler(request: Request, exc: ValueError):
     return JSONResponse(status_code=400, content={"success": False, "detail": str(exc)})
 
 
+AUTH_SECRET = os.getenv("AUTH_SECRET")
+if not AUTH_SECRET:
+    AUTH_SECRET = secrets.token_urlsafe(32)
+    print(
+        "WARNING: AUTH_SECRET is not set. A random secret was generated for this "
+        "process; tokens will be invalidated on restart. Set AUTH_SECRET in production."
+    )
+_AUTH_SECRET_BYTES = AUTH_SECRET.encode("utf-8")
+TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL", str(7 * 24 * 3600)))
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(text: str) -> bytes:
+    padding = "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode(text + padding)
+
+
+def create_auth_token(username: str) -> str:
+    now = int(time.time())
+    payload = {"u": username, "iat": now, "exp": now + TOKEN_TTL_SECONDS}
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = hmac.new(_AUTH_SECRET_BYTES, payload_b64.encode("ascii"), hashlib.sha256).digest()
+    return f"{payload_b64}.{_b64url_encode(sig)}"
+
+
+def verify_auth_token(token: str) -> Optional[str]:
+    if not token or "." not in token:
+        return None
+    try:
+        payload_b64, sig_b64 = token.split(".", 1)
+        expected_sig = hmac.new(
+            _AUTH_SECRET_BYTES, payload_b64.encode("ascii"), hashlib.sha256
+        ).digest()
+        provided_sig = _b64url_decode(sig_b64)
+        if not hmac.compare_digest(expected_sig, provided_sig):
+            return None
+        payload = json.loads(_b64url_decode(payload_b64))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if int(payload.get("exp", 0)) < int(time.time()):
+        return None
+    username = payload.get("u")
+    if not isinstance(username, str) or not username:
+        return None
+    return username
+
+
 def get_current_user(headers):
     auth_header = headers.get("authorization") or headers.get("Authorization")
     if not auth_header:
         return None
-
-    try:
-        token = auth_header.replace("Bearer ", "").replace("bearer ", "")
-        username = token.split("_")[0]
-        user = get_user_by_username(username)
-        if user and user.get("status") == "active":
-            return user
+    parts = auth_header.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
-    except Exception as exc:
-        print(f"Failed to resolve current user: {exc}")
+    username = verify_auth_token(parts[1].strip())
+    if not username:
         return None
+    user = get_user_by_username(username)
+    if user and user.get("status") == "active":
+        return user
+    return None
 
 
 def get_case_owner_username(case: dict) -> str:
     return case.get("owner_username") or case.get("author") or ""
+
+
+def _ensure_case_history_visible(case_id: int, current_user: Optional[dict]) -> dict:
+    case = get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    is_admin = bool(current_user and current_user.get("role") == "admin")
+    is_owner = bool(
+        current_user and current_user.get("username") == get_case_owner_username(case)
+    )
+    if is_admin or is_owner:
+        return case
+    if case.get("status") == "approved" and not case.get("is_hidden"):
+        return case
+    raise HTTPException(status_code=403, detail="无权查看该案例的历史记录")
 
 
 init_db()
@@ -90,7 +161,7 @@ async def login(username: str = Form(...), password: str = Form(...)):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    token = f"{user['username']}_{int(time.time())}"
+    token = create_auth_token(user["username"])
     return {
         "success": True,
         "data": {
@@ -183,7 +254,6 @@ async def create_new_case(
     request: Request,
     title: str = Form(...),
     content: str = Form(...),
-    author: str = Form(""),
     department: str = Form(""),
     type: str = Form("TYPE_A"),
     theme: str = Form("铸魂育人"),
@@ -191,21 +261,22 @@ async def create_new_case(
     auto_process: bool = Form(False),
 ):
     current_user = get_current_user(dict(request.headers))
-    owner_username = ""
-    if status == "draft":
-        if not current_user:
-            raise HTTPException(status_code=401, detail="请先登录后再保存草稿")
-        owner_username = current_user.get("username", "")
-    elif current_user:
-        owner_username = current_user.get("username", "")
-    if current_user and not author:
-        author = current_user.get("nickname") or current_user.get("username", "")
+    if not current_user:
+        raise HTTPException(status_code=401, detail="请先登录")
+
+    if status not in ("draft", "pending_review"):
+        raise HTTPException(status_code=400, detail="非法的初始状态")
+
+    owner_username = current_user.get("username", "")
+    author = current_user.get("nickname") or owner_username
 
     case_type = type or "TYPE_A"
     case_theme = theme or "铸魂育人"
 
     if auto_process:
-        case_ids = process_new_case(content, title, author, department, case_type, case_theme)
+        case_ids = process_new_case(
+            content, title, author, department, case_type, case_theme, owner_username
+        )
         return {"success": True, "message": "案例创建成功", "case_ids": case_ids}
 
     case_id = create_case(
@@ -231,8 +302,6 @@ async def _update_existing_case_impl(
     department: Optional[str],
     type: Optional[str],
     theme: Optional[str],
-    status: Optional[str],
-    updated_by: str,
     change_reason: str,
     current_user: Optional[dict],
 ):
@@ -256,11 +325,11 @@ async def _update_existing_case_impl(
         "department": department,
         "type": type,
         "theme": theme,
-        "status": status,
     }.items():
         if value is not None and value != "":
             case_data[field] = value
 
+    updated_by = current_user.get("username", "")
     if not update_case(case_id, case_data, updated_by, change_reason):
         if get_case(case_id):
             raise HTTPException(status_code=400, detail="案例没有实际变更")
@@ -279,13 +348,11 @@ async def update_existing_case(
     department: Optional[str] = Form(None),
     type: Optional[str] = Form(None),
     theme: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
-    updated_by: str = Form("system"),
     change_reason: str = Form(""),
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, status, updated_by, change_reason, current_user
+        case_id, title, content, author, department, type, theme, change_reason, current_user
     )
 
 
@@ -299,13 +366,11 @@ async def update_existing_case_post_compat(
     department: Optional[str] = Form(None),
     type: Optional[str] = Form(None),
     theme: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
-    updated_by: str = Form("system"),
     change_reason: str = Form(""),
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, status, updated_by, change_reason, current_user
+        case_id, title, content, author, department, type, theme, change_reason, current_user
     )
 
 
@@ -443,25 +508,29 @@ async def toggle_case_visibility(
 async def review_case_endpoint(
     case_id: int,
     request: Request,
-    reviewer: str = Form(...),
     comment: str = Form(...),
     status: str = Form(...),
 ):
     current_user = get_current_user(dict(request.headers))
     if not current_user or current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可以审核案例")
+    reviewer = current_user.get("username", "")
     if not review_case(case_id, reviewer, comment, status):
         raise HTTPException(status_code=400, detail="审核失败")
     return {"success": True, "message": "审核完成"}
 
 
 @app.get("/api/reviews/{case_id}")
-async def get_case_reviews(case_id: int):
+async def get_case_reviews(case_id: int, request: Request):
+    current_user = get_current_user(dict(request.headers))
+    _ensure_case_history_visible(case_id, current_user)
     return {"success": True, "data": get_reviews(case_id)}
 
 
 @app.get("/api/versions/{case_id}")
-async def get_case_version_history(case_id: int):
+async def get_case_version_history(case_id: int, request: Request):
+    current_user = get_current_user(dict(request.headers))
+    _ensure_case_history_visible(case_id, current_user)
     return {"success": True, "data": get_case_versions(case_id)}
 
 

@@ -184,31 +184,32 @@ def extract_keywords(content: str, title: str = '') -> List[str]:
     return list(set(keywords))[:10]
 
 
-def process_new_case(content: str, title: str = '', author: str = '', department: str = '', user_type: str = '', user_theme: str = '') -> List[int]:
+def process_new_case(content: str, title: str = '', author: str = '', department: str = '', user_type: str = '', user_theme: str = '', owner_username: str = '') -> List[int]:
     """处理新案例，支持生成多个版本"""
     # 使用用户选择的类型和主题
     case_type = user_type.strip() if user_type and user_type.strip() else 'TYPE_A'
     case_theme = user_theme.strip() if user_theme and user_theme.strip() else '校园文明'
-    
+
     created_case_ids = []
-    
+
     case_data = generate_case_content(content, case_type, title)
     keywords = extract_keywords(content, title)
-    
+
     case_record = {
         'title': case_data.get('title', title or '案例'),
         'type': case_type,
         'theme': case_theme,
         'content': case_data.get('content', content),
         'author': author,
+        'owner_username': owner_username,
         'department': department,
         'keywords': keywords,
         'status': 'pending_review'
     }
-    
+
     case_id = create_case(case_record)
     created_case_ids.append(case_id)
-    
+
     return created_case_ids
 
 
