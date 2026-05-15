@@ -12,7 +12,7 @@
     />
 
     <!-- 样式 -->
-    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/style.css?v=20260506-1" />
 
     <!-- 字体 -->
     <link
@@ -103,6 +103,7 @@
                 onclick="toggleUserMenu(event)"
               ></button>
               <div id="user-dropdown" class="user-dropdown">
+                <div class="user-dropdown-name" id="user-dropdown-username"></div>
                 <div class="user-dropdown-name" id="user-dropdown-name"></div>
                 <div class="user-dropdown-role" id="user-dropdown-role"></div>
                 <button type="button" class="user-dropdown-action" onclick="openChangePasswordModal(false)">
@@ -227,7 +228,7 @@
           <h2 class="page-title">创建案例</h2>
           <form class="case-form" id="create-case-form" onsubmit="event.preventDefault(); submitCase();">
             <div class="form-group">
-              <label for="case-title">案例标题 *</label>
+              <label for="case-title">案例标题</label>
               <input
                 type="text"
                 id="case-title"
@@ -242,6 +243,7 @@
                 type="text"
                 id="case-author"
                 class="form-input"
+                required
                 placeholder="请输入作者姓名"
               />
             </div>
@@ -251,11 +253,12 @@
                 type="text"
                 id="case-department"
                 class="form-input"
+                required
                 placeholder="请输入部门"
               />
             </div>
             <div class="form-group">
-              <label for="case-type">案例类型 *</label>
+              <label for="case-type">案例类型</label>
               <select id="case-type" class="form-input" required>
                 <option value="">请选择案例类型</option>
                 <option value="TYPE_A">思政课教学案例</option>
@@ -264,7 +267,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label for="case-theme">案例主题 *</label>
+              <label for="case-theme">案例主题</label>
               <select id="case-theme" class="form-input" required>
                 <option value="">请选择案例主题</option>
                 <option value="强国建设">强国建设</option>
@@ -274,11 +277,12 @@
               </select>
             </div>
             <div class="form-group">
-              <label for="case-content">案例内容 *</label>
+              <label for="case-content">案例内容</label>
               <textarea
                 id="case-content"
                 class="form-textarea"
                 rows="15"
+                required
                 placeholder="请输入案例内容"
               ></textarea>
             </div>
@@ -564,6 +568,6 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=20260506-1"></script>
   </body>
 </html>

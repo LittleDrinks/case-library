@@ -833,41 +833,22 @@ async function submitCase() {
     }
 
     const title = document.getElementById("case-title").value;
-    const author = document.getElementById("case-author").value || getDefaultAuthorName();
+    const author = document.getElementById("case-author").value;
     const department = document.getElementById("case-department").value;
     const content = document.getElementById("case-content").value;
     const caseType = document.getElementById("case-type").value;
     const caseTheme = document.getElementById("case-theme").value;
 
-    if (!title.trim()) {
-      showMessage("请填写案例标题！");
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "提交案例";
-      }
-      return;
-    }
-    
-    if (!content.trim()) {
-      showMessage("请填写案例内容！");
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "提交案例";
-      }
-      return;
-    }
-    
-    if (!caseType || caseType === "") {
-      showMessage("请选择案例类型！");
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "提交案例";
-      }
-      return;
-    }
-    
-    if (!caseTheme || caseTheme === "") {
-      showMessage("请选择案例主题！");
+    const missingFields = [];
+    if (!title.trim()) missingFields.push("案例标题");
+    if (!author.trim()) missingFields.push("作者");
+    if (!department.trim()) missingFields.push("部门");
+    if (!content.trim()) missingFields.push("案例内容");
+    if (!caseType || caseType === "") missingFields.push("案例类型");
+    if (!caseTheme || caseTheme === "") missingFields.push("案例主题");
+
+    if (missingFields.length > 0) {
+      showMessage("请填写以下字段：" + missingFields.join("、"));
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "提交案例";
@@ -2719,6 +2700,7 @@ function updateAuthUI() {
   const navLogout = document.getElementById("nav-logout");
   const navUserMenu = document.getElementById("nav-user-menu");
   const navUserAvatar = document.getElementById("nav-user-avatar");
+  const userDropdownUsername = document.getElementById("user-dropdown-username");
   const userDropdownName = document.getElementById("user-dropdown-name");
   const userDropdownRole = document.getElementById("user-dropdown-role");
   const navMyCases = document.getElementById("nav-my-cases");
@@ -2730,7 +2712,8 @@ function updateAuthUI() {
     if (navLogout) navLogout.style.display = "none";
     if (navUserMenu) navUserMenu.style.display = "inline-flex";
     if (navUserAvatar) navUserAvatar.textContent = getAvatarChar();
-    if (userDropdownName) userDropdownName.textContent = getDisplayName();
+    if (userDropdownUsername) userDropdownUsername.textContent = "账号：" + (currentUser.username || "");
+    if (userDropdownName) userDropdownName.textContent = "姓名：" + (currentUser.nickname || currentUser.username || "");
     if (userDropdownRole) {
       userDropdownRole.textContent = currentUser.role === "admin" ? "\u7ba1\u7406\u5458" : "";
       userDropdownRole.style.display = currentUser.role === "admin" ? "block" : "none";

@@ -159,7 +159,19 @@ body {
 }
 
 .user-dropdown-name {
-    display: none;
+    color: var(--text-color, #333);
+    font-size: 0.9rem;
+    padding: 4px 8px;
+}
+
+#user-dropdown-username {
+    padding-top: 8px;
+}
+
+#user-dropdown-name {
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
 }
 
 .user-dropdown-role {
