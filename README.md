@@ -11,8 +11,9 @@
 - 支持案例详情查看和互动
 
 ### 2. 数据库系统
-- SQLite数据库存储案例、审核记录和版本历史
-- 支持多维度索引，提升搜索效率
+- MongoDB 存储案例、用户、审核记录、版本历史等业务数据
+- 通过 `counters` 集合为各业务集合分配整数 `id`，便于外部引用
+- 关键查询字段与全文检索均建立索引（详见 `backend/database.py:init_db()`）
 - 完整的版本管理和审核追踪
 
 ### 3. 智能搜索
@@ -22,7 +23,7 @@
 - 最新案例更新
 
 ### 4. 审核流程
-- 草稿、待审核、已发布、需修改的完整流程
+- 草稿、待审核、已通过（自动入库）、需修改 的完整流程
 - 版本历史记录
 - 审核人意见追踪
 - 完整的案例管理功能
@@ -42,23 +43,25 @@
 
 ### 方式二：手动启动
 
+> 前置条件：本地或可访问的 MongoDB 实例。连接信息通过 `.env` 中的 `MONGODB_URI`（默认 `mongodb://localhost:27017`）和 `MONGODB_DB_NAME`（默认 `case_library`）配置，由 `backend/database.py` 读取。
+
 #### 1. 安装依赖
 
 ```bash
+cd backend
 pip install -r requirements.txt
 ```
 
-#### 2. 初始化数据库并添加演示数据
+#### 2. 初始化演示数据与用户（首次启动各执行一次）
 
 ```bash
-cd backend
-python demo.py
+python demo.py        # 写入示例案例
+python init_users.py  # 创建初始账号
 ```
 
 #### 3. 启动后端服务
 
 ```bash
-cd backend
 python -m uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
@@ -70,73 +73,80 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8001
 
 ```
 强国有我大思政课案例库/
-├── frontend/              # 前端界面
-│   ├── index.html        # 主页面
-│   ├── css/style.css     # 样式表
-│   └── js/app.js         # 前端逻辑
-├── backend/              # 后端服务
-│   ├── main.py           # FastAPI主应用
-│   ├── database.py       # 数据库操作
-│   ├── search_engine.py  # 搜索引擎
-│   ├── case_processor.py # 案例处理
-│   └── demo.py           # 演示数据脚本
-├── data/                 # 数据目录
-│   └── cases.db          # SQLite数据库
-├── skills/               # Skill系统文件
-│   ├── classifier.md
-│   ├── template-sizhengke.md
-│   ├── template-kechengsizheng.md
-│   └── template-shijian.md
-├── requirements.txt       # 依赖文件
-├── start.bat             # Windows启动脚本
-└── README.md             # 说明文档
+├── frontend/                       # 前端界面（纯静态资源，由 FastAPI 挂载提供）
+│   ├── index.html
+│   ├── css/
+│   └── js/
+├── backend/                        # 后端服务
+│   ├── main.py                     # FastAPI 入口与全部路由
+│   ├── database.py                 # MongoDB 数据访问层与索引初始化
+│   ├── search_engine.py            # 搜索 / 推荐辅助封装
+│   ├── case_processor.py           # 案例分类与处理
+│   ├── demo.py                     # 演示数据初始化脚本
+│   ├── init_users.py               # 初始用户创建脚本
+│   ├── account_admin.py            # 账号管理脚本
+│   ├── migrate_sqlite_to_mongo.py  # 一次性迁移脚本：旧 SQLite → MongoDB
+│   ├── migrate_timestamps.py       # 一次性时间戳格式迁移脚本
+│   ├── smoke_test_mongo.py         # MongoDB 烟测
+│   ├── test_submit_flow.py         # 提交流程测试
+│   ├── requirements.txt
+│   └── accounts.csv
+├── data/                           # 数据目录
+│   ├── cases.db                    # 旧 SQLite 文件，仅供 migrate_sqlite_to_mongo.py 读取
+│   └── uploads/                    # 上传文件存放目录
+├── skills/                         # AI 案例处理 Skill 系统
+│   ├── SKILL.md                    # 顶层 Skill 入口
+│   ├── anlibianxie/                # 案例编写：SKILL.md 与三套写作模板
+│   ├── shenhe/                     # 审核
+│   └── zhutifenlei/                # 主题分类（classifier.md）
+├── SKILL.md                        # 项目级 Skill 索引
+├── CLAUDE.md / AGENTS.md           # 协作约定
+├── requirements.txt                # 根目录依赖（与 backend/requirements.txt 略有版本差异）
+├── start.bat                       # Windows 启动脚本
+└── README.md
 ```
 
 ## 数据库设计
 
-### cases表 - 案例主表
-- id: 主键
-- title: 案例标题
-- type: 案例类型（TYPE_A/B/C）
-- theme: 主题分类
-- content: 案例内容
-- status: 状态（draft/pending_review/approved/needs_revision/deleted）
-- author: 作者
-- department: 部门
-- keywords: 关键词（JSON）
-- created_at: 创建时间
-- updated_at: 更新时间
-- is_approved: 是否发布
-- view_count: 浏览量
-- like_count: 点赞量
+存储后端为 MongoDB。除 Mongo 自带的 `_id` 外，每个业务集合还使用由 `counters` 集合分配的整数 `id` 字段，便于 URL 与外部系统引用。索引在 `backend/database.py:init_db()` 中创建。
 
-### reviews表 - 审核记录表
-- id: 主键
-- case_id: 案例ID
-- reviewer: 审核人
-- comment: 审核意见
-- status: 审核状态
-- review_at: 审核时间
+### cases — 案例集合
+常用字段：`id`、`title`、`type`（TYPE_A/B/C）、`theme`、`content`、`status`（draft/pending_review/approved/needs_revision）、`author`、`owner_username`、`department`、`keywords`、`created_at`、`updated_at`、`is_approved`、`is_in_library`、`view_count`、`like_count`。
 
-### versions表 - 版本历史表
-- id: 主键
-- case_id: 案例ID
-- version_number: 版本号
-- content: 内容快照
-- changed_by: 修改人
-- change_reason: 修改原因
-- created_at: 创建时间
+索引：`id` 唯一索引；`(status, created_at)`、`(author, status, created_at)`、`(owner_username, status, created_at)` 三个复合索引；以及覆盖 `title / content / keywords` 的全文索引 `cases_text_idx`。
+
+### users — 用户集合
+常用字段：`id`、`username`、`password_hash`、`role`（normal/admin）、`status`（active/no_active）、`created_at`。`id` 与 `username` 均为唯一索引。
+
+### reviews — 审核记录集合
+常用字段：`id`、`case_id`、`reviewer`、`comment`、`status`（pending/approved/rejected/needs_revision）、`review_at`。
+
+### versions — 版本历史集合
+常用字段：`id`、`case_id`、`version_number`、`content`（按 `database.py` 中 `VERSIONED_FIELDS` 定义的字段快照）、`changed_by`、`change_reason`、`created_at`。
+
+### counters — 整数 id 分配器
+为 `users / cases / reviews / versions / deployments` 集合分别维护一个自增计数。
+
+### deployments — 部署记录集合
+索引已建立，但当前代码中没有写入路径，属于预留集合。
 
 ## API接口
+
+### 认证
+- `POST /api/auth/login` - 登录
+- `POST /api/auth/change-password` - 修改密码
 
 ### 案例管理
 - `GET /api/cases` - 获取案例列表
 - `GET /api/cases/{id}` - 获取案例详情
 - `POST /api/cases` - 创建新案例
 - `PUT /api/cases/{id}` - 更新案例
+- `POST /api/cases/{id}` - 更新案例（兼容路径）
 - `DELETE /api/cases/{id}` - 删除案例
 - `POST /api/cases/{id}/submit` - 提交审核
 - `POST /api/cases/{id}/like` - 点赞案例
+- `POST /api/cases/{id}/unlike` - 取消点赞
+- `POST /api/cases/{id}/visibility` - 修改可见性
 
 ### 搜索功能
 - `GET /api/search` - 搜索案例
@@ -146,15 +156,13 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8001
 - `GET /api/latest` - 获取最新案例
 
 ### 审核流程
-- `POST /api/reviews/{id}` - 提交审核
+- `POST /api/reviews/{id}` - 提交审核结果
 - `GET /api/reviews/{id}` - 获取审核记录
 - `GET /api/versions/{id}` - 获取版本历史
 
-### 统计数据
+### 统计与常量
 - `GET /api/statistics` - 获取统计数据
-
-### 常量数据
-- `GET /api/constants` - 获取类型、主题等常量
+- `GET /api/constants` - 获取案例类型、主题、状态等常量
 
 ## 案例类型
 
@@ -169,10 +177,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8001
 
 ## 主题分类
 
-1. 强国建设
-2. 上海实践
-3. 创新发展
-4. 校园文明
+主题列表的具体取值以 `GET /api/constants` 接口返回的 `themes` 字段为准（定义在 `backend/main.py`）。文档不再独立列举，避免与代码各写一份导致不同步。
 
 ## 开发说明
 
@@ -182,12 +187,12 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8001
 - 响应式设计，支持移动端
 
 ### 后端开发
-- FastAPI框架
-- SQLite数据库
-- RESTful API设计
+- FastAPI 框架
+- MongoDB 数据库（`pymongo` 驱动）
+- RESTful API 设计
 
 ### 添加新模板
-在根目录下添加新的模板文件，遵循现有格式
+在 `skills/anlibianxie/` 下新增模板文件，遵循现有 `template-*.md` 格式
 
 ## 支持
 
