@@ -1,0 +1,64 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    "venv",
+    ".venv",
+    "__pycache__",
+    "backend/account_admin.py",
+    "backend/case_processor.py",
+    "backend/database.py",
+    "backend/demo.py",
+    "backend/init_users.py",
+    "backend/main.py",
+    "backend/migrate_sqlite_to_mongo.py",
+    "backend/migrate_timestamps.py",
+    "backend/search_engine.py",
+    "backend/smoke_test_mongo.py",
+    "backend/test_submit_flow.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "PTH",
+    "RUF",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "venv",
+    ".venv",
+    "__pycache__",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv", "__pycache__"]

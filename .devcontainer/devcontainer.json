@@ -1,0 +1,47 @@
+{
+  "name": "Case Library Dev",
+  "dockerComposeFile": ["../docker-compose.yml", "../docker-compose.override.yml"],
+  "service": "app",
+  "workspaceFolder": "/app",
+  "runServices": ["app", "mongo"],
+  "shutdownAction": "stopCompose",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "Vue.volar"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "python.analysis.extraPaths": ["/app"],
+        "ruff.enable": true,
+        "ruff.format": true,
+        "terminal.integrated.cwd": "/app"
+      }
+    }
+  },
+  "forwardPorts": [8001, 5173, 27017],
+  "postCreateCommand": "python -m pip install -r /app/requirements.txt -r /app/requirements-dev.txt && if [ -f /app/frontend/package.json ]; then cd /app/frontend && npm install; fi",
+  "remoteEnv": {
+    "HTTP_PROXY": "${localEnv:HTTP_PROXY}",
+    "HTTPS_PROXY": "${localEnv:HTTPS_PROXY}",
+    "NO_PROXY": "${localEnv:NO_PROXY}"
+  },
+  "portsAttributes": {
+    "8001": {
+      "label": "Backend API",
+      "onAutoForward": "notify"
+    },
+    "5173": {
+      "label": "Vue Frontend",
+      "onAutoForward": "openBrowser"
+    },
+    "27017": {
+      "label": "MongoDB",
+      "onAutoForward": "silent"
+    }
+  }
+}

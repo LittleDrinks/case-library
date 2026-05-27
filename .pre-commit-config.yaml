@@ -1,0 +1,26 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: check-exceptions
+        name: Check try/except smells
+        entry: python scripts/check_exceptions.py backend/core/config.py backend/core/logging_config.py
+        language: system
+        types: [python]
+        pass_filenames: false
