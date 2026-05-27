@@ -14,7 +14,7 @@ make compose-config
 
 ```bash
 ruff check backend scripts
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 pytest
 cd frontend && npm test
 cd frontend && npm run build
@@ -23,12 +23,12 @@ docker compose config
 
 ## 渐进启用策略
 
-`develop/littledrinks` 是基础设施分支。为避免在前后端目标结构尚未合入时制造红灯，CI 会采用“存在即检查”策略：
+`develop/littledrinks` 是基础设施分支。质量门禁必须在容器内执行。前端采用“存在即检查”策略：
 
-- `backend/` 始终 lint。
+- `backend/` 始终全量 lint。
 - `scripts/` 存在时纳入 lint。
-- `backend/core/config.py` 和 `backend/core/logging_config.py` 存在时启用冻结 mypy 基线。
-- `scripts/check_exceptions.py` 先约束冻结基线文件，避免历史后端债务阻塞 infra 分支。
+- `mypy backend` 始终全量类型检查后端。
+- `scripts/check_exceptions.py` 全量检查后端可疑异常处理。
 - `tests/` 存在时运行 `pytest`；否则运行旧版 smoke test。
 - `frontend/package.json` 存在时运行 `npm test` 和 `npm run build`。
 
@@ -42,7 +42,3 @@ docker compose config
 - Playwright 截图或 E2E 门禁。
 - 全量 `mypy backend`。
 - 更严格的 Ruff 规则收敛。
-
-## 已知历史债务
-
-旧版后端入口和脚本当前排除在全量 Ruff 之外，避免基础设施分支要求改写业务代码。相关文件包括 `backend/main.py`、`backend/database.py`、`backend/case_processor.py`、迁移脚本和旧运维脚本。迁移到 `backend/core/` 后，应逐步从 `pyproject.toml` 的 `extend-exclude` 中移除这些文件。

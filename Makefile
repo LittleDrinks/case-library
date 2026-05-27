@@ -16,18 +16,11 @@ format:
 	ruff format $(PYTHON_LINT_TARGETS)
 
 typecheck:
-	@if [ -f backend/core/config.py ] || [ -f backend/core/logging_config.py ]; then \
-		targets=""; \
-		[ -f backend/core/config.py ] && targets="$$targets backend/core/config.py"; \
-		[ -f backend/core/logging_config.py ] && targets="$$targets backend/core/logging_config.py"; \
-		mypy $$targets; \
-	else \
-		echo "Skipping mypy: frozen baseline files are not present yet."; \
-	fi
+	mypy backend
 
 check: lint typecheck
 	@if [ -f scripts/check_exceptions.py ]; then \
-		python scripts/check_exceptions.py backend/core/config.py backend/core/logging_config.py; \
+		python scripts/check_exceptions.py backend; \
 	fi
 
 test:

@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: check-exceptions
         name: Check try/except smells
-        entry: python scripts/check_exceptions.py backend/core/config.py backend/core/logging_config.py
+        entry: python scripts/check_exceptions.py backend
         language: system
         types: [python]
         pass_filenames: false

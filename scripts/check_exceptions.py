@@ -48,9 +48,10 @@ def check_file(path: Path) -> list[str]:
             if handler.type is None:
                 issues.append(f"{location} bare except catches all exceptions")
                 continue
-            if _is_broad_exception(handler.type) and not _has_raise(handler.body):
+            is_broad = _is_broad_exception(handler.type)
+            if is_broad and not _has_raise(handler.body):
                 issues.append(f"{location} broad exception catch without re-raise")
-            if _returns_constant(handler.body):
+            if is_broad and _returns_constant(handler.body):
                 issues.append(f"{location} except block returns a constant/default value")
     return issues
 

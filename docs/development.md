@@ -2,7 +2,7 @@
 
 ## 容器环境
 
-项目以 Dev Container / Docker Compose 作为一致开发环境。最终校验应在容器内执行。
+项目以 Dev Container / Docker Compose 作为一致开发环境。开发、测试、lint、format、typecheck、构建和最终校验必须在容器内执行。
 
 ```text
 Dev Containers: Reopen in Container
@@ -36,10 +36,8 @@ make down
 
 除非任务明确要求修改后端行为，否则后端按冻结状态处理。优先补充契约测试和窄范围修复，不做大范围重构。
 
-当前执行的冻结类型检查基线是：
+当前执行的类型检查基线是：
 
 ```bash
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 ```
-
-如果目标文件尚未合入，CI 会显式跳过该项。

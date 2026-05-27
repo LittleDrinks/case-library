@@ -29,22 +29,11 @@ jobs:
             ruff check $targets
           '
 
-      - name: Typecheck frozen baseline in container
-        run: |
-          docker compose run --rm --no-deps app sh -lc '
-            targets=""
-            for file in backend/core/config.py backend/core/logging_config.py; do
-              if [ -f "$file" ]; then targets="$targets $file"; fi
-            done
-            if [ -n "$targets" ]; then
-              mypy $targets
-            else
-              echo "Skipping mypy: frozen baseline files are not present yet."
-            fi
-          '
+      - name: Typecheck in container
+        run: docker compose run --rm --no-deps app mypy backend
 
-      - name: Check exception handling baseline in container
-        run: docker compose run --rm --no-deps app python scripts/check_exceptions.py backend/core/config.py backend/core/logging_config.py
+      - name: Check exception handling in container
+        run: docker compose run --rm --no-deps app python scripts/check_exceptions.py backend
 
       - name: Test in container
         env:

@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-项目要求使用可复现的容器环境完成最终校验。推荐流程：
+项目要求使用可复现的容器环境完成开发和最终校验。推荐流程：
 
 1. 安装 Docker 与 VS Code Dev Containers 扩展。
 2. 用 VS Code 打开仓库根目录。
@@ -35,7 +35,7 @@ make compose-config
 
 ```bash
 ruff check backend scripts
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 pytest
 cd frontend && npm test
 cd frontend && npm run build

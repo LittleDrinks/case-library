@@ -4,8 +4,9 @@
 
 ## 环境
 
-- 默认在 Dev Container 或 `docker compose` 提供的一致环境内执行开发、测试和校验命令。
-- 宿主机命令只作辅助排查；交付前的最终校验应在容器环境内完成，或说明无法进入容器的原因和剩余风险。
+- AI agent 必须在 Dev Container 或 `docker compose` 提供的一致容器环境内执行会影响结果的操作，包括开发、测试、lint、format、typecheck、构建、依赖安装和提交前验证。
+- 宿主机命令只允许用于 `git status`、`git diff`、`rg`、`sed`、查看文件等只读辅助排查；不得把宿主机测试结果作为交付依据。
+- 如容器环境不可用，应先修复容器环境；确实无法修复时，必须停止并说明阻塞原因，不得绕过容器要求交付。
 - 不要提交 `.env`、API Key、数据库导出、`.claude/`、`.codex/`、`.planning/` 等本地状态。
 
 ## 范围
@@ -35,7 +36,7 @@ make compose-config
 
 ```bash
 ruff check backend scripts
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 pytest
 cd frontend && npm test
 cd frontend && npm run build
@@ -52,6 +53,6 @@ docker compose config
 
 ## 后端
 
-- FastAPI 后端目标结构为 `backend/core/`；旧版入口为 `backend/main.py`。
+- FastAPI 后端位于 `backend/`；目标结构为 `backend/core/`，旧版入口为 `backend/main.py`。
 - 新增必需环境变量时，同步更新 `.env.example`。
 - 新增或修改接口时，优先补充显式契约测试。

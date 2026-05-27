@@ -4,16 +4,16 @@
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import bcrypt
 from bson import ObjectId
 from dotenv import load_dotenv
-from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument, TEXT
+from pymongo import ASCENDING, DESCENDING, TEXT, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, ServerSelectionTimeoutError
-
 
 load_dotenv()
 
@@ -39,7 +39,7 @@ VERSIONED_FIELDS = ["title", "type", "theme", "content", "author", "department",
 DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
 BEIJING_TZ = timezone(timedelta(hours=8))
 
-_client: Optional[MongoClient] = None
+_client: MongoClient | None = None
 
 
 def get_mongo_client() -> MongoClient:
@@ -67,7 +67,7 @@ def normalize_to_beijing_datetime(value: Any) -> Any:
     if isinstance(value, datetime):
         if value.tzinfo is not None and value.utcoffset() is not None:
             return value.astimezone(BEIJING_TZ).replace(tzinfo=None)
-        return value.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ).replace(tzinfo=None)
+        return value.replace(tzinfo=UTC).astimezone(BEIJING_TZ).replace(tzinfo=None)
 
     if isinstance(value, str):
         text = value.strip()
@@ -75,6 +75,7 @@ def normalize_to_beijing_datetime(value: Any) -> Any:
             return value
 
         parse_text = text.replace("Z", "+00:00")
+        parsed: datetime | None
         try:
             parsed = datetime.fromisoformat(parse_text)
         except ValueError:
@@ -101,7 +102,7 @@ def format_beijing_datetime(value: Any) -> Any:
     return normalized
 
 
-def _normalize_datetime_fields(doc: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_datetime_fields(doc: dict[str, Any]) -> dict[str, Any]:
     for field in DATETIME_FIELDS:
         if field in doc:
             doc[field] = format_beijing_datetime(doc[field])
@@ -114,11 +115,11 @@ def serialize_datetime(value: Any) -> Any:
     return value
 
 
-def serialize_doc(doc: Optional[Dict]) -> Optional[Dict]:
+def serialize_doc(doc: dict | None) -> dict | None:
     if doc is None:
         return None
 
-    serialized: Dict[str, Any] = {}
+    serialized: dict[str, Any] = {}
     for key, value in doc.items():
         if isinstance(value, ObjectId):
             serialized[key] = str(value)
@@ -138,7 +139,7 @@ def serialize_doc(doc: Optional[Dict]) -> Optional[Dict]:
     return serialized
 
 
-def _normalize_keywords(value: Any) -> List[str]:
+def _normalize_keywords(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -156,7 +157,7 @@ def _normalize_keywords(value: Any) -> List[str]:
     return [str(value)]
 
 
-def serialize_case(case: Optional[Dict]) -> Optional[Dict]:
+def serialize_case(case: dict | None) -> dict | None:
     if case is None:
         return None
 
@@ -174,33 +175,41 @@ def serialize_case(case: Optional[Dict]) -> Optional[Dict]:
     return case
 
 
+def _serialized_docs(rows: Iterable[dict]) -> list[dict]:
+    return [serialized for row in rows if (serialized := serialize_doc(row)) is not None]
+
+
+def _serialized_cases(rows: Iterable[dict]) -> list[dict]:
+    return [serialized for row in rows if (serialized := serialize_case(row)) is not None]
+
+
 def _now() -> str:
     """Return the current UTC+8 wall-clock time as a plain string."""
-    return format_beijing_datetime(datetime.now(timezone.utc))
+    return str(format_beijing_datetime(datetime.now(UTC)))
 
 
-def _validate_case_status(status: Optional[str]):
+def _validate_case_status(status: str | None):
     if status is not None and status not in CASE_STATUSES:
         raise ValueError(f"Invalid case status: {status}")
 
 
-def _validate_review_status(status: Optional[str]):
+def _validate_review_status(status: str | None):
     if status is not None and status not in REVIEW_STATUSES:
         raise ValueError(f"Invalid review status: {status}")
 
 
-def _validate_user_role(role: Optional[str]):
+def _validate_user_role(role: str | None):
     if role is not None and role not in USER_ROLES:
         raise ValueError(f"Invalid user role: {role}")
 
 
-def _normalize_user_role(role: Optional[str]) -> str:
+def _normalize_user_role(role: str | None) -> str:
     if role == "user":
         return "normal"
     return role or "normal"
 
 
-def _validate_user_status(status: Optional[str]):
+def _validate_user_status(status: str | None):
     if status is not None and status not in USER_STATUSES:
         raise ValueError(f"Invalid user status: {status}")
 
@@ -272,7 +281,7 @@ def next_sequence(collection_name: str) -> int:
     return int(result["seq"])
 
 
-def _insert_with_generated_id(collection_name: str, doc: Dict) -> int:
+def _insert_with_generated_id(collection_name: str, doc: dict) -> int:
     doc["id"] = next_sequence(collection_name)
     _normalize_datetime_fields(doc)
     result = get_db()[collection_name].insert_one(doc)
@@ -299,8 +308,12 @@ def init_db():
 
     db.cases.create_index([("id", ASCENDING)], unique=True)
     db.cases.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
-    db.cases.create_index([("author", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)])
-    db.cases.create_index([("owner_username", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)])
+    db.cases.create_index(
+        [("author", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)]
+    )
+    db.cases.create_index(
+        [("owner_username", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)]
+    )
     db.cases.create_index([("type", ASCENDING), ("theme", ASCENDING)])
     db.cases.create_index(
         [("title", TEXT), ("content", TEXT), ("keywords", TEXT)],
@@ -322,7 +335,7 @@ def init_db():
     print(f"MongoDB initialized: {MONGODB_URI}/{MONGODB_DB_NAME}")
 
 
-def get_user_by_username(username: str) -> Optional[Dict]:
+def get_user_by_username(username: str) -> dict | None:
     user = get_db().users.find_one({"username": username})
     serialized = serialize_doc(user)
     if serialized:
@@ -363,10 +376,10 @@ def create_user(
 
 
 def get_users_count() -> int:
-    return get_db().users.count_documents({})
+    return int(get_db().users.count_documents({}))
 
 
-def serialize_user_public(user: Optional[Dict]) -> Optional[Dict]:
+def serialize_user_public(user: dict | None) -> dict | None:
     if not user:
         return None
     serialized = serialize_doc(user) or {}
@@ -378,12 +391,12 @@ def serialize_user_public(user: Optional[Dict]) -> Optional[Dict]:
     return serialized
 
 
-def list_users() -> List[Dict]:
+def list_users() -> list[dict]:
     cursor = get_db().users.find({}).sort("username", ASCENDING)
-    return [serialize_user_public(user) for user in cursor]
+    return [user for row in cursor if (user := serialize_user_public(row)) is not None]
 
 
-def authenticate_user(username: str, password: str) -> Optional[Dict]:
+def authenticate_user(username: str, password: str) -> dict | None:
     user = get_db().users.find_one({"username": username})
     if not user:
         return None
@@ -399,14 +412,16 @@ def set_user_password(username: str, new_password: str, must_change_password: bo
     result = get_db().users.update_one(
         {"username": username},
         {
-            "$set": _normalize_datetime_fields({
-                "password": hash_password(new_password),
-                "must_change_password": bool(must_change_password),
-                "updated_at": _now(),
-            })
+            "$set": _normalize_datetime_fields(
+                {
+                    "password": hash_password(new_password),
+                    "must_change_password": bool(must_change_password),
+                    "updated_at": _now(),
+                }
+            )
         },
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 
 def change_user_password(username: str, old_password: str, new_password: str) -> bool:
@@ -416,21 +431,23 @@ def change_user_password(username: str, old_password: str, new_password: str) ->
     result = get_db().users.update_one(
         {"username": username},
         {
-            "$set": _normalize_datetime_fields({
-                "password": hash_password(new_password),
-                "must_change_password": False,
-                "updated_at": _now(),
-            })
+            "$set": _normalize_datetime_fields(
+                {
+                    "password": hash_password(new_password),
+                    "must_change_password": False,
+                    "updated_at": _now(),
+                }
+            )
         },
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 
 def update_user_fields(
     username: str,
-    role: Optional[str] = None,
-    nickname: Optional[str] = None,
-    status: Optional[str] = None,
+    role: str | None = None,
+    nickname: str | None = None,
+    status: str | None = None,
 ) -> bool:
     if role is not None:
         _validate_user_role(role)
@@ -448,8 +465,10 @@ def update_user_fields(
         return False
     updates["updated_at"] = _now()
 
-    result = get_db().users.update_one({"username": username}, {"$set": _normalize_datetime_fields(updates)})
-    return result.matched_count > 0 and result.modified_count > 0
+    result = get_db().users.update_one(
+        {"username": username}, {"$set": _normalize_datetime_fields(updates)}
+    )
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 
 def rename_user(old_username: str, new_username: str) -> bool:
@@ -460,14 +479,14 @@ def rename_user(old_username: str, new_username: str) -> bool:
             {"username": old_username},
             {"$set": _normalize_datetime_fields({"username": new_username, "updated_at": _now()})},
         )
-        return result.matched_count > 0 and result.modified_count > 0
+        return bool(result.matched_count > 0 and result.modified_count > 0)
     except DuplicateKeyError as exc:
         raise ValueError(f"Username already exists: {new_username}") from exc
 
 
 def delete_user(username: str) -> bool:
     result = get_db().users.delete_one({"username": username})
-    return result.deleted_count > 0
+    return bool(result.deleted_count > 0)
 
 
 def clear_users() -> int:
@@ -476,7 +495,7 @@ def clear_users() -> int:
     return int(result.deleted_count)
 
 
-def create_case(case_data: Dict) -> int:
+def create_case(case_data: dict) -> int:
     status = case_data.get("status", "draft")
     _validate_case_status(status)
 
@@ -519,14 +538,14 @@ def create_case(case_data: Dict) -> int:
     return case_id
 
 
-def get_case(case_id: int, include_deleted: bool = False) -> Optional[Dict]:
-    query: Dict[str, Any] = {"id": int(case_id)}
+def get_case(case_id: int, include_deleted: bool = False) -> dict | None:
+    query: dict[str, Any] = {"id": int(case_id)}
     if not include_deleted:
         query["status"] = {"$ne": "deleted"}
     return serialize_case(get_db().cases.find_one(query))
 
 
-def _author_aliases(author: str) -> List[str]:
+def _author_aliases(author: str) -> list[str]:
     """Return the username plus any non-empty nickname so legacy cases that
     stored the nickname in the `author` field still match."""
     aliases = {author}
@@ -538,7 +557,7 @@ def _author_aliases(author: str) -> List[str]:
     return [a for a in aliases if a]
 
 
-def _apply_hidden_filter(query: Dict[str, Any], include_hidden: bool) -> Dict[str, Any]:
+def _apply_hidden_filter(query: dict[str, Any], include_hidden: bool) -> dict[str, Any]:
     if include_hidden:
         return query
     query["is_hidden"] = {"$ne": True}
@@ -546,12 +565,12 @@ def _apply_hidden_filter(query: Dict[str, Any], include_hidden: bool) -> Dict[st
 
 
 def _case_list_filter(
-    status: Optional[str] = None,
-    author: Optional[str] = None,
+    status: str | None = None,
+    author: str | None = None,
     include_deleted: bool = False,
     include_hidden: bool = True,
-) -> Dict[str, Any]:
-    query: Dict[str, Any] = {}
+) -> dict[str, Any]:
+    query: dict[str, Any] = {}
 
     if author:
         aliases = _author_aliases(author)
@@ -568,9 +587,7 @@ def _case_list_filter(
         else:
             _validate_case_status(status)
             query["status"] = status
-    elif status == "all":
-        query["status"] = {"$nin": ["draft", "deleted"]}
-    elif not author:
+    elif status == "all" or not author:
         query["status"] = {"$nin": ["draft", "deleted"]}
 
     if not include_deleted:
@@ -590,29 +607,32 @@ def _case_list_filter(
 
 
 def get_all_cases(
-    status: Optional[str] = None,
+    status: str | None = None,
     offset: int = 0,
     limit: int = 50,
-    author: Optional[str] = None,
+    author: str | None = None,
     include_hidden: bool = True,
-) -> List[Dict]:
+) -> list[dict]:
     query = _case_list_filter(status=status, author=author, include_hidden=include_hidden)
     cursor = (
-        get_db().cases.find(query)
+        get_db()
+        .cases.find(query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
     )
-    return [serialize_case(row) for row in cursor]
+    return _serialized_cases(cursor)
 
 
 def count_cases(
-    status: Optional[str] = None,
-    author: Optional[str] = None,
+    status: str | None = None,
+    author: str | None = None,
     include_hidden: bool = True,
 ) -> int:
-    return get_db().cases.count_documents(
-        _case_list_filter(status=status, author=author, include_hidden=include_hidden)
+    return int(
+        get_db().cases.count_documents(
+            _case_list_filter(status=status, author=author, include_hidden=include_hidden)
+        )
     )
 
 
@@ -621,18 +641,20 @@ def set_case_hidden(case_id: int, hidden: bool) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$set": _normalize_datetime_fields({"is_hidden": bool(hidden), "updated_at": _now()})},
     )
-    return result.matched_count > 0
+    return bool(result.matched_count > 0)
 
 
-def _values_differ(field: str, current: Dict, new_value: Any) -> bool:
+def _values_differ(field: str, current: dict, new_value: Any) -> bool:
     current_value = current.get(field)
     if field == "keywords":
         current_value = _normalize_keywords(current_value)
         new_value = _normalize_keywords(new_value)
-    return current_value != new_value
+    return bool(current_value != new_value)
 
 
-def update_case(case_id: int, case_data: Dict, updated_by: str = "system", change_reason: str = "") -> bool:
+def update_case(
+    case_id: int, case_data: dict, updated_by: str = "system", change_reason: str = ""
+) -> bool:
     db = get_db()
     current = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not current:
@@ -694,7 +716,7 @@ def update_case(case_id: int, case_data: Dict, updated_by: str = "system", chang
     return True
 
 
-def delete_case(case_id: int) -> Dict:
+def delete_case(case_id: int) -> dict:
     db = get_db()
     case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not case:
@@ -771,12 +793,14 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
     result = db.cases.update_one(
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {
-            "$set": _normalize_datetime_fields({
-                "status": new_status,
-                "is_approved": is_approved,
-                "is_in_library": is_in_library,
-                "updated_at": _now(),
-            })
+            "$set": _normalize_datetime_fields(
+                {
+                    "status": new_status,
+                    "is_approved": is_approved,
+                    "is_in_library": is_in_library,
+                    "updated_at": _now(),
+                }
+            )
         },
     )
     if result.matched_count == 0:
@@ -793,7 +817,7 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
     return True
 
 
-def backfill_owner_username() -> Dict[str, int]:
+def backfill_owner_username() -> dict[str, int]:
     """Repair legacy cases that are missing `owner_username`.
 
     For each case where `owner_username` is missing/empty, look up a user whose
@@ -802,7 +826,7 @@ def backfill_owner_username() -> Dict[str, int]:
     locate cases the user authored before `owner_username` was tracked.
     """
     db = get_db()
-    nickname_to_username: Dict[str, str] = {}
+    nickname_to_username: dict[str, str] = {}
     username_set: set = set()
     for user in db.users.find({}, projection={"username": 1, "nickname": 1}):
         username = user.get("username") or ""
@@ -830,20 +854,24 @@ def backfill_owner_username() -> Dict[str, int]:
             continue
         db.cases.update_one(
             {"id": case["id"]},
-            {"$set": _normalize_datetime_fields({"owner_username": resolved, "updated_at": _now()})},
+            {
+                "$set": _normalize_datetime_fields(
+                    {"owner_username": resolved, "updated_at": _now()}
+                )
+            },
         )
         fixed += 1
     return {"fixed": fixed, "skipped": skipped}
 
 
-def get_case_versions(case_id: int) -> List[Dict]:
+def get_case_versions(case_id: int) -> list[dict]:
     cursor = get_db().versions.find({"case_id": int(case_id)}).sort("version_number", DESCENDING)
-    return [serialize_doc(row) for row in cursor]
+    return _serialized_docs(cursor)
 
 
-def get_reviews(case_id: int) -> List[Dict]:
+def get_reviews(case_id: int) -> list[dict]:
     cursor = get_db().reviews.find({"case_id": int(case_id)}).sort("review_at", DESCENDING)
-    return [serialize_doc(row) for row in cursor]
+    return _serialized_docs(cursor)
 
 
 def increment_view_count(case_id: int) -> bool:
@@ -851,7 +879,7 @@ def increment_view_count(case_id: int) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$inc": {"view_count": 1}},
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 
 def increment_like_count(case_id: int) -> bool:
@@ -859,12 +887,14 @@ def increment_like_count(case_id: int) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$inc": {"like_count": 1}},
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 
 def decrement_like_count(case_id: int) -> bool:
     db = get_db()
-    case_exists = db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}, limit=1) > 0
+    case_exists = (
+        db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}, limit=1) > 0
+    )
     if not case_exists:
         return False
 
@@ -879,10 +909,10 @@ def decrement_like_count(case_id: int) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$lt": 0}},
         {"$set": {"like_count": 0}},
     )
-    return correction.modified_count > 0
+    return bool(correction.modified_count > 0)
 
 
-def _status_search_filter(status: Optional[str]) -> Dict[str, Any]:
+def _status_search_filter(status: str | None) -> dict[str, Any]:
     if not status or status == "all":
         return {"status": {"$nin": ["draft", "deleted"]}}
     if status in ("approved", "approved_all"):
@@ -897,37 +927,38 @@ def _status_search_filter(status: Optional[str]) -> Dict[str, Any]:
 
 def search_cases(
     query: str,
-    status: Optional[str] = "approved",
+    status: str | None = "approved",
     limit: int = 20,
     offset: int = 0,
-) -> List[Dict]:
+) -> list[dict]:
     if not query or not query.strip():
         return []
 
     escaped = re.escape(query.strip())
     regex = {"$regex": escaped, "$options": "i"}
-    mongo_query: Dict[str, Any] = {
+    mongo_query: dict[str, Any] = {
         **_status_search_filter(status),
         "is_hidden": {"$ne": True},
         "$or": [{"title": regex}, {"content": regex}, {"keywords": regex}],
     }
     cursor = (
-        get_db().cases.find(mongo_query)
+        get_db()
+        .cases.find(mongo_query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
     )
-    return [serialize_case(row) for row in cursor]
+    return _serialized_cases(cursor)
 
 
 def filter_cases(
-    type_filter: Optional[str] = None,
-    theme_filter: Optional[str] = None,
+    type_filter: str | None = None,
+    theme_filter: str | None = None,
     status_filter: str = "approved",
-    keyword_filter: Optional[str] = None,
+    keyword_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> List[Dict]:
+) -> list[dict]:
     query = _status_search_filter(status_filter)
     query["is_hidden"] = {"$ne": True}
     if type_filter:
@@ -939,15 +970,16 @@ def filter_cases(
         query["$or"] = [{"title": regex}, {"content": regex}, {"keywords": regex}]
 
     cursor = (
-        get_db().cases.find(query)
+        get_db()
+        .cases.find(query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
     )
-    return [serialize_case(row) for row in cursor]
+    return _serialized_cases(cursor)
 
 
-def get_recommendation_candidates(case_id: int, limit: int = 5) -> List[Dict]:
+def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
     current_case = get_case(case_id)
     if not current_case:
         return []
@@ -959,34 +991,30 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> List[Dict]:
         "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
     }
     cursor = get_db().cases.find(query).limit(max(0, int(limit) * 3))
-    cases = [serialize_case(row) for row in cursor]
-    cases.sort(key=lambda item: (item.get("view_count", 0) + item.get("like_count", 0)), reverse=True)
+    cases = _serialized_cases(cursor)
+    cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:limit]
 
 
-def get_trending_cases(limit: int = 10) -> List[Dict]:
+def get_trending_cases(limit: int = 10) -> list[dict]:
     query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
     cursor = get_db().cases.find(query)
-    cases = [serialize_case(row) for row in cursor]
-    cases.sort(key=lambda item: (item.get("view_count", 0) + item.get("like_count", 0)), reverse=True)
+    cases = _serialized_cases(cursor)
+    cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:limit]
 
 
-def get_latest_cases(limit: int = 10) -> List[Dict]:
+def get_latest_cases(limit: int = 10) -> list[dict]:
     query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
-    cursor = (
-        get_db().cases.find(query)
-        .sort("created_at", DESCENDING)
-        .limit(max(0, int(limit)))
-    )
-    return [serialize_case(row) for row in cursor]
+    cursor = get_db().cases.find(query).sort("created_at", DESCENDING).limit(max(0, int(limit)))
+    return _serialized_cases(cursor)
 
 
-def get_statistics() -> Dict:
+def get_statistics() -> dict:
     db = get_db()
     approved_filter = {"status": "approved"}
 
-    stats: Dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
+    stats: dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
     stats["by_type"] = {
         row["_id"]: row["count"]
         for row in db.cases.aggregate(

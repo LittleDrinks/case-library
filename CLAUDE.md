@@ -4,13 +4,15 @@
 
 ## 开发环境
 
-优先使用仓库内置 Dev Container。它通过 Docker Compose 启动：
+必须使用仓库内置 Dev Container 或 Docker Compose 容器执行开发、测试、lint、format、typecheck、构建和提交前验证。宿主机命令只用于只读排查，不能作为交付依据。
+
+Dev Container 通过 Docker Compose 启动：
 
 - `app`：FastAPI 后端
 - `mongo`：MongoDB
 - `frontend`：Vue/Vite 前端（当 `frontend/package.json` 存在时启用）
 
-除非命令另有说明，默认在仓库根目录执行。最终交付检查应在容器环境中完成。
+除非命令另有说明，默认在仓库根目录执行。最终交付检查必须在容器环境中完成。
 
 ## 常用检查
 
@@ -24,7 +26,7 @@ make compose-config
 
 ```bash
 ruff check backend scripts
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 pytest
 cd frontend && npm test
 cd frontend && npm run build
@@ -43,13 +45,12 @@ docker compose config
 
 除非任务明确要求修改后端行为，否则将后端视为冻结状态。优先补充契约测试和窄范围修复，避免大范围重构。
 
-当前完整后端 mypy 可能存在历史债务。冻结基线是：
+当前后端类型检查基线是：
 
 ```bash
-mypy backend/core/config.py backend/core/logging_config.py
+mypy backend
 ```
 
-如果目标文件尚未存在，CI 会显式跳过该项；相关代码合入后会自动启用。
 
 ## AI 集成
 
