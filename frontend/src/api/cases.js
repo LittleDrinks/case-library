@@ -100,3 +100,51 @@ export async function fetchCaseReviews(caseId) {
 export async function deleteCaseById(caseId) {
   return request(`/api/cases/${caseId}`, { method: "DELETE" });
 }
+
+/**
+ * List cases for admin review by status tab.
+ *
+ * Backend contract:
+ *   GET /api/cases?status=<status>
+ *
+ * Tab mappings:
+ *   pending   -> pending_review
+ *   approved  -> approved_all
+ *   rejected  -> rejected
+ *   all       -> all
+ */
+export async function listReviewCases(status) {
+  const params = new URLSearchParams();
+  params.set("status", status);
+  return get(`/api/cases?${params.toString()}`);
+}
+
+/**
+ * Review a case as admin.
+ *
+ * Backend contract:
+ *   POST /api/reviews/{case_id}
+ *   Content-Type: application/x-www-form-urlencoded
+ *   Body: comment, status
+ *
+ * Status values accepted by backend:
+ *   "approve" | "approved"  -> approved
+ *   "reject"  | "rejected"  -> rejected / needs_revision
+ */
+export async function reviewCase(caseId, { comment, status }) {
+  return postForm(`/api/reviews/${caseId}`, { comment, status });
+}
+
+/**
+ * Set a case's visibility (hide or show).
+ *
+ * Backend contract:
+ *   POST /api/cases/{case_id}/visibility
+ *   Content-Type: application/x-www-form-urlencoded
+ *   Body: hidden (bool)
+ */
+export async function setCaseVisibility(caseId, hidden) {
+  return postForm(`/api/cases/${caseId}/visibility`, {
+    hidden: hidden ? "true" : "false",
+  });
+}
