@@ -136,6 +136,7 @@ body {
   font-size: 15px;
   font-weight: 500;
   text-decoration: none;
+  white-space: nowrap;
   transition: color 0.15s, background 0.15s;
 }
 
@@ -318,5 +319,32 @@ button {
 
   .user-name {
     display: none;
+  }
+}
+
+/* Very small screens: horizontal-scroll nav to prevent vertical compression */
+@media (max-width: 560px) {
+  .main-nav {
+    gap: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, transparent, black 10px, black calc(100% - 10px), transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 10px, black calc(100% - 10px), transparent);
+  }
+
+  .main-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    padding: 0 6px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .nav-link.active::after {
+    left: 6px;
+    right: 6px;
   }
 }
