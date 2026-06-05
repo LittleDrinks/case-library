@@ -163,6 +163,29 @@ test(
       page.locator(".case-card").filter({ hasText: uniqueTitle })
     ).toBeVisible();
 
+    // ==========================================
+    // Step 6: Global header search finds the approved case
+    // ==========================================
+    // Skip on mobile where .global-search is hidden by responsive CSS.
+    if (testInfo.project.name === "chromium-desktop") {
+      // Exercise the global header search form in App.vue (distinct from the
+      // local case-library search field) to locate the approved case.
+      await page
+        .locator(".global-search")
+        .getByLabel("搜索案例")
+        .fill(uniqueTitle);
+      await page
+        .locator(".global-search")
+        .getByRole("button", { name: "查找案例" })
+        .click();
+
+      // Should land on/remain on the case library view with the case visible
+      await expect(page).toHaveURL(/#library/);
+      await expect(
+        page.locator(".case-card").filter({ hasText: uniqueTitle })
+      ).toBeVisible();
+    }
+
     // Capture a success screenshot for UI review, distinguished by project name
     const screenshotPath = testInfo.outputPath(
       `smoke-success-${testInfo.project.name}.png`
