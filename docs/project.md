@@ -102,23 +102,69 @@ curation note when needed, and commit only reviewed fixtures or generated code.
 
 ## AI And Skills
 
+### Alpha Decision: Transient UI Guidance Only
+
+In the alpha phase, AI review remains **transient/local UI guidance only**.
+It is **not** a durable backend approval, audit, validation, or review record.
+The create-case wizard may show a local pre-submit checklist or state summary
+that helps the author self-review, but it must not imply server-side AI
+validation exists or persist any AI-generated judgment as an official record.
+
+### Durable AI Review (Future Backend Design)
+
+A durable AI review feature requires an explicit later backend design covering:
+
+- Persistence schema for AI review records (what is stored, TTL, versioning)
+- Review record semantics (what "AI passed/failed" means, thresholds, scoring)
+- Auth/traceability (who requested the review, which model, prompt version,
+  temperature, timestamp)
+- Model configuration and fallback (primary model, fallback model, error handling)
+- Failure handling (timeout, rate limit, invalid response format, retry policy)
+- Relationship to human expert review (AI review as advisory vs. gate,
+  escalation rules, override workflow)
+
+Do not implement or simulate any of the above until there is a dedicated design
+document and backend endpoint.
+
+### OpenAI-Compatible Client Boundary
+
+When implemented, the AI client must be:
+
+- **Server-side only** — never expose `AI_API_KEY` to browser code
+- **Configured through `.env`** using these variables:
+  - `AI_BASE_URL` — endpoint base URL
+  - `AI_API_KEY` — API key (server-side only)
+  - `AI_MODELS` — comma-separated available models
+  - `AI_DEFAULT_MODEL` — fallback when none specified
+  - `AI_TIMEOUT_SECONDS` — request timeout
+  - `AI_REVIEW_ENABLED` — feature flag to disable AI features entirely
+- **One chat interface** — a single chat completion path, not multiple
+  specialized endpoints
+- **Explicit model selection** — model chosen from `AI_MODELS`, defaulting to
+  `AI_DEFAULT_MODEL`; reject unknown models
+- **Feature flag and timeout honored** — when `AI_REVIEW_ENABLED=false`, AI
+  routes return 503 or equivalent; always respect `AI_TIMEOUT_SECONDS`
+
+### Skills/Prompts
+
 Existing `skills/` content is useful domain knowledge:
 
 - case writing templates
 - case classification rules
 - reference writing format
 
+These are **domain prompt/template assets**, not runtime framework code. They
+may feed future product prompts/templates when the AI client is implemented.
+
 Do not migrate old `.claude/` or `.codex/` review workflow bundles into this
 repository. They are agent orchestration tooling, not product domain assets.
 
-The future product AI review flow should be rebuilt as a small
-OpenAI-compatible chat client configured only through `.env`. It can consume the
-tracked domain `skills/` as prompts/templates, but the runtime boundary should be
-one chat interface with explicit model selection from `AI_MODELS`.
+### Explicit Non-Goals
 
-The create-case design includes an "AI review" step, but the current backend has
-no durable AI review endpoint, attachment workflow, or expert submission object.
-Do not fake server-side AI validation in the frontend.
+- No fake "server AI passed" state in frontend or backend
+- No attachment/expert workflow simulation
+- No browser-side AI credentials or direct API calls
+- No durable AI audit trail until full backend support exists
 
 ## Testing Direction
 
@@ -145,10 +191,18 @@ created via `docker compose exec` against `backend/account_admin.py`.
 Screenshot checks belong with frontend work. Workers must extract layout facts
 from `docs/design/create/*.png` before implementing create-case screens.
 
-No benchmark currently exists. Add one only when there is stable behavior to
-score, such as AI review consistency, case classification accuracy, or full
-user-story completion time. Track that decision in `docs/kanban.md` rather than
-adding speculative benchmark code now.
+No benchmark code exists in alpha. Do not add benchmark infrastructure until
+there is a real AI endpoint and stable fixtures/source policy to measure against.
+
+Later benchmark candidates (track in GitHub Issues or `docs/kanban.md` only
+after the behavior exists):
+
+- Classification accuracy against `skills/zhutifenlei` rules
+- Review consistency over curated case fixtures
+- Prompt regression using `skills/anlibianxie/evals/evals.json`
+
+Track that decision in `docs/kanban.md` rather than adding speculative benchmark
+code now.
 
 ## Worker Rules
 

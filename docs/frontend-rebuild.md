@@ -182,12 +182,21 @@ Current backend gaps relative to these designs:
 - no attachment upload/authorization agreement workflow despite confirmation copy
 - no separate expert-review submission object beyond case status/review records
 
-Until backend support exists, the Vue UI should not fake durable AI or attachment
-behavior. It can show a local, clearly bounded pre-submit checklist/state only if
-that does not imply server-side validation. The classification-step AI assistant
-can be a transient one-round conversation that helps choose type/theme without
-persistence; do not store it as an official review record or expose browser-side
-AI credentials.
+Until backend support exists, the Vue UI must not fake durable AI or attachment
+behavior. The AI review step (step 4) and submit confirmation (step 5) should be
+implemented as follows in alpha:
+
+- **Step 4 "AI 审核"**: show a local, clearly bounded pre-submit checklist or
+  self-review summary only. It must not imply server-side validation, display a
+  fake "AI passed" score, or store any AI-generated judgment. It is transient
+  UI guidance that disappears on navigation.
+- **Step 5 "提交确认"**: show the standard submit card with a "待审核" status
+  pill pointing to human expert review. Do not show "AI 智能审核已通过" or any
+  language implying server-side AI validation has occurred.
+- **Classification AI assistant**: the UI may keep only transient browser state
+  for a one-round assistant interaction that helps choose type/theme. Any future
+  model call must go through the server-side OpenAI-compatible client boundary.
+  Do not persist assistant state or expose browser-side AI credentials.
 
 ## API Use
 
