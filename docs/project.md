@@ -23,7 +23,9 @@ Do not develop from them and do not copy old files wholesale.
 ## Architecture
 
 - `backend/`: FastAPI app, MongoDB data layer, account scripts, migration/smoke scripts.
-- `frontend/`: Vue 3 + Vite app. It is currently a minimal connectivity page.
+- `frontend/`: Vue 3 + Vite alpha frontend with an app shell, role-aware
+  navigation, and restored public, authenticated, and admin workflows. Not
+  production-complete.
 - `skills/`: prompt/template resources for case writing and classification. Treat them
   as domain assets, not as runtime framework code.
 - `docs/design/`: tracked visual design references.
