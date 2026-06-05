@@ -310,6 +310,46 @@ test(
 );
 
 test(
+  "classification helper provides local suggestion",
+  async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByLabel(/案例标题/).fill("社会实践数字育人案例");
+    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await page
+      .locator("#ccf-content")
+      .fill("本案例围绕社会实践活动中的数字技术应用，记录实践育人过程。");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await page.getByRole("button", { name: "打开 AI 分类助手" }).click();
+    await expect(
+      page.getByText("AI 分类助手（本地建议）")
+    ).toBeVisible();
+
+    await page.getByPlaceholder("输入问题…").fill("帮我推荐案例类型和主题");
+    await page.getByRole("button", { name: "获取建议" }).click();
+
+    const helperResponse = page.getByRole("status");
+    await expect(helperResponse).toContainText("建议类型");
+    await expect(helperResponse).toContainText("实践育人案例");
+    await expect(helperResponse).toContainText("实践育人");
+  }
+);
+
+test(
   "save draft appears in my submissions",
   async ({ page }) => {
     const uniqueTitle = `Draft测试 ${Date.now()}`;
