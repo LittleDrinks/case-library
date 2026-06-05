@@ -455,6 +455,108 @@ test(
 );
 
 test(
+  "admin hide and show approved case visibility",
+  async ({ page }) => {
+    const uniqueTitle = `Visibility测试 ${Date.now()}`;
+
+    page.on("dialog", (dialog) => dialog.accept());
+
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByLabel(/案例标题/).fill(uniqueTitle);
+    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await page
+      .locator("#ccf-content")
+      .fill("这是用于管理员隐藏展示回归测试的案例正文内容。");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await page.locator("#ccf-type").selectOption("TYPE_A");
+    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "提交前自查" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("确认并提交")).toBeVisible();
+    await page.getByRole("button", { name: "正式提交案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByRole("button", { name: "退出" }).click();
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.getByLabel("用户名").fill(TEST_ADMIN);
+    await page.getByLabel("密码").fill(TEST_ADMIN_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "审核管理" }).click();
+    const pendingCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(pendingCard).toBeVisible();
+    await pendingCard.getByRole("button", { name: "审核" }).click();
+    await page.locator("#review-comment").fill("审核通过，用于可见性测试。");
+    await page.getByLabel("通过").check();
+    await page.getByRole("button", { name: "提交审核" }).click();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "已通过" }).click();
+    const approvedCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(approvedCard).toBeVisible();
+    await approvedCard.getByRole("button", { name: "隐藏" }).click();
+    await expect(approvedCard.locator(".pill-hidden")).toContainText("已隐藏");
+    await expect(
+      approvedCard.getByRole("button", { name: "展示" })
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "案例库" }).click();
+    await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
+    await page.getByRole("button", { name: "搜索" }).click();
+    await expect(
+      page.locator(".case-card").filter({ hasText: uniqueTitle })
+    ).toHaveCount(0);
+
+    await page.getByRole("link", { name: "审核管理" }).click();
+    await page.getByRole("tab", { name: "已通过" }).click();
+    await expect(approvedCard).toBeVisible();
+    await approvedCard.getByRole("button", { name: "展示" }).click();
+    await expect(approvedCard.locator(".pill-visible")).toContainText("未隐藏");
+
+    await page.getByRole("link", { name: "案例库" }).click();
+    await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
+    await page.getByRole("button", { name: "搜索" }).click();
+    await expect(
+      page.locator(".case-card").filter({ hasText: uniqueTitle })
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "审核管理" }).click();
+    await page.getByRole("tab", { name: "已通过" }).click();
+    await expect(approvedCard).toBeVisible();
+    await approvedCard.getByRole("button", { name: "删除" }).click();
+    await page
+      .locator(".confirm-panel")
+      .getByRole("button", { name: "删除" })
+      .click();
+    await expect(approvedCard).toHaveCount(0);
+  }
+);
+
+test(
   "forced password change workflow",
   async ({ page }, testInfo) => {
     test.skip(
