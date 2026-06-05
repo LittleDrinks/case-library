@@ -170,3 +170,66 @@ test(
     await page.screenshot({ path: screenshotPath, fullPage: true });
   }
 );
+
+test(
+  "mobile create-case layout regression",
+  async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-mobile",
+      "mobile-only regression"
+    );
+
+    page.on("dialog", (dialog) => dialog.accept());
+
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page
+      .locator(".modal-panel")
+      .getByRole("button", { name: "登录" })
+      .click();
+
+    // On mobile .user-name is hidden; use avatar as login indicator
+    await expect(page.locator(".user-avatar")).toBeVisible();
+
+    // Navigate to create case wizard
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    // Verify header nav label "案例库" is not truncated
+    const libraryLink = page
+      .locator(".main-nav .nav-link")
+      .filter({ hasText: "案例库" });
+    await expect(libraryLink).toBeVisible();
+    const isNotTruncated = await libraryLink.evaluate(
+      (el) => el.clientWidth >= el.scrollWidth
+    );
+    expect(isNotTruncated).toBe(true);
+
+    // Fill step 1 and advance to step 2
+    await page.getByLabel(/案例标题/).fill("Mobile Regression Test");
+    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+
+    // Deliberately scroll down
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const scrollYBefore = await page.evaluate(() => window.scrollY);
+    expect(scrollYBefore).toBeGreaterThan(0);
+
+    // Fill content and advance to step 3
+    await page
+      .locator("#ccf-content")
+      .fill("这是用于移动端回归测试的案例正文内容。");
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+
+    // Verify scroll resets to top after step transition
+    await page.waitForFunction(() => window.scrollY === 0);
+    const scrollYAfter = await page.evaluate(() => window.scrollY);
+    expect(scrollYAfter).toBe(0);
+  }
+);
