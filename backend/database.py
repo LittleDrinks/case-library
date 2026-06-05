@@ -1000,7 +1000,7 @@ def get_latest_cases(limit: int = 10) -> list[dict]:
 
 def get_statistics() -> dict:
     db = get_db()
-    approved_filter = {"status": "approved"}
+    approved_filter = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
 
     stats: dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
     stats["by_type"] = {

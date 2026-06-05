@@ -252,6 +252,79 @@ def main_test() -> None:
     assert versions[0]["change_reason"] == "owner edit"
     assert versions[-1]["change_reason"] == "Initial creation"
 
+    stats_visible_case = create_case(
+        {
+            "title": "stats visible case",
+            "type": "TYPE_STATS_PUBLIC",
+            "theme": "theme_stats_public",
+            "content": "public statistics visible case",
+            "author": "ownerflow",
+            "owner_username": "ownerflow",
+            "department": "test",
+            "status": "approved",
+            "created_at": "2030-01-01 08:00:00",
+            "updated_at": "2030-01-01 08:00:00",
+            "view_count": 3,
+            "like_count": 4,
+        }
+    )
+    stats_hidden_case = create_case(
+        {
+            "title": "stats hidden case",
+            "type": "TYPE_STATS_PUBLIC",
+            "theme": "theme_stats_public",
+            "content": "public statistics hidden case",
+            "author": "ownerflow",
+            "owner_username": "ownerflow",
+            "department": "test",
+            "status": "approved",
+            "created_at": "2031-01-01 08:00:00",
+            "updated_at": "2031-01-01 08:00:00",
+            "is_hidden": True,
+            "view_count": 100,
+            "like_count": 100,
+        }
+    )
+    stats_deleted_case = create_case(
+        {
+            "title": "stats deleted case",
+            "type": "TYPE_STATS_PUBLIC",
+            "theme": "theme_stats_public",
+            "content": "public statistics deleted case",
+            "author": "ownerflow",
+            "owner_username": "ownerflow",
+            "department": "test",
+            "status": "approved",
+            "created_at": "2032-01-01 08:00:00",
+            "updated_at": "2032-01-01 08:00:00",
+            "view_count": 200,
+            "like_count": 200,
+        }
+    )
+    get_db().cases.update_one({"id": stats_deleted_case}, {"$set": {"status": "deleted"}})
+
+    response = client.get("/api/statistics")
+    assert_status(response, 200)
+    stats = response.json()["data"]
+    assert stats["by_type"]["TYPE_STATS_PUBLIC"] == 1
+    assert stats["by_theme"]["theme_stats_public"] == 1
+    assert stats["total_views"] == 3
+    assert stats["total_likes"] == 4
+
+    response = client.get("/api/trending?limit=20")
+    assert_status(response, 200)
+    trending_ids = [item["id"] for item in response.json()["data"]]
+    assert stats_visible_case in trending_ids
+    assert stats_hidden_case not in trending_ids
+    assert stats_deleted_case not in trending_ids
+
+    response = client.get("/api/latest?limit=20")
+    assert_status(response, 200)
+    latest_ids = [item["id"] for item in response.json()["data"]]
+    assert stats_visible_case in latest_ids
+    assert stats_hidden_case not in latest_ids
+    assert stats_deleted_case not in latest_ids
+
     print("submit flow checks passed")
 
 
