@@ -1,4 +1,4 @@
-.PHONY: install-dev lint format check test cov smoke frontend-build compose-config run up dev down logs
+.PHONY: install-dev lint format check test cov smoke smoke-e2e frontend-build compose-config run up dev down logs
 
 install-dev:
 	pip install -r requirements.txt -r requirements-dev.txt
@@ -26,6 +26,9 @@ cov:
 
 smoke:
 	python backend/smoke_test_mongo.py
+
+smoke-e2e:
+	cd frontend && npm run test:e2e
 
 frontend-build:
 	@if [ -f frontend/package.json ]; then \

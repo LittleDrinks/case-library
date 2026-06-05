@@ -122,12 +122,25 @@ Do not fake server-side AI validation in the frontend.
 
 ## Testing Direction
 
-Current gate is intentionally small. The next testing layer should be Playwright
-smoke coverage for the primary user story:
+Current gate is intentionally small. The Playwright smoke test covers the primary
+user story end-to-end:
 
 ```text
 login -> create/submit case -> admin review -> approved case visible publicly
 ```
+
+Run it when Compose services are up:
+
+```bash
+make smoke-e2e
+# or
+cd frontend && npm run test:e2e
+```
+
+The smoke test runs on both desktop and mobile viewports, saves a success
+screenshot per project to `agent-runs/screenshots`, and also captures
+screenshots, traces, and video on failure. It uses deterministic test accounts
+created via `docker compose exec` against `backend/account_admin.py`.
 
 Screenshot checks belong with frontend work. Workers must extract layout facts
 from `docs/design/create/*.png` before implementing create-case screens.
