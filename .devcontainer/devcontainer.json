@@ -1,9 +1,9 @@
 {
   "name": "Case Library Dev",
-  "dockerComposeFile": ["../docker-compose.yml", "../docker-compose.override.yml"],
+  "dockerComposeFile": ["../docker-compose.yml"],
   "service": "app",
   "workspaceFolder": "/app",
-  "runServices": ["app", "mongo"],
+  "runServices": ["app", "mongo", "frontend"],
   "shutdownAction": "stopCompose",
   "customizations": {
     "vscode": {
@@ -19,12 +19,13 @@
         "python.analysis.extraPaths": ["/app"],
         "ruff.enable": true,
         "ruff.format": true,
+        "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.cwd": "/app"
       }
     }
   },
-  "forwardPorts": [8001, 5173, 27017],
-  "postCreateCommand": "python -m pip install -r /app/requirements.txt -r /app/requirements-dev.txt && if [ -f /app/frontend/package.json ]; then cd /app/frontend && npm install; fi",
+  "forwardPorts": [8001, 18080, 27017],
+  "postCreateCommand": "python -m pip install -r /app/requirements.txt -r /app/requirements-dev.txt",
   "remoteEnv": {
     "HTTP_PROXY": "${localEnv:HTTP_PROXY}",
     "HTTPS_PROXY": "${localEnv:HTTPS_PROXY}",
@@ -35,7 +36,7 @@
       "label": "Backend API",
       "onAutoForward": "notify"
     },
-    "5173": {
+    "18080": {
       "label": "Vue Frontend",
       "onAutoForward": "openBrowser"
     },

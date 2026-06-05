@@ -1,6 +1,12 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     init: true
     ports:
       - "8001:8001"
@@ -13,10 +19,8 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "if [ -f backend/scripts/init_data.py ]; then python backend/scripts/init_data.py || true;
-             elif [ -f backend/init_users.py ]; then python backend/init_users.py || true; fi;
-             if [ -f backend/core/main.py ]; then uvicorn backend.core.main:app --host 0.0.0.0 --port 8001 --reload;
-             else uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload; fi"
+      sh -c "python backend/init_users.py || true;
+             uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/constants', timeout=3)"]
       interval: 10s
@@ -25,23 +29,23 @@ services:
       start_period: 20s
 
   frontend:
-    image: node:20
+    image: node:20-bookworm-slim
     init: true
     working_dir: /app
-    profiles: ["frontend"]
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-18080}:5173"
+    environment:
+      NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
+    depends_on:
+      app:
+        condition: service_healthy
     command: >
-      sh -c "if [ -f package.json ]; then
-               if [ -f package-lock.json ]; then npm ci; else npm install; fi;
-               npm run dev -- --host 0.0.0.0;
-             else
-               echo 'frontend/package.json not present; frontend service idle.';
-               tail -f /dev/null;
-             fi"
+      sh -c "npm config set registry \"$${NPM_CONFIG_REGISTRY}\";
+             if [ -f package-lock.json ]; then npm ci; else npm install; fi;
+             npm run dev"
 
   mongo:
     image: mongo:7

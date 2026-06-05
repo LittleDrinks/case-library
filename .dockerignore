@@ -17,7 +17,11 @@ htmlcov/
 .idea/
 .claude/
 .codex/
+.gstack/
 .planning/
+AGENTS.md
+CLAUDE.md
+docs/
 
 .venv/
 venv/
@@ -29,6 +33,7 @@ dist/
 data/cases.db
 data/db/
 data/mongodb/
+backend/accounts.csv
 *.log
 *.swp
 *.swo

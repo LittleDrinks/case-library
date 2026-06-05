@@ -3,17 +3,16 @@
 
 import os
 import sys
+from pathlib import Path
 from uuid import uuid4
 
 os.environ["MONGODB_DB_NAME"] = f"case_library_submit_flow_test_{uuid4().hex}"
 
-sys.path.insert(0, os.path.dirname(__file__))
-
-from fastapi.testclient import TestClient
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import main
 from database import create_case, create_user, get_db, get_mongo_client
-
+from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
 
@@ -75,8 +74,12 @@ def main_test() -> None:
         "pending_review": make_case("ownerflow", "draft"),
         "deleted": make_case("ownerflow", "draft"),
     }
-    get_db().cases.update_one({"id": illegal_status_cases["pending_review"]}, {"$set": {"status": "pending_review"}})
-    get_db().cases.update_one({"id": illegal_status_cases["deleted"]}, {"$set": {"status": "deleted"}})
+    get_db().cases.update_one(
+        {"id": illegal_status_cases["pending_review"]}, {"$set": {"status": "pending_review"}}
+    )
+    get_db().cases.update_one(
+        {"id": illegal_status_cases["deleted"]}, {"$set": {"status": "deleted"}}
+    )
 
     for status, case_id in illegal_status_cases.items():
         response = client.post(f"/api/cases/{case_id}/submit", headers=auth("ownerflow"))

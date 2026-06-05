@@ -5,14 +5,14 @@ import json
 import os
 import sqlite3
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import SQLITE_DB_PATH, format_beijing_datetime, get_db, init_db, sync_all_counters
-
 
 TABLES = ["users", "cases", "reviews", "versions", "deployments"]
 
@@ -42,13 +42,13 @@ def has_table(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
-def fetch_rows(conn: sqlite3.Connection, table_name: str) -> List[Dict]:
+def fetch_rows(conn: sqlite3.Connection, table_name: str) -> list[dict]:
     if not has_table(conn, table_name):
         return []
     return [dict(row) for row in conn.execute(f"SELECT * FROM {table_name}")]
 
 
-def parse_datetime(value: Any) -> Optional[datetime]:
+def parse_datetime(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
     if isinstance(value, datetime):
@@ -73,7 +73,7 @@ def parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def normalize_keywords(value: Any) -> List[str]:
+def normalize_keywords(value: Any) -> list[str]:
     if value in (None, ""):
         return []
     if isinstance(value, list):
@@ -89,7 +89,7 @@ def normalize_keywords(value: Any) -> List[str]:
     return [str(value)]
 
 
-def clean_doc(table_name: str, row: Dict) -> Dict:
+def clean_doc(table_name: str, row: dict) -> dict:
     doc = dict(row)
 
     if table_name == "cases":
@@ -110,7 +110,7 @@ def clean_doc(table_name: str, row: Dict) -> Dict:
     return doc
 
 
-def migrate_collection(table_name: str, rows: Iterable[Dict]) -> Dict[str, int]:
+def migrate_collection(table_name: str, rows: Iterable[dict]) -> dict[str, int]:
     db = get_db()
     collection = db[table_name]
     total = 0

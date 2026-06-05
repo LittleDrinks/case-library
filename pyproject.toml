@@ -5,17 +5,6 @@ extend-exclude = [
     "venv",
     ".venv",
     "__pycache__",
-    "backend/account_admin.py",
-    "backend/case_processor.py",
-    "backend/database.py",
-    "backend/demo.py",
-    "backend/init_users.py",
-    "backend/main.py",
-    "backend/migrate_sqlite_to_mongo.py",
-    "backend/migrate_timestamps.py",
-    "backend/search_engine.py",
-    "backend/smoke_test_mongo.py",
-    "backend/test_submit_flow.py",
 ]
 
 [tool.ruff.lint]
@@ -34,6 +23,9 @@ select = [
 ]
 ignore = [
     "E501",
+    "RUF001",
+    "RUF002",
+    "RUF003",
 ]
 
 [tool.ruff.format]

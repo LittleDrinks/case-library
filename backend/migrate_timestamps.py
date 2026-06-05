@@ -19,15 +19,14 @@ full MongoDB backup.
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from bson import ObjectId
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import COUNTER_COLLECTIONS, DATETIME_FIELDS, format_beijing_datetime, get_db
 
@@ -46,17 +45,17 @@ def decode_backup_value(value: Any) -> Any:
     return value
 
 
-def planned_changes() -> List[Dict[str, Any]]:
-    changes: List[Dict[str, Any]] = []
+def planned_changes() -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
     exists_filter = {"$or": [{field: {"$exists": True}} for field in DATETIME_FIELDS]}
-    projection = {field: 1 for field in DATETIME_FIELDS}
+    projection = dict.fromkeys(DATETIME_FIELDS, 1)
 
     db = get_db()
     for collection_name in COUNTER_COLLECTIONS:
         collection = db[collection_name]
         for doc in collection.find(exists_filter, projection=projection):
-            updates: Dict[str, Any] = {}
-            original: Dict[str, Any] = {}
+            updates: dict[str, Any] = {}
+            original: dict[str, Any] = {}
             for field in DATETIME_FIELDS:
                 if field not in doc:
                     continue
@@ -77,7 +76,7 @@ def planned_changes() -> List[Dict[str, Any]]:
     return changes
 
 
-def write_backup(changes: List[Dict[str, Any]], backup_path: Path) -> None:
+def write_backup(changes: list[dict[str, Any]], backup_path: Path) -> None:
     backup_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -86,7 +85,9 @@ def write_backup(changes: List[Dict[str, Any]], backup_path: Path) -> None:
             {
                 "collection": item["collection"],
                 "_id": str(item["_id"]),
-                "original": {key: encode_backup_value(value) for key, value in item["original"].items()},
+                "original": {
+                    key: encode_backup_value(value) for key, value in item["original"].items()
+                },
             }
             for item in changes
         ],
@@ -94,7 +95,7 @@ def write_backup(changes: List[Dict[str, Any]], backup_path: Path) -> None:
     backup_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def apply_changes(changes: List[Dict[str, Any]]) -> None:
+def apply_changes(changes: list[dict[str, Any]]) -> None:
     db = get_db()
     for item in changes:
         db[item["collection"]].update_one({"_id": item["_id"]}, {"$set": item["updates"]})
@@ -105,7 +106,9 @@ def restore_backup(backup_path: Path) -> int:
     restored = 0
     db = get_db()
     for item in payload.get("changes", []):
-        original = {key: decode_backup_value(value) for key, value in item.get("original", {}).items()}
+        original = {
+            key: decode_backup_value(value) for key, value in item.get("original", {}).items()
+        }
         if not original:
             continue
         db[item["collection"]].update_one({"_id": ObjectId(item["_id"])}, {"$set": original})
@@ -119,11 +122,25 @@ def default_backup_path() -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Normalize timestamp fields to UTC+8 plain strings.")
-    parser.add_argument("--apply", action="store_true", help="Apply changes. Without this flag, runs in dry-run mode.")
-    parser.add_argument("--backup", type=Path, default=None, help="Backup JSON path for apply mode.")
-    parser.add_argument("--no-backup", action="store_true", help="Apply without writing a JSON field backup.")
-    parser.add_argument("--restore", type=Path, help="Restore timestamp fields from a backup JSON created by this script.")
+    parser = argparse.ArgumentParser(
+        description="Normalize timestamp fields to UTC+8 plain strings."
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply changes. Without this flag, runs in dry-run mode.",
+    )
+    parser.add_argument(
+        "--backup", type=Path, default=None, help="Backup JSON path for apply mode."
+    )
+    parser.add_argument(
+        "--no-backup", action="store_true", help="Apply without writing a JSON field backup."
+    )
+    parser.add_argument(
+        "--restore",
+        type=Path,
+        help="Restore timestamp fields from a backup JSON created by this script.",
+    )
     args = parser.parse_args()
 
     if args.restore:

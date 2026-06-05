@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Initialize default MongoDB accounts when the users collection is empty."""
 
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import create_user, get_users_count, init_db
-
 
 DEFAULT_USERS = [
     {

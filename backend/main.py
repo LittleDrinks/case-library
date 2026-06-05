@@ -9,20 +9,21 @@ import os
 import secrets
 import sys
 import time
-from typing import Optional
+from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from case_processor import process_new_case
 from database import (
+    authenticate_user,
+    change_user_password,
     count_cases,
     create_case,
-    change_user_password,
     decrement_like_count,
     delete_case,
     get_all_cases,
@@ -31,7 +32,6 @@ from database import (
     get_reviews,
     get_statistics,
     get_user_by_username,
-    authenticate_user,
     increment_like_count,
     increment_view_count,
     init_db,
@@ -41,7 +41,6 @@ from database import (
     update_case,
 )
 from search_engine import CaseSearchEngine
-
 
 app = FastAPI(title="Case Library API", version="1.0.0")
 
@@ -87,7 +86,7 @@ def create_auth_token(username: str) -> str:
     return f"{payload_b64}.{_b64url_encode(sig)}"
 
 
-def verify_auth_token(token: str) -> Optional[str]:
+def verify_auth_token(token: str) -> str | None:
     if not token or "." not in token:
         return None
     try:
@@ -131,14 +130,12 @@ def get_case_owner_username(case: dict) -> str:
     return case.get("owner_username") or case.get("author") or ""
 
 
-def _ensure_case_history_visible(case_id: int, current_user: Optional[dict]) -> dict:
+def _ensure_case_history_visible(case_id: int, current_user: dict | None) -> dict:
     case = get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
     is_admin = bool(current_user and current_user.get("role") == "admin")
-    is_owner = bool(
-        current_user and current_user.get("username") == get_case_owner_username(case)
-    )
+    is_owner = bool(current_user and current_user.get("username") == get_case_owner_username(case))
     if is_admin or is_owner:
         return case
     if case.get("status") == "approved" and not case.get("is_hidden"):
@@ -149,10 +146,10 @@ def _ensure_case_history_visible(case_id: int, current_user: Optional[dict]) -> 
 init_db()
 search_engine = CaseSearchEngine()
 
-ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
-FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
-UPLOAD_DIR = os.path.join(ROOT_DIR, "data", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = ROOT_DIR / "frontend"
+UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.post("/api/auth/login")
@@ -191,10 +188,10 @@ async def change_password(
 
 @app.get("/api/cases")
 async def list_cases(
-    status: Optional[str] = "approved",
+    status: str | None = "approved",
     offset: int = 0,
     limit: int = 50,
-    author: Optional[str] = None,
+    author: str | None = None,
     request: Request = None,
 ):
     current_user = get_current_user(dict(request.headers)) if request else None
@@ -212,9 +209,7 @@ async def list_cases(
             raise HTTPException(status_code=403, detail="无权查看该用户草稿")
 
     is_admin = bool(current_user and current_user.get("role") == "admin")
-    is_self_view = bool(
-        author and current_user and current_user.get("username") == author
-    )
+    is_self_view = bool(author and current_user and current_user.get("username") == author)
     is_public_library = (status == "approved") and not author
     include_hidden = (is_admin or is_self_view) and not is_public_library
 
@@ -236,9 +231,8 @@ async def get_case_detail(case_id: int, increment_view: bool = True, request: Re
     is_admin = bool(current_user and current_user.get("role") == "admin")
     is_owner = bool(current_user and current_user.get("username") == owner_username)
 
-    if case.get("status") == "draft":
-        if not is_owner:
-            raise HTTPException(status_code=403, detail="无权查看该草稿")
+    if case.get("status") == "draft" and not is_owner:
+        raise HTTPException(status_code=403, detail="无权查看该草稿")
 
     if case.get("is_hidden") and not (is_admin or is_owner):
         raise HTTPException(status_code=404, detail="案例不存在")
@@ -296,14 +290,14 @@ async def create_new_case(
 
 async def _update_existing_case_impl(
     case_id: int,
-    title: Optional[str],
-    content: Optional[str],
-    author: Optional[str],
-    department: Optional[str],
-    type: Optional[str],
-    theme: Optional[str],
+    title: str | None,
+    content: str | None,
+    author: str | None,
+    department: str | None,
+    type: str | None,
+    theme: str | None,
     change_reason: str,
-    current_user: Optional[dict],
+    current_user: dict | None,
 ):
     if not current_user:
         raise HTTPException(status_code=401, detail="请先登录")
@@ -342,12 +336,12 @@ async def _update_existing_case_impl(
 async def update_existing_case(
     case_id: int,
     request: Request,
-    title: Optional[str] = Form(None),
-    content: Optional[str] = Form(None),
-    author: Optional[str] = Form(None),
-    department: Optional[str] = Form(None),
-    type: Optional[str] = Form(None),
-    theme: Optional[str] = Form(None),
+    title: str | None = Form(None),
+    content: str | None = Form(None),
+    author: str | None = Form(None),
+    department: str | None = Form(None),
+    type: str | None = Form(None),
+    theme: str | None = Form(None),
     change_reason: str = Form(""),
 ):
     current_user = get_current_user(dict(request.headers))
@@ -360,12 +354,12 @@ async def update_existing_case(
 async def update_existing_case_post_compat(
     case_id: int,
     request: Request,
-    title: Optional[str] = Form(None),
-    content: Optional[str] = Form(None),
-    author: Optional[str] = Form(None),
-    department: Optional[str] = Form(None),
-    type: Optional[str] = Form(None),
-    theme: Optional[str] = Form(None),
+    title: str | None = Form(None),
+    content: str | None = Form(None),
+    author: str | None = Form(None),
+    department: str | None = Form(None),
+    type: str | None = Form(None),
+    theme: str | None = Form(None),
     change_reason: str = Form(""),
 ):
     current_user = get_current_user(dict(request.headers))
@@ -442,16 +436,16 @@ async def unlike_case(case_id: int):
 
 
 @app.get("/api/search")
-async def search_cases_endpoint(q: str, status: Optional[str] = "approved"):
+async def search_cases_endpoint(q: str, status: str | None = "approved"):
     return {"success": True, "data": search_engine.search(q, status), "query": q}
 
 
 @app.get("/api/search/advanced")
 async def advanced_search(
-    type: Optional[str] = None,
-    theme: Optional[str] = None,
+    type: str | None = None,
+    theme: str | None = None,
     status: str = "approved",
-    keyword: Optional[str] = None,
+    keyword: str | None = None,
     limit: int = 50,
 ):
     return {
@@ -565,17 +559,17 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 @app.get("/")
 async def read_index():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/{path:path}")
 async def catch_all(path: str):
     if path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not Found")
-    file_path = os.path.join(FRONTEND_DIR, path)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
+    file_path = FRONTEND_DIR / path
+    if file_path.exists() and file_path.is_file():
         return FileResponse(file_path)
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 if __name__ == "__main__":

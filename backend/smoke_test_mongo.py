@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Read-only MongoDB smoke checks for the case library."""
 
-import os
 import sys
+from pathlib import Path
 from pprint import pprint
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import get_all_cases, get_db, get_mongo_client, serialize_case
-
 
 COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
 

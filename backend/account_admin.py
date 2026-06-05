@@ -3,11 +3,10 @@
 
 import argparse
 import csv
-import os
 import sys
-from typing import Dict
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import (
     clear_users,
@@ -64,7 +63,7 @@ def import_csv(args):
     created = 0
     skipped = 0
     failed = 0
-    with open(args.file, "r", encoding=args.encoding, newline="") as file:
+    with Path(args.file).open(encoding=args.encoding, newline="") as file:
         reader = csv.DictReader(file)
         required = {"username", "password", "role", "nickname", "must_change_password", "status"}
         missing = required - set(reader.fieldnames or [])
@@ -119,7 +118,9 @@ def clear_accounts(args):
 
 
 def update_account(args):
-    if not update_user_fields(args.username, role=args.role, nickname=args.nickname, status=args.status):
+    if not update_user_fields(
+        args.username, role=args.role, nickname=args.nickname, status=args.status
+    ):
         raise SystemExit(f"Account not found or no changes: {args.username}")
     print(f"Updated account: {args.username}")
 
