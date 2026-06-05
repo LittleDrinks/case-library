@@ -182,6 +182,28 @@ def main_test() -> None:
     public_listed = next(item for item in public_list.json()["data"] if item["id"] == visibility_case)
     assert public_listed["is_hidden"] is False
 
+    delete_case_id = make_case("ownerflow", "draft")
+
+    response = client.delete(f"/api/cases/{delete_case_id}")
+    assert_status(response, 401)
+
+    response = client.delete(f"/api/cases/{delete_case_id}", headers=auth("otherflow"))
+    assert_status(response, 403)
+
+    response = client.delete(f"/api/cases/{delete_case_id}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+
+    response = client.get(f"/api/cases/{delete_case_id}", headers=auth("ownerflow"))
+    assert_status(response, 404)
+
+    admin_delete_case = make_case("ownerflow", "approved")
+    response = client.delete(f"/api/cases/{admin_delete_case}", headers=auth("adminflow"))
+    assert_status(response, 200)
+    assert response.json()["deleted_stats"]["type"] == "TYPE_A"
+
+    response = client.get(f"/api/cases/{admin_delete_case}", headers=auth("adminflow"))
+    assert_status(response, 404)
+
     print("submit flow checks passed")
 
 
