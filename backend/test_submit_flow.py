@@ -46,6 +46,57 @@ def main_test() -> None:
     create_user("ownerflow", "password123", role="normal", must_change_password=False)
     create_user("otherflow", "password123", role="normal", must_change_password=False)
     create_user("adminflow", "password123", role="admin", must_change_password=False)
+    create_user("forceflow", "oldpass123", role="normal", must_change_password=True)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "forceflow", "password": "oldpass123"},
+    )
+    assert_status(response, 200)
+    assert response.json()["data"]["must_change_password"] is True
+
+    response = client.post(
+        "/api/auth/change-password",
+        data={
+            "username": "forceflow",
+            "old_password": "oldpass123",
+            "new_password": "short",
+        },
+    )
+    assert_status(response, 400)
+
+    response = client.post(
+        "/api/auth/change-password",
+        data={
+            "username": "forceflow",
+            "old_password": "wrongpass123",
+            "new_password": "newpass123",
+        },
+    )
+    assert_status(response, 400)
+
+    response = client.post(
+        "/api/auth/change-password",
+        data={
+            "username": "forceflow",
+            "old_password": "oldpass123",
+            "new_password": "newpass123",
+        },
+    )
+    assert_status(response, 200)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "forceflow", "password": "oldpass123"},
+    )
+    assert_status(response, 401)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "forceflow", "password": "newpass123"},
+    )
+    assert_status(response, 200)
+    assert response.json()["data"]["must_change_password"] is False
 
     other_case = make_case("ownerflow", "draft")
     response = client.post(f"/api/cases/{other_case}/submit", headers=auth("otherflow"))
