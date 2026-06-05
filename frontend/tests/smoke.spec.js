@@ -26,6 +26,15 @@ function dockerExec(cmd) {
   });
 }
 
+async function cardLikeCount(caseCard) {
+  const text = await caseCard
+    .locator(".case-stats-row span")
+    .filter({ hasText: /^点赞\s+\d+$/ })
+    .innerText();
+  const match = text.match(/点赞\s+(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
 test.beforeAll(async () => {
   // Clean up any stale test accounts from a previous interrupted run
   try {
@@ -174,9 +183,37 @@ test(
     await page.getByRole("button", { name: "搜索" }).click();
 
     // The approved case should appear in the public library
+    const publicCaseCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(publicCaseCard).toBeVisible();
+
+    // Public visitors can like and unlike a case, with the visible count updating.
+    const initialLikeCount = await cardLikeCount(publicCaseCard);
+    expect(initialLikeCount).toBeGreaterThanOrEqual(0);
+
     await expect(
-      page.locator(".case-card").filter({ hasText: uniqueTitle })
+      publicCaseCard.getByRole("button", { name: "点赞", exact: true })
     ).toBeVisible();
+    await publicCaseCard
+      .getByRole("button", { name: "点赞", exact: true })
+      .click();
+    await expect(
+      publicCaseCard.getByRole("button", { name: "已点赞", exact: true })
+    ).toBeVisible();
+    await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
+      `点赞 ${initialLikeCount + 1}`
+    );
+
+    await publicCaseCard
+      .getByRole("button", { name: "已点赞", exact: true })
+      .click();
+    await expect(
+      publicCaseCard.getByRole("button", { name: "点赞", exact: true })
+    ).toBeVisible();
+    await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
+      `点赞 ${initialLikeCount}`
+    );
 
     // ==========================================
     // Step 6: Global header search finds the approved case
