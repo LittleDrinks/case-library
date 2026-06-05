@@ -368,6 +368,93 @@ test(
 );
 
 test(
+  "rejected review feedback appears in my submissions",
+  async ({ page }) => {
+    const uniqueTitle = `Reject测试 ${Date.now()}`;
+    const rejectComment = `请补充课堂反馈 ${Date.now()}`;
+
+    page.on("dialog", (dialog) => dialog.accept());
+
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByLabel(/案例标题/).fill(uniqueTitle);
+    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await page
+      .locator("#ccf-content")
+      .fill("这是用于驳回审核反馈回归测试的案例正文内容。");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await page.locator("#ccf-type").selectOption("TYPE_A");
+    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "提交前自查" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("确认并提交")).toBeVisible();
+    await page.getByRole("button", { name: "正式提交案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByRole("button", { name: "退出" }).click();
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.getByLabel("用户名").fill(TEST_ADMIN);
+    await page.getByLabel("密码").fill(TEST_ADMIN_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "审核管理" }).click();
+    const reviewCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(reviewCard).toBeVisible();
+    await reviewCard.getByRole("button", { name: "审核" }).click();
+    await page.locator("#review-comment").fill(rejectComment);
+    await page.getByLabel("需修改").check();
+    await page.getByRole("button", { name: "提交审核" }).click();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "退出" }).click();
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("tab", { name: "需修改" }).click();
+
+    const revisionCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(revisionCard).toBeVisible();
+    await expect(revisionCard.locator(".status-pill")).toContainText("需修改");
+
+    await revisionCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(revisionCard.locator(".detail-review")).toContainText(rejectComment);
+
+    await revisionCard.getByRole("button", { name: "删除" }).click();
+    await page
+      .locator(".confirm-panel")
+      .getByRole("button", { name: "删除" })
+      .click();
+    await expect(revisionCard).toHaveCount(0);
+  }
+);
+
+test(
   "forced password change workflow",
   async ({ page }, testInfo) => {
     test.skip(
