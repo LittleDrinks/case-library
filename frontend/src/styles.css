@@ -413,3 +413,76 @@ button {
     right: 6px;
   }
 }
+
+/* Very small phones: two-row header so nav labels stay readable */
+@media (max-width: 480px) {
+  .header-inner {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--header-height);
+    padding: 8px 12px;
+    gap: 8px 12px;
+  }
+
+  .brand {
+    gap: 8px;
+  }
+
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+  }
+
+  .logo-shu {
+    font-size: 14px;
+  }
+
+  .wordmark-red {
+    font-size: 16px;
+  }
+
+  .wordmark-black {
+    font-size: 13px;
+  }
+
+  .main-nav {
+    order: 3;
+    flex: 1 1 100%;
+    gap: 0;
+    justify-content: space-between;
+    overflow-x: visible;
+    mask-image: none;
+    -webkit-mask-image: none;
+    padding-top: 4px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .nav-link {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 0 4px;
+    font-size: 12px;
+    height: 32px;
+  }
+
+  .nav-link.active::after {
+    left: 4px;
+    right: 4px;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
+  .btn-login {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .btn-logout {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+}

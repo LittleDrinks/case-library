@@ -357,7 +357,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from "vue";
+import { ref, reactive, computed, watch, onMounted, nextTick } from "vue";
 import { currentUser, isLoggedIn } from "../api/auth.js";
 import {
   fetchCaseConstants,
@@ -717,6 +717,13 @@ watch(
   () => persistDraft(),
   { deep: true }
 );
+
+// Reset scroll to the top of the page whenever the wizard step changes
+watch(currentStep, () => {
+  nextTick(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+});
 </script>
 
 <style scoped>
