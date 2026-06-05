@@ -94,12 +94,18 @@ test(
     await page.locator("#ccf-theme").selectOption("铸魂育人");
     await page.getByRole("button", { name: "继续" }).click();
 
-    // -- Step 4: AI Review --
-    await expect(page.getByText("本地 AI 预审")).toBeVisible();
+    // -- Step 4: Pre-submit self-check --
+    await expect(
+      page.getByRole("heading", { name: "提交前自查" })
+    ).toBeVisible();
+    await expect(page.getByText("完整度指数")).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();
 
     // -- Step 5: Submit --
     await expect(page.getByText("确认并提交")).toBeVisible();
+    await expect(
+      page.getByText("提交后案例将进入专家人工审核流程")
+    ).toBeVisible();
     await page.getByRole("button", { name: "正式提交案例" }).click();
 
     // Wait for submit alert to be accepted and wizard to reset

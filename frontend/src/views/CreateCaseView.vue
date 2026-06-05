@@ -246,40 +246,40 @@
         <!-- Step 4: AI 审核 -->
         <template v-if="currentStep === 3">
           <div class="review-header">
-            <span class="review-badge">整体审核进度</span>
-            <span class="review-percent">100% 已完成</span>
+            <span class="review-badge">填写进度</span>
+            <span class="review-percent">{{ reviewScore }}% 已填写</span>
           </div>
           <div class="review-progress-track">
-            <div class="review-progress-bar" style="width: 100%"></div>
+            <div class="review-progress-bar" :style="{ width: reviewScore + '%' }"></div>
           </div>
           <p class="review-note">
-            以下结果是基于当前填写内容的<strong>本地预审</strong>，并非服务端 AI 审核结论，仅供提交前自查参考。
+            以下进度与评分仅反映当前表单必填项的<strong>填写完整度</strong>，由作者自行核对，不涉及任何 AI 审核或服务端判定。
           </p>
 
           <div class="review-grid">
             <div class="review-card">
               <div class="review-card-title">内容结构</div>
               <div class="review-card-status" :class="{ pass: checklist.structure }">
-                {{ checklist.structure ? '符合' : '待完善' }}
+                {{ checklist.structure ? '已完整' : '待完善' }}
               </div>
               <div class="review-card-desc">标题、正文、部门等必填项是否完整。</div>
             </div>
             <div class="review-card">
-              <div class="review-card-title">分类准确性</div>
+              <div class="review-card-title">分类选择</div>
               <div class="review-card-status" :class="{ pass: checklist.classification }">
-                {{ checklist.classification ? '符合' : '待完善' }}
+                {{ checklist.classification ? '已选择' : '待选择' }}
               </div>
               <div class="review-card-desc">案例类型与主题是否已选择。</div>
             </div>
             <div class="review-card">
-              <div class="review-card-title">表达规范性</div>
+              <div class="review-card-title">正文与标题</div>
               <div class="review-card-status" :class="{ pass: checklist.expression }">
-                {{ checklist.expression ? '符合' : '待完善' }}
+                {{ checklist.expression ? '已满足' : '待补充' }}
               </div>
-              <div class="review-card-desc">正文长度与标题规范性检查。</div>
+              <div class="review-card-desc">正文长度与标题字数是否达到基本要求。</div>
             </div>
             <div class="review-card score-card">
-              <div class="review-card-title">综合评分</div>
+              <div class="review-card-title">完整度指数</div>
               <div class="score-circle">{{ reviewScore }}</div>
               <div class="review-card-desc">满分 100，基于必填项完整度。</div>
             </div>
@@ -289,8 +289,8 @@
         <!-- Step 5: 提交确认 -->
         <template v-if="currentStep === 4">
           <div class="pass-notice">
-            <span class="pass-icon" aria-hidden="true">✓</span>
-            <span>AI 智能审核已通过（本地预审）</span>
+            <span class="pass-icon" aria-hidden="true">ℹ</span>
+            <span>提交后案例将进入专家人工审核流程，请耐心等待。</span>
           </div>
 
           <div class="submit-card">
@@ -372,7 +372,7 @@ const steps = [
   { id: "basic", label: "基本信息" },
   { id: "content", label: "案例内容" },
   { id: "classify", label: "分类选择" },
-  { id: "review", label: "AI 审核" },
+  { id: "review", label: "提交前自查" },
   { id: "confirm", label: "提交确认" },
 ];
 
@@ -453,7 +453,7 @@ const stepMeta = computed(() => {
     { title: "填写基本信息", desc: "完善案例标题、作者与所属部门，为后续编写打好基础。" },
     { title: "编写案例内容", desc: "在下方编辑器中撰写案例正文，支持 Markdown 格式。" },
     { title: "选择案例分类", desc: "选择案例类型与主题，便于检索与推荐。" },
-    { title: "本地 AI 预审", desc: "查看基于当前内容的本地预审结果，确认无误后再提交。" },
+    { title: "提交前自查", desc: "根据已填写内容进行自查，确认必填项完整后再提交。" },
     { title: "确认并提交", desc: "核对填写内容，确认后提交至专家审核。" },
   ];
   return metas[currentStep.value];
