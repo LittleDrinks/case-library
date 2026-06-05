@@ -61,7 +61,7 @@ Primary acceptance gate:
 
 ```bash
 docker compose run --rm app make check
-docker compose config
+docker compose config --quiet
 ```
 
 `make check` runs backend lint, the current backend submit-flow test, and the
