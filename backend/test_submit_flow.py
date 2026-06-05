@@ -92,6 +92,45 @@ def main_test() -> None:
     listed_case = next(item for item in listed.json()["data"] if item["id"] == owner_case)
     assert listed_case["display_at"] == listed_case["submitted_at"]
 
+    visibility_case = make_case("ownerflow", "approved")
+
+    response = client.post(
+        f"/api/cases/{visibility_case}/visibility",
+        data={"hidden": "true"},
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 403)
+
+    response = client.post(
+        f"/api/cases/{visibility_case}/visibility",
+        data={"hidden": "true"},
+        headers=auth("adminflow"),
+    )
+    assert_status(response, 200)
+    assert response.json()["is_hidden"] is True
+
+    public_list = client.get("/api/cases?status=approved")
+    assert_status(public_list, 200)
+    assert all(item["id"] != visibility_case for item in public_list.json()["data"])
+
+    admin_list = client.get("/api/cases?status=approved_all", headers=auth("adminflow"))
+    assert_status(admin_list, 200)
+    admin_listed = next(item for item in admin_list.json()["data"] if item["id"] == visibility_case)
+    assert admin_listed["is_hidden"] is True
+
+    response = client.post(
+        f"/api/cases/{visibility_case}/visibility",
+        data={"hidden": "false"},
+        headers=auth("adminflow"),
+    )
+    assert_status(response, 200)
+    assert response.json()["is_hidden"] is False
+
+    public_list = client.get("/api/cases?status=approved")
+    assert_status(public_list, 200)
+    public_listed = next(item for item in public_list.json()["data"] if item["id"] == visibility_case)
+    assert public_listed["is_hidden"] is False
+
     print("submit flow checks passed")
 
 
