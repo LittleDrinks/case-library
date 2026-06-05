@@ -11,6 +11,10 @@ const TEST_USER_PASS = "SmokePass123!";
 const TEST_ADMIN = "smoke_admin";
 const TEST_ADMIN_PASS = "SmokePass123!";
 
+const FORCE_PWD_USER = "force_pwd_user";
+const FORCE_PWD_PASS = "ForcePwd123!";
+const FORCE_PWD_NEW_PASS = "NewForcePwd456!";
+
 /**
  * Run a command inside the running `app` Compose service.
  */
@@ -30,6 +34,9 @@ test.beforeAll(async () => {
   try {
     dockerExec(`python backend/account_admin.py delete --username ${TEST_ADMIN}`);
   } catch {}
+  try {
+    dockerExec(`python backend/account_admin.py delete --username ${FORCE_PWD_USER}`);
+  } catch {}
 
   // Create deterministic test accounts with must_change_password=false
   dockerExec(
@@ -37,6 +44,11 @@ test.beforeAll(async () => {
   );
   dockerExec(
     `python backend/account_admin.py create --username ${TEST_ADMIN} --password ${TEST_ADMIN_PASS} --role admin --nickname SmokeAdmin --must-change-password false --status active`
+  );
+
+  // Create deterministic test account that requires forced password change
+  dockerExec(
+    `python backend/account_admin.py create --username ${FORCE_PWD_USER} --password ${FORCE_PWD_PASS} --role normal --nickname ForcePwdUser --must-change-password true --status active`
   );
 });
 
@@ -46,6 +58,9 @@ test.afterAll(async () => {
   } catch {}
   try {
     dockerExec(`python backend/account_admin.py delete --username ${TEST_ADMIN}`);
+  } catch {}
+  try {
+    dockerExec(`python backend/account_admin.py delete --username ${FORCE_PWD_USER}`);
   } catch {}
 });
 
@@ -254,5 +269,76 @@ test(
     await page.waitForFunction(() => window.scrollY === 0);
     const scrollYAfter = await page.evaluate(() => window.scrollY);
     expect(scrollYAfter).toBe(0);
+  }
+);
+
+test(
+  "forced password change workflow",
+  async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-desktop",
+      "desktop-only: asserts .user-name which is hidden on mobile"
+    );
+
+    page.on("dialog", (dialog) => dialog.accept());
+
+    // ==========================================
+    // Step 1: Login as user with must_change_password=true
+    // ==========================================
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
+    await page.getByLabel("密码").fill(FORCE_PWD_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    // ==========================================
+    // Step 2: Verify forced password change modal appears
+    // ==========================================
+    await expect(
+      page.getByRole("heading", { name: "修改初始密码" })
+    ).toBeVisible();
+    await expect(
+      page.getByText("您的账户当前使用的是初始密码")
+    ).toBeVisible();
+
+    // ==========================================
+    // Step 3: Fill and submit password change form
+    // ==========================================
+    await page.locator("#pc-old").fill(FORCE_PWD_PASS);
+    await page.locator("#pc-new").fill(FORCE_PWD_NEW_PASS);
+    await page.locator("#pc-confirm").fill(FORCE_PWD_NEW_PASS);
+    await page.getByRole("button", { name: "确认修改" }).click();
+
+    // Modal should close and user remains logged in
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await expect(page.locator(".user-name")).toContainText("ForcePwdUser");
+
+    // ==========================================
+    // Step 4: Logout and verify password change took effect
+    // ==========================================
+    await page.getByRole("button", { name: "退出" }).click();
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+
+    // Old password should no longer work
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
+    await page.getByLabel("密码").fill(FORCE_PWD_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await expect(page.locator(".modal-panel .error-msg")).toBeVisible();
+
+    // Close modal and retry with new password
+    await page.locator(".modal-panel .close-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
+    await page.getByLabel("密码").fill(FORCE_PWD_NEW_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    // Should log in successfully without forced password modal
+    await expect(page.locator(".user-name")).toContainText("ForcePwdUser");
+    await expect(
+      page.getByRole("heading", { name: "修改初始密码" })
+    ).not.toBeVisible();
   }
 );
