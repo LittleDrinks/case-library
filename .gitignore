@@ -49,10 +49,7 @@ agent-runs/
 CLAUDE.md
 
 # Runtime data
-data/cases.db
-data/db/
-data/mongodb/
-data/案例库/
+data/
 
 # Generated reports and local artifacts
 E2E-TEST-REPORT.md

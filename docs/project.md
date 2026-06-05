@@ -92,13 +92,53 @@ tables.
 
 ## Resources
 
-Raw runtime data stays out of git. The current repository ignores `data/` for
-databases, uploads, Mongo dumps, and local material collections.
+### Import Source Policy
 
-The checked historical backup currently has only an empty `data/uploads/`
-directory. If material Markdown collections reappear in another old checkout or
-backup, treat them as an import source: inspect them, write a narrow importer or
-curation note when needed, and commit only reviewed fixtures or generated code.
+Raw runtime data, Mongo dumps, uploads, and unreviewed material collections stay
+ignored and out of git. The repository root `.gitignore` already covers `data/`
+for this reason. Do not add exceptions for raw assets.
+
+Historical material collections are **import sources only**, not committed raw
+assets. They may appear in old checkouts or backups as Markdown files, JSON
+bundles, or Mongo exports. Their role is to feed a one-time or repeatable
+import/curation step, not to be snapshotted as-is into the product repository.
+
+### Handling Reappearing Old Material Collections
+
+If a material Markdown collection reappears in an old checkout or backup:
+
+1. **Inspect read-only first.** Inventory the files: count, size, structure,
+   schema drift, duplication, and obvious quality problems (encoding, broken
+   frontmatter, missing required fields).
+2. **Decide the path based on condition and value:**
+   - **Narrow importer** — if the collection is large, semi-structured, and worth
+     keeping in sync with schema evolution. Write a small script that reads from
+     the external path and outputs validated fixtures or direct DB inserts. Commit
+     only the importer and its tests.
+   - **Curated fixtures** — if only a small, high-value subset is worth keeping.
+     Extract, review, normalize, and commit the fixtures under a tracked path such
+     as `backend/tests/fixtures/` or `docs/fixtures/`. Include a note explaining
+     source and selection rationale. Historical case or material fixtures must not
+     be stored under `skills/` unless they are deliberately transformed into
+     prompt/template assets.
+   - **Curation note** — if the collection is low quality, redundant, or
+     superseded. Write a short markdown note documenting what was found, why it
+     was rejected, and where the source lives, then leave the data outside git.
+3. **Never commit raw unreviewed collections.** The committed artifacts are the
+   importer, the curated fixtures, or the documentation — never the original
+   dump.
+
+### Checked Backup Data State
+
+As of 2026-06-06, the read-only historical directories were checked:
+
+| Path | Exists | Content |
+|---|---|---|
+| `/home/q2635/wsl-workspace/case-library-old/data` | **No** | Directory does not exist. |
+| `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605/data/uploads` | **Yes** | Empty directory (no files). |
+
+This state should be re-checked only when a new backup or old checkout is
+discovered.
 
 ## AI And Skills
 
