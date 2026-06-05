@@ -233,6 +233,25 @@ def main_test() -> None:
     review_comments = [item["comment"] for item in response.json()["data"]]
     assert "需要补充教学反馈" in review_comments
 
+    version_case = make_case("ownerflow", "draft")
+    response = client.put(
+        f"/api/cases/{version_case}",
+        data={"content": "updated version content", "change_reason": "owner edit"},
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 200)
+
+    response = client.get(f"/api/versions/{version_case}", headers=auth("otherflow"))
+    assert_status(response, 403)
+
+    response = client.get(f"/api/versions/{version_case}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    versions = response.json()["data"]
+    assert versions[0]["version_number"] == 2
+    assert versions[0]["content"] == "updated version content"
+    assert versions[0]["change_reason"] == "owner edit"
+    assert versions[-1]["change_reason"] == "Initial creation"
+
     print("submit flow checks passed")
 
 
