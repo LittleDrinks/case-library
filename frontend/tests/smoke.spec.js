@@ -310,6 +310,64 @@ test(
 );
 
 test(
+  "save draft appears in my submissions",
+  async ({ page }) => {
+    const uniqueTitle = `Draft测试 ${Date.now()}`;
+
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await page.getByLabel("用户名").fill(TEST_USER);
+    await page.getByLabel("密码").fill(TEST_USER_PASS);
+    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await page.getByLabel(/案例标题/).fill(uniqueTitle);
+    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await page
+      .locator("#ccf-content")
+      .fill("这是用于草稿保存回归测试的案例正文内容。");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await page.locator("#ccf-type").selectOption("TYPE_A");
+    await page.locator("#ccf-theme").selectOption("铸魂育人");
+
+    const saveDialogPromise = page.waitForEvent("dialog");
+    await page.getByRole("button", { name: "保存草稿" }).click();
+    const saveDialog = await saveDialogPromise;
+    expect(saveDialog.message()).toContain("草稿已保存");
+    await saveDialog.accept();
+
+    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("tab", { name: "草稿" }).click();
+
+    const draftCard = page
+      .locator(".case-card")
+      .filter({ hasText: uniqueTitle });
+    await expect(draftCard).toBeVisible();
+    await expect(draftCard.locator(".status-pill")).toContainText("草稿");
+
+    await draftCard.getByRole("button", { name: "删除" }).click();
+    const deleteDialogPromise = page.waitForEvent("dialog");
+    await page
+      .locator(".confirm-panel")
+      .getByRole("button", { name: "删除" })
+      .click();
+    const deleteDialog = await deleteDialogPromise;
+    expect(deleteDialog.message()).toContain("案例删除成功");
+    await deleteDialog.accept();
+    await expect(draftCard).toHaveCount(0);
+  }
+);
+
+test(
   "forced password change workflow",
   async ({ page }, testInfo) => {
     test.skip(
