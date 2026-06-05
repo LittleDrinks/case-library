@@ -169,6 +169,63 @@ body {
   flex-shrink: 0;
 }
 
+/* Global header search */
+.global-search {
+  display: flex;
+  align-items: center;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.global-search input {
+  width: 180px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-strong);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, width 0.2s;
+}
+
+.global-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.global-search input:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px var(--color-brand-light);
+}
+
+.global-search button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--color-brand);
+  border-radius: 0 6px 6px 0;
+  background: var(--color-brand);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.global-search button:hover {
+  background: var(--color-brand-dark);
+}
+
+.global-search button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .btn-login {
   min-height: 36px;
   padding: 0 18px;
@@ -282,6 +339,10 @@ button {
     padding: 0 10px;
     font-size: 14px;
   }
+
+  .global-search input {
+    width: 140px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -318,6 +379,10 @@ button {
   }
 
   .user-name {
+    display: none;
+  }
+
+  .global-search {
     display: none;
   }
 }

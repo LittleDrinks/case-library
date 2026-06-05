@@ -163,7 +163,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import {
   fetchCaseConstants,
   listPublicCases,
@@ -172,6 +172,10 @@ import {
   likeCase,
   unlikeCase,
 } from '../api/cases.js';
+
+const props = defineProps({
+  searchTrigger: { type: Object, default: () => ({ keyword: '', nonce: 0 }) },
+});
 
 const cases = ref([]);
 const total = ref(0);
@@ -199,6 +203,32 @@ const likeProcessing = ref(new Set());
 const hasActiveFilters = computed(() => {
   return Boolean(appliedKeyword.value || filterType.value || filterTheme.value);
 });
+
+// Track last handled search trigger nonce to avoid re-applying stale keywords
+let lastHandledNonce = 0;
+
+function applyExternalSearch() {
+  const t = props.searchTrigger;
+  if (!t || t.nonce <= lastHandledNonce) return false;
+  lastHandledNonce = t.nonce;
+
+  // Clear type/theme filters for global header search to avoid confusing stale filters
+  filterType.value = '';
+  filterTheme.value = '';
+
+  if (t.keyword) {
+    searchInput.value = t.keyword;
+    appliedKeyword.value = t.keyword;
+  } else {
+    searchInput.value = '';
+    appliedKeyword.value = '';
+  }
+
+  loadCases();
+  return true;
+}
+
+watch(() => props.searchTrigger, applyExternalSearch, { deep: true });
 
 function typeLabel(type) {
   return caseTypes.value[type] || type || '未知类型';
@@ -363,7 +393,10 @@ function closeDetail() {
 
 onMounted(async () => {
   loadLikedState();
-  await loadCases();
+  const wasHandled = applyExternalSearch();
+  if (!wasHandled) {
+    await loadCases();
+  }
   try {
     const data = await fetchCaseConstants();
     if (data) {

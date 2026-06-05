@@ -30,6 +30,22 @@
           </a>
         </nav>
 
+        <!-- Global header search -->
+        <form class="global-search" @submit.prevent="submitHeaderSearch">
+          <input
+            v-model="headerSearchInput"
+            type="text"
+            placeholder="搜索案例…"
+            aria-label="搜索案例"
+          />
+          <button type="submit" aria-label="查找案例">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7" cy="7" r="5" />
+              <path d="M11 11l3.5 3.5" />
+            </svg>
+          </button>
+        </form>
+
         <!-- Right cluster: user actions -->
         <div class="header-actions">
           <template v-if="isLoggedIn()">
@@ -53,7 +69,7 @@
     <!-- Main content -->
     <main class="app-main">
       <HomeView v-if="currentView === 'home'" />
-      <CaseLibraryView v-else-if="currentView === 'library'" />
+      <CaseLibraryView v-else-if="currentView === 'library'" :search-trigger="searchTrigger" />
       <CreateCaseView v-else-if="currentView === 'create'" />
       <MySubmissionsView v-else-if="currentView === 'submissions'" />
       <AdminReviewView v-else-if="currentView === 'admin'" />
@@ -92,6 +108,20 @@ import AdminReviewView from "./views/AdminReviewView.vue";
 
 const currentView = ref("home");
 const showLogin = ref(false);
+
+// Global header search state (passed to CaseLibraryView via prop)
+const searchTrigger = ref({ keyword: "", nonce: 0 });
+const headerSearchInput = ref("");
+
+function submitHeaderSearch() {
+  const kw = headerSearchInput.value.trim();
+  searchTrigger.value = {
+    keyword: kw,
+    nonce: searchTrigger.value.nonce + 1,
+  };
+  headerSearchInput.value = "";
+  navigate("library");
+}
 
 const showPasswordChange = computed(() => {
   return isLoggedIn() && mustChangePassword();
