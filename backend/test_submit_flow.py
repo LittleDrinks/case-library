@@ -204,6 +204,35 @@ def main_test() -> None:
     response = client.get(f"/api/cases/{admin_delete_case}", headers=auth("adminflow"))
     assert_status(response, 404)
 
+    review_case_id = make_case("ownerflow", "draft")
+    response = client.post(f"/api/cases/{review_case_id}/submit", headers=auth("ownerflow"))
+    assert_status(response, 200)
+
+    response = client.post(
+        f"/api/reviews/{review_case_id}",
+        data={"comment": "normal user cannot review", "status": "reject"},
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 403)
+
+    response = client.post(
+        f"/api/reviews/{review_case_id}",
+        data={"comment": "需要补充教学反馈", "status": "reject"},
+        headers=auth("adminflow"),
+    )
+    assert_status(response, 200)
+
+    stored = get_db().cases.find_one({"id": review_case_id})
+    assert stored["status"] == "needs_revision"
+
+    response = client.get(f"/api/reviews/{review_case_id}", headers=auth("otherflow"))
+    assert_status(response, 403)
+
+    response = client.get(f"/api/reviews/{review_case_id}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    review_comments = [item["comment"] for item in response.json()["data"]]
+    assert "需要补充教学反馈" in review_comments
+
     print("submit flow checks passed")
 
 
