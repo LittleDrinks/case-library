@@ -211,3 +211,40 @@ export async function likeCase(caseId) {
 export async function unlikeCase(caseId) {
   return post(`/api/cases/${caseId}/unlike`);
 }
+
+// ============================================================================
+// Public dashboard API (no login required)
+// ============================================================================
+
+/**
+ * Fetch public statistics.
+ *
+ * Backend contract:
+ *   GET /api/statistics
+ *
+ * Response data shape:
+ *   { total_cases, total_views, total_likes, by_type: Record, by_theme: Record }
+ */
+export async function fetchStatistics() {
+  return get("/api/statistics");
+}
+
+/**
+ * Fetch trending approved cases.
+ *
+ * Backend contract:
+ *   GET /api/trending?limit=...
+ */
+export async function fetchTrendingCases(limit = 6) {
+  return get(`/api/trending?limit=${limit}`);
+}
+
+/**
+ * Fetch latest approved cases.
+ *
+ * Backend contract:
+ *   GET /api/latest?limit=...
+ */
+export async function fetchLatestCases(limit = 6) {
+  return get(`/api/latest?limit=${limit}`);
+}
