@@ -11,7 +11,17 @@ function buildUrl(path) {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     return path;
   }
-  return `${API_BASE}${path}`;
+  const base = API_BASE || "";
+  // Avoid double slash at join boundary
+  if (base.endsWith("/") && path.startsWith("/")) {
+    return `${base.slice(0, -1)}${path}`;
+  }
+  // Avoid duplicate prefix when base is a path prefix of path
+  // e.g. base="/api" + path="/api/cases" => "/api/cases"
+  if (base && !base.endsWith("/") && (path === base || path.startsWith(base + "/"))) {
+    return path;
+  }
+  return `${base}${path}`;
 }
 
 /**

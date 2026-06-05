@@ -5,7 +5,7 @@
  * between the wizard form and the backend case endpoints in one place.
  */
 
-import { request, postForm, get } from "./client.js";
+import { request, postForm, get, post } from "./client.js";
 
 /**
  * Fetch runtime labels from the backend.
@@ -147,4 +147,67 @@ export async function setCaseVisibility(caseId, hidden) {
   return postForm(`/api/cases/${caseId}/visibility`, {
     hidden: hidden ? "true" : "false",
   });
+}
+
+// ============================================================================
+// Public visitor API (no login required)
+// ============================================================================
+
+/**
+ * List approved, non-hidden cases for the public library.
+ *
+ * Backend contract:
+ *   GET /api/cases?status=approved&offset=<>&limit=<>
+ */
+export async function listPublicCases(offset = 0, limit = 50) {
+  return get(`/api/cases?status=approved&offset=${offset}&limit=${limit}`);
+}
+
+/**
+ * Search and filter approved cases.
+ *
+ * Uses /api/search/advanced when any filter or keyword is present;
+ * falls back to listPublicCases for the unfiltered list.
+ *
+ * Backend contract:
+ *   GET /api/search/advanced?status=approved&type=<>&theme=<>&keyword=<>&limit=<>
+ */
+export async function searchPublicCases({ keyword, type, theme, limit = 50 }) {
+  const params = new URLSearchParams();
+  params.set("status", "approved");
+  params.set("limit", String(limit));
+  if (keyword) params.set("keyword", keyword);
+  if (type) params.set("type", type);
+  if (theme) params.set("theme", theme);
+  return get(`/api/search/advanced?${params.toString()}`);
+}
+
+/**
+ * Fetch public case detail with view count increment.
+ *
+ * Backend contract:
+ *   GET /api/cases/{case_id}?increment_view=true
+ */
+export async function fetchPublicCaseDetail(caseId) {
+  return get(`/api/cases/${caseId}?increment_view=true`);
+}
+
+/**
+ * Like a case. No authentication required.
+ *
+ * Backend contract:
+ *   POST /api/cases/{case_id}/like
+ */
+export async function likeCase(caseId) {
+  return post(`/api/cases/${caseId}/like`);
+}
+
+/**
+ * Unlike a case. No authentication required.
+ *
+ * Backend contract:
+ *   POST /api/cases/{case_id}/unlike
+ */
+export async function unlikeCase(caseId) {
+  return post(`/api/cases/${caseId}/unlike`);
 }
