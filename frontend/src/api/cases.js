@@ -57,3 +57,46 @@ export async function updateCase(caseId, form) {
 export async function submitCaseById(caseId) {
   return request(`/api/cases/${caseId}/submit`, { method: "POST" });
 }
+
+/**
+ * List current user's cases by status tab.
+ *
+ * Backend contract:
+ *   GET /api/cases?author=<username>&status=<status>
+ */
+export async function listMyCases(username, status) {
+  const params = new URLSearchParams();
+  params.set("author", username);
+  params.set("status", status);
+  return get(`/api/cases?${params.toString()}`);
+}
+
+/**
+ * Fetch a single case detail.
+ *
+ * Backend contract:
+ *   GET /api/cases/{case_id}?increment_view=<bool>
+ */
+export async function fetchCaseDetail(caseId, incrementView = false) {
+  return get(`/api/cases/${caseId}?increment_view=${incrementView}`);
+}
+
+/**
+ * Fetch review records for a case.
+ *
+ * Backend contract:
+ *   GET /api/reviews/{case_id}
+ */
+export async function fetchCaseReviews(caseId) {
+  return get(`/api/reviews/${caseId}`);
+}
+
+/**
+ * Delete a case by ID.
+ *
+ * Backend contract:
+ *   DELETE /api/cases/{case_id}
+ */
+export async function deleteCaseById(caseId) {
+  return request(`/api/cases/${caseId}`, { method: "DELETE" });
+}
