@@ -188,13 +188,13 @@ async def change_password(
 
 @app.get("/api/cases")
 async def list_cases(
-    request: Request,
     status: str | None = "approved",
     offset: int = 0,
     limit: int = 50,
     author: str | None = None,
+    request: Request = None,
 ):
-    current_user = get_current_user(dict(request.headers))
+    current_user = get_current_user(dict(request.headers)) if request else None
     if status == "draft" and not author:
         if not current_user:
             raise HTTPException(status_code=401, detail="请先登录")
@@ -221,12 +221,12 @@ async def list_cases(
 
 
 @app.get("/api/cases/{case_id}")
-async def get_case_detail(case_id: int, request: Request, increment_view: bool = True):
+async def get_case_detail(case_id: int, increment_view: bool = True, request: Request = None):
     case = get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
 
-    current_user = get_current_user(dict(request.headers))
+    current_user = get_current_user(dict(request.headers)) if request else None
     owner_username = get_case_owner_username(case)
     is_admin = bool(current_user and current_user.get("role") == "admin")
     is_owner = bool(current_user and current_user.get("username") == owner_username)

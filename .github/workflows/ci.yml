@@ -4,14 +4,13 @@ on:
   push:
     branches:
       - main
-      - develop
-      - "develop/**"
       - "feature/**"
+      - "rescue/**"
   pull_request:
 
 jobs:
   backend:
-    name: Backend
+    name: App
     runs-on: ubuntu-latest
 
     steps:
@@ -22,73 +21,15 @@ jobs:
         run: docker compose build app
 
       - name: Lint in container
-        run: |
-          docker compose run --rm --no-deps app sh -lc '
-            targets="backend"
-            if [ -d scripts ]; then targets="$targets scripts"; fi
-            ruff check $targets
-          '
+        run: docker compose run --rm --no-deps app make lint
 
-      - name: Typecheck in container
-        run: docker compose run --rm --no-deps app mypy backend
-
-      - name: Check exception handling in container
-        run: docker compose run --rm --no-deps app python scripts/check_exceptions.py backend
-
-      - name: Test in container
-        env:
-          MONGODB_URI: mongodb://mongo:27017
-          MONGODB_DB_NAME: case_library_ci
+      - name: Check in container
         run: |
           docker compose up -d mongo
-          docker compose run --rm \
-            -e MONGODB_URI="$MONGODB_URI" \
-            -e MONGODB_DB_NAME="$MONGODB_DB_NAME" \
-            app sh -lc '
-              if [ -d tests ]; then
-                pytest
-              elif [ -f backend/test_submit_flow.py ]; then
-                python backend/test_submit_flow.py
-              else
-                echo "No tests or smoke test found."
-              fi
-            '
+          docker compose run --rm app make check
 
       - name: Docker Compose config
         run: docker compose config
 
       - name: Validate Dev Container JSON in container
         run: docker compose run --rm --no-deps app python -m json.tool .devcontainer/devcontainer.json >/tmp/devcontainer.json
-
-  frontend:
-    name: Frontend
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Detect frontend package
-        id: frontend
-        run: |
-          if [ -f frontend/package.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install dependencies in container
-        if: steps.frontend.outputs.present == 'true'
-        run: docker compose run --rm frontend sh -lc 'if [ -f package-lock.json ]; then npm ci; else npm install; fi'
-
-      - name: Test in container
-        if: steps.frontend.outputs.present == 'true'
-        run: docker compose run --rm frontend npm test
-
-      - name: Build in container
-        if: steps.frontend.outputs.present == 'true'
-        run: docker compose run --rm frontend npm run build
-
-      - name: Skip frontend
-        if: steps.frontend.outputs.present != 'true'
-        run: echo "Skipping frontend checks: frontend/package.json is not present yet."

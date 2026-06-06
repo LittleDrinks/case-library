@@ -1,58 +1,136 @@
-# AI Agent 协作规范
+# Agent Handoff
 
-本文件是所有 AI 编码 agent 共享的项目约定。`CLAUDE.md` 只记录 Claude Code 专用补充说明；两者都适用时应同时遵守。
+This file is the agent entrypoint for the restart track. Keep it operational and
+short. Do not duplicate product facts that belong in `docs/project.md`,
+`docs/frontend-rebuild.md`, or GitHub Issues.
 
-## 环境
+## Current Context
 
-- AI agent 必须在 Dev Container 或 `docker compose` 提供的一致容器环境内执行会影响结果的操作，包括开发、测试、lint、format、typecheck、构建、依赖安装和提交前验证。
-- 宿主机命令只允许用于 `git status`、`git diff`、`rg`、`sed`、查看文件等只读辅助排查；不得把宿主机测试结果作为交付依据。
-- 如容器环境不可用，应先修复容器环境；确实无法修复时，必须停止并说明阻塞原因，不得绕过容器要求交付。
-- 不要提交 `.env`、API Key、数据库导出、`.claude/`、`.codex/`、`.planning/` 等本地状态。
+- Worktree: `/home/q2635/wsl-workspace/case-library`
+- Branch: `rescue/restart`
+- Origin fork: `https://github.com/LittleDrinks/case-library.git`
+- Upstream repo: `https://github.com/yangxuchen5898/case-library.git`
+- Draft PR: `https://github.com/yangxuchen5898/case-library/pull/11`
+- Kanban: `https://github.com/yangxuchen5898/case-library/issues`
+- Scaffold commit pushed to origin: `fae1432 chore: establish restart scaffold`
 
-## 范围
+Historical directories are read-only references:
 
-- `.devcontainer/`、`Dockerfile`、`docker-compose.yml`、`docker-compose.override.yml`、`.github/`、`pyproject.toml`、`.pre-commit-config.yaml` 属于共享基础设施，应保持可复用。
-- `CLAUDE.md` 可以跟踪，但内容应限于项目级约定，不应写入个人机器路径、私有代理或密钥。
+- `/home/q2635/wsl-workspace/case-library-old`
+- `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605`
 
-## 改动纪律
+Do not develop from them and do not copy files wholesale.
 
-- 用最小改动完成任务。
-- 不重排、不改写、不移动无关代码。
-- 未经明确要求，不删除用户工作或生成的规划产物。
-- 前端大改前，先保持既有 API、store 和用户流程契约，并用测试验证。
-- 后端当前按冻结状态处理；除非任务明确要求，不做大范围重构。
+## Source Of Truth
 
-## 校验
+- Project harness, architecture, environment, API policy, testing direction:
+  `docs/project.md`
+- Frontend design and rebuild constraints: `docs/frontend-rebuild.md`
+- Kanban index only: `docs/kanban.md`
+- Actual task details and status: GitHub Issues
+- Worker prompt contracts: `agent-prompts/`
 
-交付前运行与改动范围匹配的检查。优先使用 `make` 目标：
+One fact belongs in one place. If a fact is already maintained in one of the
+above, link to it instead of copying it.
+
+## Local Environment
+
+- `.env.example` is tracked.
+- `.env` is local and ignored. It currently contains a test AI base URL/API key
+  and a model list pulled from the remote `/models` endpoint.
+- Never print or commit `AI_API_KEY`.
+- AI integration should use one OpenAI-compatible chat client configured by:
+  `AI_BASE_URL`, `AI_API_KEY`, `AI_MODELS`, `AI_DEFAULT_MODEL`,
+  `AI_TIMEOUT_SECONDS`, `AI_REVIEW_ENABLED`.
+
+## Verification Gate
+
+Before declaring scaffold or implementation work done, run the project gate from
+`docs/project.md`:
 
 ```bash
-make check
-make test
-make compose-config
+docker compose up -d --build
+curl -fsS http://127.0.0.1:8001/api/constants
+curl -fsS http://127.0.0.1:18080/
+docker compose ps
+docker compose run --rm app make check
+docker compose config --quiet
+git diff --check
 ```
 
-等价底层命令：
+Last known good evidence:
 
-```bash
-ruff check backend scripts
-mypy backend
-pytest
-cd frontend && npm test
-cd frontend && npm run build
-docker compose config
-```
+- Local Compose startup succeeded.
+- API and frontend endpoints responded.
+- `docker compose run --rm app make check` passed.
+- PR #11 CI `App` check passed.
+- AI `/models` and `/chat/completions` test calls passed with `qwen-plus`.
 
-如果某项检查因目录或依赖尚未合入而无法运行，需要明确说明跳过原因和剩余风险。
+## Orchestrator Workflow
 
-## 前端
+1. Pick one GitHub Issue with `status:now`.
+2. Make or reuse a focused branch for that issue.
+3. If delegating, write a narrow worker prompt using `agent-prompts/`.
+4. Give each worker:
+   - exact role and goal
+   - allowed files
+   - forbidden actions
+   - checks allowed
+   - required final line: `DONE <role>`
+5. Workers do not commit, push, delete volumes, read secrets, or modify old
+   directories.
+6. Review worker output and diffs yourself.
+7. Run the verification gate or the smallest justified subset, then document any
+   skipped checks in the PR.
+8. Push to `origin`, open/update a draft PR against upstream, and link the issue.
+9. Move labels as the issue progresses:
+   - `status:now`
+   - `status:next`
+   - `status:later`
+   - `status:blocked`
+10. Close issues only with concrete verification evidence.
 
-- Vue 3 + Vite 代码位于 `frontend/`。
-- 不要基于已知有问题的 UI 建立视觉回归基线。先稳定目标设计，再补截图测试。
-- 视图层不要自行猜测 API 返回结构，应通过 API 层和 store 访问数据。
+Prefer one issue per PR. Split PRs by workflow slice, not by arbitrary file
+groups.
 
-## 后端
+## Frontend Rules
 
-- FastAPI 后端位于 `backend/`；目标结构为 `backend/core/`，旧版入口为 `backend/main.py`。
-- 新增必需环境变量时，同步更新 `.env.example`。
-- 新增或修改接口时，优先补充显式契约测试。
+Before implementing create-case screens, extract structure from
+`docs/design/create/*.png`. The extraction must include at least:
+
+- Shanghai University logo position and proportion
+- "强国有我 思政案例库" wordmark position, size, and visual weight
+- top navigation layout
+- search and icon cluster layout
+- left progress rail, step states, active/inactive colors
+- page content width, spacing, form fields, primary/secondary buttons
+
+Do not ask a worker to recreate the full frontend in one pass. Build vertical
+slices and compare screenshots.
+
+## AI And Skills Policy
+
+Keep current `skills/` as domain prompt/template assets. Do not migrate old
+`.claude/` or `.codex/` workflow bundles into this repo.
+
+Future product AI review should be rebuilt around the `.env` chat settings. Do
+not fake durable AI review or attachment workflow in the frontend until backend
+support exists.
+
+Useful built-in/local skills for orchestrators:
+
+- `rmux-orchestrator`: pane workers with DONE sentinels.
+- `github:gh-fix-ci`: inspect and fix failing GitHub Actions.
+- `github:gh-address-comments`: process PR review comments.
+- `github:yeet`: publish focused changes through GitHub.
+- `find-skills`: discover additional skills before installing anything.
+
+Supplemental skill candidates found but not installed:
+
+- `microsoft/playwright-cli@playwright-cli` for browser automation.
+- `currents-dev/playwright-best-practices-skill@playwright-best-practices` for
+  Playwright test quality.
+
+Do not install low-signal GitHub or design-review skills just because they
+exist. The current GitHub plugin and repo-specific design docs are enough until
+an issue proves otherwise.

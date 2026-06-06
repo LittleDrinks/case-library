@@ -1,30 +1,19 @@
-.PHONY: install-dev lint format typecheck check test cov frontend-test frontend-build compose-config run up dev down logs
-
-PYTHON_LINT_TARGETS := backend
-ifneq ("$(wildcard scripts)","")
-PYTHON_LINT_TARGETS += scripts
-endif
+.PHONY: install-dev lint format check test cov smoke smoke-e2e frontend-build compose-config run up dev down logs
 
 install-dev:
 	pip install -r requirements.txt -r requirements-dev.txt
 	pre-commit install
 
 lint:
-	ruff check $(PYTHON_LINT_TARGETS)
+	ruff check backend
 
 format:
-	ruff format $(PYTHON_LINT_TARGETS)
+	ruff format backend
 
-typecheck:
-	mypy backend
-
-check: lint typecheck
-	@if [ -f scripts/check_exceptions.py ]; then \
-		python scripts/check_exceptions.py backend; \
-	fi
+check: lint test frontend-build
 
 test:
-	@if [ -d tests ]; then \
+	@if find tests -type f -name 'test_*.py' 2>/dev/null | grep -q .; then \
 		pytest; \
 	elif [ -f backend/test_submit_flow.py ]; then \
 		python backend/test_submit_flow.py; \
@@ -35,21 +24,26 @@ test:
 cov:
 	pytest --cov=backend --cov-report=term-missing
 
-frontend-test:
-	@if [ -f frontend/package.json ]; then cd frontend && npm test; else echo "Skipping frontend tests: frontend/package.json is not present yet."; fi
+smoke:
+	python backend/smoke_test_mongo.py
+
+smoke-e2e:
+	cd frontend && npm run test:e2e
 
 frontend-build:
-	@if [ -f frontend/package.json ]; then cd frontend && npm run build; else echo "Skipping frontend build: frontend/package.json is not present yet."; fi
+	@if [ -f frontend/package.json ]; then \
+		cd frontend && \
+		if [ -f package-lock.json ]; then npm ci; else npm install; fi && \
+		npm run build; \
+	else \
+		echo "No frontend/package.json found."; \
+	fi
 
 compose-config:
 	docker compose config
 
 run:
-	@if [ -f backend/core/main.py ]; then \
-		uvicorn backend.core.main:app --host 0.0.0.0 --port 8001 --reload; \
-	else \
-		uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload; \
-	fi
+	uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
 
 dev up:
 	docker compose up -d

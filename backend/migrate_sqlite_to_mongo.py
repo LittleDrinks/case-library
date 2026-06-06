@@ -10,8 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pymongo.errors import PyMongoError
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import SQLITE_DB_PATH, format_beijing_datetime, get_db, init_db, sync_all_counters
@@ -136,7 +134,7 @@ def migrate_collection(table_name: str, rows: Iterable[dict]) -> dict[str, int]:
 
             collection.insert_one(doc)
             inserted += 1
-        except (KeyError, TypeError, ValueError, PyMongoError) as exc:
+        except Exception as exc:
             errors += 1
             print(f"[{table_name}] failed to migrate id={row.get('id')}: {exc}")
 

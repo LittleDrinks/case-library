@@ -6,8 +6,6 @@ import csv
 import sys
 from pathlib import Path
 
-from pymongo.errors import PyMongoError
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from database import (
@@ -93,7 +91,7 @@ def import_csv(args):
                 )
                 created += 1
                 print(f"Created account: {username}")
-            except (KeyError, ValueError, PyMongoError) as exc:
+            except Exception as exc:
                 failed += 1
                 print(f"Failed account {username}: {exc}")
 

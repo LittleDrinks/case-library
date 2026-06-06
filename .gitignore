@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Project-local private data
+backend/accounts.csv
+accounts.csv
+
 # Python
 __pycache__/
 *.py[cod]
@@ -38,21 +42,17 @@ Thumbs.db
 # AI agent and local planning state
 .claude/
 .codex/
+.gstack/
 .planning/
 .playwright-cli/
+agent-runs/
+CLAUDE.md
 
 # Runtime data
-data/cases.db
-data/db/
-data/mongodb/
-data/案例库/
+data/
 
 # Generated reports and local artifacts
 E2E-TEST-REPORT.md
-docs/mock/
-docs/ai-features-demo.html
-docs/网站设计*/
-docs/网站设计*/**/
 start.sh
 
 # Local backups

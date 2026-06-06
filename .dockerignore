@@ -17,7 +17,14 @@ htmlcov/
 .idea/
 .claude/
 .codex/
+.gstack/
 .planning/
+.playwright-cli/
+agent-prompts/
+agent-runs/
+AGENTS.md
+CLAUDE.md
+docs/
 
 .venv/
 venv/
@@ -29,6 +36,8 @@ dist/
 data/cases.db
 data/db/
 data/mongodb/
+data/案例库/
+backend/accounts.csv
 *.log
 *.swp
 *.swo

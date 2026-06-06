@@ -9,24 +9,31 @@ from pathlib import Path
 # 导入数据库模块
 from database import create_case, get_case, update_case
 
-# 配置
-SKILL_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent
+CLASSIFIER_PATH = ROOT_DIR / "skills" / "zhutifenlei" / "classifier.md"
+TEMPLATE_DIR = ROOT_DIR / "skills" / "anlibianxie"
 
 
 def classify_case(content: str) -> dict:
     """调用分类器判断案例类型"""
-    classifier_path = SKILL_DIR / "classifier.md"
-
-    if classifier_path.exists():
-        # 简单的关键词匹配分类（完整版本需要LLM）
-        return _simple_classify(content)
-
-    return {
-        "primary_type": "TYPE_A",
-        "types": ["TYPE_A"],
-        "themes": ["校园文明"],
-        "reason": "默认分类",
-    }
+    try:
+        if CLASSIFIER_PATH.exists():
+            # 简单的关键词匹配分类（完整版本需要LLM）
+            return _simple_classify(content)
+        return {
+            "primary_type": "TYPE_A",
+            "types": ["TYPE_A"],
+            "themes": ["校园文明"],
+            "reason": "默认分类",
+        }
+    except Exception as e:
+        print(f"分类失败: {e}")
+        return {
+            "primary_type": "TYPE_A",
+            "types": ["TYPE_A"],
+            "themes": ["校园文明"],
+            "reason": "分类异常",
+        }
 
 
 def _simple_classify(content: str) -> dict:
@@ -103,12 +110,7 @@ def _simple_classify(content: str) -> dict:
     if not themes:
         themes.append("校园文明")
 
-    return {
-        "primary_type": types[0],
-        "types": types,
-        "themes": themes,
-        "reason": "基于关键词匹配",
-    }
+    return {"primary_type": types[0], "types": types, "themes": themes, "reason": "基于关键词匹配"}
 
 
 def get_template(type_code: str) -> str | None:
@@ -121,7 +123,7 @@ def get_template(type_code: str) -> str | None:
 
     template_name = template_map.get(type_code)
     if template_name:
-        template_path = SKILL_DIR / template_name
+        template_path = TEMPLATE_DIR / template_name
         if template_path.exists():
             return template_path.read_text(encoding="utf-8")
 

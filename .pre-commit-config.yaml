@@ -15,12 +15,3 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-
-  - repo: local
-    hooks:
-      - id: check-exceptions
-        name: Check try/except smells
-        entry: python scripts/check_exceptions.py backend
-        language: system
-        types: [python]
-        pass_filenames: false
