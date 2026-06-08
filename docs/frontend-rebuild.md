@@ -200,8 +200,9 @@ implemented as follows in alpha:
 
 ## API Use
 
-Do not maintain a hand-written endpoint catalog here. FastAPI Swagger at
-`/docs` and OpenAPI at `/openapi.json` are the API source of truth. Use
+Do not maintain a hand-written endpoint catalog here. Use FastAPI Swagger at
+`/docs` and OpenAPI at `/openapi.json` as the current implementation reference,
+and use `docs/api.md` only as recovered target-state design material. Use
 `/api/constants` for labels such as case types, themes, and statuses.
 
 ## Suggested Vue Slices

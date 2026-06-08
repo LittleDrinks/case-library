@@ -11,9 +11,11 @@ import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -42,9 +44,38 @@ from database import (
     update_case,
 )
 from prompts import get_prompt, list_prompt_metadata
+from schemas import (
+    AIChatRequest,
+    AIChatResponse,
+    CaseCreateResponse,
+    CaseDeleteResponse,
+    CaseDetailResponse,
+    CaseListResponse,
+    CaseVisibilityResponse,
+    ConstantsResponse,
+    LoginResponse,
+    PromptListResponse,
+    ReviewListResponse,
+    SearchResponse,
+    StatisticsResponse,
+    SuccessMessageResponse,
+    VersionListResponse,
+)
 from search_engine import CaseSearchEngine
 
-app = FastAPI(title="Case Library API", version="1.0.0")
+app = FastAPI(
+    title="Case Library API",
+    version="1.0.0",
+    description=(
+        "Current implementation reference for the alpha case library API. "
+        "Protected endpoints use an HMAC-signed bearer token returned by "
+        "`POST /api/auth/login`; the token is not a JWT."
+    ),
+)
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="Use `Authorization: Bearer <token>` with the login token.",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +89,45 @@ app.add_middleware(
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
     return JSONResponse(status_code=400, content={"success": False, "detail": str(exc)})
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    ai_chat_operation = openapi_schema["paths"]["/api/ai/chat"]["post"]
+    ai_chat_operation["requestBody"] = {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/AIChatRequest"},
+                "examples": {
+                    "self_check": {
+                        "summary": "Run a workflow self-check prompt",
+                        "value": {
+                            "prompt_id": "workflow/completeness",
+                            "variables": {"title": "案例标题", "content": "案例正文"},
+                            "model": "qwen-plus",
+                        },
+                    }
+                },
+            }
+        },
+    }
+    openapi_schema.setdefault("components", {}).setdefault("schemas", {})[
+        "AIChatRequest"
+    ] = AIChatRequest.model_json_schema(ref_template="#/components/schemas/{model}")
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 AUTH_SECRET = os.getenv("AUTH_SECRET")
@@ -152,6 +222,11 @@ def require_current_user(request: Request) -> dict:
     return current_user
 
 
+BearerCredentials = HTTPAuthorizationCredentials | None
+OptionalBearer = Depends(bearer_scheme)
+RequiredBearer = Depends(bearer_scheme)
+
+
 def render_prompt(content: str, variables: dict) -> str:
     try:
         return content.format(**variables)
@@ -169,7 +244,15 @@ UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@app.post("/api/auth/login")
+@app.post(
+    "/api/auth/login",
+    response_model=LoginResponse,
+    summary="Login and receive a bearer token",
+    description=(
+        "Authenticate with form credentials. The returned `data.token` must be sent as "
+        "`Authorization: Bearer <token>` on protected endpoints."
+    ),
+)
 async def login(username: str = Form(...), password: str = Form(...)):
     user = authenticate_user(username, password)
     if not user:
@@ -190,7 +273,12 @@ async def login(username: str = Form(...), password: str = Form(...)):
     }
 
 
-@app.post("/api/auth/change-password")
+@app.post(
+    "/api/auth/change-password",
+    response_model=SuccessMessageResponse,
+    summary="Change a user's password",
+    description="Change a password by providing the username, old password, and new password.",
+)
 async def change_password(
     username: str = Form(...),
     old_password: str = Form(...),
@@ -203,14 +291,38 @@ async def change_password(
     return {"success": True, "message": "密码修改成功"}
 
 
-@app.get("/api/prompts")
-async def list_prompts(request: Request, category: str | None = None):
+@app.get(
+    "/api/prompts",
+    response_model=PromptListResponse,
+    summary="List AI prompt metadata",
+    description=(
+        "Return metadata for server-side AI self-check prompts. Prompt content and "
+        "secrets are not returned. Requires a bearer token."
+    ),
+)
+async def list_prompts(
+    request: Request,
+    category: str | None = None,
+    _credentials: BearerCredentials = RequiredBearer,
+):
     require_current_user(request)
     return {"success": True, "data": list_prompt_metadata(category)}
 
 
-@app.post("/api/ai/chat")
-async def ai_chat(request: Request):
+@app.post(
+    "/api/ai/chat",
+    response_model=AIChatResponse,
+    summary="Run a server-side AI self-check prompt",
+    description=(
+        "Render one prompt from the prompt registry with caller-provided variables and "
+        "send it through the server-side OpenAI-compatible chat client. Requires a "
+        "bearer token and honors the AI_REVIEW_ENABLED feature flag."
+    ),
+)
+async def ai_chat(
+    request: Request,
+    _credentials: BearerCredentials = RequiredBearer,
+):
     require_current_user(request)
     try:
         payload = await request.json()
@@ -273,13 +385,22 @@ async def ai_chat(request: Request):
     }
 
 
-@app.get("/api/cases")
+@app.get(
+    "/api/cases",
+    response_model=CaseListResponse,
+    summary="List cases",
+    description=(
+        "List public approved cases by default. Draft, author-scoped, and admin views "
+        "require a bearer token and are filtered by the current user's role."
+    ),
+)
 async def list_cases(
     status: str | None = "approved",
     offset: int = 0,
     limit: int = 50,
     author: str | None = None,
     request: Request = None,
+    _credentials: BearerCredentials = OptionalBearer,
 ):
     current_user = get_current_user(dict(request.headers)) if request else None
     if status == "draft" and not author:
@@ -307,8 +428,21 @@ async def list_cases(
     }
 
 
-@app.get("/api/cases/{case_id}")
-async def get_case_detail(case_id: int, increment_view: bool = True, request: Request = None):
+@app.get(
+    "/api/cases/{case_id}",
+    response_model=CaseDetailResponse,
+    summary="Get case detail",
+    description=(
+        "Return one case. Public approved cases are readable without auth; draft or "
+        "hidden cases are visible only to the owner or an admin."
+    ),
+)
+async def get_case_detail(
+    case_id: int,
+    increment_view: bool = True,
+    request: Request = None,
+    _credentials: BearerCredentials = OptionalBearer,
+):
     case = get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
@@ -330,7 +464,15 @@ async def get_case_detail(case_id: int, increment_view: bool = True, request: Re
     return {"success": True, "data": case}
 
 
-@app.post("/api/cases")
+@app.post(
+    "/api/cases",
+    response_model=CaseCreateResponse,
+    summary="Create a case",
+    description=(
+        "Create a draft or pending-review case from form fields. Requires a bearer "
+        "token. `auto_process=true` may create multiple processed case records."
+    ),
+)
 async def create_new_case(
     request: Request,
     title: str = Form(...),
@@ -340,6 +482,7 @@ async def create_new_case(
     theme: str = Form("铸魂育人"),
     status: str = Form("pending_review"),
     auto_process: bool = Form(False),
+    _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     if not current_user:
@@ -419,7 +562,15 @@ async def _update_existing_case_impl(
     return {"success": True, "message": "案例更新成功"}
 
 
-@app.put("/api/cases/{case_id}")
+@app.put(
+    "/api/cases/{case_id}",
+    response_model=SuccessMessageResponse,
+    summary="Update a case",
+    description=(
+        "Update editable case fields and record a version entry. Requires owner or "
+        "admin bearer auth."
+    ),
+)
 async def update_existing_case(
     case_id: int,
     request: Request,
@@ -430,6 +581,7 @@ async def update_existing_case(
     type: str | None = Form(None),
     theme: str | None = Form(None),
     change_reason: str = Form(""),
+    _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
@@ -437,7 +589,12 @@ async def update_existing_case(
     )
 
 
-@app.post("/api/cases/{case_id}")
+@app.post(
+    "/api/cases/{case_id}",
+    response_model=SuccessMessageResponse,
+    summary="Update a case with POST compatibility",
+    description="Compatibility endpoint with the same behavior as PUT /api/cases/{case_id}.",
+)
 async def update_existing_case_post_compat(
     case_id: int,
     request: Request,
@@ -448,6 +605,7 @@ async def update_existing_case_post_compat(
     type: str | None = Form(None),
     theme: str | None = Form(None),
     change_reason: str = Form(""),
+    _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
@@ -455,8 +613,20 @@ async def update_existing_case_post_compat(
     )
 
 
-@app.delete("/api/cases/{case_id}")
-async def delete_case_endpoint(case_id: int, request: Request):
+@app.delete(
+    "/api/cases/{case_id}",
+    response_model=CaseDeleteResponse,
+    summary="Delete a case",
+    description=(
+        "Soft-delete a case and return statistics about the removed library item. "
+        "Requires owner or admin bearer auth."
+    ),
+)
+async def delete_case_endpoint(
+    case_id: int,
+    request: Request,
+    _credentials: BearerCredentials = RequiredBearer,
+):
     current_user = get_current_user(dict(request.headers))
     if not current_user:
         raise HTTPException(status_code=401, detail="请先登录")
@@ -487,8 +657,17 @@ async def delete_case_endpoint(case_id: int, request: Request):
     }
 
 
-@app.post("/api/cases/{case_id}/submit")
-async def submit_case_for_review(case_id: int, request: Request):
+@app.post(
+    "/api/cases/{case_id}/submit",
+    response_model=SuccessMessageResponse,
+    summary="Submit a case for human review",
+    description="Move a draft or revision-required case to pending review. Requires owner auth.",
+)
+async def submit_case_for_review(
+    case_id: int,
+    request: Request,
+    _credentials: BearerCredentials = RequiredBearer,
+):
     current_user = get_current_user(dict(request.headers))
     if not current_user:
         raise HTTPException(status_code=401, detail="请先登录")
@@ -506,14 +685,22 @@ async def submit_case_for_review(case_id: int, request: Request):
     return {"success": True, "message": "案例已提交审核"}
 
 
-@app.post("/api/cases/{case_id}/like")
+@app.post(
+    "/api/cases/{case_id}/like",
+    response_model=SuccessMessageResponse,
+    summary="Like a public case",
+)
 async def like_case(case_id: int):
     if not increment_like_count(case_id):
         raise HTTPException(status_code=404, detail="案例不存在")
     return {"success": True, "message": "点赞成功"}
 
 
-@app.post("/api/cases/{case_id}/unlike")
+@app.post(
+    "/api/cases/{case_id}/unlike",
+    response_model=SuccessMessageResponse,
+    summary="Remove one like from a case",
+)
 async def unlike_case(case_id: int):
     if not decrement_like_count(case_id):
         if get_case(case_id):
@@ -522,12 +709,20 @@ async def unlike_case(case_id: int):
     return {"success": True, "message": "取消点赞成功"}
 
 
-@app.get("/api/search")
+@app.get(
+    "/api/search",
+    response_model=SearchResponse,
+    summary="Search cases by keyword",
+)
 async def search_cases_endpoint(q: str, status: str | None = "approved"):
     return {"success": True, "data": search_engine.search(q, status), "query": q}
 
 
-@app.get("/api/search/advanced")
+@app.get(
+    "/api/search/advanced",
+    response_model=SearchResponse,
+    summary="Filter cases by type, theme, status, and keyword",
+)
 async def advanced_search(
     type: str | None = None,
     theme: str | None = None,
@@ -547,26 +742,44 @@ async def advanced_search(
     }
 
 
-@app.get("/api/recommendations/{case_id}")
+@app.get(
+    "/api/recommendations/{case_id}",
+    response_model=SearchResponse,
+    summary="Get related case recommendations",
+)
 async def get_recommendations_endpoint(case_id: int, limit: int = 5):
     return {"success": True, "data": search_engine.get_recommendations(case_id, limit)}
 
 
-@app.get("/api/trending")
+@app.get(
+    "/api/trending",
+    response_model=SearchResponse,
+    summary="List trending public cases",
+)
 async def get_trending_cases(limit: int = 10):
     return {"success": True, "data": search_engine.get_trending(limit)}
 
 
-@app.get("/api/latest")
+@app.get(
+    "/api/latest",
+    response_model=SearchResponse,
+    summary="List latest public cases",
+)
 async def get_latest_cases(limit: int = 10):
     return {"success": True, "data": search_engine.get_latest(limit)}
 
 
-@app.post("/api/cases/{case_id}/visibility")
+@app.post(
+    "/api/cases/{case_id}/visibility",
+    response_model=CaseVisibilityResponse,
+    summary="Hide or show a case",
+    description="Admin-only visibility toggle. Requires a bearer token for an admin user.",
+)
 async def toggle_case_visibility(
     case_id: int,
     request: Request,
     hidden: bool = Form(...),
+    _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     if not current_user or current_user.get("role") != "admin":
@@ -585,12 +798,21 @@ async def toggle_case_visibility(
     }
 
 
-@app.post("/api/reviews/{case_id}")
+@app.post(
+    "/api/reviews/{case_id}",
+    response_model=SuccessMessageResponse,
+    summary="Review a submitted case",
+    description=(
+        "Admin-only human review action. Form status accepts approve/approved or "
+        "reject/rejected/needs_revision; reject means returned for revision."
+    ),
+)
 async def review_case_endpoint(
     case_id: int,
     request: Request,
     comment: str = Form(...),
     status: str = Form(...),
+    _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     if not current_user or current_user.get("role") != "admin":
@@ -601,26 +823,60 @@ async def review_case_endpoint(
     return {"success": True, "message": "审核完成"}
 
 
-@app.get("/api/reviews/{case_id}")
-async def get_case_reviews(case_id: int, request: Request):
+@app.get(
+    "/api/reviews/{case_id}",
+    response_model=ReviewListResponse,
+    summary="List case review records",
+    description=(
+        "Return human review history. Visible to admins, case owners, or public readers "
+        "of approved non-hidden cases."
+    ),
+)
+async def get_case_reviews(
+    case_id: int,
+    request: Request,
+    _credentials: BearerCredentials = OptionalBearer,
+):
     current_user = get_current_user(dict(request.headers))
     _ensure_case_history_visible(case_id, current_user)
     return {"success": True, "data": get_reviews(case_id)}
 
 
-@app.get("/api/versions/{case_id}")
-async def get_case_version_history(case_id: int, request: Request):
+@app.get(
+    "/api/versions/{case_id}",
+    response_model=VersionListResponse,
+    summary="List case version history",
+    description=(
+        "Return edit history. Visible to admins, case owners, or public readers of "
+        "approved non-hidden cases."
+    ),
+)
+async def get_case_version_history(
+    case_id: int,
+    request: Request,
+    _credentials: BearerCredentials = OptionalBearer,
+):
     current_user = get_current_user(dict(request.headers))
     _ensure_case_history_visible(case_id, current_user)
     return {"success": True, "data": get_case_versions(case_id)}
 
 
-@app.get("/api/statistics")
+@app.get(
+    "/api/statistics",
+    response_model=StatisticsResponse,
+    summary="Get public case statistics",
+    description="Return aggregate counts for approved, visible cases.",
+)
 async def get_statistics_endpoint():
     return {"success": True, "data": get_statistics()}
 
 
-@app.get("/api/constants")
+@app.get(
+    "/api/constants",
+    response_model=ConstantsResponse,
+    summary="Get runtime labels and constants",
+    description="Return case type, theme, and status labels used by the frontend.",
+)
 async def get_constants():
     return {
         "success": True,

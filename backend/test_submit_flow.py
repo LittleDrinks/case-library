@@ -42,7 +42,56 @@ def assert_status(response, expected: int):
     assert response.status_code == expected, (response.status_code, response.text)
 
 
+def assert_openapi_documented() -> None:
+    docs = client.get("/docs")
+    assert_status(docs, 200)
+    assert "text/html" in docs.headers.get("content-type", "")
+
+    response = client.get("/openapi.json")
+    assert_status(response, 200)
+    spec = response.json()
+    paths = spec.get("paths", {})
+    components = spec.get("components", {})
+    schemas = components.get("schemas", {})
+
+    required_paths = {
+        "/api/auth/login",
+        "/api/auth/change-password",
+        "/api/prompts",
+        "/api/ai/chat",
+        "/api/cases",
+        "/api/cases/{case_id}",
+        "/api/reviews/{case_id}",
+        "/api/statistics",
+        "/api/constants",
+    }
+    assert required_paths.issubset(paths.keys()), sorted(required_paths - paths.keys())
+
+    security_schemes = components.get("securitySchemes", {})
+    assert security_schemes.get("HTTPBearer", {}).get("scheme") == "bearer"
+
+    required_schemas = {
+        "LoginResponse",
+        "PromptListResponse",
+        "AIChatRequest",
+        "AIChatResponse",
+        "CaseListResponse",
+        "CaseDetailResponse",
+        "ReviewListResponse",
+        "StatisticsResponse",
+        "ConstantsResponse",
+    }
+    assert required_schemas.issubset(schemas.keys()), sorted(required_schemas - schemas.keys())
+
+    assert paths["/api/prompts"]["get"].get("security") == [{"HTTPBearer": []}]
+    assert paths["/api/ai/chat"]["post"].get("security") == [{"HTTPBearer": []}]
+    assert paths["/api/cases"]["post"].get("security") == [{"HTTPBearer": []}]
+    assert paths["/api/reviews/{case_id}"]["post"].get("security") == [{"HTTPBearer": []}]
+
+
 def main_test() -> None:
+    assert_openapi_documented()
+
     create_user("ownerflow", "password123", role="normal", must_change_password=False)
     create_user("otherflow", "password123", role="normal", must_change_password=False)
     create_user("adminflow", "password123", role="admin", must_change_password=False)

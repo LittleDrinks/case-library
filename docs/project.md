@@ -81,16 +81,19 @@ docker compose up -d frontend
 
 ## API Documentation
 
-Do not maintain a duplicated hand-written endpoint list. FastAPI owns the API
-contract:
+FastAPI-generated OpenAPI is the current implementation reference:
 
 - Swagger UI: `http://127.0.0.1:8001/docs`
 - OpenAPI JSON: `http://127.0.0.1:8001/openapi.json`
 - Runtime labels/constants: `GET /api/constants`
 
-When public API behavior changes, update tests or the OpenAPI-producing route
-implementation. Prefer generated API references over manually copied endpoint
-tables.
+`docs/api.md` is a recovered target-state API contract from the rewrite design.
+Use it as planning/reference material, not as proof that an endpoint is currently
+implemented. When public API behavior changes, update the FastAPI route metadata,
+schemas, and regression tests that generate `/openapi.json`; avoid maintaining
+new hand-written endpoint tables. The submit-flow check includes an OpenAPI
+regression assertion, and the project gate fails if required API documentation
+paths, schemas, or bearer-auth metadata disappear.
 
 ## Resources
 

@@ -1,10 +1,16 @@
 <!--
 Migrated on 2026-06-06 from recovered WeChat attachment:
 E:\xwechat_files\wxid_x6e64hefjyox12_ba3b\msg\attach\e94fbe1ac58d09c830a799592fea2f62\2026-05\Rec\efe0cc6fcce98913\F\2\API-CONTRACT.md
-Keep this document aligned with backend contract tests and future OpenAPI export.
+This is recovered target-state design material. The current implementation
+reference is generated from FastAPI at /docs and /openapi.json.
 -->
 
-# API Contract v1.1 (Alpha)
+# API Contract v1.1 (Alpha Target Reference)
+
+> 本文档是从历史设计稿恢复的目标态 API 参考，不是当前实现自动生成的
+> API 文档。当前实现以 FastAPI Swagger `/docs` 和 OpenAPI
+> `/openapi.json` 为准；当两者不一致时，先以当前实现和 GitHub issue
+> 验收条件推进，再更新目标契约或后端实现。
 
 > 生成日期: 2026-05-25
 > 基于 Phase 4-9 设计文档
