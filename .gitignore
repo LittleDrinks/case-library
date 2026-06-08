@@ -46,6 +46,7 @@ Thumbs.db
 .planning/
 .playwright-cli/
 agent-runs/
+agent-prompts/
 CLAUDE.md
 
 # Runtime data
