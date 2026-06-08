@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from ai_client import AIClientError, AISettings, call_chat_completion, extract_json_object
 from case_processor import process_new_case
 from database import (
     authenticate_user,
@@ -40,6 +41,7 @@ from database import (
     submit_for_review,
     update_case,
 )
+from prompts import get_prompt, list_prompt_metadata
 from search_engine import CaseSearchEngine
 
 app = FastAPI(title="Case Library API", version="1.0.0")
@@ -143,6 +145,21 @@ def _ensure_case_history_visible(case_id: int, current_user: dict | None) -> dic
     raise HTTPException(status_code=403, detail="无权查看该案例的历史记录")
 
 
+def require_current_user(request: Request) -> dict:
+    current_user = get_current_user(dict(request.headers))
+    if not current_user:
+        raise HTTPException(status_code=401, detail="请先登录")
+    return current_user
+
+
+def render_prompt(content: str, variables: dict) -> str:
+    try:
+        return content.format(**variables)
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise HTTPException(status_code=400, detail=f"缺少必填变量: {missing}") from exc
+
+
 init_db()
 search_engine = CaseSearchEngine()
 
@@ -184,6 +201,76 @@ async def change_password(
     if not change_user_password(username, old_password, new_password):
         raise HTTPException(status_code=400, detail="用户名或原密码错误")
     return {"success": True, "message": "密码修改成功"}
+
+
+@app.get("/api/prompts")
+async def list_prompts(request: Request, category: str | None = None):
+    require_current_user(request)
+    return {"success": True, "data": list_prompt_metadata(category)}
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(request: Request):
+    require_current_user(request)
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
+
+    prompt_id = payload.get("prompt_id")
+    if not isinstance(prompt_id, str) or not prompt_id.strip():
+        raise HTTPException(status_code=400, detail="缺少 prompt_id")
+
+    prompt = get_prompt(prompt_id.strip())
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt 不存在")
+
+    variables = payload.get("variables", {})
+    if not isinstance(variables, dict):
+        raise HTTPException(status_code=400, detail="variables 必须是对象")
+
+    missing = [name for name in prompt.variables if name not in variables]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"缺少必填变量: {', '.join(missing)}")
+
+    serialized_variables = json.dumps(variables, ensure_ascii=False)
+    if len(serialized_variables) > 100_000:
+        raise HTTPException(status_code=400, detail="AI 请求内容超过长度限制")
+
+    settings = AISettings.from_env()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="AI 审核功能未启用")
+    if not settings.configured():
+        raise HTTPException(status_code=503, detail="AI 服务未配置")
+
+    requested_model = payload.get("model")
+    if requested_model is not None and not isinstance(requested_model, str):
+        raise HTTPException(status_code=400, detail="model 必须是字符串")
+    try:
+        model = settings.resolve_model(requested_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    prompt_text = render_prompt(prompt.content, variables)
+    try:
+        answer = call_chat_completion(prompt_text, model, settings=settings)
+    except AIClientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    parsed = None
+    parse_error = None
+    if prompt.output_schema == "json":
+        parsed, parse_error = extract_json_object(answer)
+
+    return {
+        "success": True,
+        "answer": answer,
+        "parsed": parsed,
+        "parse_error": parse_error,
+    }
 
 
 @app.get("/api/cases")

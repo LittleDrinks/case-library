@@ -325,6 +325,112 @@ def main_test() -> None:
     assert stats_hidden_case not in latest_ids
     assert stats_deleted_case not in latest_ids
 
+    response = client.get("/api/prompts?category=workflow")
+    assert_status(response, 401)
+
+    old_prompt_key = os.environ.get("AI_API_KEY")
+    os.environ["AI_API_KEY"] = "secret-test-key"
+    try:
+        response = client.get("/api/prompts?category=workflow", headers=auth("ownerflow"))
+        assert_status(response, 200)
+        prompt_items = response.json()["data"]
+        prompt_ids = {item["id"] for item in prompt_items}
+        assert {
+            "workflow/completeness",
+            "workflow/categorization",
+            "workflow/expression",
+            "workflow/score",
+        }.issubset(prompt_ids)
+        assert all("content" not in item for item in prompt_items)
+        assert "secret-test-key" not in response.text
+    finally:
+        if old_prompt_key is None:
+            os.environ.pop("AI_API_KEY", None)
+        else:
+            os.environ["AI_API_KEY"] = old_prompt_key
+
+    response = client.get("/api/prompts", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    assert response.json()["data"] == []
+
+    old_env = {
+        key: os.environ.get(key)
+        for key in [
+            "AI_REVIEW_ENABLED",
+            "AI_BASE_URL",
+            "AI_API_KEY",
+            "AI_MODELS",
+            "AI_DEFAULT_MODEL",
+            "AI_TIMEOUT_SECONDS",
+        ]
+    }
+    old_call_chat_completion = main.call_chat_completion
+    try:
+        os.environ["AI_REVIEW_ENABLED"] = "false"
+        os.environ["AI_BASE_URL"] = "https://example.invalid/v1"
+        os.environ["AI_API_KEY"] = "secret-test-key"
+        os.environ["AI_MODELS"] = "qwen-plus,qwen-turbo"
+        os.environ["AI_DEFAULT_MODEL"] = "qwen-plus"
+        os.environ["AI_TIMEOUT_SECONDS"] = "3"
+
+        response = client.post(
+            "/api/ai/chat",
+            json={
+                "prompt_id": "workflow/completeness",
+                "variables": {"title": "AI 测试", "content": "内容"},
+            },
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 503)
+
+        os.environ["AI_REVIEW_ENABLED"] = "true"
+
+        response = client.post(
+            "/api/ai/chat",
+            json={"prompt_id": "workflow/completeness", "variables": {"title": "AI 测试"}},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 400)
+
+        response = client.post(
+            "/api/ai/chat",
+            json={
+                "prompt_id": "workflow/completeness",
+                "variables": {"title": "AI 测试", "content": "内容"},
+                "model": "not-allowed",
+            },
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 400)
+
+        def fake_chat_completion(prompt_text, model, settings=None):
+            assert model == "qwen-plus"
+            assert "secret-test-key" not in prompt_text
+            return '{"pass": true, "detail": "可提交", "suggestions": []}'
+
+        main.call_chat_completion = fake_chat_completion
+        response = client.post(
+            "/api/ai/chat",
+            json={
+                "prompt_id": "workflow/completeness",
+                "variables": {"title": "AI 测试", "content": "内容完整"},
+            },
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 200)
+        ai_data = response.json()
+        assert ai_data["success"] is True
+        assert ai_data["parsed"]["pass"] is True
+        assert ai_data["parse_error"] is None
+        assert "secret-test-key" not in response.text
+    finally:
+        main.call_chat_completion = old_call_chat_completion
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
     print("submit flow checks passed")
 
 

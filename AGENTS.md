@@ -7,12 +7,26 @@ short. Do not duplicate product facts that belong in `docs/project.md`,
 ## Current Context
 
 - Worktree: `/home/q2635/wsl-workspace/case-library`
-- Branch: `rescue/restart`
+- Branch: `develop/alpha-summary`
 - Origin fork: `https://github.com/LittleDrinks/case-library.git`
 - Upstream repo: `https://github.com/yangxuchen5898/case-library.git`
-- Draft PR: `https://github.com/yangxuchen5898/case-library/pull/11`
+- Summary PR: `https://github.com/yangxuchen5898/case-library/pull/62`
 - Kanban: `https://github.com/yangxuchen5898/case-library/issues`
-- Scaffold commit pushed to origin: `fae1432 chore: establish restart scaffold`
+- Current AI contract issue: `https://github.com/yangxuchen5898/case-library/issues/63`
+
+Current local tracked changes:
+
+- `docs/api.md` has been replaced with the recovered full API contract.
+- Solo-project cleanup deleted `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, and
+  collaboration boilerplate under `.github/`.
+
+Current ignored local tooling/state:
+
+- `.codex/skills/rmux-delegation/` contains the project-local rmux delegation
+  skill and wrapper.
+- `.codex/skills/gpt-tasteskill/` is local Codex skill state.
+- `agent-runs/` contains ignored one-off worker prompts and rmux captures,
+  organized by run/session subdirectory.
 
 Historical directories are read-only references:
 
@@ -28,10 +42,21 @@ Do not develop from them and do not copy files wholesale.
 - Frontend design and rebuild constraints: `docs/frontend-rebuild.md`
 - Kanban index only: `docs/kanban.md`
 - Actual task details and status: GitHub Issues
-- Worker prompt contracts: `agent-prompts/`
+- Reusable worker prompt contracts: `agent-prompts/`
+- One-off worker prompts and run captures: `agent-runs/` (ignored)
 
 One fact belongs in one place. If a fact is already maintained in one of the
 above, link to it instead of copying it.
+
+## Prompt Tracking Policy
+
+Track `agent-prompts/` only for reusable worker contracts that are stable across
+issues, such as frontend slice or structure extraction roles. Do not track
+per-issue prompts, scratch prompts, rmux captures, or worker reports; keep those
+under ignored `agent-runs/<session>/`.
+
+Project-local Codex/rmux tooling belongs under ignored `.codex/skills/`, not
+`agent-prompts/` and not product `skills/`.
 
 ## Local Environment
 
@@ -66,11 +91,15 @@ Last known good evidence:
 - PR #11 CI `App` check passed.
 - AI `/models` and `/chat/completions` test calls passed with `qwen-plus`.
 
+This evidence predates the latest local documentation/API-contract cleanup. Run
+the full gate again before reporting the current branch as release-ready.
+
 ## Orchestrator Workflow
 
 1. Pick one GitHub Issue with `status:now`.
 2. Make or reuse a focused branch for that issue.
-3. If delegating, write a narrow worker prompt using `agent-prompts/`.
+3. If delegating, write a narrow worker prompt. Use `agent-prompts/` as reusable
+   templates and put the concrete prompt under `agent-runs/`.
 4. Give each worker:
    - exact role and goal
    - allowed files
@@ -93,6 +122,42 @@ Last known good evidence:
 Prefer one issue per PR. Split PRs by workflow slice, not by arbitrary file
 groups.
 
+## rmux Delegation
+
+The current working local route is:
+
+```bash
+.codex/skills/rmux-delegation/scripts/rmux_worker.sh \
+  --session issue63-wrapper-intake-003 \
+  --role issue63-wrapper-intake \
+  --prompt agent-runs/issue63-wrapper-intake/prompt.md \
+  --worktree /home/q2635/wsl-workspace/case-library \
+  --wait \
+  --poll 60 \
+  --lines 700
+```
+
+Local reality:
+
+- `ccd` is available through `~/.zshrc` as
+  `claude --dangerously-skip-permissions`.
+- The wrapper now defaults to `ccd`, waits for shell/Claude readiness, pastes
+  the prompt, waits for a standalone `DONE <role>` line, and writes final
+  captures under `agent-runs/<session>/`.
+- After a worker finishes, collect and close the rmux session with:
+
+```bash
+.codex/skills/rmux-delegation/scripts/rmux_collect.sh \
+  --session issue63-wrapper-intake-003 \
+  --role issue63-wrapper-intake
+```
+
+  This writes `collect-*` artifacts under `agent-runs/<session>/` and closes
+  the session by default.
+- Verified smoke: `issue63-wrapper-intake-003` read GitHub issue #63 and local
+  docs, then produced `DONE issue63-wrapper-intake`.
+- Workers still do not commit, push, read `.env`, or touch historical dirs.
+
 ## Frontend Rules
 
 Before implementing create-case screens, extract structure from
@@ -113,9 +178,14 @@ slices and compare screenshots.
 Keep current `skills/` as domain prompt/template assets. Do not migrate old
 `.claude/` or `.codex/` workflow bundles into this repo.
 
-Future product AI review should be rebuilt around the `.env` chat settings. Do
-not fake durable AI review or attachment workflow in the frontend until backend
-support exists.
+Product AI review semantics are clarified in issue #63 and `docs/api.md`:
+`AI 审核` means user-facing pre-submit self-check. It is advisory material
+submitted as `ai_reviews` for human expert review, not automatic approval or
+rejection.
+
+AI integration should be rebuilt around the `.env` chat settings. Do not fake AI
+output or browser-side AI calls. When unavailable, return/show an explicit
+disabled or unavailable state.
 
 Useful built-in/local skills for orchestrators:
 

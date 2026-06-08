@@ -1,59 +1,90 @@
-# Claude Code 项目说明
+# Claude Code Handoff
 
-本文件记录 Claude Code 专用项目说明。所有 AI 编码 agent 共享规范见 `AGENTS.md`。
+Read `AGENTS.md` first. It is the shared entrypoint and contains the current
+branch, PR, issue, verification gate, and delegation rules.
 
-## 开发环境
+## Current Assignment Shape
 
-必须使用仓库内置 Dev Container 或 Docker Compose 容器执行开发、测试、lint、format、typecheck、构建和提交前验证。宿主机命令只用于只读排查，不能作为交付依据。
+GPT is the orchestrator. Claude workers should take one narrow GitHub issue slice
+at a time, implement only the assigned files, report results, and stop. Workers
+do not commit, push, open PRs, delete worktrees, delete volumes, read `.env`, or
+modify historical directories.
 
-Dev Container 通过 Docker Compose 启动：
+For issue #63, the recommended first slice is backend AI boundary only:
 
-- `app`：FastAPI 后端
-- `mongo`：MongoDB
-- `frontend`：Vue/Vite 前端（当 `frontend/package.json` 存在时启用）
+- Add server-side prompt metadata/loading and OpenAI-compatible chat endpoint.
+- Preserve `AI_API_KEY` server-side only.
+- Return explicit unavailable/503 behavior when AI is disabled or the remote
+  model call fails.
+- Do not implement frontend workflow or case persistence in the same slice unless
+  explicitly assigned.
 
-除非命令另有说明，默认在仓库根目录执行。最终交付检查必须在容器环境中完成。
+## AI Review Semantics
 
-## 常用检查
+`AI 审核` means pre-submit author self-check. It is advisory material that the
+author submits with the case as `ai_reviews` for human expert review. It is not
+admin review, not automatic approval/rejection, and not durable multi-turn chat.
 
-```bash
-make check
-make test
-make compose-config
-```
+Contract source:
 
-底层命令：
+- `docs/api.md`
+- GitHub issue #63:
+  `https://github.com/yangxuchen5898/case-library/issues/63`
 
-```bash
-ruff check backend scripts
-mypy backend
-pytest
-cd frontend && npm test
-cd frontend && npm run build
-docker compose config
-```
+Important contract constraints:
 
-## 项目结构
+- One backend chat boundary: `POST /api/ai/chat`
+- Prompt metadata only: `GET /api/prompts`, never prompt content
+- Workflow IDs:
+  `workflow/completeness`, `workflow/categorization`,
+  `workflow/expression`, `workflow/score`
+- `ai_reviews` max 3 records FIFO
+- No fake AI output and no browser-side credentials
 
-- `backend/`：FastAPI 后端。目标结构为 `backend/core/`，旧版入口为 `backend/main.py`。
-- `frontend/`：Vue 3 + Vite 前端；旧版静态前端位于 `frontend/index.html`、`frontend/css/`、`frontend/js/`。
-- `prompts/` 或 `skills/`：AI/prompt 相关资源。
-- `tests/`：后端、契约和端到端测试。
-- `docs/`：开发、质量、API、AI 和设计文档。
+## rmux Worker Startup
 
-## 后端冻结
-
-除非任务明确要求修改后端行为，否则将后端视为冻结状态。优先补充契约测试和窄范围修复，避免大范围重构。
-
-当前后端类型检查基线是：
+Use the project-local wrapper from the repo root:
 
 ```bash
-mypy backend
+.codex/skills/rmux-delegation/scripts/rmux_worker.sh \
+  --session issue63-backend-ai-001 \
+  --role backend-ai \
+  --prompt agent-runs/issue63-backend-ai/prompt.md \
+  --worktree /home/q2635/wsl-workspace/case-library \
+  --wait \
+  --poll 60 \
+  --lines 700
 ```
 
+Local `ccd` resolves through `~/.zshrc` to:
 
-## AI 集成
+```bash
+claude --dangerously-skip-permissions
+```
 
-修改 AI 配置、prompt 加载、响应解析或 LLM client 行为时，应同步更新 `docs/ai.md`。
+The wrapper has been verified with `issue63-wrapper-intake-003`; final capture is
+under `agent-runs/issue63-wrapper-intake-003/final.txt`.
 
-不要提交真实服务凭据。私有配置应放在被忽略的 `.env` 文件中。
+After a worker finishes, collect the final pane state and close the rmux session:
+
+```bash
+.codex/skills/rmux-delegation/scripts/rmux_collect.sh \
+  --session issue63-backend-ai-001 \
+  --role backend-ai
+```
+
+Collection writes `collect-*` artifacts under `agent-runs/<session>/` and closes
+the session by default.
+
+## Prompt Files
+
+- `agent-prompts/`: tracked reusable prompt contracts only.
+- `agent-runs/<session>/`: ignored per-issue prompts, reports, and rmux captures.
+- `.codex/skills/rmux-delegation/`: ignored project-local orchestration tooling.
+- `skills/`: product/domain prompt-template assets, not Codex workflow tooling.
+
+## Checks
+
+Use the gate in `AGENTS.md` before claiming completion. For narrow worker slices,
+run only the assigned checks and report skipped checks with reasons. Final
+orchestrator verification should run the full gate.
