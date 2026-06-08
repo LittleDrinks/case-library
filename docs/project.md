@@ -225,10 +225,29 @@ make smoke-e2e
 cd frontend && npm run test:e2e
 ```
 
-The smoke test runs on both desktop and mobile viewports, saves a success
-screenshot per project to `agent-runs/screenshots`, and also captures
-screenshots, traces, and video on failure. It uses deterministic test accounts
-created via `docker compose exec` against `backend/account_admin.py`.
+For the containerized development E2E runner, use:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
+```
+
+The dev compose app startup normalizes deterministic test accounts via
+`scripts/seed_e2e_accounts.py`. Equivalent Make targets are available:
+
+```bash
+make dev-up
+make dev-e2e
+make dev-down
+```
+
+The audit E2E currently runs the desktop Playwright project, saves audit and
+failure screenshots to `agent-runs/screenshots`, and verifies:
+
+```text
+default admin login requires password change
+author submit -> admin approve -> public search
+```
 
 Screenshot checks belong with frontend work. Workers must extract layout facts
 from `docs/design/create/*.png` before implementing create-case screens.

@@ -1,4 +1,4 @@
-.PHONY: install-dev lint format check test cov smoke smoke-e2e frontend-build compose-config run up dev down logs
+.PHONY: install-dev lint format check test cov smoke smoke-e2e frontend-build compose-config run up dev down logs dev-up dev-seed dev-e2e dev-down
 
 install-dev:
 	pip install -r requirements.txt -r requirements-dev.txt
@@ -29,6 +29,18 @@ smoke:
 
 smoke-e2e:
 	cd frontend && npm run test:e2e
+
+dev-up:
+	docker compose -f docker-compose.dev.yml up -d --build
+
+dev-seed:
+	docker compose -f docker-compose.dev.yml exec app python scripts/seed_e2e_accounts.py
+
+dev-e2e:
+	docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
+
+dev-down:
+	docker compose -f docker-compose.dev.yml down
 
 frontend-build:
 	@if [ -f frontend/package.json ]; then \

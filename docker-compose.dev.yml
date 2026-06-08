@@ -1,0 +1,100 @@
+name: case-library-dev
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+    init: true
+    ports:
+      - "8001:8001"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: case_library
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODELS: ${AI_MODELS:-}
+      AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-60}
+      AI_REVIEW_ENABLED: ${AI_REVIEW_ENABLED:-false}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c "python backend/init_users.py || true;
+             python scripts/seed_e2e_accounts.py || true;
+             uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/constants', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    image: node:20-bookworm-slim
+    init: true
+    working_dir: /app
+    ports:
+      - "${FRONTEND_PORT:-18080}:5173"
+    environment:
+      NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      app:
+        condition: service_healthy
+    command: >
+      sh -c "npm config set registry \"$${NPM_CONFIG_REGISTRY}\";
+             if [ -f package-lock.json ]; then npm ci; else npm install; fi;
+             npm run dev"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  mongo:
+    image: mongo:7
+    expose:
+      - "27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh --quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    profiles:
+      - e2e
+    init: true
+    working_dir: /app/frontend
+    environment:
+      NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      PLAYWRIGHT_BASE_URL: http://frontend:5173
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/frontend/node_modules
+    depends_on:
+      frontend:
+        condition: service_healthy
+    command: >
+      sh -c "npm config set registry \"$${NPM_CONFIG_REGISTRY}\";
+             npx playwright test tests/audit.spec.js --project=chromium-desktop"
+
+volumes:
+  mongo_data:
+  frontend_node_modules:

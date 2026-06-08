@@ -8,7 +8,7 @@ export default {
   reporter: "list",
   outputDir: "../agent-runs/screenshots",
   use: {
-    baseURL: "http://localhost:18080",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://localhost:18080",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "on-first-retry",
