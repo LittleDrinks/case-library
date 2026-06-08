@@ -122,7 +122,9 @@ test(
     await expect(
       page.getByRole("heading", { name: "提交前自查" })
     ).toBeVisible();
-    await expect(page.getByText("完整度指数")).toBeVisible();
+    await expect(page.getByText("运行全部自查")).toBeVisible();
+    await page.getByRole("button", { name: "运行此项" }).first().click();
+    await expect(page.getByText("AI 审核功能未启用")).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();
 
     // -- Step 5: Submit --

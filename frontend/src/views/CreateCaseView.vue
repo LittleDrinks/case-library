@@ -246,42 +246,89 @@
         <!-- Step 4: AI 审核 -->
         <template v-if="currentStep === 3">
           <div class="review-header">
-            <span class="review-badge">填写进度</span>
-            <span class="review-percent">{{ reviewScore }}% 已填写</span>
+            <span class="review-badge">AI 自查</span>
+            <span class="review-percent">{{ aiReviewProgress }}% 已完成</span>
           </div>
           <div class="review-progress-track">
-            <div class="review-progress-bar" :style="{ width: reviewScore + '%' }"></div>
+            <div class="review-progress-bar" :style="{ width: aiReviewProgress + '%' }"></div>
           </div>
           <p class="review-note">
-            以下进度与评分仅反映当前表单必填项的<strong>填写完整度</strong>，由作者自行核对，不涉及任何 AI 审核或服务端判定。
+            以下结果来自后端 AI 自查接口，仅作为作者提交前参考，不代表专家审核结论。
           </p>
 
+          <div v-if="aiPromptLoadError" class="ai-unavailable-banner" role="status">
+            {{ aiPromptLoadError }}
+          </div>
+
+          <div class="ai-review-toolbar">
+            <button
+              type="button"
+              class="btn-primary"
+              :disabled="aiRunningAll || !canRunAiReview"
+              @click="runAllAiReviews"
+            >
+              {{ aiRunningAll ? '自查中…' : '运行全部自查' }}
+            </button>
+            <span class="ai-toolbar-note">
+              需要先填写标题、正文、类型和主题。AI 不可用时可继续提交人工审核。
+            </span>
+          </div>
+
           <div class="review-grid">
-            <div class="review-card">
-              <div class="review-card-title">内容结构</div>
-              <div class="review-card-status" :class="{ pass: checklist.structure }">
-                {{ checklist.structure ? '已完整' : '待完善' }}
+            <div v-for="item in aiReviewItems" :key="item.id" class="review-card ai-review-card">
+              <div class="review-card-top">
+                <div>
+                  <div class="review-card-title">{{ item.name }}</div>
+                  <div class="review-card-desc">{{ item.description }}</div>
+                </div>
+                <span class="ai-status-pill" :class="aiReviewState[item.id].status">
+                  {{ aiStatusLabel(aiReviewState[item.id].status) }}
+                </span>
               </div>
-              <div class="review-card-desc">标题、正文、部门等必填项是否完整。</div>
-            </div>
-            <div class="review-card">
-              <div class="review-card-title">分类选择</div>
-              <div class="review-card-status" :class="{ pass: checklist.classification }">
-                {{ checklist.classification ? '已选择' : '待选择' }}
+
+              <div v-if="aiReviewState[item.id].status === 'idle'" class="ai-placeholder">
+                尚未运行。点击下方按钮获取作者侧自查建议。
               </div>
-              <div class="review-card-desc">案例类型与主题是否已选择。</div>
-            </div>
-            <div class="review-card">
-              <div class="review-card-title">正文与标题</div>
-              <div class="review-card-status" :class="{ pass: checklist.expression }">
-                {{ checklist.expression ? '已满足' : '待补充' }}
+
+              <div v-else-if="aiReviewState[item.id].status === 'loading'" class="ai-placeholder">
+                正在请求后端 AI 自查…
               </div>
-              <div class="review-card-desc">正文长度与标题字数是否达到基本要求。</div>
-            </div>
-            <div class="review-card score-card">
-              <div class="review-card-title">完整度指数</div>
-              <div class="score-circle">{{ reviewScore }}</div>
-              <div class="review-card-desc">满分 100，基于必填项完整度。</div>
+
+              <div v-else-if="aiReviewState[item.id].status === 'error'" class="ai-error">
+                {{ aiReviewState[item.id].error }}
+              </div>
+
+              <div v-else class="ai-result">
+                <div v-if="aiReviewState[item.id].parsed" class="ai-result-body">
+                  <div v-if="aiReviewState[item.id].parsed.detail" class="ai-detail">
+                    {{ aiReviewState[item.id].parsed.detail }}
+                  </div>
+                  <div v-if="aiReviewState[item.id].parsed.score != null" class="ai-score">
+                    评分 {{ aiReviewState[item.id].parsed.score }}
+                  </div>
+                  <ul
+                    v-if="Array.isArray(aiReviewState[item.id].parsed.suggestions) && aiReviewState[item.id].parsed.suggestions.length"
+                    class="ai-suggestions"
+                  >
+                    <li v-for="suggestion in aiReviewState[item.id].parsed.suggestions" :key="suggestion">
+                      {{ suggestion }}
+                    </li>
+                  </ul>
+                </div>
+                <pre v-else class="ai-answer">{{ aiReviewState[item.id].answer }}</pre>
+                <div v-if="aiReviewState[item.id].parse_error" class="ai-parse-warning">
+                  {{ aiReviewState[item.id].parse_error }}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="btn-secondary ai-run-btn"
+                :disabled="aiReviewState[item.id].status === 'loading' || !canRunAiReview"
+                @click="runAiReview(item.id)"
+              >
+                {{ aiReviewState[item.id].status === 'loading' ? '运行中…' : '运行此项' }}
+              </button>
             </div>
           </div>
         </template>
@@ -365,6 +412,7 @@ import {
   updateCase,
   submitCaseById,
 } from "../api/cases.js";
+import { listPrompts, runPrompt } from "../api/ai.js";
 
 const DRAFT_KEY = "case_library_create_case_draft";
 
@@ -416,6 +464,51 @@ const constants = reactive({
 const showHelper = ref(false);
 const helperInput = ref("");
 const helperResponse = ref("");
+const aiPromptLoadError = ref("");
+const aiRunningAll = ref(false);
+
+const DEFAULT_AI_REVIEW_ITEMS = [
+  {
+    id: "workflow/completeness",
+    name: "完整性检查",
+    description: "检查案例是否包含背景、做法、成效与反思等关键板块。",
+    variables: ["title", "content"],
+  },
+  {
+    id: "workflow/categorization",
+    name: "分类检查",
+    description: "检查案例类型和主题是否与正文内容匹配。",
+    variables: ["title", "content", "type", "theme"],
+  },
+  {
+    id: "workflow/expression",
+    name: "表达检查",
+    description: "检查案例表达是否清晰、正式、适合专家审核。",
+    variables: ["title", "content"],
+  },
+  {
+    id: "workflow/score",
+    name: "综合评分",
+    description: "给出提交前综合自查评分和主要风险。",
+    variables: ["title", "content"],
+  },
+];
+
+const aiReviewItems = ref([...DEFAULT_AI_REVIEW_ITEMS]);
+const aiReviewState = reactive(
+  Object.fromEntries(
+    DEFAULT_AI_REVIEW_ITEMS.map((item) => [
+      item.id,
+      {
+        status: "idle",
+        answer: "",
+        parsed: null,
+        parse_error: null,
+        error: "",
+      },
+    ])
+  )
+);
 
 const displayAuthor = computed(() => {
   const user = currentUser();
@@ -495,6 +588,22 @@ const canSubmit = computed(() => {
     !!form.type &&
     !!form.theme
   );
+});
+
+const canRunAiReview = computed(() => {
+  return !!(
+    form.title.trim() &&
+    form.content.trim() &&
+    form.type &&
+    form.theme &&
+    isAuthenticated.value
+  );
+});
+
+const aiReviewProgress = computed(() => {
+  const total = aiReviewItems.value.length || 1;
+  const done = aiReviewItems.value.filter((item) => aiReviewState[item.id].status === "success").length;
+  return Math.round((done / total) * 100);
 });
 
 function touch(field) {
@@ -670,6 +779,104 @@ function resetForm() {
   touched.content = false;
   touched.type = false;
   touched.theme = false;
+  for (const item of aiReviewItems.value) {
+    resetAiReviewItem(item.id);
+  }
+}
+
+function ensureAiReviewState(promptId) {
+  if (!aiReviewState[promptId]) {
+    aiReviewState[promptId] = {
+      status: "idle",
+      answer: "",
+      parsed: null,
+      parse_error: null,
+      error: "",
+    };
+  }
+  return aiReviewState[promptId];
+}
+
+function resetAiReviewItem(promptId) {
+  const state = ensureAiReviewState(promptId);
+  state.status = "idle";
+  state.answer = "";
+  state.parsed = null;
+  state.parse_error = null;
+  state.error = "";
+}
+
+function aiStatusLabel(status) {
+  if (status === "loading") return "运行中";
+  if (status === "success") return "已完成";
+  if (status === "error") return "不可用";
+  return "待运行";
+}
+
+function buildAiVariables() {
+  return {
+    title: form.title.trim(),
+    content: form.content.trim(),
+    type: form.type,
+    theme: form.theme,
+  };
+}
+
+async function loadAiPrompts() {
+  aiPromptLoadError.value = "";
+  try {
+    const prompts = await listPrompts("workflow");
+    const mapped = DEFAULT_AI_REVIEW_ITEMS.map((fallback) => {
+      const prompt = prompts.find((item) => item.id === fallback.id);
+      return prompt
+        ? {
+            id: prompt.id,
+            name: prompt.name || fallback.name,
+            description: prompt.description || fallback.description,
+            variables: prompt.variables || fallback.variables,
+          }
+        : fallback;
+    });
+    aiReviewItems.value = mapped;
+    for (const item of mapped) ensureAiReviewState(item.id);
+  } catch (err) {
+    aiPromptLoadError.value = err.message || "AI 自查提示词暂不可用";
+  }
+}
+
+async function runAiReview(promptId) {
+  if (!canRunAiReview.value) {
+    aiPromptLoadError.value = "请先登录并填写标题、正文、类型和主题后再运行 AI 自查。";
+    return;
+  }
+  const state = ensureAiReviewState(promptId);
+  state.status = "loading";
+  state.answer = "";
+  state.parsed = null;
+  state.parse_error = null;
+  state.error = "";
+  try {
+    const data = await runPrompt(promptId, buildAiVariables());
+    state.status = "success";
+    state.answer = data.answer || "";
+    state.parsed = data.parsed || null;
+    state.parse_error = data.parse_error || null;
+  } catch (err) {
+    state.status = "error";
+    state.error = err.message || "AI 自查暂不可用";
+  }
+}
+
+async function runAllAiReviews() {
+  if (!canRunAiReview.value || aiRunningAll.value) return;
+  aiRunningAll.value = true;
+  try {
+    for (const item of aiReviewItems.value) {
+      await runAiReview(item.id);
+    }
+  } finally {
+    aiRunningAll.value = false;
+  }
 }
 
 function runHelper() {
@@ -702,6 +909,9 @@ onMounted(async () => {
   } catch {
     // Safe fallbacks already set
   }
+  if (isAuthenticated.value) {
+    await loadAiPrompts();
+  }
 });
 
 // Persist form changes locally as the user types
@@ -717,6 +927,12 @@ watch(
   () => persistDraft(),
   { deep: true }
 );
+
+watch(currentStep, (step) => {
+  if (step === 3 && isAuthenticated.value) {
+    loadAiPrompts();
+  }
+});
 
 // Reset scroll to the top of the page whenever the wizard step changes
 watch(currentStep, () => {
@@ -1271,6 +1487,30 @@ textarea {
   margin: 0 0 18px;
 }
 
+.ai-unavailable-banner {
+  padding: 12px 14px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.ai-review-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ai-toolbar-note {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
 .review-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1283,6 +1523,104 @@ textarea {
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-surface);
+}
+
+.ai-review-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 210px;
+}
+
+.review-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-status-pill {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-status-pill.loading {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ai-status-pill.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.ai-status-pill.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.ai-placeholder,
+.ai-error,
+.ai-result {
+  flex: 1;
+  margin: 4px 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-placeholder {
+  color: var(--color-text-muted);
+}
+
+.ai-error {
+  color: #b91c1c;
+}
+
+.ai-detail {
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.ai-score {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.ai-suggestions {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-text-secondary);
+}
+
+.ai-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font: inherit;
+  color: var(--color-text-secondary);
+}
+
+.ai-parse-warning {
+  margin-top: 8px;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.ai-run-btn {
+  align-self: flex-start;
 }
 
 .score-card {

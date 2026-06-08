@@ -89,8 +89,10 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
-    await expect(page.getByText("不涉及任何 AI 审核或服务端判定")).toBeVisible();
-    await capture(page, testInfo, "create-step-4-local-check");
+    await expect(page.getByText("运行全部自查")).toBeVisible();
+    await page.getByRole("button", { name: "运行此项" }).first().click();
+    await expect(page.getByText("AI 审核功能未启用")).toBeVisible();
+    await capture(page, testInfo, "create-step-4-ai-unavailable");
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByText("确认并提交")).toBeVisible();
