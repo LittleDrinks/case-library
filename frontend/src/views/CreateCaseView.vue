@@ -88,12 +88,7 @@
 
       <!-- Unauthenticated notice -->
       <div v-if="!isAuthenticated" class="login-required-card">
-        <div class="login-required-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="34" height="34">
-            <rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
-            <path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"></path>
-          </svg>
-        </div>
+        <div class="login-required-icon" aria-hidden="true">🔒</div>
         <h3>请先登录</h3>
         <p>创建案例需要登录账号。请先登录后再继续。</p>
       </div>
@@ -144,13 +139,7 @@
           </div>
 
           <div class="tip-card">
-            <div class="tip-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="28" height="28">
-                <path d="M9 18h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                <path d="M10 22h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                <path d="M8 14c-1.4-1.1-2-2.7-2-4.2A6 6 0 0 1 18 9.8c0 1.5-.6 3.1-2 4.2-.8.7-1 1.4-1 2H9c0-.6-.2-1.3-1-2Z" fill="none" stroke="currentColor" stroke-width="2"></path>
-              </svg>
-            </div>
+            <div class="tip-icon" aria-hidden="true">💡</div>
             <div class="tip-body">
               <div class="tip-title">编写小贴士</div>
               <ul>
@@ -185,15 +174,7 @@
         <!-- Step 3: 分类选择 -->
         <template v-if="currentStep === 2">
           <div class="hint-banner">
-            <span class="hint-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="22" height="22">
-                <path d="M12 3v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                <rect x="5" y="7" width="14" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
-                <circle cx="9" cy="12" r="1" fill="currentColor"></circle>
-                <circle cx="15" cy="12" r="1" fill="currentColor"></circle>
-                <path d="M9 16h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-              </svg>
-            </span>
+            <span class="hint-icon" aria-hidden="true">🤖</span>
             <span>不确定分类？可点击右下角 AI 助手，根据已填写内容获取一次本地建议。</span>
           </div>
 
@@ -258,18 +239,14 @@
             aria-label="打开 AI 分类助手"
             @click="showHelper = true"
           >
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-              <path d="M12 3v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-              <rect x="5" y="7" width="14" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
-              <path d="M9 12h.01M15 12h.01M9 16h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            </svg>
+            🤖
           </button>
         </template>
 
         <!-- Step 4: AI 审核 -->
         <template v-if="currentStep === 3">
           <div class="review-header">
-            <span class="review-badge">整体审核进度</span>
+            <span class="review-badge">AI 自查</span>
             <span class="review-percent">{{ aiReviewProgress }}% 已完成</span>
           </div>
           <div class="review-progress-track">
@@ -297,43 +274,16 @@
             </span>
           </div>
 
-          <div class="review-grid" data-testid="ai-review-grid">
-            <div
-              v-for="item in aiReviewItems"
-              :key="item.id"
-              class="review-card ai-review-card"
-              :class="{ 'score-summary-card': item.id === 'workflow/score' }"
-            >
+          <div class="review-grid">
+            <div v-for="item in aiReviewItems" :key="item.id" class="review-card ai-review-card">
               <div class="review-card-top">
-                <div class="review-card-icon" aria-hidden="true">
-                  <svg v-if="item.id === 'workflow/completeness'" viewBox="0 0 24 24" width="32" height="32">
-                    <path d="M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v5H4z" fill="none" stroke="currentColor" stroke-width="2"></path>
-                    <path d="M14 17l2 2 4-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                  <svg v-else-if="item.id === 'workflow/categorization'" viewBox="0 0 24 24" width="32" height="32">
-                    <path d="M5 4h14v16H5z" fill="none" stroke="currentColor" stroke-width="2"></path>
-                    <path d="M8 8h5M8 12h4M8 16h3M15 15l2 2 3-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                  <svg v-else-if="item.id === 'workflow/expression'" viewBox="0 0 24 24" width="32" height="32">
-                    <path d="M5 19 12 5l7 14M8 14h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    <path d="m16 6 2 2 3-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                </div>
-                <div class="review-card-copy">
+                <div>
                   <div class="review-card-title">{{ item.name }}</div>
                   <div class="review-card-desc">{{ item.description }}</div>
                 </div>
-                <span class="ai-status-pill" :class="aiResultClass(item.id)">
-                  {{ aiResultLabel(item.id) }}
+                <span class="ai-status-pill" :class="aiReviewState[item.id].status">
+                  {{ aiStatusLabel(aiReviewState[item.id].status) }}
                 </span>
-              </div>
-
-              <div v-if="item.id === 'workflow/score'" class="score-summary">
-                <div class="score-ring" :style="{ '--score-deg': scoreRingDegrees(item.id) }">
-                  <strong>{{ scoreValue(item.id) }}</strong>
-                  <span>SCORE</span>
-                </div>
-                <div class="score-summary-text">{{ scoreRating(item.id) }}</div>
               </div>
 
               <div v-if="aiReviewState[item.id].status === 'idle'" class="ai-placeholder">
@@ -386,25 +336,13 @@
         <!-- Step 5: 提交确认 -->
         <template v-if="currentStep === 4">
           <div class="pass-notice">
-            <span class="pass-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="22" height="22">
-                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle>
-                <path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-              </svg>
-            </span>
-            <span>专家人工审核流程：提交后将进入待审核队列，AI 自查结果仅作为专家参考。</span>
+            <span class="pass-icon" aria-hidden="true">ℹ</span>
+            <span>提交后案例将进入专家人工审核流程，请耐心等待。</span>
           </div>
 
           <div class="submit-card">
             <div class="submit-card-header">
-              <div class="submit-title-wrap">
-                <span class="submit-title-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="26" height="26">
-                    <path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                </span>
-                <h3>提交至专家审核</h3>
-              </div>
+              <h3>提交至专家审核</h3>
               <span class="status-pill">待审核</span>
             </div>
             <ul class="submit-checklist">
@@ -892,53 +830,6 @@ function aiStatusLabel(status) {
   return "待运行";
 }
 
-function aiResultClass(promptId) {
-  const state = aiReviewState[promptId];
-  if (!state) return "idle";
-  if (state.status !== "success") return state.status;
-  const parsed = state.parsed;
-  if (parsed && typeof parsed === "object") {
-    if (parsed.pass === false) return "warning";
-    const score = Number(parsed.score);
-    if (Number.isFinite(score) && score < 70) return "warning";
-  }
-  return "success";
-}
-
-function aiResultLabel(promptId) {
-  const className = aiResultClass(promptId);
-  if (className === "loading") return "运行中";
-  if (className === "error") return "不可用";
-  if (className === "warning") return promptId === "workflow/score" ? "需关注" : "待优化";
-  if (className === "success") {
-    if (promptId === "workflow/categorization") return "准确";
-    if (promptId === "workflow/expression") return "规范";
-    return "合格";
-  }
-  return "待运行";
-}
-
-function scoreValue(promptId) {
-  const parsed = aiReviewState[promptId]?.parsed;
-  const score = Number(parsed?.score);
-  if (Number.isFinite(score)) return Math.max(0, Math.min(100, Math.round(score)));
-  return aiReviewState[promptId]?.status === "success" ? 80 : "--";
-}
-
-function scoreRingDegrees(promptId) {
-  const value = scoreValue(promptId);
-  if (typeof value !== "number") return "0deg";
-  return `${Math.round((value / 100) * 360)}deg`;
-}
-
-function scoreRating(promptId) {
-  const value = scoreValue(promptId);
-  if (typeof value !== "number") return "等待综合评估";
-  if (value >= 85) return "综合评估优秀";
-  if (value >= 70) return "综合评估良好";
-  return "综合评估需修改";
-}
-
 function buildAiVariables() {
   return {
     title: form.title.trim(),
@@ -1100,7 +991,7 @@ watch(currentStep, (step) => {
 // Reset scroll to the top of the page whenever the wizard step changes
 watch(currentStep, () => {
   nextTick(() => {
-    window.scrollTo({ top: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
 });
 </script>
@@ -1110,72 +1001,71 @@ watch(currentStep, () => {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - var(--header-height));
-  background: #fff;
+  background: var(--color-bg);
 }
 
 /* Desktop rail */
 .wizard-rail {
   display: none;
-  width: 288px;
+  width: 280px;
   flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #eceff3;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
 }
 
 .rail-header {
-  padding: 56px 32px 48px;
-  border-bottom: 0;
+  padding: 24px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .rail-header-top {
-  display: block;
-  margin-bottom: 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 
 .rail-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .rail-percent {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
-  color: #17c964;
+  color: #16a34a;
 }
 
 .rail-progress-track {
   height: 6px;
-  background: #f0f2f4;
+  background: #e5e7eb;
   border-radius: 3px;
   overflow: hidden;
-  max-width: 212px;
 }
 
 .rail-progress-bar {
   height: 100%;
-  background: #17c964;
+  background: #16a34a;
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
 .rail-steps {
-  padding: 28px 0 24px;
+  padding: 8px 0 24px;
 }
 
 .rail-step {
   display: flex;
   align-items: center;
-  gap: 24px;
-  min-height: 58px;
-  padding: 0 32px;
+  gap: 12px;
+  padding: 14px 20px;
   position: relative;
-  color: #9aa0aa;
+  color: var(--color-text-secondary);
 }
 
 .rail-step.active {
-  background: #fff5f6;
+  background: var(--color-brand-light);
   color: var(--color-brand);
 }
 
@@ -1187,10 +1077,11 @@ watch(currentStep, () => {
   bottom: 0;
   width: 4px;
   background: var(--color-brand);
+  border-radius: 0 2px 2px 0;
 }
 
 .rail-step.completed {
-  color: #6b7280;
+  color: var(--color-text);
 }
 
 .rail-step.future {
@@ -1200,16 +1091,15 @@ watch(currentStep, () => {
 .rail-step-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
 }
 
 .step-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  color: currentColor;
+  width: 22px;
+  height: 22px;
 }
 
 .step-marker {
@@ -1221,30 +1111,23 @@ watch(currentStep, () => {
   border-radius: 50%;
   font-size: 12px;
   font-weight: 700;
-  border: 2px solid #e0e5ec;
-  color: #c8cfd8;
-  background: #fff;
+  border: 2px solid currentColor;
 }
 
 .rail-step.completed .step-marker {
-  background: #fff;
-  color: var(--color-brand);
+  background: var(--color-brand);
+  color: #fff;
   border-color: var(--color-brand);
 }
 
-.rail-step.active .step-marker {
-  border-color: #dbe3ec;
-  color: #b8c2cf;
-}
-
 .rail-step.future .step-marker {
-  border-color: #e0e5ec;
-  color: #c8cfd8;
+  border-color: var(--color-text-muted);
+  color: var(--color-text-muted);
 }
 
 .step-label {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .rail-step.active .step-label {
@@ -1351,14 +1234,14 @@ watch(currentStep, () => {
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 34px 16px 40px;
-  max-width: none;
+  padding: 24px 16px 40px;
+  max-width: 960px;
 }
 
 .wizard-breadcrumb {
-  font-size: 15px;
-  color: #5d6470;
-  margin-bottom: 26px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
 }
 
 .bc-current {
@@ -1371,38 +1254,36 @@ watch(currentStep, () => {
 }
 
 .wizard-title {
-  margin: 0 0 14px;
-  font-size: 32px;
-  font-weight: 500;
-  color: #111111;
-  letter-spacing: 0;
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text);
 }
 
 .wizard-desc {
-  margin: 0 0 42px;
-  font-size: 16px;
-  color: #606773;
-  line-height: 1.8;
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
 }
 
 .wizard-form {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-  max-width: 920px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 20px;
 }
 
 .field {
-  margin-bottom: 30px;
+  margin-bottom: 18px;
 }
 
 .field label {
   display: block;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  color: #191919;
-  margin-bottom: 10px;
+  color: var(--color-text);
+  margin-bottom: 6px;
 }
 
 .required {
@@ -1414,11 +1295,11 @@ input[type="text"],
 select,
 textarea {
   width: 100%;
-  padding: 14px 16px;
-  border: 1px solid #d9dee7;
-  border-radius: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
   font-family: inherit;
-  font-size: 16px;
+  font-size: 14px;
   color: var(--color-text);
   background: var(--color-surface);
   outline: none;
@@ -1429,7 +1310,7 @@ input[type="text"]:focus,
 select:focus,
 textarea:focus {
   border-color: var(--color-brand);
-  box-shadow: 0 0 0 2px rgba(191, 0, 36, 0.08);
+  box-shadow: 0 0 0 3px var(--color-brand-light);
 }
 
 input.readonly {
@@ -1438,15 +1319,15 @@ input.readonly {
 }
 
 textarea {
-  min-height: 430px;
+  min-height: 240px;
   resize: vertical;
   line-height: 1.6;
 }
 
 .field-help {
-  margin-top: 8px;
-  font-size: 13px;
-  color: #777e89;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .field-error {
@@ -1475,24 +1356,24 @@ textarea {
 .tip-card {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 26px 30px;
-  border: 1px solid #edf0f4;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.02);
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 6px;
+  background: #fafafa;
 }
 
 .tip-icon {
-  color: var(--color-brand);
+  font-size: 20px;
+  line-height: 1;
   flex-shrink: 0;
 }
 
 .tip-title {
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--color-text);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .tip-body {
@@ -1502,34 +1383,34 @@ textarea {
 .tip-body ul {
   margin: 0;
   padding-left: 16px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
-  line-height: 1.8;
+  line-height: 1.7;
 }
 
 .hint-banner {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 22px;
-  background: #fffdf3;
-  border: 1px solid #efe6bd;
-  border-radius: 0;
-  margin-bottom: 34px;
-  font-size: 15px;
-  color: #3f3530;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+  border-radius: 6px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: #713f12;
 }
 
 .hint-icon {
-  color: #d4aa20;
+  font-size: 16px;
   flex-shrink: 0;
 }
 
 /* Helper panel */
 .helper-panel {
   position: fixed;
-  right: 32px;
-  bottom: 92px;
+  right: 16px;
+  bottom: 80px;
   width: min(92vw, 360px);
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
@@ -1601,10 +1482,10 @@ textarea {
 
 .fab-helper {
   position: fixed;
-  right: 32px;
-  bottom: 32px;
-  width: 52px;
-  height: 52px;
+  right: 16px;
+  bottom: 24px;
+  width: 48px;
+  height: 48px;
   border-radius: 8px;
   background: var(--color-brand);
   color: #fff;
@@ -1620,45 +1501,44 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .review-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--color-error-bg);
   color: var(--color-brand);
-  font-size: 17px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .review-percent {
-  font-size: 16px;
-  font-weight: 500;
-  color: #4f5662;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .review-progress-track {
-  height: 6px;
-  background: #f4d4d9;
-  border-radius: 3px;
+  height: 8px;
+  background: #fee2e2;
+  border-radius: 4px;
   overflow: hidden;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .review-progress-bar {
   height: 100%;
   background: var(--color-brand);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .review-note {
-  font-size: 14px;
-  color: #6a7280;
-  margin: 0 0 24px;
-  line-height: 1.7;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0 0 18px;
 }
 
 .ai-unavailable-banner {
@@ -1675,8 +1555,8 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 28px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .ai-toolbar-note {
@@ -1688,51 +1568,34 @@ textarea {
 .review-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 28px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
 .review-card {
-  padding: 34px;
-  border: 1px solid #e8ebf0;
-  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
   background: var(--color-surface);
-  box-shadow: 0 3px 12px rgba(17, 24, 39, 0.025);
 }
 
 .ai-review-card {
   display: flex;
   flex-direction: column;
-  min-height: 238px;
-  position: relative;
+  min-height: 210px;
 }
 
 .review-card-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 26px;
-}
-
-.review-card-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  color: var(--color-brand);
-  flex-shrink: 0;
-}
-
-.review-card-copy {
-  min-width: 0;
-  flex: 1;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .ai-status-pill {
   flex-shrink: 0;
-  padding: 4px 12px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: #f3f4f6;
   color: var(--color-text-secondary);
@@ -1750,11 +1613,6 @@ textarea {
   color: #15803d;
 }
 
-.ai-status-pill.warning {
-  background: #fff7ed;
-  color: #c2410c;
-}
-
 .ai-status-pill.error {
   background: #fee2e2;
   color: #b91c1c;
@@ -1765,7 +1623,7 @@ textarea {
 .ai-result {
   flex: 1;
   margin: 4px 0 14px;
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -1779,7 +1637,7 @@ textarea {
 
 .ai-detail {
   color: var(--color-text);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .ai-score {
@@ -1819,18 +1677,16 @@ textarea {
   align-self: flex-start;
 }
 
-.score-summary-card {
-  align-items: center;
-  justify-content: center;
-  border: 2px solid var(--color-brand);
-  text-align: center;
+.score-card {
+  border-color: var(--color-brand);
+  background: var(--color-brand-light);
 }
 
 .review-card-title {
-  font-size: 22px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--color-text);
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .review-card-status {
@@ -1845,99 +1701,56 @@ textarea {
 }
 
 .review-card-desc {
-  font-size: 15px;
+  font-size: 12px;
   color: var(--color-text-secondary);
-  line-height: 1.8;
+  line-height: 1.5;
 }
 
-.score-summary {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  flex: 1;
-  width: 100%;
-}
-
-.score-ring {
-  --score-deg: 0deg;
-  width: 112px;
-  height: 112px;
+.score-circle {
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: conic-gradient(var(--color-brand) var(--score-deg), #f1f3f6 0);
-  color: var(--color-brand);
+  background: var(--color-brand);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  position: relative;
-  margin: 0 auto;
-}
-
-.score-ring::before {
-  content: "";
-  position: absolute;
-  inset: 12px;
-  border-radius: 50%;
-  background: #fff;
-}
-
-.score-ring strong,
-.score-ring span {
-  position: relative;
-}
-
-.score-ring strong {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 800;
-  line-height: 1;
-}
-
-.score-ring span {
-  margin-top: 5px;
-  color: #6b7280;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 2px;
-}
-
-.score-summary-text {
-  color: var(--color-brand);
-  font-size: 21px;
-  font-weight: 700;
+  margin-bottom: 8px;
 }
 
 /* Submit confirmation */
 .pass-notice {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 26px 34px;
-  border: 1px solid #efc7ce;
-  border-radius: 4px;
-  color: #3f3530;
-  font-size: 16px;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-brand);
+  border-radius: 6px;
+  color: var(--color-brand);
+  font-size: 14px;
   font-weight: 600;
-  margin-bottom: 32px;
-  line-height: 1.7;
+  margin-bottom: 18px;
 }
 
 .pass-icon {
-  width: 34px;
-  height: 34px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  color: #334155;
+  background: var(--color-brand);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
 .submit-card {
-  padding: 32px 42px;
-  border: 1px solid #efc7ce;
-  border-radius: 0;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
   background: var(--color-surface);
 }
 
@@ -1945,53 +1758,39 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 22px;
-}
-
-.submit-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
-
-.submit-title-icon {
-  color: var(--color-brand);
-  flex-shrink: 0;
+  margin-bottom: 14px;
 }
 
 .submit-card-header h3 {
   margin: 0;
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
 }
 
 .status-pill {
-  padding: 6px 14px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: #fff1f2;
-  color: var(--color-brand);
-  font-size: 13px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .submit-checklist {
   list-style: none;
-  margin: 0 0 26px;
+  margin: 0 0 20px;
   padding: 0;
 }
 
 .submit-checklist li {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 10px;
   padding: 8px 0;
-  font-size: 15px;
-  color: #4b5565;
-  border-bottom: 0;
-  line-height: 1.6;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .submit-checklist li:last-child {
@@ -2003,8 +1802,8 @@ textarea {
 }
 
 .submit-checklist .check {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -2022,18 +1821,17 @@ textarea {
 }
 
 .btn-submit-final {
-  width: auto;
-  min-width: 228px;
+  width: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 16px 28px;
+  padding: 12px 20px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--color-brand);
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2048,18 +1846,17 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 24px;
-  margin-top: 54px;
-  padding-top: 0;
-  border-top: 0;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
 }
 
 .btn-primary,
 .btn-secondary {
-  min-width: 150px;
-  padding: 14px 26px;
-  border-radius: 4px;
-  font-size: 16px;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s, transform 0.05s;
@@ -2072,9 +1869,9 @@ textarea {
 }
 
 .btn-secondary {
-  border: 1px solid #9da3ad;
+  border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
-  color: #4b5565;
+  color: var(--color-text-secondary);
 }
 
 .btn-primary:disabled,
@@ -2134,16 +1931,15 @@ textarea {
   }
 
   .wizard-main {
-    padding: 72px 72px 72px;
+    padding: 32px 40px 48px;
   }
 
   .wizard-title {
-    font-size: 42px;
+    font-size: 28px;
   }
 
   .wizard-form {
-    padding: 0;
-    max-width: min(980px, calc(100vw - 430px));
+    padding: 28px;
   }
 
   .tip-card {
@@ -2152,87 +1948,11 @@ textarea {
 
   .row.two-col {
     grid-template-columns: 1fr 1fr;
-    gap: 56px;
+    gap: 16px;
   }
 
   .review-grid {
     grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (min-width: 1180px) {
-  .wizard-rail {
-    width: 336px;
-  }
-
-  .rail-step {
-    min-height: 64px;
-    padding: 0 38px;
-  }
-
-  .wizard-main {
-    padding-left: 84px;
-    padding-right: 84px;
-  }
-
-  .wizard-form {
-    max-width: 1040px;
-  }
-
-  .review-grid {
-    max-width: 1020px;
-  }
-}
-
-@media (max-width: 859px) {
-  .wizard-main {
-    padding: 24px 16px 40px;
-  }
-
-  .wizard-title {
-    font-size: 28px;
-  }
-
-  .wizard-desc {
-    font-size: 14px;
-    margin-bottom: 26px;
-  }
-
-  .wizard-form {
-    max-width: none;
-  }
-
-  textarea {
-    min-height: 260px;
-  }
-
-  .review-card {
-    padding: 22px;
-  }
-
-  .review-card-top,
-  .submit-card-header {
-    flex-wrap: wrap;
-  }
-
-  .score-summary-card {
-    min-height: 260px;
-  }
-
-  .pass-notice,
-  .submit-card {
-    padding: 22px;
-  }
-
-  .btn-submit-final,
-  .btn-primary,
-  .btn-secondary {
-    width: 100%;
-  }
-
-  .wizard-actions {
-    gap: 12px;
-    margin-top: 32px;
   }
 }
 </style>

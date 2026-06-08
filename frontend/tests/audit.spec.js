@@ -26,49 +26,14 @@ async function logout(page) {
 }
 
 async function capture(page, testInfo, name) {
-  const isCreateVisual = name.startsWith("create-step") || name.startsWith("create-mobile");
   await page.screenshot({
     path: testInfo.outputPath(`${name}-${testInfo.project.name}.png`),
-    fullPage: !isCreateVisual,
+    fullPage: true,
   });
 }
 
-async function expectCreateShellVisualStructure(page) {
-  const railBox = await page.locator(".wizard-rail").boundingBox();
-  expect(railBox?.width).toBeGreaterThanOrEqual(320);
-
-  const mainBox = await page.locator(".wizard-main").boundingBox();
-  expect(mainBox?.x).toBeGreaterThanOrEqual(railBox.width);
-
-  await expect(page.locator(".rail-step.active")).toHaveCSS("background-color", "rgb(255, 245, 246)");
-  await expect(page.locator(".rail-progress-bar")).toHaveCSS("background-color", "rgb(23, 201, 100)");
-}
-
-async function expectAiReviewVisualStructure(page) {
-  const grid = page.locator("[data-testid='ai-review-grid']");
-  const firstCard = grid.locator(".ai-review-card").nth(0);
-  const secondCard = grid.locator(".ai-review-card").nth(1);
-  const scoreCard = grid.locator(".score-summary-card");
-
-  const firstBox = await firstCard.boundingBox();
-  const secondBox = await secondCard.boundingBox();
-  expect(firstBox?.y).toBeCloseTo(secondBox.y, 4);
-  expect(secondBox.x).toBeGreaterThan(firstBox.x + firstBox.width * 0.8);
-
-  await expect(page.locator(".review-progress-bar")).toHaveCSS("background-color", "rgb(192, 0, 36)");
-  await expect(scoreCard).toHaveCSS("border-top-color", "rgb(192, 0, 36)");
-  await expect(scoreCard.locator(".score-ring")).toBeVisible();
-}
-
-async function expectSubmitVisualStructure(page) {
-  await expect(page.locator(".pass-notice")).toHaveCSS("border-top-color", "rgb(239, 199, 206)");
-  await expect(page.locator(".submit-card")).toHaveCSS("border-top-color", "rgb(239, 199, 206)");
-  await expect(page.locator(".status-pill")).toContainText("待审核");
-  await expect(page.getByText("AI 自查结果仅作为专家参考")).toBeVisible();
-}
-
 test.describe("manual audit candidate flows", () => {
-  test("default admin account is present and handles password-change state", async ({ page }, testInfo) => {
+  test("default admin account is present but requires password change", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium-desktop",
       "desktop-only audit because mobile hides the username text"
@@ -81,13 +46,8 @@ test.describe("manual audit candidate flows", () => {
       nickname: "小李",
     });
 
-    const passwordChangeHeading = page.getByRole("heading", { name: "修改初始密码" });
-    if (await passwordChangeHeading.isVisible().catch(() => false)) {
-      await capture(page, testInfo, "default-admin-password-change");
-    } else {
-      await expect(page.locator(".user-name")).toContainText("小李");
-      await capture(page, testInfo, "default-admin-login-state");
-    }
+    await expect(page.getByRole("heading", { name: "修改初始密码" })).toBeVisible();
+    await capture(page, testInfo, "default-admin-password-change");
   });
 
   test("author submit -> admin approve -> public search, with audit screenshots", async ({
@@ -147,7 +107,6 @@ test.describe("manual audit candidate flows", () => {
 
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
-    await expectCreateShellVisualStructure(page);
     await capture(page, testInfo, "create-step-1");
 
     await page.getByLabel(/案例标题/).fill(title);
@@ -172,7 +131,6 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "运行全部自查" }).click();
     await expect(page.getByText("E2E AI 自查：完整性检查通过。")).toBeVisible();
     await expect(page.getByText("E2E AI 自查：综合风险偏高，建议修改后再提交。")).toBeVisible();
-    await expectAiReviewVisualStructure(page);
     await capture(page, testInfo, "create-step-4-ai-results");
     await page.getByRole("button", { name: "继续" }).click();
     await expect
@@ -181,7 +139,6 @@ test.describe("manual audit candidate flows", () => {
 
     await expect(page.getByText("确认并提交")).toBeVisible();
     await expect(page.getByText("专家人工审核流程")).toBeVisible();
-    await expectSubmitVisualStructure(page);
     await capture(page, testInfo, "create-step-5-submit");
     await page.getByRole("button", { name: "正式提交案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
@@ -216,24 +173,5 @@ test.describe("manual audit candidate flows", () => {
     const publicCard = page.locator(".case-card").filter({ hasText: title });
     await expect(publicCard).toBeVisible();
     await capture(page, testInfo, "public-approved-search-result");
-  });
-
-  test("create flow visual shell is stable on mobile", async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-mobile",
-      "mobile-only visual regression coverage"
-    );
-
-    await page.goto("/");
-    await login(page, USER);
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
-    await expect(page.locator(".wizard-rail-mobile")).toBeVisible();
-    await expect(page.locator(".wizard-rail")).not.toBeVisible();
-
-    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
-    expect(horizontalOverflow).toBe(false);
-
-    await capture(page, testInfo, "create-mobile-step-1");
   });
 });
