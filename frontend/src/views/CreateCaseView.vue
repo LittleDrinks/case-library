@@ -630,6 +630,9 @@ function validateStep(step) {
 
 function nextStep() {
   if (!validateStep(currentStep.value)) return;
+  if (currentStep.value === 3 && hasAiReviewWarning() && !confirmAiReviewWarning()) {
+    return;
+  }
   if (currentStep.value < steps.length - 1) {
     currentStep.value += 1;
   }
@@ -642,7 +645,7 @@ function prevStep() {
 }
 
 function buildPayload(status) {
-  return {
+  const payload = {
     title: form.title.trim(),
     content: form.content.trim(),
     department: form.department.trim(),
@@ -650,6 +653,16 @@ function buildPayload(status) {
     theme: form.theme,
     status,
   };
+  appendAiReviewsPayload(payload);
+  return payload;
+}
+
+function appendAiReviewsPayload(payload) {
+  const reviews = collectAiReviews();
+  if (reviews.length) {
+    payload.ai_reviews = JSON.stringify(reviews);
+  }
+  return payload;
 }
 
 async function handleSaveDraft() {
@@ -660,7 +673,7 @@ async function handleSaveDraft() {
   saving.value = true;
   try {
     if (caseId.value) {
-      await updateCase(caseId.value, {
+      const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
         author: displayAuthor.value,
@@ -668,7 +681,9 @@ async function handleSaveDraft() {
         type: form.type,
         theme: form.theme,
         change_reason: "保存草稿",
-      });
+      };
+      appendAiReviewsPayload(payload);
+      await updateCase(caseId.value, payload);
     } else {
       const res = await createCase(buildPayload("draft"));
       if (res && res.case_id) {
@@ -697,7 +712,7 @@ async function handleFormalSubmit() {
   try {
     if (caseId.value) {
       // Update existing draft with latest form data before submitting
-      await updateCase(caseId.value, {
+      const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
         author: displayAuthor.value,
@@ -705,7 +720,9 @@ async function handleFormalSubmit() {
         type: form.type,
         theme: form.theme,
         change_reason: "提交前更新",
-      });
+      };
+      appendAiReviewsPayload(payload);
+      await updateCase(caseId.value, payload);
       await submitCaseById(caseId.value);
     } else {
       await createCase(buildPayload("pending_review"));
@@ -820,6 +837,43 @@ function buildAiVariables() {
     type: form.type,
     theme: form.theme,
   };
+}
+
+function collectAiReviews() {
+  return aiReviewItems.value
+    .map((item) => {
+      const state = aiReviewState[item.id];
+      if (!state || state.status !== "success") return null;
+      return {
+        prompt_id: item.id,
+        name: item.name,
+        answer: state.answer,
+        parsed: state.parsed,
+        parse_error: state.parse_error,
+        reviewed_at: new Date().toISOString(),
+      };
+    })
+    .filter(Boolean)
+    .slice(-3);
+}
+
+function hasAiReviewWarning() {
+  return aiReviewItems.value.some((item) => {
+    const parsed = aiReviewState[item.id]?.parsed;
+    if (!parsed || typeof parsed !== "object") return false;
+    if (parsed.pass === false) return true;
+    if (parsed.score != null) {
+      const score = Number(parsed.score);
+      return Number.isFinite(score) && score < 70;
+    }
+    return false;
+  });
+}
+
+function confirmAiReviewWarning() {
+  return window.confirm(
+    "AI 自查提示当前案例可能还需要修改。AI 结果可能误判，不会阻止提交；你可以继续提交专家审核，也可以取消后返回修改。"
+  );
 }
 
 async function loadAiPrompts() {

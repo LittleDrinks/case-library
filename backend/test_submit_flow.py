@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Executable submit-flow safety checks."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -479,6 +480,79 @@ def main_test() -> None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+    ai_review_records = [
+        {
+            "prompt_id": "workflow/completeness",
+            "name": "完整性检查",
+            "answer": "ok",
+            "parsed": {"pass": True, "detail": "完整", "suggestions": []},
+            "parse_error": None,
+            "reviewed_at": "2026-01-01 10:00:00",
+        },
+        {
+            "prompt_id": "workflow/expression",
+            "name": "表达检查",
+            "answer": "needs polish",
+            "parsed": {"pass": False, "detail": "需润色", "suggestions": ["压缩标题"]},
+            "parse_error": None,
+            "reviewed_at": "2026-01-01 10:01:00",
+        },
+    ]
+    response = client.post(
+        "/api/cases",
+        data={
+            "title": "AI review persistence",
+            "content": "AI review persistence content",
+            "department": "test",
+            "type": "TYPE_A",
+            "theme": "铸魂育人",
+            "status": "draft",
+            "ai_reviews": json.dumps(ai_review_records, ensure_ascii=False),
+        },
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 200)
+    ai_case_id = response.json()["case_id"]
+    response = client.get(f"/api/cases/{ai_case_id}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    stored_ai_reviews = response.json()["data"]["ai_reviews"]
+    assert [item["prompt_id"] for item in stored_ai_reviews] == [
+        "workflow/completeness",
+        "workflow/expression",
+    ]
+    assert stored_ai_reviews[1]["parsed"]["suggestions"] == ["压缩标题"]
+
+    too_many_ai_reviews = [
+        {"prompt_id": f"workflow/{index}", "name": "x", "answer": "x"} for index in range(4)
+    ]
+    response = client.put(
+        f"/api/cases/{ai_case_id}",
+        data={"ai_reviews": json.dumps(too_many_ai_reviews), "change_reason": "too many"},
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 400)
+
+    updated_ai_reviews = [
+        {
+            "prompt_id": "workflow/score",
+            "name": "综合评分",
+            "answer": "score",
+            "parsed": {"score": 82, "detail": "可提交", "suggestions": []},
+        }
+    ]
+    response = client.put(
+        f"/api/cases/{ai_case_id}",
+        data={
+            "ai_reviews": json.dumps(updated_ai_reviews, ensure_ascii=False),
+            "change_reason": "update ai reviews",
+        },
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 200)
+    response = client.get(f"/api/cases/{ai_case_id}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    assert response.json()["data"]["ai_reviews"][0]["prompt_id"] == "workflow/score"
 
     print("submit flow checks passed")
 

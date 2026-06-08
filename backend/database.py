@@ -36,6 +36,7 @@ USER_STATUSES = {"active", "no_active"}
 COUNTER_COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
 VERSIONED_FIELDS = ["title", "type", "theme", "content", "author", "department", "keywords"]
 DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
+AI_REVIEW_DATETIME_FIELDS = {"reviewed_at", "created_at"}
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 _client: MongoClient | None = None
@@ -155,6 +156,44 @@ def _normalize_keywords(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _normalize_ai_reviews(value: Any) -> list[dict[str, Any]]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("ai_reviews must be valid JSON") from exc
+    if not isinstance(value, list):
+        raise ValueError("ai_reviews must be a list")
+    if len(value) > 3:
+        raise ValueError("ai_reviews cannot contain more than 3 records")
+
+    normalized: list[dict[str, Any]] = []
+    for item in value[-3:]:
+        if not isinstance(item, dict):
+            raise ValueError("ai_reviews records must be objects")
+        record: dict[str, Any] = {
+            "prompt_id": str(item.get("prompt_id", "")).strip(),
+            "name": str(item.get("name", "")).strip(),
+            "answer": str(item.get("answer", "")),
+            "parse_error": item.get("parse_error"),
+            "reviewed_at": item.get("reviewed_at") or _now(),
+        }
+        parsed = item.get("parsed")
+        if isinstance(parsed, (dict, list, str, int, float, bool)) or parsed is None:
+            record["parsed"] = parsed
+        else:
+            record["parsed"] = None
+        for field in AI_REVIEW_DATETIME_FIELDS:
+            if field in record:
+                record[field] = format_beijing_datetime(record[field])
+        if not record["prompt_id"]:
+            raise ValueError("ai_reviews records require prompt_id")
+        normalized.append(record)
+    return normalized
+
+
 def serialize_case(case: dict | None) -> dict | None:
     if case is None:
         return None
@@ -166,6 +205,7 @@ def serialize_case(case: dict | None) -> dict | None:
     case["is_hidden"] = bool(case.get("is_hidden", False))
     case["view_count"] = int(case.get("view_count") or 0)
     case["like_count"] = int(case.get("like_count") or 0)
+    case["ai_reviews"] = _normalize_ai_reviews(case.get("ai_reviews"))
     if case.get("status") == "draft":
         case["display_at"] = case.get("updated_at") or case.get("created_at")
     else:
@@ -507,6 +547,7 @@ def create_case(case_data: dict) -> int:
         "is_hidden": bool(case_data.get("is_hidden", False)),
         "view_count": int(case_data.get("view_count") or 0),
         "like_count": int(case_data.get("like_count") or 0),
+        "ai_reviews": _normalize_ai_reviews(case_data.get("ai_reviews")),
     }
 
     if case_data.get("deployed_at") is not None:
@@ -661,11 +702,14 @@ def update_case(
         "status",
         "is_approved",
         "is_in_library",
+        "ai_reviews",
     ]
     updates = {field: case_data[field] for field in allowed_fields if field in case_data}
 
     if "keywords" in case_data:
         updates["keywords"] = _normalize_keywords(case_data.get("keywords"))
+    if "ai_reviews" in case_data:
+        updates["ai_reviews"] = _normalize_ai_reviews(case_data.get("ai_reviews"))
 
     changed_updates = {
         field: value for field, value in updates.items() if _values_differ(field, current, value)

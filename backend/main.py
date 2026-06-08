@@ -481,6 +481,7 @@ async def create_new_case(
     type: str = Form("TYPE_A"),
     theme: str = Form("铸魂育人"),
     status: str = Form("pending_review"),
+    ai_reviews: str | None = Form(None),
     auto_process: bool = Form(False),
     _credentials: BearerCredentials = RequiredBearer,
 ):
@@ -513,6 +514,7 @@ async def create_new_case(
             "owner_username": owner_username,
             "department": department,
             "status": status,
+            "ai_reviews": ai_reviews,
         }
     )
     return {"success": True, "message": "案例创建成功", "case_id": case_id}
@@ -526,6 +528,7 @@ async def _update_existing_case_impl(
     department: str | None,
     type: str | None,
     theme: str | None,
+    ai_reviews: str | None,
     change_reason: str,
     current_user: dict | None,
 ):
@@ -549,6 +552,7 @@ async def _update_existing_case_impl(
         "department": department,
         "type": type,
         "theme": theme,
+        "ai_reviews": ai_reviews,
     }.items():
         if value is not None and value != "":
             case_data[field] = value
@@ -580,12 +584,13 @@ async def update_existing_case(
     department: str | None = Form(None),
     type: str | None = Form(None),
     theme: str | None = Form(None),
+    ai_reviews: str | None = Form(None),
     change_reason: str = Form(""),
     _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, change_reason, current_user
+        case_id, title, content, author, department, type, theme, ai_reviews, change_reason, current_user
     )
 
 
@@ -604,12 +609,13 @@ async def update_existing_case_post_compat(
     department: str | None = Form(None),
     type: str | None = Form(None),
     theme: str | None = Form(None),
+    ai_reviews: str | None = Form(None),
     change_reason: str = Form(""),
     _credentials: BearerCredentials = RequiredBearer,
 ):
     current_user = get_current_user(dict(request.headers))
     return await _update_existing_case_impl(
-        case_id, title, content, author, department, type, theme, change_reason, current_user
+        case_id, title, content, author, department, type, theme, ai_reviews, change_reason, current_user
     )
 
 

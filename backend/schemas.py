@@ -73,6 +73,7 @@ class CaseData(BaseModel):
     like_count: int | None = None
     is_hidden: bool | None = None
     keywords: list[str] | None = None
+    ai_reviews: list[JsonDict] = Field(default_factory=list)
 
     model_config = {"extra": "allow"}
 

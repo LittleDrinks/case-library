@@ -106,6 +106,36 @@
               <span v-for="k in c.keywords" :key="k" class="keyword-tag">{{ k }}</span>
             </div>
 
+            <div v-if="c.ai_reviews && c.ai_reviews.length" class="detail-ai-reviews">
+              <strong>作者 AI 自查意见：</strong>
+              <div class="ai-review-list">
+                <div v-for="item in c.ai_reviews" :key="item.prompt_id" class="ai-review-item">
+                  <div class="ai-review-head">
+                    <span class="ai-review-name">{{ item.name || item.prompt_id }}</span>
+                    <span v-if="item.reviewed_at" class="ai-review-time">{{ formatDate(item.reviewed_at) }}</span>
+                  </div>
+                  <div v-if="item.parsed && item.parsed.detail" class="ai-review-detail">
+                    {{ item.parsed.detail }}
+                  </div>
+                  <div v-if="item.parsed && item.parsed.score != null" class="ai-review-score">
+                    评分 {{ item.parsed.score }}
+                  </div>
+                  <ul
+                    v-if="item.parsed && Array.isArray(item.parsed.suggestions) && item.parsed.suggestions.length"
+                    class="ai-review-suggestions"
+                  >
+                    <li v-for="suggestion in item.parsed.suggestions" :key="suggestion">
+                      {{ suggestion }}
+                    </li>
+                  </ul>
+                  <pre v-if="!item.parsed" class="ai-review-answer">{{ item.answer }}</pre>
+                  <div v-if="item.parse_error" class="ai-review-warning">
+                    {{ item.parse_error }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Review info -->
             <div v-if="showReviewFor(c.status)" class="detail-review">
               <strong>审核信息：</strong>
@@ -759,6 +789,86 @@ watch(currentTab, () => {
   color: var(--color-brand);
   font-size: 12px;
   border-radius: 4px;
+}
+
+.detail-ai-reviews {
+  font-size: 13px;
+  margin: 12px 0;
+  color: var(--color-text-secondary);
+}
+
+.detail-ai-reviews > strong {
+  color: var(--color-text);
+}
+
+.ai-review-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ai-review-item {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.ai-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ai-review-name {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ai-review-time {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.ai-review-detail {
+  color: var(--color-text);
+  line-height: 1.6;
+  margin-bottom: 6px;
+}
+
+.ai-review-score {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.ai-review-suggestions {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+.ai-review-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font: inherit;
+  line-height: 1.6;
+}
+
+.ai-review-warning {
+  margin-top: 6px;
+  color: #92400e;
+  font-size: 12px;
 }
 
 .detail-review {
