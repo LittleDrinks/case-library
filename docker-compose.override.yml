@@ -1,9 +1,0 @@
-services:
-  app:
-    environment:
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - .:/app
-
-  frontend:
-    profiles: []
