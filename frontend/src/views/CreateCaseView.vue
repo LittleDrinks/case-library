@@ -930,9 +930,11 @@ function hasAiReviewWarning() {
 }
 
 function confirmAiReviewWarning() {
-  return window.confirm(
-    "AI 自查提示当前案例可能还需要修改。AI 结果可能误判，不会阻止提交；你可以继续提交专家审核，也可以取消后返回修改。"
+  notify(
+    "AI 自查提示当前案例可能还需要修改；结果仅供参考，不会阻止提交专家审核。",
+    "info"
   );
+  return true;
 }
 
 async function loadAiPrompts() {

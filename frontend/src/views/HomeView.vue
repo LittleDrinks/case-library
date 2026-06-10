@@ -170,6 +170,7 @@ import {
   fetchLatestCases,
   fetchPublicCaseDetail,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const stats = ref({ total_cases: 0, total_views: 0, total_likes: 0, by_type: {}, by_theme: {} });
 const statsLoading = ref(false);
@@ -284,7 +285,7 @@ async function openDetail(caseId) {
       throw new Error(res?.message || '加载详情失败');
     }
   } catch (err) {
-    window.alert(err.message || '加载案例详情失败');
+    notify(err.message || '加载案例详情失败', 'error');
   }
 }
 
