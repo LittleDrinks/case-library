@@ -250,7 +250,8 @@
             aria-label="打开 AI 分类助手"
             @click="showHelper = true"
           >
-            AI
+            <span class="helper-label-desktop">AI</span>
+            <span class="helper-label-mobile">AI 建议</span>
           </button>
         </template>
 
@@ -1667,6 +1668,10 @@ textarea {
   z-index: 105;
 }
 
+.helper-label-mobile {
+  display: none;
+}
+
 @media (max-width: 859px) {
   .fab-helper {
     position: static;
@@ -1674,10 +1679,25 @@ textarea {
     align-items: center;
     justify-content: center;
     margin: 12px 0 0 auto;
-    width: 72px;
-    height: 44px;
-    font-size: 16px;
+    width: auto;
+    min-width: 88px;
+    height: 38px;
+    padding: 0 14px;
+    border: 1px solid rgba(141, 27, 53, 0.22);
+    background: var(--color-brand-light);
+    color: var(--color-brand);
+    font-size: 14px;
+    font-weight: 700;
     border-radius: 7px;
+    box-shadow: none;
+  }
+
+  .helper-label-desktop {
+    display: none;
+  }
+
+  .helper-label-mobile {
+    display: inline;
   }
 }
 
