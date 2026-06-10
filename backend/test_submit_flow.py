@@ -586,6 +586,16 @@ def main_test() -> None:
             }
         )
 
+        os.environ["AI_REVIEW_ENABLED"] = "false"
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 503)
+        assert response.json()["status"] == "disabled"
+        os.environ["AI_REVIEW_ENABLED"] = "true"
+
         response = client.post(
             f"/api/cases/{structured_case}/ai-review",
             json={"model": "not-allowed"},
@@ -593,6 +603,45 @@ def main_test() -> None:
         )
         assert_status(response, 400)
         assert response.json()["status"] == "invalid_model"
+
+        def fake_malformed_structured_completion(prompt_text, model, settings=None):
+            assert model == "qwen-plus"
+            return "not json"
+
+        main.call_chat_completion = fake_malformed_structured_completion
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 502)
+        assert response.json()["status"] == "parse_failed"
+
+        def fake_invalid_contract_completion(prompt_text, model, settings=None):
+            assert model == "qwen-plus"
+            return json.dumps(
+                {
+                    "comments": [
+                        {
+                            "paragraph_id": "p404",
+                            "category": "source",
+                            "severity": "important",
+                            "message": "未知段落。",
+                        }
+                    ],
+                    "summary": {},
+                },
+                ensure_ascii=False,
+            )
+
+        main.call_chat_completion = fake_invalid_contract_completion
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 422)
+        assert response.json()["status"] == "invalid_contract"
 
         def fake_structured_completion(prompt_text, model, settings=None):
             assert model == "qwen-plus"
