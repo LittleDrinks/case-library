@@ -290,25 +290,61 @@ def main_test() -> None:
             }
         },
     )
+    recommendation_case = create_case(
+        {
+            "title": "recommended public case",
+            "type": "TYPE_A",
+            "theme": "test",
+            "content": "recommended public source material case",
+            "source_material": "source material test",
+            "author": "ownerflow",
+            "owner_username": "ownerflow",
+            "department": "test",
+            "status": "approved",
+            "created_at": "2020-01-02 08:00:00",
+            "updated_at": "2020-01-02 08:00:00",
+            "view_count": 9,
+            "like_count": 1,
+        }
+    )
+    get_db().cases.update_one(
+        {"id": recommendation_case},
+        {
+            "$set": {
+                "submitted_version_id": 321,
+                "reviewed_version_id": 654,
+                "latest_review_version_id": 987,
+                "ai_reviews": [
+                    {
+                        "prompt_id": "workflow/recommendation-internal",
+                        "answer": "internal recommendation AI note",
+                        "model": "qwen-plus",
+                    }
+                ],
+            }
+        },
+    )
 
     public_surfaces = [
-        f"/api/cases/{visibility_case}",
-        "/api/cases?status=approved",
-        "/api/search?q=source%20material",
-        "/api/search/advanced?status=approved&type=TYPE_A&keyword=source%20material",
-        "/api/trending?limit=20",
-        "/api/latest?limit=20",
+        (f"/api/cases/{visibility_case}", visibility_case),
+        ("/api/cases?status=approved", visibility_case),
+        ("/api/search?q=source%20material", visibility_case),
+        ("/api/search/advanced?status=approved&type=TYPE_A&keyword=source%20material", visibility_case),
+        (f"/api/recommendations/{visibility_case}?limit=20", recommendation_case),
+        ("/api/trending?limit=20", visibility_case),
+        ("/api/latest?limit=20", visibility_case),
     ]
-    for path in public_surfaces:
+    for path, expected_case_id in public_surfaces:
         response = client.get(path)
         assert_status(response, 200)
         data = response.json()["data"]
         items = data if isinstance(data, list) else [data]
-        matched = [item for item in items if item.get("id") == visibility_case]
+        matched = [item for item in items if item.get("id") == expected_case_id]
         assert matched, path
         for item in matched:
             assert item["source_material"] == "source material test"
             assert_public_case_payload(item)
+    get_db().cases.update_one({"id": recommendation_case}, {"$set": {"status": "deleted"}})
     get_db().cases.update_one(
         {"id": visibility_case},
         {"$set": {"view_count": 0, "like_count": 0}},
