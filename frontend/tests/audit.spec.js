@@ -239,4 +239,85 @@ test.describe("manual audit candidate flows", () => {
     await capture(page, testInfo, "public-approved-search-result");
     await cleanupCaseByTitle(page, title);
   });
+
+  test("public library does not render leaked review internals", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-desktop",
+      "desktop-only public leakage regression"
+    );
+
+    const publicCase = {
+      id: "leak-public-case",
+      title: "公开字段白名单审计案例",
+      type: "TYPE_A",
+      theme: "铸魂育人",
+      author: "公开作者",
+      department: "马克思主义学院",
+      created_at: "2026-06-11T02:00:00Z",
+      view_count: 7,
+      like_count: 2,
+      content: "公开正文只包含案例内容，不应展示任何审核内部材料。",
+      source_material: "公开来源材料：课堂记录摘录。",
+      keywords: ["公开标签"],
+      ai_reviews: [
+        {
+          prompt_id: "workflow/leak",
+          answer: "LEAK_AI_REVIEW_ANSWER_SHOULD_NOT_RENDER",
+          model: "LEAK_MODEL_SHOULD_NOT_RENDER",
+          prompt: "LEAK_PROMPT_SHOULD_NOT_RENDER",
+        },
+      ],
+      latest_review_version_id: 999,
+      submitted_version_id: 998,
+      reviewed_version_id: 997,
+      paragraph_comments: [
+        { paragraph_id: "p1", message: "LEAK_PARAGRAPH_COMMENT_SHOULD_NOT_RENDER" },
+      ],
+      admin_comments: [
+        {
+          reviewer: "admin",
+          comments: [
+            { paragraph_id: "p1", message: "LEAK_ADMIN_COMMENT_SHOULD_NOT_RENDER" },
+          ],
+        },
+      ],
+    };
+
+    await page.route("**/api/cases**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/cases" && url.searchParams.get("status") === "approved") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [publicCase], total: 1 }),
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/cases/leak-public-case") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: publicCase }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await page.goto("/");
+    await page.getByRole("link", { name: "案例库" }).click();
+    await expect(page.getByText("公开字段白名单审计案例")).toBeVisible();
+    await page.getByRole("button", { name: "查看详情" }).click();
+    await expect(page.getByText("公开正文只包含案例内容，不应展示任何审核内部材料。")).toBeVisible();
+    await expect(page.getByText("公开来源材料：课堂记录摘录。")).toBeVisible();
+    await expect(page.getByText("公开标签")).toBeVisible();
+
+    await expect(page.getByText("LEAK_AI_REVIEW_ANSWER_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("LEAK_MODEL_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("LEAK_PROMPT_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("LEAK_PARAGRAPH_COMMENT_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("LEAK_ADMIN_COMMENT_SHOULD_NOT_RENDER")).toHaveCount(0);
+  });
 });
