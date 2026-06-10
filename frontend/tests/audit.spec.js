@@ -333,4 +333,101 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByText("LEAK_PARAGRAPH_COMMENT_SHOULD_NOT_RENDER")).toHaveCount(0);
     await expect(page.getByText("LEAK_ADMIN_COMMENT_SHOULD_NOT_RENDER")).toHaveCount(0);
   });
+
+  test("home public detail renders source material without review internals", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-desktop",
+      "desktop-only public home detail regression"
+    );
+
+    const publicCase = {
+      id: "home-public-source-case",
+      title: "首页公开来源材料审计案例",
+      type: "TYPE_A",
+      theme: "强国建设",
+      author: "公开作者",
+      department: "马克思主义学院",
+      created_at: "2026-06-11T02:30:00Z",
+      view_count: 11,
+      like_count: 3,
+      content: "首页公开详情应展示正文，并保持审核内部信息不可见。",
+      source_material: "首页公开来源材料：学院新闻与课堂反馈摘录。",
+      keywords: ["首页标签"],
+      ai_reviews: [
+        {
+          answer: "HOME_LEAK_AI_REVIEW_SHOULD_NOT_RENDER",
+          model: "HOME_LEAK_MODEL_SHOULD_NOT_RENDER",
+        },
+      ],
+      admin_comments: [
+        {
+          reviewer: "admin",
+          comments: [{ paragraph_id: "p1", message: "HOME_LEAK_ADMIN_SHOULD_NOT_RENDER" }],
+        },
+      ],
+      paragraph_comments: [
+        { paragraph_id: "p1", message: "HOME_LEAK_PARAGRAPH_SHOULD_NOT_RENDER" },
+      ],
+    };
+
+    await page.route("**/api/statistics", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            total_cases: 1,
+            total_views: 11,
+            total_likes: 3,
+            by_type: { TYPE_A: 1 },
+            by_theme: { 强国建设: 1 },
+          },
+        }),
+      });
+    });
+
+    await page.route("**/api/trending**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [publicCase] }),
+      });
+    });
+
+    await page.route("**/api/latest**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [publicCase] }),
+      });
+    });
+
+    await page.route("**/api/cases/home-public-source-case**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: publicCase }),
+      });
+    });
+
+    await page.goto("/");
+    const homeCard = page.locator(".case-card").filter({ hasText: publicCase.title }).first();
+    await expect(homeCard).toBeVisible();
+    await expect(homeCard.getByText("浏览 11")).toBeVisible();
+    await expect(homeCard.getByText("点赞 3")).toBeVisible();
+    await homeCard.click();
+
+    const detailDialog = page.getByRole("dialog", { name: publicCase.title });
+    await expect(detailDialog.getByText(publicCase.content)).toBeVisible();
+    await expect(detailDialog.getByText(publicCase.source_material)).toBeVisible();
+    await expect(detailDialog.getByText("首页标签")).toBeVisible();
+
+    await expect(page.getByText("HOME_LEAK_AI_REVIEW_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("HOME_LEAK_MODEL_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("HOME_LEAK_ADMIN_SHOULD_NOT_RENDER")).toHaveCount(0);
+    await expect(page.getByText("HOME_LEAK_PARAGRAPH_SHOULD_NOT_RENDER")).toHaveCount(0);
+  });
 });
