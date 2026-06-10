@@ -1667,6 +1667,20 @@ textarea {
   z-index: 105;
 }
 
+@media (max-width: 859px) {
+  .fab-helper {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 12px 0 0 auto;
+    width: 72px;
+    height: 44px;
+    font-size: 16px;
+    border-radius: 7px;
+  }
+}
+
 /* Review step */
 .review-header {
   display: flex;
