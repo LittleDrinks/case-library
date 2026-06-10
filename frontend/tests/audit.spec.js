@@ -166,6 +166,10 @@ test.describe("manual audit candidate flows", () => {
 
     const publicCard = page.locator(".case-card").filter({ hasText: title });
     await expect(publicCard).toBeVisible();
+    await publicCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(page.locator(".detail-source").getByText("来源材料：", { exact: true })).toBeVisible();
+    await expect(page.getByText("E2E 来源材料：学院新闻与课堂反馈摘录。")).toBeVisible();
+    await expect(page.getByText("作者 AI 自查意见")).toHaveCount(0);
     await capture(page, testInfo, "public-approved-search-result");
   });
 });
