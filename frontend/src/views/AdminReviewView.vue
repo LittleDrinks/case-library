@@ -7,14 +7,14 @@
 
     <!-- Login required -->
     <div v-if="!isAuthenticated" class="login-required-card">
-      <div class="login-required-icon" aria-hidden="true">锁</div>
+      <div class="login-required-icon" aria-hidden="true"></div>
       <h3>请先登录</h3>
       <p>审核管理功能需要管理员身份，请先登录。</p>
     </div>
 
     <!-- Permission denied -->
     <div v-else-if="!isAdminUser" class="permission-denied-card">
-      <div class="permission-icon" aria-hidden="true">禁</div>
+      <div class="permission-icon" aria-hidden="true"></div>
       <h3>权限不足</h3>
       <p>审核管理功能仅限管理员使用。</p>
     </div>
@@ -42,14 +42,14 @@
 
       <!-- Error -->
       <div v-else-if="error" class="state-error">
-        <div class="error-icon" aria-hidden="true">警</div>
+        <div class="error-icon" aria-hidden="true"></div>
         <p>{{ error }}</p>
         <button type="button" class="btn-secondary" @click="loadCases">重试</button>
       </div>
 
       <!-- Empty -->
       <div v-else-if="cases.length === 0" class="state-empty">
-        <div class="empty-icon" aria-hidden="true">空</div>
+        <div class="empty-icon" aria-hidden="true"></div>
         <h3>暂无{{ currentTabLabel }}</h3>
         <p>当前分类下没有案例</p>
       </div>
@@ -823,8 +823,63 @@ watch(currentTab, () => {
 .empty-icon,
 .login-required-icon,
 .permission-icon {
-  font-size: 40px;
-  line-height: 1;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+.login-required-icon::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 17px;
+  width: 16px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.login-required-icon::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 9px;
+  width: 10px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.permission-icon,
+.error-icon {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.permission-icon::before,
+.error-icon::before {
+  content: '!';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.empty-icon::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 13px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
 }
 
 .state-empty h3,

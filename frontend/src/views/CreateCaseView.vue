@@ -88,7 +88,7 @@
 
       <!-- Unauthenticated notice -->
       <div v-if="!isAuthenticated" class="login-required-card">
-        <div class="login-required-icon" aria-hidden="true">锁</div>
+        <div class="login-required-icon" aria-hidden="true"></div>
         <h3>请先登录</h3>
         <p>创建案例需要登录账号。请先登录后再继续。</p>
       </div>
@@ -139,7 +139,7 @@
           </div>
 
           <div class="tip-card">
-            <div class="tip-icon" aria-hidden="true">提</div>
+            <div class="tip-icon" aria-hidden="true"></div>
             <div class="tip-body">
               <div class="tip-title">编写小贴士</div>
               <ul>
@@ -185,7 +185,7 @@
         <!-- Step 3: 分类选择 -->
         <template v-if="currentStep === 2">
           <div class="hint-banner">
-            <span class="hint-icon" aria-hidden="true">AI</span>
+            <span class="hint-icon" aria-hidden="true"></span>
             <span>不确定分类？可点击右下角 AI 助手，根据已填写内容获取一次本地建议。</span>
           </div>
 
@@ -355,7 +355,7 @@
         <!-- Step 5: 提交确认 -->
         <template v-if="currentStep === 4">
           <div class="pass-notice">
-            <span class="pass-icon" aria-hidden="true">ℹ</span>
+            <span class="pass-icon" aria-hidden="true"></span>
             <span>提交后案例将进入专家人工审核流程，请耐心等待。</span>
           </div>
 
@@ -1436,9 +1436,35 @@ textarea {
 }
 
 .tip-icon {
-  font-size: 20px;
-  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+  position: relative;
   flex-shrink: 0;
+}
+
+.tip-icon::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 5px;
+  width: 2px;
+  height: 12px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.tip-icon::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
 }
 
 .tip-title {
@@ -1474,8 +1500,34 @@ textarea {
 }
 
 .hint-icon {
-  font-size: 16px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  position: relative;
   flex-shrink: 0;
+}
+
+.hint-icon::before,
+.hint-icon::after {
+  content: '';
+  position: absolute;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.hint-icon::before {
+  left: 7px;
+  top: 3px;
+  width: 2px;
+  height: 8px;
+}
+
+.hint-icon::after {
+  left: 7px;
+  top: 12px;
+  width: 2px;
+  height: 2px;
 }
 
 /* Helper panel */
@@ -1819,6 +1871,15 @@ textarea {
   flex-shrink: 0;
 }
 
+.pass-icon::before {
+  content: '';
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
 .submit-card {
   padding: 20px;
   border: 1px solid var(--color-border);
@@ -1984,8 +2045,35 @@ textarea {
 }
 
 .login-required-icon {
-  font-size: 40px;
-  line-height: 1;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+.login-required-icon::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 17px;
+  width: 16px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.login-required-icon::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 9px;
+  width: 10px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
 }
 
 /* Responsive desktop */
