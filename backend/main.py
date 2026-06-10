@@ -1009,8 +1009,7 @@ async def review_case_endpoint(
     response_model=ReviewListResponse,
     summary="List case review records",
     description=(
-        "Return human review history. Visible to admins, case owners, or public readers "
-        "of approved non-hidden cases."
+        "Return human review history. Visible only to admins or the case owner."
     ),
 )
 async def get_case_reviews(
@@ -1028,8 +1027,7 @@ async def get_case_reviews(
     response_model=VersionListResponse,
     summary="List case version history",
     description=(
-        "Return edit history. Visible to admins, case owners, or public readers of "
-        "approved non-hidden cases."
+        "Return edit history. Visible only to admins or the case owner."
     ),
 )
 async def get_case_version_history(
