@@ -322,9 +322,10 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("link", { name: "案例库" }).click();
     await expect(page.getByText("公开字段白名单审计案例")).toBeVisible();
     await page.getByRole("button", { name: "查看详情" }).click();
-    await expect(page.getByText("公开正文只包含案例内容，不应展示任何审核内部材料。")).toBeVisible();
-    await expect(page.getByText("公开来源材料：课堂记录摘录。")).toBeVisible();
-    await expect(page.getByText("公开标签")).toBeVisible();
+    const detailDialog = page.getByRole("dialog", { name: "公开字段白名单审计案例" });
+    await expect(detailDialog.getByText("公开正文只包含案例内容，不应展示任何审核内部材料。")).toBeVisible();
+    await expect(detailDialog.getByText("公开来源材料：课堂记录摘录。")).toBeVisible();
+    await expect(detailDialog.getByText("公开标签")).toBeVisible();
 
     await expect(page.getByText("LEAK_AI_REVIEW_ANSWER_SHOULD_NOT_RENDER")).toHaveCount(0);
     await expect(page.getByText("LEAK_MODEL_SHOULD_NOT_RENDER")).toHaveCount(0);

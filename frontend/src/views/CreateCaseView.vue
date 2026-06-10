@@ -1105,8 +1105,12 @@ watch(currentStep, (step) => {
 // Reset scroll to the top of the page whenever the wizard step changes
 watch(currentStep, () => {
   nextTick(() => {
-    const top = document.querySelector(".create-case-wizard")?.getBoundingClientRect().top || 0;
-    window.scrollTo({ top: Math.max(0, window.scrollY + top), behavior: "auto" });
+    const wizardTop = document.querySelector(".create-case-wizard")?.getBoundingClientRect().top || 0;
+    const headerHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-height")) || 0;
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + wizardTop - headerHeight),
+      behavior: "auto",
+    });
   });
 });
 </script>
