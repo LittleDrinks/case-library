@@ -101,9 +101,52 @@
               <strong>内容：</strong>
               <div class="detail-content-body">{{ c.content || '暂无内容' }}</div>
             </div>
+            <div class="detail-content-full" v-if="c.source_material">
+              <strong>来源材料：</strong>
+              <div class="detail-content-body">{{ c.source_material }}</div>
+            </div>
             <div v-if="c.keywords && c.keywords.length" class="detail-keywords">
               <strong>关键词：</strong>
               <span v-for="k in c.keywords" :key="k" class="keyword-tag">{{ k }}</span>
+            </div>
+
+            <div class="version-review-block">
+              <div class="section-head">
+                <strong>提交版本</strong>
+                <span v-if="versionMap[c.id]?.length" class="section-count">{{ versionMap[c.id].length }} 个版本</span>
+              </div>
+              <div v-if="versionLoading[c.id]" class="review-placeholder">加载中…</div>
+              <div v-else-if="versionError[c.id]" class="review-placeholder">{{ versionError[c.id] }}</div>
+              <div v-else-if="submittedVersionFor(c)" class="version-summary">
+                <div class="version-head">
+                  <strong>v{{ submittedVersionFor(c).version_number }}</strong>
+                  <span>{{ formatDate(submittedVersionFor(c).created_at) }}</span>
+                </div>
+                <div class="paragraph-list">
+                  <div
+                    v-for="paragraph in submittedVersionFor(c).paragraphs"
+                    :key="paragraph.paragraph_id"
+                    class="paragraph-row"
+                  >
+                    <span>{{ paragraph.paragraph_id }}</span>
+                    <p>{{ paragraph.text }}</p>
+                  </div>
+                </div>
+                <div v-if="submittedVersionFor(c).admin_comments?.length" class="admin-comment-list">
+                  <strong>人工批注留存</strong>
+                  <div
+                    v-for="batch in submittedVersionFor(c).admin_comments"
+                    :key="`${batch.created_at}-${batch.reviewer}`"
+                    class="admin-comment-batch"
+                  >
+                    <div>{{ batch.reviewer }} · {{ formatDate(batch.created_at) }}</div>
+                    <p v-for="comment in batch.comments" :key="`${comment.paragraph_id}-${comment.message}`">
+                      {{ comment.paragraph_id }}：{{ comment.message }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="review-placeholder">暂无提交版本</div>
             </div>
 
             <div v-if="c.ai_reviews && c.ai_reviews.length" class="detail-ai-reviews">
@@ -186,6 +229,30 @@
         </div>
         <div class="modal-body">
           <div class="field">
+            <label for="review-version">审核版本 <span class="required">*</span></label>
+            <select
+              id="review-version"
+              v-model="reviewForm.version_id"
+              :disabled="versionLoading[reviewingCase.id]"
+              @change="syncParagraphSelection"
+            >
+              <option disabled value="">请选择版本</option>
+              <option v-for="version in currentReviewVersions" :key="version.id" :value="String(version.id)">
+                v{{ version.version_number }} · {{ formatDate(version.created_at) }}
+              </option>
+            </select>
+          </div>
+          <div v-if="selectedReviewVersion" class="modal-version-preview">
+            <div
+              v-for="paragraph in selectedReviewParagraphs"
+              :key="paragraph.paragraph_id"
+              :class="['paragraph-preview', { active: reviewForm.paragraph_id === paragraph.paragraph_id }]"
+            >
+              <span>{{ paragraph.paragraph_id }}</span>
+              <p>{{ paragraph.text }}</p>
+            </div>
+          </div>
+          <div class="field">
             <label for="review-comment">审核意见 <span class="required">*</span></label>
             <textarea
               id="review-comment"
@@ -205,6 +272,62 @@
                 <input type="radio" v-model="reviewForm.status" value="reject" />
                 <span>需修改</span>
               </label>
+            </div>
+          </div>
+          <div class="paragraph-comment-form">
+            <div class="section-head">
+              <strong>段落批注</strong>
+              <span class="section-count">选填，随当前版本留存</span>
+            </div>
+            <div class="field field-inline">
+              <div>
+                <label for="paragraph-id">段落</label>
+                <select id="paragraph-id" v-model="reviewForm.paragraph_id" :disabled="!selectedReviewParagraphs.length">
+                  <option value="">不添加段落批注</option>
+                  <option
+                    v-for="paragraph in selectedReviewParagraphs"
+                    :key="paragraph.paragraph_id"
+                    :value="paragraph.paragraph_id"
+                  >
+                    {{ paragraph.paragraph_id }}
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label for="paragraph-category">类型</label>
+                <select id="paragraph-category" v-model="reviewForm.category">
+                  <option value="content">内容</option>
+                  <option value="source">来源</option>
+                  <option value="structure">结构</option>
+                  <option value="style">表达</option>
+                </select>
+              </div>
+              <div>
+                <label for="paragraph-severity">级别</label>
+                <select id="paragraph-severity" v-model="reviewForm.severity">
+                  <option value="minor">一般</option>
+                  <option value="important">重要</option>
+                  <option value="critical">关键</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="paragraph-message">批注内容</label>
+              <textarea
+                id="paragraph-message"
+                v-model="reviewForm.message"
+                rows="3"
+                placeholder="针对所选段落填写修改意见"
+              ></textarea>
+            </div>
+            <div class="field">
+              <label for="paragraph-suggestion">修改建议</label>
+              <input
+                id="paragraph-suggestion"
+                v-model="reviewForm.suggestion"
+                type="text"
+                placeholder="可选：给出可执行建议"
+              />
             </div>
           </div>
         </div>
@@ -245,6 +368,7 @@ import {
   fetchCaseConstants,
   listReviewCases,
   fetchCaseReviews,
+  fetchCaseVersions,
   reviewCase,
   setCaseVisibility,
   deleteCaseById,
@@ -265,6 +389,9 @@ const error = ref('');
 const expandedId = ref(null);
 const reviewMap = ref({});
 const reviewLoading = ref({});
+const versionMap = ref({});
+const versionLoading = ref({});
+const versionError = ref({});
 
 const caseTypes = ref({
   TYPE_A: '思政课教学案例',
@@ -273,7 +400,16 @@ const caseTypes = ref({
 });
 
 const reviewingCase = ref(null);
-const reviewForm = ref({ comment: '', status: 'approve' });
+const reviewForm = ref({
+  comment: '',
+  status: 'approve',
+  version_id: '',
+  paragraph_id: '',
+  category: 'content',
+  severity: 'important',
+  message: '',
+  suggestion: '',
+});
 const reviewing = ref(false);
 
 const deletingCase = ref(null);
@@ -283,6 +419,15 @@ const isAuthenticated = computed(() => isLoggedIn());
 const isAdminUser = computed(() => isAdmin());
 const currentTabLabel = computed(() => tabs.find(t => t.key === currentTab.value)?.label || '');
 const currentTabApiStatus = computed(() => tabs.find(t => t.key === currentTab.value)?.apiStatus || 'pending_review');
+const currentReviewVersions = computed(() => {
+  if (!reviewingCase.value) return [];
+  return versionMap.value[reviewingCase.value.id] || [];
+});
+const selectedReviewVersion = computed(() => {
+  const selectedId = Number(reviewForm.value.version_id);
+  return currentReviewVersions.value.find(version => Number(version.id) === selectedId) || null;
+});
+const selectedReviewParagraphs = computed(() => selectedReviewVersion.value?.paragraphs || []);
 
 function switchTab(tab) {
   currentTab.value = tab;
@@ -364,9 +509,37 @@ function toggleDetail(caseId) {
   }
   expandedId.value = caseId;
   const c = cases.value.find(x => x.id === caseId);
+  loadVersions(caseId);
   if (c && showReviewFor(c.status)) {
     loadReview(caseId);
   }
+}
+
+async function loadVersions(caseId) {
+  if (versionMap.value[caseId] !== undefined || versionLoading.value[caseId]) return versionMap.value[caseId] || [];
+  versionLoading.value[caseId] = true;
+  versionError.value[caseId] = '';
+  try {
+    const res = await fetchCaseVersions(caseId);
+    if (res?.success && Array.isArray(res.data)) {
+      versionMap.value[caseId] = res.data;
+      return res.data;
+    }
+    throw new Error(res?.message || '版本加载失败');
+  } catch (err) {
+    versionMap.value[caseId] = [];
+    versionError.value[caseId] = err.message || '版本加载失败';
+    return [];
+  } finally {
+    versionLoading.value[caseId] = false;
+  }
+}
+
+function submittedVersionFor(c) {
+  const versions = versionMap.value[c.id] || [];
+  if (!versions.length) return null;
+  const targetId = c.submitted_version_id || c.reviewed_version_id;
+  return versions.find(version => Number(version.id) === Number(targetId)) || versions[0];
 }
 
 async function loadReview(caseId) {
@@ -396,14 +569,52 @@ async function loadReview(caseId) {
   }
 }
 
-function openReviewModal(c) {
+async function openReviewModal(c) {
   reviewingCase.value = c;
-  reviewForm.value = { comment: '', status: 'approve' };
+  reviewForm.value = {
+    comment: '',
+    status: 'approve',
+    version_id: '',
+    paragraph_id: '',
+    category: 'content',
+    severity: 'important',
+    message: '',
+    suggestion: '',
+  };
+  const versions = await loadVersions(c.id);
+  const preferred = submittedVersionFor(c) || versions[0];
+  if (preferred) {
+    reviewForm.value.version_id = String(preferred.id);
+    syncParagraphSelection();
+  }
 }
 
 function closeReviewModal() {
   reviewingCase.value = null;
   reviewing.value = false;
+}
+
+function syncParagraphSelection() {
+  const current = reviewForm.value.paragraph_id;
+  const stillValid = selectedReviewParagraphs.value.some(
+    paragraph => paragraph.paragraph_id === current
+  );
+  reviewForm.value.paragraph_id = stillValid ? current : '';
+}
+
+function buildParagraphComments() {
+  if (!reviewForm.value.paragraph_id) return [];
+  const message = reviewForm.value.message.trim();
+  if (!message) return [];
+  const comment = {
+    paragraph_id: reviewForm.value.paragraph_id,
+    category: reviewForm.value.category,
+    severity: reviewForm.value.severity,
+    message,
+  };
+  const suggestion = reviewForm.value.suggestion.trim();
+  if (suggestion) comment.suggestion = suggestion;
+  return [comment];
 }
 
 async function submitReview() {
@@ -412,11 +623,21 @@ async function submitReview() {
     notify('请填写审核意见', 'error');
     return;
   }
+  if (!reviewForm.value.version_id) {
+    notify('请选择审核版本', 'error');
+    return;
+  }
+  if (reviewForm.value.paragraph_id && !reviewForm.value.message.trim()) {
+    notify('请填写段落批注内容，或选择不添加段落批注', 'error');
+    return;
+  }
   reviewing.value = true;
   try {
     await reviewCase(reviewingCase.value.id, {
       comment: reviewForm.value.comment.trim(),
       status: reviewForm.value.status,
+      version_id: reviewForm.value.version_id,
+      paragraph_comments: buildParagraphComments(),
     });
     notify('审核完成', 'success');
     closeReviewModal();
@@ -474,6 +695,9 @@ onMounted(async () => {
 watch(currentTab, () => {
   reviewMap.value = {};
   reviewLoading.value = {};
+  versionMap.value = {};
+  versionLoading.value = {};
+  versionError.value = {};
 });
 </script>
 
@@ -872,6 +1096,118 @@ watch(currentTab, () => {
   font-size: 12px;
 }
 
+.version-review-block {
+  margin: 14px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.section-head strong {
+  color: var(--color-text);
+}
+
+.section-count {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.version-summary {
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.version-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.version-head strong {
+  color: var(--color-brand);
+  font-size: 13px;
+}
+
+.paragraph-list,
+.modal-version-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.paragraph-row,
+.paragraph-preview {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.paragraph-preview.active {
+  border-color: rgba(141, 27, 53, 0.45);
+  background: var(--color-brand-light);
+}
+
+.paragraph-row span,
+.paragraph-preview span {
+  font-weight: 700;
+  color: var(--color-brand);
+}
+
+.paragraph-row p,
+.paragraph-preview p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.admin-comment-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-comment-list > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.admin-comment-batch {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.admin-comment-batch + .admin-comment-batch {
+  margin-top: 8px;
+}
+
+.admin-comment-batch div {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.admin-comment-batch p {
+  margin: 2px 0 0;
+}
+
 .detail-review {
   font-size: 13px;
   margin-bottom: 10px;
@@ -1035,6 +1371,12 @@ watch(currentTab, () => {
   margin-bottom: 16px;
 }
 
+.field-inline {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 10px;
+}
+
 .field label {
   display: block;
   font-size: 13px;
@@ -1098,6 +1440,17 @@ textarea {
   line-height: 1.6;
 }
 
+.modal-version-preview {
+  margin-bottom: 16px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.paragraph-comment-form {
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
 /* Responsive */
 @media (min-width: 640px) {
   .page-title {
@@ -1153,6 +1506,10 @@ textarea {
   .modal-footer {
     padding: 10px 14px;
     flex-wrap: wrap;
+  }
+
+  .field-inline {
+    grid-template-columns: 1fr;
   }
 }
 

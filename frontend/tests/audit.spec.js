@@ -138,6 +138,16 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "正式提交案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
 
+    await page.getByRole("link", { name: "我的提交" }).click();
+    const teacherPendingCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(teacherPendingCard).toBeVisible();
+    await teacherPendingCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(teacherPendingCard.getByText("历史版本")).toBeVisible();
+    await expect(teacherPendingCard.getByText("来源材料", { exact: true }).first()).toBeVisible();
+    await expect(teacherPendingCard.getByText("E2E 来源材料：学院新闻与课堂反馈摘录。").first()).toBeVisible();
+    await expect(teacherPendingCard.getByRole("button", { name: "复制版本" }).first()).toBeVisible();
+    await capture(page, testInfo, "teacher-version-history");
+
     await logout(page);
     await login(page, ADMIN);
     await page.getByRole("link", { name: "审核管理" }).click();
@@ -151,9 +161,17 @@ test.describe("manual audit candidate flows", () => {
     await pendingCard.getByRole("button", { name: "查看详情" }).click();
     await expect(pendingCard.getByText("作者 AI 自查意见")).toBeVisible();
     await expect(pendingCard.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
+    await expect(pendingCard.getByText("提交版本")).toBeVisible();
+    await expect(pendingCard.getByText("p1").first()).toBeVisible();
     await capture(page, testInfo, "admin-pending-review");
     await pendingCard.getByRole("button", { name: "审核" }).click();
+    await expect(page.locator("#review-version")).toHaveValue(/^\d+$/);
     await page.locator("#review-comment").fill("审计测试：审核通过。");
+    await page.locator("#paragraph-id").selectOption("p1");
+    await page.locator("#paragraph-category").selectOption("source");
+    await page.locator("#paragraph-severity").selectOption("important");
+    await page.locator("#paragraph-message").fill("审计测试：补充来源材料中的时间和参与对象。");
+    await page.locator("#paragraph-suggestion").fill("补充学院新闻链接和课堂反馈摘要。");
     await page.getByLabel("通过").check();
     await capture(page, testInfo, "admin-review-modal");
     await page.getByRole("button", { name: "提交审核" }).click();

@@ -87,9 +87,48 @@
               <strong>内容：</strong>
               <div class="detail-content-body">{{ c.content || '暂无内容' }}</div>
             </div>
+            <div class="detail-content-full" v-if="c.source_material">
+              <strong>来源材料：</strong>
+              <div class="detail-content-body">{{ c.source_material }}</div>
+            </div>
             <div v-if="c.keywords && c.keywords.length" class="detail-keywords">
               <strong>关键词：</strong>
               <span v-for="k in c.keywords" :key="k" class="keyword-tag">{{ k }}</span>
+            </div>
+
+            <div class="version-history">
+              <div class="section-head">
+                <strong>历史版本</strong>
+                <span v-if="versionMap[c.id]?.length" class="section-count">{{ versionMap[c.id].length }} 个版本</span>
+              </div>
+              <div v-if="versionLoading[c.id]" class="review-placeholder">加载中…</div>
+              <div v-else-if="versionError[c.id]" class="review-placeholder">{{ versionError[c.id] }}</div>
+              <div v-else-if="versionMap[c.id]?.length" class="version-list">
+                <article v-for="version in versionMap[c.id]" :key="version.id" class="version-item">
+                  <div class="version-head">
+                    <div>
+                      <strong>v{{ version.version_number }}</strong>
+                      <span v-if="version.change_reason" class="version-reason">{{ version.change_reason }}</span>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" @click="copyVersion(version)">复制版本</button>
+                  </div>
+                  <div class="version-meta">
+                    <span>创建 {{ formatDate(version.created_at) }}</span>
+                    <span v-if="version.created_by">创建人 {{ version.created_by }}</span>
+                  </div>
+                  <div class="version-body">
+                    <div class="version-field">
+                      <span>正文</span>
+                      <p>{{ version.content || '暂无内容' }}</p>
+                    </div>
+                    <div class="version-field">
+                      <span>来源材料</span>
+                      <p>{{ version.source_material || '暂无来源材料' }}</p>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="review-placeholder">暂无历史版本</div>
             </div>
 
             <!-- Review info -->
@@ -151,6 +190,10 @@
             <textarea id="ms-edit-content" v-model="editForm.content" rows="10" placeholder="请输入案例正文"></textarea>
           </div>
           <div class="field">
+            <label for="ms-edit-source">来源材料</label>
+            <textarea id="ms-edit-source" v-model="editForm.source_material" rows="5" placeholder="粘贴新闻、课堂记录、调研材料等来源文本"></textarea>
+          </div>
+          <div class="field">
             <label for="ms-edit-type">案例类型 <span class="required">*</span></label>
             <select id="ms-edit-type" v-model="editForm.type">
               <option disabled value="">请选择案例类型</option>
@@ -206,6 +249,7 @@ import {
   listMyCases,
   fetchCaseDetail,
   fetchCaseReviews,
+  fetchCaseVersions,
   updateCase,
   submitCaseById,
   deleteCaseById,
@@ -227,6 +271,9 @@ const error = ref('');
 const expandedId = ref(null);
 const reviewMap = ref({});
 const reviewLoading = ref({});
+const versionMap = ref({});
+const versionLoading = ref({});
+const versionError = ref({});
 
 const caseTypes = ref({
   TYPE_A: '思政课教学案例',
@@ -237,7 +284,7 @@ const themes = ref(['强国建设', '实践育人', '数字赋能', '铸魂育�
 
 const editingCase = ref(null);
 const editAction = ref(''); // '', 'submit', 'resubmit'
-const editForm = ref({ title: '', department: '', content: '', type: '', theme: '' });
+const editForm = ref({ title: '', department: '', content: '', source_material: '', type: '', theme: '' });
 const saving = ref(false);
 const submitting = ref(false);
 
@@ -373,8 +420,66 @@ function toggleDetail(caseId) {
   }
   expandedId.value = caseId;
   const c = cases.value.find(x => x.id === caseId);
+  loadVersions(caseId);
   if (c && showReviewFor(c.status)) {
     loadReview(caseId);
+  }
+}
+
+async function loadVersions(caseId) {
+  if (versionMap.value[caseId] !== undefined || versionLoading.value[caseId]) return;
+  versionLoading.value[caseId] = true;
+  versionError.value[caseId] = '';
+  try {
+    const res = await fetchCaseVersions(caseId);
+    if (res?.success && Array.isArray(res.data)) {
+      versionMap.value[caseId] = res.data;
+    } else {
+      throw new Error(res?.message || '版本加载失败');
+    }
+  } catch (err) {
+    versionMap.value[caseId] = [];
+    versionError.value[caseId] = err.message || '版本加载失败';
+  } finally {
+    versionLoading.value[caseId] = false;
+  }
+}
+
+function versionSnapshotText(version) {
+  return [
+    `版本：v${version.version_number || ''}`,
+    `标题：${version.title || ''}`,
+    `类型：${typeLabel(version.type) || ''}`,
+    `主题：${version.theme || ''}`,
+    `创建时间：${formatDate(version.created_at)}`,
+    '',
+    '正文：',
+    version.content || '',
+    '',
+    '来源材料：',
+    version.source_material || '',
+  ].join('\n');
+}
+
+async function copyVersion(version) {
+  const text = versionSnapshotText(version);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    notify(`v${version.version_number} 已复制`, 'success');
+  } catch {
+    notify('复制失败，请手动选中文本复制', 'error');
   }
 }
 
@@ -412,6 +517,7 @@ function openEdit(c, action = '') {
     title: c.title || '',
     department: c.department || '',
     content: c.content || '',
+    source_material: c.source_material || '',
     type: c.type || '',
     theme: c.theme || '',
   };
@@ -436,6 +542,7 @@ async function handleSave() {
     await updateCase(editingCase.value.id, {
       title: editForm.value.title.trim(),
       content: editForm.value.content.trim(),
+      source_material: editForm.value.source_material.trim(),
       author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
       department: editForm.value.department.trim(),
       type: editForm.value.type,
@@ -464,6 +571,7 @@ async function handleResubmit() {
     await updateCase(editingCase.value.id, {
       title: editForm.value.title.trim(),
       content: editForm.value.content.trim(),
+      source_material: editForm.value.source_material.trim(),
       author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
       department: editForm.value.department.trim(),
       type: editForm.value.type,
@@ -522,6 +630,9 @@ onMounted(async () => {
 watch(currentTab, () => {
   reviewMap.value = {};
   reviewLoading.value = {};
+  versionMap.value = {};
+  versionLoading.value = {};
+  versionError.value = {};
 });
 </script>
 
@@ -824,6 +935,87 @@ watch(currentTab, () => {
   padding: 12px;
   background: var(--color-error-bg);
   border-radius: 6px;
+}
+
+.version-history {
+  margin: 14px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.section-head strong {
+  color: var(--color-text);
+}
+
+.section-count,
+.version-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.version-list {
+  display: grid;
+  gap: 10px;
+}
+
+.version-item {
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.version-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.version-head strong {
+  color: var(--color-brand);
+}
+
+.version-reason {
+  margin-left: 8px;
+  color: var(--color-text-secondary);
+}
+
+.version-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+}
+
+.version-body {
+  display: grid;
+  gap: 8px;
+}
+
+.version-field span {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.version-field p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .detail-review strong {

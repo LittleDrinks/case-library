@@ -97,6 +97,16 @@ export async function fetchCaseReviews(caseId) {
 }
 
 /**
+ * Fetch read-only version history for a case.
+ *
+ * Backend contract:
+ *   GET /api/versions/{case_id}
+ */
+export async function fetchCaseVersions(caseId) {
+  return get(`/api/versions/${caseId}`);
+}
+
+/**
  * Delete a case by ID.
  *
  * Backend contract:
@@ -136,8 +146,15 @@ export async function listReviewCases(status) {
  *   "approve" | "approved"  -> approved
  *   "reject"  | "rejected"  -> rejected / needs_revision
  */
-export async function reviewCase(caseId, { comment, status }) {
-  return postForm(`/api/reviews/${caseId}`, { comment, status });
+export async function reviewCase(caseId, { comment, status, version_id, paragraph_comments }) {
+  const body = { comment, status };
+  if (version_id) body.version_id = version_id;
+  if (paragraph_comments) {
+    body.paragraph_comments = Array.isArray(paragraph_comments)
+      ? JSON.stringify(paragraph_comments)
+      : paragraph_comments;
+  }
+  return postForm(`/api/reviews/${caseId}`, body);
 }
 
 /**
