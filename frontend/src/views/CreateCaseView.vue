@@ -18,7 +18,9 @@
             { active: idx === currentStep, completed: idx < currentStep },
           ]"
         >
-          <span class="mobile-step-dot">{{ idx < currentStep ? '✓' : idx + 1 }}</span>
+          <span class="mobile-step-dot" aria-hidden="true">
+            <span v-if="idx >= currentStep">{{ idx + 1 }}</span>
+          </span>
           <span class="mobile-step-label">{{ step.label }}</span>
         </div>
       </div>
@@ -68,7 +70,7 @@
               </svg>
             </div>
             <div class="step-marker" aria-hidden="true">
-              {{ idx < currentStep ? '✓' : idx + 1 }}
+              <span v-if="idx >= currentStep">{{ idx + 1 }}</span>
             </div>
           </div>
           <div class="step-label">{{ step.label }}</div>
@@ -395,23 +397,23 @@
             </div>
             <ul class="submit-checklist">
               <li :class="{ ok: form.title }">
-                <span class="check" aria-hidden="true">{{ form.title ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例标题：{{ form.title || '未填写' }}
               </li>
               <li :class="{ ok: form.department }">
-                <span class="check" aria-hidden="true">{{ form.department ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 所属部门/学院：{{ form.department || '未填写' }}
               </li>
               <li :class="{ ok: form.content }">
-                <span class="check" aria-hidden="true">{{ form.content ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例正文：{{ contentSummary }}
               </li>
               <li :class="{ ok: form.type }">
-                <span class="check" aria-hidden="true">{{ form.type ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例类型：{{ form.type ? constants.case_types[form.type] : '未选择' }}
               </li>
               <li :class="{ ok: form.theme }">
-                <span class="check" aria-hidden="true">{{ form.theme ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例主题：{{ form.theme || '未选择' }}
               </li>
             </ul>
@@ -1235,9 +1237,19 @@ watch(currentStep, () => {
 }
 
 .rail-step.completed .step-marker {
+  position: relative;
   background: var(--color-brand);
   color: #fff;
   border-color: var(--color-brand);
+}
+
+.rail-step.completed .step-marker::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .rail-step.future .step-marker {
@@ -1335,9 +1347,19 @@ watch(currentStep, () => {
 }
 
 .mobile-step.completed .mobile-step-dot {
+  position: relative;
   background: var(--color-brand);
   color: #fff;
   border-color: var(--color-brand);
+}
+
+.mobile-step.completed .mobile-step-dot::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .mobile-step-label {
@@ -2093,6 +2115,7 @@ textarea {
 }
 
 .submit-checklist .check {
+  position: relative;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -2109,6 +2132,15 @@ textarea {
   background: var(--color-brand);
   border-color: var(--color-brand);
   color: #fff;
+}
+
+.submit-checklist li.ok .check::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .btn-submit-final {
