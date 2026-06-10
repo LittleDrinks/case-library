@@ -493,7 +493,7 @@ async function loadReview(caseId) {
       if (decisive) {
         reviewMap.value[caseId] = {
           reviewer: decisive.reviewer || '未知',
-          result: decisive.status === 'approved' ? '通过' : '驳回',
+          result: decisive.status === 'approved' ? '通过' : '需修改',
           comment: decisive.comment || '（无意见）',
           reviewAt: formatDate(decisive.review_at),
         };
