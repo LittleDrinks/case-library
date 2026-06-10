@@ -412,6 +412,17 @@ def main_test() -> None:
     assert_status(response, 404)
 
     review_case_id = make_case("ownerflow", "draft")
+
+    direct_draft_review_id = make_case("ownerflow", "draft")
+    response = client.post(
+        f"/api/reviews/{direct_draft_review_id}",
+        data={"comment": "cannot approve draft directly", "status": "approve"},
+        headers=auth("adminflow"),
+    )
+    assert_status(response, 400)
+    stored_direct_draft = get_db().cases.find_one({"id": direct_draft_review_id})
+    assert stored_direct_draft["status"] == "draft"
+
     response = client.post(f"/api/cases/{review_case_id}/submit", headers=auth("ownerflow"))
     assert_status(response, 200)
 

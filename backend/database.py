@@ -1099,6 +1099,8 @@ def review_case(
     case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not case:
         return False
+    if case.get("status") != "pending_review":
+        return False
     bound_version_id = int(version_id or case.get("submitted_version_id") or 0)
     if not bound_version_id:
         bound_version_id = _latest_version_id(case_id) or 0
