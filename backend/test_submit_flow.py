@@ -586,6 +586,24 @@ def main_test() -> None:
             }
         )
 
+        response = client.post(f"/api/cases/{structured_case}/ai-review", json={})
+        assert_status(response, 401)
+
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={},
+            headers=auth("otherflow"),
+        )
+        assert_status(response, 403)
+
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={"model": 123},
+            headers=auth("adminflow"),
+        )
+        assert_status(response, 400)
+        assert response.json()["detail"] == "model 必须是字符串"
+
         os.environ["AI_REVIEW_ENABLED"] = "false"
         response = client.post(
             f"/api/cases/{structured_case}/ai-review",
