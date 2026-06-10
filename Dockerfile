@@ -4,10 +4,10 @@ FROM node:20-bookworm-slim AS node
 
 FROM python:3.12-slim
 
-ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-ARG APT_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+ARG APT_MIRROR=http://deb.debian.org/debian
+ARG APT_SECURITY_MIRROR=http://deb.debian.org/debian-security
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \

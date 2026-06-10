@@ -81,7 +81,7 @@ AI 约束见 `docs/ai.md`。
   `AI_TIMEOUT_SECONDS`、`AI_REVIEW_ENABLED`
 - 前端：`VITE_API_BASE_URL`、`FRONTEND_PORT`
 - 镜像源：`APT_MIRROR`、`APT_SECURITY_MIRROR`、`PIP_INDEX_URL`、
-  `NPM_CONFIG_REGISTRY`
+  `NPM_CONFIG_REGISTRY`。默认使用官方源；国内镜像只应通过本地 `.env` 或构建参数显式启用。
 
 禁止打印或提交真实 `AI_API_KEY`、AnySearch/Tavily key、代理地址和私有服务地址。
 
