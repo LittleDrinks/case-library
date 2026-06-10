@@ -25,6 +25,30 @@ AI 约束见 `docs/ai.md`。
 - `agent-prompts/`：可复用 worker 提示词。
 - `agent-runs/`：本地一次性 worker 输出，忽略不提交。
 
+### 后端脚本和默认值
+
+`backend/` 当前仍混放运行模块和操作脚本，暂不在 alpha PR 中搬目录：
+
+- 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、`prompts.py`、
+  `case_processor.py`、`search_engine.py`
+- Compose 启动账号初始化：`backend/init_users.py`
+- 管理员账号工具：`backend/account_admin.py`
+- 演示数据脚本：`backend/demo.py`
+- 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
+- 本地 smoke/debug：`backend/smoke_test_mongo.py`
+- 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用
+- E2E seed：`scripts/seed_e2e_accounts.py`，由 `docker-compose.dev.yml` 调用
+
+`backend/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
+均设置 `must_change_password=true`。E2E 账号和 alpha demo 案例由
+`scripts/seed_e2e_accounts.py` 确定性创建，仅用于 dev/e2e 环境。不要把真实账号、真实密码
+或生产种子数据写入这些脚本。
+
+`/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
+后端测试、前端 fallback 和文档。产品 prompt/template 资产当前保留在 `skills/`，后续若做
+统一 prompt 管理，先按 issue #80 迁移路径和评测命令收口，不把 `.codex/` 代理技能混入产品
+资产。
+
 历史目录只读参考，不从中开发，不整目录复制：
 
 - `/home/q2635/wsl-workspace/case-library-old`
