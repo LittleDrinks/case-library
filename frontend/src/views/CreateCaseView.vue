@@ -333,6 +333,32 @@
                       {{ comment.paragraph_id }}：{{ comment.message }}
                     </li>
                   </ul>
+                  <div
+                    v-if="aiReviewState[item.id].version?.paragraphs?.length && aiReviewState[item.id].comments.length"
+                    class="ai-annotation-preview"
+                  >
+                    <div class="annotation-copy">
+                      <p
+                        v-for="paragraph in aiReviewState[item.id].version.paragraphs"
+                        :key="paragraph.paragraph_id"
+                        :class="{ highlighted: commentsForParagraph(aiReviewState[item.id], paragraph.paragraph_id).length }"
+                      >
+                        <span>{{ paragraph.paragraph_id }}</span>
+                        {{ paragraph.text }}
+                      </p>
+                    </div>
+                    <aside class="annotation-comments" aria-label="AI 段落批注">
+                      <div
+                        v-for="comment in aiReviewState[item.id].comments"
+                        :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
+                        class="annotation-comment"
+                      >
+                        <strong>{{ comment.paragraph_id }}</strong>
+                        <p>{{ comment.message }}</p>
+                        <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
+                      </div>
+                    </aside>
+                  </div>
                 </div>
                 <pre v-else class="ai-answer">{{ aiReviewState[item.id].answer }}</pre>
                 <div v-if="aiReviewState[item.id].parse_error" class="ai-parse-warning">
@@ -528,6 +554,7 @@ const aiReviewState = reactive(
         parse_error: null,
         error: "",
         comments: [],
+        version: null,
       },
     ])
   )
@@ -847,6 +874,7 @@ function ensureAiReviewState(promptId) {
       parse_error: null,
       error: "",
       comments: [],
+      version: null,
     };
   }
   return aiReviewState[promptId];
@@ -860,6 +888,11 @@ function resetAiReviewItem(promptId) {
   state.parse_error = null;
   state.error = "";
   state.comments = [];
+  state.version = null;
+}
+
+function commentsForParagraph(state, paragraphId) {
+  return (state.comments || []).filter((comment) => comment.paragraph_id === paragraphId);
 }
 
 function aiStatusLabel(status) {
@@ -971,6 +1004,7 @@ async function runAiReview(promptId) {
   state.parse_error = null;
   state.error = "";
   state.comments = [];
+  state.version = null;
   try {
     const activeCaseId = await ensureDraftCase();
     const data = await runParagraphReview(activeCaseId);
@@ -979,6 +1013,7 @@ async function runAiReview(promptId) {
     latestReviewVersionId.value = version.id || null;
     state.status = "success";
     state.comments = result.comments || [];
+    state.version = version || null;
     state.answer = state.comments.map((comment) => comment.message).join("\n") || "AI 未返回段落批注。";
     state.parsed = {
       detail: `已生成 v${version.version_number || ""} 只读审核版本，包含 ${state.comments.length} 条段落批注。`,
@@ -1784,6 +1819,74 @@ textarea {
   color: var(--color-text-secondary);
 }
 
+.ai-annotation-preview {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.annotation-copy,
+.annotation-comments {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.annotation-copy p {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.annotation-copy p.highlighted {
+  border-color: rgba(141, 27, 53, 0.35);
+  background: var(--color-brand-light);
+  color: var(--color-text);
+}
+
+.annotation-copy span {
+  display: inline-flex;
+  margin-right: 6px;
+  font-weight: 700;
+  color: var(--color-brand);
+}
+
+.annotation-comment {
+  padding: 9px 10px;
+  border: 1px solid rgba(141, 27, 53, 0.22);
+  border-left: 3px solid var(--color-brand);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.annotation-comment strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-brand);
+}
+
+.annotation-comment p,
+.annotation-comment small {
+  display: block;
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.annotation-comment small {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+}
+
 .ai-answer {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2114,6 +2217,10 @@ textarea {
 
   .review-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .ai-annotation-preview {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
   }
 }
 </style>
