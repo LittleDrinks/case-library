@@ -54,8 +54,13 @@ export async function updateCase(caseId, form) {
  * Backend contract:
  *   POST /api/cases/{case_id}/submit
  */
-export async function submitCaseById(caseId) {
-  return request(`/api/cases/${caseId}/submit`, { method: "POST" });
+export async function submitCaseById(caseId, versionId = null) {
+  const options = { method: "POST" };
+  if (versionId) {
+    options.form = true;
+    options.body = { version_id: versionId };
+  }
+  return request(`/api/cases/${caseId}/submit`, options);
 }
 
 /**

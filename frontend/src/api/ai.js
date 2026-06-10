@@ -15,3 +15,9 @@ export async function runPrompt(promptId, variables, model = null) {
   if (model) payload.model = model;
   return postJSON("/api/ai/chat", payload);
 }
+
+export async function runParagraphReview(caseId, model = null) {
+  const payload = {};
+  if (model) payload.model = model;
+  return postJSON(`/api/cases/${caseId}/ai-review`, payload);
+}

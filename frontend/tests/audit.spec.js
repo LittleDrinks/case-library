@@ -59,42 +59,39 @@ test.describe("manual audit candidate flows", () => {
     );
 
     const title = `Audit案例 ${Date.now()}`;
-    const dialogMessages = [];
     page.on("dialog", (dialog) => {
-      dialogMessages.push(dialog.message());
       dialog.accept();
     });
-    await page.route("**/api/ai/chat", async (route) => {
-      const request = route.request();
-      const payload = request.postDataJSON();
-      const names = {
-        "workflow/completeness": "完整性检查",
-        "workflow/categorization": "分类检查",
-        "workflow/expression": "表达检查",
-        "workflow/score": "综合评分",
-      };
-      const promptName = names[payload.prompt_id] || payload.prompt_id;
-      const parsed =
-        payload.prompt_id === "workflow/score"
-          ? {
-              pass: false,
-              score: 62,
-              detail: "E2E AI 自查：综合风险偏高，建议修改后再提交。",
-              suggestions: ["补充课堂反馈证据。"],
-            }
-          : {
-              pass: true,
-              detail: `E2E AI 自查：${promptName}通过。`,
-              suggestions: ["保留关键教学过程描述。"],
-            };
+    await page.route("**/api/cases/*/ai-review", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          answer: JSON.stringify(parsed),
-          parsed,
-          parse_error: null,
+          status: "ok",
+          data: {
+            version: {
+              version_number: 2,
+              paragraphs: [
+                { paragraph_id: "p1", text: "本案例用于端到端审计测试。" },
+                { paragraph_id: "p2", text: "来源材料用于验证版本快照。" },
+              ],
+              source_material: "E2E 来源材料：学院新闻与课堂反馈摘录。",
+            },
+            comments: [
+              {
+                id: "c1",
+                paragraph_id: "p2",
+                category: "source",
+                severity: "important",
+                message: "E2E AI 段落批注：请补充来源材料中的时间和参与对象。",
+                suggestion: "补充课堂反馈证据。",
+              },
+            ],
+            summary: {
+              suggested_next_steps: ["补充课堂反馈证据。"],
+            },
+          },
         }),
       });
     });
@@ -117,6 +114,7 @@ test.describe("manual audit candidate flows", () => {
     await page.locator("#ccf-content").fill(
       "本案例用于端到端审计测试。内容包含教学背景、问题分析、课堂实施、学生反馈和改进反思，用于验证创建、审核、公开展示的完整链路。"
     );
+    await page.locator("#ccf-source").fill("E2E 来源材料：学院新闻与课堂反馈摘录。");
     await capture(page, testInfo, "create-step-2");
     await page.getByRole("button", { name: "继续" }).click();
 
@@ -129,13 +127,10 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
     await expect(page.getByText("运行全部自查")).toBeVisible();
     await page.getByRole("button", { name: "运行全部自查" }).click();
-    await expect(page.getByText("E2E AI 自查：完整性检查通过。")).toBeVisible();
-    await expect(page.getByText("E2E AI 自查：综合风险偏高，建议修改后再提交。")).toBeVisible();
+    await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
+    await expect(page.getByText("p2：E2E AI 段落批注：请补充来源材料中的时间和参与对象。")).toBeVisible();
     await capture(page, testInfo, "create-step-4-ai-results");
     await page.getByRole("button", { name: "继续" }).click();
-    await expect
-      .poll(() => dialogMessages.some((message) => message.includes("AI 自查提示当前案例可能还需要修改")))
-      .toBe(true);
 
     await expect(page.getByText("确认并提交")).toBeVisible();
     await expect(page.getByText("专家人工审核流程")).toBeVisible();
@@ -155,8 +150,7 @@ test.describe("manual audit candidate flows", () => {
     await expect(pendingCard).toBeVisible();
     await pendingCard.getByRole("button", { name: "查看详情" }).click();
     await expect(pendingCard.getByText("作者 AI 自查意见")).toBeVisible();
-    await expect(pendingCard.getByText("E2E AI 自查：分类检查通过。")).toBeVisible();
-    await expect(pendingCard.getByText("E2E AI 自查：综合风险偏高，建议修改后再提交。")).toBeVisible();
+    await expect(pendingCard.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
     await capture(page, testInfo, "admin-pending-review");
     await pendingCard.getByRole("button", { name: "审核" }).click();
     await page.locator("#review-comment").fill("审计测试：审核通过。");

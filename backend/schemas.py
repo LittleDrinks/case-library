@@ -60,6 +60,7 @@ class CaseData(BaseModel):
     type: str | None = None
     theme: str | None = None
     content: str | None = None
+    source_material: str | None = None
     author: str | None = None
     owner_username: str | None = None
     department: str | None = None
@@ -73,7 +74,7 @@ class CaseData(BaseModel):
     like_count: int | None = None
     is_hidden: bool | None = None
     keywords: list[str] | None = None
-    ai_reviews: list[JsonDict] = Field(default_factory=list)
+    ai_reviews: list[JsonDict] | None = None
 
     model_config = {"extra": "allow"}
 
@@ -125,8 +126,10 @@ class SearchResponse(BaseModel):
 class ReviewData(BaseModel):
     id: int | None = None
     case_id: int | None = None
+    version_id: int | None = None
     reviewer: str | None = None
     comment: str | None = None
+    paragraph_comments: list[JsonDict] = Field(default_factory=list)
     status: str | None = None
     created_at: str | None = None
     review_at: str | None = None
@@ -144,7 +147,16 @@ class VersionData(BaseModel):
     case_id: int | None = None
     version_number: int | None = None
     title: str | None = None
+    type: str | None = None
+    theme: str | None = None
     content: str | None = None
+    source_material: str | None = None
+    author: str | None = None
+    owner_username: str | None = None
+    created_by: str | None = None
+    paragraphs: list[JsonDict] = Field(default_factory=list)
+    ai_review: JsonDict | None = None
+    admin_comments: list[JsonDict] = Field(default_factory=list)
     change_reason: str | None = None
     created_at: str | None = None
 

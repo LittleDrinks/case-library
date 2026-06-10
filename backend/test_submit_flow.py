@@ -29,6 +29,7 @@ def make_case(owner: str, status: str = "draft") -> int:
             "type": "TYPE_A",
             "theme": "test",
             "content": "submit flow test",
+            "source_material": "source material test",
             "author": owner,
             "owner_username": owner,
             "department": "test",
@@ -231,6 +232,8 @@ def main_test() -> None:
     assert_status(public_list, 200)
     public_listed = next(item for item in public_list.json()["data"] if item["id"] == visibility_case)
     assert public_listed["is_hidden"] is False
+    assert public_listed["source_material"] == "source material test"
+    assert "ai_reviews" not in public_listed
 
     delete_case_id = make_case("ownerflow", "draft")
 
@@ -299,8 +302,23 @@ def main_test() -> None:
     versions = response.json()["data"]
     assert versions[0]["version_number"] == 2
     assert versions[0]["content"] == "updated version content"
+    assert versions[0]["source_material"] == "source material test"
+    assert versions[0]["type"] == "TYPE_A"
+    assert versions[0]["theme"] == "test"
+    assert versions[0]["owner_username"] == "ownerflow"
+    assert versions[0]["paragraphs"][0]["paragraph_id"] == "p1"
     assert versions[0]["change_reason"] == "owner edit"
     assert versions[-1]["change_reason"] == "Initial creation"
+
+    response = client.put(
+        f"/api/cases/{version_case}",
+        data={"source_material": "更新后的来源材料", "change_reason": "source update"},
+        headers=auth("ownerflow"),
+    )
+    assert_status(response, 200)
+    response = client.get(f"/api/versions/{version_case}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    assert response.json()["data"][0]["source_material"] == "更新后的来源材料"
 
     stats_visible_case = create_case(
         {
@@ -308,6 +326,7 @@ def main_test() -> None:
             "type": "TYPE_STATS_PUBLIC",
             "theme": "theme_stats_public",
             "content": "public statistics visible case",
+            "source_material": "public source material",
             "author": "ownerflow",
             "owner_username": "ownerflow",
             "department": "test",
@@ -473,6 +492,128 @@ def main_test() -> None:
         assert ai_data["parsed"]["pass"] is True
         assert ai_data["parse_error"] is None
         assert "secret-test-key" not in response.text
+
+        structured_case = create_case(
+            {
+                "title": "结构化 AI 审核案例",
+                "type": "TYPE_A",
+                "theme": "铸魂育人",
+                "content": "第一段说明案例背景。\n第二段缺少来源支撑。",
+                "source_material": "来源材料：学院新闻摘录。",
+                "author": "ownerflow",
+                "owner_username": "ownerflow",
+                "department": "test",
+                "status": "draft",
+            }
+        )
+
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={"model": "not-allowed"},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 400)
+        assert response.json()["status"] == "invalid_model"
+
+        def fake_structured_completion(prompt_text, model, settings=None):
+            assert model == "qwen-plus"
+            assert "p1:" in prompt_text and "p2:" in prompt_text
+            assert "secret-test-key" not in prompt_text
+            return json.dumps(
+                {
+                    "comments": [
+                        {
+                            "paragraph_id": "p2",
+                            "quote": "缺少来源支撑",
+                            "category": "source",
+                            "severity": "important",
+                            "message": "这一段需要补充来源依据。",
+                            "suggestion": "补充学院新闻或活动记录中的对应事实。",
+                        }
+                    ],
+                    "summary": {
+                        "strengths": ["结构清楚"],
+                        "risks": ["来源支撑不足"],
+                        "suggested_next_steps": ["补充来源后提交人工审核"],
+                    },
+                },
+                ensure_ascii=False,
+            )
+
+        main.call_chat_completion = fake_structured_completion
+        response = client.post(
+            f"/api/cases/{structured_case}/ai-review",
+            json={},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 200)
+        structured_data = response.json()["data"]
+        review_version = structured_data["version"]
+        assert review_version["version_number"] == 2
+        assert review_version["source_material"] == "来源材料：学院新闻摘录。"
+        assert review_version["paragraphs"][1]["paragraph_id"] == "p2"
+        assert structured_data["comments"][0]["category"] == "source"
+
+        response = client.post(
+            f"/api/cases/{structured_case}/submit",
+            data={"version_id": review_version["id"]},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 200)
+        stored = get_db().cases.find_one({"id": structured_case})
+        assert stored["submitted_version_id"] == review_version["id"]
+
+        paragraph_comments = [
+            {
+                "paragraph_id": "p2",
+                "category": "source",
+                "severity": "important",
+                "message": "请补充新闻链接或原始活动记录。",
+                "suggestion": "把来源材料中的时间、地点和参与对象补齐。",
+            }
+        ]
+        response = client.post(
+            f"/api/reviews/{structured_case}",
+            data={
+                "comment": "退回修改：来源材料不足",
+                "status": "rejected",
+                "version_id": review_version["id"],
+                "paragraph_comments": json.dumps(paragraph_comments, ensure_ascii=False),
+            },
+            headers=auth("adminflow"),
+        )
+        assert_status(response, 200)
+        stored = get_db().cases.find_one({"id": structured_case})
+        assert stored["status"] == "needs_revision"
+        assert stored["reviewed_version_id"] == review_version["id"]
+
+        response = client.get(f"/api/versions/{structured_case}", headers=auth("ownerflow"))
+        assert_status(response, 200)
+        latest_review_version = next(
+            item for item in response.json()["data"] if item["id"] == review_version["id"]
+        )
+        assert latest_review_version["admin_comments"][0]["comments"][0]["paragraph_id"] == "p2"
+
+        get_db().cases.update_one(
+            {"id": structured_case},
+            {
+                "$set": {
+                    "status": "approved",
+                    "is_approved": True,
+                    "is_in_library": True,
+                }
+            },
+        )
+        response = client.get(f"/api/cases/{structured_case}")
+        assert_status(response, 200)
+        public_detail = response.json()["data"]
+        assert public_detail["source_material"] == "来源材料：学院新闻摘录。"
+        assert "ai_reviews" not in public_detail
+        assert "latest_review_version_id" not in public_detail
+        response = client.get(f"/api/reviews/{structured_case}")
+        assert_status(response, 403)
+        response = client.get(f"/api/versions/{structured_case}")
+        assert_status(response, 403)
     finally:
         main.call_chat_completion = old_call_chat_completion
         for key, value in old_env.items():

@@ -169,6 +169,17 @@
             </div>
             <div v-if="errors.content" class="field-error" role="alert">{{ errors.content }}</div>
           </div>
+
+          <div class="field">
+            <label for="ccf-source">来源材料</label>
+            <textarea
+              id="ccf-source"
+              v-model="form.source_material"
+              rows="8"
+              placeholder="可粘贴新闻链接、公众号正文、活动记录、访谈纪要或其他支撑材料。"
+            ></textarea>
+            <div class="field-help">来源材料会随版本快照保存，公开案例仅展示正文和来源材料，不展示审核批注。</div>
+          </div>
         </template>
 
         <!-- Step 3: 分类选择 -->
@@ -314,6 +325,14 @@
                       {{ suggestion }}
                     </li>
                   </ul>
+                  <ul
+                    v-if="Array.isArray(aiReviewState[item.id].comments) && aiReviewState[item.id].comments.length"
+                    class="ai-suggestions"
+                  >
+                    <li v-for="comment in aiReviewState[item.id].comments" :key="comment.id || comment.message">
+                      {{ comment.paragraph_id }}：{{ comment.message }}
+                    </li>
+                  </ul>
                 </div>
                 <pre v-else class="ai-answer">{{ aiReviewState[item.id].answer }}</pre>
                 <div v-if="aiReviewState[item.id].parse_error" class="ai-parse-warning">
@@ -412,7 +431,7 @@ import {
   updateCase,
   submitCaseById,
 } from "../api/cases.js";
-import { listPrompts, runPrompt } from "../api/ai.js";
+import { listPrompts, runParagraphReview } from "../api/ai.js";
 
 const DRAFT_KEY = "case_library_create_case_draft";
 
@@ -434,6 +453,7 @@ const form = reactive({
   author: "",
   department: "",
   content: "",
+  source_material: "",
   type: "",
   theme: "",
 });
@@ -457,7 +477,7 @@ const constants = reactive({
     draft: "草稿",
     pending_review: "待审核",
     approved: "已通过",
-    needs_revision: "已驳回",
+    needs_revision: "退回修改",
   },
 });
 
@@ -466,6 +486,7 @@ const helperInput = ref("");
 const helperResponse = ref("");
 const aiPromptLoadError = ref("");
 const aiRunningAll = ref(false);
+const latestReviewVersionId = ref(null);
 
 const DEFAULT_AI_REVIEW_ITEMS = [
   {
@@ -505,6 +526,7 @@ const aiReviewState = reactive(
         parsed: null,
         parse_error: null,
         error: "",
+        comments: [],
       },
     ])
   )
@@ -648,6 +670,7 @@ function buildPayload(status) {
   const payload = {
     title: form.title.trim(),
     content: form.content.trim(),
+    source_material: form.source_material.trim(),
     department: form.department.trim(),
     type: form.type,
     theme: form.theme,
@@ -676,6 +699,7 @@ async function handleSaveDraft() {
       const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
+        source_material: form.source_material.trim(),
         author: displayAuthor.value,
         department: form.department.trim(),
         type: form.type,
@@ -715,6 +739,7 @@ async function handleFormalSubmit() {
       const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
+        source_material: form.source_material.trim(),
         author: displayAuthor.value,
         department: form.department.trim(),
         type: form.type,
@@ -723,9 +748,13 @@ async function handleFormalSubmit() {
       };
       appendAiReviewsPayload(payload);
       await updateCase(caseId.value, payload);
-      await submitCaseById(caseId.value);
+      await submitCaseById(caseId.value, latestReviewVersionId.value);
     } else {
-      await createCase(buildPayload("pending_review"));
+      const res = await createCase(buildPayload("draft"));
+      if (res && res.case_id) {
+        caseId.value = res.case_id;
+        await submitCaseById(caseId.value, latestReviewVersionId.value);
+      }
     }
     clearDraft();
     window.alert("案例提交成功，请等待专家审核");
@@ -746,10 +775,12 @@ function persistDraft() {
         author: form.author,
         department: form.department,
         content: form.content,
+        source_material: form.source_material,
         type: form.type,
         theme: form.theme,
       },
       caseId: caseId.value,
+      latestReviewVersionId: latestReviewVersionId.value,
       savedAt: Date.now(),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
@@ -769,6 +800,9 @@ function loadDraft() {
     if (saved && saved.caseId) {
       caseId.value = saved.caseId;
     }
+    if (saved && saved.latestReviewVersionId) {
+      latestReviewVersionId.value = saved.latestReviewVersionId;
+    }
   } catch {
     // Ignore malformed storage
   }
@@ -787,9 +821,11 @@ function resetForm() {
   form.author = "";
   form.department = "";
   form.content = "";
+  form.source_material = "";
   form.type = "";
   form.theme = "";
   caseId.value = null;
+  latestReviewVersionId.value = null;
   currentStep.value = 0;
   touched.title = false;
   touched.department = false;
@@ -809,6 +845,7 @@ function ensureAiReviewState(promptId) {
       parsed: null,
       parse_error: null,
       error: "",
+      comments: [],
     };
   }
   return aiReviewState[promptId];
@@ -821,6 +858,7 @@ function resetAiReviewItem(promptId) {
   state.parsed = null;
   state.parse_error = null;
   state.error = "";
+  state.comments = [];
 }
 
 function aiStatusLabel(status) {
@@ -834,9 +872,29 @@ function buildAiVariables() {
   return {
     title: form.title.trim(),
     content: form.content.trim(),
+    source_material: form.source_material.trim(),
     type: form.type,
     theme: form.theme,
   };
+}
+
+async function ensureDraftCase() {
+  const payload = buildPayload("draft");
+  if (caseId.value) {
+    await updateCase(caseId.value, {
+      ...payload,
+      author: displayAuthor.value,
+      change_reason: "AI 审核前更新",
+    });
+    return caseId.value;
+  }
+  const res = await createCase(payload);
+  if (!res || !res.case_id) {
+    throw new Error("保存草稿失败，无法创建 AI 审核版本");
+  }
+  caseId.value = res.case_id;
+  persistDraft();
+  return caseId.value;
 }
 
 function collectAiReviews() {
@@ -909,15 +967,27 @@ async function runAiReview(promptId) {
   state.parsed = null;
   state.parse_error = null;
   state.error = "";
+  state.comments = [];
   try {
-    const data = await runPrompt(promptId, buildAiVariables());
+    const activeCaseId = await ensureDraftCase();
+    const data = await runParagraphReview(activeCaseId);
+    const result = data?.data || {};
+    const version = result.version || {};
+    latestReviewVersionId.value = version.id || null;
     state.status = "success";
-    state.answer = data.answer || "";
-    state.parsed = data.parsed || null;
-    state.parse_error = data.parse_error || null;
+    state.comments = result.comments || [];
+    state.answer = state.comments.map((comment) => comment.message).join("\n") || "AI 未返回段落批注。";
+    state.parsed = {
+      detail: `已生成 v${version.version_number || ""} 只读审核版本，包含 ${state.comments.length} 条段落批注。`,
+      suggestions: (result.summary?.suggested_next_steps || []).concat(
+        state.comments.map((comment) => comment.suggestion).filter(Boolean)
+      ),
+    };
+    state.parse_error = null;
+    persistDraft();
   } catch (err) {
     state.status = "error";
-    state.error = err.message || "AI 自查暂不可用";
+    state.error = err.data?.detail || err.message || "AI 自查暂不可用";
   }
 }
 
@@ -925,9 +995,7 @@ async function runAllAiReviews() {
   if (!canRunAiReview.value || aiRunningAll.value) return;
   aiRunningAll.value = true;
   try {
-    for (const item of aiReviewItems.value) {
-      await runAiReview(item.id);
-    }
+    await runAiReview(aiReviewItems.value[0]?.id || DEFAULT_AI_REVIEW_ITEMS[0].id);
   } finally {
     aiRunningAll.value = false;
   }
