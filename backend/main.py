@@ -411,6 +411,14 @@ async def list_cases(
             raise HTTPException(status_code=401, detail="请先登录")
         author = current_user.get("username")
 
+    is_admin = bool(current_user and current_user.get("role") == "admin")
+    is_public_library = (status == "approved") and not author
+    if not author and not is_public_library:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="请先登录")
+        if not is_admin:
+            raise HTTPException(status_code=403, detail="仅管理员可以查看全站审核队列")
+
     if author:
         if not current_user:
             raise HTTPException(status_code=401, detail="请先登录")
@@ -419,9 +427,7 @@ async def list_cases(
         if status == "draft" and current_user.get("username") != author:
             raise HTTPException(status_code=403, detail="无权查看该用户草稿")
 
-    is_admin = bool(current_user and current_user.get("role") == "admin")
     is_self_view = bool(author and current_user and current_user.get("username") == author)
-    is_public_library = (status == "approved") and not author
     include_hidden = (is_admin or is_self_view) and not is_public_library
     if is_public_library:
         return {

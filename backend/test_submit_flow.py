@@ -247,6 +247,12 @@ def main_test() -> None:
     assert_status(public_list, 200)
     assert all(item["id"] != visibility_case for item in public_list.json()["data"])
 
+    anonymous_all = client.get("/api/cases?status=all")
+    assert_status(anonymous_all, 401)
+
+    normal_global_queue = client.get("/api/cases?status=pending_review", headers=auth("ownerflow"))
+    assert_status(normal_global_queue, 403)
+
     admin_list = client.get("/api/cases?status=approved_all", headers=auth("adminflow"))
     assert_status(admin_list, 200)
     admin_listed = next(item for item in admin_list.json()["data"] if item["id"] == visibility_case)
