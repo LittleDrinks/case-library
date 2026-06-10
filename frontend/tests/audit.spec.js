@@ -32,6 +32,16 @@ async function capture(page, testInfo, name) {
   });
 }
 
+async function cleanupCaseByTitle(page, title) {
+  const response = await page.request.get(`/api/search?q=${encodeURIComponent(title)}&limit=10`);
+  if (!response.ok()) return;
+  const payload = await response.json();
+  const cases = Array.isArray(payload.data) ? payload.data : [];
+  for (const item of cases.filter((c) => c.title === title)) {
+    await page.request.delete(`/api/cases/${item.id}`);
+  }
+}
+
 test.describe("manual audit candidate flows", () => {
   test("mobile create flow keeps critical screens readable", async ({ page }, testInfo) => {
     test.skip(
@@ -227,5 +237,6 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByText("E2E 来源材料：学院新闻与课堂反馈摘录。")).toBeVisible();
     await expect(page.getByText("作者 AI 自查意见")).toHaveCount(0);
     await capture(page, testInfo, "public-approved-search-result");
+    await cleanupCaseByTitle(page, title);
   });
 });
