@@ -33,6 +33,44 @@ async function capture(page, testInfo, name) {
 }
 
 test.describe("manual audit candidate flows", () => {
+  test("mobile create flow keeps critical screens readable", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-mobile",
+      "mobile-only visual regression for create flow"
+    );
+
+    await page.goto("/");
+    await login(page, USER);
+    await page.getByRole("link", { name: "创建案例" }).click();
+
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.locator(".wizard-main")).toBeInViewport();
+    await expect(page.locator("#ccf-title")).toBeVisible();
+    await capture(page, testInfo, "mobile-create-step-1");
+
+    await page.getByLabel(/案例标题/).fill(`移动端视觉审计 ${Date.now()}`);
+    await page.getByLabel(/所属部门\/学院/).fill("马克思主义学院");
+    await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.locator("#ccf-content")).toBeVisible();
+    await expect(page.locator("#ccf-source")).toBeVisible();
+    await capture(page, testInfo, "mobile-create-step-2");
+
+    await page.locator("#ccf-content").fill(
+      "移动端创建流程视觉审计正文，覆盖输入框宽度、按钮换行和页面滚动。"
+    );
+    await page.locator("#ccf-source").fill("移动端来源材料审计文本。");
+    await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await expect(page.locator("#ccf-type")).toBeVisible();
+    await expect(page.locator("#ccf-theme")).toBeVisible();
+    await capture(page, testInfo, "mobile-create-step-3");
+  });
+
   test("default admin account is present but requires password change", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium-desktop",
