@@ -1004,14 +1004,18 @@ async def review_case_endpoint(
     if not current_user or current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可以审核案例")
     reviewer = current_user.get("username", "")
-    if not review_case(
-        case_id,
-        reviewer,
-        comment,
-        status,
-        version_id=version_id,
-        paragraph_comments=paragraph_comments,
-    ):
+    try:
+        reviewed = review_case(
+            case_id,
+            reviewer,
+            comment,
+            status,
+            version_id=version_id,
+            paragraph_comments=paragraph_comments,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not reviewed:
         raise HTTPException(status_code=400, detail="审核失败")
     return {"success": True, "message": "审核完成"}
 

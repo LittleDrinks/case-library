@@ -801,6 +801,46 @@ def main_test() -> None:
         stored = get_db().cases.find_one({"id": structured_case})
         assert stored["submitted_version_id"] == review_version["id"]
 
+        invalid_review_payloads = [
+            (
+                {"paragraph_comments": "not-json"},
+                "paragraph_comments must be valid JSON",
+            ),
+            (
+                {
+                    "paragraph_comments": json.dumps(
+                        [{"paragraph_id": "p404", "message": "未知段落"}],
+                        ensure_ascii=False,
+                    )
+                },
+                "Unknown paragraph_id: p404",
+            ),
+            (
+                {
+                    "paragraph_comments": json.dumps(
+                        [{"paragraph_id": "p2", "message": "  "}],
+                        ensure_ascii=False,
+                    )
+                },
+                "paragraph_comments records require message",
+            ),
+        ]
+        for extra_payload, expected_detail in invalid_review_payloads:
+            response = client.post(
+                f"/api/reviews/{structured_case}",
+                data={
+                    "comment": "无效批注测试",
+                    "status": "rejected",
+                    "version_id": review_version["id"],
+                    **extra_payload,
+                },
+                headers=auth("adminflow"),
+            )
+            assert_status(response, 400)
+            assert response.json()["detail"] == expected_detail
+            stored = get_db().cases.find_one({"id": structured_case})
+            assert stored["status"] == "pending_review"
+
         paragraph_comments = [
             {
                 "paragraph_id": "p2",

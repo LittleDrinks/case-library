@@ -261,6 +261,9 @@ def normalize_paragraph_comments(value: Any, paragraph_ids: set[str] | None = No
         severity = str(item.get("severity", "suggestion")).strip()
         if severity not in COMMENT_SEVERITIES:
             severity = "suggestion"
+        message = str(item.get("message", "")).strip()
+        if not message:
+            raise ValueError("paragraph_comments records require message")
 
         normalized.append(
             {
@@ -269,7 +272,7 @@ def normalize_paragraph_comments(value: Any, paragraph_ids: set[str] | None = No
                 "quote": str(item.get("quote", ""))[:500],
                 "category": category,
                 "severity": severity,
-                "message": str(item.get("message", "")).strip(),
+                "message": message,
                 "suggestion": str(item.get("suggestion", "")).strip(),
             }
         )
@@ -286,9 +289,6 @@ def normalize_structured_ai_review(value: Any, paragraph_ids: set[str]) -> dict:
         raise ValueError("AI review result must be a JSON object")
 
     comments = normalize_paragraph_comments(value.get("comments", []), paragraph_ids)
-    for item in comments:
-        if not item.get("message"):
-            raise ValueError("AI review comments require message")
     return {"comments": comments, "summary": _normalize_summary(value.get("summary", {}))}
 
 
