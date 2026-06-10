@@ -32,13 +32,15 @@ async function capture(page, testInfo, name) {
   });
 }
 
-async function cleanupCaseByTitle(page, title) {
-  const response = await page.request.get(`/api/search?q=${encodeURIComponent(title)}&limit=10`);
+async function cleanupAuditCases(page, titlePrefix = "Audit案例 ") {
+  const token = await page.evaluate(() => localStorage.getItem("case_library_auth_token"));
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const response = await page.request.get("/api/cases?status=all&limit=100", { headers });
   if (!response.ok()) return;
   const payload = await response.json();
   const cases = Array.isArray(payload.data) ? payload.data : [];
-  for (const item of cases.filter((c) => c.title === title)) {
-    await page.request.delete(`/api/cases/${item.id}`);
+  for (const item of cases.filter((c) => c.title?.startsWith(titlePrefix))) {
+    await page.request.delete(`/api/cases/${item.id}`, { headers });
   }
 }
 
@@ -147,6 +149,10 @@ test.describe("manual audit candidate flows", () => {
     await page.goto("/");
     await capture(page, testInfo, "home-public");
 
+    await login(page, ADMIN);
+    await cleanupAuditCases(page);
+    await logout(page);
+
     await login(page, USER);
     await capture(page, testInfo, "home-authenticated-user");
 
@@ -240,7 +246,9 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByText("E2E 来源材料：学院新闻与课堂反馈摘录。")).toBeVisible();
     await expect(page.getByText("作者 AI 自查意见")).toHaveCount(0);
     await capture(page, testInfo, "public-approved-search-result");
-    await cleanupCaseByTitle(page, title);
+    await page.getByLabel("关闭").click();
+    await login(page, ADMIN);
+    await cleanupAuditCases(page, title);
   });
 
   test("public library does not render leaked review internals", async ({ page }, testInfo) => {
