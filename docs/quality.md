@@ -55,5 +55,6 @@ git diff --check
 
 ## 扩展方向
 
-- 为 AI JSON contract 增加 schema 校验测试。
+- 为 AI JSON contract 增加更严格的 schema 边界测试；当前已覆盖 disabled、
+  parse_failed、invalid_contract 和主成功路径。
 - 为前端批注页增加 Playwright 截图/交互测试。
