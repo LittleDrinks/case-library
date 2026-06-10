@@ -1,44 +1,55 @@
-# 质量基线
+# 质量门禁
 
-仓库质量门覆盖 lint、format、类型检查、后端测试、前端测试、构建和 Compose 配置校验。
+当前强制门禁由 Docker Compose 容器执行。本机没有完整项目运行环境，除纯文档检查外，
+不要在宿主机直接运行项目依赖、测试或构建。
 
-## 当前强制检查
-
-```bash
-make check
-make test
-make compose-config
-```
-
-底层命令：
+## 标准门禁
 
 ```bash
-ruff check backend scripts
-mypy backend
-pytest
-cd frontend && npm test
-cd frontend && npm run build
-docker compose config
+docker compose up -d --build
+curl -fsS http://127.0.0.1:8001/api/constants
+curl -fsS http://127.0.0.1:18080/
+docker compose ps
+docker compose run --rm app make check
+docker compose config --quiet
+git diff --check
 ```
 
-## 渐进启用策略
+`make check` 当前包含：
 
-`develop/littledrinks` 是基础设施分支。质量门禁必须在容器内执行。前端采用“存在即检查”策略：
+- `ruff check backend`
+- 后端提交流测试或 `pytest`
+- 前端依赖安装和 `npm run build`
 
-- `backend/` 始终全量 lint。
-- `scripts/` 存在时纳入 lint。
-- `mypy backend` 始终全量类型检查后端。
-- `scripts/check_exceptions.py` 全量检查后端可疑异常处理。
-- `tests/` 存在时运行 `pytest`；否则运行旧版 smoke test。
-- `frontend/package.json` 存在时运行 `npm test` 和 `npm run build`。
+## E2E
 
-目标结构合入后，这些检查会自动变成强制门禁。
+前端 Playwright smoke 也应在容器环境中运行；仅在已确认宿主机环境完整时才可临时
+使用本机命令。
 
-## 扩展门禁
+```bash
+docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
+```
 
-后续可以逐步加入：
+容器化 E2E：
 
-- `pip-audit` 或 Dependabot 依赖安全检查。
-- Playwright 截图或 E2E 门禁。
-- 全量 `mypy backend`。
-- 更严格的 Ruff 规则收敛。
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
+```
+
+## 允许缩小门禁的情况
+
+纯文档修改可只运行：
+
+```bash
+git diff --check
+```
+
+并在汇报中说明未运行完整 Compose 门禁。
+
+## 扩展方向
+
+- 为 PRD 目标补充版本化批注接口测试。
+- 为 AI JSON contract 增加 schema 校验测试。
+- 为公开案例“不展示批注”增加回归测试。
+- 为前端批注页增加 Playwright 截图/交互测试。

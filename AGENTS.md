@@ -1,8 +1,8 @@
 # Agent Handoff
 
 This file is the agent entrypoint for the restart track. Keep it operational and
-short. Do not duplicate product facts that belong in `docs/project.md`,
-`docs/frontend-rebuild.md`, or GitHub Issues.
+short. Do not duplicate product facts that belong in `docs/prd.md`,
+`docs/project.md`, or GitHub Issues.
 
 ## Current Context
 
@@ -16,9 +16,13 @@ short. Do not duplicate product facts that belong in `docs/project.md`,
 
 Current local tracked changes:
 
-- `docs/api.md` has been replaced with the recovered full API contract.
-- Solo-project cleanup deleted `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, and
-  collaboration boilerplate under `.github/`.
+- Documentation is being rewritten in concise Chinese to match current progress.
+- `docs/prd.md` now owns the alpha product definition.
+- `docs/handoff-alpha-issues.md` tells the next agent how to branch, finish all
+  alpha issues, merge back into `develop/alpha-summary`, and prepare tomorrow's
+  acceptance handoff.
+- `docs/frontend-rebuild.md` has been removed; frontend constraints now live in
+  `docs/prd.md` and current implementation facts live in `docs/project.md`.
 
 Current ignored local tooling/state:
 
@@ -37,9 +41,10 @@ Do not develop from them and do not copy files wholesale.
 
 ## Source Of Truth
 
+- Product requirements and frontend experience constraints: `docs/prd.md`
+- Next-agent implementation handoff: `docs/handoff-alpha-issues.md`
 - Project harness, architecture, environment, API policy, testing direction:
   `docs/project.md`
-- Frontend design and rebuild constraints: `docs/frontend-rebuild.md`
 - Kanban index only: `docs/kanban.md`
 - Actual task details and status: GitHub Issues
 - Reusable worker prompt contracts: `agent-prompts/`
