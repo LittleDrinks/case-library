@@ -39,9 +39,12 @@ docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
 
 当前 `e2e` profile 运行 `frontend/tests/audit.spec.js`：
 
-- `chromium-desktop`：默认管理员强制改密、教师创建/AI 自查/提交、教师历史版本、
-  管理员版本化段落批注、公开检索和公开字段白名单。
+- `chromium-desktop`：默认管理员强制改密、创建流作者身份不读旧草稿、教师创建/AI
+  自查/提交、教师历史版本、管理员版本化段落批注、公开检索、案例库公开字段白名单、
+  首页公开详情来源材料和内部审核信息不渲染。
 - `chromium-mobile`：创建案例基本信息、案例内容、分类选择三个关键屏的可读性和截图。
+
+当前矩阵中移动端只跑移动专属可读性测试；桌面专属验收流在移动项目中显式 skip。
 
 ## 允许缩小门禁的情况
 
