@@ -176,7 +176,10 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByText("运行全部自查")).toBeVisible();
     await page.getByRole("button", { name: "运行全部自查" }).click();
     await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
-    await expect(page.getByText("p2：E2E AI 段落批注：请补充来源材料中的时间和参与对象。")).toBeVisible();
+    await expect(page.getByText("版本正文")).toBeVisible();
+    await expect(page.getByText("AI 批注")).toBeVisible();
+    await expect(page.getByText("来源材料用于验证版本快照。")).toBeVisible();
+    await expect(page.getByText("E2E AI 段落批注：请补充来源材料中的时间和参与对象。")).toBeVisible();
     await capture(page, testInfo, "create-step-4-ai-results");
     await page.getByRole("button", { name: "继续" }).click();
 

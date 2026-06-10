@@ -326,7 +326,7 @@
                     </li>
                   </ul>
                   <ul
-                    v-if="Array.isArray(aiReviewState[item.id].comments) && aiReviewState[item.id].comments.length"
+                    v-if="Array.isArray(aiReviewState[item.id].comments) && aiReviewState[item.id].comments.length && !hasAnnotationPreview(aiReviewState[item.id])"
                     class="ai-suggestions"
                   >
                     <li v-for="comment in aiReviewState[item.id].comments" :key="comment.id || comment.message">
@@ -334,10 +334,11 @@
                     </li>
                   </ul>
                   <div
-                    v-if="aiReviewState[item.id].version?.paragraphs?.length && aiReviewState[item.id].comments.length"
+                    v-if="hasAnnotationPreview(aiReviewState[item.id])"
                     class="ai-annotation-preview"
                   >
                     <div class="annotation-copy">
+                      <strong>版本正文</strong>
                       <p
                         v-for="paragraph in aiReviewState[item.id].version.paragraphs"
                         :key="paragraph.paragraph_id"
@@ -348,6 +349,7 @@
                       </p>
                     </div>
                     <aside class="annotation-comments" aria-label="AI 段落批注">
+                      <strong>AI 批注</strong>
                       <div
                         v-for="comment in aiReviewState[item.id].comments"
                         :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
@@ -895,6 +897,10 @@ function commentsForParagraph(state, paragraphId) {
   return (state.comments || []).filter((comment) => comment.paragraph_id === paragraphId);
 }
 
+function hasAnnotationPreview(state) {
+  return Boolean(state?.version?.paragraphs?.length && state?.comments?.length);
+}
+
 function aiStatusLabel(status) {
   if (status === "loading") return "运行中";
   if (status === "success") return "已完成";
@@ -1015,9 +1021,10 @@ async function runAiReview(promptId) {
     state.comments = result.comments || [];
     state.version = version || null;
     state.answer = state.comments.map((comment) => comment.message).join("\n") || "AI 未返回段落批注。";
+    const summarySuggestions = Array.from(new Set(result.summary?.suggested_next_steps || []));
     state.parsed = {
       detail: `已生成 v${version.version_number || ""} 只读审核版本，包含 ${state.comments.length} 条段落批注。`,
-      suggestions: (result.summary?.suggested_next_steps || []).concat(
+      suggestions: hasAnnotationPreview(state) ? summarySuggestions : summarySuggestions.concat(
         state.comments.map((comment) => comment.suggestion).filter(Boolean)
       ),
     };
@@ -1833,6 +1840,14 @@ textarea {
   display: grid;
   gap: 8px;
   min-width: 0;
+  align-content: start;
+}
+
+.annotation-copy > strong,
+.annotation-comments > strong {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
 }
 
 .annotation-copy p {
@@ -1865,9 +1880,10 @@ textarea {
   border-left: 3px solid var(--color-brand);
   border-radius: 6px;
   background: #fff;
+  box-shadow: 0 8px 20px rgba(141, 27, 53, 0.06);
 }
 
-.annotation-comment strong {
+.annotation-comment > strong {
   display: block;
   margin-bottom: 4px;
   color: var(--color-brand);
