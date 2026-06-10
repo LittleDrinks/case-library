@@ -7,11 +7,12 @@ AI 约束见 `docs/ai.md`。
 
 - 分支：`develop/alpha-summary`
 - 代码库：`https://github.com/yangxuchen5898/case-library`
-- 当前实现：可运行的 FastAPI + MongoDB + Vue/Vite alpha。
-- 产品目标：上海大学专版思政案例库，后续向“正文 + 来源材料 + AI/人工批注 +
-  版本快照”演进。
-- 当前差距：后端已有版本记录和 `ai_reviews` 字段，但还没有 PRD 中定义的
-  段落级批注、来源材料字段、AI 审核即版本快照、只读批注审核页。
+- 当前实现：可运行的 FastAPI + MongoDB + Vue/Vite alpha，已覆盖“正文 + 来源材料 +
+  AI/人工批注 + 版本快照”主流程。
+- 产品目标：上海大学专版思政案例库，继续围绕 alpha 验收收口视觉一致性、测试覆盖和
+  文档一致性。
+- 当前差距：创建流仍保留五步 wizard 形态；AI/人工批注已使用段落级 MVP，尚未实现
+  字符级锚点、富文本编辑、文件上传、导出、多级审核或版本 diff/回滚。
 
 ## 目录职责
 
@@ -94,6 +95,7 @@ git diff --check
 ## 当前技术债
 
 - `docs/api.md` 只做索引；真实契约以 FastAPI OpenAPI 为准。
-- 当前版本记录由编辑触发，不等同于 PRD 中“AI 审核生成只读版本”。
-- 当前 AI 路由是通用 prompt chat，不是段落级批注 review endpoint。
-- 当前前端创建流仍是五步 wizard，未改成“输入页 + 只读批注审核页”。
+- `POST /api/cases/{case_id}/ai-review` 已是 alpha 主流程的版本化段落批注接口；
+  `/api/ai/chat` 仅作为兼容自查端点保留。
+- 当前前端创建流仍是五步 wizard，而不是 PRD 理想形态中的单页输入 + 独立只读审核页。
+- 当前 E2E 门禁覆盖 alpha 主路径，但仍偏精简；扩大稳定回归矩阵见 issue #78。
