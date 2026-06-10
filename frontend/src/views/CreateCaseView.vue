@@ -1063,7 +1063,8 @@ watch(currentStep, (step) => {
 // Reset scroll to the top of the page whenever the wizard step changes
 watch(currentStep, () => {
   nextTick(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const top = document.querySelector(".create-case-wizard")?.getBoundingClientRect().top || 0;
+    window.scrollTo({ top: Math.max(0, window.scrollY + top), behavior: "auto" });
   });
 });
 </script>
