@@ -7,14 +7,14 @@
 
     <!-- Login required -->
     <div v-if="!isAuthenticated" class="login-required-card">
-      <div class="login-required-icon" aria-hidden="true">🔒</div>
+      <div class="login-required-icon" aria-hidden="true">锁</div>
       <h3>请先登录</h3>
       <p>审核管理功能需要管理员身份，请先登录。</p>
     </div>
 
     <!-- Permission denied -->
     <div v-else-if="!isAdminUser" class="permission-denied-card">
-      <div class="permission-icon" aria-hidden="true">🚫</div>
+      <div class="permission-icon" aria-hidden="true">禁</div>
       <h3>权限不足</h3>
       <p>审核管理功能仅限管理员使用。</p>
     </div>
@@ -42,14 +42,14 @@
 
       <!-- Error -->
       <div v-else-if="error" class="state-error">
-        <div class="error-icon" aria-hidden="true">⚠️</div>
+        <div class="error-icon" aria-hidden="true">警</div>
         <p>{{ error }}</p>
         <button type="button" class="btn-secondary" @click="loadCases">重试</button>
       </div>
 
       <!-- Empty -->
       <div v-else-if="cases.length === 0" class="state-empty">
-        <div class="empty-icon" aria-hidden="true">📋</div>
+        <div class="empty-icon" aria-hidden="true">空</div>
         <h3>暂无{{ currentTabLabel }}</h3>
         <p>当前分类下没有案例</p>
       </div>
@@ -74,17 +74,17 @@
             </div>
             <h3 class="case-title">{{ c.title }}</h3>
             <div class="case-meta-row">
-              <span class="meta-item" v-if="c.author">👤 {{ c.author }}</span>
-              <span class="meta-item" v-if="c.owner_username">🏛 {{ c.owner_username }}</span>
-              <span class="meta-item" v-if="c.department">🏢 {{ c.department }}</span>
-              <span class="meta-item" v-if="c.theme">🏷 {{ c.theme }}</span>
-              <span class="meta-item">📅 {{ formatDate(c.created_at) }}</span>
-              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">🔄 {{ formatDate(c.updated_at) }}</span>
+              <span class="meta-item" v-if="c.author">作者 {{ c.author }}</span>
+              <span class="meta-item" v-if="c.owner_username">账号 {{ c.owner_username }}</span>
+              <span class="meta-item" v-if="c.department">学院 {{ c.department }}</span>
+              <span class="meta-item" v-if="c.theme">主题 {{ c.theme }}</span>
+              <span class="meta-item">创建 {{ formatDate(c.created_at) }}</span>
+              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">更新 {{ formatDate(c.updated_at) }}</span>
             </div>
             <p class="case-preview">{{ preview(c.content) }}</p>
             <div class="case-stats-row">
-              <span>👁 {{ c.view_count || 0 }}</span>
-              <span>❤️ {{ c.like_count || 0 }}</span>
+              <span>浏览 {{ c.view_count || 0 }}</span>
+              <span>点赞 {{ c.like_count || 0 }}</span>
             </div>
           </div>
 
@@ -249,6 +249,7 @@ import {
   setCaseVisibility,
   deleteCaseById,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const tabs = [
   { key: 'pending', label: '待审核', apiStatus: 'pending_review' },
@@ -408,7 +409,7 @@ function closeReviewModal() {
 async function submitReview() {
   if (!reviewingCase.value) return;
   if (!reviewForm.value.comment.trim()) {
-    window.alert('请填写审核意见');
+    notify('请填写审核意见', 'error');
     return;
   }
   reviewing.value = true;
@@ -417,11 +418,11 @@ async function submitReview() {
       comment: reviewForm.value.comment.trim(),
       status: reviewForm.value.status,
     });
-    window.alert('审核完成');
+    notify('审核完成', 'success');
     closeReviewModal();
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '审核提交失败');
+    notify(err.message || '审核提交失败', 'error');
   } finally {
     reviewing.value = false;
   }
@@ -430,10 +431,10 @@ async function submitReview() {
 async function toggleVisibility(c) {
   try {
     await setCaseVisibility(c.id, !c.is_hidden);
-    window.alert(c.is_hidden ? '案例已展示' : '案例已隐藏');
+    notify(c.is_hidden ? '案例已展示' : '案例已隐藏', 'success');
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '操作失败');
+    notify(err.message || '操作失败', 'error');
   }
 }
 
@@ -446,11 +447,11 @@ async function doDelete() {
   deleting.value = true;
   try {
     await deleteCaseById(deletingCase.value.id);
-    window.alert('案例删除成功');
+    notify('案例删除成功', 'success');
     deletingCase.value = null;
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '删除失败');
+    notify(err.message || '删除失败', 'error');
   } finally {
     deleting.value = false;
   }

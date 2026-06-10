@@ -88,7 +88,7 @@
 
       <!-- Unauthenticated notice -->
       <div v-if="!isAuthenticated" class="login-required-card">
-        <div class="login-required-icon" aria-hidden="true">🔒</div>
+        <div class="login-required-icon" aria-hidden="true">锁</div>
         <h3>请先登录</h3>
         <p>创建案例需要登录账号。请先登录后再继续。</p>
       </div>
@@ -139,7 +139,7 @@
           </div>
 
           <div class="tip-card">
-            <div class="tip-icon" aria-hidden="true">💡</div>
+            <div class="tip-icon" aria-hidden="true">提</div>
             <div class="tip-body">
               <div class="tip-title">编写小贴士</div>
               <ul>
@@ -185,7 +185,7 @@
         <!-- Step 3: 分类选择 -->
         <template v-if="currentStep === 2">
           <div class="hint-banner">
-            <span class="hint-icon" aria-hidden="true">🤖</span>
+            <span class="hint-icon" aria-hidden="true">AI</span>
             <span>不确定分类？可点击右下角 AI 助手，根据已填写内容获取一次本地建议。</span>
           </div>
 
@@ -250,7 +250,7 @@
             aria-label="打开 AI 分类助手"
             @click="showHelper = true"
           >
-            🤖
+            AI
           </button>
         </template>
 
@@ -432,6 +432,7 @@ import {
   submitCaseById,
 } from "../api/cases.js";
 import { listPrompts, runParagraphReview } from "../api/ai.js";
+import { notify } from "../utils/toast.js";
 
 const DRAFT_KEY = "case_library_create_case_draft";
 
@@ -534,7 +535,7 @@ const aiReviewState = reactive(
 
 const displayAuthor = computed(() => {
   const user = currentUser();
-  return form.author || user?.nickname || user?.username || "";
+  return user?.nickname || user?.username || form.author || "";
 });
 
 const wordCount = computed(() => {
@@ -690,7 +691,7 @@ function appendAiReviewsPayload(payload) {
 
 async function handleSaveDraft() {
   if (!isAuthenticated.value) {
-    window.alert("请先登录后再保存草稿");
+    notify("请先登录后再保存草稿", "error");
     return;
   }
   saving.value = true;
@@ -715,9 +716,9 @@ async function handleSaveDraft() {
       }
     }
     persistDraft();
-    window.alert("草稿已保存");
+    notify("草稿已保存", "success");
   } catch (err) {
-    window.alert(err.message || "保存草稿失败，请稍后重试");
+    notify(err.message || "保存草稿失败，请稍后重试", "error");
   } finally {
     saving.value = false;
   }
@@ -725,11 +726,11 @@ async function handleSaveDraft() {
 
 async function handleFormalSubmit() {
   if (!canSubmit.value) {
-    window.alert("请完善所有必填项后再提交");
+    notify("请完善所有必填项后再提交", "error");
     return;
   }
   if (!isAuthenticated.value) {
-    window.alert("请先登录后再提交案例");
+    notify("请先登录后再提交案例", "error");
     return;
   }
   submitting.value = true;
@@ -757,11 +758,11 @@ async function handleFormalSubmit() {
       }
     }
     clearDraft();
-    window.alert("案例提交成功，请等待专家审核");
+    notify("案例提交成功，请等待专家审核", "success");
     resetForm();
     currentStep.value = 0;
   } catch (err) {
-    window.alert(err.message || "提交失败，请稍后重试");
+    notify(err.message || "提交失败，请稍后重试", "error");
   } finally {
     submitting.value = false;
   }
@@ -1043,6 +1044,7 @@ watch(
     author: form.author,
     department: form.department,
     content: form.content,
+    source_material: form.source_material,
     type: form.type,
     theme: form.theme,
   }),

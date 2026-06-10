@@ -7,7 +7,7 @@
 
     <!-- Login required -->
     <div v-if="!isAuthenticated" class="login-required-card">
-      <div class="login-required-icon" aria-hidden="true">🔒</div>
+      <div class="login-required-icon" aria-hidden="true">锁</div>
       <h3>请先登录</h3>
       <p>查看和管理您的案例需要先登录账号。</p>
     </div>
@@ -35,14 +35,14 @@
 
       <!-- Error -->
       <div v-else-if="error" class="state-error">
-        <div class="error-icon" aria-hidden="true">⚠️</div>
+        <div class="error-icon" aria-hidden="true">警</div>
         <p>{{ error }}</p>
         <button type="button" class="btn-secondary" @click="loadCases">重试</button>
       </div>
 
       <!-- Empty -->
       <div v-else-if="cases.length === 0" class="state-empty">
-        <div class="empty-icon" aria-hidden="true">📝</div>
+        <div class="empty-icon" aria-hidden="true">空</div>
         <h3>暂无{{ currentTabLabel }}</h3>
         <p>当前分类下没有案例</p>
         <button type="button" class="btn-primary" @click="goToCreate">创建新案例</button>
@@ -63,15 +63,15 @@
             </div>
             <h3 class="case-title">{{ c.title }}</h3>
             <div class="case-meta-row">
-              <span class="meta-item" v-if="c.department">🏛 {{ c.department }}</span>
-              <span class="meta-item" v-if="c.theme">🏷 {{ c.theme }}</span>
-              <span class="meta-item">📅 {{ formatDate(c.created_at) }}</span>
-              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">🔄 {{ formatDate(c.updated_at) }}</span>
+              <span class="meta-item" v-if="c.department">学院 {{ c.department }}</span>
+              <span class="meta-item" v-if="c.theme">主题 {{ c.theme }}</span>
+              <span class="meta-item">创建 {{ formatDate(c.created_at) }}</span>
+              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">更新 {{ formatDate(c.updated_at) }}</span>
             </div>
             <p class="case-preview">{{ preview(c.content) }}</p>
             <div class="case-stats-row">
-              <span>👁 {{ c.view_count || 0 }}</span>
-              <span>❤️ {{ c.like_count || 0 }}</span>
+              <span>浏览 {{ c.view_count || 0 }}</span>
+              <span>点赞 {{ c.like_count || 0 }}</span>
             </div>
           </div>
 
@@ -210,6 +210,7 @@ import {
   submitCaseById,
   deleteCaseById,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const tabs = [
   { key: 'pending_review', label: '待审核' },
@@ -426,7 +427,7 @@ function closeEdit() {
 async function handleSave() {
   if (!editingCase.value) return;
   if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    window.alert('请填写所有必填项');
+    notify('请填写所有必填项', 'error');
     return;
   }
   saving.value = true;
@@ -441,11 +442,11 @@ async function handleSave() {
       theme: editForm.value.theme,
       change_reason: actionLabel,
     });
-    window.alert('保存成功');
+    notify('保存成功', 'success');
     closeEdit();
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '保存失败');
+    notify(err.message || '保存失败', 'error');
   } finally {
     saving.value = false;
   }
@@ -454,7 +455,7 @@ async function handleSave() {
 async function handleResubmit() {
   if (!editingCase.value) return;
   if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    window.alert('请填写所有必填项');
+    notify('请填写所有必填项', 'error');
     return;
   }
   submitting.value = true;
@@ -473,12 +474,12 @@ async function handleResubmit() {
     const successMsg = editAction.value === 'resubmit'
       ? '案例已重新提交，请等待专家审核'
       : '案例已提交审核，请等待专家审核';
-    window.alert(successMsg);
+    notify(successMsg, 'success');
     closeEdit();
     await loadCases();
   } catch (err) {
     const errorMsg = editAction.value === 'resubmit' ? '重新提交失败' : '提交审核失败';
-    window.alert(err.message || errorMsg);
+    notify(err.message || errorMsg, 'error');
   } finally {
     submitting.value = false;
   }
@@ -493,11 +494,11 @@ async function doDelete() {
   deleting.value = true;
   try {
     await deleteCaseById(deletingCase.value.id);
-    window.alert('案例删除成功');
+    notify('案例删除成功', 'success');
     deletingCase.value = null;
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '删除失败');
+    notify(err.message || '删除失败', 'error');
   } finally {
     deleting.value = false;
   }
