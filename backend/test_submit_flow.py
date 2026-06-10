@@ -44,6 +44,23 @@ def assert_status(response, expected: int):
     assert response.status_code == expected, (response.status_code, response.text)
 
 
+def assert_public_case_payload(item: dict):
+    forbidden = {
+        "ai_reviews",
+        "ai_review",
+        "admin_comments",
+        "paragraph_comments",
+        "prompt",
+        "prompt_id",
+        "model",
+        "latest_review_version_id",
+        "submitted_version_id",
+        "reviewed_version_id",
+        "owner_username",
+    }
+    assert forbidden.isdisjoint(item.keys()), item
+
+
 def assert_openapi_documented() -> None:
     docs = client.get("/docs")
     assert_status(docs, 200)
@@ -233,7 +250,69 @@ def main_test() -> None:
     public_listed = next(item for item in public_list.json()["data"] if item["id"] == visibility_case)
     assert public_listed["is_hidden"] is False
     assert public_listed["source_material"] == "source material test"
-    assert "ai_reviews" not in public_listed
+    assert_public_case_payload(public_listed)
+
+    get_db().cases.update_one(
+        {"id": visibility_case},
+        {
+            "$set": {
+                "owner_username": "ownerflow",
+                "submitted_version_id": 123,
+                "reviewed_version_id": 456,
+                "latest_review_version_id": 789,
+                "ai_reviews": [
+                    {
+                        "prompt_id": "workflow/internal",
+                        "name": "internal",
+                        "answer": "internal AI note",
+                        "model": "qwen-plus",
+                    }
+                ],
+            }
+        },
+    )
+    get_db().versions.update_one(
+        {"case_id": visibility_case},
+        {
+            "$set": {
+                "ai_review": {
+                    "comments": [{"paragraph_id": "p1", "message": "internal AI comment"}],
+                    "summary": {"risks": ["internal risk"]},
+                    "prompt": "internal prompt",
+                    "model": "qwen-plus",
+                },
+                "admin_comments": [
+                    {
+                        "reviewer": "adminflow",
+                        "comments": [{"paragraph_id": "p1", "message": "internal admin comment"}],
+                    }
+                ],
+            }
+        },
+    )
+
+    public_surfaces = [
+        f"/api/cases/{visibility_case}",
+        "/api/cases?status=approved",
+        "/api/search?q=source%20material",
+        "/api/search/advanced?status=approved&type=TYPE_A&keyword=source%20material",
+        "/api/trending?limit=20",
+        "/api/latest?limit=20",
+    ]
+    for path in public_surfaces:
+        response = client.get(path)
+        assert_status(response, 200)
+        data = response.json()["data"]
+        items = data if isinstance(data, list) else [data]
+        matched = [item for item in items if item.get("id") == visibility_case]
+        assert matched, path
+        for item in matched:
+            assert item["source_material"] == "source material test"
+            assert_public_case_payload(item)
+    get_db().cases.update_one(
+        {"id": visibility_case},
+        {"$set": {"view_count": 0, "like_count": 0}},
+    )
 
     delete_case_id = make_case("ownerflow", "draft")
 
