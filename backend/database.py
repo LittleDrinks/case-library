@@ -1282,16 +1282,12 @@ def decrement_like_count(case_id: int) -> bool:
 
 
 def _status_search_filter(status: str | None) -> dict[str, Any]:
-    if not status or status == "all":
-        return {"status": {"$nin": ["draft", "deleted"]}}
-    if status in ("approved", "approved_all"):
+    if not status or status in ("all", "approved", "approved_all"):
         return {"status": "approved"}
-    if status == "rejected":
-        return {"status": "needs_revision"}
-    if status == "draft":
-        return {"status": "__private_draft__"}
+    if status in ("draft", "pending_review", "rejected", "needs_revision"):
+        return {"status": "__public_search_no_match__"}
     _validate_case_status(status)
-    return {"status": status}
+    return {"status": "__public_search_no_match__"}
 
 
 def search_cases(

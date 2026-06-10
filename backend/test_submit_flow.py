@@ -211,6 +211,16 @@ def main_test() -> None:
     listed_case = next(item for item in listed.json()["data"] if item["id"] == owner_case)
     assert listed_case["display_at"] == listed_case["submitted_at"]
 
+    for path, forbidden_id in [
+        ("/api/search?q=submit%20flow&status=all", owner_case),
+        ("/api/search/advanced?status=all&keyword=submit%20flow", owner_case),
+        ("/api/search?q=ownerflow&status=rejected", admin_case),
+        ("/api/search/advanced?status=rejected&keyword=ownerflow", admin_case),
+    ]:
+        response = client.get(path)
+        assert_status(response, 200)
+        assert all(item.get("id") != forbidden_id for item in response.json()["data"]), path
+
     visibility_case = make_case("ownerflow", "approved")
 
     response = client.post(
