@@ -287,6 +287,164 @@ test.describe("manual audit candidate flows", () => {
     await cleanupAuditCases(page, title);
   });
 
+  test("admin returns a submitted version and author resubmits after copying comments", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-desktop",
+      "desktop-only revision-required acceptance path"
+    );
+
+    const title = `Audit案例 退回再提交 ${Date.now()}`;
+    const initialContent = [
+      "退回再提交审计案例第一段，说明教学背景和课堂目标。",
+      "退回再提交审计案例第二段，暂缺来源材料中的时间和对象。",
+    ].join("\n");
+    const revisedContent = [
+      initialContent,
+      "已根据人工批注补充学院新闻时间、参与对象和课堂反馈摘要。",
+    ].join("\n");
+    const sourceMaterial = "退回再提交来源材料：学院新闻、课堂反馈、访谈记录。";
+    const adminParagraphComment = "人工段落批注：请补充来源材料中的时间和参与对象。";
+    const adminSuggestion = "补充学院新闻日期、参与学生和课堂反馈摘要。";
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.route("**/api/cases/*/ai-review", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          status: "ok",
+          data: {
+            version: {
+              version_number: 2,
+              paragraphs: [
+                { paragraph_id: "p1", text: "退回再提交审计案例第一段，说明教学背景和课堂目标。" },
+                { paragraph_id: "p2", text: "退回再提交审计案例第二段，暂缺来源材料中的时间和对象。" },
+              ],
+              source_material: sourceMaterial,
+            },
+            comments: [
+              {
+                id: "c-revision",
+                paragraph_id: "p2",
+                category: "source",
+                severity: "important",
+                message: "AI 段落批注：来源材料要补齐时间和对象。",
+                suggestion: "提交前补充来源材料摘录。",
+              },
+            ],
+            summary: {
+              suggested_next_steps: ["补充来源材料摘录。"],
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await login(page, ADMIN);
+    await cleanupAuditCases(page);
+    await logout(page);
+
+    await login(page, USER);
+    await page.getByRole("link", { name: "创建案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await page.getByLabel(/案例标题/).fill(title);
+    await page.getByLabel(/所属部门\/学院/).fill("马克思主义学院");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await page.locator("#ccf-content").fill(initialContent);
+    await page.locator("#ccf-source").fill(sourceMaterial);
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await page.locator("#ccf-type").selectOption("TYPE_A");
+    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await page.getByRole("button", { name: "继续" }).click();
+
+    await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
+    await page.getByRole("button", { name: "运行全部自查" }).click();
+    await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
+    await expect(page.getByText("AI 段落批注：来源材料要补齐时间和对象。")).toBeVisible();
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByText("确认并提交")).toBeVisible();
+    await page.getByRole("button", { name: "正式提交案例" }).click();
+    await expect(page.getByText("填写基本信息")).toBeVisible();
+
+    await logout(page);
+    await login(page, ADMIN);
+    await page.getByRole("link", { name: "审核管理" }).click();
+    const pendingCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(pendingCard).toBeVisible();
+    await pendingCard.getByRole("button", { name: "审核" }).click();
+    await expect(page.locator("#review-version")).toHaveValue(/^\d+$/);
+    await page.locator("#review-comment").fill("退回修改：来源材料不足。");
+    await page.locator("#paragraph-id").selectOption("p2");
+    await page.locator("#paragraph-category").selectOption("source");
+    await page.locator("#paragraph-severity").selectOption("important");
+    await page.locator("#paragraph-message").fill(adminParagraphComment);
+    await page.locator("#paragraph-suggestion").fill(adminSuggestion);
+    await page.getByLabel("需修改").check();
+    await page.getByRole("button", { name: "提交审核" }).click();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+
+    await logout(page);
+    await login(page, USER);
+    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("tab", { name: "需修改" }).click();
+    const revisionCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(revisionCard).toBeVisible();
+    await revisionCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(revisionCard.getByText("人工段落批注", { exact: true })).toBeVisible();
+    await expect(revisionCard.getByText(adminParagraphComment)).toBeVisible();
+    await expect(revisionCard.getByText(adminSuggestion)).toBeVisible();
+    await revisionCard.getByRole("button", { name: "复制版本" }).first().click();
+    await expect(page.getByText(/v\d+ 已复制/)).toBeVisible();
+
+    await revisionCard.getByRole("button", { name: "重新提交" }).click();
+    const resubmitDialog = page.getByRole("dialog", { name: "重新提交案例" });
+    await expect(resubmitDialog).toBeVisible();
+    await page.locator("#ms-edit-content").fill(revisedContent);
+    await page.locator("#ms-edit-source").fill(`${sourceMaterial}\n补充：2026 年课堂反馈摘要。`);
+    await resubmitDialog.getByRole("button", { name: "重新提交" }).click();
+    await expect(page.getByText("案例已重新提交，请等待专家审核")).toBeVisible();
+
+    await logout(page);
+    await login(page, ADMIN);
+    await page.getByRole("link", { name: "审核管理" }).click();
+    const resubmittedCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(resubmittedCard).toBeVisible();
+    await resubmittedCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(resubmittedCard.locator(".detail-content-body").first()).toContainText(
+      "已根据人工批注补充学院新闻时间"
+    );
+    await resubmittedCard.getByRole("button", { name: "审核" }).click();
+    await page.locator("#review-comment").fill("审核通过：退回意见已修改。");
+    await page.getByLabel("通过").check();
+    await page.getByRole("button", { name: "提交审核" }).click();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+
+    await logout(page);
+    await page.getByRole("link", { name: "案例库" }).click();
+    await page.getByPlaceholder("搜索案例标题、内容...").fill(title);
+    await page.getByRole("button", { name: "搜索" }).click();
+    const publicCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(publicCard).toBeVisible();
+    await publicCard.getByRole("button", { name: "查看详情" }).click();
+    const publicDialog = page.getByRole("dialog", { name: title });
+    await expect(publicDialog.getByText("已根据人工批注补充学院新闻时间")).toBeVisible();
+    await expect(publicDialog.getByText(sourceMaterial)).toBeVisible();
+    await expect(page.getByText(adminParagraphComment)).toHaveCount(0);
+    await expect(page.getByText("AI 段落批注：来源材料要补齐时间和对象。")).toHaveCount(0);
+    await page.getByLabel("关闭").click();
+
+    await login(page, ADMIN);
+    await cleanupAuditCases(page, title);
+  });
+
   test("public library does not render leaked review internals", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium-desktop",

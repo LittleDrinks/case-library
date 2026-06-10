@@ -126,6 +126,32 @@
                       <p>{{ version.source_material || '暂无来源材料' }}</p>
                     </div>
                   </div>
+                  <div v-if="version.admin_comments?.length" class="version-admin-comments">
+                    <strong>人工段落批注</strong>
+                    <div
+                      v-for="batch in version.admin_comments"
+                      :key="`${batch.created_at}-${batch.reviewer}`"
+                      class="version-comment-batch"
+                    >
+                      <div class="version-comment-meta">
+                        <span>{{ batch.reviewer || '审核员' }}</span>
+                        <span>{{ formatDate(batch.created_at) }}</span>
+                      </div>
+                      <p v-if="batch.comment" class="version-review-comment">{{ batch.comment }}</p>
+                      <ul>
+                        <li
+                          v-for="comment in batch.comments"
+                          :key="`${comment.paragraph_id}-${comment.message}`"
+                        >
+                          <span>{{ comment.paragraph_id }}</span>
+                          <p>
+                            {{ comment.message }}
+                            <em v-if="comment.suggestion">{{ comment.suggestion }}</em>
+                          </p>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
                 </article>
               </div>
               <div v-else class="review-placeholder">暂无历史版本</div>
@@ -1069,6 +1095,84 @@ watch(currentTab, () => {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.version-admin-comments {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fff7f7;
+}
+
+.version-admin-comments > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #991b1b;
+}
+
+.version-comment-batch + .version-comment-batch {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #fee2e2;
+}
+
+.version-comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.version-review-comment {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.version-admin-comments ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-admin-comments li {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+}
+
+.version-admin-comments li > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border-radius: 4px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.version-admin-comments li p {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.version-admin-comments li em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  color: var(--color-text-secondary);
 }
 
 .detail-review strong {
