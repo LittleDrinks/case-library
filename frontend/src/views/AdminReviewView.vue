@@ -296,18 +296,20 @@
               <div>
                 <label for="paragraph-category">类型</label>
                 <select id="paragraph-category" v-model="reviewForm.category">
-                  <option value="content">内容</option>
                   <option value="source">来源</option>
+                  <option value="fact">事实</option>
                   <option value="structure">结构</option>
-                  <option value="style">表达</option>
+                  <option value="classification">分类</option>
+                  <option value="classroom">课堂</option>
+                  <option value="clarity">表达</option>
                 </select>
               </div>
               <div>
                 <label for="paragraph-severity">级别</label>
                 <select id="paragraph-severity" v-model="reviewForm.severity">
-                  <option value="minor">一般</option>
+                  <option value="info">提示</option>
+                  <option value="suggestion">建议</option>
                   <option value="important">重要</option>
-                  <option value="critical">关键</option>
                 </select>
               </div>
             </div>
@@ -405,7 +407,7 @@ const reviewForm = ref({
   status: 'approve',
   version_id: '',
   paragraph_id: '',
-  category: 'content',
+  category: 'clarity',
   severity: 'important',
   message: '',
   suggestion: '',
@@ -576,7 +578,7 @@ async function openReviewModal(c) {
     status: 'approve',
     version_id: '',
     paragraph_id: '',
-    category: 'content',
+    category: 'clarity',
     severity: 'important',
     message: '',
     suggestion: '',
