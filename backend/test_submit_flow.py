@@ -228,6 +228,11 @@ def main_test() -> None:
     assert_status(response, 200)
     assert response.json()["is_hidden"] is True
 
+    response = client.post(f"/api/cases/{visibility_case}/like")
+    assert_status(response, 404)
+    hidden_after_like = get_db().cases.find_one({"id": visibility_case})
+    assert hidden_after_like["like_count"] == 0
+
     public_list = client.get("/api/cases?status=approved")
     assert_status(public_list, 200)
     assert all(item["id"] != visibility_case for item in public_list.json()["data"])
@@ -251,6 +256,24 @@ def main_test() -> None:
     assert public_listed["is_hidden"] is False
     assert public_listed["source_material"] == "source material test"
     assert_public_case_payload(public_listed)
+
+    response = client.post(f"/api/cases/{visibility_case}/like")
+    assert_status(response, 200)
+    liked_case = get_db().cases.find_one({"id": visibility_case})
+    assert liked_case["like_count"] == 1
+
+    response = client.post(f"/api/cases/{visibility_case}/unlike")
+    assert_status(response, 200)
+    unliked_case = get_db().cases.find_one({"id": visibility_case})
+    assert unliked_case["like_count"] == 0
+
+    draft_interaction_case = make_case("ownerflow", "draft")
+    response = client.post(f"/api/cases/{draft_interaction_case}/like")
+    assert_status(response, 404)
+    response = client.post(f"/api/cases/{draft_interaction_case}/unlike")
+    assert_status(response, 404)
+    draft_after_interaction = get_db().cases.find_one({"id": draft_interaction_case})
+    assert draft_after_interaction["like_count"] == 0
 
     get_db().cases.update_one(
         {"id": visibility_case},

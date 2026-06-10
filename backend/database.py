@@ -1231,7 +1231,7 @@ def get_reviews(case_id: int) -> list[dict]:
 
 def increment_view_count(case_id: int) -> bool:
     result = get_db().cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"view_count": 1}},
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -1239,7 +1239,7 @@ def increment_view_count(case_id: int) -> bool:
 
 def increment_like_count(case_id: int) -> bool:
     result = get_db().cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"like_count": 1}},
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -1248,20 +1248,34 @@ def increment_like_count(case_id: int) -> bool:
 def decrement_like_count(case_id: int) -> bool:
     db = get_db()
     case_exists = (
-        db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}, limit=1) > 0
+        db.cases.count_documents(
+            {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
+            limit=1,
+        )
+        > 0
     )
     if not case_exists:
         return False
 
     result = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$gt": 0}},
+        {
+            "id": int(case_id),
+            "status": "approved",
+            "is_hidden": {"$ne": True},
+            "like_count": {"$gt": 0},
+        },
         {"$inc": {"like_count": -1}},
     )
     if result.modified_count > 0:
         return True
 
     correction = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$lt": 0}},
+        {
+            "id": int(case_id),
+            "status": "approved",
+            "is_hidden": {"$ne": True},
+            "like_count": {"$lt": 0},
+        },
         {"$set": {"like_count": 0}},
     )
     return correction.modified_count > 0

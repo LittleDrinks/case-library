@@ -471,7 +471,12 @@ async def get_case_detail(
     if is_public_reader and case.get("status") != "approved":
         raise HTTPException(status_code=403, detail="无权查看该案例")
 
-    if increment_view and not increment_view_count(case_id):
+    if (
+        increment_view
+        and case.get("status") == "approved"
+        and not case.get("is_hidden")
+        and not increment_view_count(case_id)
+    ):
         raise HTTPException(status_code=404, detail="案例不存在")
 
     return {"success": True, "data": serialize_public_case(case) if is_public_reader else case}
@@ -870,7 +875,8 @@ async def like_case(case_id: int):
 )
 async def unlike_case(case_id: int):
     if not decrement_like_count(case_id):
-        if get_case(case_id):
+        case = get_case(case_id)
+        if case and case.get("status") == "approved" and not case.get("is_hidden"):
             raise HTTPException(status_code=400, detail="点赞数已经为0")
         raise HTTPException(status_code=404, detail="案例不存在")
     return {"success": True, "message": "取消点赞成功"}
