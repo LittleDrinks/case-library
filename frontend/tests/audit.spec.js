@@ -101,6 +101,41 @@ test.describe("manual audit candidate flows", () => {
     await capture(page, testInfo, "default-admin-password-change");
   });
 
+  test("create flow author identity follows current login, not stale draft", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-desktop",
+      "desktop-only author identity regression"
+    );
+
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "case_library_create_case_draft",
+        JSON.stringify({
+          form: {
+            title: "旧草稿标题",
+            author: "过期作者",
+            department: "马克思主义学院",
+            content: "旧草稿正文",
+            source_material: "旧来源材料",
+            type: "TYPE_A",
+            theme: "铸魂育人",
+          },
+          savedAt: Date.now(),
+        })
+      );
+    });
+
+    await login(page, USER);
+    await page.getByRole("link", { name: "创建案例" }).click();
+
+    await expect(page.getByLabel("作者姓名")).toHaveValue(USER.nickname);
+    await expect(page.getByLabel("作者姓名")).not.toHaveValue("过期作者");
+    await expect(page.getByLabel(/案例标题/)).toHaveValue("旧草稿标题");
+  });
+
   test("author submit -> admin approve -> public search, with audit screenshots", async ({
     page,
   }, testInfo) => {
