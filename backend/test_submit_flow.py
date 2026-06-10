@@ -170,6 +170,12 @@ def main_test() -> None:
     response = client.post(f"/api/cases/{other_case}/submit", headers=auth("otherflow"))
     assert_status(response, 403)
 
+    direct_pending_case = make_case("ownerflow", "pending_review")
+    direct_pending = get_db().cases.find_one({"id": direct_pending_case})
+    direct_pending_version = get_db().versions.find_one({"case_id": direct_pending_case})
+    assert direct_pending.get("submitted_at")
+    assert direct_pending["submitted_version_id"] == direct_pending_version["id"]
+
     owner_case = make_case("ownerflow", "draft")
     response = client.post(f"/api/cases/{owner_case}/submit", headers=auth("ownerflow"))
     assert_status(response, 200)

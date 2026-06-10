@@ -689,6 +689,7 @@ def create_case(case_data: dict) -> int:
         "content": case_data.get("content", ""),
         "source_material": case_data.get("source_material", ""),
         "status": status,
+        "submitted_at": case_data.get("submitted_at") or (now if status == "pending_review" else None),
         "author": case_data.get("author", ""),
         "owner_username": case_data.get("owner_username", ""),
         "department": case_data.get("department", ""),
@@ -728,7 +729,16 @@ def create_case(case_data: dict) -> int:
         "change_reason": "Initial creation",
         "created_at": now,
     }
-    _insert_with_generated_id("versions", version_doc)
+    version_id = _insert_with_generated_id("versions", version_doc)
+    if status == "pending_review":
+        get_db().cases.update_one(
+            {"id": case_id},
+            {
+                "$set": _normalize_datetime_fields(
+                    {"submitted_version_id": version_id, "submitted_at": doc["submitted_at"]}
+                )
+            },
+        )
     return case_id
 
 
