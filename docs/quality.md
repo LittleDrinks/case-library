@@ -37,6 +37,12 @@ docker compose -f docker-compose.dev.yml up -d --build
 docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
 ```
 
+当前 `e2e` profile 运行 `frontend/tests/audit.spec.js`：
+
+- `chromium-desktop`：默认管理员强制改密、教师创建/AI 自查/提交、教师历史版本、
+  管理员版本化段落批注、公开检索和公开字段白名单。
+- `chromium-mobile`：创建案例基本信息、案例内容、分类选择三个关键屏的可读性和截图。
+
 ## 允许缩小门禁的情况
 
 纯文档修改可只运行：
@@ -49,7 +55,5 @@ git diff --check
 
 ## 扩展方向
 
-- 为 PRD 目标补充版本化批注接口测试。
 - 为 AI JSON contract 增加 schema 校验测试。
-- 为公开案例“不展示批注”增加回归测试。
 - 为前端批注页增加 Playwright 截图/交互测试。
