@@ -2,7 +2,7 @@
   <div class="modal-overlay">
     <div class="modal-panel">
       <div class="modal-header">
-        <div class="header-icon">🔒</div>
+        <div class="header-icon">锁</div>
         <h2>修改初始密码</h2>
       </div>
       <p class="modal-desc">

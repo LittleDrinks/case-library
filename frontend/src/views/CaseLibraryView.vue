@@ -142,6 +142,10 @@
           <div class="detail-content">
             <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
           </div>
+          <div v-if="detailCase.source_material" class="detail-source">
+            <strong>来源材料：</strong>
+            <div class="detail-source-body">{{ detailCase.source_material }}</div>
+          </div>
           <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
             <strong>关键词：</strong>
             <span v-for="k in detailCase.keywords" :key="k" class="keyword-tag">{{ k }}</span>
@@ -172,6 +176,7 @@ import {
   likeCase,
   unlikeCase,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const props = defineProps({
   searchTrigger: { type: Object, default: () => ({ keyword: '', nonce: 0 }) },
@@ -300,7 +305,7 @@ async function toggleLike(caseId) {
     }
     saveLikedState();
   } catch (err) {
-    window.alert(err.message || '操作失败，请稍后重试');
+    notify(err.message || '操作失败，请稍后重试', 'error');
   } finally {
     likeProcessing.value.delete(caseId);
   }
@@ -383,7 +388,7 @@ async function openDetail(caseId) {
       throw new Error(res?.message || '加载详情失败');
     }
   } catch (err) {
-    window.alert(err.message || '加载案例详情失败');
+    notify(err.message || '加载案例详情失败', 'error');
   }
 }
 
@@ -852,6 +857,28 @@ onMounted(async () => {
   color: var(--color-text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.detail-source {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(141, 27, 53, 0.16);
+  border-radius: 8px;
+  background: rgba(141, 27, 53, 0.04);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.detail-source strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+
+.detail-source-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
 }
 
 .detail-keywords {

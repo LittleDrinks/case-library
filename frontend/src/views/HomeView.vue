@@ -75,8 +75,8 @@
           <h3 class="case-title">{{ c.title }}</h3>
           <p class="case-preview">{{ preview(c.content) }}</p>
           <div class="case-card-footer">
-            <span class="meta-stat">👁 {{ c.view_count || 0 }}</span>
-            <span class="meta-stat">❤ {{ c.like_count || 0 }}</span>
+            <span class="meta-stat">浏览 {{ c.view_count || 0 }}</span>
+            <span class="meta-stat">点赞 {{ c.like_count || 0 }}</span>
             <span class="meta-date">{{ formatDate(c.created_at) }}</span>
           </div>
         </div>
@@ -116,8 +116,8 @@
           <h3 class="case-title">{{ c.title }}</h3>
           <p class="case-preview">{{ preview(c.content) }}</p>
           <div class="case-card-footer">
-            <span class="meta-stat">👁 {{ c.view_count || 0 }}</span>
-            <span class="meta-stat">❤ {{ c.like_count || 0 }}</span>
+            <span class="meta-stat">浏览 {{ c.view_count || 0 }}</span>
+            <span class="meta-stat">点赞 {{ c.like_count || 0 }}</span>
             <span class="meta-date">{{ formatDate(c.created_at) }}</span>
           </div>
         </div>
@@ -149,6 +149,10 @@
           <div class="detail-content">
             <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
           </div>
+          <div v-if="detailCase.source_material" class="detail-source">
+            <strong>来源材料：</strong>
+            <div class="detail-source-body">{{ detailCase.source_material }}</div>
+          </div>
           <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
             <strong>关键词：</strong>
             <span v-for="k in detailCase.keywords" :key="k" class="keyword-tag">{{ k }}</span>
@@ -170,6 +174,7 @@ import {
   fetchLatestCases,
   fetchPublicCaseDetail,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const stats = ref({ total_cases: 0, total_views: 0, total_likes: 0, by_type: {}, by_theme: {} });
 const statsLoading = ref(false);
@@ -284,7 +289,7 @@ async function openDetail(caseId) {
       throw new Error(res?.message || '加载详情失败');
     }
   } catch (err) {
-    window.alert(err.message || '加载案例详情失败');
+    notify(err.message || '加载案例详情失败', 'error');
   }
 }
 
@@ -658,6 +663,29 @@ onMounted(() => {
 
 .detail-content {
   margin-bottom: 16px;
+}
+
+.detail-source {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: #f9fafb;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.detail-source strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.detail-source-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .detail-content-body {

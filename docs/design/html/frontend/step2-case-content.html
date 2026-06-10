@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>撰写案例内容 - 强国有我思政案例库</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23c41e3a'/><text y='.85em' x='50%' text-anchor='middle' font-size='60' fill='white' font-family='serif'>强</text></svg>">
+  <style>
+    /* ─── tokens ───────────────────────────────────────────────────────── */
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --fg: #1a1a1a;
+      --muted: #666666;
+      --border: #e5e5e5;
+      --accent: #c41e3a;
+      --accent-soft: #fef2f2;
+      --accent-dark: #a01830;
+      --success: #22c55e;
+      --gray-surface: #fafafa;
+      --gray-bg: #f5f5f5;
+      --gray-bg-dark: #f0f0f0;
+      --gray-border: #e5e5e5;
+      --gray-text: #bbb;
+      --gray-text-light: #ccc;
+      --gray-hint: #999;
+      --gray-input: #f9f9f9;
+      --success-bg: #dcfce7;
+      --success-fg: #166534;
+      --success-fg-light: #15803d;
+      --success-border: #bbf7d0;
+      --success-surface: #f0fdf4;
+      --warn-bg: #fef3c7;
+      --warn-fg: #92400e;
+      --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', 'Iowan Old Style', 'Charter', Georgia, serif;
+      --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+      --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    }
+
+    /* ─── reset & base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; }
+    input, textarea, select { font: inherit; }
+
+    /* ─── topnav ────────────────────────────────────────────────────── */
+    .topnav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      height: 64px;
+    }
+    .topnav-inner {
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+      height: 100%; max-width: 1440px; margin: 0 auto; padding: 0 24px;
+    }
+    .topnav-left {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo-badge {
+      width: 36px; height: 36px;
+      background: var(--accent);
+      border-radius: 50%;
+      display: grid; place-items: center;
+      color: white; font-size: 10px; font-weight: 700;
+      font-family: var(--font-display);
+    }
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 18px; font-weight: 700;
+      color: var(--accent); letter-spacing: 2px;
+    }
+    .topnav-nav { display: flex; align-items: center; gap: 6px; justify-self: center; }
+    .topnav-nav a { padding: 6px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--muted); transition: color 0.15s, background 0.15s; }
+    .topnav-nav a:hover { color: var(--fg); background: var(--gray-bg); }
+    .topnav-nav a.active { color: var(--accent); background: var(--accent-soft); }
+    .topnav-right {
+      display: flex; align-items: center; gap: 16px;
+      justify-self: end;
+    }
+    .search-box {
+      position: relative;
+    }
+    .search-box input {
+      width: 180px; padding: 8px 12px 8px 32px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--gray-input); font-size: 13px;
+      outline: none; transition: border-color 0.15s ease, width 0.2s ease;
+    }
+    .search-box input:focus {
+      border-color: var(--accent);
+      width: 220px;
+    }
+    .search-box svg {
+      position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+      width: 14px; height: 14px; color: var(--muted);
+      pointer-events: none;
+    }
+    .icon-btn {
+      width: 36px; height: 36px;
+      display: grid; place-items: center;
+      border-radius: 50%; border: none; background: transparent;
+      color: var(--muted); cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--gray-bg); }
+    .icon-btn svg { width: 18px; height: 18px; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--accent-soft); color: var(--accent);
+      display: grid; place-items: center;
+      font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border);
+    }
+
+    /* ─── layout ────────────────────────────────────────────────────── */
+    .page-wrapper {
+      display: flex; min-height: 100vh;
+      padding-top: 64px;
+    }
+
+    /* ─── sidebar steps ─────────────────────────────────────────────── */
+    .sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 32px 20px;
+      position: fixed; top: 64px; bottom: 0; left: 0;
+      overflow-y: auto;
+    }
+    .progress-header {
+      font-size: 12px; font-weight: 600; color: var(--fg);
+      margin-bottom: 8px; letter-spacing: 0.5px;
+    }
+    .progress-bar {
+      height: 4px; background: var(--gray-bg-dark); border-radius: 2px;
+      margin-bottom: 24px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: var(--accent); border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .progress-text {
+      font-size: 11px; color: var(--muted); margin-bottom: 24px;
+    }
+    .step-list {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .step-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px; border-radius: 8px;
+      cursor: default; position: relative;
+      transition: background 0.15s ease;
+    }
+    .step-item.current {
+      background: var(--accent-soft);
+    }
+    .step-item.current::before {
+      content: ''; position: absolute; left: 0; top: 12px; bottom: 12px;
+      width: 3px; background: var(--accent); border-radius: 0 2px 2px 0;
+    }
+    .step-icon {
+      width: 24px; height: 24px; flex-shrink: 0;
+      display: grid; place-items: center;
+      border-radius: 50%; margin-top: 1px;
+    }
+    .step-icon.done {
+      background: var(--accent); color: white;
+    }
+    .step-icon.current {
+      background: var(--accent-soft); color: var(--accent);
+      border: 1.5px solid var(--accent);
+    }
+    .step-icon.todo {
+      background: var(--gray-bg); color: var(--gray-text);
+      border: 1.5px solid var(--gray-border);
+    }
+    .step-icon svg { width: 12px; height: 12px; }
+    .step-info { flex: 1; }
+    .step-title {
+      font-size: 13px; font-weight: 500; color: var(--fg); line-height: 1.4;
+    }
+    .step-item.current .step-title {
+      color: var(--accent); font-weight: 600;
+    }
+    .step-item.todo .step-title {
+      color: var(--gray-text);
+    }
+    .step-desc {
+      font-size: 11px; color: var(--muted); margin-top: 2px;
+    }
+    .step-item.todo .step-desc {
+      color: var(--gray-text-light);
+    }
+
+    /* ─── main content ──────────────────────────────────────────────── */
+    .main {
+      flex: 1; margin-left: 260px;
+      padding: 32px 48px 48px;
+      max-width: 720px;
+    }
+
+    /* ─── TOC panel ─────────────────────────────────────────────────── */
+    .toc-panel {
+      width: 200px; flex-shrink: 0;
+      padding: 32px 16px 48px 0;
+      position: sticky; top: 64px;
+      height: calc(100vh - 64px); overflow-y: auto;
+    }
+    .toc-title {
+      font-size: 12px; font-weight: 600;
+      color: var(--muted); letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px; padding-left: 8px;
+    }
+    .toc-list {
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .toc-item {
+      display: block;
+      padding: 5px 8px; border-radius: 4px;
+      font-size: 12px; line-height: 1.5;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border-left: 2px solid transparent;
+    }
+    .toc-item:hover {
+      background: var(--gray-surface);
+      color: var(--fg);
+    }
+    .toc-item.active {
+      color: var(--accent); font-weight: 500;
+      background: var(--accent-soft);
+      border-left-color: var(--accent);
+    }
+    .toc-item.level-2 { padding-left: 8px; }
+    .toc-item.level-3 { padding-left: 20px; font-size: 11px; }
+    .toc-item.level-4 { padding-left: 32px; font-size: 11px; }
+    .toc-empty {
+      font-size: 12px; color: var(--gray-text-light);
+      padding: 8px; font-style: italic;
+    }
+    .breadcrumb {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--muted); margin-bottom: 24px;
+    }
+    .breadcrumb a { color: var(--muted); transition: color 0.15s; }
+    .breadcrumb a:hover { color: var(--fg); }
+    .breadcrumb-sep { color: var(--gray-text-light); }
+    .breadcrumb .current { color: var(--accent); font-weight: 500; }
+    .page-title {
+      font-family: var(--font-display);
+      font-size: 28px; font-weight: 700;
+      color: var(--fg); margin-bottom: 8px; letter-spacing: 1px;
+    }
+    .page-desc {
+      font-size: 13px; color: var(--muted); line-height: 1.7;
+      margin-bottom: 32px;
+    }
+
+    /* ─── rich text editor ──────────────────────────────────────────── */
+    .editor-wrapper {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      margin-bottom: 8px;
+    }
+    .editor-toolbar {
+      display: flex; align-items: center; gap: 4px;
+      padding: 8px 12px;
+      background: var(--gray-surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar-btn {
+      width: 32px; height: 32px;
+      display: grid; place-items: center;
+      border: none; border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .toolbar-btn:hover {
+      background: var(--gray-bg);
+      color: var(--fg);
+    }
+    .toolbar-btn svg {
+      width: 16px; height: 16px;
+    }
+    .toolbar-divider {
+      width: 1px; height: 20px;
+      background: var(--border);
+      margin: 0 4px;
+    }
+    .editor-textarea {
+      width: 100%; min-height: 320px;
+      padding: 16px;
+      border: none;
+      background: var(--surface);
+      font-size: 14px;
+      line-height: 1.8;
+      resize: vertical;
+      outline: none;
+    }
+    .editor-textarea::placeholder {
+      color: var(--gray-text);
+    }
+    .char-count {
+      text-align: right;
+      font-size: 12px;
+      color: var(--gray-hint);
+      margin-bottom: 28px;
+    }
+
+    /* ─── upload zone ───────────────────────────────────────────────── */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 32px 24px;
+      text-align: center;
+      background: var(--gray-surface);
+      transition: border-color 0.15s ease, background 0.15s ease;
+      cursor: pointer;
+      margin-bottom: 24px;
+    }
+    .upload-zone:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .upload-zone svg {
+      width: 40px; height: 40px;
+      color: var(--gray-hint);
+      margin: 0 auto 12px;
+    }
+    .upload-zone:hover svg {
+      color: var(--accent);
+    }
+    .upload-title {
+      font-size: 14px; font-weight: 500;
+      color: var(--fg); margin-bottom: 4px;
+    }
+    .upload-hint {
+      font-size: 12px; color: var(--gray-hint);
+    }
+
+    /* ─── tip card ──────────────────────────────────────────────────── */
+    .tip-card {
+      display: flex; gap: 12px;
+      background: var(--accent-soft); border-radius: 8px;
+      padding: 16px 20px; margin: 24px 0;
+    }
+    .tip-icon {
+      width: 20px; height: 20px; flex-shrink: 0;
+      color: var(--accent); margin-top: 2px;
+    }
+    .tip-title {
+      font-size: 13px; font-weight: 600; color: var(--fg);
+      margin-bottom: 4px;
+    }
+    .tip-text {
+      font-size: 12px; color: var(--muted); line-height: 1.7;
+    }
+
+    /* ─── buttons ───────────────────────────────────────────────────── */
+    .btn-group {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 40px; padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+    .btn-group-left {
+      display: flex; gap: 12px;
+    }
+    .btn-group-right {
+      display: flex; gap: 12px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 24px; border-radius: 6px;
+      font-size: 14px; font-weight: 500;
+      border: 1px solid transparent; cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-primary {
+      background: var(--accent); color: white; border-color: var(--accent);
+    }
+    .btn-primary:hover {
+      background: var(--accent-dark); border-color: var(--accent-dark);
+    }
+    .btn-secondary {
+      background: white; color: var(--fg); border-color: var(--border);
+    }
+    .btn-secondary:hover {
+      border-color: var(--fg); background: var(--gray-surface);
+    }
+    .btn svg { width: 14px; height: 14px; }
+
+    /* ─── responsive ────────────────────────────────────────────────── */
+    @media (max-width: 1200px) {
+      .toc-panel { display: none; }
+      .main { max-width: 900px; }
+    }
+    @media (max-width: 1024px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; padding: 24px; max-width: 100%; }
+      .topnav-nav { display: none; }
+    }
+    @media (max-width: 640px) {
+      .search-box { display: none; }
+      .page-title { font-size: 22px; }
+      .main { padding: 20px 16px; }
+      .btn-group {
+        flex-direction: column; gap: 12px; align-items: stretch;
+      }
+      .btn-group-left, .btn-group-right {
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ TOP NAVIGATION ═══ -->
+<header class="topnav">
+  <div class="topnav-inner">
+    <a href="index.html" class="topnav-left" style="text-decoration:none;">
+      <div class="logo-badge" title="上海大学校徽">上大</div>
+      <span class="logo-text">强国有我 思政案例库</span>
+    </a>
+    <nav class="topnav-nav">
+      <a href="index.html">首页</a>
+      <a href="index.html#page-cases">案例库</a>
+      <a href="step1-basic-info.html" class="active">创建案例</a>
+      <a href="index.html#page-stats">数据统计</a>
+      <a href="index.html#page-my-cases">我的提交</a>
+      <a href="index.html#page-review">审核管理</a>
+    </nav>
+    <div class="topnav-right">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" placeholder="搜索案例..." />
+      </div>
+      <button class="icon-btn" title="通知">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </button>
+      <div class="avatar" title="用户">用</div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ PAGE WRAPPER ═══ -->
+<div class="page-wrapper">
+
+  <!-- ═══ SIDEBAR STEPS ═══ -->
+  <aside class="sidebar">
+    <div class="progress-header">进度</div>
+    <div class="progress-bar">
+      <div class="progress-fill" style="width: 40%"></div>
+    </div>
+    <div class="progress-text">40% 完成</div>
+
+    <div class="step-list">
+      <div class="step-item" style="cursor:pointer" onclick="location.href='step1-basic-info.html'">
+        <div class="step-icon done">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="step-info">
+          <div class="step-title">基本信息</div>
+          <div class="step-desc">填写标题与作者</div>
+        </div>
+      </div>
+      <div class="step-item current">
+        <div class="step-icon current">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/></svg>
+        </div>
+        <div class="step-info">
+          <div class="step-title">案例内容</div>
+          <div class="step-desc">撰写案例正文</div>
+        </div>
+      </div>
+      <div class="step-item todo">
+        <div class="step-icon todo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <div class="step-info">
+          <div class="step-title">分类选择</div>
+          <div class="step-desc">选择学科分类</div>
+        </div>
+      </div>
+      <div class="step-item todo">
+        <div class="step-icon todo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+        </div>
+        <div class="step-info">
+          <div class="step-title">AI 审核</div>
+          <div class="step-desc">智能内容审核</div>
+        </div>
+      </div>
+      <div class="step-item todo">
+        <div class="step-icon todo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="step-info">
+          <div class="step-title">提交确认</div>
+          <div class="step-desc">确认并提交</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <main class="main">
+    <nav class="breadcrumb">
+      <a href="index.html">案例库</a>
+      <span class="breadcrumb-sep">›</span>
+      <span class="current">创建新案例</span>
+    </nav>
+
+    <h1 class="page-title">撰写案例内容</h1>
+    <p class="page-desc">
+      请围绕教学实践，系统撰写案例正文。内容应包含案例背景、教学过程、思政元素融入方式及教学反思等核心模块，确保案例具有示范性与可推广价值。
+    </p>
+
+    <!-- Rich Text Editor -->
+    <div class="editor-wrapper">
+      <div class="editor-toolbar">
+        <button class="toolbar-btn" title="加粗">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>
+        </button>
+        <button class="toolbar-btn" title="斜体">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+        </button>
+        <button class="toolbar-btn" title="下划线">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+        </button>
+        <span class="toolbar-divider"></span>
+        <button class="toolbar-btn" title="无序列表">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>
+        <button class="toolbar-btn" title="有序列表">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+        </button>
+        <span class="toolbar-divider"></span>
+        <button class="toolbar-btn" title="插入链接">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
+        <button class="toolbar-btn" title="插入图片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </button>
+      </div>
+      <textarea class="editor-textarea" id="editor" placeholder="请在此撰写案例正文，建议包含以下内容。可使用 Markdown 语法，如 ## 标题：
+
+## 案例背景
+简述教学场景、课程名称、授课对象等基本信息。
+
+## 教学过程
+详细描述教学环节的设计与实施过程。
+
+## 思政元素融入
+阐述如何将思想政治教育有机融入专业教学。
+
+## 教学反思
+总结教学效果、经验与改进方向。
+"></textarea>
+    </div>
+    <div class="char-count">0 / 5000 字</div>
+
+    <!-- Tip Card -->
+    <div class="tip-card">
+      <svg class="tip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      <div>
+        <div class="tip-title">写作小贴士</div>
+        <div class="tip-text">
+          优秀的思政案例应当叙事生动、逻辑清晰、价值导向明确。建议在撰写过程中注重真实性与典型性，善用具体数据和场景描写增强说服力。案例字数建议控制在 2000–5000 字之间。
+        </div>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="btn-group">
+      <div class="btn-group-left">
+        <a class="btn btn-secondary" href="step1-basic-info.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          上一步
+        </a>
+        <button class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          保存草稿
+        </button>
+      </div>
+      <div class="btn-group-right">
+        <a class="btn btn-primary" href="step3-classification.html">
+          继续
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══ TABLE OF CONTENTS ═══ -->
+  <aside class="toc-panel" id="tocPanel">
+    <div class="toc-title">目录</div>
+    <div class="toc-list" id="tocList">
+      <div class="toc-empty">在编辑器中使用 ## 标题 即可生成目录</div>
+    </div>
+  </aside>
+
+</div>
+
+<script src="js/common.js"></script>
+<script>
+(function() {
+  const editor = document.getElementById('editor');
+  const tocList = document.getElementById('tocList');
+  const tocPanel = document.getElementById('tocPanel');
+
+  // Parse ## headings from text
+  function parseHeadings(text) {
+    const lines = text.split('\n');
+    const headings = [];
+    let charIndex = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/^(#{1,4})\s+(.+)$/);
+      if (match) {
+        headings.push({
+          level: match[1].length,
+          text: match[2].trim(),
+          line: i,
+          pos: charIndex
+        });
+      }
+      charIndex += line.length + 1; // +1 for newline
+    }
+    return headings;
+  }
+
+  // Render TOC
+  function renderTOC(headings) {
+    if (!headings.length) {
+      tocList.innerHTML = '<div class="toc-empty">在编辑器中使用 ## 标题 即可生成目录</div>';
+      return;
+    }
+    tocList.innerHTML = headings.map((h, idx) =>
+      `<div class="toc-item level-${h.level}" data-idx="${idx}" data-pos="${h.pos}">${escapeHtml(h.text)}</div>`
+    ).join('');
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  // Jump to heading on click
+  tocList.addEventListener('click', function(e) {
+    const item = e.target.closest('.toc-item');
+    if (!item) return;
+    const pos = parseInt(item.dataset.pos, 10);
+    editor.focus();
+    editor.setSelectionRange(pos, pos);
+    // Scroll textarea so cursor is visible
+    const lineHeight = 22; // approx line height in px
+    const linesBefore = editor.value.substring(0, pos).split('\n').length - 1;
+    editor.scrollTop = Math.max(0, linesBefore * lineHeight - editor.clientHeight / 3);
+    highlightActive();
+  });
+
+  // Highlight current heading based on scroll position
+  function highlightActive() {
+    const headings = parseHeadings(editor.value);
+    if (!headings.length) return;
+    const scrollTop = editor.scrollTop;
+    const lineHeight = 22;
+    const currentLine = Math.floor(scrollTop / lineHeight);
+
+    let activeIdx = -1;
+    for (let i = headings.length - 1; i >= 0; i--) {
+      if (headings[i].line <= currentLine + 2) {
+        activeIdx = i;
+        break;
+      }
+    }
+    if (activeIdx === -1) activeIdx = 0;
+
+    tocList.querySelectorAll('.toc-item').forEach((el, idx) => {
+      el.classList.toggle('active', idx === activeIdx);
+    });
+  }
+
+  // Update TOC on input
+  let lastHeadingsJson = '';
+  editor.addEventListener('input', function() {
+    const headings = parseHeadings(editor.value);
+    const json = JSON.stringify(headings);
+    if (json !== lastHeadingsJson) {
+      lastHeadingsJson = json;
+      renderTOC(headings);
+    }
+  });
+
+  editor.addEventListener('scroll', highlightActive);
+
+  // Initial render
+  renderTOC(parseHeadings(editor.value));
+})();
+</script>
+</body>
+</html>

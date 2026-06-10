@@ -5,10 +5,10 @@ services:
     build:
       context: .
       args:
-        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
-        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+        APT_MIRROR: ${APT_MIRROR:-http://deb.debian.org/debian}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}
     init: true
     ports:
       - "8001:8001"
@@ -93,7 +93,7 @@ services:
         condition: service_healthy
     command: >
       sh -c "npm config set registry \"$${NPM_CONFIG_REGISTRY}\";
-             npx playwright test tests/audit.spec.js --project=chromium-desktop"
+             npx playwright test tests/audit.spec.js --project=chromium-desktop --project=chromium-mobile"
 
 volumes:
   mongo_data:

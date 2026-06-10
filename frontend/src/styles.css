@@ -32,6 +32,37 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.toast-stack {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-brand);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text);
+  box-shadow: 0 16px 40px rgba(29, 35, 47, 0.16);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.toast-success {
+  border-left-color: #0f766e;
+}
+
+.toast-error {
+  border-left-color: #b91c1c;
+}
+
 /* App shell */
 .app {
   min-height: 100vh;

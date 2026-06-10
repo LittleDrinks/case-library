@@ -1,285 +1,125 @@
-# Project Harness
+# 项目说明
 
-This document owns the project scaffold: architecture, environment, quality
-gates, API documentation policy, resource policy, and worker rules. Keep each
-project fact here unless it belongs only to frontend design (`docs/frontend-rebuild.md`)
-or progress tracking (`docs/kanban.md`).
+本文档记录当前工程事实。产品需求见 `docs/prd.md`，API 索引见 `docs/api.md`，
+AI 约束见 `docs/ai.md`。
 
-## Workspace
+## 当前状态
 
-Work from:
+- 分支：`develop/alpha-summary`
+- 代码库：`https://github.com/yangxuchen5898/case-library`
+- 当前实现：可运行的 FastAPI + MongoDB + Vue/Vite alpha，已覆盖“正文 + 来源材料 +
+  AI/人工批注 + 版本快照”主流程。
+- 产品目标：上海大学专版思政案例库，继续围绕 alpha 验收收口视觉一致性、测试覆盖和
+  文档一致性。
+- 当前差距：创建流仍保留五步 wizard 形态；AI/人工批注已使用段落级 MVP，尚未实现
+  字符级锚点、富文本编辑、文件上传、导出、多级审核或版本 diff/回滚。
 
-```bash
-cd /home/q2635/wsl-workspace/case-library
-```
+## 目录职责
 
-Historical directories are read-only references:
+- `backend/`：FastAPI、MongoDB 数据层、账号脚本、迁移和 smoke 脚本。
+- `frontend/`：Vue 3 + Vite 单页 alpha 前端，使用 hash 视图切换。
+- `skills/`：思政案例提示词、模板和分类规则，是产品领域资产。
+- `docs/`：项目、产品、API、AI、开发和质量文档。
+- `docs/design/`：已跟踪的创建案例视觉参考图。
+- `docs/case-library-design.zip`：本地 HTML 风格参考包，目前未跟踪，可作为设计参考。
+- `agent-prompts/`：可复用 worker 提示词。
+- `agent-runs/`：本地一次性 worker 输出，忽略不提交。
+
+### 后端脚本和默认值
+
+`backend/` 当前仍混放运行模块和操作脚本，暂不在 alpha PR 中搬目录：
+
+- 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、`prompts.py`、
+  `case_processor.py`、`search_engine.py`
+- Compose 启动账号初始化：`backend/init_users.py`
+- 管理员账号工具：`backend/account_admin.py`
+- 演示数据脚本：`backend/demo.py`
+- 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
+- 本地 smoke/debug：`backend/smoke_test_mongo.py`
+- 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用
+- E2E seed：`scripts/seed_e2e_accounts.py`，由 `docker-compose.dev.yml` 调用
+
+`backend/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
+均设置 `must_change_password=true`。E2E 账号和 alpha demo 案例由
+`scripts/seed_e2e_accounts.py` 确定性创建，仅用于 dev/e2e 环境。不要把真实账号、真实密码
+或生产种子数据写入这些脚本。
+
+`/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
+后端测试、前端 fallback 和文档。产品 prompt/template 资产当前保留在 `skills/`，后续若做
+统一 prompt 管理，先按 issue #80 迁移路径和评测命令收口，不把 `.codex/` 代理技能混入产品
+资产。
+
+历史目录只读参考，不从中开发，不整目录复制：
 
 - `/home/q2635/wsl-workspace/case-library-old`
 - `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605`
 
-Do not develop from them and do not copy old files wholesale.
+## 运行服务
 
-## Architecture
+`docker-compose.yml` 定义三个服务：
 
-- `backend/`: FastAPI app, MongoDB data layer, account scripts, migration/smoke scripts.
-- `frontend/`: Vue 3 + Vite alpha frontend with an app shell, role-aware
-  navigation, and restored public, authenticated, and admin workflows. Not
-  production-complete.
-- `skills/`: prompt/template resources for case writing and classification. Treat them
-  as domain assets, not as runtime framework code.
-- `docs/design/`: tracked visual design references.
-- `agent-prompts/`: tracked worker task contracts.
-- `agent-runs/`: ignored worker outputs and pane captures.
+- `app`：FastAPI，宿主端口 `8001`
+- `frontend`：Vite dev server，宿主端口 `18080`
+- `mongo`：MongoDB，仅 Compose 网络内暴露
 
-Runtime services are defined in `docker-compose.yml`:
+常用地址：
 
-- `app`: FastAPI API on host port `8001`
-- `frontend`: Vite dev server on host port `18080`
-- `mongo`: MongoDB on the Compose network only
+- API：`http://127.0.0.1:8001`
+- Swagger：`http://127.0.0.1:8001/docs`
+- OpenAPI：`http://127.0.0.1:8001/openapi.json`
+- 前端：`http://127.0.0.1:18080/`
 
-## Environment
+## 环境变量
 
-`.env.example` is the source of truth for local configuration names. Copy it to
-`.env` for local secrets and overrides.
+`.env.example` 是可提交示例，`.env` 是本地文件，已忽略，禁止提交。
 
-Important groups:
+关键配置：
 
-- MongoDB: `MONGODB_URI`, `MONGODB_DB_NAME`, `MONGODB_TIMEOUT_MS`
-- Auth: `AUTH_SECRET`, `AUTH_TOKEN_TTL`
-- OpenAI-compatible AI client placeholders:
-  `AI_BASE_URL`, `AI_API_KEY`, `AI_MODELS`, `AI_DEFAULT_MODEL`,
-  `AI_TIMEOUT_SECONDS`, `AI_REVIEW_ENABLED`
-- Frontend: `VITE_API_BASE_URL`, `FRONTEND_PORT`
-- Mirrors: `APT_MIRROR`, `APT_SECURITY_MIRROR`, `PIP_INDEX_URL`,
-  `NPM_CONFIG_REGISTRY`
+- MongoDB：`MONGODB_URI`、`MONGODB_DB_NAME`、`MONGODB_TIMEOUT_MS`
+- 认证：`AUTH_SECRET`、`AUTH_TOKEN_TTL`
+- AI：`AI_BASE_URL`、`AI_API_KEY`、`AI_MODELS`、`AI_DEFAULT_MODEL`、
+  `AI_TIMEOUT_SECONDS`、`AI_REVIEW_ENABLED`
+- 前端：`VITE_API_BASE_URL`、`FRONTEND_PORT`
+- 镜像源：`APT_MIRROR`、`APT_SECURITY_MIRROR`、`PIP_INDEX_URL`、
+  `NPM_CONFIG_REGISTRY`。默认使用官方源；国内镜像只应通过本地 `.env` 或构建参数显式启用。
 
-The AI variables are intentionally placeholders until AI-backed review/skill
-features are implemented. Fill them in local `.env`; never commit real keys.
+禁止打印或提交真实 `AI_API_KEY`、AnySearch/Tavily key、代理地址和私有服务地址。
 
-## Quality Gate
+## 网络和代理
 
-Primary acceptance gate:
+当前沙箱内普通网络可能 DNS 失败；提权后宿主网络可访问 GitHub。Docker Hub 直连
+超时，但执行 `zsh -lic 'proxy_on'` 后可通过代理访问 Docker Registry。
+
+`proxy_on` 定义在 `~/.zshrc`，会设置 shell 代理、写入 `/etc/docker/proxy.env`，
+并在 Docker 正运行时重启 Docker。需要写系统目录时必须请求权限。
+
+## 质量门禁
+
+实现或脚手架变更完成前，在容器内运行：
 
 ```bash
+docker compose up -d --build
+curl -fsS http://127.0.0.1:8001/api/constants
+curl -fsS http://127.0.0.1:18080/
+docker compose ps
 docker compose run --rm app make check
 docker compose config --quiet
+git diff --check
 ```
 
-`make check` runs backend lint, the current backend submit-flow test, and the
-frontend Vite build. Add focused tests as behavior is restored instead of widening
-the gate with unowned tools.
+小范围文档修改可只运行 `git diff --check`，并在汇报中说明未跑完整门禁。
 
-If the frontend dev server reports a broken Vite install, reset only its dependency
-volume:
+## 数据和资源
 
-```bash
-docker compose stop frontend
-docker volume rm case-library_frontend_node_modules
-docker compose up -d frontend
-```
+- 原始运行数据、Mongo dump、上传文件和未审材料不得提交。
+- `data/` 保持忽略。
+- 历史材料只能作为导入源：先只读盘点，再选择写导入器、精选 fixture 或记录弃用说明。
+- 不把旧 `.claude/`、`.codex/` 工作流资产迁入产品仓库。
 
-## API Documentation
+## 当前技术债
 
-FastAPI-generated OpenAPI is the current implementation reference:
-
-- Swagger UI: `http://127.0.0.1:8001/docs`
-- OpenAPI JSON: `http://127.0.0.1:8001/openapi.json`
-- Runtime labels/constants: `GET /api/constants`
-
-`docs/api.md` is a recovered target-state API contract from the rewrite design.
-Use it as planning/reference material, not as proof that an endpoint is currently
-implemented. When public API behavior changes, update the FastAPI route metadata,
-schemas, and regression tests that generate `/openapi.json`; avoid maintaining
-new hand-written endpoint tables. The submit-flow check includes an OpenAPI
-regression assertion, and the project gate fails if required API documentation
-paths, schemas, or bearer-auth metadata disappear.
-
-## Resources
-
-### Import Source Policy
-
-Raw runtime data, Mongo dumps, uploads, and unreviewed material collections stay
-ignored and out of git. The repository root `.gitignore` already covers `data/`
-for this reason. Do not add exceptions for raw assets.
-
-Historical material collections are **import sources only**, not committed raw
-assets. They may appear in old checkouts or backups as Markdown files, JSON
-bundles, or Mongo exports. Their role is to feed a one-time or repeatable
-import/curation step, not to be snapshotted as-is into the product repository.
-
-### Handling Reappearing Old Material Collections
-
-If a material Markdown collection reappears in an old checkout or backup:
-
-1. **Inspect read-only first.** Inventory the files: count, size, structure,
-   schema drift, duplication, and obvious quality problems (encoding, broken
-   frontmatter, missing required fields).
-2. **Decide the path based on condition and value:**
-   - **Narrow importer** — if the collection is large, semi-structured, and worth
-     keeping in sync with schema evolution. Write a small script that reads from
-     the external path and outputs validated fixtures or direct DB inserts. Commit
-     only the importer and its tests.
-   - **Curated fixtures** — if only a small, high-value subset is worth keeping.
-     Extract, review, normalize, and commit the fixtures under a tracked path such
-     as `backend/tests/fixtures/` or `docs/fixtures/`. Include a note explaining
-     source and selection rationale. Historical case or material fixtures must not
-     be stored under `skills/` unless they are deliberately transformed into
-     prompt/template assets.
-   - **Curation note** — if the collection is low quality, redundant, or
-     superseded. Write a short markdown note documenting what was found, why it
-     was rejected, and where the source lives, then leave the data outside git.
-3. **Never commit raw unreviewed collections.** The committed artifacts are the
-   importer, the curated fixtures, or the documentation — never the original
-   dump.
-
-### Checked Backup Data State
-
-As of 2026-06-06, the read-only historical directories were checked:
-
-| Path | Exists | Content |
-|---|---|---|
-| `/home/q2635/wsl-workspace/case-library-old/data` | **No** | Directory does not exist. |
-| `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605/data/uploads` | **Yes** | Empty directory (no files). |
-
-This state should be re-checked only when a new backup or old checkout is
-discovered.
-
-## AI And Skills
-
-### Alpha Decision: Transient UI Guidance Only
-
-In the alpha phase, AI review remains **transient/local UI guidance only**.
-It is **not** a durable backend approval, audit, validation, or review record.
-The create-case wizard may show a local pre-submit checklist or state summary
-that helps the author self-review, but it must not imply server-side AI
-validation exists or persist any AI-generated judgment as an official record.
-
-### Durable AI Review (Future Backend Design)
-
-A durable AI review feature requires an explicit later backend design covering:
-
-- Persistence schema for AI review records (what is stored, TTL, versioning)
-- Review record semantics (what "AI passed/failed" means, thresholds, scoring)
-- Auth/traceability (who requested the review, which model, prompt version,
-  temperature, timestamp)
-- Model configuration and fallback (primary model, fallback model, error handling)
-- Failure handling (timeout, rate limit, invalid response format, retry policy)
-- Relationship to human expert review (AI review as advisory vs. gate,
-  escalation rules, override workflow)
-
-Do not implement or simulate any of the above until there is a dedicated design
-document and backend endpoint.
-
-### OpenAI-Compatible Client Boundary
-
-When implemented, the AI client must be:
-
-- **Server-side only** — never expose `AI_API_KEY` to browser code
-- **Configured through `.env`** using these variables:
-  - `AI_BASE_URL` — endpoint base URL
-  - `AI_API_KEY` — API key (server-side only)
-  - `AI_MODELS` — comma-separated available models
-  - `AI_DEFAULT_MODEL` — fallback when none specified
-  - `AI_TIMEOUT_SECONDS` — request timeout
-  - `AI_REVIEW_ENABLED` — feature flag to disable AI features entirely
-- **One chat interface** — a single chat completion path, not multiple
-  specialized endpoints
-- **Explicit model selection** — model chosen from `AI_MODELS`, defaulting to
-  `AI_DEFAULT_MODEL`; reject unknown models
-- **Feature flag and timeout honored** — when `AI_REVIEW_ENABLED=false`, AI
-  routes return 503 or equivalent; always respect `AI_TIMEOUT_SECONDS`
-
-### Skills/Prompts
-
-Existing `skills/` content is useful domain knowledge:
-
-- case writing templates
-- case classification rules
-- reference writing format
-
-These are **domain prompt/template assets**, not runtime framework code. They
-may feed future product prompts/templates when the AI client is implemented.
-
-Do not migrate old `.claude/` or `.codex/` review workflow bundles into this
-repository. They are agent orchestration tooling, not product domain assets.
-
-### Explicit Non-Goals
-
-- No fake "server AI passed" state in frontend or backend
-- No attachment/expert workflow simulation
-- No browser-side AI credentials or direct API calls
-- No durable AI audit trail until full backend support exists
-
-## Testing Direction
-
-Current gate is intentionally small. The Playwright smoke test covers the primary
-user story end-to-end:
-
-```text
-login -> create/submit case -> admin review -> approved case visible publicly
-```
-
-Run it when Compose services are up:
-
-```bash
-make smoke-e2e
-# or
-cd frontend && npm run test:e2e
-```
-
-For the containerized development E2E runner, use:
-
-```bash
-docker compose -f docker-compose.dev.yml up -d --build
-docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
-```
-
-The dev compose app startup normalizes deterministic test accounts via
-`scripts/seed_e2e_accounts.py`. Equivalent Make targets are available:
-
-```bash
-make dev-up
-make dev-e2e
-make dev-down
-```
-
-The audit E2E currently runs the desktop Playwright project, saves audit and
-failure screenshots to `agent-runs/screenshots`, and verifies:
-
-```text
-default admin login requires password change
-author submit -> admin approve -> public search
-```
-
-Screenshot checks belong with frontend work. Workers must extract layout facts
-from `docs/design/create/*.png` before implementing create-case screens.
-
-No benchmark code exists in alpha. Do not add benchmark infrastructure until
-there is a real AI endpoint and stable fixtures/source policy to measure against.
-
-Later benchmark candidates (track in GitHub Issues or `docs/kanban.md` only
-after the behavior exists):
-
-- Classification accuracy against `skills/zhutifenlei` rules
-- Review consistency over curated case fixtures
-- Prompt regression using `skills/anlibianxie/evals/evals.json`
-
-Track that decision in `docs/kanban.md` rather than adding speculative benchmark
-code now.
-
-## Worker Rules
-
-Use narrow prompts from `agent-prompts/`. A worker must get:
-
-- role and goal
-- allowed files
-- forbidden actions
-- checks allowed
-- required `DONE <role>` final line
-
-Workers do not commit, push, delete Docker volumes, read credentials, or modify
-historical directories. Review worker diffs before merging.
-
-Use GitHub Issues as the kanban. `docs/kanban.md` is only an index to the issue
-board and must not duplicate task details.
+- `docs/api.md` 只做索引；真实契约以 FastAPI OpenAPI 为准。
+- `POST /api/cases/{case_id}/ai-review` 已是 alpha 主流程的版本化段落批注接口；
+  `/api/ai/chat` 仅作为兼容自查端点保留。
+- 当前前端创建流仍是五步 wizard，而不是 PRD 理想形态中的单页输入 + 独立只读审核页。
+- 当前 E2E 门禁覆盖 alpha 主路径，但仍偏精简；扩大稳定回归矩阵见 issue #78。

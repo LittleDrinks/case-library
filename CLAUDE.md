@@ -40,7 +40,7 @@ Current contract direction:
 - Future submitted advisory records: `ai_reviews`, capped at 3 records
 - No fake AI output when AI is disabled or unavailable
 
-Keep `docs/api.md`, `docs/project.md`, `docs/frontend-rebuild.md`, and GitHub
+Keep `docs/api.md`, `docs/project.md`, `docs/prd.md`, `docs/ai.md`, and GitHub
 issues aligned when AI behavior changes.
 
 ## Worker Conduct

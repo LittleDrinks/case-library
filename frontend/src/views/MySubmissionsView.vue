@@ -7,7 +7,7 @@
 
     <!-- Login required -->
     <div v-if="!isAuthenticated" class="login-required-card">
-      <div class="login-required-icon" aria-hidden="true">🔒</div>
+      <div class="login-required-icon" aria-hidden="true"></div>
       <h3>请先登录</h3>
       <p>查看和管理您的案例需要先登录账号。</p>
     </div>
@@ -35,14 +35,14 @@
 
       <!-- Error -->
       <div v-else-if="error" class="state-error">
-        <div class="error-icon" aria-hidden="true">⚠️</div>
+        <div class="error-icon" aria-hidden="true"></div>
         <p>{{ error }}</p>
         <button type="button" class="btn-secondary" @click="loadCases">重试</button>
       </div>
 
       <!-- Empty -->
       <div v-else-if="cases.length === 0" class="state-empty">
-        <div class="empty-icon" aria-hidden="true">📝</div>
+        <div class="empty-icon" aria-hidden="true"></div>
         <h3>暂无{{ currentTabLabel }}</h3>
         <p>当前分类下没有案例</p>
         <button type="button" class="btn-primary" @click="goToCreate">创建新案例</button>
@@ -63,15 +63,15 @@
             </div>
             <h3 class="case-title">{{ c.title }}</h3>
             <div class="case-meta-row">
-              <span class="meta-item" v-if="c.department">🏛 {{ c.department }}</span>
-              <span class="meta-item" v-if="c.theme">🏷 {{ c.theme }}</span>
-              <span class="meta-item">📅 {{ formatDate(c.created_at) }}</span>
-              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">🔄 {{ formatDate(c.updated_at) }}</span>
+              <span class="meta-item" v-if="c.department">学院 {{ c.department }}</span>
+              <span class="meta-item" v-if="c.theme">主题 {{ c.theme }}</span>
+              <span class="meta-item">创建 {{ formatDate(c.created_at) }}</span>
+              <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">更新 {{ formatDate(c.updated_at) }}</span>
             </div>
             <p class="case-preview">{{ preview(c.content) }}</p>
             <div class="case-stats-row">
-              <span>👁 {{ c.view_count || 0 }}</span>
-              <span>❤️ {{ c.like_count || 0 }}</span>
+              <span>浏览 {{ c.view_count || 0 }}</span>
+              <span>点赞 {{ c.like_count || 0 }}</span>
             </div>
           </div>
 
@@ -87,9 +87,74 @@
               <strong>内容：</strong>
               <div class="detail-content-body">{{ c.content || '暂无内容' }}</div>
             </div>
+            <div class="detail-content-full" v-if="c.source_material">
+              <strong>来源材料：</strong>
+              <div class="detail-content-body">{{ c.source_material }}</div>
+            </div>
             <div v-if="c.keywords && c.keywords.length" class="detail-keywords">
               <strong>关键词：</strong>
               <span v-for="k in c.keywords" :key="k" class="keyword-tag">{{ k }}</span>
+            </div>
+
+            <div class="version-history">
+              <div class="section-head">
+                <strong>历史版本</strong>
+                <span v-if="versionMap[c.id]?.length" class="section-count">{{ versionMap[c.id].length }} 个版本</span>
+              </div>
+              <div v-if="versionLoading[c.id]" class="review-placeholder">加载中…</div>
+              <div v-else-if="versionError[c.id]" class="review-placeholder">{{ versionError[c.id] }}</div>
+              <div v-else-if="versionMap[c.id]?.length" class="version-list">
+                <article v-for="version in versionMap[c.id]" :key="version.id" class="version-item">
+                  <div class="version-head">
+                    <div>
+                      <strong>v{{ version.version_number }}</strong>
+                      <span v-if="version.change_reason" class="version-reason">{{ version.change_reason }}</span>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" @click="copyVersion(version)">复制版本</button>
+                  </div>
+                  <div class="version-meta">
+                    <span>创建 {{ formatDate(version.created_at) }}</span>
+                    <span v-if="version.created_by">创建人 {{ version.created_by }}</span>
+                  </div>
+                  <div class="version-body">
+                    <div class="version-field">
+                      <span>正文</span>
+                      <p>{{ version.content || '暂无内容' }}</p>
+                    </div>
+                    <div class="version-field">
+                      <span>来源材料</span>
+                      <p>{{ version.source_material || '暂无来源材料' }}</p>
+                    </div>
+                  </div>
+                  <div v-if="version.admin_comments?.length" class="version-admin-comments">
+                    <strong>人工段落批注</strong>
+                    <div
+                      v-for="batch in version.admin_comments"
+                      :key="`${batch.created_at}-${batch.reviewer}`"
+                      class="version-comment-batch"
+                    >
+                      <div class="version-comment-meta">
+                        <span>{{ batch.reviewer || '审核员' }}</span>
+                        <span>{{ formatDate(batch.created_at) }}</span>
+                      </div>
+                      <p v-if="batch.comment" class="version-review-comment">{{ batch.comment }}</p>
+                      <ul>
+                        <li
+                          v-for="comment in batch.comments"
+                          :key="`${comment.paragraph_id}-${comment.message}`"
+                        >
+                          <span>{{ comment.paragraph_id }}</span>
+                          <p>
+                            {{ comment.message }}
+                            <em v-if="comment.suggestion">{{ comment.suggestion }}</em>
+                          </p>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="review-placeholder">暂无历史版本</div>
             </div>
 
             <!-- Review info -->
@@ -151,6 +216,10 @@
             <textarea id="ms-edit-content" v-model="editForm.content" rows="10" placeholder="请输入案例正文"></textarea>
           </div>
           <div class="field">
+            <label for="ms-edit-source">来源材料</label>
+            <textarea id="ms-edit-source" v-model="editForm.source_material" rows="5" placeholder="粘贴新闻、课堂记录、调研材料等来源文本"></textarea>
+          </div>
+          <div class="field">
             <label for="ms-edit-type">案例类型 <span class="required">*</span></label>
             <select id="ms-edit-type" v-model="editForm.type">
               <option disabled value="">请选择案例类型</option>
@@ -206,10 +275,12 @@ import {
   listMyCases,
   fetchCaseDetail,
   fetchCaseReviews,
+  fetchCaseVersions,
   updateCase,
   submitCaseById,
   deleteCaseById,
 } from '../api/cases.js';
+import { notify } from '../utils/toast.js';
 
 const tabs = [
   { key: 'pending_review', label: '待审核' },
@@ -226,6 +297,9 @@ const error = ref('');
 const expandedId = ref(null);
 const reviewMap = ref({});
 const reviewLoading = ref({});
+const versionMap = ref({});
+const versionLoading = ref({});
+const versionError = ref({});
 
 const caseTypes = ref({
   TYPE_A: '思政课教学案例',
@@ -236,7 +310,7 @@ const themes = ref(['强国建设', '实践育人', '数字赋能', '铸魂育�
 
 const editingCase = ref(null);
 const editAction = ref(''); // '', 'submit', 'resubmit'
-const editForm = ref({ title: '', department: '', content: '', type: '', theme: '' });
+const editForm = ref({ title: '', department: '', content: '', source_material: '', type: '', theme: '' });
 const saving = ref(false);
 const submitting = ref(false);
 
@@ -372,8 +446,66 @@ function toggleDetail(caseId) {
   }
   expandedId.value = caseId;
   const c = cases.value.find(x => x.id === caseId);
+  loadVersions(caseId);
   if (c && showReviewFor(c.status)) {
     loadReview(caseId);
+  }
+}
+
+async function loadVersions(caseId) {
+  if (versionMap.value[caseId] !== undefined || versionLoading.value[caseId]) return;
+  versionLoading.value[caseId] = true;
+  versionError.value[caseId] = '';
+  try {
+    const res = await fetchCaseVersions(caseId);
+    if (res?.success && Array.isArray(res.data)) {
+      versionMap.value[caseId] = res.data;
+    } else {
+      throw new Error(res?.message || '版本加载失败');
+    }
+  } catch (err) {
+    versionMap.value[caseId] = [];
+    versionError.value[caseId] = err.message || '版本加载失败';
+  } finally {
+    versionLoading.value[caseId] = false;
+  }
+}
+
+function versionSnapshotText(version) {
+  return [
+    `版本：v${version.version_number || ''}`,
+    `标题：${version.title || ''}`,
+    `类型：${typeLabel(version.type) || ''}`,
+    `主题：${version.theme || ''}`,
+    `创建时间：${formatDate(version.created_at)}`,
+    '',
+    '正文：',
+    version.content || '',
+    '',
+    '来源材料：',
+    version.source_material || '',
+  ].join('\n');
+}
+
+async function copyVersion(version) {
+  const text = versionSnapshotText(version);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    notify(`v${version.version_number} 已复制`, 'success');
+  } catch {
+    notify('复制失败，请手动选中文本复制', 'error');
   }
 }
 
@@ -387,7 +519,7 @@ async function loadReview(caseId) {
       if (decisive) {
         reviewMap.value[caseId] = {
           reviewer: decisive.reviewer || '未知',
-          result: decisive.status === 'approved' ? '通过' : '驳回',
+          result: decisive.status === 'approved' ? '通过' : '需修改',
           comment: decisive.comment || '（无意见）',
           reviewAt: formatDate(decisive.review_at),
         };
@@ -411,6 +543,7 @@ function openEdit(c, action = '') {
     title: c.title || '',
     department: c.department || '',
     content: c.content || '',
+    source_material: c.source_material || '',
     type: c.type || '',
     theme: c.theme || '',
   };
@@ -426,7 +559,7 @@ function closeEdit() {
 async function handleSave() {
   if (!editingCase.value) return;
   if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    window.alert('请填写所有必填项');
+    notify('请填写所有必填项', 'error');
     return;
   }
   saving.value = true;
@@ -435,17 +568,18 @@ async function handleSave() {
     await updateCase(editingCase.value.id, {
       title: editForm.value.title.trim(),
       content: editForm.value.content.trim(),
+      source_material: editForm.value.source_material.trim(),
       author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
       department: editForm.value.department.trim(),
       type: editForm.value.type,
       theme: editForm.value.theme,
       change_reason: actionLabel,
     });
-    window.alert('保存成功');
+    notify('保存成功', 'success');
     closeEdit();
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '保存失败');
+    notify(err.message || '保存失败', 'error');
   } finally {
     saving.value = false;
   }
@@ -454,7 +588,7 @@ async function handleSave() {
 async function handleResubmit() {
   if (!editingCase.value) return;
   if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    window.alert('请填写所有必填项');
+    notify('请填写所有必填项', 'error');
     return;
   }
   submitting.value = true;
@@ -463,6 +597,7 @@ async function handleResubmit() {
     await updateCase(editingCase.value.id, {
       title: editForm.value.title.trim(),
       content: editForm.value.content.trim(),
+      source_material: editForm.value.source_material.trim(),
       author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
       department: editForm.value.department.trim(),
       type: editForm.value.type,
@@ -473,12 +608,12 @@ async function handleResubmit() {
     const successMsg = editAction.value === 'resubmit'
       ? '案例已重新提交，请等待专家审核'
       : '案例已提交审核，请等待专家审核';
-    window.alert(successMsg);
+    notify(successMsg, 'success');
     closeEdit();
     await loadCases();
   } catch (err) {
     const errorMsg = editAction.value === 'resubmit' ? '重新提交失败' : '提交审核失败';
-    window.alert(err.message || errorMsg);
+    notify(err.message || errorMsg, 'error');
   } finally {
     submitting.value = false;
   }
@@ -493,11 +628,11 @@ async function doDelete() {
   deleting.value = true;
   try {
     await deleteCaseById(deletingCase.value.id);
-    window.alert('案例删除成功');
+    notify('案例删除成功', 'success');
     deletingCase.value = null;
     await loadCases();
   } catch (err) {
-    window.alert(err.message || '删除失败');
+    notify(err.message || '删除失败', 'error');
   } finally {
     deleting.value = false;
   }
@@ -521,6 +656,9 @@ onMounted(async () => {
 watch(currentTab, () => {
   reviewMap.value = {};
   reviewLoading.value = {};
+  versionMap.value = {};
+  versionLoading.value = {};
+  versionError.value = {};
 });
 </script>
 
@@ -642,8 +780,61 @@ watch(currentTab, () => {
 .error-icon,
 .empty-icon,
 .login-required-icon {
-  font-size: 40px;
-  line-height: 1;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+.login-required-icon::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 17px;
+  width: 16px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.login-required-icon::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 9px;
+  width: 10px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.error-icon {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.error-icon::before {
+  content: '!';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.empty-icon::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 13px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
 }
 
 .state-empty h3,
@@ -823,6 +1014,165 @@ watch(currentTab, () => {
   padding: 12px;
   background: var(--color-error-bg);
   border-radius: 6px;
+}
+
+.version-history {
+  margin: 14px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.section-head strong {
+  color: var(--color-text);
+}
+
+.section-count,
+.version-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.version-list {
+  display: grid;
+  gap: 10px;
+}
+
+.version-item {
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.version-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.version-head strong {
+  color: var(--color-brand);
+}
+
+.version-reason {
+  margin-left: 8px;
+  color: var(--color-text-secondary);
+}
+
+.version-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+}
+
+.version-body {
+  display: grid;
+  gap: 8px;
+}
+
+.version-field span {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.version-field p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.version-admin-comments {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fff7f7;
+}
+
+.version-admin-comments > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #991b1b;
+}
+
+.version-comment-batch + .version-comment-batch {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #fee2e2;
+}
+
+.version-comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.version-review-comment {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.version-admin-comments ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-admin-comments li {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+}
+
+.version-admin-comments li > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border-radius: 4px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.version-admin-comments li p {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.version-admin-comments li em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  color: var(--color-text-secondary);
 }
 
 .detail-review strong {

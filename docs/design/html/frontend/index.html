@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>强国有我大思政课案例库 - 上海大学</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23c41e3a'/><text y='.85em' x='50%' text-anchor='middle' font-size='60' fill='white' font-family='serif'>强</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Site Header -->
+<header id="site-header">
+  <div class="container">
+    <a class="logo" onclick="showPage('home')">
+      <div class="logo-badge">上大</div>
+      <span class="logo-text">强国有我 思政案例库</span>
+    </a>
+    <nav>
+      <a href="javascript:void(0)" onclick="showPage('home')" data-page="home">首页</a>
+      <a href="javascript:void(0)" onclick="showPage('cases')" data-page="cases">案例库</a>
+      <a href="step1-basic-info.html">创建案例</a>
+      <a href="javascript:void(0)" onclick="showPage('stats')" data-page="stats">数据统计</a>
+      <a href="javascript:void(0)" onclick="showPage('my-cases')" data-page="my-cases">我的提交</a>
+      <a href="javascript:void(0)" onclick="showPage('review')" data-page="review">审核管理</a>
+    </nav>
+    <div class="header-tools">
+      <div class="header-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" placeholder="搜索案例..." id="header-search-input" onkeypress="if(event.key==='Enter'){showPage('cases');setTimeout(function(){document.getElementById('case-search').value=document.getElementById('header-search-input').value;doSearch();},100);}">
+      </div>
+      <button class="icon-btn" title="通知" onclick="alert('暂无新通知')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </button>
+      <div class="header-avatar" id="header-avatar" title="用户" onclick="showPage('my-cases')">用</div>
+    </div>
+  </div>
+</header>
+
+<!-- ==================== PAGE: HOME ==================== -->
+<div id="page-home" class="page active">
+  <div class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">上海大学 · 大思政课案例库</p>
+      <h1>强国有我 · 案例库</h1>
+      <p>汇聚优质思政教学案例，共建共享教育资源平台</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="step1-basic-info.html">创建新案例</a>
+        <button class="btn btn-secondary" onclick="showPage('cases')">浏览案例库</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-container">
+    <div class="stats-row" id="home-stats-row">
+      <div class="stat-card">
+        <div class="num">-</div>
+        <div class="label">收录案例</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">-</div>
+        <div class="label">总浏览量</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">-</div>
+        <div class="label">总点赞数</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">-</div>
+        <div class="label">案例类型</div>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <span>最近更新案例</span>
+      <a onclick="showPage('cases')">查看全部 &rarr;</a>
+    </div>
+    <div class="case-card-grid">
+      <div class="case-card" style="opacity:0.5;pointer-events:none;">
+        <span class="tag">加载中</span>
+        <h4>正在加载最新案例</h4>
+        <p>请稍候...</p>
+        <div class="meta">&mdash;</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: CASES ==================== -->
+<div id="page-cases" class="page">
+  <div class="page-container">
+    <h1 style="font-size:var(--fs-h2);font-weight:600;margin-bottom:20px;">案例库</h1>
+
+    <div class="search-bar">
+      <input type="text" id="case-search" placeholder="搜索案例标题、关键词、作者..." onkeypress="if(event.key==='Enter')doSearch()">
+      <button class="btn btn-primary" onclick="doSearch()">搜索</button>
+    </div>
+
+    <div class="filter-row">
+      <select id="filter-type" onchange="doFilter()">
+        <option value="">全部类型</option>
+        <option value="思政课教学案例">思政课教学案例</option>
+        <option value="课程思政共享资源">课程思政共享资源</option>
+        <option value="实践育人案例">实践育人案例</option>
+      </select>
+      <select id="filter-theme" onchange="doFilter()">
+        <option value="">全部主题</option>
+        <option value="强国建设">强国建设</option>
+        <option value="上海实践">上海实践</option>
+        <option value="创新发展">创新发展</option>
+        <option value="校园文明">校园文明</option>
+      </select>
+      <select id="filter-sort" onchange="doFilter()">
+        <option value="newest">最新发布</option>
+        <option value="popular">最多浏览</option>
+        <option value="score">评分最高</option>
+      </select>
+    </div>
+
+    <div class="case-list" id="case-list">
+      <div class="case-list-item" style="opacity:0.5;pointer-events:none;">
+        <div class="info">
+          <span class="item-tag">加载中</span>
+          <h4>正在加载案例列表</h4>
+          <p>请稍候...</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="pagination" id="case-pagination">
+      <button onclick="changePage('prev')">&larr;</button>
+      <button class="active" onclick="changePage(1)">1</button>
+      <button onclick="changePage(2)">2</button>
+      <button onclick="changePage(3)">3</button>
+      <button onclick="changePage('next')">&rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: CASE DETAIL ==================== -->
+<div id="page-case-detail" class="page">
+  <div class="page-container">
+    <div class="case-detail-header">
+      <div class="case-detail-breadcrumb">
+        <a onclick="showPage('home')">首页</a> <span style="color:var(--muted);">&gt;</span> <a onclick="showPage('cases')">案例库</a> <span style="color:var(--muted);">&gt;</span> <span>数字赋能思政课：VR重走长征路教学实践</span>
+      </div>
+      <div class="case-detail-title-row">
+        <h1>数字赋能思政课：VR重走长征路教学实践</h1>
+        <button class="btn btn-secondary" onclick="showToast('已收藏')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          收藏
+        </button>
+      </div>
+      <div class="case-detail-meta-bar">
+        <span class="tag">思政课教学案例</span>
+        <span class="meta-item">李明华</span>
+        <span class="meta-item">马克思主义学院</span>
+        <span class="meta-item">强国建设</span>
+        <span class="meta-item">2026-05-18</span>
+        <span class="meta-item">1,234 次浏览</span>
+        <span class="meta-item score">4.8</span>
+      </div>
+    </div>
+
+    <div class="case-detail-body">
+      <div class="case-detail-main">
+        <div class="markdown-body">
+          <h2 id="section-background">一、案例背景</h2>
+          <p>随着信息技术的快速发展，虚拟现实（VR）技术在教育领域的应用日益广泛。传统的思政课教学面临学生参与度不高、历史场景难以还原等问题。为提升思政课教学的吸引力和感染力，本案例探索将VR技术引入《中国近现代史纲要》课程教学。</p>
+          <p>本项目得到了学校教务处和马克思主义学院的大力支持，于2025年秋季学期在2023级本科生中开展试点教学。</p>
+
+          <h2 id="section-goals">二、教学目标</h2>
+          <ul>
+            <li>知识目标：帮助学生深入理解红军长征的历史背景、重要意义和伟大精神</li>
+            <li>能力目标：培养学生运用现代信息技术进行自主学习和探究的能力</li>
+            <li>价值目标：增强学生的历史使命感和爱国主义情怀</li>
+          </ul>
+
+          <h2 id="section-design">三、教学设计与实施</h2>
+          <h3 id="section-tech">3.1 技术方案</h3>
+          <p>采用Unity3D引擎开发沉浸式VR场景，重点还原以下历史场景：</p>
+          <ol>
+            <li><strong>遵义会议</strong>：还原会议召开的历史环境，学生可"置身"会场，感受历史转折的紧张氛围</li>
+            <li><strong>四渡赤水</strong>：通过3D地图动态演示，让学生理解毛泽东军事指挥艺术的精妙</li>
+            <li><strong>飞夺泸定桥</strong>：模拟铁索桥的惊险场景，体验红军战士的英勇无畏</li>
+            <li><strong>过雪山草地</strong>：还原严酷的自然环境，体会长征的艰辛与伟大</li>
+          </ol>
+
+          <h3 id="section-flow">3.2 教学流程</h3>
+          <p>整个教学过程分为三个阶段：课前预习（线上微课+VR场景体验）、课堂研讨（小组讨论+教师讲解）、课后拓展（撰写心得+分享交流）。每个阶段都有明确的任务单和评价标准。</p>
+
+          <blockquote>
+            "当我戴上VR头盔，'站'在泸定桥上往下看湍急的河水时，才真正理解什么叫'大渡桥横铁索寒'。这种体验是课本给不了的。" —— 学生课后反馈
+          </blockquote>
+
+          <h2 id="section-effect">四、教学成效</h2>
+          <p>经过一学期的教学实践，通过问卷调查和访谈收集了学生的学习反馈：</p>
+          <ul>
+            <li>课程满意度达到<strong>96.5%</strong>，较传统教学提升23个百分点</li>
+            <li>学生课堂参与率从<strong>62%</strong>提升至<strong>91%</strong></li>
+            <li>期末考试成绩平均分提高<strong>8.7分</strong></li>
+            <li>学生撰写的学习心得多达<strong>300余篇</strong>，其中优秀作品在校报发表</li>
+          </ul>
+
+          <h2 id="section-reflection">五、经验与反思</h2>
+          <p>本案例的成功实施，得益于技术与教学的深度融合。但也发现一些需要改进的地方：VR设备数量有限，需要分批次体验；部分学生初期有眩晕感，需要适应时间；后续计划引入AR技术，让学生可以在校园内"重走长征路"。</p>
+          <p>总的来说，数字技术为思政课教学开辟了新路径，但技术只是手段，育人才是目的。如何在技术应用中守住思政课的价值底色，是每一位思政教师需要持续思考的问题。</p>
+        </div>
+
+        <div class="detail-actions">
+          <button id="detail-like-btn" class="btn btn-secondary">收藏案例</button>
+          <button class="btn btn-secondary" onclick="shareCase()">分享</button>
+          <button class="btn btn-primary" onclick="downloadCase()">下载文档</button>
+        </div>
+      </div>
+
+      <div class="case-detail-sidebar">
+        <div class="sidebar-card">
+          <h4>作者信息</h4>
+          <div class="author-info">
+            <div class="author-avatar">李</div>
+            <div>
+              <div class="author-name">李明华</div>
+              <div class="author-dept">马克思主义学院 · 副教授</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-card">
+          <h4>内容大纲</h4>
+          <ul class="outline-nav">
+            <li onclick="scrollToSection('section-background')">一、案例背景</li>
+            <li onclick="scrollToSection('section-goals')">二、教学目标</li>
+            <li onclick="scrollToSection('section-design')">三、教学设计与实施</li>
+            <li class="l2" onclick="scrollToSection('section-tech')">3.1 技术方案</li>
+            <li class="l2" onclick="scrollToSection('section-flow')">3.2 教学流程</li>
+            <li onclick="scrollToSection('section-effect')">四、教学成效</li>
+            <li onclick="scrollToSection('section-reflection')">五、经验与反思</li>
+          </ul>
+        </div>
+
+        <div class="sidebar-card">
+          <h4>相关推荐</h4>
+          <div class="related-case-item" onclick="showPage('cases')">
+            <h5>红色剧本杀：沉浸式党史学习教育</h5>
+            <div class="rc-meta">陈志强 · 4.9 · 1,567</div>
+          </div>
+          <div class="related-case-item" onclick="showPage('cases')">
+            <h5>翻转课堂在《马克思主义基本原理》中的应用</h5>
+            <div class="rc-meta">刘芳 · 4.3 · 543</div>
+          </div>
+          <div class="related-case-item" onclick="showPage('cases')">
+            <h5>AI伦理辩论赛：科技发展与道德边界</h5>
+            <div class="rc-meta">周晓燕 · 4.4 · 678</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: CREATE CASE ==================== -->
+<div id="page-create" class="page">
+  <div class="page-container layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <h4>进度</h4>
+        <div class="progress-bar"><div class="fill" id="vc-progress" style="width:60%"></div></div>
+        <div style="font-size:var(--fs-xs);color:var(--muted);" id="vc-progress-text">60% 完成</div>
+      </div>
+      <div class="sidebar-section">
+        <h4>表单分区</h4>
+        <div class="nav-item active" onclick="showSection('vc-info')" data-section="vc-info">
+          <span class="status-icon complete" id="vc-icon-info">&#10003;</span>
+          <span>基本信息</span>
+        </div>
+        <div class="nav-item locked" onclick="showSection('vc-content-section')" data-section="vc-content-section">
+          <span class="status-icon empty" id="vc-icon-content">&#9675;</span>
+          <span>素材内容</span>
+        </div>
+        <div class="nav-item locked" onclick="showSection('vc-category')" data-section="vc-category">
+          <span class="status-icon empty" id="vc-icon-category">&#9675;</span>
+          <span>分类选择</span>
+        </div>
+        <div class="nav-item locked" onclick="showSection('vc-ai')" data-section="vc-ai">
+          <span class="status-icon empty" id="vc-icon-ai">&#9675;</span>
+          <span>AI 审核</span>
+        </div>
+        <div class="nav-item locked" onclick="showSection('vc-submit')" data-section="vc-submit">
+          <span class="status-icon empty" id="vc-icon-submit">&#9675;</span>
+          <span>提交确认</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div style="margin-bottom:20px;">
+        <h1 style="font-size:var(--fs-h2);font-weight:600;">创建新案例</h1>
+        <p style="color:var(--muted);font-size:var(--fs-sm);margin-top:4px;">系统已预填示例内容，您可以直接修改或使用 AI 工具辅助创作。</p>
+      </div>
+
+      <!-- New guided flow banner -->
+      <div style="background:var(--accent-soft);border:1px dashed var(--accent);border-radius:var(--radius-lg);padding:16px 20px;margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="flex-shrink:0;"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+        <div style="flex:1;">
+          <div style="font-weight:600;color:var(--fg);">推荐使用五步流程创建案例</div>
+          <div style="font-size:var(--fs-sm);color:var(--muted);">全新的分步引导界面，更清晰的填写体验，更完整的 AI 辅助审核。</div>
+        </div>
+        <a href="step1-basic-info.html" class="btn btn-primary" style="flex-shrink:0;">前往五步流程</a>
+      </div>
+
+      <!-- Section 1: 基本信息 -->
+      <div class="section active" id="vc-info">
+        <div class="section-header">
+          <h3>基本信息</h3>
+          <span class="badge required">必填</span>
+        </div>
+        <div class="form-group">
+          <label for="vc-title">案例标题</label>
+          <input type="text" id="vc-title" class="form-input" value="" placeholder="请输入案例标题" oninput="markFormChanged()">
+        </div>
+        <div class="meta-row">
+          <div class="form-group">
+            <label for="vc-author">作者</label>
+            <input type="text" id="vc-author" class="form-input" value="" placeholder="请输入作者姓名" oninput="markFormChanged()">
+          </div>
+          <div class="form-group">
+            <label for="vc-department">部门/学院</label>
+            <input type="text" id="vc-department" class="form-input" value="" placeholder="请输入部门/学院" oninput="markFormChanged()">
+          </div>
+        </div>
+        <div class="sticky-actions" style="justify-content:center;">
+          <button class="btn btn-primary" onclick="continueToNext()">继续</button>
+        </div>
+      </div>
+
+      <!-- Section 2: 素材内容 -->
+      <div class="section" id="vc-content-section">
+        <div class="section-header">
+          <h3>素材内容</h3>
+          <span class="badge required">必填</span>
+        </div>
+
+        <div class="form-group">
+          <label for="vc-content">素材正文</label>
+          <textarea id="vc-content" class="form-textarea" rows="16" placeholder="请详细描述素材内容，可包含教学目标、实施过程、创新亮点、成效反思等板块..." oninput="markFormChanged()"></textarea>
+        </div>
+
+        <!-- AI Helper Hint -->
+        <div class="ai-helper-hint" onclick="nudgeCopilot()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+          <span>不知道怎么写？<strong>问问 AI</strong> — 右下角的 AI 助手可以帮你润色文字、加工素材</span>
+          <span class="hint-arrow">&rarr;</span>
+        </div>
+
+        <div class="form-group">
+          <label for="vc-keywords">关键词 <span class="label-hint">用逗号分隔</span></label>
+          <input type="text" id="vc-keywords" class="form-input" value="" placeholder="用逗号分隔多个关键词" oninput="markFormChanged()">
+        </div>
+
+        <!-- Save Draft Row -->
+        <div id="save-draft-hint" style="display:none;font-size:var(--fs-sm);color:var(--accent);margin-bottom:12px;font-weight:500;">内容已修改，请先保存草稿</div>
+        <div class="save-draft-row">
+          <button class="btn btn-save-draft" id="save-draft-btn" onclick="saveDraft()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            保存草稿
+          </button>
+          <span class="save-draft-note">保存后方可继续下一步</span>
+        </div>
+
+        <div class="sticky-actions" style="justify-content:center;">
+          <button class="btn btn-primary" id="content-continue-btn" onclick="continueToNext()" disabled>继续</button>
+        </div>
+      </div>
+
+      <!-- Section 3: 分类 -->
+      <div class="section" id="vc-category">
+        <div class="section-header">
+          <h3>分类选择</h3>
+          <span class="badge required">必填</span>
+        </div>
+        <div class="meta-row">
+          <div class="form-group">
+            <label for="vc-type">案例类型</label>
+            <select id="vc-type" class="form-select" onchange="markFormChanged()">
+              <option value="">请选择类型</option>
+              <option value="TYPE_A" selected>思政课教学案例</option>
+              <option value="TYPE_B">课程思政共享资源案例</option>
+              <option value="TYPE_C">实践育人案例</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="vc-theme">案例主题</label>
+            <select id="vc-theme" class="form-select" onchange="markFormChanged()">
+              <option value="">请选择主题</option>
+              <option value="强国建设" selected>强国建设</option>
+              <option value="上海实践">上海实践</option>
+              <option value="创新发展">创新发展</option>
+              <option value="校园文明">校园文明</option>
+            </select>
+          </div>
+        </div>
+        <div class="category-hint">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span>不确定分类？</span>
+          <button class="hint-link" onclick="nudgeCopilot()">试试问右下角的 AI 助手</button>
+        </div>
+        <div class="sticky-actions" style="justify-content:center;">
+          <button class="btn btn-primary" onclick="continueToNext()">继续</button>
+        </div>
+      </div>
+
+      <!-- Section 4: AI 审核 -->
+      <div class="section" id="vc-ai">
+        <div class="section-header">
+          <h3>AI 审核</h3>
+          <span class="badge">智能工具</span>
+        </div>
+
+        <div class="ai-panel" id="review-panel">
+          <div class="ai-panel-header">
+            <div class="icon review">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            </div>
+            <div>
+              <h4>AI 审核</h4>
+              <div class="sub">智能评估案例质量</div>
+            </div>
+          </div>
+          <div class="ai-panel-body" id="review-body">
+            <div class="card-stepper" id="review-stepper">
+              <div class="card-step" data-step="0">
+                <span class="step-dot">1</span>
+                <div>
+                  <div class="step-label">分析内容结构</div>
+                  <div class="step-desc">检测教学目标、实施过程等关键板块</div>
+                </div>
+                <div class="step-spinner"></div>
+                <div class="step-check"></div>
+              </div>
+              <div class="card-step" data-step="1">
+                <span class="step-dot">2</span>
+                <div>
+                  <div class="step-label">评估分类准确性</div>
+                  <div class="step-desc">验证案例类型与主题匹配度</div>
+                </div>
+                <div class="step-spinner"></div>
+                <div class="step-check"></div>
+              </div>
+              <div class="card-step" data-step="2">
+                <span class="step-dot">3</span>
+                <div>
+                  <div class="step-label">检查表达规范</div>
+                  <div class="step-desc">识别口语化表达和格式问题</div>
+                </div>
+                <div class="step-spinner"></div>
+                <div class="step-check"></div>
+              </div>
+              <div class="card-step" data-step="3">
+                <span class="step-dot">4</span>
+                <div>
+                  <div class="step-label">生成综合评分</div>
+                  <div class="step-desc">输出多维度评估报告</div>
+                </div>
+                <div class="step-spinner"></div>
+                <div class="step-check"></div>
+              </div>
+            </div>
+            <div id="review-result" style="display:none;">
+              <div class="score-ring-container">
+                <div class="score-ring" id="review-score-ring" style="background:conic-gradient(var(--success) 0deg, var(--success) 288deg, var(--border) 288deg);">
+                  <span id="review-score">80</span>
+                </div>
+                <div>
+                  <div style="font-weight:600;">综合评分</div>
+                  <div style="font-size:var(--fs-xs);color:var(--muted);">良好 · 可提交，仍有优化空间</div>
+                </div>
+              </div>
+              <div class="audit-item">
+                <span class="audit-status ok">通过</span>
+                <div><div class="audit-title">内容完整性</div><div class="audit-detail">已包含教学目标、实施过程、成效反思等关键板块</div></div>
+              </div>
+              <div class="audit-item">
+                <span class="audit-status ok">通过</span>
+                <div><div class="audit-title">分类准确性</div><div class="audit-detail">案例类型与主题匹配度良好</div></div>
+              </div>
+              <div class="audit-item">
+                <span class="audit-status warn">待改</span>
+                <div><div class="audit-title">表达规范性</div><div class="audit-detail">部分表述偏口语化，建议增加具体数据支撑</div></div>
+              </div>
+              <div class="audit-item">
+                <span class="audit-status ok">通过</span>
+                <div><div class="audit-title">基础信息</div><div class="audit-detail">标题、作者、部门信息完整</div></div>
+              </div>
+            </div>
+            <div id="review-stale" style="display:none;" class="stale-badge">
+              内容已更新，请重新审核
+            </div>
+            <div id="review-persist" style="display:none;" class="persist-badge">
+              已保存到数据库
+            </div>
+            <div style="margin-top:16px;">
+              <button class="btn btn-sm btn-secondary" id="review-reset-btn" onclick="resetReview()" style="display:none;">重新审核</button>
+            </div>
+          </div>
+          <div id="review-start-area">
+            <button class="btn btn-primary" id="review-start-btn" onclick="startReview()">开始 AI 审核</button>
+          </div>
+        </div>
+
+        <div class="sticky-actions" style="justify-content:center;">
+          <button class="btn btn-primary" id="ai-continue-btn" onclick="continueToNext()" disabled>继续</button>
+        </div>
+      </div>
+
+      <!-- Section 5: Submit -->
+      <div class="section" id="vc-submit">
+        <div class="section-header">
+          <h3>提交确认</h3>
+          <span class="badge">核对</span>
+        </div>
+        <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px;">提交后，您的案例将进入审核队列。您可以在"我的提交"中查看审核进度。</p>
+
+        <div id="submit-score-summary" style="display:none;" class="submit-score-summary">
+          <div class="score-num" id="submit-score-num">80</div>
+          <div>
+            <div style="font-weight:600;">AI 审核已通过</div>
+            <div style="font-size:var(--fs-xs);color:var(--muted);">综合评分良好，案例质量符合提交标准</div>
+          </div>
+        </div>
+
+        <div id="submit-card" class="submit-card">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent);flex-shrink:0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div style="flex:1;">
+            <div style="font-weight:500;">提交至审核</div>
+            <div style="font-size:var(--fs-sm);color:var(--muted);">平均审核时间：1-3 个工作日</div>
+          </div>
+          <button class="btn btn-primary" id="submit-btn" onclick="submitForm()" disabled>提交案例</button>
+        </div>
+
+        <div id="submit-warning" class="submit-warning" style="margin-top:16px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>请先完成 AI 审核，再提交案例</span>
+        </div>
+      </div>
+
+      <!-- Section 6: 提交成功 -->
+      <div class="section" id="vc-success">
+        <div style="text-align:center;padding:60px 20px;max-width:480px;margin:0 auto;">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="1.5" style="margin-bottom:16px;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          <h2 style="font-size:var(--fs-h3);font-weight:600;margin-bottom:8px;">案例提交成功</h2>
+          <p style="color:var(--muted);margin-bottom:32px;">您的案例已进入审核队列，管理员将在 1-3 个工作日内完成审核。</p>
+
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:32px;text-align:left;">
+            <div style="font-size:var(--fs-xs);color:var(--muted);margin-bottom:4px;">案例标题</div>
+            <div style="font-weight:500;margin-bottom:16px;" id="success-case-title">-</div>
+            <div style="font-size:var(--fs-xs);color:var(--muted);margin-bottom:4px;">提交时间</div>
+            <div style="font-weight:500;" id="success-submit-time">-</div>
+          </div>
+
+          <div style="display:flex;gap:12px;justify-content:center;">
+            <button class="btn btn-primary" onclick="location.reload()">创建新案例</button>
+            <button class="btn btn-secondary" onclick="showPage('my-cases')">查看我的提交</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Floating Copilot -->
+  <button class="float-btn" id="float-btn" onclick="toggleFloat()">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+  </button>
+  <div class="float-panel" id="float-panel">
+    <div class="float-panel-header">
+      <span>AI 助手</span>
+    </div>
+    <div class="float-panel-body" id="float-body">
+      <div class="float-chat-hint">你可以问我：帮我检查案例完整性、推荐合适的分类、优化这段表达...</div>
+      <div class="float-quick-actions" id="float-quick-actions">
+        <button class="float-quick-action" onclick="sendFloatPreset('AI润色')"><span class="qa-label">AI 润色</span><span class="qa-arrow">&rarr;</span></button>
+        <button class="float-quick-action" onclick="sendFloatPreset('素材加工')"><span class="qa-label">素材加工</span><span class="qa-arrow">&rarr;</span></button>
+        <button class="float-quick-action" onclick="sendFloatPreset('检查完整性')"><span class="qa-label">检查完整性</span><span class="qa-arrow">&rarr;</span></button>
+        <button class="float-quick-action" onclick="sendFloatPreset('推荐分类')"><span class="qa-label">推荐分类</span><span class="qa-arrow">&rarr;</span></button>
+        <button class="float-quick-action" onclick="sendFloatPreset('优化表达')"><span class="qa-label">优化表达</span><span class="qa-arrow">&rarr;</span></button>
+        <button class="float-quick-action" onclick="sendFloatPreset('生成摘要')"><span class="qa-label">生成摘要</span><span class="qa-arrow">&rarr;</span></button>
+      </div>
+      <div id="float-chat-area"></div>
+    </div>
+    <div class="float-input-area" id="float-input-area">
+      <div class="float-input-row">
+        <input type="text" id="float-input" placeholder="输入你的问题..." onkeypress="if(event.key==='Enter')sendFloat()">
+        <button id="float-send-btn" onclick="sendFloat()">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: STATS ==================== -->
+<div id="page-stats" class="page">
+  <div class="page-container">
+    <h1 style="font-size:var(--fs-h2);font-weight:600;margin-bottom:24px;">数据统计</h1>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="num" id="stat-total-cases">-</div>
+        <div class="label">收录案例</div>
+      </div>
+      <div class="stat-card">
+        <div class="num" id="stat-total-authors">-</div>
+        <div class="label">参与教师</div>
+      </div>
+      <div class="stat-card">
+        <div class="num" id="stat-monthly-new">-</div>
+        <div class="label">本月新增</div>
+      </div>
+      <div class="stat-card">
+        <div class="num" id="stat-approval-rate">-</div>
+        <div class="label">审核通过率</div>
+      </div>
+    </div>
+
+    <div class="chart-container">
+      <div class="chart-title">案例类型分布</div>
+      <div class="chart-bars" id="stats-type-chart">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+
+    <div class="chart-container">
+      <div class="chart-title">月度提交趋势（近6个月）</div>
+      <div class="chart-bars" id="stats-trend-chart">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: MY CASES ==================== -->
+<div id="page-my-cases" class="page">
+  <div class="page-container">
+    <h1 style="font-size:var(--fs-h2);font-weight:600;margin-bottom:20px;">我的提交</h1>
+
+    <div class="status-tabs">
+      <button class="status-tab active" onclick="showMyCaseTab('pending', this)">审核中</button>
+      <button class="status-tab" onclick="showMyCaseTab('approved', this)">已通过</button>
+      <button class="status-tab" onclick="showMyCaseTab('rejected', this)">已驳回</button>
+    </div>
+
+    <div id="my-cases-pending">
+      <div class="my-case-item" style="opacity:0.5;pointer-events:none;">
+        <div class="info"><h4>正在加载...</h4></div>
+      </div>
+    </div>
+
+    <div id="my-cases-approved" style="display:none;">
+      <div class="my-case-item" style="opacity:0.5;pointer-events:none;">
+        <div class="info"><h4>正在加载...</h4></div>
+      </div>
+    </div>
+
+    <div id="my-cases-rejected" style="display:none;">
+      <div class="my-case-item" style="opacity:0.5;pointer-events:none;">
+        <div class="info"><h4>正在加载...</h4></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: REVIEW ==================== -->
+<div id="page-review" class="page">
+  <div class="page-container">
+    <h1 style="font-size:var(--fs-h2);font-weight:600;margin-bottom:20px;">审核管理</h1>
+
+    <div class="search-bar">
+      <input type="text" id="review-search" placeholder="搜索待审核案例...">
+      <button class="btn btn-primary" onclick="searchReviewCases()">搜索</button>
+    </div>
+
+    <div style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px;" id="review-count">待审核案例：加载中...</div>
+
+    <div id="review-list">
+      <div class="review-item" style="opacity:0.5;pointer-events:none;">
+        <div class="info">
+          <h4>正在加载待审核案例</h4>
+          <div class="meta">请稍候...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Modal -->
+<div id="reject-modal" class="modal" style="display:none;">
+  <div class="modal-content" style="max-width:480px;margin:auto;background:var(--surface);padding:24px;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>驳回案例</h3>
+      <button onclick="closeRejectModal()" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div class="form-group">
+      <label for="reject-comment">驳回原因</label>
+      <textarea id="reject-comment" class="form-textarea" rows="4" placeholder="请输入驳回原因，将反馈给提交者..."></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-secondary" onclick="closeRejectModal()">取消</button>
+      <button class="btn btn-danger" id="reject-confirm-btn" onclick="confirmReject()">确认驳回</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+
+<script src="js/app.js"></script>
+</body>
+</html>

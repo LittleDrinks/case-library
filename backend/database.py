@@ -34,7 +34,16 @@ REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "need
 USER_ROLES = {"normal", "admin"}
 USER_STATUSES = {"active", "no_active"}
 COUNTER_COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
-VERSIONED_FIELDS = ["title", "type", "theme", "content", "author", "department", "keywords"]
+VERSIONED_FIELDS = [
+    "title",
+    "type",
+    "theme",
+    "content",
+    "source_material",
+    "author",
+    "department",
+    "keywords",
+]
 DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
 AI_REVIEW_DATETIME_FIELDS = {"reviewed_at", "created_at"}
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -194,11 +203,125 @@ def _normalize_ai_reviews(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+COMMENT_CATEGORIES = {"source", "fact", "structure", "classification", "classroom", "clarity"}
+COMMENT_SEVERITIES = {"info", "suggestion", "important"}
+
+
+def split_paragraphs(content: str) -> list[dict[str, str]]:
+    paragraphs: list[dict[str, str]] = []
+    for line in str(content or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        paragraphs.append({"paragraph_id": f"p{len(paragraphs) + 1}", "text": text})
+    if not paragraphs and str(content or "").strip():
+        paragraphs.append({"paragraph_id": "p1", "text": str(content).strip()})
+    return paragraphs
+
+
+def _normalize_summary(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        value = {}
+    summary: dict[str, list[str]] = {}
+    for key in ("strengths", "risks", "suggested_next_steps"):
+        items = value.get(key, [])
+        if isinstance(items, str):
+            items = [items]
+        if not isinstance(items, list):
+            items = []
+        summary[key] = [str(item) for item in items if item is not None and str(item).strip()]
+    return summary
+
+
+def normalize_paragraph_comments(value: Any, paragraph_ids: set[str] | None = None) -> list[dict]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("paragraph_comments must be valid JSON") from exc
+    if not isinstance(value, list):
+        raise ValueError("paragraph_comments must be a list")
+
+    normalized: list[dict[str, Any]] = []
+    allowed_ids = paragraph_ids or set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError("paragraph_comments records must be objects")
+        paragraph_id = str(item.get("paragraph_id", "")).strip()
+        if not paragraph_id:
+            raise ValueError("paragraph_comments records require paragraph_id")
+        if allowed_ids and paragraph_id not in allowed_ids:
+            raise ValueError(f"Unknown paragraph_id: {paragraph_id}")
+
+        category = str(item.get("category", "clarity")).strip()
+        if category not in COMMENT_CATEGORIES:
+            category = "clarity"
+        severity = str(item.get("severity", "suggestion")).strip()
+        if severity not in COMMENT_SEVERITIES:
+            severity = "suggestion"
+        message = str(item.get("message", "")).strip()
+        if not message:
+            raise ValueError("paragraph_comments records require message")
+
+        normalized.append(
+            {
+                "id": str(item.get("id") or f"c{index + 1}"),
+                "paragraph_id": paragraph_id,
+                "quote": str(item.get("quote", ""))[:500],
+                "category": category,
+                "severity": severity,
+                "message": message,
+                "suggestion": str(item.get("suggestion", "")).strip(),
+            }
+        )
+    return normalized
+
+
+def normalize_structured_ai_review(value: Any, paragraph_ids: set[str]) -> dict:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("AI review JSON parse failed") from exc
+    if not isinstance(value, dict):
+        raise ValueError("AI review result must be a JSON object")
+
+    comments = normalize_paragraph_comments(value.get("comments", []), paragraph_ids)
+    return {"comments": comments, "summary": _normalize_summary(value.get("summary", {}))}
+
+
+def _public_case_fields(case: dict) -> dict:
+    allowed = {
+        "id",
+        "title",
+        "type",
+        "theme",
+        "content",
+        "source_material",
+        "author",
+        "department",
+        "status",
+        "created_at",
+        "updated_at",
+        "submitted_at",
+        "review_at",
+        "display_at",
+        "view_count",
+        "like_count",
+        "is_hidden",
+        "keywords",
+    }
+    return {key: case.get(key) for key in allowed if key in case}
+
+
 def serialize_case(case: dict | None) -> dict | None:
     if case is None:
         return None
 
     case = serialize_doc(case) or {}
+    case["source_material"] = str(case.get("source_material") or "")
     case["keywords"] = _normalize_keywords(case.get("keywords"))
     case["is_approved"] = bool(case.get("is_approved", False))
     case["is_in_library"] = bool(case.get("is_in_library", False))
@@ -211,6 +334,31 @@ def serialize_case(case: dict | None) -> dict | None:
     else:
         case["display_at"] = case.get("submitted_at") or case.get("created_at")
     return case
+
+
+def serialize_public_case(case: dict | None) -> dict | None:
+    serialized = serialize_case(case)
+    if not serialized:
+        return None
+    return _public_case_fields(serialized)
+
+
+def serialize_version(version: dict | None) -> dict | None:
+    serialized = serialize_doc(version)
+    if not serialized:
+        return None
+    serialized.setdefault("title", "")
+    serialized.setdefault("type", "")
+    serialized.setdefault("theme", "")
+    serialized.setdefault("content", "")
+    serialized.setdefault("source_material", "")
+    serialized.setdefault("author", "")
+    serialized.setdefault("owner_username", "")
+    serialized.setdefault("created_by", serialized.get("changed_by", ""))
+    serialized.setdefault("paragraphs", split_paragraphs(serialized.get("content", "")))
+    serialized.setdefault("ai_review", None)
+    serialized.setdefault("admin_comments", [])
+    return serialized
 
 
 def _now() -> str:
@@ -345,8 +493,12 @@ def init_db():
         [("owner_username", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)]
     )
     db.cases.create_index([("type", ASCENDING), ("theme", ASCENDING)])
+    existing_text_index = db.cases.index_information().get("cases_text_idx")
+    existing_weights = (existing_text_index or {}).get("weights", {})
+    if existing_text_index and "source_material" not in existing_weights:
+        db.cases.drop_index("cases_text_idx")
     db.cases.create_index(
-        [("title", TEXT), ("content", TEXT), ("keywords", TEXT)],
+        [("title", TEXT), ("content", TEXT), ("source_material", TEXT), ("keywords", TEXT)],
         name="cases_text_idx",
         default_language="none",
     )
@@ -535,7 +687,9 @@ def create_case(case_data: dict) -> int:
         "type": case_data.get("type", ""),
         "theme": case_data.get("theme", ""),
         "content": case_data.get("content", ""),
+        "source_material": case_data.get("source_material", ""),
         "status": status,
+        "submitted_at": case_data.get("submitted_at") or (now if status == "pending_review" else None),
         "author": case_data.get("author", ""),
         "owner_username": case_data.get("owner_username", ""),
         "department": case_data.get("department", ""),
@@ -560,12 +714,31 @@ def create_case(case_data: dict) -> int:
     version_doc = {
         "case_id": case_id,
         "version_number": 1,
+        "title": doc.get("title", ""),
+        "type": doc.get("type", ""),
+        "theme": doc.get("theme", ""),
         "content": doc.get("content", ""),
+        "source_material": doc.get("source_material", ""),
+        "author": doc.get("author", ""),
+        "owner_username": doc.get("owner_username", ""),
+        "created_by": doc.get("owner_username") or doc.get("author", ""),
+        "paragraphs": split_paragraphs(doc.get("content", "")),
+        "ai_review": None,
+        "admin_comments": [],
         "changed_by": doc.get("author", ""),
         "change_reason": "Initial creation",
         "created_at": now,
     }
-    _insert_with_generated_id("versions", version_doc)
+    version_id = _insert_with_generated_id("versions", version_doc)
+    if status == "pending_review":
+        get_db().cases.update_one(
+            {"id": case_id},
+            {
+                "$set": _normalize_datetime_fields(
+                    {"submitted_version_id": version_id, "submitted_at": doc["submitted_at"]}
+                )
+            },
+        )
     return case_id
 
 
@@ -655,6 +828,25 @@ def get_all_cases(
     return [serialize_case(row) for row in cursor]
 
 
+def get_all_public_cases(
+    status: str | None = "approved",
+    offset: int = 0,
+    limit: int = 50,
+) -> list[dict]:
+    return [
+        item
+        for item in (
+            serialize_public_case(row)
+            for row in get_db()
+            .cases.find(_case_list_filter(status=status, include_hidden=False))
+            .sort("created_at", DESCENDING)
+            .skip(max(0, int(offset)))
+            .limit(max(0, int(limit)))
+        )
+        if item is not None
+    ]
+
+
 def count_cases(
     status: str | None = None,
     author: str | None = None,
@@ -697,6 +889,7 @@ def update_case(
         "type",
         "theme",
         "content",
+        "source_material",
         "author",
         "department",
         "status",
@@ -738,7 +931,17 @@ def update_case(
         version_doc = {
             "case_id": int(case_id),
             "version_number": new_version,
+            "title": (updated or {}).get("title", ""),
+            "type": (updated or {}).get("type", ""),
+            "theme": (updated or {}).get("theme", ""),
             "content": (updated or {}).get("content", ""),
+            "source_material": (updated or {}).get("source_material", ""),
+            "author": (updated or {}).get("author", ""),
+            "owner_username": (updated or {}).get("owner_username", ""),
+            "created_by": updated_by,
+            "paragraphs": split_paragraphs((updated or {}).get("content", "")),
+            "ai_review": None,
+            "admin_comments": [],
             "changed_by": updated_by,
             "change_reason": change_reason,
             "created_at": _now(),
@@ -746,6 +949,78 @@ def update_case(
         _insert_with_generated_id("versions", version_doc)
 
     return True
+
+
+def create_ai_review_version(
+    case_id: int,
+    reviewer: str,
+    ai_review: dict,
+    model: str = "",
+    raw_answer: str = "",
+) -> dict | None:
+    db = get_db()
+    current = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
+    if not current:
+        return None
+
+    paragraphs = split_paragraphs(current.get("content", ""))
+    paragraph_ids = {item["paragraph_id"] for item in paragraphs}
+    normalized_review = normalize_structured_ai_review(ai_review, paragraph_ids)
+    now = _now()
+
+    max_version = db.versions.find_one(
+        {"case_id": int(case_id)},
+        sort=[("version_number", DESCENDING)],
+        projection={"version_number": 1},
+    )
+    new_version = int(max_version["version_number"]) + 1 if max_version else 1
+    version_doc = {
+        "case_id": int(case_id),
+        "version_number": new_version,
+        "title": current.get("title", ""),
+        "type": current.get("type", ""),
+        "theme": current.get("theme", ""),
+        "content": current.get("content", ""),
+        "source_material": current.get("source_material", ""),
+        "author": current.get("author", ""),
+        "owner_username": current.get("owner_username", ""),
+        "created_by": reviewer,
+        "paragraphs": paragraphs,
+        "ai_review": {
+            **normalized_review,
+            "model": model,
+            "raw_answer": raw_answer,
+            "created_at": now,
+            "created_by": reviewer,
+        },
+        "admin_comments": [],
+        "changed_by": reviewer,
+        "change_reason": "AI pre-submit review",
+        "created_at": now,
+    }
+    version_id = _insert_with_generated_id("versions", version_doc)
+    db.cases.update_one(
+        {"id": int(case_id)},
+        {
+            "$set": _normalize_datetime_fields(
+                {
+                    "latest_review_version_id": version_id,
+                    "updated_at": now,
+                    "ai_reviews": [
+                        {
+                            "prompt_id": "alpha/paragraph-review",
+                            "name": "AI 段落审核",
+                            "answer": raw_answer,
+                            "parsed": normalized_review,
+                            "parse_error": None,
+                            "reviewed_at": now,
+                        }
+                    ],
+                }
+            )
+        },
+    )
+    return serialize_doc(db.versions.find_one({"id": version_id}))
 
 
 def delete_case(case_id: int) -> dict:
@@ -777,15 +1052,32 @@ def delete_case(case_id: int) -> dict:
     }
 
 
-def submit_for_review(case_id: int) -> bool:
+def _latest_version_id(case_id: int) -> int | None:
+    version = get_db().versions.find_one(
+        {"case_id": int(case_id)}, sort=[("version_number", DESCENDING)], projection={"id": 1}
+    )
+    return int(version["id"]) if version and version.get("id") is not None else None
+
+
+def submit_for_review(case_id: int, version_id: int | None = None) -> bool:
     db = get_db()
     now = _now()
+    bound_version_id = int(version_id) if version_id is not None else _latest_version_id(case_id)
+    if bound_version_id is None:
+        return False
+    if not db.versions.find_one({"id": bound_version_id, "case_id": int(case_id)}):
+        return False
 
     result = db.cases.update_one(
         {"id": int(case_id), "status": {"$in": ["draft", "needs_revision"]}},
         {
             "$set": _normalize_datetime_fields(
-                {"status": "pending_review", "updated_at": now, "submitted_at": now}
+                {
+                    "status": "pending_review",
+                    "updated_at": now,
+                    "submitted_at": now,
+                    "submitted_version_id": bound_version_id,
+                }
             )
         },
     )
@@ -794,8 +1086,10 @@ def submit_for_review(case_id: int) -> bool:
 
     review_doc = {
         "case_id": int(case_id),
+        "version_id": bound_version_id,
         "reviewer": "system",
         "comment": "Submitted for review",
+        "paragraph_comments": [],
         "status": "pending",
         "review_at": _now(),
     }
@@ -803,10 +1097,28 @@ def submit_for_review(case_id: int) -> bool:
     return True
 
 
-def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
+def review_case(
+    case_id: int,
+    reviewer: str,
+    comment: str,
+    status: str,
+    version_id: int | None = None,
+    paragraph_comments: Any = None,
+) -> bool:
     db = get_db()
-    if not db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}}):
+    case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
+    if not case:
         return False
+    if case.get("status") != "pending_review":
+        return False
+    bound_version_id = int(version_id or case.get("submitted_version_id") or 0)
+    if not bound_version_id:
+        bound_version_id = _latest_version_id(case_id) or 0
+    version = db.versions.find_one({"id": bound_version_id, "case_id": int(case_id)})
+    if not version:
+        return False
+    paragraph_ids = {item.get("paragraph_id") for item in version.get("paragraphs", [])}
+    normalized_comments = normalize_paragraph_comments(paragraph_comments or [], paragraph_ids)
 
     review_status = _normalize_review_status(status)
     if review_status == "approved":
@@ -830,6 +1142,8 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
                     "status": new_status,
                     "is_approved": is_approved,
                     "is_in_library": is_in_library,
+                    "reviewed_version_id": bound_version_id,
+                    "review_at": _now(),
                     "updated_at": _now(),
                 }
             )
@@ -840,12 +1154,33 @@ def review_case(case_id: int, reviewer: str, comment: str, status: str) -> bool:
 
     review_doc = {
         "case_id": int(case_id),
+        "version_id": bound_version_id,
         "reviewer": reviewer,
         "comment": comment,
+        "paragraph_comments": normalized_comments,
         "status": review_status,
         "review_at": _now(),
     }
     _insert_with_generated_id("reviews", review_doc)
+    if normalized_comments:
+        existing = version.get("admin_comments") or []
+        db.versions.update_one(
+            {"id": bound_version_id},
+            {
+                "$set": {
+                    "admin_comments": [
+                        *existing,
+                        {
+                            "reviewer": reviewer,
+                            "status": review_status,
+                            "comment": comment,
+                            "created_at": _now(),
+                            "comments": normalized_comments,
+                        },
+                    ]
+                }
+            },
+        )
     return True
 
 
@@ -898,7 +1233,7 @@ def backfill_owner_username() -> dict[str, int]:
 
 def get_case_versions(case_id: int) -> list[dict]:
     cursor = get_db().versions.find({"case_id": int(case_id)}).sort("version_number", DESCENDING)
-    return [serialize_doc(row) for row in cursor]
+    return [item for item in (serialize_version(row) for row in cursor) if item is not None]
 
 
 def get_reviews(case_id: int) -> list[dict]:
@@ -908,7 +1243,7 @@ def get_reviews(case_id: int) -> list[dict]:
 
 def increment_view_count(case_id: int) -> bool:
     result = get_db().cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"view_count": 1}},
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -916,7 +1251,7 @@ def increment_view_count(case_id: int) -> bool:
 
 def increment_like_count(case_id: int) -> bool:
     result = get_db().cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"like_count": 1}},
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -925,36 +1260,46 @@ def increment_like_count(case_id: int) -> bool:
 def decrement_like_count(case_id: int) -> bool:
     db = get_db()
     case_exists = (
-        db.cases.count_documents({"id": int(case_id), "status": {"$ne": "deleted"}}, limit=1) > 0
+        db.cases.count_documents(
+            {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
+            limit=1,
+        )
+        > 0
     )
     if not case_exists:
         return False
 
     result = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$gt": 0}},
+        {
+            "id": int(case_id),
+            "status": "approved",
+            "is_hidden": {"$ne": True},
+            "like_count": {"$gt": 0},
+        },
         {"$inc": {"like_count": -1}},
     )
     if result.modified_count > 0:
         return True
 
     correction = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}, "like_count": {"$lt": 0}},
+        {
+            "id": int(case_id),
+            "status": "approved",
+            "is_hidden": {"$ne": True},
+            "like_count": {"$lt": 0},
+        },
         {"$set": {"like_count": 0}},
     )
     return correction.modified_count > 0
 
 
 def _status_search_filter(status: str | None) -> dict[str, Any]:
-    if not status or status == "all":
-        return {"status": {"$nin": ["draft", "deleted"]}}
-    if status in ("approved", "approved_all"):
+    if not status or status in ("all", "approved", "approved_all"):
         return {"status": "approved"}
-    if status == "rejected":
-        return {"status": "needs_revision"}
-    if status == "draft":
-        return {"status": "__private_draft__"}
+    if status in ("draft", "pending_review", "rejected", "needs_revision"):
+        return {"status": "__public_search_no_match__"}
     _validate_case_status(status)
-    return {"status": status}
+    return {"status": "__public_search_no_match__"}
 
 
 def search_cases(
@@ -971,7 +1316,12 @@ def search_cases(
     mongo_query: dict[str, Any] = {
         **_status_search_filter(status),
         "is_hidden": {"$ne": True},
-        "$or": [{"title": regex}, {"content": regex}, {"keywords": regex}],
+        "$or": [
+            {"title": regex},
+            {"content": regex},
+            {"source_material": regex},
+            {"keywords": regex},
+        ],
     }
     cursor = (
         get_db()
@@ -980,7 +1330,7 @@ def search_cases(
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
     )
-    return [serialize_case(row) for row in cursor]
+    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
 
 def filter_cases(
@@ -999,7 +1349,12 @@ def filter_cases(
         query["theme"] = theme_filter
     if keyword_filter:
         regex = {"$regex": re.escape(keyword_filter), "$options": "i"}
-        query["$or"] = [{"title": regex}, {"content": regex}, {"keywords": regex}]
+        query["$or"] = [
+            {"title": regex},
+            {"content": regex},
+            {"source_material": regex},
+            {"keywords": regex},
+        ]
 
     cursor = (
         get_db()
@@ -1008,7 +1363,7 @@ def filter_cases(
         .skip(max(0, int(offset)))
         .limit(max(0, int(limit)))
     )
-    return [serialize_case(row) for row in cursor]
+    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
 
 def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
@@ -1023,7 +1378,7 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
         "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
     }
     cursor = get_db().cases.find(query).limit(max(0, int(limit) * 3))
-    cases = [serialize_case(row) for row in cursor]
+    cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:limit]
 
@@ -1031,7 +1386,7 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
 def get_trending_cases(limit: int = 10) -> list[dict]:
     query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
     cursor = get_db().cases.find(query)
-    cases = [serialize_case(row) for row in cursor]
+    cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:limit]
 
@@ -1039,7 +1394,7 @@ def get_trending_cases(limit: int = 10) -> list[dict]:
 def get_latest_cases(limit: int = 10) -> list[dict]:
     query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
     cursor = get_db().cases.find(query).sort("created_at", DESCENDING).limit(max(0, int(limit)))
-    return [serialize_case(row) for row in cursor]
+    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
 
 def get_statistics() -> dict:

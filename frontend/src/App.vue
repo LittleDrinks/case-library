@@ -85,11 +85,21 @@
 
     <!-- Forced Password Change Modal (cannot dismiss) -->
     <PasswordChangeModal v-if="showPasswordChange" @success="onPasswordChanged" />
+
+    <div class="toast-stack" aria-live="polite" aria-atomic="true">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        :class="['toast', `toast-${toast.type}`]"
+      >
+        {{ toast.message }}
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import {
   auth,
   isLoggedIn,
@@ -105,9 +115,12 @@ import CaseLibraryView from "./views/CaseLibraryView.vue";
 import CreateCaseView from "./views/CreateCaseView.vue";
 import MySubmissionsView from "./views/MySubmissionsView.vue";
 import AdminReviewView from "./views/AdminReviewView.vue";
+import { TOAST_EVENT } from "./utils/toast.js";
 
 const currentView = ref("home");
 const showLogin = ref(false);
+const toasts = ref([]);
+let toastSeq = 0;
 
 // Global header search state (passed to CaseLibraryView via prop)
 const searchTrigger = ref({ keyword: "", nonce: 0 });
@@ -179,6 +192,20 @@ function handleLogout() {
   currentView.value = "home";
 }
 
+function handleToast(event) {
+  const message = event.detail?.message || "";
+  if (!message) return;
+  const toast = {
+    id: ++toastSeq,
+    message,
+    type: event.detail?.type || "info",
+  };
+  toasts.value = [...toasts.value, toast].slice(-4);
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((item) => item.id !== toast.id);
+  }, 3200);
+}
+
 // Optional: sync with hash for basic URL state
 function readHash() {
   const hash = window.location.hash.replace("#", "");
@@ -194,4 +221,13 @@ watch(currentView, (view) => {
 
 window.addEventListener("hashchange", readHash);
 readHash();
+
+onMounted(() => {
+  window.addEventListener(TOAST_EVENT, handleToast);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener(TOAST_EVENT, handleToast);
+  window.removeEventListener("hashchange", readHash);
+});
 </script>

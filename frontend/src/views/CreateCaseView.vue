@@ -18,7 +18,9 @@
             { active: idx === currentStep, completed: idx < currentStep },
           ]"
         >
-          <span class="mobile-step-dot">{{ idx < currentStep ? '✓' : idx + 1 }}</span>
+          <span class="mobile-step-dot" aria-hidden="true">
+            <span v-if="idx >= currentStep">{{ idx + 1 }}</span>
+          </span>
           <span class="mobile-step-label">{{ step.label }}</span>
         </div>
       </div>
@@ -68,7 +70,7 @@
               </svg>
             </div>
             <div class="step-marker" aria-hidden="true">
-              {{ idx < currentStep ? '✓' : idx + 1 }}
+              <span v-if="idx >= currentStep">{{ idx + 1 }}</span>
             </div>
           </div>
           <div class="step-label">{{ step.label }}</div>
@@ -88,7 +90,7 @@
 
       <!-- Unauthenticated notice -->
       <div v-if="!isAuthenticated" class="login-required-card">
-        <div class="login-required-icon" aria-hidden="true">🔒</div>
+        <div class="login-required-icon" aria-hidden="true"></div>
         <h3>请先登录</h3>
         <p>创建案例需要登录账号。请先登录后再继续。</p>
       </div>
@@ -139,7 +141,7 @@
           </div>
 
           <div class="tip-card">
-            <div class="tip-icon" aria-hidden="true">💡</div>
+            <div class="tip-icon" aria-hidden="true"></div>
             <div class="tip-body">
               <div class="tip-title">编写小贴士</div>
               <ul>
@@ -169,12 +171,23 @@
             </div>
             <div v-if="errors.content" class="field-error" role="alert">{{ errors.content }}</div>
           </div>
+
+          <div class="field">
+            <label for="ccf-source">来源材料</label>
+            <textarea
+              id="ccf-source"
+              v-model="form.source_material"
+              rows="8"
+              placeholder="可粘贴新闻链接、公众号正文、活动记录、访谈纪要或其他支撑材料。"
+            ></textarea>
+            <div class="field-help">来源材料会随版本快照保存，公开案例仅展示正文和来源材料，不展示审核批注。</div>
+          </div>
         </template>
 
         <!-- Step 3: 分类选择 -->
         <template v-if="currentStep === 2">
           <div class="hint-banner">
-            <span class="hint-icon" aria-hidden="true">🤖</span>
+            <span class="hint-icon" aria-hidden="true"></span>
             <span>不确定分类？可点击右下角 AI 助手，根据已填写内容获取一次本地建议。</span>
           </div>
 
@@ -239,7 +252,8 @@
             aria-label="打开 AI 分类助手"
             @click="showHelper = true"
           >
-            🤖
+            <span class="helper-label-desktop">AI</span>
+            <span class="helper-label-mobile">AI 建议</span>
           </button>
         </template>
 
@@ -314,6 +328,42 @@
                       {{ suggestion }}
                     </li>
                   </ul>
+                  <ul
+                    v-if="Array.isArray(aiReviewState[item.id].comments) && aiReviewState[item.id].comments.length && !hasAnnotationPreview(aiReviewState[item.id])"
+                    class="ai-suggestions"
+                  >
+                    <li v-for="comment in aiReviewState[item.id].comments" :key="comment.id || comment.message">
+                      {{ comment.paragraph_id }}：{{ comment.message }}
+                    </li>
+                  </ul>
+                  <div
+                    v-if="hasAnnotationPreview(aiReviewState[item.id])"
+                    class="ai-annotation-preview"
+                  >
+                    <div class="annotation-copy">
+                      <strong>版本正文</strong>
+                      <p
+                        v-for="paragraph in aiReviewState[item.id].version.paragraphs"
+                        :key="paragraph.paragraph_id"
+                        :class="{ highlighted: commentsForParagraph(aiReviewState[item.id], paragraph.paragraph_id).length }"
+                      >
+                        <span>{{ paragraph.paragraph_id }}</span>
+                        {{ paragraph.text }}
+                      </p>
+                    </div>
+                    <aside class="annotation-comments" aria-label="AI 段落批注">
+                      <strong>AI 批注</strong>
+                      <div
+                        v-for="comment in aiReviewState[item.id].comments"
+                        :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
+                        class="annotation-comment"
+                      >
+                        <strong>{{ comment.paragraph_id }}</strong>
+                        <p>{{ comment.message }}</p>
+                        <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
+                      </div>
+                    </aside>
+                  </div>
                 </div>
                 <pre v-else class="ai-answer">{{ aiReviewState[item.id].answer }}</pre>
                 <div v-if="aiReviewState[item.id].parse_error" class="ai-parse-warning">
@@ -336,7 +386,7 @@
         <!-- Step 5: 提交确认 -->
         <template v-if="currentStep === 4">
           <div class="pass-notice">
-            <span class="pass-icon" aria-hidden="true">ℹ</span>
+            <span class="pass-icon" aria-hidden="true"></span>
             <span>提交后案例将进入专家人工审核流程，请耐心等待。</span>
           </div>
 
@@ -347,23 +397,23 @@
             </div>
             <ul class="submit-checklist">
               <li :class="{ ok: form.title }">
-                <span class="check" aria-hidden="true">{{ form.title ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例标题：{{ form.title || '未填写' }}
               </li>
               <li :class="{ ok: form.department }">
-                <span class="check" aria-hidden="true">{{ form.department ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 所属部门/学院：{{ form.department || '未填写' }}
               </li>
               <li :class="{ ok: form.content }">
-                <span class="check" aria-hidden="true">{{ form.content ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例正文：{{ contentSummary }}
               </li>
               <li :class="{ ok: form.type }">
-                <span class="check" aria-hidden="true">{{ form.type ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例类型：{{ form.type ? constants.case_types[form.type] : '未选择' }}
               </li>
               <li :class="{ ok: form.theme }">
-                <span class="check" aria-hidden="true">{{ form.theme ? '✓' : '○' }}</span>
+                <span class="check" aria-hidden="true"></span>
                 案例主题：{{ form.theme || '未选择' }}
               </li>
             </ul>
@@ -412,7 +462,8 @@ import {
   updateCase,
   submitCaseById,
 } from "../api/cases.js";
-import { listPrompts, runPrompt } from "../api/ai.js";
+import { listPrompts, runParagraphReview } from "../api/ai.js";
+import { notify } from "../utils/toast.js";
 
 const DRAFT_KEY = "case_library_create_case_draft";
 
@@ -434,6 +485,7 @@ const form = reactive({
   author: "",
   department: "",
   content: "",
+  source_material: "",
   type: "",
   theme: "",
 });
@@ -457,7 +509,7 @@ const constants = reactive({
     draft: "草稿",
     pending_review: "待审核",
     approved: "已通过",
-    needs_revision: "已驳回",
+    needs_revision: "退回修改",
   },
 });
 
@@ -466,6 +518,7 @@ const helperInput = ref("");
 const helperResponse = ref("");
 const aiPromptLoadError = ref("");
 const aiRunningAll = ref(false);
+const latestReviewVersionId = ref(null);
 
 const DEFAULT_AI_REVIEW_ITEMS = [
   {
@@ -505,6 +558,8 @@ const aiReviewState = reactive(
         parsed: null,
         parse_error: null,
         error: "",
+        comments: [],
+        version: null,
       },
     ])
   )
@@ -512,7 +567,7 @@ const aiReviewState = reactive(
 
 const displayAuthor = computed(() => {
   const user = currentUser();
-  return form.author || user?.nickname || user?.username || "";
+  return user?.nickname || user?.username || form.author || "";
 });
 
 const wordCount = computed(() => {
@@ -648,6 +703,7 @@ function buildPayload(status) {
   const payload = {
     title: form.title.trim(),
     content: form.content.trim(),
+    source_material: form.source_material.trim(),
     department: form.department.trim(),
     type: form.type,
     theme: form.theme,
@@ -667,7 +723,7 @@ function appendAiReviewsPayload(payload) {
 
 async function handleSaveDraft() {
   if (!isAuthenticated.value) {
-    window.alert("请先登录后再保存草稿");
+    notify("请先登录后再保存草稿", "error");
     return;
   }
   saving.value = true;
@@ -676,6 +732,7 @@ async function handleSaveDraft() {
       const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
+        source_material: form.source_material.trim(),
         author: displayAuthor.value,
         department: form.department.trim(),
         type: form.type,
@@ -691,9 +748,9 @@ async function handleSaveDraft() {
       }
     }
     persistDraft();
-    window.alert("草稿已保存");
+    notify("草稿已保存", "success");
   } catch (err) {
-    window.alert(err.message || "保存草稿失败，请稍后重试");
+    notify(err.message || "保存草稿失败，请稍后重试", "error");
   } finally {
     saving.value = false;
   }
@@ -701,11 +758,11 @@ async function handleSaveDraft() {
 
 async function handleFormalSubmit() {
   if (!canSubmit.value) {
-    window.alert("请完善所有必填项后再提交");
+    notify("请完善所有必填项后再提交", "error");
     return;
   }
   if (!isAuthenticated.value) {
-    window.alert("请先登录后再提交案例");
+    notify("请先登录后再提交案例", "error");
     return;
   }
   submitting.value = true;
@@ -715,6 +772,7 @@ async function handleFormalSubmit() {
       const payload = {
         title: form.title.trim(),
         content: form.content.trim(),
+        source_material: form.source_material.trim(),
         author: displayAuthor.value,
         department: form.department.trim(),
         type: form.type,
@@ -723,16 +781,20 @@ async function handleFormalSubmit() {
       };
       appendAiReviewsPayload(payload);
       await updateCase(caseId.value, payload);
-      await submitCaseById(caseId.value);
+      await submitCaseById(caseId.value, latestReviewVersionId.value);
     } else {
-      await createCase(buildPayload("pending_review"));
+      const res = await createCase(buildPayload("draft"));
+      if (res && res.case_id) {
+        caseId.value = res.case_id;
+        await submitCaseById(caseId.value, latestReviewVersionId.value);
+      }
     }
     clearDraft();
-    window.alert("案例提交成功，请等待专家审核");
+    notify("案例提交成功，请等待专家审核", "success");
     resetForm();
     currentStep.value = 0;
   } catch (err) {
-    window.alert(err.message || "提交失败，请稍后重试");
+    notify(err.message || "提交失败，请稍后重试", "error");
   } finally {
     submitting.value = false;
   }
@@ -746,10 +808,12 @@ function persistDraft() {
         author: form.author,
         department: form.department,
         content: form.content,
+        source_material: form.source_material,
         type: form.type,
         theme: form.theme,
       },
       caseId: caseId.value,
+      latestReviewVersionId: latestReviewVersionId.value,
       savedAt: Date.now(),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
@@ -769,6 +833,9 @@ function loadDraft() {
     if (saved && saved.caseId) {
       caseId.value = saved.caseId;
     }
+    if (saved && saved.latestReviewVersionId) {
+      latestReviewVersionId.value = saved.latestReviewVersionId;
+    }
   } catch {
     // Ignore malformed storage
   }
@@ -787,9 +854,11 @@ function resetForm() {
   form.author = "";
   form.department = "";
   form.content = "";
+  form.source_material = "";
   form.type = "";
   form.theme = "";
   caseId.value = null;
+  latestReviewVersionId.value = null;
   currentStep.value = 0;
   touched.title = false;
   touched.department = false;
@@ -809,6 +878,8 @@ function ensureAiReviewState(promptId) {
       parsed: null,
       parse_error: null,
       error: "",
+      comments: [],
+      version: null,
     };
   }
   return aiReviewState[promptId];
@@ -821,6 +892,16 @@ function resetAiReviewItem(promptId) {
   state.parsed = null;
   state.parse_error = null;
   state.error = "";
+  state.comments = [];
+  state.version = null;
+}
+
+function commentsForParagraph(state, paragraphId) {
+  return (state.comments || []).filter((comment) => comment.paragraph_id === paragraphId);
+}
+
+function hasAnnotationPreview(state) {
+  return Boolean(state?.version?.paragraphs?.length && state?.comments?.length);
 }
 
 function aiStatusLabel(status) {
@@ -834,9 +915,29 @@ function buildAiVariables() {
   return {
     title: form.title.trim(),
     content: form.content.trim(),
+    source_material: form.source_material.trim(),
     type: form.type,
     theme: form.theme,
   };
+}
+
+async function ensureDraftCase() {
+  const payload = buildPayload("draft");
+  if (caseId.value) {
+    await updateCase(caseId.value, {
+      ...payload,
+      author: displayAuthor.value,
+      change_reason: "AI 审核前更新",
+    });
+    return caseId.value;
+  }
+  const res = await createCase(payload);
+  if (!res || !res.case_id) {
+    throw new Error("保存草稿失败，无法创建 AI 审核版本");
+  }
+  caseId.value = res.case_id;
+  persistDraft();
+  return caseId.value;
 }
 
 function collectAiReviews() {
@@ -871,9 +972,11 @@ function hasAiReviewWarning() {
 }
 
 function confirmAiReviewWarning() {
-  return window.confirm(
-    "AI 自查提示当前案例可能还需要修改。AI 结果可能误判，不会阻止提交；你可以继续提交专家审核，也可以取消后返回修改。"
+  notify(
+    "AI 自查提示当前案例可能还需要修改；结果仅供参考，不会阻止提交专家审核。",
+    "info"
   );
+  return true;
 }
 
 async function loadAiPrompts() {
@@ -909,15 +1012,30 @@ async function runAiReview(promptId) {
   state.parsed = null;
   state.parse_error = null;
   state.error = "";
+  state.comments = [];
+  state.version = null;
   try {
-    const data = await runPrompt(promptId, buildAiVariables());
+    const activeCaseId = await ensureDraftCase();
+    const data = await runParagraphReview(activeCaseId);
+    const result = data?.data || {};
+    const version = result.version || {};
+    latestReviewVersionId.value = version.id || null;
     state.status = "success";
-    state.answer = data.answer || "";
-    state.parsed = data.parsed || null;
-    state.parse_error = data.parse_error || null;
+    state.comments = result.comments || [];
+    state.version = version || null;
+    state.answer = state.comments.map((comment) => comment.message).join("\n") || "AI 未返回段落批注。";
+    const summarySuggestions = Array.from(new Set(result.summary?.suggested_next_steps || []));
+    state.parsed = {
+      detail: `已生成 v${version.version_number || ""} 只读审核版本，包含 ${state.comments.length} 条段落批注。`,
+      suggestions: hasAnnotationPreview(state) ? summarySuggestions : summarySuggestions.concat(
+        state.comments.map((comment) => comment.suggestion).filter(Boolean)
+      ),
+    };
+    state.parse_error = null;
+    persistDraft();
   } catch (err) {
     state.status = "error";
-    state.error = err.message || "AI 自查暂不可用";
+    state.error = err.data?.detail || err.message || "AI 自查暂不可用";
   }
 }
 
@@ -925,9 +1043,7 @@ async function runAllAiReviews() {
   if (!canRunAiReview.value || aiRunningAll.value) return;
   aiRunningAll.value = true;
   try {
-    for (const item of aiReviewItems.value) {
-      await runAiReview(item.id);
-    }
+    await runAiReview(aiReviewItems.value[0]?.id || DEFAULT_AI_REVIEW_ITEMS[0].id);
   } finally {
     aiRunningAll.value = false;
   }
@@ -975,6 +1091,7 @@ watch(
     author: form.author,
     department: form.department,
     content: form.content,
+    source_material: form.source_material,
     type: form.type,
     theme: form.theme,
   }),
@@ -991,7 +1108,12 @@ watch(currentStep, (step) => {
 // Reset scroll to the top of the page whenever the wizard step changes
 watch(currentStep, () => {
   nextTick(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const wizardTop = document.querySelector(".create-case-wizard")?.getBoundingClientRect().top || 0;
+    const headerHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-height")) || 0;
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + wizardTop - headerHeight),
+      behavior: "auto",
+    });
   });
 });
 </script>
@@ -1115,9 +1237,19 @@ watch(currentStep, () => {
 }
 
 .rail-step.completed .step-marker {
+  position: relative;
   background: var(--color-brand);
   color: #fff;
   border-color: var(--color-brand);
+}
+
+.rail-step.completed .step-marker::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .rail-step.future .step-marker {
@@ -1215,9 +1347,19 @@ watch(currentStep, () => {
 }
 
 .mobile-step.completed .mobile-step-dot {
+  position: relative;
   background: var(--color-brand);
   color: #fff;
   border-color: var(--color-brand);
+}
+
+.mobile-step.completed .mobile-step-dot::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .mobile-step-label {
@@ -1364,9 +1506,35 @@ textarea {
 }
 
 .tip-icon {
-  font-size: 20px;
-  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+  position: relative;
   flex-shrink: 0;
+}
+
+.tip-icon::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 5px;
+  width: 2px;
+  height: 12px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.tip-icon::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
 }
 
 .tip-title {
@@ -1402,8 +1570,34 @@ textarea {
 }
 
 .hint-icon {
-  font-size: 16px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  position: relative;
   flex-shrink: 0;
+}
+
+.hint-icon::before,
+.hint-icon::after {
+  content: '';
+  position: absolute;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.hint-icon::before {
+  left: 7px;
+  top: 3px;
+  width: 2px;
+  height: 8px;
+}
+
+.hint-icon::after {
+  left: 7px;
+  top: 12px;
+  width: 2px;
+  height: 2px;
 }
 
 /* Helper panel */
@@ -1494,6 +1688,39 @@ textarea {
   cursor: pointer;
   box-shadow: 0 6px 16px rgba(141, 27, 53, 0.25);
   z-index: 105;
+}
+
+.helper-label-mobile {
+  display: none;
+}
+
+@media (max-width: 859px) {
+  .fab-helper {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 12px 0 0 auto;
+    width: auto;
+    min-width: 88px;
+    height: 38px;
+    padding: 0 14px;
+    border: 1px solid rgba(141, 27, 53, 0.22);
+    background: var(--color-brand-light);
+    color: var(--color-brand);
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 7px;
+    box-shadow: none;
+  }
+
+  .helper-label-desktop {
+    display: none;
+  }
+
+  .helper-label-mobile {
+    display: inline;
+  }
 }
 
 /* Review step */
@@ -1659,6 +1886,83 @@ textarea {
   color: var(--color-text-secondary);
 }
 
+.ai-annotation-preview {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.annotation-copy,
+.annotation-comments {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  align-content: start;
+}
+
+.annotation-copy > strong,
+.annotation-comments > strong {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+.annotation-copy p {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.annotation-copy p.highlighted {
+  border-color: rgba(141, 27, 53, 0.35);
+  background: var(--color-brand-light);
+  color: var(--color-text);
+}
+
+.annotation-copy span {
+  display: inline-flex;
+  margin-right: 6px;
+  font-weight: 700;
+  color: var(--color-brand);
+}
+
+.annotation-comment {
+  padding: 9px 10px;
+  border: 1px solid rgba(141, 27, 53, 0.22);
+  border-left: 3px solid var(--color-brand);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(141, 27, 53, 0.06);
+}
+
+.annotation-comment > strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-brand);
+}
+
+.annotation-comment p,
+.annotation-comment small {
+  display: block;
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.annotation-comment small {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+}
+
 .ai-answer {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1747,6 +2051,15 @@ textarea {
   flex-shrink: 0;
 }
 
+.pass-icon::before {
+  content: '';
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
 .submit-card {
   padding: 20px;
   border: 1px solid var(--color-border);
@@ -1802,6 +2115,7 @@ textarea {
 }
 
 .submit-checklist .check {
+  position: relative;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -1818,6 +2132,15 @@ textarea {
   background: var(--color-brand);
   border-color: var(--color-brand);
   color: #fff;
+}
+
+.submit-checklist li.ok .check::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .btn-submit-final {
@@ -1912,8 +2235,35 @@ textarea {
 }
 
 .login-required-icon {
-  font-size: 40px;
-  line-height: 1;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+.login-required-icon::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 17px;
+  width: 16px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.login-required-icon::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 9px;
+  width: 10px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
 }
 
 /* Responsive desktop */
@@ -1953,6 +2303,10 @@ textarea {
 
   .review-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .ai-annotation-preview {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
   }
 }
 </style>

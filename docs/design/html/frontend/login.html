@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 强国有我大思政课案例库</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23c41e3a'/><text y='.85em' x='50%' text-anchor='middle' font-size='60' fill='white' font-family='serif'>强</text></svg>">
+  <style>
+    /* ─── Design System ───────────────────────────────────────────────── */
+    :root {
+      --accent:        #c41e3a;
+      --accent-hover:  #a01830;
+      --accent-deep:   #8a1528;
+      --accent-dark:   #6d101f;
+      --accent-soft:   #fef2f2;
+      --accent-glow:   rgba(196,30,58,0.15);
+
+      --bg:      #ffffff;
+      --surface: #ffffff;
+      --fg:      #1a1a1a;
+      --muted:   #666666;
+      --border:  #e5e5e5;
+      --danger:  #dc2626;
+      --success: #22c55e;
+
+      --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'Iowan Old Style', 'Charter', Georgia, serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+      --font-mono:    ui-monospace, 'SF Mono', Menlo, 'Noto Sans Mono', monospace;
+
+      --radius:    8px;
+      --radius-lg: 12px;
+      --shadow-md: 0 4px 12px color-mix(in oklch, var(--fg) 6%, transparent);
+      --shadow-lg: 0 8px 30px color-mix(in oklch, var(--fg) 8%, transparent);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; padding: 0;
+      font-family: var(--font-body);
+      font-size: 15px; line-height: 1.6;
+      color: var(--fg);
+      background: var(--surface);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; background: none; border: none; }
+    input { font: inherit; }
+
+    /* ─── Layout ───────────────────────────────────────────────────────── */
+    .login-page {
+      display: grid;
+      grid-template-columns: 1fr 520px;
+      min-height: 100vh;
+    }
+
+    /* ─── Left Panel ───────────────────────────────────────────────────── */
+    .login-left {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 48px 56px;
+      background: linear-gradient(160deg, var(--accent) 0%, var(--accent-deep) 50%, var(--accent-dark) 100%);
+      color: white;
+      overflow: hidden;
+    }
+    .login-left::before {
+      content: '';
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 80% 20%, rgba(255,255,255,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 20% 80%, rgba(255,255,255,0.05) 0%, transparent 50%);
+      pointer-events: none;
+    }
+    .login-left > * { position: relative; z-index: 1; }
+
+    .login-left .brand {
+      display: flex; align-items: center; gap: 12px;
+      font-family: var(--font-display);
+      font-size: 18px; font-weight: 600;
+    }
+    .login-left .brand-icon {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-display);
+      font-size: 10px; font-weight: 700;
+    }
+
+    .login-left .hero-text {
+      max-width: 420px;
+    }
+    .login-left .hero-text h1 {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 3vw, 40px);
+      font-weight: 600;
+      line-height: 1.2;
+      margin: 0 0 16px 0;
+      letter-spacing: -0.01em;
+    }
+    .login-left .hero-text p {
+      font-size: 16px;
+      line-height: 1.7;
+      color: rgba(255,255,255,0.75);
+      margin: 0;
+    }
+
+    .login-left .features {
+      display: flex; flex-direction: column; gap: 16px;
+      margin-top: 40px;
+    }
+    .login-left .feature-item {
+      display: flex; align-items: center; gap: 14px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.8);
+    }
+    .login-left .feature-item .icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: rgba(255,255,255,0.1);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .login-left .feature-item .icon svg { width: 16px; height: 16px; }
+
+    .login-left .footer {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* Decorative elements */
+    .deco-circle {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.06);
+      pointer-events: none;
+    }
+    .deco-circle.c1 { width: 400px; height: 400px; top: -100px; right: -100px; }
+    .deco-circle.c2 { width: 280px; height: 280px; bottom: 10%; left: -80px; }
+    .deco-circle.c3 { width: 160px; height: 160px; top: 40%; right: 15%; border-color: rgba(255,255,255,0.04); }
+
+    /* ─── Right Panel ──────────────────────────────────────────────────── */
+    .login-right {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 48px;
+      background: var(--surface);
+    }
+
+    .login-form-wrap {
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .login-form-wrap .header {
+      margin-bottom: 32px;
+    }
+    .login-form-wrap .header h2 {
+      font-family: var(--font-display);
+      font-size: 26px;
+      font-weight: 600;
+      margin: 0 0 8px 0;
+    }
+    .login-form-wrap .header p {
+      font-size: 14px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .form-group {
+      display: flex; flex-direction: column; gap: 6px;
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--fg);
+    }
+    .form-input {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--fg);
+      font-size: 15px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .form-input::placeholder { color: color-mix(in oklch, var(--muted) 60%, transparent); }
+
+    .login-btn {
+      width: 100%;
+      padding: 12px;
+      margin-top: 8px;
+      background: var(--accent);
+      color: white;
+      font-size: 15px;
+      font-weight: 500;
+      border-radius: var(--radius);
+      border: 1px solid var(--accent);
+      transition: all 0.15s ease;
+    }
+    .login-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+    .login-btn:active { transform: translateY(1px); }
+    .login-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 24px;
+      font-size: 13px;
+      color: var(--muted);
+      transition: color 0.15s;
+    }
+    .back-link:hover { color: var(--accent); }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      padding: 12px 24px;
+      border-radius: var(--radius-lg);
+      background: var(--fg);
+      color: white;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: var(--shadow-lg);
+      z-index: 500;
+      opacity: 0;
+      transition: all 0.3s ease;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ─── Responsive ───────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .login-page {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+      .login-left {
+        padding: 32px 24px;
+        min-height: auto;
+      }
+      .login-left .hero-text h1 {
+        font-size: 24px;
+      }
+      .login-left .features {
+        display: none;
+      }
+      .login-left .footer {
+        margin-top: 24px;
+      }
+      .login-right {
+        padding: 32px 24px;
+      }
+      .deco-circle { display: none; }
+    }
+
+    @media (max-width: 400px) {
+      .login-form-wrap .header h2 {
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="login-page">
+  <!-- Left Panel -->
+  <div class="login-left">
+    <div class="deco-circle c1"></div>
+    <div class="deco-circle c2"></div>
+    <div class="deco-circle c3"></div>
+
+    <div class="brand">
+      <div class="brand-icon">上大</div>
+      <span style="letter-spacing:1px;">强国有我 思政案例库</span>
+    </div>
+
+    <div class="hero-text">
+      <h1>大思政课案例库平台</h1>
+      <p>汇聚优质思政教学案例，共建共享教育资源。用鲜活案例讲好中国故事，以实践成果助力铸魂育人。</p>
+
+      <div class="features">
+        <div class="feature-item">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          系统化案例管理与检索
+        </div>
+        <div class="feature-item">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </div>
+          AI 智能审核与润色
+        </div>
+        <div class="feature-item">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          多角色协作与审核
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      上海大学马克思主义学院
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="login-right">
+    <div class="login-form-wrap">
+      <div class="header">
+        <h2>欢迎回来</h2>
+        <p>请输入您的账号信息登录系统</p>
+      </div>
+
+      <form id="login-form" onsubmit="event.preventDefault(); doLogin();">
+        <div class="form-group">
+          <label for="username">用户名</label>
+          <input type="text" id="username" class="form-input" placeholder="请输入用户名" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label for="password">密码</label>
+          <input type="password" id="password" class="form-input" placeholder="请输入密码" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="login-btn" id="login-btn">登录</button>
+      </form>
+
+      <a href="index.html" class="back-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        返回首页
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const API_BASE = window.API_BASE || "http://localhost:8001/api";
+
+  function showToast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 3000);
+  }
+
+  async function formRequest(url, formData, method = "POST") {
+    try {
+      const response = await fetch(`${API_BASE}${url}`, { method, body: formData });
+      if (!response.ok) {
+        const text = await response.text();
+        let detail = "";
+        try { detail = JSON.parse(text).detail || ""; } catch (e) { detail = text; }
+        return { success: false, error: detail || `服务器错误: ${response.status}`, status: response.status };
+      }
+      return await response.json();
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async function doLogin() {
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    const btn = document.getElementById("login-btn");
+
+    if (!username || !password) {
+      showToast("请输入用户名和密码");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "登录中...";
+
+    // Mock login for testing — no backend required
+    const MOCK_USERS = {
+      "admin": { password: "admin123", role: "admin", nickname: "管理员" },
+      "user": { password: "user123", role: "user", nickname: "普通用户" }
+    };
+
+    if (MOCK_USERS[username] && MOCK_USERS[username].password === password) {
+      const mock = MOCK_USERS[username];
+      const user = {
+        id: username === "admin" ? 1 : 2,
+        username: username,
+        role: mock.role,
+        nickname: mock.nickname,
+        must_change_password: false
+      };
+      try {
+        localStorage.setItem("authToken", "mock-token-" + username);
+        localStorage.setItem("currentUser", JSON.stringify(user));
+      } catch (e) {}
+      showToast(`欢迎，${user.nickname}`);
+      setTimeout(() => {
+        window.location.href = "index.html";
+      }, 600);
+      return;
+    }
+
+    // Real API login fallback
+    const formData = new FormData();
+    formData.append("username", username);
+    formData.append("password", password);
+
+    const data = await formRequest("/auth/login", formData);
+
+    btn.disabled = false;
+    btn.textContent = "登录";
+
+    if (data.success && data.data) {
+      const user = {
+        id: data.data.id,
+        username: data.data.username,
+        role: data.data.role,
+        nickname: data.data.nickname || data.data.username,
+        must_change_password: !!data.data.must_change_password
+      };
+      try {
+        localStorage.setItem("authToken", data.data.token);
+        localStorage.setItem("currentUser", JSON.stringify(user));
+      } catch (e) {}
+
+      showToast(`欢迎，${user.nickname || user.username}`);
+
+      setTimeout(() => {
+        if (user.must_change_password) {
+          window.location.href = "index.html?change_password=1";
+        } else {
+          window.location.href = "index.html";
+        }
+      }, 600);
+    } else {
+      showToast(data.error || data.detail || "登录失败，请检查用户名和密码");
+    }
+  }
+
+  // Auto-focus username on load
+  window.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("username")?.focus();
+  });
+</script>
+
+</body>
+</html>
