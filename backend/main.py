@@ -112,13 +112,36 @@ def custom_openapi():
             "application/json": {
                 "schema": {"$ref": "#/components/schemas/AIChatRequest"},
                 "examples": {
-                    "self_check": {
-                        "summary": "Run a workflow self-check prompt",
+                    "legacy_self_check": {
+                        "summary": "Run a legacy compatibility self-check prompt",
                         "value": {
                             "prompt_id": "workflow/completeness",
                             "variables": {"title": "案例标题", "content": "案例正文"},
                             "model": "qwen-plus",
                         },
+                    }
+                },
+            }
+        },
+    }
+    ai_review_operation = openapi_schema["paths"]["/api/cases/{case_id}/ai-review"]["post"]
+    ai_review_operation["requestBody"] = {
+        "required": False,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Optional model name from AI_MODELS.",
+                        }
+                    },
+                },
+                "examples": {
+                    "alpha_paragraph_review": {
+                        "summary": "Create an alpha paragraph-comment review version",
+                        "value": {"model": "qwen-plus"},
                     }
                 },
             }

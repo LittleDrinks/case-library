@@ -104,6 +104,16 @@ def assert_openapi_documented() -> None:
 
     assert paths["/api/prompts"]["get"].get("security") == [{"HTTPBearer": []}]
     assert paths["/api/ai/chat"]["post"].get("security") == [{"HTTPBearer": []}]
+    assert "legacy_self_check" in paths["/api/ai/chat"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["examples"]
+    assert paths["/api/cases/{case_id}/ai-review"]["post"].get("security") == [
+        {"HTTPBearer": []}
+    ]
+    ai_review_examples = paths["/api/cases/{case_id}/ai-review"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["examples"]
+    assert "alpha_paragraph_review" in ai_review_examples
     assert paths["/api/cases"]["post"].get("security") == [{"HTTPBearer": []}]
     assert paths["/api/reviews/{case_id}"]["post"].get("security") == [{"HTTPBearer": []}]
 
