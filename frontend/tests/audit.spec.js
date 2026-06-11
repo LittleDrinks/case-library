@@ -114,6 +114,7 @@ test.describe("manual audit candidate flows", () => {
       localStorage.setItem(
         "case_library_create_case_draft",
         JSON.stringify({
+          username: "old_author",
           form: {
             title: "旧草稿标题",
             author: "过期作者",
@@ -123,6 +124,8 @@ test.describe("manual audit candidate flows", () => {
             type: "TYPE_A",
             theme: "铸魂育人",
           },
+          caseId: 999999,
+          latestReviewVersionId: 888888,
           savedAt: Date.now(),
         })
       );
@@ -134,6 +137,15 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByLabel("作者姓名")).toHaveValue(USER.nickname);
     await expect(page.getByLabel("作者姓名")).not.toHaveValue("过期作者");
     await expect(page.getByLabel(/案例标题/)).toHaveValue("旧草稿标题");
+
+    await page.getByRole("button", { name: "保存草稿" }).click();
+    await expect(page.getByText("草稿已保存")).toBeVisible();
+    const draft = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("case_library_create_case_draft"))
+    );
+    expect(draft.username).toBe(USER.username);
+    expect(draft.caseId).not.toBe(999999);
+    expect(draft.latestReviewVersionId).not.toBe(888888);
   });
 
   test("author submit -> admin approve -> public search, with audit screenshots", async ({

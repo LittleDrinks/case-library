@@ -784,7 +784,9 @@ async function handleFormalSubmit() {
 
 function persistDraft() {
   try {
+    const user = currentUser();
     const payload = {
+      username: user?.username || "",
       form: {
         title: form.title,
         author: form.author,
@@ -809,14 +811,20 @@ function loadDraft() {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
+    const user = currentUser();
+    const sameUser = !saved.username || saved.username === user?.username;
     if (saved && saved.form) {
       Object.assign(form, saved.form);
     }
-    if (saved && saved.caseId) {
+    if (sameUser && saved && saved.caseId) {
       caseId.value = saved.caseId;
     }
-    if (saved && saved.latestReviewVersionId) {
+    if (sameUser && saved && saved.latestReviewVersionId) {
       latestReviewVersionId.value = saved.latestReviewVersionId;
+    }
+    if (!sameUser) {
+      caseId.value = null;
+      latestReviewVersionId.value = null;
     }
   } catch {
     // Ignore malformed storage
