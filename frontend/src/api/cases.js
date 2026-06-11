@@ -125,7 +125,7 @@ export async function deleteCaseById(caseId) {
  * Tab mappings:
  *   pending   -> pending_review
  *   approved  -> approved_all
- *   rejected  -> rejected
+ *   rejected  -> needs_revision / 退回修改
  *   all       -> all
  */
 export async function listReviewCases(status) {
@@ -144,7 +144,7 @@ export async function listReviewCases(status) {
  *
  * Status values accepted by backend:
  *   "approve" | "approved"  -> approved
- *   "reject"  | "rejected"  -> rejected / needs_revision
+ *   "reject"  | "rejected"  -> needs_revision / 退回修改
  */
 export async function reviewCase(caseId, { comment, status, version_id, paragraph_comments }) {
   const body = { comment, status };
