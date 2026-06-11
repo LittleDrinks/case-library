@@ -358,6 +358,8 @@ def serialize_version(version: dict | None) -> dict | None:
     serialized.setdefault("paragraphs", split_paragraphs(serialized.get("content", "")))
     serialized.setdefault("ai_review", None)
     serialized.setdefault("admin_comments", [])
+    if serialized.get("change_reason") == "Initial creation":
+        serialized["change_reason"] = "初始创建"
     return serialized
 
 
@@ -726,7 +728,7 @@ def create_case(case_data: dict) -> int:
         "ai_review": None,
         "admin_comments": [],
         "changed_by": doc.get("author", ""),
-        "change_reason": "Initial creation",
+        "change_reason": "初始创建",
         "created_at": now,
     }
     version_id = _insert_with_generated_id("versions", version_doc)

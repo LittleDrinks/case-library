@@ -479,7 +479,7 @@ def main_test() -> None:
     assert versions[0]["owner_username"] == "ownerflow"
     assert versions[0]["paragraphs"][0]["paragraph_id"] == "p1"
     assert versions[0]["change_reason"] == "owner edit"
-    assert versions[-1]["change_reason"] == "Initial creation"
+    assert versions[-1]["change_reason"] == "初始创建"
 
     response = client.put(
         f"/api/cases/{version_case}",
