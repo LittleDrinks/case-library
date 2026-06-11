@@ -215,8 +215,9 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
-    await expect(page.getByText("运行全部自查")).toBeVisible();
-    await page.getByRole("button", { name: "运行全部自查" }).click();
+    await expect(page.getByText("生成只读审核版本")).toBeVisible();
+    await page.getByRole("button", { name: "生成只读审核版本" }).click();
+    await expect(page.getByText("100% 已完成")).toBeVisible();
     await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
     await expect(page.getByText("版本正文")).toBeVisible();
     await expect(page.getByText("AI 批注")).toBeVisible();
@@ -366,7 +367,8 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
-    await page.getByRole("button", { name: "运行全部自查" }).click();
+    await page.getByRole("button", { name: "生成只读审核版本" }).click();
+    await expect(page.getByText("100% 已完成")).toBeVisible();
     await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
     await expect(page.getByText("AI 段落批注：来源材料要补齐时间和对象。")).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();

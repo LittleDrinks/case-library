@@ -281,10 +281,10 @@
               :disabled="aiRunningAll || !canRunAiReview"
               @click="runAllAiReviews"
             >
-              {{ aiRunningAll ? '自查中…' : '运行全部自查' }}
+              {{ aiRunningAll ? '生成中…' : '生成只读审核版本' }}
             </button>
             <span class="ai-toolbar-note">
-              需要先填写标题、正文、类型和主题。AI 不可用时可继续提交人工审核。
+              需要先填写标题、正文、类型和主题。AI 会生成段落级批注版本，不会给出审批结论。
             </span>
           </div>
 
@@ -522,28 +522,10 @@ const latestReviewVersionId = ref(null);
 
 const DEFAULT_AI_REVIEW_ITEMS = [
   {
-    id: "workflow/completeness",
-    name: "完整性检查",
-    description: "检查案例是否包含背景、做法、成效与反思等关键板块。",
-    variables: ["title", "content"],
-  },
-  {
-    id: "workflow/categorization",
-    name: "分类检查",
-    description: "检查案例类型和主题是否与正文内容匹配。",
-    variables: ["title", "content", "type", "theme"],
-  },
-  {
-    id: "workflow/expression",
-    name: "表达检查",
-    description: "检查案例表达是否清晰、正式、适合专家审核。",
-    variables: ["title", "content"],
-  },
-  {
-    id: "workflow/score",
-    name: "综合评分",
-    description: "给出提交前综合自查评分和主要风险。",
-    variables: ["title", "content"],
+    id: "alpha/paragraph-review",
+    name: "段落批注自查",
+    description: "生成只读版本，并按段落给出作者侧修改建议。",
+    variables: ["title", "content", "source_material", "type", "theme"],
   },
 ];
 
@@ -982,7 +964,7 @@ function confirmAiReviewWarning() {
 async function loadAiPrompts() {
   aiPromptLoadError.value = "";
   try {
-    const prompts = await listPrompts("workflow");
+    const prompts = await listPrompts("alpha");
     const mapped = DEFAULT_AI_REVIEW_ITEMS.map((fallback) => {
       const prompt = prompts.find((item) => item.id === fallback.id);
       return prompt

@@ -583,6 +583,20 @@ def main_test() -> None:
         }.issubset(prompt_ids)
         assert all("content" not in item for item in prompt_items)
         assert "secret-test-key" not in response.text
+
+        response = client.get("/api/prompts?category=alpha", headers=auth("ownerflow"))
+        assert_status(response, 200)
+        alpha_prompt_items = response.json()["data"]
+        assert [item["id"] for item in alpha_prompt_items] == ["alpha/paragraph-review"]
+        assert alpha_prompt_items[0]["variables"] == [
+            "title",
+            "content",
+            "source_material",
+            "type",
+            "theme",
+        ]
+        assert "content" not in alpha_prompt_items[0]
+        assert "secret-test-key" not in response.text
     finally:
         if old_prompt_key is None:
             os.environ.pop("AI_API_KEY", None)

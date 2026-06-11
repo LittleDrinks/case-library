@@ -35,6 +35,23 @@ _JSON_RULE = (
 
 
 PROMPTS: dict[str, Prompt] = {
+    "alpha/paragraph-review": Prompt(
+        id="alpha/paragraph-review",
+        name="段落批注自查",
+        description="生成只读版本，并按段落给出作者侧修改建议",
+        category="alpha",
+        variables=("title", "content", "source_material", "type", "theme"),
+        output_schema="json",
+        content=(
+            "你是高校思政案例库的作者侧提交前自查助手。请基于案例《{title}》"
+            "按段落给出结构化批注，重点关注正文、来源材料、类型和主题的一致性。"
+            "不要给出通过或退回等审批结论。只返回 JSON 对象，字段包含 "
+            "comments(array) 和 summary(object)。comments 每项包含 paragraph_id、"
+            "category、severity、message、suggestion。\n\n"
+            "案例类型：{type}\n案例主题：{theme}\n来源材料：\n{source_material}\n\n"
+            "案例正文：\n{content}"
+        ),
+    ),
     "workflow/completeness": Prompt(
         id="workflow/completeness",
         name="完整性检查",
