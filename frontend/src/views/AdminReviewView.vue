@@ -1367,13 +1367,14 @@ watch(currentTab, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 24px;
+  overflow-y: auto;
 }
 
 .modal-panel {
   width: 100%;
-  max-width: 640px;
-  max-height: calc(100vh - 32px);
+  max-width: 720px;
+  max-height: calc(100vh - 48px);
   background: var(--color-surface);
   border-radius: 10px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12);
@@ -1390,8 +1391,10 @@ watch(currentTab, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -1399,6 +1402,8 @@ watch(currentTab, () => {
   font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .modal-close {
@@ -1413,6 +1418,7 @@ watch(currentTab, () => {
 .modal-body {
   padding: 20px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .modal-footer {
@@ -1421,6 +1427,8 @@ watch(currentTab, () => {
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
 }
 
 /* Form fields in modal */
@@ -1556,17 +1564,42 @@ textarea {
     font-size: 12px;
   }
 
+  .modal-overlay {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .modal-panel {
+    max-height: calc(100vh - 24px);
+    border-radius: 8px;
+  }
+
+  .modal-header {
+    padding: 12px 14px;
+  }
+
+  .modal-header h3 {
+    font-size: 15px;
+  }
+
   .modal-body {
     padding: 14px;
   }
 
   .modal-footer {
     padding: 10px 14px;
-    flex-wrap: wrap;
+    flex-direction: column-reverse;
   }
 
   .field-inline {
     grid-template-columns: 1fr;
+  }
+
+  .modal-footer .btn-primary,
+  .modal-footer .btn-secondary,
+  .modal-footer .btn-danger {
+    width: 100%;
+    min-height: 40px;
   }
 }
 

@@ -271,4 +271,4 @@ def get_case_type_name(type_code: str) -> str:
 
 
 if __name__ == "__main__":
-    print("✅ 案例处理模块加载成功")
+    print("case processor module loaded")
