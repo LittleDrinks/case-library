@@ -32,12 +32,13 @@ human expert review, not automatic approval/rejection and not admin review.
 
 Current contract direction:
 
-- Backend prompt metadata: `GET /api/prompts`
-- Backend chat boundary: `POST /api/ai/chat`
-- Workflow prompt IDs:
-  `workflow/completeness`, `workflow/categorization`,
-  `workflow/expression`, `workflow/score`
-- Future submitted advisory records: `ai_reviews`, capped at 3 records
+- Alpha prompt metadata: `GET /api/prompts?category=alpha`, currently
+  `alpha/paragraph-review`
+- Alpha AI review boundary: `POST /api/cases/{case_id}/ai-review`, which creates
+  a versioned read-only paragraph-comment snapshot
+- Legacy workflow prompts under `workflow/*` and `POST /api/ai/chat` are kept as
+  compatibility surfaces, not the alpha teacher review path
+- Submitted advisory records: `ai_reviews`, capped at 3 records
 - No fake AI output when AI is disabled or unavailable
 
 Keep `docs/api.md`, `docs/project.md`, `docs/prd.md`, `docs/ai.md`, and GitHub
