@@ -37,12 +37,13 @@ AI 约束见 `docs/ai.md`。
 - 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
 - 本地 smoke/debug：`backend/smoke_test_mongo.py`
 - 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用
-- E2E seed：`scripts/seed_e2e_accounts.py`，由 `docker-compose.dev.yml` 调用
+- Alpha/E2E seed：`scripts/seed_e2e_accounts.py`，由默认 Compose 和
+  `docker-compose.dev.yml` 启动时调用
 
 `backend/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
-均设置 `must_change_password=true`。E2E 账号和 alpha demo 案例由
-`scripts/seed_e2e_accounts.py` 确定性创建，仅用于 dev/e2e 环境。不要把真实账号、真实密码
-或生产种子数据写入这些脚本。
+均设置 `must_change_password=true`。测试账号和 alpha demo 案例由
+`scripts/seed_e2e_accounts.py` 确定性创建，仅用于本地 alpha demo、dev 和 e2e 环境。
+不要把真实账号、真实密码或生产种子数据写入这些脚本。
 
 `/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
 后端测试、前端 fallback 和文档。产品 prompt/template 资产当前保留在 `skills/`，后续若做
