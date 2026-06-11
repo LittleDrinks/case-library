@@ -24,6 +24,19 @@ function buildUrl(path) {
   return `${base}${path}`;
 }
 
+function shouldAttachAuth(url) {
+  try {
+    const target = new URL(url, window.location.origin);
+    const allowedOrigins = new Set([window.location.origin]);
+    if (API_BASE.startsWith("http://") || API_BASE.startsWith("https://")) {
+      allowedOrigins.add(new URL(API_BASE).origin);
+    }
+    return allowedOrigins.has(target.origin);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Extract a human-readable error message from a FastAPI-style response body.
  */
@@ -74,7 +87,7 @@ export async function request(path, options = {}) {
 
   // Inject auth token from centralized storage
   const token = localStorage.getItem("case_library_auth_token");
-  if (token) {
+  if (token && shouldAttachAuth(url)) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
