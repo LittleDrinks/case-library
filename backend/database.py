@@ -34,6 +34,7 @@ REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "need
 USER_ROLES = {"normal", "admin"}
 USER_STATUSES = {"active", "no_active"}
 COUNTER_COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
+MAX_QUERY_LIMIT = 100
 VERSIONED_FIELDS = [
     "title",
     "type",
@@ -366,6 +367,14 @@ def serialize_version(version: dict | None) -> dict | None:
 def _now() -> str:
     """Return the current UTC+8 wall-clock time as a plain string."""
     return format_beijing_datetime(datetime.now(UTC))
+
+
+def _bounded_limit(limit: Any, default: int = 50) -> int:
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = default
+    return max(0, min(value, MAX_QUERY_LIMIT))
 
 
 def _validate_case_status(status: str | None):
@@ -825,7 +834,7 @@ def get_all_cases(
         .cases.find(query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
-        .limit(max(0, int(limit)))
+        .limit(_bounded_limit(limit))
     )
     return [serialize_case(row) for row in cursor]
 
@@ -843,7 +852,7 @@ def get_all_public_cases(
             .cases.find(_case_list_filter(status=status, include_hidden=False))
             .sort("created_at", DESCENDING)
             .skip(max(0, int(offset)))
-            .limit(max(0, int(limit)))
+            .limit(_bounded_limit(limit))
         )
         if item is not None
     ]
@@ -1330,7 +1339,7 @@ def search_cases(
         .cases.find(mongo_query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
-        .limit(max(0, int(limit)))
+        .limit(_bounded_limit(limit, default=20))
     )
     return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
@@ -1363,7 +1372,7 @@ def filter_cases(
         .cases.find(query)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
-        .limit(max(0, int(limit)))
+        .limit(_bounded_limit(limit))
     )
     return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
@@ -1379,10 +1388,11 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
         "is_hidden": {"$ne": True},
         "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
     }
-    cursor = get_db().cases.find(query).limit(max(0, int(limit) * 3))
+    bounded = _bounded_limit(limit, default=5)
+    cursor = get_db().cases.find(query).limit(bounded * 3)
     cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
-    return cases[:limit]
+    return cases[:bounded]
 
 
 def get_trending_cases(limit: int = 10) -> list[dict]:
@@ -1390,12 +1400,17 @@ def get_trending_cases(limit: int = 10) -> list[dict]:
     cursor = get_db().cases.find(query)
     cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
-    return cases[:limit]
+    return cases[:_bounded_limit(limit, default=10)]
 
 
 def get_latest_cases(limit: int = 10) -> list[dict]:
     query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
-    cursor = get_db().cases.find(query).sort("created_at", DESCENDING).limit(max(0, int(limit)))
+    cursor = (
+        get_db()
+        .cases.find(query)
+        .sort("created_at", DESCENDING)
+        .limit(_bounded_limit(limit, default=10))
+    )
     return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
 

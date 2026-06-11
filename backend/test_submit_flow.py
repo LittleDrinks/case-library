@@ -389,6 +389,34 @@ def main_test() -> None:
         for item in matched:
             assert item["source_material"] == "source material test"
             assert_public_case_payload(item)
+
+    for idx in range(120):
+        create_case(
+            {
+                "title": f"public limit clamp case {idx:03d}",
+                "type": "TYPE_A",
+                "theme": "test",
+                "content": "public limit clamp source material",
+                "source_material": "source material test",
+                "author": "ownerflow",
+                "owner_username": "ownerflow",
+                "department": "test",
+                "status": "approved",
+                "created_at": f"2020-02-{(idx % 28) + 1:02d} 08:00:00",
+                "updated_at": f"2020-02-{(idx % 28) + 1:02d} 08:00:00",
+            }
+        )
+
+    for path in [
+        "/api/cases?status=approved&limit=1000",
+        "/api/search/advanced?status=approved&keyword=public%20limit%20clamp&limit=1000",
+        "/api/trending?limit=1000",
+        "/api/latest?limit=1000",
+    ]:
+        response = client.get(path)
+        assert_status(response, 200)
+        assert len(response.json()["data"]) <= 100, path
+
     get_db().cases.update_one({"id": recommendation_case}, {"$set": {"status": "deleted"}})
     get_db().cases.update_one(
         {"id": visibility_case},
