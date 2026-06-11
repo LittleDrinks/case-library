@@ -54,6 +54,14 @@ data/
 # Generated reports and local artifacts
 E2E-TEST-REPORT.md
 start.sh
+test-results/
+playwright-report/
+blob-report/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+*.trace
+trace.zip
 
 # Local backups
 *backup*/
