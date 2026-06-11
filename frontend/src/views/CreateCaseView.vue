@@ -1456,6 +1456,14 @@ textarea {
   line-height: 1.6;
 }
 
+#ccf-content {
+  min-height: 280px;
+}
+
+#ccf-source {
+  min-height: 180px;
+}
+
 .field-help {
   margin-top: 4px;
   font-size: 12px;
@@ -2289,6 +2297,14 @@ textarea {
   .row.two-col {
     grid-template-columns: 1fr 1fr;
     gap: 16px;
+  }
+
+  #ccf-content {
+    min-height: 380px;
+  }
+
+  #ccf-source {
+    min-height: 240px;
   }
 
   .review-grid {
