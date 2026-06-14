@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 os.environ["MONGODB_DB_NAME"] = f"case_library_submit_flow_test_{uuid4().hex}"
+os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:18080"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -118,8 +119,32 @@ def assert_openapi_documented() -> None:
     assert paths["/api/reviews/{case_id}"]["post"].get("security") == [{"HTTPBearer": []}]
 
 
+def assert_cors_is_not_wildcard_with_credentials() -> None:
+    response = client.options(
+        "/api/constants",
+        headers={
+            "Origin": "http://127.0.0.1:18080",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert_status(response, 200)
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:18080"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+    blocked = client.options(
+        "/api/constants",
+        headers={
+            "Origin": "https://example.invalid",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert_status(blocked, 400)
+    assert blocked.headers.get("access-control-allow-origin") is None
+
+
 def main_test() -> None:
     assert_openapi_documented()
+    assert_cors_is_not_wildcard_with_credentials()
 
     create_user("ownerflow", "password123", role="normal", must_change_password=False)
     create_user("otherflow", "password123", role="normal", must_change_password=False)

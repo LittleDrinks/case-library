@@ -67,6 +67,32 @@ from schemas import (
 )
 from search_engine import CaseSearchEngine
 
+
+def parse_cors_origins(raw_value: str | None) -> list[str]:
+    """Parse comma-separated CORS origins from environment configuration.
+
+    No default origins are provided: production or unknown environments must
+    explicitly set CORS_ALLOW_ORIGINS. Docker Compose and .env.example supply
+    the local development defaults.
+    """
+    if raw_value is None:
+        return []
+    return [origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip()]
+
+
+def build_cors_options() -> dict:
+    allow_origins = parse_cors_origins(os.getenv("CORS_ALLOW_ORIGINS"))
+    wildcard = "*" in allow_origins
+    if wildcard:
+        allow_origins = ["*"]
+    return {
+        "allow_origins": allow_origins,
+        "allow_credentials": not wildcard,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+
+
 app = FastAPI(
     title="Case Library API",
     version="1.0.0",
@@ -83,10 +109,7 @@ bearer_scheme = HTTPBearer(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **build_cors_options(),
 )
 
 
