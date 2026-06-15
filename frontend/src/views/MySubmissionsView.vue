@@ -12,6 +12,134 @@
       <p>查看和管理您的案例需要先登录账号。</p>
     </div>
 
+    <section v-else-if="detailCase" class="submission-detail-page">
+      <div class="submission-detail-toolbar">
+        <button type="button" class="btn-secondary" @click="closeSubmissionDetail">返回我的提交</button>
+        <div class="submission-detail-actions">
+          <button
+            v-if="hasDetailReviewArtifacts"
+            type="button"
+            class="btn-secondary"
+            @click="showDetailReviewResult = !showDetailReviewResult"
+          >
+            {{ showDetailReviewResult ? '隐藏审核结果' : '显示审核结果' }}
+          </button>
+          <button v-if="isEditable(detailCase.status)" type="button" class="btn-primary" @click="goToEdit(detailCase)">
+            修改案例
+          </button>
+        </div>
+      </div>
+
+      <div class="submission-detail-header">
+        <div>
+          <div class="case-type">{{ typeLabel(detailCase.type) }}</div>
+          <h2>{{ detailCase.title }}</h2>
+          <div class="case-meta-row">
+            <span class="meta-item" v-if="detailCase.department">学院 {{ detailCase.department }}</span>
+            <span class="meta-item" v-if="detailCase.theme">主题 {{ detailCase.theme }}</span>
+            <span class="meta-item">创建 {{ formatDate(detailCase.created_at) }}</span>
+            <span class="meta-item" v-if="detailCase.updated_at && detailCase.updated_at !== detailCase.created_at">更新 {{ formatDate(detailCase.updated_at) }}</span>
+          </div>
+        </div>
+        <span :class="['status-pill', statusPillClass(detailCase.status)]">{{ statusLabel(detailCase.status) }}</span>
+      </div>
+
+      <div class="submission-detail-grid">
+        <main class="submission-detail-main">
+          <section class="submission-detail-card">
+            <div class="section-head">
+              <strong>案例正文</strong>
+              <span v-if="showDetailReviewResult && detailReviewVersion" class="section-count">
+                审核版本 v{{ detailReviewVersion.version_number }}
+              </span>
+            </div>
+            <div v-if="showDetailReviewResult && detailParagraphs.length" class="submission-paragraph-list">
+              <article
+                v-for="paragraph in detailParagraphs"
+                :key="paragraph.paragraph_id"
+                class="submission-paragraph"
+              >
+                <span>{{ paragraph.paragraph_id }}</span>
+                <div class="submission-paragraph-text" v-html="renderMarkdown(paragraph.text)"></div>
+                <div
+                  v-for="comment in detailAiCommentsForParagraph(paragraph.paragraph_id)"
+                  :key="comment.id || `ai-${comment.paragraph_id}-${comment.message}`"
+                  class="submission-ai-inline"
+                >
+                  <strong>AI 意见</strong>
+                  <p>{{ comment.message }}</p>
+                  <small v-if="comment.suggestion">建议：{{ comment.suggestion }}</small>
+                  <small v-if="comment.severity || comment.category">
+                    {{ comment.category || '内容建议' }} · {{ comment.severity || '提示' }}
+                  </small>
+                </div>
+                <div
+                  v-for="comment in detailAdminCommentsForParagraph(paragraph.paragraph_id)"
+                  :key="`admin-${comment.paragraph_id}-${comment.created_at}-${comment.message}`"
+                  class="submission-admin-inline"
+                >
+                  <strong>人工段落批注</strong>
+                  <p>{{ comment.message }}</p>
+                  <small v-if="comment.suggestion">建议：{{ comment.suggestion }}</small>
+                  <small>
+                    {{ comment.reviewer || '审核员' }}
+                    <template v-if="comment.created_at"> · {{ formatDate(comment.created_at) }}</template>
+                  </small>
+                </div>
+              </article>
+            </div>
+            <div v-else class="detail-markdown" v-html="renderMarkdown(detailCase.content || '暂无内容')"></div>
+          </section>
+          <section v-if="detailCase.source_material" class="submission-detail-card">
+            <div class="section-head">
+              <strong>来源材料</strong>
+            </div>
+            <div class="detail-markdown" v-html="renderMarkdown(detailCase.source_material)"></div>
+          </section>
+        </main>
+
+        <aside class="submission-detail-side">
+          <section class="submission-detail-card">
+            <div class="section-head">
+              <strong>历史版本</strong>
+              <span v-if="detailVersions.length" class="section-count">{{ detailVersions.length }} 个版本</span>
+            </div>
+            <div v-if="versionLoading[detailCase.id]" class="review-placeholder">加载中…</div>
+            <div v-else-if="versionError[detailCase.id]" class="review-placeholder">{{ versionError[detailCase.id] }}</div>
+            <div v-else-if="detailVersions.length" class="version-list">
+              <article v-for="version in detailVersions" :key="version.id" class="version-item">
+                <div class="version-head">
+                  <div>
+                    <strong>v{{ version.version_number }}</strong>
+                    <span v-if="version.change_reason" class="version-reason">{{ version.change_reason }}</span>
+                  </div>
+                  <button type="button" class="btn-secondary btn-sm" @click="copyVersion(version)">复制</button>
+                </div>
+                <div class="version-meta">
+                  <span>创建 {{ formatDate(version.created_at) }}</span>
+                </div>
+              </article>
+            </div>
+            <div v-else class="review-placeholder">暂无历史版本</div>
+          </section>
+
+          <section v-if="showReviewFor(detailCase.status)" class="submission-detail-card">
+            <div class="section-head">
+              <strong>审核信息</strong>
+            </div>
+            <div v-if="reviewLoading[detailCase.id]" class="review-placeholder">加载中…</div>
+            <div v-else-if="reviewMap[detailCase.id]" class="review-body">
+              <div><strong>审核人：</strong>{{ reviewMap[detailCase.id].reviewer }}</div>
+              <div><strong>审核结果：</strong>{{ reviewMap[detailCase.id].result }}</div>
+              <div><strong>审核意见：</strong>{{ reviewMap[detailCase.id].comment }}</div>
+              <div v-if="reviewMap[detailCase.id].reviewAt"><strong>审核时间：</strong>{{ reviewMap[detailCase.id].reviewAt }}</div>
+            </div>
+            <div v-else class="review-placeholder">暂无审核信息</div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
     <template v-else>
       <!-- Tabs -->
       <div class="tabs-bar" role="tablist" aria-label="案例状态">
@@ -24,6 +152,20 @@
           @click="switchTab(tab.key)"
         >
           {{ tab.label }}
+        </button>
+      </div>
+
+      <div class="submissions-toolbar">
+        <div>
+          <strong>{{ currentTabLabel }}</strong>
+          <span>{{ tabDescription }}</span>
+        </div>
+        <button
+          type="button"
+          class="btn-primary"
+          @click="goToCreate"
+        >
+          新建案例
         </button>
       </div>
 
@@ -44,7 +186,7 @@
       <div v-else-if="cases.length === 0" class="state-empty">
         <div class="empty-icon" aria-hidden="true"></div>
         <h3>暂无{{ currentTabLabel }}</h3>
-        <p>当前分类下没有案例</p>
+        <p>{{ emptyDescription }}</p>
         <button type="button" class="btn-primary" @click="goToCreate">创建新案例</button>
       </div>
 
@@ -178,73 +320,22 @@
           <!-- Card actions -->
           <div class="case-actions">
             <button type="button" class="btn-secondary btn-sm" @click.stop="toggleDetail(c.id)">
-              {{ expandedId === c.id ? '收起' : '查看详情' }}
+              查看详情
             </button>
             <template v-if="isEditable(c.status)">
-              <button type="button" class="btn-primary btn-sm" @click.stop="openEdit(c)">修改</button>
+              <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">修改</button>
             </template>
             <template v-if="c.status === 'draft'">
-              <button type="button" class="btn-primary btn-sm" @click.stop="openEdit(c, 'submit')">提交审核</button>
+              <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">提交审核</button>
             </template>
             <template v-if="c.status === 'needs_revision'">
-              <button type="button" class="btn-primary btn-sm" @click.stop="openEdit(c, 'resubmit')">重新提交</button>
+              <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">重新提交</button>
             </template>
             <button type="button" class="btn-danger btn-sm" @click.stop="confirmDelete(c)">删除</button>
           </div>
         </div>
       </div>
     </template>
-
-    <!-- Edit Modal -->
-    <div v-if="editingCase" class="modal-overlay" @click.self="closeEdit">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-title">
-        <div class="modal-header">
-          <h3 id="edit-title">{{ modalTitle }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭" @click="closeEdit">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="field">
-            <label for="ms-edit-title">案例标题 <span class="required">*</span></label>
-            <input id="ms-edit-title" v-model="editForm.title" type="text" placeholder="请输入案例标题" />
-          </div>
-          <div class="field">
-            <label for="ms-edit-dept">所属部门/学院 <span class="required">*</span></label>
-            <input id="ms-edit-dept" v-model="editForm.department" type="text" placeholder="请输入所属部门或学院" />
-          </div>
-          <div class="field">
-            <label for="ms-edit-content">案例正文 <span class="required">*</span></label>
-            <textarea id="ms-edit-content" v-model="editForm.content" rows="10" placeholder="请输入案例正文"></textarea>
-          </div>
-          <div class="field">
-            <label for="ms-edit-source">来源材料</label>
-            <textarea id="ms-edit-source" v-model="editForm.source_material" rows="5" placeholder="粘贴新闻、课堂记录、调研材料等来源文本"></textarea>
-          </div>
-          <div class="field">
-            <label for="ms-edit-type">案例类型 <span class="required">*</span></label>
-            <select id="ms-edit-type" v-model="editForm.type">
-              <option disabled value="">请选择案例类型</option>
-              <option v-for="(label, key) in caseTypes" :key="key" :value="key">{{ label }}</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="ms-edit-theme">案例主题 <span class="required">*</span></label>
-            <select id="ms-edit-theme" v-model="editForm.theme">
-              <option disabled value="">请选择案例主题</option>
-              <option v-for="t in themes" :key="t" :value="t">{{ t }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn-secondary" @click="closeEdit">取消</button>
-          <button type="button" class="btn-primary" :disabled="saving" @click="handleSave">
-            {{ saving ? '保存中…' : '保存' }}
-          </button>
-          <button v-if="editAction" type="button" class="btn-primary" :disabled="saving || submitting" @click="handleResubmit">
-            {{ submitting ? '提交中…' : submitButtonLabel }}
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Delete confirmation modal -->
     <div v-if="deletingCase" class="modal-overlay" @click.self="deletingCase = null">
@@ -268,7 +359,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { isLoggedIn, currentUser } from '../api/auth.js';
 import {
   fetchCaseConstants,
@@ -276,21 +367,19 @@ import {
   fetchCaseDetail,
   fetchCaseReviews,
   fetchCaseVersions,
-  updateCase,
-  submitCaseById,
   deleteCaseById,
 } from '../api/cases.js';
 import { notify } from '../utils/toast.js';
 
 const tabs = [
-  { key: 'pending_review', label: '待审核' },
-  { key: 'approved', label: '已通过' },
-  { key: 'needs_revision', label: '需修改' },
-  { key: 'draft', label: '草稿' },
   { key: 'all', label: '全部' },
+  { key: 'draft', label: '草稿' },
+  { key: 'pending_review', label: '待审核' },
+  { key: 'needs_revision', label: '需修改' },
+  { key: 'approved', label: '已通过' },
 ];
 
-const currentTab = ref('pending_review');
+const currentTab = ref('all');
 const cases = ref([]);
 const loading = ref(false);
 const error = ref('');
@@ -300,6 +389,9 @@ const reviewLoading = ref({});
 const versionMap = ref({});
 const versionLoading = ref({});
 const versionError = ref({});
+const detailCase = ref(null);
+const showDetailReviewResult = ref(false);
+let lastOpenedHashCaseId = '';
 
 const caseTypes = ref({
   TYPE_A: '思政课教学案例',
@@ -308,29 +400,77 @@ const caseTypes = ref({
 });
 const themes = ref(['强国建设', '实践育人', '数字赋能', '铸魂育人']);
 
-const editingCase = ref(null);
-const editAction = ref(''); // '', 'submit', 'resubmit'
-const editForm = ref({ title: '', department: '', content: '', source_material: '', type: '', theme: '' });
-const saving = ref(false);
-const submitting = ref(false);
-
-const modalTitle = computed(() => {
-  if (editAction.value === 'resubmit') return '重新提交案例';
-  if (editAction.value === 'submit') return '提交审核';
-  return '修改案例';
-});
-
-const submitButtonLabel = computed(() => {
-  if (editAction.value === 'resubmit') return '重新提交';
-  if (editAction.value === 'submit') return '提交审核';
-  return '提交';
-});
-
 const deletingCase = ref(null);
 const deleting = ref(false);
 
 const isAuthenticated = computed(() => isLoggedIn());
 const currentTabLabel = computed(() => tabs.find(t => t.key === currentTab.value)?.label || '');
+const tabDescription = computed(() => {
+  const map = {
+    all: '集中查看全部案例状态，支持继续编辑草稿、处理退回修改和查看审核进度。',
+    draft: '尚未提交审核的案例，可继续编辑或提交审核。',
+    pending_review: '已提交但仍在等待专家审核的案例。',
+    needs_revision: '专家退回后需要修改并重新提交的案例。',
+    approved: '已通过审核并可进入案例库展示的案例。',
+  };
+  return map[currentTab.value] || '查看和管理您的案例。';
+});
+const emptyDescription = computed(() => {
+  const map = {
+    all: '当前还没有案例，可以从新建案例开始。',
+    draft: '当前没有草稿，可以从新建案例开始。',
+    pending_review: '当前没有等待审核的案例。',
+    needs_revision: '当前没有需要修改的案例。',
+    approved: '当前没有已通过的案例。',
+  };
+  return map[currentTab.value] || '当前分类下没有案例。';
+});
+const detailVersions = computed(() => {
+  if (!detailCase.value) return [];
+  return versionMap.value[detailCase.value.id] || [];
+});
+const detailReviewVersion = computed(() => {
+  if (!detailCase.value || !detailVersions.value.length) return null;
+  const targetId = detailCase.value.submitted_version_id || detailCase.value.reviewed_version_id;
+  const target = detailVersions.value.find(version => Number(version.id) === Number(targetId));
+  if (target) return target;
+  const withAdminComments = detailVersions.value.find(version => Array.isArray(version.admin_comments) && version.admin_comments.length);
+  if (withAdminComments) return withAdminComments;
+  const withAiComments = detailVersions.value.find(version => Array.isArray(version.ai_review?.comments) && version.ai_review.comments.length);
+  if (withAiComments) return withAiComments;
+  return detailVersions.value[0];
+});
+const detailParagraphs = computed(() => {
+  if (Array.isArray(detailReviewVersion.value?.paragraphs) && detailReviewVersion.value.paragraphs.length) {
+    return detailReviewVersion.value.paragraphs;
+  }
+  const content = detailReviewVersion.value?.content || detailCase.value?.content || '';
+  return splitContentToParagraphs(content);
+});
+const detailAiComments = computed(() => {
+  const caseComments = (detailCase.value?.ai_reviews || []).flatMap(item => {
+    if (Array.isArray(item.comments)) return item.comments;
+    if (Array.isArray(item.version?.ai_review?.comments)) return item.version.ai_review.comments;
+    return [];
+  });
+  if (caseComments.length) return caseComments;
+  return detailReviewVersion.value?.ai_review?.comments || [];
+});
+const detailAdminComments = computed(() => {
+  const versions = detailReviewVersion.value ? [detailReviewVersion.value] : detailVersions.value;
+  return versions.flatMap(version => {
+    return (version.admin_comments || []).flatMap(batch => {
+      return (batch.comments || []).map(comment => ({
+        ...comment,
+        reviewer: batch.reviewer,
+        created_at: batch.created_at,
+      }));
+    });
+  });
+});
+const hasDetailReviewArtifacts = computed(() => {
+  return detailAiComments.value.length > 0 || detailAdminComments.value.length > 0;
+});
 
 function switchTab(tab) {
   currentTab.value = tab;
@@ -340,6 +480,10 @@ function switchTab(tab) {
 
 function goToCreate() {
   window.location.hash = 'create';
+}
+
+function goToEdit(c) {
+  window.location.hash = `create?draft=${encodeURIComponent(c.id)}`;
 }
 
 function isEditable(status) {
@@ -440,16 +584,56 @@ async function loadCases() {
 }
 
 function toggleDetail(caseId) {
-  if (expandedId.value === caseId) {
-    expandedId.value = null;
+  openSubmissionDetail(caseId);
+}
+
+function openSubmissionDetail(caseId) {
+  const targetHash = `submissions?case=${encodeURIComponent(caseId)}`;
+  const currentHash = window.location.hash.replace('#', '');
+  if (currentHash !== targetHash) {
+    window.location.hash = targetHash;
     return;
   }
-  expandedId.value = caseId;
-  const c = cases.value.find(x => x.id === caseId);
-  loadVersions(caseId);
-  if (c && showReviewFor(c.status)) {
-    loadReview(caseId);
+  loadSubmissionDetail(caseId);
+}
+
+async function loadSubmissionDetail(caseId) {
+  try {
+    showDetailReviewResult.value = false;
+    const res = await fetchCaseDetail(caseId, false);
+    if (!res?.success || !res.data) {
+      throw new Error(res?.message || '加载案例详情失败');
+    }
+    detailCase.value = res.data;
+    await loadVersions(caseId);
+    if (showReviewFor(res.data.status)) await loadReview(caseId);
+  } catch (err) {
+    notify(err.message || '加载案例详情失败', 'error');
   }
+}
+
+function closeSubmissionDetail() {
+  detailCase.value = null;
+  showDetailReviewResult.value = false;
+  lastOpenedHashCaseId = '';
+  if (window.location.hash.replace('#', '').startsWith('submissions?case=')) {
+    window.location.hash = 'submissions';
+  }
+}
+
+function readDetailFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  const [viewId, query = ''] = hash.split('?');
+  if (viewId !== 'submissions') return;
+  const caseId = new URLSearchParams(query).get('case') || '';
+  if (!caseId) {
+    detailCase.value = null;
+    lastOpenedHashCaseId = '';
+    return;
+  }
+  if (caseId === lastOpenedHashCaseId && detailCase.value) return;
+  lastOpenedHashCaseId = caseId;
+  loadSubmissionDetail(caseId);
 }
 
 async function loadVersions(caseId) {
@@ -536,87 +720,61 @@ async function loadReview(caseId) {
   }
 }
 
-function openEdit(c, action = '') {
-  editingCase.value = c;
-  editAction.value = action;
-  editForm.value = {
-    title: c.title || '',
-    department: c.department || '',
-    content: c.content || '',
-    source_material: c.source_material || '',
-    type: c.type || '',
-    theme: c.theme || '',
-  };
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function closeEdit() {
-  editingCase.value = null;
-  editAction.value = '';
-  saving.value = false;
-  submitting.value = false;
+function renderInlineMarkdown(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
-async function handleSave() {
-  if (!editingCase.value) return;
-  if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    notify('请填写所有必填项', 'error');
-    return;
-  }
-  saving.value = true;
-  try {
-    const actionLabel = editAction.value === 'resubmit' ? '重新提交前更新' : editAction.value === 'submit' ? '提交审核前更新' : '修改案例';
-    await updateCase(editingCase.value.id, {
-      title: editForm.value.title.trim(),
-      content: editForm.value.content.trim(),
-      source_material: editForm.value.source_material.trim(),
-      author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
-      department: editForm.value.department.trim(),
-      type: editForm.value.type,
-      theme: editForm.value.theme,
-      change_reason: actionLabel,
-    });
-    notify('保存成功', 'success');
-    closeEdit();
-    await loadCases();
-  } catch (err) {
-    notify(err.message || '保存失败', 'error');
-  } finally {
-    saving.value = false;
-  }
+function renderMarkdown(value) {
+  const lines = String(value || '').split(/\r?\n/);
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '<br>';
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = Math.min(4, heading[1].length + 2);
+      return `<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`;
+    }
+    const listItem = trimmed.match(/^[-*]\s+(.+)$/);
+    if (listItem) {
+      return `<p class="md-list-item">${renderInlineMarkdown(listItem[1])}</p>`;
+    }
+    const quote = trimmed.match(/^>\s*(.+)$/);
+    if (quote) {
+      return `<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`;
+    }
+    return `<p>${renderInlineMarkdown(line)}</p>`;
+  }).join('');
 }
 
-async function handleResubmit() {
-  if (!editingCase.value) return;
-  if (!editForm.value.title.trim() || !editForm.value.department.trim() || !editForm.value.content.trim()) {
-    notify('请填写所有必填项', 'error');
-    return;
-  }
-  submitting.value = true;
-  try {
-    const actionLabel = editAction.value === 'resubmit' ? '重新提交前更新' : '提交审核前更新';
-    await updateCase(editingCase.value.id, {
-      title: editForm.value.title.trim(),
-      content: editForm.value.content.trim(),
-      source_material: editForm.value.source_material.trim(),
-      author: editingCase.value.author || currentUser()?.nickname || currentUser()?.username || '',
-      department: editForm.value.department.trim(),
-      type: editForm.value.type,
-      theme: editForm.value.theme,
-      change_reason: actionLabel,
-    });
-    await submitCaseById(editingCase.value.id);
-    const successMsg = editAction.value === 'resubmit'
-      ? '案例已重新提交，请等待专家审核'
-      : '案例已提交审核，请等待专家审核';
-    notify(successMsg, 'success');
-    closeEdit();
-    await loadCases();
-  } catch (err) {
-    const errorMsg = editAction.value === 'resubmit' ? '重新提交失败' : '提交审核失败';
-    notify(err.message || errorMsg, 'error');
-  } finally {
-    submitting.value = false;
-  }
+function splitContentToParagraphs(content) {
+  const chunks = String(content || '')
+    .split(/\n{2,}/)
+    .map(text => text.trim())
+    .filter(Boolean);
+  if (!chunks.length) return [];
+  return chunks.map((text, index) => ({
+    paragraph_id: `p${index + 1}`,
+    text,
+  }));
+}
+
+function detailAiCommentsForParagraph(paragraphId) {
+  return detailAiComments.value.filter(comment => comment.paragraph_id === paragraphId);
+}
+
+function detailAdminCommentsForParagraph(paragraphId) {
+  return detailAdminComments.value.filter(comment => comment.paragraph_id === paragraphId);
 }
 
 function confirmDelete(c) {
@@ -651,6 +809,12 @@ onMounted(async () => {
   } catch {
     // Safe fallbacks already set
   }
+  readDetailFromHash();
+  window.addEventListener('hashchange', readDetailFromHash);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', readDetailFromHash);
 });
 
 watch(currentTab, () => {
@@ -699,6 +863,278 @@ watch(currentTab, () => {
 
 .tabs-bar::-webkit-scrollbar {
   display: none;
+}
+
+.submissions-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.submissions-toolbar strong,
+.submissions-toolbar span {
+  display: block;
+}
+
+.submissions-toolbar strong {
+  margin-bottom: 2px;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.submissions-toolbar span {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.submission-detail-page {
+  display: grid;
+  gap: 18px;
+}
+
+.submission-detail-toolbar,
+.submission-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.submission-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.submission-detail-header {
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.submission-detail-header h2 {
+  margin: 10px 0;
+  font-size: 22px;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+
+.submission-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+
+.submission-detail-main,
+.submission-detail-side {
+  min-width: 0;
+}
+
+.submission-detail-side {
+  position: sticky;
+  top: calc(var(--header-height) + 20px);
+  display: grid;
+  gap: 14px;
+}
+
+.submission-detail-card {
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.submission-detail-card + .submission-detail-card {
+  margin-top: 14px;
+}
+
+.detail-markdown {
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.detail-markdown :deep(p),
+.detail-markdown :deep(h3),
+.detail-markdown :deep(h4),
+.detail-markdown :deep(h5),
+.detail-markdown :deep(h6) {
+  margin: 0;
+  word-break: break-word;
+}
+
+.detail-markdown :deep(p + p),
+.detail-markdown :deep(h3 + p),
+.detail-markdown :deep(p + h3) {
+  margin-top: 10px;
+}
+
+.detail-markdown :deep(h3),
+.detail-markdown :deep(h4),
+.detail-markdown :deep(h5),
+.detail-markdown :deep(h6) {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.detail-markdown :deep(.md-list-item)::before {
+  content: '- ';
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+.detail-markdown :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-brand);
+  background: #fafafa;
+  color: var(--color-text-secondary);
+}
+
+.detail-markdown :deep(code) {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  font-family: inherit;
+  font-size: 0.95em;
+}
+
+.submission-paragraph-list {
+  display: grid;
+  gap: 10px;
+}
+
+.submission-paragraph {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.submission-paragraph > span {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--color-brand);
+  font-weight: 800;
+}
+
+.submission-paragraph-text {
+  min-width: 0;
+}
+
+.submission-paragraph-text :deep(p),
+.submission-paragraph-text :deep(h3),
+.submission-paragraph-text :deep(h4),
+.submission-paragraph-text :deep(h5),
+.submission-paragraph-text :deep(h6) {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.submission-paragraph-text :deep(p + p),
+.submission-paragraph-text :deep(p + h3),
+.submission-paragraph-text :deep(h3 + p),
+.submission-paragraph-text :deep(h4 + p) {
+  margin-top: 8px;
+}
+
+.submission-paragraph-text :deep(h3),
+.submission-paragraph-text :deep(h4),
+.submission-paragraph-text :deep(h5),
+.submission-paragraph-text :deep(h6) {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.submission-paragraph-text :deep(.md-list-item)::before {
+  content: '- ';
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+.submission-paragraph-text :deep(code) {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  font-family: inherit;
+  font-size: 0.95em;
+}
+
+.submission-paragraph-text :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-brand);
+  background: #fafafa;
+  color: var(--color-text-secondary);
+}
+
+.submission-ai-inline,
+.submission-admin-inline {
+  grid-column: 2;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+
+.submission-ai-inline {
+  border: 1px solid rgba(141, 27, 53, 0.2);
+  border-left: 3px solid var(--color-brand);
+  background: #fff;
+}
+
+.submission-admin-inline {
+  border: 1px solid #fecaca;
+  border-left: 3px solid #b91c1c;
+  background: #fff7f7;
+}
+
+.submission-ai-inline strong,
+.submission-admin-inline strong,
+.submission-ai-inline p,
+.submission-admin-inline p,
+.submission-ai-inline small,
+.submission-admin-inline small {
+  display: block;
+  margin: 0;
+}
+
+.submission-ai-inline strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--color-brand);
+}
+
+.submission-admin-inline strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.submission-ai-inline p,
+.submission-admin-inline p {
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.submission-ai-inline small,
+.submission-admin-inline small {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
 }
 
 .tab-btn {
@@ -1382,6 +1818,25 @@ textarea {
 @media (max-width: 480px) {
   .my-submissions {
     padding: 20px 12px 32px;
+  }
+
+  .submission-detail-toolbar,
+  .submission-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .submission-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .submission-detail-side {
+    position: static;
+  }
+
+  .submissions-toolbar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .tab-btn {

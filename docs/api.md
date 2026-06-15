@@ -5,7 +5,7 @@
 - Swagger：`http://127.0.0.1:8001/docs`
 - OpenAPI JSON：`http://127.0.0.1:8001/openapi.json`
 
-本文只维护人工索引和当前实现备注，不再维护长篇手写契约表。修改 API 时应同步更新
+本文维护人工索引、前端 baseline 依赖的关键契约和当前实现备注。修改 API 时应同步更新
 FastAPI schema、测试和本文。
 
 ## 全局约定
@@ -83,6 +83,112 @@ FastAPI schema、测试和本文。
 - `needs_revision`：退回修改
 
 历史兼容中，部分接口仍接受或映射 `rejected`，语义等同“退回修改”，不是永久拒绝。
+
+## 提案：案例类型多选契约（issue #97，尚未实现）
+
+当前实现仍以单字符串 `type` 作为案例类型字段。为满足 `docs/prd.md` 中“案例类型支持多选”的
+产品要求，后续实现建议新增 `types: string[]` 作为规范字段，并在一个兼容窗口内保留 `type`
+作为主类型/旧客户端回退字段。
+
+- 写入契约：`POST /api/cases`、`PUT /api/cases/{case_id}` 和兼容 `POST /api/cases/{case_id}`
+  接受 `types` 数组；表单提交可使用重复字段 `types=TYPE_A&types=TYPE_C`，也可在兼容期继续
+  发送旧字段 `type=TYPE_A`。若同时传入二者，以 `types` 为准，`type` 自动取 `types[0]`。
+- 读取契约：案例列表、详情、版本、公开搜索、推荐、热门、最新和统计响应均返回 `types`；
+  兼容期继续返回 `type = types[0]`。历史仅含字符串 `type` 的数据读出时规范化为
+  `types: [type]`。
+- 校验契约：`types` 去重并保持用户选择顺序；只接受 `/api/constants.case_types` 中存在的
+  类型码；空值回退到当前默认 `["TYPE_A"]`。
+- 搜索契约：`/api/search/advanced?type=TYPE_A` 保持单类型过滤入口，语义改为命中
+  `types` 中包含该值的案例（OR 语义）。
+- 统计契约：`/api/statistics.data.by_type` 按每个类型标签计数；一个多类型案例会分别计入每个
+  已选类型，`total_cases` 仍按案例数计数。
+- 迁移策略：不需要阻塞式数据库迁移；在序列化读取、版本快照和写入路径中双写/规范化即可。
+  可选的一次性后台修正脚本只用于把旧文档补齐 `types`，不改变公开 API 兼容语义。
+
+## 前端 baseline 契约
+
+以下字段是当前前端 baseline 依赖的后端契约。第一阶段后端拆分不得改变路径、请求字段、
+响应字段名或 Mongo 文档语义。
+
+### 案例列表和详情
+
+- `GET /api/cases?status=approved` 可匿名访问，只返回已通过且未隐藏案例；`status=draft`、
+  `pending_review`、`needs_revision`、`all` 或 `author=<username>` 视图需要登录并按作者/管理员
+  权限过滤。
+- 列表响应：`{ success, data, total }`；`data[]` 至少包含 `id`、`title`、`type`、`theme`、
+  `content`、`source_material`、`author`、`department`、`status`、`created_at`、`updated_at`、
+  `submitted_at`、`review_at`、`display_at`、`view_count`、`like_count`、`is_hidden`、`keywords`。
+- `GET /api/cases/{case_id}` 公开已通过案例可匿名访问；草稿、隐藏案例、未通过案例需要作者或
+  管理员权限。公开读者看到的是公开字段白名单；作者/管理员看到内部字段。
+- 已通过案例如果存在 `reviewed_version_id`，公开列表、公开详情、公开搜索、推荐、热门、最新和
+  统计均以该审核通过版本快照的标题、正文、来源材料、类型/主题、作者、院系和关键词为准，
+  不展示审核后 live edit 的内部版本内容。
+
+### 我的提交
+
+- 前端“我的提交”使用 `GET /api/cases?author=<当前用户名>&status=all` 读取作者视图。
+- 作者可编辑 `draft` 和 `needs_revision`；作者不可编辑 `pending_review` 或 `approved`，
+  这些状态需要管理员退回后才能修改。
+- `POST /api/cases/{case_id}/submit` 接受可选表单字段 `version_id`；未传时绑定当前最新版本。
+  成功后案例进入 `pending_review`，写入 `submitted_at` 和 `submitted_version_id`。
+
+### 版本记录
+
+- `GET /api/versions/{case_id}` 仅作者或管理员可见，响应 `data[]` 按 `version_number` 倒序。
+- 版本项包含 `id`、`case_id`、`version_number`、`title`、`type`、`theme`、`content`、
+  `source_material`、`author`、`department`、`keywords`、`owner_username`、`created_by`、
+  `changed_by`、`change_reason`、`created_at`、`paragraphs`、`ai_review`、`admin_comments`。
+- 正文、来源材料、标题、类型/主题、作者、院系或关键词变更会创建版本；AI review 也创建只读
+  版本快照。
+
+### AI 审核
+
+- `POST /api/cases/{case_id}/ai-review` 需要作者或管理员登录。普通作者只能对 `draft` 或
+  `needs_revision` 案例发起；`pending_review` 和 `approved` 会被锁定。
+- 请求体是 JSON 对象，可选 `model` 字符串。服务端生成 `paragraphs[]`，调用后端配置的模型，
+  校验 `{ comments, summary }` 结构，并创建版本快照。
+- 成功响应：`{ success: true, status: "ok", data: { version, comments, summary } }`。
+  `version.ai_review.comments` 与响应 `comments` 同源；`version.ai_review.summary` 与响应
+  `summary` 同源；案例文档会更新 `latest_review_version_id` 和兼容字段 `ai_reviews`。
+- 失败状态使用现有 `disabled`、`unconfigured`、`invalid_model`、`unavailable`、
+  `parse_failed`、`invalid_contract`，前端按 `status` 和 `detail` 展示。
+
+### 人工审核
+
+- `POST /api/reviews/{case_id}` 仅管理员可用，表单字段为 `comment`、`status`、可选
+  `version_id`、可选 `paragraph_comments` JSON 字符串。
+- `status=approve/approved` 将案例置为 `approved`；`reject/rejected/needs_revision` 将案例置为
+  `needs_revision`；历史兼容 `rejected` 映射到退回修改。
+- 审核写入 `reviews` 记录，保留 `version_id` 和规范化后的 `paragraph_comments`；如果传入
+  段落批注，也会追加到对应版本的 `admin_comments`。
+- `GET /api/reviews/{case_id}` 仅作者或管理员可见。
+
+### 公开字段白名单
+
+匿名公开列表、详情、搜索、推荐、热门和最新接口只返回以下公开字段：
+
+- `id`
+- `title`
+- `type`
+- `theme`
+- `content`
+- `source_material`
+- `author`
+- `department`
+- `status`
+- `created_at`
+- `updated_at`
+- `submitted_at`
+- `review_at`
+- `display_at`
+- `view_count`
+- `like_count`
+- `is_hidden`
+- `keywords`
+
+公开接口不得返回 `ai_reviews`、`ai_review`、`admin_comments`、`paragraph_comments`、
+`prompt`、`prompt_id`、`model`、`submitted_version_id`、`reviewed_version_id`、
+`latest_review_version_id`、`owner_username` 等内部字段。
 
 ## 公开字段边界
 

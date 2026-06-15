@@ -2,7 +2,10 @@ import { test, expect } from "@playwright/test";
 import { login, logout } from "./support/auth.js";
 import {
   approveAuditCaseAndVerifyPublicSearch,
+  confirmAndSubmitCase,
   createAndSubmitAuditCase,
+  expectPendingSubmission,
+  submitAdminReview,
 } from "./support/auditFlow.js";
 import { cleanupAuditCases } from "./support/caseCleanup.js";
 import { capture } from "./support/capture.js";
@@ -30,7 +33,7 @@ test.describe("manual audit candidate flows", () => {
     await login(page, USER);
     await page.getByRole("link", { name: "创建案例" }).click();
 
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
     await expect(page.locator(".wizard-main")).toBeInViewport();
     await expect(page.locator("#ccf-title")).toBeVisible();
     await capture(page, testInfo, "mobile-create-step-1");
@@ -40,7 +43,7 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await expect(page.locator("#ccf-content")).toBeVisible();
     await expect(page.locator("#ccf-source")).toBeVisible();
     await capture(page, testInfo, "mobile-create-step-2");
@@ -52,13 +55,13 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await expect(page.locator("#ccf-type")).toBeVisible();
-    await expect(page.locator("#ccf-theme")).toBeVisible();
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await expect(page.getByRole("button", { name: "思政课教学案例" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "铸魂育人" })).toBeVisible();
     await capture(page, testInfo, "mobile-create-step-3");
   });
 
-  test("default admin account is present but requires password change", async ({ page }, testInfo) => {
+  test("default admin seed account reaches home without password change", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "chromium-desktop",
       "desktop-only audit because mobile hides the username text"
@@ -71,8 +74,10 @@ test.describe("manual audit candidate flows", () => {
       nickname: "小李",
     });
 
-    await expect(page.getByRole("heading", { name: "修改初始密码" })).toBeVisible();
-    await capture(page, testInfo, "default-admin-password-change");
+    await expect(page.getByRole("heading", { name: "欢迎来到强国有我思政案例库" })).toBeVisible();
+    await expect(page.locator(".user-name")).toContainText("小李");
+    await expect(page.getByRole("heading", { name: "修改初始密码" })).toHaveCount(0);
+    await capture(page, testInfo, "default-admin-home");
   });
 
   test("create flow author identity follows current login, not stale draft", async ({
@@ -282,30 +287,30 @@ test.describe("manual audit candidate flows", () => {
 
     await login(page, USER);
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
     await page.getByLabel(/案例标题/).fill(title);
     await page.getByLabel(/所属部门\/学院/).fill("马克思主义学院");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await page.locator("#ccf-content").fill(initialContent);
     await page.locator("#ccf-source").fill(sourceMaterial);
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.locator("#ccf-type").selectOption("TYPE_A");
-    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await page.getByRole("button", { name: "思政课教学案例" }).click();
+    await page.getByRole("button", { name: "铸魂育人" }).click();
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByRole("heading", { name: "提交前自查" })).toBeVisible();
-    await page.getByRole("button", { name: "生成只读审核版本" }).click();
-    await expect(page.getByText("100% 已完成")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI 智能内容审核" })).toBeVisible();
+    await page.getByRole("button", { name: "生成自查建议" }).click();
+    await expect(page.getByText("100%")).toBeVisible();
     await expect(page.getByText(/已生成 v2 只读审核版本/)).toBeVisible();
     await expect(page.getByText("AI 段落批注：来源材料要补齐时间和对象。")).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();
     await expect(page.getByText("确认并提交")).toBeVisible();
-    await page.getByRole("button", { name: "正式提交案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await confirmAndSubmitCase(page);
+    await expectPendingSubmission(page, title);
 
     await logout(page);
     await login(page, ADMIN);
@@ -313,16 +318,13 @@ test.describe("manual audit candidate flows", () => {
     const pendingCard = page.locator(".case-card").filter({ hasText: title });
     await expect(pendingCard).toBeVisible();
     await pendingCard.getByRole("button", { name: "审核" }).click();
-    await expect(page.locator("#review-version")).toHaveValue(/^\d+$/);
-    await page.locator("#review-comment").fill("退回修改：来源材料不足。");
-    await page.locator("#paragraph-id").selectOption("p2");
-    await page.locator("#paragraph-category").selectOption("source");
-    await page.locator("#paragraph-severity").selectOption("important");
-    await page.locator("#paragraph-message").fill(adminParagraphComment);
-    await page.locator("#paragraph-suggestion").fill(adminSuggestion);
-    await page.getByLabel("需修改").check();
-    await page.getByRole("button", { name: "提交审核" }).click();
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await submitAdminReview(page, {
+      status: "reject",
+      comment: "退回修改：来源材料不足。",
+      paragraphId: "p2",
+      paragraphMessage: adminParagraphComment,
+      paragraphSuggestion: adminSuggestion,
+    });
 
     await logout(page);
     await login(page, USER);
@@ -331,48 +333,55 @@ test.describe("manual audit candidate flows", () => {
     const revisionCard = page.locator(".case-card").filter({ hasText: title });
     await expect(revisionCard).toBeVisible();
     await revisionCard.getByRole("button", { name: "查看详情" }).click();
-    await expect(revisionCard.getByText("人工段落批注", { exact: true })).toBeVisible();
-    await expect(revisionCard.getByText(adminParagraphComment)).toBeVisible();
-    await expect(revisionCard.getByText(adminSuggestion)).toBeVisible();
-    await revisionCard.getByRole("button", { name: "复制版本" }).first().click();
+    await page.getByRole("button", { name: "显示审核结果" }).click();
+    await expect(page.getByText("人工段落批注", { exact: true })).toBeVisible();
+    await expect(page.getByText(adminParagraphComment)).toBeVisible();
+    await expect(page.getByText(adminSuggestion)).toBeVisible();
+    await page.getByRole("button", { name: "复制" }).first().click();
     await expect(page.getByText(/v\d+ 已复制/)).toBeVisible();
 
-    await revisionCard.getByRole("button", { name: "重新提交" }).click();
-    const resubmitDialog = page.getByRole("dialog", { name: "重新提交案例" });
-    await expect(resubmitDialog).toBeVisible();
-    await page.locator("#ms-edit-content").fill(revisedContent);
-    await page.locator("#ms-edit-source").fill(`${sourceMaterial}\n补充：2026 年课堂反馈摘要。`);
-    await resubmitDialog.getByRole("button", { name: "重新提交" }).click();
-    await expect(page.getByText("案例已重新提交，请等待专家审核")).toBeVisible();
+    await page.getByRole("button", { name: "修改案例" }).click();
+    await expect(page).toHaveURL(/#create\?draft=/);
+    await expect(page.getByRole("heading", { name: "撰写案例内容" })).toBeVisible();
+    await page.locator("#ccf-content").fill(revisedContent);
+    await page.locator("#ccf-source").fill(`${sourceMaterial}\n补充：2026 年课堂反馈摘要。`);
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByRole("heading", { name: "AI 智能内容审核" })).toBeVisible();
+    await page.getByRole("button", { name: "继续" }).click();
+    await expect(page.getByText("确认并提交")).toBeVisible();
+    await confirmAndSubmitCase(page);
+    await expectPendingSubmission(page, title);
 
     await logout(page);
     await login(page, ADMIN);
     await page.getByRole("link", { name: "审核管理" }).click();
-    const resubmittedCard = page.locator(".case-card").filter({ hasText: title });
-    await expect(resubmittedCard).toBeVisible();
-    await resubmittedCard.getByRole("button", { name: "查看详情" }).click();
-    await expect(resubmittedCard.locator(".detail-content-body").first()).toContainText(
-      "已根据人工批注补充学院新闻时间"
-    );
-    await resubmittedCard.getByRole("button", { name: "审核" }).click();
-    await page.locator("#review-comment").fill("审核通过：退回意见已修改。");
-    await page.getByLabel("通过").check();
-    await page.getByRole("button", { name: "提交审核" }).click();
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
-
+    const revisedPendingCard = page.locator(".case-card").filter({ hasText: title });
+    await expect(revisedPendingCard).toBeVisible();
+    await revisedPendingCard.getByRole("button", { name: "查看详情" }).click();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await expect(page.getByText("已根据人工批注补充学院新闻时间")).toBeVisible();
+    await page.getByRole("button", { name: "返回审核列表" }).click();
+    await revisedPendingCard.getByRole("button", { name: "审核" }).click();
+    await submitAdminReview(page, {
+      status: "approve",
+      comment: "审核通过：退回意见已修改。",
+    });
     await logout(page);
+
     await page.getByRole("link", { name: "案例库" }).click();
     await page.getByPlaceholder("搜索案例标题、内容...").fill(title);
     await page.getByRole("button", { name: "搜索" }).click();
     const publicCard = page.locator(".case-card").filter({ hasText: title });
     await expect(publicCard).toBeVisible();
     await publicCard.getByRole("button", { name: "查看详情" }).click();
-    const publicDialog = page.getByRole("dialog", { name: title });
-    await expect(publicDialog.getByText("已根据人工批注补充学院新闻时间")).toBeVisible();
-    await expect(publicDialog.getByText(sourceMaterial)).toBeVisible();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await expect(page.getByText("已根据人工批注补充学院新闻时间")).toBeVisible();
+    await expect(page.getByText(sourceMaterial)).toBeVisible();
+    await expect(page.getByText("补充：2026 年课堂反馈摘要。")).toBeVisible();
     await expect(page.getByText(adminParagraphComment)).toHaveCount(0);
     await expect(page.getByText("AI 段落批注：来源材料要补齐时间和对象。")).toHaveCount(0);
-    await page.getByLabel("关闭").click();
 
     await login(page, ADMIN);
     await cleanupAuditCases(page, title);
@@ -448,10 +457,10 @@ test.describe("manual audit candidate flows", () => {
     await page.getByRole("link", { name: "案例库" }).click();
     await expect(page.getByText("公开字段白名单审计案例")).toBeVisible();
     await page.getByRole("button", { name: "查看详情" }).click();
-    const detailDialog = page.getByRole("dialog", { name: "公开字段白名单审计案例" });
-    await expect(detailDialog.getByText("公开正文只包含案例内容，不应展示任何审核内部材料。")).toBeVisible();
-    await expect(detailDialog.getByText("公开来源材料：课堂记录摘录。")).toBeVisible();
-    await expect(detailDialog.getByText("公开标签")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "公开字段白名单审计案例" })).toBeVisible();
+    await expect(page.getByText("公开正文只包含案例内容，不应展示任何审核内部材料。")).toBeVisible();
+    await expect(page.getByText("公开来源材料：课堂记录摘录。")).toBeVisible();
+    await expect(page.getByText("公开标签")).toBeVisible();
 
     await expect(page.getByText("LEAK_AI_REVIEW_ANSWER_SHOULD_NOT_RENDER")).toHaveCount(0);
     await expect(page.getByText("LEAK_MODEL_SHOULD_NOT_RENDER")).toHaveCount(0);
@@ -540,16 +549,17 @@ test.describe("manual audit candidate flows", () => {
     });
 
     await page.goto("/");
-    const homeCard = page.locator(".case-card").filter({ hasText: publicCase.title }).first();
+    const latestCases = page.getByLabel("最新案例");
+    const homeCard = latestCases.locator(".case-card").filter({ hasText: publicCase.title });
     await expect(homeCard).toBeVisible();
     await expect(homeCard.getByText("浏览 11")).toBeVisible();
     await expect(homeCard.getByText("点赞 3")).toBeVisible();
-    await homeCard.click();
+    await homeCard.getByRole("heading", { name: publicCase.title }).click();
 
-    const detailDialog = page.getByRole("dialog", { name: publicCase.title });
-    await expect(detailDialog.getByText(publicCase.content)).toBeVisible();
-    await expect(detailDialog.getByText(publicCase.source_material)).toBeVisible();
-    await expect(detailDialog.getByText("首页标签")).toBeVisible();
+    await expect(page.getByRole("heading", { name: publicCase.title, level: 1 })).toBeVisible();
+    await expect(page.getByText(publicCase.content)).toBeVisible();
+    await expect(page.getByText(publicCase.source_material)).toBeVisible();
+    await expect(page.getByText("首页标签")).toBeVisible();
 
     await expect(page.getByText("HOME_LEAK_AI_REVIEW_SHOULD_NOT_RENDER")).toHaveCount(0);
     await expect(page.getByText("HOME_LEAK_MODEL_SHOULD_NOT_RENDER")).toHaveCount(0);

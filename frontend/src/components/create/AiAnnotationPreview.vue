@@ -1,28 +1,30 @@
 <template>
   <div class="ai-annotation-preview">
     <div class="annotation-copy">
-      <strong>版本正文</strong>
-      <p
+      <div class="annotation-summary">
+        <strong>版本正文</strong>
+        <span>{{ state.comments?.length || 0 }} 条 AI 批注已附在对应段落下方</span>
+      </div>
+      <article
         v-for="paragraph in state.version.paragraphs"
         :key="paragraph.paragraph_id"
-        :class="{ highlighted: commentsForParagraph(paragraph.paragraph_id).length }"
+        :class="['annotation-paragraph', { highlighted: commentsForParagraph(paragraph.paragraph_id).length }]"
       >
-        <span>{{ paragraph.paragraph_id }}</span>
-        {{ paragraph.text }}
-      </p>
+        <p>
+          <span>{{ paragraph.paragraph_id }}</span>
+          {{ paragraph.text }}
+        </p>
+        <div
+          v-for="comment in commentsForParagraph(paragraph.paragraph_id)"
+          :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
+          class="inline-comment"
+        >
+          <strong>AI 批注</strong>
+          <p>{{ comment.message }}</p>
+          <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
+        </div>
+      </article>
     </div>
-    <aside class="annotation-comments" aria-label="AI 段落批注">
-      <strong>AI 批注</strong>
-      <div
-        v-for="comment in state.comments"
-        :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
-        class="annotation-comment"
-      >
-        <strong>{{ comment.paragraph_id }}</strong>
-        <p>{{ comment.message }}</p>
-        <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
-      </div>
-    </aside>
   </div>
 </template>
 
@@ -41,41 +43,49 @@ function commentsForParagraph(paragraphId) {
 
 <style scoped>
 .ai-annotation-preview {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid var(--color-border);
 }
 
-.annotation-copy,
-.annotation-comments {
+.annotation-copy {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   align-content: start;
 }
 
-.annotation-copy > strong,
-.annotation-comments > strong {
+.annotation-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.annotation-summary strong {
   font-size: 12px;
   color: var(--color-text-muted);
   letter-spacing: 0;
 }
 
-.annotation-copy p {
+.annotation-paragraph {
   margin: 0;
-  padding: 9px 10px;
+  padding: 13px 16px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
+  background: #fff;
   color: var(--color-text-secondary);
-  line-height: 1.7;
+}
+
+.annotation-paragraph p {
+  margin: 0;
+  line-height: 1.75;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.annotation-copy p.highlighted {
+.annotation-paragraph.highlighted {
   border-color: rgba(141, 27, 53, 0.35);
   background: var(--color-brand-light);
   color: var(--color-text);
@@ -88,23 +98,24 @@ function commentsForParagraph(paragraphId) {
   color: var(--color-brand);
 }
 
-.annotation-comment {
-  padding: 9px 10px;
+.inline-comment {
+  margin-top: 12px;
+  padding: 12px 14px;
   border: 1px solid rgba(141, 27, 53, 0.22);
   border-left: 3px solid var(--color-brand);
   border-radius: 6px;
   background: #fff;
-  box-shadow: 0 8px 20px rgba(141, 27, 53, 0.06);
 }
 
-.annotation-comment > strong {
+.inline-comment > strong {
   display: block;
   margin-bottom: 4px;
+  font-size: 12px;
   color: var(--color-brand);
 }
 
-.annotation-comment p,
-.annotation-comment small {
+.inline-comment p,
+.inline-comment small {
   display: block;
   margin: 0;
   color: var(--color-text-secondary);
@@ -112,14 +123,15 @@ function commentsForParagraph(paragraphId) {
   word-break: break-word;
 }
 
-.annotation-comment small {
+.inline-comment small {
   margin-top: 4px;
   color: var(--color-text-muted);
 }
 
-@media (min-width: 860px) {
-  .ai-annotation-preview {
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
+@media (max-width: 640px) {
+  .annotation-summary {
+    flex-direction: column;
+    gap: 4px;
   }
 }
 </style>

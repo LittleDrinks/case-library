@@ -26,6 +26,7 @@ test:
 		pytest; \
 	else \
 		set -e; \
+		if [ -f backend/test_contract_helpers.py ]; then python backend/test_contract_helpers.py; fi; \
 		if [ -f backend/test_prompt_injection.py ]; then python backend/test_prompt_injection.py; fi; \
 		if [ -f backend/test_submit_flow.py ]; then python backend/test_submit_flow.py; fi; \
 	fi

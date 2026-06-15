@@ -3,7 +3,10 @@
     尚未运行。点击下方按钮获取作者侧自查建议。
   </div>
 
-  <div v-else-if="state.status === 'loading'" class="ai-placeholder">正在请求后端 AI 自查…</div>
+  <div v-else-if="state.status === 'loading'" class="ai-placeholder ai-loading">
+    <span class="ai-spinner" aria-hidden="true"></span>
+    <span>正在生成段落批注版本…</span>
+  </div>
 
   <div v-else-if="state.status === 'error'" class="ai-error">
     {{ state.error }}
@@ -68,6 +71,28 @@ const hasAnnotationPreview = computed(() =>
 
 .ai-placeholder {
   color: var(--color-text-muted);
+}
+
+.ai-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(141, 27, 53, 0.16);
+  border-top-color: var(--color-brand);
+  border-radius: 50%;
+  animation: ai-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ai-error {

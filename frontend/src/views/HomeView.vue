@@ -124,45 +124,6 @@
       </div>
     </section>
 
-    <!-- Detail Modal -->
-    <div v-if="detailCase" class="modal-overlay" @click.self="closeDetail">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title">
-        <div class="modal-header">
-          <h3 id="detail-title">{{ detailCase.title }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭" @click="closeDetail">
-            ×
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="detail-badges">
-            <span class="badge-type">{{ typeLabel(detailCase.type) }}</span>
-            <span v-if="detailCase.theme" class="badge-theme">{{ detailCase.theme }}</span>
-            <span class="badge-status">已通过</span>
-          </div>
-          <div class="detail-meta">
-            <span v-if="detailCase.author">作者: {{ detailCase.author }}</span>
-            <span v-if="detailCase.department">部门: {{ detailCase.department }}</span>
-            <span>日期: {{ formatDate(detailCase.created_at) }}</span>
-            <span>浏览 {{ detailCase.view_count || 0 }}</span>
-            <span>点赞 {{ detailCase.like_count || 0 }}</span>
-          </div>
-          <div class="detail-content">
-            <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
-          </div>
-          <div v-if="detailCase.source_material" class="detail-source">
-            <strong>来源材料：</strong>
-            <div class="detail-source-body">{{ detailCase.source_material }}</div>
-          </div>
-          <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
-            <strong>关键词：</strong>
-            <span v-for="k in detailCase.keywords" :key="k" class="keyword-tag">{{ k }}</span>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn-secondary" @click="closeDetail">关闭</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -172,9 +133,7 @@ import {
   fetchStatistics,
   fetchTrendingCases,
   fetchLatestCases,
-  fetchPublicCaseDetail,
 } from '../api/cases.js';
-import { notify } from '../utils/toast.js';
 
 const stats = ref({ total_cases: 0, total_views: 0, total_likes: 0, by_type: {}, by_theme: {} });
 const statsLoading = ref(false);
@@ -187,8 +146,6 @@ const trendingError = ref('');
 const latestCases = ref([]);
 const latestLoading = ref(false);
 const latestError = ref('');
-
-const detailCase = ref(null);
 
 const typeCount = computed(() => Object.keys(stats.value.by_type || {}).length);
 
@@ -280,21 +237,8 @@ async function loadLatest() {
   }
 }
 
-async function openDetail(caseId) {
-  try {
-    const res = await fetchPublicCaseDetail(caseId);
-    if (res?.success && res.data) {
-      detailCase.value = res.data;
-    } else {
-      throw new Error(res?.message || '加载详情失败');
-    }
-  } catch (err) {
-    notify(err.message || '加载案例详情失败', 'error');
-  }
-}
-
-function closeDetail() {
-  detailCase.value = null;
+function openDetail(caseId) {
+  window.location.hash = `library?case=${encodeURIComponent(caseId)}`;
 }
 
 onMounted(() => {
@@ -560,188 +504,6 @@ onMounted(() => {
   color: var(--color-brand-dark);
 }
 
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.modal-panel {
-  width: 100%;
-  max-width: 720px;
-  max-height: calc(100vh - 32px);
-  background: var(--color-surface);
-  border-radius: 10px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text);
-  line-height: 1.4;
-  padding-right: 16px;
-}
-
-.modal-close {
-  background: transparent;
-  border: 0;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.detail-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.badge-type {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-brand);
-  background: var(--color-brand-light);
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-
-.badge-theme {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: #f3f4f6;
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-
-.badge-status {
-  font-size: 12px;
-  font-weight: 700;
-  color: #166534;
-  background: #dcfce7;
-  padding: 3px 10px;
-  border-radius: 999px;
-}
-
-.detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-bottom: 18px;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
-.detail-content {
-  margin-bottom: 16px;
-}
-
-.detail-source {
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  background: #f9fafb;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-.detail-source strong {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 13px;
-  color: var(--color-text);
-}
-
-.detail-source-body {
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.detail-content-body {
-  font-size: 15px;
-  line-height: 1.8;
-  color: var(--color-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.detail-keywords {
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-
-.detail-keywords strong {
-  color: var(--color-text);
-}
-
-.keyword-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  margin: 2px 4px 2px 0;
-  background: var(--color-brand-light);
-  color: var(--color-brand);
-  font-size: 12px;
-  border-radius: 4px;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-
-.btn-secondary {
-  padding: 8px 18px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-secondary:hover {
-  background: rgba(29, 35, 47, 0.04);
-}
-
 /* Responsive */
 @media (max-width: 1024px) {
   .case-cards {
@@ -776,13 +538,6 @@ onMounted(() => {
     gap: 12px;
   }
 
-  .modal-body {
-    padding: 14px;
-  }
-
-  .modal-footer {
-    padding: 10px 14px;
-  }
 }
 
 @media (max-width: 390px) {

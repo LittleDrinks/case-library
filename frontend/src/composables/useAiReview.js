@@ -20,6 +20,7 @@ function createEmptyReviewState() {
     parse_error: null,
     error: "",
     comments: [],
+    summary: null,
     version: null,
   };
 }
@@ -122,11 +123,18 @@ export function useAiReview({
     };
 
     if (caseId.value) {
-      await updateCase(caseId.value, {
-        ...payload,
-        author: displayAuthor.value,
-        change_reason: "AI 审核前更新",
-      });
+      try {
+        await updateCase(caseId.value, {
+          ...payload,
+          author: displayAuthor.value,
+          change_reason: "AI 审核前更新",
+        });
+      } catch (err) {
+        const detail = err.data?.detail || err.message || "";
+        if (detail !== "案例没有实际变更") {
+          throw err;
+        }
+      }
       return caseId.value;
     }
 
@@ -150,6 +158,11 @@ export function useAiReview({
           answer: state.answer,
           parsed: state.parsed,
           parse_error: state.parse_error,
+          version_id: state.version?.id || null,
+          version_number: state.version?.version_number || null,
+          version: state.version || null,
+          comments: state.comments || [],
+          summary: state.summary || null,
           reviewed_at: new Date().toISOString(),
         };
       })
@@ -217,6 +230,7 @@ export function useAiReview({
       latestReviewVersionId.value = version.id || null;
       state.status = "success";
       state.comments = result.comments || [];
+      state.summary = result.summary || null;
       state.version = version || null;
       state.answer =
         state.comments.map((comment) => comment.message).join("\n") || "AI 未返回段落批注。";

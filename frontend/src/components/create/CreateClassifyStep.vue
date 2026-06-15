@@ -1,97 +1,85 @@
 <template>
   <div class="classify-step">
-    <div class="hint-banner">
-      <span class="hint-icon" aria-hidden="true"></span>
-      <span>不确定分类？可点击右下角 AI 助手，根据已填写内容获取一次本地建议。</span>
-    </div>
-
-    <div class="field">
-      <label for="ccf-type">
-        案例类型 <span class="required" aria-hidden="true">*</span>
-      </label>
-      <select
-        id="ccf-type"
-        v-model="form.type"
-        :aria-invalid="!!errors.type"
-        @change="$emit('touch', 'type')"
-      >
-        <option disabled value="">请选择案例类型</option>
-        <option v-for="(label, key) in constants.case_types" :key="key" :value="key">
-          {{ label }}
-        </option>
-      </select>
-      <div class="field-help">类型决定案例在库中的展示分类与主要使用场景。</div>
+    <div class="tag-section">
+      <div class="tag-section-title">
+        学科领域 <span class="required" aria-hidden="true">*</span>
+      </div>
+      <div class="tag-grid">
+        <button
+          v-for="(label, key) in constants.case_types"
+          :key="key"
+          type="button"
+          :class="['tag-chip', { selected: form.type === key }]"
+          :aria-pressed="form.type === key"
+          @click="selectType(key)"
+        >
+          <span class="tag-checkbox" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+          <span class="tag-label">{{ label }}</span>
+        </button>
+      </div>
+      <div class="field-help">对应当前案例类型字段，用于案例在库中的展示分类与主要使用场景。</div>
       <div v-if="errors.type" class="field-error" role="alert">{{ errors.type }}</div>
     </div>
 
-    <div class="field">
-      <label for="ccf-theme">
-        案例主题 <span class="required" aria-hidden="true">*</span>
-      </label>
-      <select
-        id="ccf-theme"
-        v-model="form.theme"
-        :aria-invalid="!!errors.theme"
-        @change="$emit('touch', 'theme')"
-      >
-        <option disabled value="">请选择案例主题</option>
-        <option v-for="t in constants.themes" :key="t" :value="t">{{ t }}</option>
-      </select>
+    <div class="tag-section">
+      <div class="tag-section-title">
+        思政主题 <span class="required" aria-hidden="true">*</span>
+      </div>
+      <div class="tag-grid">
+        <button
+          v-for="theme in constants.themes"
+          :key="theme"
+          type="button"
+          :class="['tag-chip', { selected: form.theme === theme }]"
+          :aria-pressed="form.theme === theme"
+          @click="selectTheme(theme)"
+        >
+          <span class="tag-checkbox" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+          <span class="tag-label">{{ theme }}</span>
+        </button>
+      </div>
       <div class="field-help">主题用于跨类型的关键词聚合与检索。</div>
       <div v-if="errors.theme" class="field-error" role="alert">{{ errors.theme }}</div>
     </div>
 
-    <!-- Transient local helper panel -->
-    <div
-      v-if="showHelper"
-      class="helper-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="helper-title"
-    >
-      <div class="helper-header">
-        <span id="helper-title">AI 分类助手（本地建议）</span>
-        <button
-          type="button"
-          class="helper-close-btn"
-          aria-label="关闭"
-          @click="showHelper = false"
-        >
-          ×
-        </button>
+    <div class="tag-section">
+      <div class="tag-section-title">适用学段</div>
+      <div class="tag-grid compact">
+        <span class="tag-chip readonly selected">
+          <span class="tag-checkbox" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+          <span class="tag-label">本科生</span>
+        </span>
+        <span class="tag-chip readonly">
+          <span class="tag-checkbox" aria-hidden="true"></span>
+          <span class="tag-label">硕士研究生</span>
+        </span>
+        <span class="tag-chip readonly">
+          <span class="tag-checkbox" aria-hidden="true"></span>
+          <span class="tag-label">博士研究生</span>
+        </span>
       </div>
-      <div class="helper-body">
-        <p class="helper-desc">请输入您想咨询的问题，例如：“帮我推荐案例类型和主题”。</p>
-        <input v-model="helperInput" type="text" placeholder="输入问题…" @keyup.enter="runHelper" />
-        <button
-          type="button"
-          class="btn-helper"
-          :disabled="!helperInput.trim()"
-          @click="runHelper"
-        >
-          获取建议
-        </button>
-        <div v-if="helperResponse" class="helper-response" role="status" aria-live="polite">
-          {{ helperResponse }}
+    </div>
+
+    <div class="tip-card">
+      <span class="tip-icon" aria-hidden="true"></span>
+      <div>
+        <div class="tip-title">分类小贴士</div>
+        <div class="tip-text">
+          建议选择一个案例类型和一个思政主题。分类越准确，越有助于后续审核、检索与推荐。
         </div>
       </div>
     </div>
 
-    <button
-      type="button"
-      class="fab-helper"
-      aria-label="打开 AI 分类助手"
-      @click="showHelper = true"
-    >
-      <span class="helper-label-desktop">AI</span>
-      <span class="helper-label-mobile">AI 建议</span>
-    </button>
   </div>
 </template>
 
 <script setup>
-import { ref } from "vue";
-
 const props = defineProps({
   form: {
     type: Object,
@@ -107,40 +95,32 @@ const props = defineProps({
   },
 });
 
-defineEmits(["touch"]);
+const emit = defineEmits(["touch"]);
 
-const showHelper = ref(false);
-const helperInput = ref("");
-const helperResponse = ref("");
+function selectType(key) {
+  props.form.type = key;
+  emit("touch", "type");
+}
 
-function runHelper() {
-  const q = helperInput.value.trim();
-  if (!q) return;
-  const text = (props.form.title + " " + props.form.content).toLowerCase();
-  let type = "TYPE_A";
-  let theme = "铸魂育人";
-  if (text.includes("课程") || text.includes("教学")) type = "TYPE_A";
-  if (text.includes("共享") || text.includes("资源")) type = "TYPE_B";
-  if (text.includes("实践") || text.includes("活动") || text.includes("社会")) type = "TYPE_C";
-  if (text.includes("强国")) theme = "强国建设";
-  else if (text.includes("实践") || text.includes("育人")) theme = "实践育人";
-  else if (text.includes("数字") || text.includes("技术") || text.includes("网络")) theme = "数字赋能";
-  const typeLabel = props.constants.case_types[type] || type;
-  helperResponse.value = `根据当前内容，建议类型为「${typeLabel}」，主题选择「${theme}」。您也可以结合自身判断手动调整。`;
+function selectTheme(theme) {
+  props.form.theme = theme;
+  emit("touch", "theme");
 }
 </script>
 
 <style scoped>
-.field {
-  margin-bottom: 18px;
+.tag-section {
+  margin-bottom: 32px;
 }
 
-.field label {
-  display: block;
-  font-size: 13px;
+.tag-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 6px;
 }
 
 .required {
@@ -148,26 +128,81 @@ function runHelper() {
   margin-left: 2px;
 }
 
-select {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+.tag-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
-select:focus {
+.tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tag-chip.readonly {
+  cursor: default;
+}
+
+.tag-chip:hover,
+.tag-chip.selected {
   border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px var(--color-brand-light);
+  background: var(--color-brand-light);
+}
+
+.tag-chip.readonly:not(.selected):hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.tag-checkbox {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid #cccccc;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tag-checkbox svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+.tag-chip.selected .tag-checkbox {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.tag-chip.selected .tag-checkbox svg {
+  opacity: 1;
+}
+
+.tag-label {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .field-help {
-  margin-top: 4px;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--color-text-muted);
 }
@@ -181,178 +216,58 @@ select:focus {
   border-radius: 4px;
 }
 
-.hint-banner {
+.tip-card {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: #fefce8;
-  border: 1px solid #fde047;
-  border-radius: 6px;
-  margin-bottom: 18px;
-  font-size: 13px;
-  color: #713f12;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  background: var(--color-brand-light);
+  margin: 24px 0;
 }
 
-.hint-icon {
-  width: 18px;
-  height: 18px;
+.tip-icon {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: 2px solid currentColor;
+  color: var(--color-brand);
   position: relative;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
-.hint-icon::before,
-.hint-icon::after {
-  content: "";
+.tip-icon::before {
+  content: "i";
   position: absolute;
-  background: currentColor;
-  border-radius: 1px;
-}
-
-.hint-icon::before {
-  left: 7px;
-  top: 3px;
-  width: 2px;
-  height: 8px;
-}
-
-.hint-icon::after {
-  left: 7px;
-  top: 12px;
-  width: 2px;
-  height: 2px;
-}
-
-.helper-panel {
-  position: fixed;
-  right: 16px;
-  bottom: 80px;
-  width: min(92vw, 360px);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-  z-index: 110;
-}
-
-.helper-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.helper-close-btn {
-  background: transparent;
-  border: 0;
-  font-size: 20px;
-  line-height: 1;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.helper-body {
-  padding: 14px;
-}
-
-.helper-desc {
-  margin: 0 0 10px;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: Georgia, serif;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  font-weight: 700;
+  line-height: 1;
 }
 
-.helper-body input[type="text"] {
-  width: 100%;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  outline: none;
-}
-
-.btn-helper {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid var(--color-brand);
-  border-radius: 6px;
-  background: var(--color-brand);
-  color: #fff;
+.tip-title {
+  margin-bottom: 4px;
   font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-helper:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.helper-response {
-  margin-top: 10px;
-  padding: 10px;
-  background: #f6f7f9;
-  border-radius: 6px;
-  font-size: 13px;
   color: var(--color-text);
-  line-height: 1.5;
 }
 
-.fab-helper {
-  position: fixed;
-  right: 16px;
-  bottom: 24px;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  background: var(--color-brand);
-  color: #fff;
-  border: 0;
-  font-size: 20px;
-  cursor: pointer;
-  box-shadow: 0 6px 16px rgba(141, 27, 53, 0.25);
-  z-index: 105;
+.tip-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
 }
 
-.helper-label-mobile {
-  display: none;
-}
-
-@media (max-width: 859px) {
-  .fab-helper {
-    position: static;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 12px 0 0 auto;
-    width: auto;
-    min-width: 88px;
-    height: 38px;
-    padding: 0 14px;
-    border: 1px solid rgba(141, 27, 53, 0.22);
-    background: var(--color-brand-light);
-    color: var(--color-brand);
-    font-size: 14px;
-    font-weight: 700;
-    border-radius: 7px;
-    box-shadow: none;
+@media (min-width: 700px) {
+  .tag-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
 
-  .helper-label-desktop {
-    display: none;
-  }
-
-  .helper-label-mobile {
-    display: inline;
+  .tag-grid.compact {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 </style>

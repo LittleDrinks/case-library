@@ -1,157 +1,22 @@
 <template>
   <div class="case-library">
-    <!-- Header -->
-    <div class="library-header">
-      <h1 class="page-title">案例库</h1>
-      <p class="page-desc">浏览和搜索已公开的思政案例资源。</p>
-    </div>
-
-    <!-- Search and filters -->
-    <div class="filter-bar">
-      <div class="search-box">
-        <BaseInput
-          v-model="searchInput"
-          placeholder="搜索案例标题、内容..."
-          @keydown.enter="applySearch"
-        >
-          <template #suffix>
-            <BaseButton variant="primary" size="md" @click="applySearch">
-              搜索
-            </BaseButton>
-          </template>
-        </BaseInput>
-      </div>
-      <div class="filter-selects">
-        <BaseSelect
-          v-model="filterType"
-          :options="typeOptions"
-          placeholder="全部类型"
-          @change="applyFilters"
-        />
-        <BaseSelect
-          v-model="filterTheme"
-          :options="themes"
-          placeholder="全部主题"
-          @change="applyFilters"
-        />
-      </div>
-    </div>
-
-    <!-- Active filter chips -->
-    <div v-if="hasActiveFilters" class="filter-chips">
-      <span v-if="appliedKeyword" class="chip">
-        搜索: {{ appliedKeyword }}
-        <button type="button" class="chip-remove" @click="clearSearch">×</button>
-      </span>
-      <span v-if="filterType" class="chip">
-        类型: {{ typeLabel(filterType) }}
-        <button type="button" class="chip-remove" @click="clearType">×</button>
-      </span>
-      <span v-if="filterTheme" class="chip">
-        主题: {{ filterTheme }}
-        <button type="button" class="chip-remove" @click="clearTheme">×</button>
-      </span>
-      <BaseButton variant="ghost" size="sm" @click="clearAllFilters">
-        清除全部
-      </BaseButton>
-    </div>
-
-    <!-- Results count -->
-    <div v-if="!loading && cases.length > 0" class="results-count">
-      共 {{ total }} 条结果
-    </div>
-
-    <!-- Loading -->
-    <EmptyState
-      v-if="loading"
-      variant="loading"
-      title="加载中…"
-      message="请稍候"
-    />
-
-    <!-- Error -->
-    <EmptyState
-      v-else-if="error"
-      variant="error"
-      :title="error"
-      message="加载案例失败，请稍后重试"
-    >
-      <template #action>
-        <BaseButton variant="secondary" size="md" @click="loadCases">
-          重试
+    <section v-if="detailCase" class="case-detail-page">
+      <div class="detail-toolbar">
+        <BaseButton type="button" variant="secondary" size="md" @click="closeDetail">
+          返回案例库
         </BaseButton>
-      </template>
-    </EmptyState>
+        <BaseButton
+          type="button"
+          :class="['btn-like-lg', { liked: isLiked(detailCase.id) }]"
+          variant="secondary"
+          size="md"
+          @click="toggleLike(detailCase.id)"
+        >
+          {{ isLiked(detailCase.id) ? '已点赞' : '点赞' }}
+        </BaseButton>
+      </div>
 
-    <!-- Empty -->
-    <EmptyState
-      v-else-if="cases.length === 0"
-      variant="empty"
-      title="暂无案例"
-      message="当前条件下没有找到公开案例"
-    />
-
-    <!-- Case grid -->
-    <div v-else class="case-grid">
-      <BaseCard
-        v-for="c in cases"
-        :key="c.id"
-        class="case-card"
-        hoverable
-        padding="md"
-        :data-case-id="c.id"
-      >
-        <div class="case-card-main" @click="openDetail(c.id)">
-          <div class="case-card-top">
-            <BaseBadge variant="brand" class="case-type">
-              {{ typeLabel(c.type) }}
-            </BaseBadge>
-            <BaseBadge v-if="c.theme" variant="secondary" class="case-theme">
-              {{ c.theme }}
-            </BaseBadge>
-          </div>
-          <h3 class="case-title">{{ c.title }}</h3>
-          <div class="case-meta-row">
-            <span v-if="c.author" class="meta-item">作者: {{ c.author }}</span>
-            <span v-if="c.department" class="meta-item">部门: {{ c.department }}</span>
-            <span class="meta-item">日期: {{ formatDate(c.created_at) }}</span>
-          </div>
-          <p class="case-preview">{{ preview(c.content) }}</p>
-          <div class="case-stats-row">
-            <span>浏览 {{ c.view_count || 0 }}</span>
-            <span>点赞 {{ c.like_count || 0 }}</span>
-          </div>
-        </div>
-        <div class="case-card-actions">
-          <BaseButton
-            type="button"
-            :class="['btn-like', { liked: isLiked(c.id) }]"
-            variant="ghost"
-            size="sm"
-            @click.stop="toggleLike(c.id)"
-          >
-            {{ isLiked(c.id) ? '已点赞' : '点赞' }}
-          </BaseButton>
-          <BaseButton
-            type="button"
-            class="btn-view"
-            variant="ghost"
-            size="sm"
-            @click.stop="openDetail(c.id)"
-          >
-            查看详情
-          </BaseButton>
-        </div>
-      </BaseCard>
-    </div>
-
-    <!-- Detail Modal -->
-    <BaseModal
-      :model-value="detailCase !== null"
-      :title="detailCase?.title"
-      @update:model-value="closeDetail"
-    >
-      <template #body>
+      <div class="detail-hero">
         <div class="detail-badges">
           <BaseBadge variant="brand" class="badge-type">
             {{ typeLabel(detailCase.type) }}
@@ -163,6 +28,7 @@
             已通过
           </BaseBadge>
         </div>
+        <h1 class="detail-title">{{ detailCase.title }}</h1>
         <div class="detail-meta">
           <span v-if="detailCase.author">作者: {{ detailCase.author }}</span>
           <span v-if="detailCase.department">部门: {{ detailCase.department }}</span>
@@ -170,45 +36,187 @@
           <span>浏览 {{ detailCase.view_count || 0 }}</span>
           <span>点赞 {{ detailLikeCount }}</span>
         </div>
-        <div class="detail-content">
-          <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
-        </div>
-        <div v-if="detailCase.source_material" class="detail-source">
-          <strong>来源材料：</strong>
-          <div class="detail-source-body">{{ detailCase.source_material }}</div>
-        </div>
-        <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
-          <strong>关键词：</strong>
-          <BaseBadge
-            v-for="k in detailCase.keywords"
-            :key="k"
-            variant="brand"
-            class="keyword-tag"
+      </div>
+
+      <div class="detail-reader-layout">
+        <main class="detail-reader-main">
+          <CaseReader :content="detailCase.content" title="案例正文" />
+        </main>
+        <aside class="detail-reader-side">
+          <CaseReader
+            v-if="detailCase.source_material"
+            :content="detailCase.source_material"
+            title="来源材料"
+            compact
+          />
+          <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
+            <strong>关键词</strong>
+            <div class="keyword-list">
+              <BaseBadge
+                v-for="k in detailCase.keywords"
+                :key="k"
+                variant="brand"
+                class="keyword-tag"
+              >
+                {{ k }}
+              </BaseBadge>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <template v-else>
+      <!-- Header -->
+      <div class="library-header">
+        <h1 class="page-title">案例库</h1>
+        <p class="page-desc">浏览和搜索已公开的思政案例资源。</p>
+      </div>
+
+      <!-- Search and filters -->
+      <div class="filter-bar">
+        <div class="search-box">
+          <BaseInput
+            v-model="searchInput"
+            placeholder="搜索案例标题、内容..."
+            @keydown.enter="applySearch"
           >
-            {{ k }}
-          </BaseBadge>
+            <template #suffix>
+              <BaseButton variant="primary" size="md" @click="applySearch">
+                搜索
+              </BaseButton>
+            </template>
+          </BaseInput>
         </div>
-      </template>
-      <template #footer>
-        <BaseButton
-          type="button"
-          :class="['btn-like-lg', { liked: isLiked(detailCase.id) }]"
-          variant="secondary"
-          size="md"
-          @click="toggleLike(detailCase.id)"
+        <div class="filter-selects">
+          <BaseSelect
+            v-model="filterType"
+            :options="typeOptions"
+            placeholder="全部类型"
+            @change="applyFilters"
+          />
+          <BaseSelect
+            v-model="filterTheme"
+            :options="themes"
+            placeholder="全部主题"
+            @change="applyFilters"
+          />
+        </div>
+      </div>
+
+      <!-- Active filter chips -->
+      <div v-if="hasActiveFilters" class="filter-chips">
+        <span v-if="appliedKeyword" class="chip">
+          搜索: {{ appliedKeyword }}
+          <button type="button" class="chip-remove" @click="clearSearch">×</button>
+        </span>
+        <span v-if="filterType" class="chip">
+          类型: {{ typeLabel(filterType) }}
+          <button type="button" class="chip-remove" @click="clearType">×</button>
+        </span>
+        <span v-if="filterTheme" class="chip">
+          主题: {{ filterTheme }}
+          <button type="button" class="chip-remove" @click="clearTheme">×</button>
+        </span>
+        <BaseButton variant="ghost" size="sm" @click="clearAllFilters">
+          清除全部
+        </BaseButton>
+      </div>
+
+      <!-- Results count -->
+      <div v-if="!loading && cases.length > 0" class="results-count">
+        共 {{ total }} 条结果
+      </div>
+
+      <!-- Loading -->
+      <EmptyState
+        v-if="loading"
+        variant="loading"
+        title="加载中…"
+        message="请稍候"
+      />
+
+      <!-- Error -->
+      <EmptyState
+        v-else-if="error"
+        variant="error"
+        :title="error"
+        message="加载案例失败，请稍后重试"
+      >
+        <template #action>
+          <BaseButton variant="secondary" size="md" @click="loadCases">
+            重试
+          </BaseButton>
+        </template>
+      </EmptyState>
+
+      <!-- Empty -->
+      <EmptyState
+        v-else-if="cases.length === 0"
+        variant="empty"
+        title="暂无案例"
+        message="当前条件下没有找到公开案例"
+      />
+
+      <!-- Case grid -->
+      <div v-else class="case-grid">
+        <BaseCard
+          v-for="c in cases"
+          :key="c.id"
+          class="case-card"
+          hoverable
+          padding="md"
+          :data-case-id="c.id"
         >
-          {{ isLiked(detailCase.id) ? '已点赞' : '点赞' }}
-        </BaseButton>
-        <BaseButton variant="secondary" size="md" @click="closeDetail">
-          关闭
-        </BaseButton>
-      </template>
-    </BaseModal>
+          <div class="case-card-main" @click="openDetail(c.id)">
+            <div class="case-card-top">
+              <BaseBadge variant="brand" class="case-type">
+                {{ typeLabel(c.type) }}
+              </BaseBadge>
+              <BaseBadge v-if="c.theme" variant="secondary" class="case-theme">
+                {{ c.theme }}
+              </BaseBadge>
+            </div>
+            <h3 class="case-title">{{ c.title }}</h3>
+            <div class="case-meta-row">
+              <span v-if="c.author" class="meta-item">作者: {{ c.author }}</span>
+              <span v-if="c.department" class="meta-item">部门: {{ c.department }}</span>
+              <span class="meta-item">日期: {{ formatDate(c.created_at) }}</span>
+            </div>
+            <p class="case-preview">{{ preview(c.content) }}</p>
+            <div class="case-stats-row">
+              <span>浏览 {{ c.view_count || 0 }}</span>
+              <span>点赞 {{ c.like_count || 0 }}</span>
+            </div>
+          </div>
+          <div class="case-card-actions">
+            <BaseButton
+              type="button"
+              :class="['btn-like', { liked: isLiked(c.id) }]"
+              variant="ghost"
+              size="sm"
+              @click.stop="toggleLike(c.id)"
+            >
+              {{ isLiked(c.id) ? '已点赞' : '点赞' }}
+            </BaseButton>
+            <BaseButton
+              type="button"
+              class="btn-view"
+              variant="ghost"
+              size="sm"
+              @click.stop="openDetail(c.id)"
+            >
+              查看详情
+            </BaseButton>
+          </div>
+        </BaseCard>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import {
   fetchCaseConstants,
   listPublicCases,
@@ -223,8 +231,8 @@ import BaseInput from '../components/ui/BaseInput.vue';
 import BaseSelect from '../components/ui/BaseSelect.vue';
 import BaseCard from '../components/ui/BaseCard.vue';
 import BaseBadge from '../components/ui/BaseBadge.vue';
-import BaseModal from '../components/ui/BaseModal.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
+import CaseReader from '../components/cases/CaseReader.vue';
 
 const props = defineProps({
   searchTrigger: { type: Object, default: () => ({ keyword: '', nonce: 0 }) },
@@ -263,6 +271,7 @@ const typeOptions = computed(() =>
 
 // Track last handled search trigger nonce to avoid re-applying stale keywords
 let lastHandledNonce = 0;
+let lastOpenedHashCaseId = '';
 
 function applyExternalSearch() {
   const t = props.searchTrigger;
@@ -428,6 +437,16 @@ function clearAllFilters() {
 }
 
 async function openDetail(caseId) {
+  const targetHash = `library?case=${encodeURIComponent(caseId)}`;
+  const currentHash = window.location.hash.replace('#', '');
+  if (currentHash !== targetHash) {
+    window.location.hash = targetHash;
+    return;
+  }
+  await loadDetail(caseId);
+}
+
+async function loadDetail(caseId) {
   try {
     const res = await fetchPublicCaseDetail(caseId);
     if (res?.success && res.data) {
@@ -446,6 +465,25 @@ async function openDetail(caseId) {
 
 function closeDetail() {
   detailCase.value = null;
+  lastOpenedHashCaseId = '';
+  if (window.location.hash.replace('#', '').startsWith('library?case=')) {
+    window.location.hash = 'library';
+  }
+}
+
+function readDetailFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  const [viewId, query = ''] = hash.split('?');
+  if (viewId !== 'library') return;
+  const caseId = new URLSearchParams(query).get('case') || '';
+  if (!caseId) {
+    detailCase.value = null;
+    lastOpenedHashCaseId = '';
+    return;
+  }
+  if (caseId === lastOpenedHashCaseId && detailCase.value) return;
+  lastOpenedHashCaseId = caseId;
+  loadDetail(caseId);
 }
 
 onMounted(async () => {
@@ -463,6 +501,12 @@ onMounted(async () => {
   } catch {
     // Safe fallbacks already set
   }
+  readDetailFromHash();
+  window.addEventListener('hashchange', readDetailFromHash);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', readDetailFromHash);
 });
 </script>
 
@@ -661,69 +705,88 @@ onMounted(async () => {
   color: var(--color-brand);
 }
 
-/* Detail modal content */
+.case-detail-page {
+  width: 100%;
+}
+
+.detail-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.detail-hero {
+  margin-bottom: 20px;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
 .detail-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+}
+
+.detail-title {
+  margin: 0 0 12px;
+  font-size: 28px;
+  line-height: 1.35;
+  color: var(--color-text);
 }
 
 .detail-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  margin-bottom: 18px;
   font-size: 13px;
   color: var(--color-text-secondary);
 }
 
-.detail-content {
-  margin-bottom: 16px;
+.detail-reader-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 20px;
+  align-items: start;
 }
 
-.detail-content-body {
-  font-size: 15px;
-  line-height: 1.8;
-  color: var(--color-text);
-  white-space: pre-wrap;
-  word-break: break-word;
+.detail-reader-main,
+.detail-reader-side {
+  min-width: 0;
 }
 
-.detail-source {
-  margin: 0 0 16px;
-  padding: 12px 14px;
-  border: 1px solid rgba(141, 27, 53, 0.16);
-  border-radius: 8px;
-  background: rgba(141, 27, 53, 0.04);
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
-.detail-source strong {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--color-text);
-}
-
-.detail-source-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.7;
+.detail-reader-side {
+  position: sticky;
+  top: 88px;
+  display: grid;
+  gap: 16px;
 }
 
 .detail-keywords {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
   font-size: 13px;
-  margin-bottom: 8px;
 }
 
 .detail-keywords strong {
+  display: block;
+  margin-bottom: 10px;
   color: var(--color-text);
+}
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .keyword-tag {
   display: inline-block;
-  margin: 2px 4px 2px 0;
 }
 
 .btn-like-lg {
@@ -765,6 +828,26 @@ onMounted(async () => {
 @media (max-width: 720px) {
   .case-library {
     padding: 20px 12px 32px;
+  }
+
+  .detail-toolbar {
+    flex-direction: column;
+  }
+
+  .detail-title {
+    font-size: 22px;
+  }
+
+  .detail-hero {
+    padding: 18px;
+  }
+
+  .detail-reader-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-reader-side {
+    position: static;
   }
 
   .filter-bar {

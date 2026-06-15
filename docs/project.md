@@ -37,7 +37,10 @@ AI 约束见 `docs/ai.md`。
 - 演示数据脚本：`backend/demo.py`
 - 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
 - 本地 smoke/debug：`backend/smoke_test_mongo.py`
-- 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用
+- 单元脚本：`backend/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
+  规范化、AI review summary 规范化和公开案例快照序列化白名单。
+- 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用，仍作为提交、AI/人工审核、
+  权限、公开可见性和统计缓存主流程的回归门禁。
 - Alpha/E2E seed：`scripts/seed_e2e_accounts.py`，仅在 `ENABLE_DEMO_SEED=true` 时运行；
   默认 `docker-compose.yml` 不再调用，开发/e2e 通过 `docker-compose.dev.yml` 显式启用
 
@@ -109,6 +112,12 @@ git diff --check
 
 小范围文档修改可只运行 `git diff --check`，并在汇报中说明未跑完整门禁。
 
+## E2E 产物
+
+Playwright 默认输出到忽略目录；常规截图/trace 产物在 `agent-runs/screenshots/`，baseline
+demo 视频按 `docs/development.md` 的命令生成到 `agent-runs/demo-media/`。这些产物用于
+本地验收和交接，不进入 git。
+
 ## 数据和资源
 
 - 原始运行数据、Mongo dump、上传文件和未审材料不得提交。
@@ -121,5 +130,7 @@ git diff --check
 - `docs/api.md` 只做索引；真实契约以 FastAPI OpenAPI 为准。
 - `POST /api/cases/{case_id}/ai-review` 已是 alpha 主流程的版本化段落批注接口；
   `/api/ai/chat` 仅作为兼容自查端点保留。
+- 后端模块拆分第一阶段边界见 `docs/backend-module-split.md`；拆分前必须保持
+  `docs/api.md` 的前端 baseline 契约不变。
 - 当前前端创建流仍是五步 wizard，而不是 PRD 理想形态中的单页输入 + 独立只读审核页。
 - 当前 E2E 门禁覆盖 alpha 主路径，但仍偏精简；扩大稳定回归矩阵见 issue #78。

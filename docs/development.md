@@ -47,6 +47,25 @@ docker compose down
 允许在宿主机执行的操作仅限于：git、文档编辑、文件搜索、网络诊断、Docker/Compose
 控制命令。所有项目运行、依赖安装、lint、测试、构建都必须在容器内完成。
 
+## 测试布局第一阶段
+
+当前先不搬动测试文件，避免在 alpha verifier 未稳定前同时修改路径、CI 和测试语义。第一阶段
+布局和覆盖边界如下：
+
+- `backend/test_contract_helpers.py`：后端单元脚本，只覆盖不需要启动 FastAPI 或真实 MongoDB
+  流程的 contract helper。当前范围包括段落拆分、段落批注规范化、AI review summary 规范化、
+  公开案例字段白名单和 reviewed version 公开快照行为。
+- `backend/test_prompt_injection.py`：产品 prompt/template 的注入边界检查。
+- `backend/test_submit_flow.py`：后端集成门禁，继续覆盖登录改密、提交审核、AI/人工批注版本、
+  作者/管理员权限、隐藏/公开可见性、公开搜索/推荐/统计缓存等主流程，不用单元测试替代。
+- `backend/smoke_test_mongo.py`：本地 MongoDB smoke/debug 脚本，不属于 `make check` 默认门禁。
+- `frontend/tests/smoke.spec.js`、`frontend/tests/audit.spec.js`、`frontend/tests/demo-media.spec.js`：
+  浏览器 E2E/baseline 验收；`frontend/tests/support/*` 只放浏览器测试辅助函数。
+
+后续等当前门禁稳定后，再按 `tests/backend/unit`、`tests/backend/integration`、
+`frontend/tests/e2e` 和 `frontend/tests/support` 迁移；迁移 PR 必须同步 `Makefile`、CI/compose
+命令和本文档。
+
 ## 前端依赖异常
 
 如果 Vite 或 node_modules 损坏，只重置前端依赖卷：
@@ -107,6 +126,33 @@ make smoke-e2e
 Docker CLI/daemon 的宿主机执行，并通过 `SMOKE_E2E_COMPOSE_FILE=docker-compose.dev.yml`
 把测试内的 compose exec 指向同一套 dev compose 服务。
 
+## E2E demo 视频
+
+issue #161 的交接视频使用 Playwright 录制，不提交视频二进制。先启动带 seed 的 dev
+compose，再在 `e2e` profile 容器内运行专用 spec：
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e npm run test:e2e:demo-media
+```
+
+该命令只跑桌面端 `frontend/tests/demo-media.spec.js`，并把 Playwright 产物写入
+`agent-runs/demo-media/`。每个测试用例生成一段 `.webm`，对应四条 baseline 用户路径：
+
+- 教师从“我的提交”进入创建，填写基本信息、正文、来源材料和分类，生成 AI 只读审核版本，
+  查看 AI 批注并提交人工审核。
+- 管理员进入审核管理，查看提交版本、预览和 AI 自查意见，添加人工段落批注并退回。
+- 作者在“我的提交”查看退回结果、AI/人工段落批注，复制版本并重新提交修改。
+- 管理员通过修改稿后，匿名用户从首页/案例库浏览公开案例，搜索和筛选公开结果，并确认不
+  展示 AI/人工审核内部信息。
+
+`agent-runs/`、`frontend/test-results/`、`frontend/playwright-report/` 和相关 trace/report
+目录已被 `.gitignore` 覆盖。若需要临时换目录或强制开启视频，可复用同一配置入口：
+
+```bash
+PLAYWRIGHT_OUTPUT_DIR=../agent-runs/demo-media PLAYWRIGHT_VIDEO=on npm run test:e2e -- tests/demo-media.spec.js --project=chromium-desktop
+```
+
 ## 开发约束
 
 - 不提交 `.env`、密钥、私有 URL、代理地址。
@@ -116,6 +162,8 @@ Docker CLI/daemon 的宿主机执行，并通过 `SMOKE_E2E_COMPOSE_FILE=docker-
 - 改 API 时同步 schema、测试和 `docs/api.md`。
 - 改 AI 行为时同步 `docs/ai.md` 和相关测试。
 - 改产品流程时先更新 `docs/prd.md`。
+- 拆分后端模块前先阅读 `docs/backend-module-split.md`，并确认 `docs/api.md` 中的前端
+  baseline 契约不变。
 
 ## PR 与合并规范
 

@@ -19,6 +19,254 @@
       <p>审核管理功能仅限管理员使用。</p>
     </div>
 
+    <section v-if="reviewingCase" class="review-workspace">
+      <div class="review-workspace-toolbar">
+        <button type="button" class="btn-secondary" @click="closeReviewModal">返回审核列表</button>
+        <button type="button" class="btn-secondary" @click="toggleReviewMode">
+          {{ reviewMode === 'review' ? '切换预览视图' : '切换审核视图' }}
+        </button>
+      </div>
+
+      <div class="review-workspace-header">
+        <div>
+          <div class="review-workspace-eyebrow">审核案例</div>
+          <h2>{{ reviewingCase.title }}</h2>
+          <div class="case-meta-row">
+            <span class="meta-item" v-if="reviewingCase.author">作者 {{ reviewingCase.author }}</span>
+            <span class="meta-item" v-if="reviewingCase.owner_username">账号 {{ reviewingCase.owner_username }}</span>
+            <span class="meta-item" v-if="reviewingCase.department">学院 {{ reviewingCase.department }}</span>
+            <span class="meta-item" v-if="reviewingCase.theme">主题 {{ reviewingCase.theme }}</span>
+          </div>
+        </div>
+        <span :class="['status-pill', statusPillClass(reviewingCase.status)]">
+          {{ statusLabel(reviewingCase.status) }}
+        </span>
+      </div>
+
+      <div :class="['review-workspace-grid', { preview: reviewMode === 'preview' }]">
+        <main class="review-document">
+          <div class="review-section-head">
+            <div>
+              <strong>{{ reviewMode === 'preview' ? '案例正文' : '提交版本' }}</strong>
+              <span v-if="reviewMode === 'preview'">当前案例内容</span>
+              <span v-else-if="selectedReviewVersion">v{{ selectedReviewVersion.version_number }} · {{ formatDate(selectedReviewVersion.created_at) }}</span>
+            </div>
+          </div>
+
+          <template v-if="reviewMode === 'preview'">
+            <div class="admin-detail-content" v-html="renderMarkdown(selectedReviewVersion?.content || reviewingCase.content || '暂无内容')"></div>
+            <div v-if="selectedReviewVersion?.source_material || reviewingCase.source_material" class="admin-source-block">
+              <strong>来源材料</strong>
+              <div v-html="renderMarkdown(selectedReviewVersion?.source_material || reviewingCase.source_material)"></div>
+            </div>
+          </template>
+
+          <div v-else-if="selectedReviewVersion" class="review-paragraph-list">
+            <article
+              v-for="paragraph in selectedReviewParagraphs"
+              :key="paragraph.paragraph_id"
+              :data-paragraph-id="paragraph.paragraph_id"
+              :class="[
+                'review-paragraph',
+                {
+                  active: reviewForm.paragraph_id === paragraph.paragraph_id,
+                  annotated: draftCommentsForParagraph(paragraph.paragraph_id).length,
+                },
+              ]"
+              @click="selectParagraph(paragraph.paragraph_id)"
+            >
+              <span>{{ paragraph.paragraph_id }}</span>
+              <div class="review-paragraph-text" v-html="renderMarkdown(paragraph.text)"></div>
+              <div
+                v-for="comment in aiCommentsForParagraph(paragraph.paragraph_id)"
+                :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
+                class="review-ai-inline"
+              >
+                <strong>AI 自查</strong>
+                <p>{{ comment.message }}</p>
+                <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
+              </div>
+              <div
+                v-for="(comment, index) in draftCommentsForParagraph(paragraph.paragraph_id)"
+                :key="`${comment.paragraph_id}-${index}-${comment.message}`"
+                class="review-draft-inline"
+              >
+                <strong>待提交批注</strong>
+                <p>{{ comment.message }}</p>
+                <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
+              </div>
+            </article>
+          </div>
+          <div v-else class="review-placeholder">暂无提交版本</div>
+        </main>
+
+        <aside v-if="reviewMode === 'review'" class="review-side-panel">
+          <section class="review-side-card">
+            <div class="field">
+              <label for="review-comment">审核意见</label>
+              <textarea
+                id="review-comment"
+                v-model="reviewForm.comment"
+                rows="5"
+                placeholder="可选：整体意见；具体问题可写在段落批注中。点击左侧段落添加批注。"
+              ></textarea>
+            </div>
+            <div class="field">
+              <label>审核结果 <span class="required">*</span></label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" v-model="reviewForm.status" value="approve" />
+                  <span>通过</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" v-model="reviewForm.status" value="reject" />
+                  <span>需修改</span>
+                </label>
+              </div>
+            </div>
+            <div class="review-submit-row">
+              <button type="button" class="btn-primary" :disabled="reviewing" @click="submitReview">
+                {{ reviewing ? '提交中…' : '提交审核' }}
+              </button>
+            </div>
+          </section>
+
+          <section class="review-side-card">
+            <div class="review-section-head compact">
+              <strong>段落批注</strong>
+              <span>{{ reviewForm.paragraph_id ? `当前：${reviewForm.paragraph_id}` : '点击左侧段落后填写' }}</span>
+            </div>
+            <div class="field field-inline">
+              <div>
+                <label for="paragraph-category">类型</label>
+                <select id="paragraph-category" v-model="reviewForm.category">
+                  <option value="source">来源</option>
+                  <option value="fact">事实</option>
+                  <option value="structure">结构</option>
+                  <option value="classification">分类</option>
+                  <option value="classroom">课堂</option>
+                  <option value="clarity">表达</option>
+                </select>
+              </div>
+              <div>
+                <label for="paragraph-severity">级别</label>
+                <select id="paragraph-severity" v-model="reviewForm.severity">
+                  <option value="info">提示</option>
+                  <option value="suggestion">建议</option>
+                  <option value="important">重要</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="paragraph-message">批注内容</label>
+              <textarea
+                id="paragraph-message"
+                v-model="reviewForm.message"
+                rows="4"
+                placeholder="针对所选段落填写修改意见"
+              ></textarea>
+            </div>
+            <div class="field">
+              <label for="paragraph-suggestion">修改建议</label>
+              <input
+                id="paragraph-suggestion"
+                v-model="reviewForm.suggestion"
+                type="text"
+                placeholder="可选：给出可执行建议"
+              />
+            </div>
+            <button type="button" class="btn-secondary add-comment-btn" @click="addParagraphComment">
+              添加批注
+            </button>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section v-else-if="detailCase" class="admin-detail-page">
+      <div class="review-workspace-toolbar">
+        <button type="button" class="btn-secondary" @click="closeAdminDetail">返回审核列表</button>
+        <button
+          v-if="detailCase.status === 'pending_review'"
+          type="button"
+          class="btn-primary"
+          @click="openReviewModal(detailCase)"
+        >
+          审核此案例
+        </button>
+      </div>
+
+      <div class="review-workspace-header">
+        <div>
+          <div class="review-workspace-eyebrow">案例详情</div>
+          <h2>{{ detailCase.title }}</h2>
+          <div class="case-meta-row">
+            <span class="meta-item" v-if="detailCase.author">作者 {{ detailCase.author }}</span>
+            <span class="meta-item" v-if="detailCase.owner_username">账号 {{ detailCase.owner_username }}</span>
+            <span class="meta-item" v-if="detailCase.department">学院 {{ detailCase.department }}</span>
+            <span class="meta-item" v-if="detailCase.theme">主题 {{ detailCase.theme }}</span>
+            <span class="meta-item">创建 {{ formatDate(detailCase.created_at) }}</span>
+          </div>
+        </div>
+        <span :class="['status-pill', statusPillClass(detailCase.status)]">
+          {{ statusLabel(detailCase.status) }}
+        </span>
+      </div>
+
+      <div class="admin-detail-grid">
+        <main class="review-document">
+          <div class="review-section-head">
+            <div>
+              <strong>案例正文</strong>
+              <span>当前案例内容</span>
+            </div>
+          </div>
+          <div class="admin-detail-content" v-html="renderMarkdown(detailCase.content || '暂无内容')"></div>
+
+          <div v-if="detailCase.source_material" class="admin-source-block">
+            <strong>来源材料</strong>
+            <div v-html="renderMarkdown(detailCase.source_material)"></div>
+          </div>
+        </main>
+
+        <aside class="review-side-panel">
+          <section class="review-side-card">
+            <div class="review-section-head compact">
+              <strong>版本预览</strong>
+              <span>{{ detailVersions.length ? `${detailVersions.length} 个版本` : '无' }}</span>
+            </div>
+            <div v-if="versionLoading[detailCase.id]" class="review-placeholder">加载中…</div>
+            <div v-else-if="versionError[detailCase.id]" class="review-placeholder">{{ versionError[detailCase.id] }}</div>
+            <div v-else-if="detailVersions.length" class="detail-version-list">
+              <article v-for="version in detailVersions" :key="version.id" class="detail-version-item">
+                <div class="version-head">
+                  <strong>v{{ version.version_number }}</strong>
+                  <span>{{ formatDate(version.created_at) }}</span>
+                </div>
+                <p v-if="version.change_reason">{{ version.change_reason }}</p>
+                <div v-if="version.admin_comments?.length" class="admin-comment-list">
+                  <strong>管理员批注</strong>
+                  <div
+                    v-for="batch in version.admin_comments"
+                    :key="`${batch.created_at}-${batch.reviewer}`"
+                    class="admin-comment-batch"
+                  >
+                    <div>{{ batch.reviewer }} · {{ formatDate(batch.created_at) }}</div>
+                    <p v-if="batch.comment">{{ batch.comment }}</p>
+                    <p v-for="comment in batch.comments" :key="`${comment.paragraph_id}-${comment.message}`">
+                      {{ comment.paragraph_id }}：{{ comment.message }}
+                    </p>
+                  </div>
+                </div>
+              </article>
+            </div>
+            <div v-else class="review-placeholder">暂无版本记录</div>
+          </section>
+
+        </aside>
+      </div>
+    </section>
+
     <template v-else>
       <!-- Tabs -->
       <div class="tabs-bar" role="tablist" aria-label="审核状态">
@@ -200,7 +448,7 @@
           <!-- Card actions -->
           <div class="case-actions">
             <button type="button" class="btn-secondary btn-sm" @click.stop="toggleDetail(c.id)">
-              {{ expandedId === c.id ? '收起' : '查看详情' }}
+              查看详情
             </button>
             <template v-if="c.status === 'pending_review'">
               <button type="button" class="btn-primary btn-sm" @click.stop="openReviewModal(c)">审核</button>
@@ -219,128 +467,6 @@
         </div>
       </div>
     </template>
-
-    <!-- Review Modal -->
-    <div v-if="reviewingCase" class="modal-overlay" @click.self="closeReviewModal">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="review-title">
-        <div class="modal-header">
-          <h3 id="review-title">审核案例：{{ reviewingCase.title }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭" @click="closeReviewModal">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="field">
-            <label for="review-version">审核版本 <span class="required">*</span></label>
-            <select
-              id="review-version"
-              v-model="reviewForm.version_id"
-              :disabled="versionLoading[reviewingCase.id]"
-              @change="syncParagraphSelection"
-            >
-              <option disabled value="">请选择版本</option>
-              <option v-for="version in currentReviewVersions" :key="version.id" :value="String(version.id)">
-                v{{ version.version_number }} · {{ formatDate(version.created_at) }}
-              </option>
-            </select>
-          </div>
-          <div v-if="selectedReviewVersion" class="modal-version-preview">
-            <div
-              v-for="paragraph in selectedReviewParagraphs"
-              :key="paragraph.paragraph_id"
-              :class="['paragraph-preview', { active: reviewForm.paragraph_id === paragraph.paragraph_id }]"
-            >
-              <span>{{ paragraph.paragraph_id }}</span>
-              <p>{{ paragraph.text }}</p>
-            </div>
-          </div>
-          <div class="field">
-            <label for="review-comment">审核意见 <span class="required">*</span></label>
-            <textarea
-              id="review-comment"
-              v-model="reviewForm.comment"
-              rows="5"
-              placeholder="请输入审核意见"
-            ></textarea>
-          </div>
-          <div class="field">
-            <label>审核结果 <span class="required">*</span></label>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" v-model="reviewForm.status" value="approve" />
-                <span>通过</span>
-              </label>
-              <label class="radio-label">
-                <input type="radio" v-model="reviewForm.status" value="reject" />
-                <span>需修改</span>
-              </label>
-            </div>
-          </div>
-          <div class="paragraph-comment-form">
-            <div class="section-head">
-              <strong>段落批注</strong>
-              <span class="section-count">选填，随当前版本留存</span>
-            </div>
-            <div class="field field-inline">
-              <div>
-                <label for="paragraph-id">段落</label>
-                <select id="paragraph-id" v-model="reviewForm.paragraph_id" :disabled="!selectedReviewParagraphs.length">
-                  <option value="">不添加段落批注</option>
-                  <option
-                    v-for="paragraph in selectedReviewParagraphs"
-                    :key="paragraph.paragraph_id"
-                    :value="paragraph.paragraph_id"
-                  >
-                    {{ paragraph.paragraph_id }}
-                  </option>
-                </select>
-              </div>
-              <div>
-                <label for="paragraph-category">类型</label>
-                <select id="paragraph-category" v-model="reviewForm.category">
-                  <option value="source">来源</option>
-                  <option value="fact">事实</option>
-                  <option value="structure">结构</option>
-                  <option value="classification">分类</option>
-                  <option value="classroom">课堂</option>
-                  <option value="clarity">表达</option>
-                </select>
-              </div>
-              <div>
-                <label for="paragraph-severity">级别</label>
-                <select id="paragraph-severity" v-model="reviewForm.severity">
-                  <option value="info">提示</option>
-                  <option value="suggestion">建议</option>
-                  <option value="important">重要</option>
-                </select>
-              </div>
-            </div>
-            <div class="field">
-              <label for="paragraph-message">批注内容</label>
-              <textarea
-                id="paragraph-message"
-                v-model="reviewForm.message"
-                rows="3"
-                placeholder="针对所选段落填写修改意见"
-              ></textarea>
-            </div>
-            <div class="field">
-              <label for="paragraph-suggestion">修改建议</label>
-              <input
-                id="paragraph-suggestion"
-                v-model="reviewForm.suggestion"
-                type="text"
-                placeholder="可选：给出可执行建议"
-              />
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn-secondary" @click="closeReviewModal">取消</button>
-          <button type="button" class="btn-primary" :disabled="reviewing" @click="submitReview">
-            {{ reviewing ? '提交中…' : '提交审核' }}
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Delete confirmation modal -->
     <div v-if="deletingCase" class="modal-overlay" @click.self="deletingCase = null">
@@ -364,11 +490,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { isLoggedIn, isAdmin, currentUser } from '../api/auth.js';
 import {
   fetchCaseConstants,
   listReviewCases,
+  fetchCaseDetail,
   fetchCaseReviews,
   fetchCaseVersions,
   reviewCase,
@@ -394,6 +521,8 @@ const reviewLoading = ref({});
 const versionMap = ref({});
 const versionLoading = ref({});
 const versionError = ref({});
+const detailCase = ref(null);
+let lastOpenedHashCaseId = '';
 
 const caseTypes = ref({
   TYPE_A: '思政课教学案例',
@@ -402,6 +531,7 @@ const caseTypes = ref({
 });
 
 const reviewingCase = ref(null);
+const reviewMode = ref('review');
 const reviewForm = ref({
   comment: '',
   status: 'approve',
@@ -411,6 +541,7 @@ const reviewForm = ref({
   severity: 'important',
   message: '',
   suggestion: '',
+  paragraph_comments: [],
 });
 const reviewing = ref(false);
 
@@ -430,6 +561,23 @@ const selectedReviewVersion = computed(() => {
   return currentReviewVersions.value.find(version => Number(version.id) === selectedId) || null;
 });
 const selectedReviewParagraphs = computed(() => selectedReviewVersion.value?.paragraphs || []);
+const currentAiReviewItems = computed(() => {
+  if (!reviewingCase.value) return [];
+  return reviewingCase.value.ai_reviews || [];
+});
+const currentAiComments = computed(() => {
+  const reviewItemComments = currentAiReviewItems.value.flatMap(item => {
+    if (Array.isArray(item.comments)) return item.comments;
+    if (Array.isArray(item.version?.ai_review?.comments)) return item.version.ai_review.comments;
+    return [];
+  });
+  if (reviewItemComments.length) return reviewItemComments;
+  return selectedReviewVersion.value?.ai_review?.comments || [];
+});
+const detailVersions = computed(() => {
+  if (!detailCase.value) return [];
+  return versionMap.value[detailCase.value.id] || [];
+});
 
 function switchTab(tab) {
   currentTab.value = tab;
@@ -505,16 +653,55 @@ async function loadCases() {
 }
 
 function toggleDetail(caseId) {
-  if (expandedId.value === caseId) {
-    expandedId.value = null;
+  openAdminDetail(caseId);
+}
+
+function openAdminDetail(caseId) {
+  const targetHash = `admin?case=${encodeURIComponent(caseId)}&from=review`;
+  const currentHash = window.location.hash.replace('#', '');
+  if (currentHash !== targetHash) {
+    window.location.hash = targetHash;
     return;
   }
-  expandedId.value = caseId;
-  const c = cases.value.find(x => x.id === caseId);
-  loadVersions(caseId);
-  if (c && showReviewFor(c.status)) {
-    loadReview(caseId);
+  loadAdminDetail(caseId);
+}
+
+async function loadAdminDetail(caseId) {
+  try {
+    const res = await fetchCaseDetail(caseId, false);
+    if (!res?.success || !res.data) {
+      throw new Error(res?.message || '加载案例详情失败');
+    }
+    detailCase.value = res.data;
+    await loadVersions(caseId);
+    await loadReview(caseId);
+  } catch (err) {
+    notify(err.message || '加载案例详情失败', 'error');
   }
+}
+
+function closeAdminDetail() {
+  detailCase.value = null;
+  lastOpenedHashCaseId = '';
+  if (window.location.hash.replace('#', '').startsWith('admin?case=')) {
+    window.location.hash = 'admin';
+  }
+}
+
+function readDetailFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  const [viewId, query = ''] = hash.split('?');
+  if (viewId !== 'admin') return;
+  const params = new URLSearchParams(query);
+  const caseId = params.get('case') || '';
+  if (!caseId) {
+    detailCase.value = null;
+    lastOpenedHashCaseId = '';
+    return;
+  }
+  if (caseId === lastOpenedHashCaseId && detailCase.value) return;
+  lastOpenedHashCaseId = caseId;
+  loadAdminDetail(caseId);
 }
 
 async function loadVersions(caseId) {
@@ -542,6 +729,17 @@ function submittedVersionFor(c) {
   if (!versions.length) return null;
   const targetId = c.submitted_version_id || c.reviewed_version_id;
   return versions.find(version => Number(version.id) === Number(targetId)) || versions[0];
+}
+
+function latestVersionFrom(versions) {
+  if (!Array.isArray(versions) || !versions.length) return null;
+  return [...versions].sort((a, b) => {
+    const numberDiff = Number(b.version_number || 0) - Number(a.version_number || 0);
+    if (numberDiff) return numberDiff;
+    const dateDiff = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    if (dateDiff) return dateDiff;
+    return Number(b.id || 0) - Number(a.id || 0);
+  })[0];
 }
 
 async function loadReview(caseId) {
@@ -573,6 +771,7 @@ async function loadReview(caseId) {
 
 async function openReviewModal(c) {
   reviewingCase.value = c;
+  reviewMode.value = 'review';
   reviewForm.value = {
     comment: '',
     status: 'approve',
@@ -582,9 +781,10 @@ async function openReviewModal(c) {
     severity: 'important',
     message: '',
     suggestion: '',
+    paragraph_comments: [],
   };
   const versions = await loadVersions(c.id);
-  const preferred = submittedVersionFor(c) || versions[0];
+  const preferred = latestVersionFrom(versions);
   if (preferred) {
     reviewForm.value.version_id = String(preferred.id);
     syncParagraphSelection();
@@ -593,7 +793,20 @@ async function openReviewModal(c) {
 
 function closeReviewModal() {
   reviewingCase.value = null;
+  reviewMode.value = 'review';
   reviewing.value = false;
+}
+
+function routeToAdminList() {
+  detailCase.value = null;
+  lastOpenedHashCaseId = '';
+  if (window.location.hash.replace('#', '') !== 'admin') {
+    window.location.hash = 'admin';
+  }
+}
+
+function toggleReviewMode() {
+  reviewMode.value = reviewMode.value === 'review' ? 'preview' : 'review';
 }
 
 function syncParagraphSelection() {
@@ -604,7 +817,94 @@ function syncParagraphSelection() {
   reviewForm.value.paragraph_id = stillValid ? current : '';
 }
 
+function selectParagraph(paragraphId) {
+  reviewForm.value.paragraph_id = paragraphId;
+  scrollParagraphIntoView(paragraphId);
+}
+
+function aiCommentsForParagraph(paragraphId) {
+  return currentAiComments.value.filter(comment => comment.paragraph_id === paragraphId);
+}
+
+function scrollParagraphIntoView(paragraphId) {
+  if (!paragraphId) return;
+  requestAnimationFrame(() => {
+    const target = Array.from(document.querySelectorAll('.review-paragraph'))
+      .find((node) => node.dataset.paragraphId === paragraphId);
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+}
+
 function buildParagraphComments() {
+  return [...reviewForm.value.paragraph_comments];
+}
+
+function draftCommentsForParagraph(paragraphId) {
+  return reviewForm.value.paragraph_comments.filter(comment => comment.paragraph_id === paragraphId);
+}
+
+function addParagraphComment() {
+  if (!reviewForm.value.paragraph_id) {
+    notify('请选择段落后再添加批注', 'error');
+    return;
+  }
+  const message = reviewForm.value.message.trim();
+  if (!message) {
+    notify('请填写段落批注内容', 'error');
+    return;
+  }
+  const comment = {
+    paragraph_id: reviewForm.value.paragraph_id,
+    category: reviewForm.value.category,
+    severity: reviewForm.value.severity,
+    message,
+  };
+  const suggestion = reviewForm.value.suggestion.trim();
+  if (suggestion) comment.suggestion = suggestion;
+  reviewForm.value.paragraph_comments.push(comment);
+  reviewForm.value.message = '';
+  reviewForm.value.suggestion = '';
+  scrollParagraphIntoView(comment.paragraph_id);
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderInlineMarkdown(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function renderMarkdown(value) {
+  const lines = String(value || '').split(/\r?\n/);
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '<br>';
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = Math.min(4, heading[1].length + 2);
+      return `<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`;
+    }
+    const listItem = trimmed.match(/^[-*]\s+(.+)$/);
+    if (listItem) {
+      return `<p class="md-list-item">${renderInlineMarkdown(listItem[1])}</p>`;
+    }
+    const quote = trimmed.match(/^>\s*(.+)$/);
+    if (quote) {
+      return `<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`;
+    }
+    return `<p>${renderInlineMarkdown(line)}</p>`;
+  }).join('');
+}
+
+function buildSingleParagraphComment() {
   if (!reviewForm.value.paragraph_id) return [];
   const message = reviewForm.value.message.trim();
   if (!message) return [];
@@ -621,28 +921,21 @@ function buildParagraphComments() {
 
 async function submitReview() {
   if (!reviewingCase.value) return;
-  if (!reviewForm.value.comment.trim()) {
-    notify('请填写审核意见', 'error');
-    return;
-  }
   if (!reviewForm.value.version_id) {
     notify('请选择审核版本', 'error');
-    return;
-  }
-  if (reviewForm.value.paragraph_id && !reviewForm.value.message.trim()) {
-    notify('请填写段落批注内容，或选择不添加段落批注', 'error');
     return;
   }
   reviewing.value = true;
   try {
     await reviewCase(reviewingCase.value.id, {
-      comment: reviewForm.value.comment.trim(),
+      comment: reviewForm.value.comment.trim() || '见段落批注',
       status: reviewForm.value.status,
       version_id: reviewForm.value.version_id,
-      paragraph_comments: buildParagraphComments(),
+      paragraph_comments: buildParagraphComments().concat(buildSingleParagraphComment()),
     });
     notify('审核完成', 'success');
     closeReviewModal();
+    routeToAdminList();
     await loadCases();
   } catch (err) {
     notify(err.message || '审核提交失败', 'error');
@@ -692,6 +985,12 @@ onMounted(async () => {
   } catch {
     // Safe fallbacks already set
   }
+  readDetailFromHash();
+  window.addEventListener('hashchange', readDetailFromHash);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', readDetailFromHash);
 });
 
 watch(currentTab, () => {
@@ -725,6 +1024,344 @@ watch(currentTab, () => {
   margin: 0;
   font-size: 14px;
   color: var(--color-text-secondary);
+}
+
+.review-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-detail-page {
+  display: grid;
+  gap: 18px;
+}
+
+.review-workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.review-workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.review-workspace-eyebrow {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-brand);
+}
+
+.review-workspace-header h2 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+
+.review-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+
+.review-workspace-grid.preview {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+
+.review-document,
+.review-side-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.review-document {
+  min-width: 0;
+  padding: 18px;
+}
+
+.review-submit-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.review-side-panel {
+  position: sticky;
+  top: calc(var(--header-height) + 20px);
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.review-side-card {
+  padding: 16px;
+}
+
+.review-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.review-section-head strong,
+.review-section-head span {
+  display: block;
+}
+
+.review-section-head strong {
+  color: var(--color-text);
+}
+
+.review-section-head span {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.review-section-head select {
+  min-width: 220px;
+}
+
+.review-section-head.compact {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.review-section-head.compact span {
+  margin-top: 0;
+}
+
+.review-paragraph-list {
+  display: grid;
+  gap: 10px;
+}
+
+.review-paragraph {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.review-paragraph.active {
+  border-color: rgba(141, 27, 53, 0.45);
+  background: var(--color-brand-light);
+}
+
+.review-paragraph.annotated {
+  border-left: 3px solid var(--color-brand);
+}
+
+.review-paragraph > span {
+  display: inline-flex;
+  justify-content: center;
+  align-items: flex-start;
+  color: var(--color-brand);
+  font-weight: 800;
+}
+
+.review-paragraph-text {
+  min-width: 0;
+}
+
+.review-paragraph-text :deep(p),
+.review-paragraph-text :deep(h3),
+.review-paragraph-text :deep(h4),
+.review-paragraph-text :deep(h5),
+.review-paragraph-text :deep(h6) {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.review-paragraph-text :deep(p + p),
+.review-paragraph-text :deep(p + h3),
+.review-paragraph-text :deep(h3 + p),
+.review-paragraph-text :deep(h4 + p) {
+  margin-top: 8px;
+}
+
+.review-paragraph-text :deep(h3),
+.review-paragraph-text :deep(h4),
+.review-paragraph-text :deep(h5),
+.review-paragraph-text :deep(h6) {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.review-paragraph-text :deep(.md-list-item)::before {
+  content: '- ';
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+.review-paragraph-text :deep(code) {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  font-family: inherit;
+  font-size: 0.95em;
+}
+
+.review-paragraph-text :deep(blockquote),
+.admin-detail-content :deep(blockquote),
+.admin-source-block :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-brand);
+  background: #fafafa;
+  color: var(--color-text-secondary);
+}
+
+.review-ai-inline {
+  grid-column: 2;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(141, 27, 53, 0.2);
+  border-left: 3px solid var(--color-brand);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.review-ai-inline strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--color-brand);
+}
+
+.review-ai-inline p,
+.review-ai-inline small {
+  display: block;
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.review-ai-inline small {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+}
+
+.admin-detail-content {
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.admin-detail-content :deep(p),
+.admin-detail-content :deep(h3),
+.admin-detail-content :deep(h4),
+.admin-detail-content :deep(h5),
+.admin-detail-content :deep(h6),
+.admin-source-block :deep(p),
+.admin-source-block :deep(h3),
+.admin-source-block :deep(h4),
+.admin-source-block :deep(h5),
+.admin-source-block :deep(h6) {
+  margin: 0;
+  word-break: break-word;
+}
+
+.admin-detail-content :deep(p + p),
+.admin-detail-content :deep(h3 + p),
+.admin-detail-content :deep(p + h3),
+.admin-source-block :deep(p + p) {
+  margin-top: 10px;
+}
+
+.admin-source-block {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fafafa;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.admin-source-block > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.detail-version-list {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-version-item {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.detail-version-item > p {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.review-draft-inline {
+  grid-column: 2;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-left: 3px solid #b91c1c;
+  border-radius: 6px;
+  background: #fff7f7;
+}
+
+.review-draft-inline strong,
+.review-draft-inline p,
+.review-draft-inline small {
+  display: block;
+  margin: 0;
+}
+
+.review-draft-inline strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.review-draft-inline p {
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.review-draft-inline small {
+  margin-top: 4px;
+  color: var(--color-text-muted);
 }
 
 /* Tabs */
@@ -1291,6 +1928,10 @@ watch(currentTab, () => {
   line-height: 1.5;
 }
 
+.add-comment-btn {
+  width: 100%;
+}
+
 .detail-actions {
   display: flex;
   justify-content: flex-end;
@@ -1532,9 +2173,44 @@ textarea {
   }
 }
 
+@media (max-width: 1100px) {
+  .review-workspace-grid,
+  .admin-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-side-panel {
+    position: static;
+  }
+}
+
 @media (max-width: 480px) {
   .admin-review {
     padding: 20px 12px 32px;
+  }
+
+  .review-workspace-toolbar,
+  .review-workspace-header,
+  .review-section-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .review-section-head select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .review-paragraph {
+    grid-template-columns: 1fr;
+  }
+
+  .review-paragraph > span {
+    justify-content: flex-start;
+  }
+
+  .review-ai-inline {
+    grid-column: 1;
   }
 
   .tab-btn {

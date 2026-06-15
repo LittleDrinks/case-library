@@ -5,6 +5,7 @@ import json
 import os
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import bcrypt
@@ -18,6 +19,7 @@ load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "case_library")
 MONGODB_TIMEOUT_MS = int(os.getenv("MONGODB_TIMEOUT_MS", "5000"))
+STATISTICS_CACHE_TTL_SECONDS = int(os.getenv("STATISTICS_CACHE_TTL_SECONDS", "300"))
 SQLITE_DB_PATH = os.getenv(
     "SQLITE_DB_PATH",
     str(Path(__file__).resolve().parent.parent / "data" / "cases.db"),
@@ -67,6 +69,8 @@ AI_REVIEW_DATETIME_FIELDS = {"reviewed_at", "created_at"}
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 _client: MongoClient | None = None
+_statistics_cache: dict[str, Any] = {"expires_at": None, "data": None}
+_statistics_cache_lock = RLock()
 
 
 def get_mongo_client() -> MongoClient:
@@ -83,6 +87,12 @@ def get_db_connection():
 
 def get_db():
     return get_db_connection()
+
+
+def invalidate_statistics_cache() -> None:
+    with _statistics_cache_lock:
+        _statistics_cache["expires_at"] = None
+        _statistics_cache["data"] = None
 
 
 def normalize_to_beijing_datetime(value: Any) -> Any:
@@ -812,6 +822,8 @@ def create_case(case_data: dict) -> int:
                 )
             },
         )
+    if status == "approved" and not doc.get("is_hidden"):
+        invalidate_statistics_cache()
     return case_id
 
 
@@ -985,6 +997,8 @@ def set_case_hidden(case_id: int, hidden: bool) -> bool:
         {"id": int(case_id), "status": {"$ne": "deleted"}},
         {"$set": _normalize_datetime_fields({"is_hidden": bool(hidden), "updated_at": _now()})},
     )
+    if result.matched_count > 0 and result.modified_count > 0:
+        invalidate_statistics_cache()
     return result.matched_count > 0
 
 
@@ -1073,6 +1087,8 @@ def update_case(
         }
         _insert_with_generated_id("versions", version_doc)
 
+    if current.get("status") == "approved" or changed_updates.get("status") == "approved":
+        invalidate_statistics_cache()
     return True
 
 
@@ -1177,6 +1193,8 @@ def delete_case(case_id: int, deleted_by: str = "") -> dict:
         {"$set": _normalize_datetime_fields(updates)},
     )
     # Intentionally keep reviews, versions and deployments for audit/history.
+    if result.matched_count > 0 and case.get("status") == "approved" and not case.get("is_hidden"):
+        invalidate_statistics_cache()
 
     return {
         "success": result.matched_count > 0,
@@ -1317,6 +1335,8 @@ def review_case(
                 }
             },
         )
+    if case.get("status") == "approved" or new_status == "approved":
+        invalidate_statistics_cache()
     return True
 
 
@@ -1382,7 +1402,10 @@ def increment_view_count(case_id: int) -> bool:
         {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"view_count": 1}},
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    changed = result.matched_count > 0 and result.modified_count > 0
+    if changed:
+        invalidate_statistics_cache()
+    return changed
 
 
 def increment_like_count(case_id: int) -> bool:
@@ -1390,7 +1413,10 @@ def increment_like_count(case_id: int) -> bool:
         {"id": int(case_id), "status": "approved", "is_hidden": {"$ne": True}},
         {"$inc": {"like_count": 1}},
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    changed = result.matched_count > 0 and result.modified_count > 0
+    if changed:
+        invalidate_statistics_cache()
+    return changed
 
 
 def decrement_like_count(case_id: int) -> bool:
@@ -1415,6 +1441,7 @@ def decrement_like_count(case_id: int) -> bool:
         {"$inc": {"like_count": -1}},
     )
     if result.modified_count > 0:
+        invalidate_statistics_cache()
         return True
 
     correction = db.cases.update_one(
@@ -1426,7 +1453,10 @@ def decrement_like_count(case_id: int) -> bool:
         },
         {"$set": {"like_count": 0}},
     )
-    return correction.modified_count > 0
+    changed = correction.modified_count > 0
+    if changed:
+        invalidate_statistics_cache()
+    return changed
 
 
 def _status_search_filter(status: str | None) -> dict[str, Any]:
@@ -1514,26 +1544,35 @@ def get_latest_cases(limit: int = 10) -> list[dict]:
 
 
 def get_statistics() -> dict:
-    public_cases = _public_query_cases()
+    now = datetime.now(UTC)
+    with _statistics_cache_lock:
+        cached = _statistics_cache.get("data")
+        expires_at = _statistics_cache.get("expires_at")
+        if cached is not None and isinstance(expires_at, datetime) and expires_at > now:
+            return json.loads(json.dumps(cached))
 
-    stats: dict[str, Any] = {"total_cases": len(public_cases), "by_type": {}, "by_theme": {}}
-    total_views = 0
-    total_likes = 0
-    for case in public_cases:
-        case_type = case.get("type")
-        if case_type is not None:
-            stats["by_type"][case_type] = stats["by_type"].get(case_type, 0) + 1
+        public_cases = _public_query_cases()
 
-        case_theme = case.get("theme")
-        if case_theme is not None:
-            stats["by_theme"][case_theme] = stats["by_theme"].get(case_theme, 0) + 1
+        stats: dict[str, Any] = {"total_cases": len(public_cases), "by_type": {}, "by_theme": {}}
+        total_views = 0
+        total_likes = 0
+        for case in public_cases:
+            case_type = case.get("type")
+            if case_type is not None:
+                stats["by_type"][case_type] = stats["by_type"].get(case_type, 0) + 1
 
-        total_views += int(case.get("view_count") or 0)
-        total_likes += int(case.get("like_count") or 0)
+            case_theme = case.get("theme")
+            if case_theme is not None:
+                stats["by_theme"][case_theme] = stats["by_theme"].get(case_theme, 0) + 1
 
-    stats["total_views"] = total_views
-    stats["total_likes"] = total_likes
-    return stats
+            total_views += int(case.get("view_count") or 0)
+            total_likes += int(case.get("like_count") or 0)
+
+        stats["total_views"] = total_views
+        stats["total_likes"] = total_likes
+        _statistics_cache["data"] = json.loads(json.dumps(stats))
+        _statistics_cache["expires_at"] = now + timedelta(seconds=max(0, STATISTICS_CACHE_TTL_SECONDS))
+        return stats
 
 
 if __name__ == "__main__":

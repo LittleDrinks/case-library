@@ -30,22 +30,6 @@
           </a>
         </nav>
 
-        <!-- Global header search -->
-        <form class="global-search" @submit.prevent="submitHeaderSearch">
-          <input
-            v-model="headerSearchInput"
-            type="text"
-            placeholder="搜索案例…"
-            aria-label="搜索案例"
-          />
-          <button type="submit" aria-label="查找案例">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11l3.5 3.5" />
-            </svg>
-          </button>
-        </form>
-
         <!-- Right cluster: user actions -->
         <div class="header-actions">
           <template v-if="isLoggedIn()">
@@ -70,13 +54,13 @@
     <main class="app-main">
       <HomeView v-if="currentView === 'home'" />
       <CaseLibraryView v-else-if="currentView === 'library'" :search-trigger="searchTrigger" />
-      <CreateCaseView v-else-if="currentView === 'create'" />
+      <CreateCaseView v-else-if="currentView === 'create'" :key="routeKey" />
       <MySubmissionsView v-else-if="currentView === 'submissions'" />
       <AdminReviewView v-else-if="currentView === 'admin'" />
     </main>
 
     <!-- Footer -->
-    <footer class="app-footer">
+    <footer v-if="currentView !== 'create'" class="app-footer">
       <p>© 上海大学 思政案例库</p>
     </footer>
 
@@ -168,23 +152,12 @@ const MySubmissionsView = lazyView(() =>
 const AdminReviewView = lazyView(() => import("./views/AdminReviewView.vue"));
 
 const currentView = ref("home");
+const routeKey = ref(window.location.hash || "home");
 const showLogin = ref(false);
 const toasts = ref([]);
 let toastSeq = 0;
 
-// Global header search state (passed to CaseLibraryView via prop)
 const searchTrigger = ref({ keyword: "", nonce: 0 });
-const headerSearchInput = ref("");
-
-function submitHeaderSearch() {
-  const kw = headerSearchInput.value.trim();
-  searchTrigger.value = {
-    keyword: kw,
-    nonce: searchTrigger.value.nonce + 1,
-  };
-  headerSearchInput.value = "";
-  navigate("library");
-}
 
 const showPasswordChange = computed(() => {
   return isLoggedIn() && mustChangePassword();
@@ -211,6 +184,7 @@ const allNavItems = [
 
 const visibleNavItems = computed(() => {
   return allNavItems.filter((item) => {
+    if (item.hidden) return false;
     if (item.admin && !isAdmin()) return false;
     if (!item.public && !isLoggedIn()) return false;
     return true;
@@ -267,6 +241,7 @@ function handleToast(event) {
 function readHash() {
   const hash = window.location.hash.replace("#", "");
   const viewId = hash.split("?")[0];
+  routeKey.value = window.location.hash || viewId || "home";
   const item = allNavItems.find((i) => i.id === viewId);
   if (item) {
     navigate(viewId);

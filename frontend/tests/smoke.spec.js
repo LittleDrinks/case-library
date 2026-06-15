@@ -8,6 +8,7 @@ import {
   openLoginDialog,
   submitLoginCredentials,
 } from "./support/auth.js";
+import { confirmAndSubmitCase, submitAdminReview } from "./support/auditFlow.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -127,7 +128,7 @@ test(
       // Step 2: Navigate to create case wizard
       // ==========================================
       await page.getByRole("link", { name: "创建案例" }).click();
-      await expect(page.getByText("填写基本信息")).toBeVisible();
+      await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
       // -- Step 1: Basic info --
       await page.getByLabel(/案例标题/).fill(uniqueTitle);
@@ -135,23 +136,23 @@ test(
       await page.getByRole("button", { name: "继续" }).click();
 
       // -- Step 2: Content --
-      await expect(page.getByText("编写案例内容")).toBeVisible();
+      await expect(page.getByText("撰写案例内容")).toBeVisible();
       await page.locator("#ccf-content").fill(
         "这是一篇用于冒烟测试的案例正文。案例内容包含背景、问题、分析与反思等部分，以确保测试流程能够完整运行。"
       );
       await page.getByRole("button", { name: "继续" }).click();
 
       // -- Step 3: Classification --
-      await expect(page.getByText("选择案例分类")).toBeVisible();
-      await page.locator("#ccf-type").selectOption("TYPE_A");
-      await page.locator("#ccf-theme").selectOption("铸魂育人");
+      await expect(page.getByText("选择分类")).toBeVisible();
+      await page.getByRole("button", { name: "思政课教学案例" }).click();
+      await page.getByRole("button", { name: "铸魂育人" }).click();
       await page.getByRole("button", { name: "继续" }).click();
 
       // -- Step 4: Pre-submit self-check --
       await expect(
-        page.getByRole("heading", { name: "提交前自查" })
+        page.getByRole("heading", { name: "AI 智能内容审核" })
       ).toBeVisible();
-      await expect(page.getByText("运行全部自查")).toBeVisible();
+      await expect(page.getByText("生成自查建议")).toBeVisible();
       await page.getByRole("button", { name: "运行此项" }).first().click();
       await expect(page.getByText("AI 审核功能未启用")).toBeVisible();
       await page.getByRole("button", { name: "继续" }).click();
@@ -161,10 +162,10 @@ test(
       await expect(
         page.getByText("提交后案例将进入专家人工审核流程")
       ).toBeVisible();
-      await page.getByRole("button", { name: "正式提交案例" }).click();
+      await confirmAndSubmitCase(page);
 
       // Wait for submit alert to be accepted and wizard to reset
-      await expect(page.getByText("填写基本信息")).toBeVisible();
+      await expect(page.getByText("填写案例基本信息")).toBeVisible();
     });
 
     await test.step("管理员审核并验证公开展示", async () => {
@@ -189,13 +190,10 @@ test(
 
       await caseCard.getByRole("button", { name: "审核" }).click();
 
-      // Fill review modal
-      await page.locator("#review-comment").fill("审核通过，测试用例。");
-      await page.getByLabel("通过").check();
-      await page.getByRole("button", { name: "提交审核" }).click();
-
-      // Wait for modal to close after review submission
-      await expect(page.locator(".modal-overlay")).toHaveCount(0);
+      await submitAdminReview(page, {
+        status: "approve",
+        comment: "审核通过，测试用例。",
+      });
 
       // ==========================================
       // Step 5: Verify public library visibility
@@ -241,29 +239,6 @@ test(
         `点赞 ${initialLikeCount}`
       );
 
-      // ==========================================
-      // Step 6: Global header search finds the approved case
-      // ==========================================
-      // Skip on mobile where .global-search is hidden by responsive CSS.
-      if (testInfo.project.name === "chromium-desktop") {
-        // Exercise the global header search form in App.vue (distinct from the
-        // local case-library search field) to locate the approved case.
-        await page
-          .locator(".global-search")
-          .getByLabel("搜索案例")
-          .fill(uniqueTitle);
-        await page
-          .locator(".global-search")
-          .getByRole("button", { name: "查找案例" })
-          .click();
-
-        // Should land on/remain on the case library view with the case visible
-        await expect(page).toHaveURL(/#library/);
-        await expect(
-          page.locator(".case-card").filter({ hasText: uniqueTitle })
-        ).toBeVisible();
-      }
-
       // Capture a success screenshot for UI review, distinguished by project name
       const screenshotPath = testInfo.outputPath(
         `smoke-success-${testInfo.project.name}.png`
@@ -292,7 +267,7 @@ test(
 
     // Navigate to create case wizard
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     // Verify header nav label "案例库" is not truncated
     const libraryLink = page
@@ -308,7 +283,7 @@ test(
     await page.getByLabel(/案例标题/).fill("Mobile Regression Test");
     await page.getByLabel(/所属部门\/学院/).fill("测试学院");
     await page.getByRole("button", { name: "继续" }).click();
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
 
     // Deliberately scroll down
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -320,7 +295,7 @@ test(
       .locator("#ccf-content")
       .fill("这是用于移动端回归测试的案例正文内容。");
     await page.getByRole("button", { name: "继续" }).click();
-    await expect(page.getByText("选择案例分类")).toBeVisible();
+    await expect(page.getByText("选择分类")).toBeVisible();
 
     // Verify scroll resets to top after step transition
     await page.waitForFunction(() => window.scrollY === 0);
@@ -330,7 +305,7 @@ test(
 );
 
 test(
-  "classification helper provides local suggestion",
+  "classification tags select type and theme",
   async ({ page }) => {
     await page.goto("/");
     await login(page, SMOKE_USER, {
@@ -339,31 +314,25 @@ test(
     });
 
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await page.getByLabel(/案例标题/).fill("社会实践数字育人案例");
     await page.getByLabel(/所属部门\/学院/).fill("测试学院");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await page
       .locator("#ccf-content")
       .fill("本案例围绕社会实践活动中的数字技术应用，记录实践育人过程。");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.getByRole("button", { name: "打开 AI 分类助手" }).click();
-    await expect(
-      page.getByText("AI 分类助手（本地建议）")
-    ).toBeVisible();
-
-    await page.getByPlaceholder("输入问题…").fill("帮我推荐案例类型和主题");
-    await page.getByRole("button", { name: "获取建议" }).click();
-
-    const helperResponse = page.getByRole("status");
-    await expect(helperResponse).toContainText("建议类型");
-    await expect(helperResponse).toContainText("实践育人案例");
-    await expect(helperResponse).toContainText("实践育人");
+    await expect(page.getByText("选择分类")).toBeVisible();
+    const typeButton = page.getByRole("button", { name: "实践育人案例" });
+    const themeButton = page.getByRole("button", { name: "实践育人" });
+    await typeButton.click();
+    await themeButton.click();
+    await expect(typeButton).toHaveAttribute("aria-pressed", "true");
+    await expect(themeButton).toHaveAttribute("aria-pressed", "true");
   }
 );
 
@@ -379,21 +348,21 @@ test(
     });
 
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await page.getByLabel(/案例标题/).fill(uniqueTitle);
     await page.getByLabel(/所属部门\/学院/).fill("测试学院");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await page
       .locator("#ccf-content")
       .fill("这是用于草稿保存回归测试的案例正文内容。");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.locator("#ccf-type").selectOption("TYPE_A");
-    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await page.getByRole("button", { name: "思政课教学案例" }).click();
+    await page.getByRole("button", { name: "铸魂育人" }).click();
 
     const saveDialogPromise = page.waitForEvent("dialog");
     await page.getByRole("button", { name: "保存草稿" }).click();
@@ -438,31 +407,31 @@ test(
     });
 
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await page.getByLabel(/案例标题/).fill(uniqueTitle);
     await page.getByLabel(/所属部门\/学院/).fill("测试学院");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await page
       .locator("#ccf-content")
       .fill("这是用于驳回审核反馈回归测试的案例正文内容。");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.locator("#ccf-type").selectOption("TYPE_A");
-    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await page.getByRole("button", { name: "思政课教学案例" }).click();
+    await page.getByRole("button", { name: "铸魂育人" }).click();
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "提交前自查" })
+      page.getByRole("heading", { name: "AI 智能内容审核" })
     ).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByText("确认并提交")).toBeVisible();
-    await page.getByRole("button", { name: "正式提交案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await confirmAndSubmitCase(page);
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await logout(page);
     await login(page, SMOKE_ADMIN, {
@@ -475,10 +444,10 @@ test(
       .filter({ hasText: uniqueTitle });
     await expect(reviewCard).toBeVisible();
     await reviewCard.getByRole("button", { name: "审核" }).click();
-    await page.locator("#review-comment").fill(rejectComment);
-    await page.getByLabel("需修改").check();
-    await page.getByRole("button", { name: "提交审核" }).click();
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await submitAdminReview(page, {
+      status: "reject",
+      comment: rejectComment,
+    });
 
     await logout(page);
     await login(page, SMOKE_USER, {
@@ -495,8 +464,10 @@ test(
     await expect(revisionCard.locator(".status-pill")).toContainText("需修改");
 
     await revisionCard.getByRole("button", { name: "查看详情" }).click();
-    await expect(revisionCard.locator(".detail-review")).toContainText(rejectComment);
+    await expect(page.getByRole("heading", { name: uniqueTitle })).toBeVisible();
+    await expect(page.getByText(rejectComment)).toBeVisible();
 
+    await page.getByRole("button", { name: "返回我的提交" }).click();
     await revisionCard.getByRole("button", { name: "删除" }).click();
     await page
       .locator(".confirm-panel")
@@ -520,31 +491,31 @@ test(
     });
 
     await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await page.getByLabel(/案例标题/).fill(uniqueTitle);
     await page.getByLabel(/所属部门\/学院/).fill("测试学院");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("编写案例内容")).toBeVisible();
+    await expect(page.getByText("撰写案例内容")).toBeVisible();
     await page
       .locator("#ccf-content")
       .fill("这是用于管理员隐藏展示回归测试的案例正文内容。");
     await page.getByRole("button", { name: "继续" }).click();
 
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.locator("#ccf-type").selectOption("TYPE_A");
-    await page.locator("#ccf-theme").selectOption("铸魂育人");
+    await expect(page.getByText("选择分类")).toBeVisible();
+    await page.getByRole("button", { name: "思政课教学案例" }).click();
+    await page.getByRole("button", { name: "铸魂育人" }).click();
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "提交前自查" })
+      page.getByRole("heading", { name: "AI 智能内容审核" })
     ).toBeVisible();
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByText("确认并提交")).toBeVisible();
-    await page.getByRole("button", { name: "正式提交案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+    await confirmAndSubmitCase(page);
+    await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await logout(page);
     await login(page, SMOKE_ADMIN, {
@@ -557,10 +528,10 @@ test(
       .filter({ hasText: uniqueTitle });
     await expect(pendingCard).toBeVisible();
     await pendingCard.getByRole("button", { name: "审核" }).click();
-    await page.locator("#review-comment").fill("审核通过，用于可见性测试。");
-    await page.getByLabel("通过").check();
-    await page.getByRole("button", { name: "提交审核" }).click();
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await submitAdminReview(page, {
+      status: "approve",
+      comment: "审核通过，用于可见性测试。",
+    });
 
     await page.getByRole("tab", { name: "已通过" }).click();
     const approvedCard = page

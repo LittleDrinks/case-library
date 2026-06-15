@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:1808
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import database
 import main
 from database import (
     create_case,
@@ -19,7 +21,10 @@ from database import (
     get_case,
     get_db,
     get_mongo_client,
+    get_statistics,
     get_user_by_username,
+    increment_like_count,
+    invalidate_statistics_cache,
     update_case,
 )
 from fastapi.testclient import TestClient
@@ -446,16 +451,24 @@ def main_test() -> None:
     )
     assert_status(response, 403)
 
-    # Admin can still trigger AI review (AI disabled in test env -> 503)
-    response = client.post(
-        f"/api/cases/{ai_locked_approved}/ai-review", headers=auth("adminflow")
-    )
-    assert_status(response, 503)
+    old_ai_review_enabled = os.environ.get("AI_REVIEW_ENABLED")
+    os.environ["AI_REVIEW_ENABLED"] = "false"
+    try:
+        # Admin can still reach AI review; disabled AI returns the stable 503 contract.
+        response = client.post(
+            f"/api/cases/{ai_locked_approved}/ai-review", headers=auth("adminflow")
+        )
+        assert_status(response, 503)
 
-    # Draft owner can still trigger AI review (AI disabled in test env -> 503)
-    ai_draft = make_case("ownerflow", "draft")
-    response = client.post(f"/api/cases/{ai_draft}/ai-review", headers=auth("ownerflow"))
-    assert_status(response, 503)
+        # Draft owner can still reach AI review; disabled AI returns the stable 503 contract.
+        ai_draft = make_case("ownerflow", "draft")
+        response = client.post(f"/api/cases/{ai_draft}/ai-review", headers=auth("ownerflow"))
+        assert_status(response, 503)
+    finally:
+        if old_ai_review_enabled is None:
+            os.environ.pop("AI_REVIEW_ENABLED", None)
+        else:
+            os.environ["AI_REVIEW_ENABLED"] = old_ai_review_enabled
 
     # Public listing ordering: newer created_at appears before older
     older_approved = make_case("ownerflow", "draft")
@@ -1005,6 +1018,51 @@ def main_test() -> None:
     assert "TYPE_STATS_LIVE" not in stats["by_type"]
     assert "theme_stats_live" not in stats["by_theme"]
 
+    invalidate_statistics_cache()
+    query_calls = {"count": 0}
+    original_public_query_cases = database._public_query_cases
+    try:
+        def fake_public_query_cases():
+            query_calls["count"] += 1
+            return [
+                {
+                    "id": 9001,
+                    "type": "TYPE_CACHE",
+                    "theme": "theme_cache",
+                    "view_count": 7,
+                    "like_count": 8,
+                }
+            ]
+
+        database._public_query_cases = fake_public_query_cases
+        first_stats = get_statistics()
+        second_stats = get_statistics()
+        assert query_calls["count"] == 1
+        assert first_stats == second_stats
+        assert first_stats["total_cases"] == 1
+        assert first_stats["total_views"] == 7
+        assert first_stats["total_likes"] == 8
+
+        second_stats["by_type"]["TYPE_CACHE"] = 99
+        assert get_statistics()["by_type"]["TYPE_CACHE"] == 1
+
+        database._statistics_cache["expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
+        refreshed_stats = get_statistics()
+        assert query_calls["count"] == 2
+        assert refreshed_stats["by_type"]["TYPE_CACHE"] == 1
+
+        invalidate_statistics_cache()
+        assert database._statistics_cache["data"] is None
+        assert database._statistics_cache["expires_at"] is None
+    finally:
+        database._public_query_cases = original_public_query_cases
+        invalidate_statistics_cache()
+
+    _ = get_statistics()
+    assert database._statistics_cache["data"] is not None
+    assert increment_like_count(stats_visible_case) is True
+    assert database._statistics_cache["data"] is None
+
     response = client.get("/api/trending?limit=20")
     assert_status(response, 200)
     trending_ids = [item["id"] for item in response.json()["data"]]
@@ -1264,7 +1322,21 @@ def main_test() -> None:
         assert review_version["version_number"] == 2
         assert review_version["source_material"] == "来源材料：学院新闻摘录。"
         assert review_version["paragraphs"][1]["paragraph_id"] == "p2"
+        assert review_version["ai_review"]["comments"][0]["paragraph_id"] == "p2"
+        assert review_version["ai_review"]["comments"][0]["message"] == "这一段需要补充来源依据。"
+        assert review_version["ai_review"]["summary"]["risks"] == ["来源支撑不足"]
+        assert review_version["ai_review"]["summary"]["suggested_next_steps"] == [
+            "补充来源后提交人工审核"
+        ]
         assert structured_data["comments"][0]["category"] == "source"
+        assert structured_data["summary"]["strengths"] == ["结构清楚"]
+
+        stored_review_version = get_db().versions.find_one({"id": review_version["id"]})
+        assert stored_review_version["ai_review"]["comments"][0]["paragraph_id"] == "p2"
+        assert stored_review_version["ai_review"]["summary"]["strengths"] == ["结构清楚"]
+        stored_case_after_ai = get_db().cases.find_one({"id": structured_case})
+        assert stored_case_after_ai["latest_review_version_id"] == review_version["id"]
+        assert stored_case_after_ai["ai_reviews"][0]["parsed"]["comments"][0]["paragraph_id"] == "p2"
 
         response = client.post(
             f"/api/cases/{structured_case}/submit",
@@ -1338,6 +1410,12 @@ def main_test() -> None:
         stored = get_db().cases.find_one({"id": structured_case})
         assert stored["status"] == "needs_revision"
         assert stored["reviewed_version_id"] == review_version["id"]
+        stored_review = get_db().reviews.find_one(
+            {"case_id": structured_case, "status": "rejected"},
+            sort=[("id", -1)],
+        )
+        assert stored_review["version_id"] == review_version["id"]
+        assert stored_review["paragraph_comments"][0]["paragraph_id"] == "p2"
 
         response = client.get(f"/api/versions/{structured_case}", headers=auth("ownerflow"))
         assert_status(response, 200)
@@ -1345,6 +1423,30 @@ def main_test() -> None:
             item for item in response.json()["data"] if item["id"] == review_version["id"]
         )
         assert latest_review_version["admin_comments"][0]["comments"][0]["paragraph_id"] == "p2"
+
+        response = client.put(
+            f"/api/cases/{structured_case}",
+            data={
+                "content": "第一段说明案例背景。\n第二段已经补充来源支撑。",
+                "source_material": "来源材料：学院新闻摘录；活动记录补充。",
+                "change_reason": "按人工审核意见补充来源材料",
+            },
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 200)
+        response = client.get(f"/api/versions/{structured_case}", headers=auth("ownerflow"))
+        assert_status(response, 200)
+        revision_version = response.json()["data"][0]
+        assert revision_version["id"] != review_version["id"]
+        assert revision_version["content"] == "第一段说明案例背景。\n第二段已经补充来源支撑。"
+        assert revision_version["source_material"] == "来源材料：学院新闻摘录；活动记录补充。"
+        assert revision_version["change_reason"] == "按人工审核意见补充来源材料"
+
+        response = client.post(f"/api/cases/{structured_case}/submit", headers=auth("ownerflow"))
+        assert_status(response, 200)
+        stored = get_db().cases.find_one({"id": structured_case})
+        assert stored["status"] == "pending_review"
+        assert stored["submitted_version_id"] == revision_version["id"]
 
         get_db().cases.update_one(
             {"id": structured_case},
@@ -1360,8 +1462,7 @@ def main_test() -> None:
         assert_status(response, 200)
         public_detail = response.json()["data"]
         assert public_detail["source_material"] == "来源材料：学院新闻摘录。"
-        assert "ai_reviews" not in public_detail
-        assert "latest_review_version_id" not in public_detail
+        assert_public_case_payload(public_detail)
         response = client.get(f"/api/reviews/{structured_case}")
         assert_status(response, 403)
         response = client.get(f"/api/versions/{structured_case}")
