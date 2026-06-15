@@ -75,7 +75,8 @@ AI 约束见 `docs/ai.md`。
 
 - MongoDB：`MONGODB_URI`、`MONGODB_DB_NAME`、`MONGODB_TIMEOUT_MS`
 - 认证：`AUTH_SECRET`、`AUTH_TOKEN_TTL`
-- 跨域：`CORS_ALLOW_ORIGINS`（生产必须显式设置，无默认回退）
+- 跨域：`CORS_ALLOW_ORIGINS`。后端未配置时默认不放行跨域；
+  Compose 和 `.env.example` 为本地开发提供 localhost 默认值，生产必须显式设置允许源。
 - AI：`AI_BASE_URL`、`AI_API_KEY`、`AI_MODELS`、`AI_DEFAULT_MODEL`、
   `AI_TIMEOUT_SECONDS`、`AI_REVIEW_ENABLED`
 - 前端：`VITE_API_BASE_URL`、`FRONTEND_PORT`

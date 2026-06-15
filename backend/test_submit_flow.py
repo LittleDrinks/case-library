@@ -142,9 +142,25 @@ def assert_cors_is_not_wildcard_with_credentials() -> None:
     assert blocked.headers.get("access-control-allow-origin") is None
 
 
+def assert_cors_wildcard_disables_credentials() -> None:
+    previous = os.environ.get("CORS_ALLOW_ORIGINS")
+    os.environ["CORS_ALLOW_ORIGINS"] = "*"
+    try:
+        options = main.build_cors_options()
+    finally:
+        if previous is None:
+            os.environ.pop("CORS_ALLOW_ORIGINS", None)
+        else:
+            os.environ["CORS_ALLOW_ORIGINS"] = previous
+
+    assert options["allow_origins"] == ["*"]
+    assert options["allow_credentials"] is False
+
+
 def main_test() -> None:
     assert_openapi_documented()
     assert_cors_is_not_wildcard_with_credentials()
+    assert_cors_wildcard_disables_credentials()
 
     create_user("ownerflow", "password123", role="normal", must_change_password=False)
     create_user("otherflow", "password123", role="normal", must_change_password=False)
