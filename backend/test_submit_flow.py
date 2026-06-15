@@ -13,7 +13,14 @@ os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:1808
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import main
-from database import create_case, create_user, get_db, get_mongo_client, get_user_by_username
+from database import (
+    create_case,
+    create_user,
+    get_case,
+    get_db,
+    get_mongo_client,
+    get_user_by_username,
+)
 from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
@@ -751,6 +758,54 @@ def main_test() -> None:
 
     response = client.get(f"/api/cases/{admin_delete_case}", headers=auth("adminflow"))
     assert_status(response, 404)
+
+    # Soft-delete regression: case is marked deleted, related records are kept.
+    soft_delete_case = make_case("ownerflow", "draft")
+    response = client.post(f"/api/cases/{soft_delete_case}/submit", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    response = client.post(
+        f"/api/reviews/{soft_delete_case}",
+        data={"comment": "soft delete regression review", "status": "reject"},
+        headers=auth("adminflow"),
+    )
+    assert_status(response, 200)
+    version_count_before = get_db().versions.count_documents({"case_id": soft_delete_case})
+    review_count_before = get_db().reviews.count_documents({"case_id": soft_delete_case})
+    assert version_count_before >= 1
+    assert review_count_before >= 1
+
+    response = client.delete(f"/api/cases/{soft_delete_case}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    stats = response.json()["deleted_stats"]
+    assert stats["type"] == "TYPE_A"
+    assert stats["theme"] == "test"
+
+    stored = get_db().cases.find_one({"id": soft_delete_case})
+    assert stored is not None
+    assert stored["status"] == "deleted"
+    assert stored.get("deleted_at")
+    assert stored.get("deleted_by") == "ownerflow"
+    assert stored.get("updated_at") == stored.get("deleted_at")
+
+    response = client.get(f"/api/cases/{soft_delete_case}", headers=auth("ownerflow"))
+    assert_status(response, 404)
+    response = client.get("/api/cases?status=deleted", headers=auth("adminflow"))
+    assert_status(response, 200)
+    assert all(item["id"] != soft_delete_case for item in response.json()["data"])
+
+    assert get_case(soft_delete_case) is None
+    assert get_case(soft_delete_case, include_deleted=True) is not None
+
+    assert get_db().versions.count_documents({"case_id": soft_delete_case}) == version_count_before
+    assert get_db().reviews.count_documents({"case_id": soft_delete_case}) == review_count_before
+    response = client.get(f"/api/versions/{soft_delete_case}", headers=auth("ownerflow"))
+    assert_status(response, 200)
+    assert len(response.json()["data"]) == version_count_before
+    response = client.get(f"/api/reviews/{soft_delete_case}", headers=auth("adminflow"))
+    assert_status(response, 200)
+    assert len(response.json()["data"]) == review_count_before
+    response = client.get(f"/api/reviews/{soft_delete_case}", headers=auth("otherflow"))
+    assert_status(response, 403)
 
     review_case_id = make_case("ownerflow", "draft")
 

@@ -28,6 +28,7 @@ CASE_STATUSES = {
     "pending_review",
     "approved",
     "needs_revision",
+    "deleted",
 }
 REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "needs_revision"}
 USER_ROLES = {"normal", "admin"}
@@ -53,7 +54,14 @@ PUBLIC_REVIEW_SNAPSHOT_FIELDS = [
     "author",
     "department",
 ]
-DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
+DATETIME_FIELDS = {
+    "created_at",
+    "updated_at",
+    "submitted_at",
+    "review_at",
+    "deployed_at",
+    "deleted_at",
+}
 AI_REVIEW_DATETIME_FIELDS = {"reviewed_at", "created_at"}
 BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -1137,7 +1145,7 @@ def create_ai_review_version(
     return serialize_doc(db.versions.find_one({"id": version_id}))
 
 
-def delete_case(case_id: int) -> dict:
+def delete_case(case_id: int, deleted_by: str = "") -> dict:
     db = get_db()
     case = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not case:
@@ -1150,14 +1158,23 @@ def delete_case(case_id: int) -> dict:
             "theme": None,
         }
 
-    result = db.cases.delete_one({"id": int(case_id)})
-    if result.deleted_count > 0:
-        db.reviews.delete_many({"case_id": int(case_id)})
-        db.versions.delete_many({"case_id": int(case_id)})
-        db.deployments.delete_many({"case_id": int(case_id)})
+    now = _now()
+    updates = {
+        "status": "deleted",
+        "updated_at": now,
+        "deleted_at": now,
+    }
+    if deleted_by:
+        updates["deleted_by"] = deleted_by
+
+    result = db.cases.update_one(
+        {"id": int(case_id), "status": {"$ne": "deleted"}},
+        {"$set": _normalize_datetime_fields(updates)},
+    )
+    # Intentionally keep reviews, versions and deployments for audit/history.
 
     return {
-        "success": result.deleted_count > 0,
+        "success": result.matched_count > 0,
         "was_in_library": bool(case.get("is_in_library", False)),
         "view_count": int(case.get("view_count") or 0),
         "like_count": int(case.get("like_count") or 0),

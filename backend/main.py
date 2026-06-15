@@ -271,7 +271,7 @@ def get_case_owner_username(case: dict) -> str:
 
 
 def _ensure_case_history_visible(case_id: int, current_user: dict | None) -> dict:
-    case = get_case(case_id)
+    case = get_case(case_id, include_deleted=True)
     if not case:
         raise HTTPException(status_code=404, detail="案例不存在")
     is_admin = bool(current_user and current_user.get("role") == "admin")
@@ -909,7 +909,7 @@ async def delete_case_endpoint(
     if case.get("status") == "draft" and current_user.get("username") != owner_username:
         raise HTTPException(status_code=403, detail="无权删除该草稿")
 
-    result = delete_case(case_id)
+    result = delete_case(case_id, deleted_by=current_user.get("username", ""))
     if not result.get("success"):
         raise HTTPException(status_code=404, detail="案例不存在")
 

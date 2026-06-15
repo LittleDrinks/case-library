@@ -45,7 +45,10 @@ FastAPI schema、测试和本文。
 - `PUT /api/cases/{case_id}`：更新案例并在正文、来源材料等字段变更时写版本记录，需作者或管理员；
   作者只能更新草稿或退回修改案例，待审核或已通过案例需先由管理员退回修改。
 - `POST /api/cases/{case_id}`：兼容更新端点，同上。
-- `DELETE /api/cases/{case_id}`：软删除案例，需作者或管理员。
+- `DELETE /api/cases/{case_id}`：软删除案例，需作者或管理员。案例状态标记为
+  `deleted` 并记录 `deleted_at`/`deleted_by`，不物理删除关联的 versions、reviews、
+  deployments；普通列表和详情会自动过滤已删除案例，内部查询可通过
+  `include_deleted=True` 或直接访问数据库获取。
 - `POST /api/cases/{case_id}/submit`：提交人工审核，需作者或管理员；可用 `version_id`
   绑定提交版本。
 - `POST /api/cases/{case_id}/like`：公开点赞。
