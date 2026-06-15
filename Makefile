@@ -27,17 +27,17 @@ cov:
 smoke:
 	python backend/smoke_test_mongo.py
 
-smoke-e2e:
-	cd frontend && npm run test:e2e
-
 dev-up:
-	docker compose -f docker-compose.dev.yml up -d --build
+	docker compose -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120
 
 dev-seed:
-	docker compose -f docker-compose.dev.yml exec app python scripts/seed_e2e_accounts.py
+	docker compose -f docker-compose.dev.yml exec -e ENABLE_DEMO_SEED=true app python scripts/seed_e2e_accounts.py
 
 dev-e2e:
 	docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
+
+smoke-e2e: dev-up
+	cd frontend && SMOKE_E2E_COMPOSE_FILE=docker-compose.dev.yml npm run test:e2e
 
 dev-down:
 	docker compose -f docker-compose.dev.yml down

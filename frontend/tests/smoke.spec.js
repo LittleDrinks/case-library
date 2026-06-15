@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -14,16 +14,22 @@ const TEST_ADMIN_PASS = "SmokePass123!";
 const FORCE_PWD_USER = "force_pwd_user";
 const FORCE_PWD_PASS = "ForcePwd123!";
 const FORCE_PWD_NEW_PASS = "NewForcePwd456!";
+const DOCKER_COMPOSE_FILE = process.env.SMOKE_E2E_COMPOSE_FILE || "";
+const DOCKER_COMPOSE_ARGS = DOCKER_COMPOSE_FILE ? ["-f", DOCKER_COMPOSE_FILE] : [];
 
 /**
  * Run a command inside the running `app` Compose service.
  */
 function dockerExec(cmd) {
-  return execSync(`docker compose exec -T app ${cmd}`, {
+  return execFileSync(
+    "docker",
+    ["compose", ...DOCKER_COMPOSE_ARGS, "exec", "-T", "app", "sh", "-lc", cmd],
+    {
     encoding: "utf-8",
     cwd: REPO_ROOT,
     timeout: 30000,
-  });
+    }
+  );
 }
 
 async function cardLikeCount(caseCard) {

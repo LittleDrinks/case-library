@@ -37,7 +37,25 @@ docker compose -f docker-compose.dev.yml up -d --build
 docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e
 ```
 
-当前 `e2e` profile 运行 `frontend/tests/audit.spec.js`：
+等价的 make 入口：
+
+```bash
+make dev-e2e
+```
+
+该容器入口只运行 `frontend/tests/audit.spec.js`。`frontend/tests/smoke.spec.js` 会调用宿主机
+`docker compose exec`，不能放进无 Docker daemon/socket 的 Playwright 容器执行。
+
+完整 smoke E2E 入口：
+
+```bash
+make smoke-e2e
+```
+
+`make smoke-e2e` 会启动 dev compose，然后在宿主机运行完整 Playwright suite。若默认
+compose 栈已在本机运行，请先 `docker compose down`，避免 `8001` / `18080` 端口冲突。
+
+当前 `e2e` profile 的 `frontend/tests/audit.spec.js` 覆盖：
 
 - `chromium-desktop`：默认管理员强制改密、创建流作者身份不读旧草稿、教师创建/AI
   自查/提交、教师历史版本、管理员版本化段落批注、退回修改后教师查看人工批注并复制

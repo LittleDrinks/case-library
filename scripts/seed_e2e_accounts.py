@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create deterministic alpha accounts and demo cases for browser/E2E tests."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -148,6 +149,10 @@ def reset_demo_cases() -> None:
 
 
 def main() -> None:
+    if os.environ.get("ENABLE_DEMO_SEED", "").lower() not in {"1", "true", "yes"}:
+        print("ENABLE_DEMO_SEED is not enabled; skipping e2e/demo seed.")
+        return
+
     init_db()
     for account in ACCOUNTS:
         upsert_account(account)
