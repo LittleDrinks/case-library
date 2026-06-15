@@ -62,6 +62,9 @@ docker compose up -d frontend
 默认 `docker compose up` 不再创建固定密码的 E2E 演示账号和演示案例。
 `scripts/seed_e2e_accounts.py` 只在 `ENABLE_DEMO_SEED=true` 时执行。
 
+用于系统演示的完整示例案例见 `docs/demo-case.md`，其中包含案例正文、来源材料、元数据、
+AI/人工审核批注示例以及 fixture 数据结构。本地 seed 和 E2E 截图验收可引用该文件内容。
+
 开发/E2E 环境使用 dev compose，默认启用 seed：
 
 ```bash
