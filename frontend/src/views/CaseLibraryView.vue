@@ -9,29 +9,31 @@
     <!-- Search and filters -->
     <div class="filter-bar">
       <div class="search-box">
-        <input
+        <BaseInput
           v-model="searchInput"
-          type="text"
           placeholder="搜索案例标题、内容..."
           @keydown.enter="applySearch"
-        />
-        <button type="button" class="btn-search" @click="applySearch">
-          搜索
-        </button>
+        >
+          <template #suffix>
+            <BaseButton variant="primary" size="md" @click="applySearch">
+              搜索
+            </BaseButton>
+          </template>
+        </BaseInput>
       </div>
       <div class="filter-selects">
-        <select v-model="filterType" @change="applyFilters">
-          <option value="">全部类型</option>
-          <option v-for="(label, key) in caseTypes" :key="key" :value="key">
-            {{ label }}
-          </option>
-        </select>
-        <select v-model="filterTheme" @change="applyFilters">
-          <option value="">全部主题</option>
-          <option v-for="t in themes" :key="t" :value="t">
-            {{ t }}
-          </option>
-        </select>
+        <BaseSelect
+          v-model="filterType"
+          :options="typeOptions"
+          placeholder="全部类型"
+          @change="applyFilters"
+        />
+        <BaseSelect
+          v-model="filterTheme"
+          :options="themes"
+          placeholder="全部主题"
+          @change="applyFilters"
+        />
       </div>
     </div>
 
@@ -49,9 +51,9 @@
         主题: {{ filterTheme }}
         <button type="button" class="chip-remove" @click="clearTheme">×</button>
       </span>
-      <button type="button" class="chip-clear" @click="clearAllFilters">
+      <BaseButton variant="ghost" size="sm" @click="clearAllFilters">
         清除全部
-      </button>
+      </BaseButton>
     </div>
 
     <!-- Results count -->
@@ -60,35 +62,53 @@
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="state-loading">
-      <div class="spinner" aria-hidden="true"></div>
-      <p>加载中…</p>
-    </div>
+    <EmptyState
+      v-if="loading"
+      variant="loading"
+      title="加载中…"
+      message="请稍候"
+    />
 
     <!-- Error -->
-    <div v-else-if="error" class="state-error">
-      <p>{{ error }}</p>
-      <button type="button" class="btn-secondary" @click="loadCases">重试</button>
-    </div>
+    <EmptyState
+      v-else-if="error"
+      variant="error"
+      :title="error"
+      message="加载案例失败，请稍后重试"
+    >
+      <template #action>
+        <BaseButton variant="secondary" size="md" @click="loadCases">
+          重试
+        </BaseButton>
+      </template>
+    </EmptyState>
 
     <!-- Empty -->
-    <div v-else-if="cases.length === 0" class="state-empty">
-      <h3>暂无案例</h3>
-      <p>当前条件下没有找到公开案例</p>
-    </div>
+    <EmptyState
+      v-else-if="cases.length === 0"
+      variant="empty"
+      title="暂无案例"
+      message="当前条件下没有找到公开案例"
+    />
 
     <!-- Case grid -->
     <div v-else class="case-grid">
-      <div
+      <BaseCard
         v-for="c in cases"
         :key="c.id"
         class="case-card"
+        hoverable
+        padding="md"
         :data-case-id="c.id"
       >
         <div class="case-card-main" @click="openDetail(c.id)">
           <div class="case-card-top">
-            <div class="case-type">{{ typeLabel(c.type) }}</div>
-            <div v-if="c.theme" class="case-theme">{{ c.theme }}</div>
+            <BaseBadge variant="brand" class="case-type">
+              {{ typeLabel(c.type) }}
+            </BaseBadge>
+            <BaseBadge v-if="c.theme" variant="secondary" class="case-theme">
+              {{ c.theme }}
+            </BaseBadge>
           </div>
           <h3 class="case-title">{{ c.title }}</h3>
           <div class="case-meta-row">
@@ -103,66 +123,87 @@
           </div>
         </div>
         <div class="case-card-actions">
-          <button
+          <BaseButton
             type="button"
             :class="['btn-like', { liked: isLiked(c.id) }]"
+            variant="ghost"
+            size="sm"
             @click.stop="toggleLike(c.id)"
           >
             {{ isLiked(c.id) ? '已点赞' : '点赞' }}
-          </button>
-          <button type="button" class="btn-view" @click.stop="openDetail(c.id)">
+          </BaseButton>
+          <BaseButton
+            type="button"
+            class="btn-view"
+            variant="ghost"
+            size="sm"
+            @click.stop="openDetail(c.id)"
+          >
             查看详情
-          </button>
+          </BaseButton>
         </div>
-      </div>
+      </BaseCard>
     </div>
 
     <!-- Detail Modal -->
-    <div v-if="detailCase" class="modal-overlay" @click.self="closeDetail">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title">
-        <div class="modal-header">
-          <h3 id="detail-title">{{ detailCase.title }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭" @click="closeDetail">
-            ×
-          </button>
+    <BaseModal
+      :model-value="detailCase !== null"
+      :title="detailCase?.title"
+      @update:model-value="closeDetail"
+    >
+      <template #body>
+        <div class="detail-badges">
+          <BaseBadge variant="brand" class="badge-type">
+            {{ typeLabel(detailCase.type) }}
+          </BaseBadge>
+          <BaseBadge v-if="detailCase.theme" variant="secondary" class="badge-theme">
+            {{ detailCase.theme }}
+          </BaseBadge>
+          <BaseBadge variant="success" shape="pill" class="badge-status">
+            已通过
+          </BaseBadge>
         </div>
-        <div class="modal-body">
-          <div class="detail-badges">
-            <span class="badge-type">{{ typeLabel(detailCase.type) }}</span>
-            <span v-if="detailCase.theme" class="badge-theme">{{ detailCase.theme }}</span>
-            <span class="badge-status">已通过</span>
-          </div>
-          <div class="detail-meta">
-            <span v-if="detailCase.author">作者: {{ detailCase.author }}</span>
-            <span v-if="detailCase.department">部门: {{ detailCase.department }}</span>
-            <span>日期: {{ formatDate(detailCase.created_at) }}</span>
-            <span>浏览 {{ detailCase.view_count || 0 }}</span>
-            <span>点赞 {{ detailLikeCount }}</span>
-          </div>
-          <div class="detail-content">
-            <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
-          </div>
-          <div v-if="detailCase.source_material" class="detail-source">
-            <strong>来源材料：</strong>
-            <div class="detail-source-body">{{ detailCase.source_material }}</div>
-          </div>
-          <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
-            <strong>关键词：</strong>
-            <span v-for="k in detailCase.keywords" :key="k" class="keyword-tag">{{ k }}</span>
-          </div>
+        <div class="detail-meta">
+          <span v-if="detailCase.author">作者: {{ detailCase.author }}</span>
+          <span v-if="detailCase.department">部门: {{ detailCase.department }}</span>
+          <span>日期: {{ formatDate(detailCase.created_at) }}</span>
+          <span>浏览 {{ detailCase.view_count || 0 }}</span>
+          <span>点赞 {{ detailLikeCount }}</span>
         </div>
-        <div class="modal-footer">
-          <button
-            type="button"
-            :class="['btn-like-lg', { liked: isLiked(detailCase.id) }]"
-            @click="toggleLike(detailCase.id)"
+        <div class="detail-content">
+          <div class="detail-content-body">{{ detailCase.content || '暂无内容' }}</div>
+        </div>
+        <div v-if="detailCase.source_material" class="detail-source">
+          <strong>来源材料：</strong>
+          <div class="detail-source-body">{{ detailCase.source_material }}</div>
+        </div>
+        <div v-if="detailCase.keywords && detailCase.keywords.length" class="detail-keywords">
+          <strong>关键词：</strong>
+          <BaseBadge
+            v-for="k in detailCase.keywords"
+            :key="k"
+            variant="brand"
+            class="keyword-tag"
           >
-            {{ isLiked(detailCase.id) ? '已点赞' : '点赞' }}
-          </button>
-          <button type="button" class="btn-secondary" @click="closeDetail">关闭</button>
+            {{ k }}
+          </BaseBadge>
         </div>
-      </div>
-    </div>
+      </template>
+      <template #footer>
+        <BaseButton
+          type="button"
+          :class="['btn-like-lg', { liked: isLiked(detailCase.id) }]"
+          variant="secondary"
+          size="md"
+          @click="toggleLike(detailCase.id)"
+        >
+          {{ isLiked(detailCase.id) ? '已点赞' : '点赞' }}
+        </BaseButton>
+        <BaseButton variant="secondary" size="md" @click="closeDetail">
+          关闭
+        </BaseButton>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
@@ -177,6 +218,13 @@ import {
   unlikeCase,
 } from '../api/cases.js';
 import { notify } from '../utils/toast.js';
+import BaseButton from '../components/ui/BaseButton.vue';
+import BaseInput from '../components/ui/BaseInput.vue';
+import BaseSelect from '../components/ui/BaseSelect.vue';
+import BaseCard from '../components/ui/BaseCard.vue';
+import BaseBadge from '../components/ui/BaseBadge.vue';
+import BaseModal from '../components/ui/BaseModal.vue';
+import EmptyState from '../components/ui/EmptyState.vue';
 
 const props = defineProps({
   searchTrigger: { type: Object, default: () => ({ keyword: '', nonce: 0 }) },
@@ -208,6 +256,10 @@ const likeProcessing = ref(new Set());
 const hasActiveFilters = computed(() => {
   return Boolean(appliedKeyword.value || filterType.value || filterTheme.value);
 });
+
+const typeOptions = computed(() =>
+  Object.entries(caseTypes.value).map(([value, label]) => ({ value, label }))
+);
 
 // Track last handled search trigger nonce to avoid re-applying stale keywords
 let lastHandledNonce = 0;
@@ -452,40 +504,26 @@ onMounted(async () => {
   flex: 1 1 320px;
   min-width: 240px;
   max-width: 520px;
+  align-items: stretch;
 }
 
-.search-box input {
+.search-box :deep(.base-input) {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid var(--color-border-strong);
-  border-right: 0;
+}
+
+.search-box :deep(.input-wrap) {
   border-radius: 6px 0 0 6px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.search-box input:focus {
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px var(--color-brand-light);
+.search-box :deep(.input-suffix) {
+  padding: 0;
+  border: 0;
 }
 
-.btn-search {
-  padding: 0 16px;
-  border: 1px solid var(--color-brand);
+.search-box :deep(.base-button) {
+  height: 100%;
   border-radius: 0 6px 6px 0;
-  background: var(--color-brand);
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-search:hover {
-  background: var(--color-brand-dark);
+  border: 1px solid var(--color-brand);
 }
 
 .filter-selects {
@@ -494,26 +532,9 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.filter-selects select {
-  padding: 10px 28px 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%234b5565' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  transition: border-color 0.15s, box-shadow 0.15s;
+.filter-selects :deep(.base-select) {
+  flex: 1;
   min-width: 140px;
-}
-
-.filter-selects select:focus {
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px var(--color-brand-light);
 }
 
 /* Filter chips */
@@ -547,20 +568,6 @@ onMounted(async () => {
   padding: 0 2px;
 }
 
-.chip-clear {
-  background: transparent;
-  border: 0;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 4px 6px;
-}
-
-.chip-clear:hover {
-  color: var(--color-text);
-}
-
 /* Results count */
 .results-count {
   margin-bottom: 12px;
@@ -568,71 +575,11 @@ onMounted(async () => {
   color: var(--color-text-muted);
 }
 
-/* States */
-.state-loading,
-.state-error,
-.state-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 56px 24px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  text-align: center;
-}
-
-.state-loading p,
-.state-error p,
-.state-empty p {
-  margin: 0;
-  font-size: 14px;
-  color: var(--color-text-secondary);
-}
-
-.spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-brand);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.state-empty h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
 /* Case grid */
 .case-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 16px;
-}
-
-.case-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: box-shadow 0.15s;
-}
-
-.case-card:hover {
-  box-shadow: 0 4px 16px rgba(29, 35, 47, 0.08);
 }
 
 .case-card-main {
@@ -647,24 +594,6 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 10px;
   flex-wrap: wrap;
-}
-
-.case-type {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-brand);
-  background: var(--color-brand-light);
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-
-.case-theme {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: #f3f4f6;
-  padding: 3px 10px;
-  border-radius: 4px;
 }
 
 .case-title {
@@ -709,133 +638,35 @@ onMounted(async () => {
   border-top: 1px solid var(--color-border);
 }
 
-.btn-like,
-.btn-view {
+.case-card .case-card-actions :deep(.base-button) {
   flex: 1;
-  padding: 10px 14px;
+  border-radius: 0;
   border: 0;
-  background: var(--color-surface);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  text-align: center;
-}
-
-.btn-like {
-  color: var(--color-text-secondary);
   border-right: 1px solid var(--color-border);
-}
-
-.btn-like:hover {
-  background: var(--color-brand-light);
-  color: var(--color-brand);
-}
-
-.btn-like.liked {
-  color: var(--color-brand);
-  background: var(--color-brand-light);
-}
-
-.btn-view {
-  color: var(--color-brand);
-}
-
-.btn-view:hover {
-  background: var(--color-brand-light);
-}
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.modal-panel {
-  width: 100%;
-  max-width: 720px;
-  max-height: calc(100vh - 32px);
-  background: var(--color-surface);
-  border-radius: 10px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text);
-  line-height: 1.4;
-  padding-right: 16px;
-}
-
-.modal-close {
   background: transparent;
-  border: 0;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
+  color: var(--color-text-secondary);
 }
 
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
+.case-card .case-card-actions :deep(.base-button):last-child {
+  border-right: 0;
 }
 
+.case-card .case-card-actions :deep(.base-button):hover {
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+.case-card .case-card-actions :deep(.base-button).liked {
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+}
+
+/* Detail modal content */
 .detail-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
-}
-
-.badge-type {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-brand);
-  background: var(--color-brand-light);
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-
-.badge-theme {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: #f3f4f6;
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-
-.badge-status {
-  font-size: 12px;
-  font-weight: 700;
-  color: #166534;
-  background: #dcfce7;
-  padding: 3px 10px;
-  border-radius: 999px;
 }
 
 .detail-meta {
@@ -892,35 +723,12 @@ onMounted(async () => {
 
 .keyword-tag {
   display: inline-block;
-  padding: 2px 8px;
   margin: 2px 4px 2px 0;
-  background: var(--color-brand-light);
-  color: var(--color-brand);
-  font-size: 12px;
-  border-radius: 4px;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
 }
 
 .btn-like-lg {
-  padding: 8px 18px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .btn-like-lg:hover {
@@ -933,23 +741,6 @@ onMounted(async () => {
   background: var(--color-brand-light);
   border-color: var(--color-brand);
   color: var(--color-brand);
-}
-
-.btn-secondary {
-  padding: 8px 18px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-secondary:hover {
-  background: rgba(29, 35, 47, 0.04);
 }
 
 /* Responsive */
@@ -991,8 +782,7 @@ onMounted(async () => {
     width: 100%;
   }
 
-  .filter-selects select {
-    flex: 1;
+  .filter-selects :deep(.base-select) {
     min-width: 0;
   }
 
@@ -1011,18 +801,6 @@ onMounted(async () => {
   .meta-item {
     font-size: 12px;
   }
-
-  .modal-body {
-    padding: 14px;
-  }
-
-  .modal-footer {
-    padding: 10px 14px;
-  }
-
-  .modal-header h3 {
-    font-size: 16px;
-  }
 }
 
 @media (max-width: 390px) {
@@ -1031,8 +809,7 @@ onMounted(async () => {
     align-items: flex-start;
   }
 
-  .btn-like,
-  .btn-view {
+  .case-card .case-card-actions :deep(.base-button) {
     padding: 8px 10px;
     font-size: 12px;
   }
