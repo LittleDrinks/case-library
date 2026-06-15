@@ -184,7 +184,14 @@ function onLoginSuccess() {
 }
 
 function onPasswordChanged() {
-  // Modal closes automatically via computed
+  currentView.value = "home";
+  showLogin.value = true;
+  handleToast({
+    detail: {
+      message: "密码已修改，请使用新密码重新登录。",
+      type: "success",
+    },
+  });
 }
 
 function handleLogout() {

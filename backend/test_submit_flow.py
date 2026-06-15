@@ -13,14 +13,24 @@ os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:1808
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import main
-from database import create_case, create_user, get_db, get_mongo_client
+from database import create_case, create_user, get_db, get_mongo_client, get_user_by_username
 from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
 
 
 def auth(username: str):
-    return {"Authorization": f"Bearer {main.create_auth_token(username)}"}
+    user = get_user_by_username(username)
+    assert user, username
+    return {
+        "Authorization": (
+            f"Bearer {main.create_auth_token(username, user.get('token_version', 0))}"
+        )
+    }
+
+
+def bearer(token: str):
+    return {"Authorization": f"Bearer {token}"}
 
 
 def make_case(owner: str, status: str = "draft") -> int:
@@ -167,12 +177,52 @@ def main_test() -> None:
     create_user("adminflow", "password123", role="admin", must_change_password=False)
     create_user("forceflow", "oldpass123", role="normal", must_change_password=True)
 
+    get_db().users.update_one({"username": "otherflow"}, {"$unset": {"token_version": ""}})
+    response = client.get("/api/prompts", headers=auth("otherflow"))
+    assert_status(response, 200)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "ownerflow", "password": "password123"},
+    )
+    assert_status(response, 200)
+    owner_old_token = response.json()["data"]["token"]
+
+    response = client.post(
+        "/api/auth/change-password",
+        data={
+            "username": "ownerflow",
+            "old_password": "password123",
+            "new_password": "ownerpass456",
+        },
+    )
+    assert_status(response, 200)
+
+    response = client.get("/api/prompts", headers=bearer(owner_old_token))
+    assert_status(response, 401)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "ownerflow", "password": "password123"},
+    )
+    assert_status(response, 401)
+
+    response = client.post(
+        "/api/auth/login",
+        data={"username": "ownerflow", "password": "ownerpass456"},
+    )
+    assert_status(response, 200)
+    owner_new_token = response.json()["data"]["token"]
+    response = client.get("/api/prompts", headers=bearer(owner_new_token))
+    assert_status(response, 200)
+
     response = client.post(
         "/api/auth/login",
         data={"username": "forceflow", "password": "oldpass123"},
     )
     assert_status(response, 200)
     assert response.json()["data"]["must_change_password"] is True
+    force_old_token = response.json()["data"]["token"]
 
     response = client.post(
         "/api/auth/change-password",
@@ -204,6 +254,9 @@ def main_test() -> None:
     )
     assert_status(response, 200)
 
+    response = client.get("/api/prompts", headers=bearer(force_old_token))
+    assert_status(response, 401)
+
     response = client.post(
         "/api/auth/login",
         data={"username": "forceflow", "password": "oldpass123"},
@@ -216,6 +269,9 @@ def main_test() -> None:
     )
     assert_status(response, 200)
     assert response.json()["data"]["must_change_password"] is False
+    force_new_token = response.json()["data"]["token"]
+    response = client.get("/api/prompts", headers=bearer(force_new_token))
+    assert_status(response, 200)
 
     other_case = make_case("ownerflow", "draft")
     response = client.post(f"/api/cases/{other_case}/submit", headers=auth("otherflow"))

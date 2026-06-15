@@ -19,7 +19,12 @@ class LoginUser(BaseModel):
     nickname: str = ""
     must_change_password: bool = False
     status: str = Field(default="active", examples=["active"])
-    token: str = Field(description="HMAC-signed bearer token. This token is not a JWT.")
+    token: str = Field(
+        description=(
+            "HMAC-signed bearer token. This token is not a JWT and is invalidated "
+            "after a successful password change or admin password reset."
+        )
+    )
 
 
 class LoginResponse(BaseModel):

@@ -200,15 +200,28 @@ def _b64url_decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + padding)
 
 
-def create_auth_token(username: str) -> str:
+def _normalize_token_version(value) -> int:
+    try:
+        version = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(version, 0)
+
+
+def create_auth_token(username: str, token_version: int = 0) -> str:
     now = int(time.time())
-    payload = {"u": username, "iat": now, "exp": now + TOKEN_TTL_SECONDS}
+    payload = {
+        "u": username,
+        "tv": _normalize_token_version(token_version),
+        "iat": now,
+        "exp": now + TOKEN_TTL_SECONDS,
+    }
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = hmac.new(_AUTH_SECRET_BYTES, payload_b64.encode("ascii"), hashlib.sha256).digest()
     return f"{payload_b64}.{_b64url_encode(sig)}"
 
 
-def verify_auth_token(token: str) -> str | None:
+def verify_auth_token(token: str) -> dict | None:
     if not token or "." not in token:
         return None
     try:
@@ -229,7 +242,7 @@ def verify_auth_token(token: str) -> str | None:
     username = payload.get("u")
     if not isinstance(username, str) or not username:
         return None
-    return username
+    return {"username": username, "token_version": _normalize_token_version(payload.get("tv"))}
 
 
 def get_current_user(headers):
@@ -239,11 +252,16 @@ def get_current_user(headers):
     parts = auth_header.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
-    username = verify_auth_token(parts[1].strip())
-    if not username:
+    token_payload = verify_auth_token(parts[1].strip())
+    if not token_payload:
         return None
-    user = get_user_by_username(username)
-    if user and user.get("status") == "active":
+    user = get_user_by_username(token_payload["username"])
+    if (
+        user
+        and user.get("status") == "active"
+        and _normalize_token_version(user.get("token_version"))
+        == token_payload["token_version"]
+    ):
         return user
     return None
 
@@ -306,7 +324,7 @@ async def login(username: str = Form(...), password: str = Form(...)):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    token = create_auth_token(user["username"])
+    token = create_auth_token(user["username"], user.get("token_version", 0))
     return {
         "success": True,
         "data": {
@@ -325,7 +343,10 @@ async def login(username: str = Form(...), password: str = Form(...)):
     "/api/auth/change-password",
     response_model=SuccessMessageResponse,
     summary="Change a user's password",
-    description="Change a password by providing the username, old password, and new password.",
+    description=(
+        "Change a password by providing the username, old password, and new password. "
+        "Existing bearer tokens for the user are invalidated after a successful change."
+    ),
 )
 async def change_password(
     username: str = Form(...),

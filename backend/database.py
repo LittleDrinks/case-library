@@ -398,6 +398,25 @@ def _normalize_user_role(role: str | None) -> str:
     return role or "normal"
 
 
+def _normalize_token_version(value: Any) -> int:
+    try:
+        version = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(version, 0)
+
+
+def _serialize_user_doc(user: dict | None) -> dict | None:
+    serialized = serialize_doc(user)
+    if serialized:
+        serialized["role"] = _normalize_user_role(serialized.get("role"))
+        serialized.setdefault("nickname", "")
+        serialized.setdefault("status", "active")
+        serialized["must_change_password"] = bool(serialized.get("must_change_password", False))
+        serialized["token_version"] = _normalize_token_version(serialized.get("token_version"))
+    return serialized
+
+
 def _validate_user_status(status: str | None):
     if status is not None and status not in USER_STATUSES:
         raise ValueError(f"Invalid user status: {status}")
@@ -494,6 +513,11 @@ def init_db():
     db.users.create_index([("id", ASCENDING)], unique=True)
     db.users.create_index([("username", ASCENDING)], unique=True)
     db.users.create_index([("role", ASCENDING), ("status", ASCENDING)])
+    token_repair = db.users.update_many(
+        {"token_version": {"$exists": False}}, {"$set": {"token_version": 0}}
+    )
+    if token_repair.modified_count:
+        print(f"Backfilled token_version on {token_repair.modified_count} legacy user(s)")
 
     db.cases.create_index([("id", ASCENDING)], unique=True)
     db.cases.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
@@ -529,14 +553,7 @@ def init_db():
 
 
 def get_user_by_username(username: str) -> dict | None:
-    user = get_db().users.find_one({"username": username})
-    serialized = serialize_doc(user)
-    if serialized:
-        serialized["role"] = _normalize_user_role(serialized.get("role"))
-        serialized.setdefault("nickname", "")
-        serialized.setdefault("status", "active")
-        serialized["must_change_password"] = bool(serialized.get("must_change_password", False))
-    return serialized
+    return _serialize_user_doc(get_db().users.find_one({"username": username}))
 
 
 def create_user(
@@ -559,6 +576,7 @@ def create_user(
         "nickname": nickname,
         "must_change_password": bool(must_change_password),
         "status": status,
+        "token_version": 0,
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -573,14 +591,11 @@ def get_users_count() -> int:
 
 
 def serialize_user_public(user: dict | None) -> dict | None:
-    if not user:
+    serialized = _serialize_user_doc(user)
+    if not serialized:
         return None
-    serialized = serialize_doc(user) or {}
     serialized.pop("password", None)
-    serialized["must_change_password"] = bool(serialized.get("must_change_password", False))
-    serialized["role"] = _normalize_user_role(serialized.get("role"))
-    serialized.setdefault("nickname", "")
-    serialized.setdefault("status", "active")
+    serialized.pop("token_version", None)
     return serialized
 
 
@@ -597,8 +612,7 @@ def authenticate_user(username: str, password: str) -> dict | None:
         return None
     if not verify_password(password, user.get("password", "")):
         return None
-    user["role"] = _normalize_user_role(user.get("role"))
-    return serialize_doc(user)
+    return _serialize_user_doc(user)
 
 
 def set_user_password(username: str, new_password: str, must_change_password: bool = True) -> bool:
@@ -611,7 +625,8 @@ def set_user_password(username: str, new_password: str, must_change_password: bo
                     "must_change_password": bool(must_change_password),
                     "updated_at": _now(),
                 }
-            )
+            ),
+            "$inc": {"token_version": 1},
         },
     )
     return result.matched_count > 0 and result.modified_count > 0
@@ -630,7 +645,8 @@ def change_user_password(username: str, old_password: str, new_password: str) ->
                     "must_change_password": False,
                     "updated_at": _now(),
                 }
-            )
+            ),
+            "$inc": {"token_version": 1},
         },
     )
     return result.matched_count > 0 and result.modified_count > 0

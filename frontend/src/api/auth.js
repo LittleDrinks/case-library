@@ -105,12 +105,8 @@ export async function changePassword(username, oldPassword, newPassword) {
       new_password: newPassword,
     });
     if (data.success) {
-      if (state.user) {
-        const updated = { ...state.user, must_change_password: false };
-        state.user = updated;
-        localStorage.setItem(USER_KEY, JSON.stringify(updated));
-      }
-      return { success: true };
+      clearAuth();
+      return { success: true, requiresLogin: true };
     }
     throw new Error(data.message || "修改密码失败");
   } catch (err) {

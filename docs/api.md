@@ -11,7 +11,8 @@ FastAPI schema、测试和本文。
 ## 全局约定
 
 - 认证：登录后使用 `Authorization: Bearer <token>`。
-- Token：HMAC-SHA256 签名，不是 JWT，默认有效期由 `AUTH_TOKEN_TTL` 控制。
+- Token：HMAC-SHA256 签名，不是 JWT，默认有效期由 `AUTH_TOKEN_TTL` 控制；用户成功改密
+  或管理员重置密码后，旧 token 会立即失效。
 - 成功响应通常包含 `success: true`。
 - 错误响应由 FastAPI 返回 `detail`。
 - 当前主键仍是自增整数 `id`。
@@ -21,7 +22,8 @@ FastAPI schema、测试和本文。
 ### 认证
 
 - `POST /api/auth/login`：表单登录，返回用户信息和 token。
-- `POST /api/auth/change-password`：用户名 + 旧密码 + 新密码修改密码。
+- `POST /api/auth/change-password`：用户名 + 旧密码 + 新密码修改密码；成功后该用户旧 token
+  立即失效。
 
 ### AI
 

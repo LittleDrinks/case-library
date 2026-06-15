@@ -642,23 +642,17 @@ test(
     await page.locator("#pc-confirm").fill(FORCE_PWD_NEW_PASS);
     await page.getByRole("button", { name: "确认修改" }).click();
 
-    // Modal should close and user remains logged in
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
-    await expect(page.locator(".user-name")).toContainText("ForcePwdUser");
-
-    // ==========================================
-    // Step 4: Logout and verify password change took effect
-    // ==========================================
-    await logout(page, { waitForLoginButton: true });
+    // After a successful password change the backend revokes all existing
+    // tokens and the frontend clears auth, so the login dialog should appear.
+    await expect(
+      page.getByRole("heading", { name: "用户登录" })
+    ).toBeVisible();
 
     // Old password should no longer work
-    await openLoginDialog(page, { waitForVisible: false });
     await submitLoginCredentials(page, FORCE_PASSWORD_USER);
     await expect(page.locator(".modal-panel .error-msg")).toBeVisible();
 
-    // Close modal and retry with new password
-    await page.locator(".modal-panel .close-btn").click();
-    await openLoginDialog(page, { waitForVisible: false });
+    // Re-login with the new password
     await submitLoginCredentials(page, FORCE_PASSWORD_USER_WITH_NEW_PASSWORD);
 
     // Should log in successfully without forced password modal
