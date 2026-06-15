@@ -83,6 +83,10 @@ ENABLE_DEMO_SEED=false docker compose -f docker-compose.dev.yml up -d --build
 make dev-seed
 ```
 
+本地 demo/E2E seed 会创建可直接验收的演示管理员 `10000002` / `default123456`，
+该账号不会触发强制改密弹窗。生产或默认初始化账号仍由 `backend/init_users.py`
+创建，并保持首次登录强制改密。
+
 容器化 E2E 入口使用同一套 dev compose seed 路径，只运行不依赖宿主机 Docker 的
 `frontend/tests/audit.spec.js`：
 

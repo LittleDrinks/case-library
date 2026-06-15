@@ -42,7 +42,9 @@ ACCOUNTS = [
         "password": "default123456",
         "role": "admin",
         "nickname": "小李",
-        "must_change_password": True,
+        # Local demo/E2E admin for reviewer walkthroughs. Production/default
+        # init users still require password change in backend/init_users.py.
+        "must_change_password": False,
         "status": "active",
     },
 ]

@@ -44,6 +44,7 @@ AI 约束见 `docs/ai.md`。
 `backend/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
 均设置 `must_change_password=true`。测试账号和 alpha demo 案例由
 `scripts/seed_e2e_accounts.py` 确定性创建，仅用于本地 alpha demo、dev 和 e2e 环境。
+该 seed 中的演示管理员 `10000002` 为便于浏览器验收不强制改密，不代表生产默认账号策略。
 不要把真实账号、真实密码或生产种子数据写入这些脚本。
 
 `/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
