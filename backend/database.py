@@ -53,6 +53,7 @@ PUBLIC_REVIEW_SNAPSHOT_FIELDS = [
     "source_material",
     "author",
     "department",
+    "keywords",
 ]
 DATETIME_FIELDS = {
     "created_at",
@@ -396,6 +397,7 @@ def serialize_version(version: dict | None) -> dict | None:
     serialized.setdefault("content", "")
     serialized.setdefault("source_material", "")
     serialized.setdefault("author", "")
+    serialized["keywords"] = _normalize_keywords(serialized.get("keywords"))
     serialized.setdefault("owner_username", "")
     serialized.setdefault("created_by", serialized.get("changed_by", ""))
     serialized.setdefault("paragraphs", split_paragraphs(serialized.get("content", "")))
@@ -790,6 +792,7 @@ def create_case(case_data: dict) -> int:
         "source_material": doc.get("source_material", ""),
         "author": doc.get("author", ""),
         "department": doc.get("department", ""),
+        "keywords": _normalize_keywords(doc.get("keywords")),
         "owner_username": doc.get("owner_username", ""),
         "created_by": doc.get("owner_username") or doc.get("author", ""),
         "paragraphs": split_paragraphs(doc.get("content", "")),
@@ -1058,6 +1061,7 @@ def update_case(
             "source_material": (updated or {}).get("source_material", ""),
             "author": (updated or {}).get("author", ""),
             "department": (updated or {}).get("department", ""),
+            "keywords": _normalize_keywords((updated or {}).get("keywords")),
             "owner_username": (updated or {}).get("owner_username", ""),
             "created_by": updated_by,
             "paragraphs": split_paragraphs((updated or {}).get("content", "")),
@@ -1105,6 +1109,7 @@ def create_ai_review_version(
         "source_material": current.get("source_material", ""),
         "author": current.get("author", ""),
         "department": current.get("department", ""),
+        "keywords": _normalize_keywords(current.get("keywords")),
         "owner_username": current.get("owner_username", ""),
         "created_by": reviewer,
         "paragraphs": paragraphs,

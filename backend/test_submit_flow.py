@@ -20,6 +20,7 @@ from database import (
     get_db,
     get_mongo_client,
     get_user_by_username,
+    update_case,
 )
 from fastapi.testclient import TestClient
 
@@ -357,6 +358,12 @@ def main_test() -> None:
         headers=auth("ownerflow"),
     )
     assert_status(response, 200)
+    assert update_case(
+        snapshot_case,
+        {"keywords": ["approved-snapshot-keyword"]},
+        updated_by="ownerflow",
+        change_reason="prepare snapshot keywords",
+    )
     response = client.post(f"/api/cases/{snapshot_case}/submit", headers=auth("ownerflow"))
     assert_status(response, 200)
     submitted = get_db().cases.find_one({"id": snapshot_case})
@@ -381,6 +388,12 @@ def main_test() -> None:
         headers=auth("adminflow"),
     )
     assert_status(response, 200)
+    assert update_case(
+        snapshot_case,
+        {"keywords": ["live-edited-keyword"]},
+        updated_by="adminflow",
+        change_reason="admin live keyword edit",
+    )
 
     response = client.get(f"/api/cases/{snapshot_case}?increment_view=false")
     assert_status(response, 200)
@@ -406,6 +419,12 @@ def main_test() -> None:
     assert_status(response, 200)
     assert any(item["id"] == snapshot_case for item in response.json()["data"])
     response = client.get("/api/search?q=live%20edited")
+    assert_status(response, 200)
+    assert all(item["id"] != snapshot_case for item in response.json()["data"])
+    response = client.get("/api/search?q=approved-snapshot-keyword")
+    assert_status(response, 200)
+    assert any(item["id"] == snapshot_case for item in response.json()["data"])
+    response = client.get("/api/search?q=live-edited-keyword")
     assert_status(response, 200)
     assert all(item["id"] != snapshot_case for item in response.json()["data"])
     response = client.get("/api/search/advanced?type=SNAPSHOT_APPROVED_TYPE")
