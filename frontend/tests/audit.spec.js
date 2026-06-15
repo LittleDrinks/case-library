@@ -100,6 +100,18 @@ test.describe("manual audit candidate flows", () => {
         })
       );
     });
+    let staleUpdateRequests = 0;
+    await page.route("**/api/cases/999999", async (route) => {
+      staleUpdateRequests += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: false,
+          detail: "stale caseId should not be used",
+        }),
+      });
+    });
 
     await login(page, USER);
     await page.getByRole("link", { name: "创建案例" }).click();
@@ -108,8 +120,16 @@ test.describe("manual audit candidate flows", () => {
     await expect(page.getByLabel("作者姓名")).not.toHaveValue("过期作者");
     await expect(page.getByLabel(/案例标题/)).toHaveValue("旧草稿标题");
 
+    // #92：进入创建案例入口后，旧 draft 的 caseId 不应被复用。
+    const draftAfterEntry = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("case_library_create_case_draft"))
+    );
+    expect(draftAfterEntry.caseId).not.toBe(999999);
+    expect(draftAfterEntry.latestReviewVersionId).not.toBe(888888);
+
     await page.getByRole("button", { name: "保存草稿" }).click();
     await expect(page.getByText("草稿已保存")).toBeVisible();
+    expect(staleUpdateRequests).toBe(0);
     const draft = await page.evaluate(() =>
       JSON.parse(localStorage.getItem("case_library_create_case_draft"))
     );

@@ -1055,10 +1055,26 @@ function runHelper() {
   helperResponse.value = `根据当前内容，建议类型为「${typeLabel}」，主题选择「${theme}」。您也可以结合自身判断手动调整。`;
 }
 
+function currentDraftQueryId() {
+  const hash = window.location.hash.replace("#", "");
+  const [viewId, query = ""] = hash.split("?");
+  if (viewId !== "create") return "";
+  return new URLSearchParams(query).get("draft");
+}
+
 onMounted(async () => {
   const user = currentUser();
   form.author = user?.nickname || user?.username || "";
   loadDraft();
+
+  // 修复 #92：默认"创建案例"入口应启动全新流程，不能复用 localStorage 里的旧 caseId。
+  // 只有显式通过 #create?draft=xxx 进入时才保留已恢复的旧 draft 身份。
+  const draftId = currentDraftQueryId();
+  if (!draftId) {
+    caseId.value = null;
+    latestReviewVersionId.value = null;
+  }
+
   try {
     const data = await fetchCaseConstants();
     if (data) {

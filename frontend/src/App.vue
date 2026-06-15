@@ -216,14 +216,18 @@ function handleToast(event) {
 // Optional: sync with hash for basic URL state
 function readHash() {
   const hash = window.location.hash.replace("#", "");
-  const item = allNavItems.find((i) => i.id === hash);
+  const viewId = hash.split("?")[0];
+  const item = allNavItems.find((i) => i.id === viewId);
   if (item) {
-    navigate(hash);
+    navigate(viewId);
   }
 }
 
 watch(currentView, (view) => {
-  window.location.hash = view;
+  const hashView = window.location.hash.replace("#", "").split("?")[0];
+  if (hashView !== view) {
+    window.location.hash = view;
+  }
 });
 
 window.addEventListener("hashchange", readHash);
