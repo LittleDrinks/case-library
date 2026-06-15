@@ -1,0 +1,11 @@
+[config]
+custom_model_max_tokens = 64000
+
+[pr_reviewer]
+extra_instructions = "请用简体中文进行代码审查，重点关注 bug、安全、可维护性、测试缺口和是否混入无关改动。"
+
+[pr_description]
+extra_instructions = "请用简体中文生成 PR 描述，必须包含变更范围、关联 issue、验证证据和风险。"
+
+[pr_code_suggestions]
+extra_instructions = "请用简体中文提供代码改进建议。"

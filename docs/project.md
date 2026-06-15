@@ -50,10 +50,7 @@ AI 约束见 `docs/ai.md`。
 统一 prompt 管理，先按 issue #80 迁移路径和评测命令收口，不把 `.codex/` 代理技能混入产品
 资产。
 
-历史目录只读参考，不从中开发，不整目录复制：
-
-- `/home/q2635/wsl-workspace/case-library-old`
-- `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605`
+历史目录、备份目录或其他项目目录只能作为只读参考；不从中开发，不整目录复制。
 
 ## 运行服务
 
@@ -89,11 +86,9 @@ AI 约束见 `docs/ai.md`。
 
 ## 网络和代理
 
-当前沙箱内普通网络可能 DNS 失败；提权后宿主网络可访问 GitHub。Docker Hub 直连
-超时，但执行 `zsh -lic 'proxy_on'` 后可通过代理访问 Docker Registry。
-
-`proxy_on` 定义在 `~/.zshrc`，会设置 shell 代理、写入 `/etc/docker/proxy.env`，
-并在 Docker 正运行时重启 Docker。需要写系统目录时必须请求权限。
+若 Docker 拉取镜像或安装依赖失败，先按 `docs/development.md` 的网络诊断命令确认问题。
+代理、镜像源和 Docker daemon 配置属于本地开发环境，不写入仓库规范；需要时通过本机
+环境变量、Docker 配置或团队约定的安全方式启用。
 
 ## 质量门禁
 

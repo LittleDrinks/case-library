@@ -1,211 +1,63 @@
-# Agent Handoff
+# AI 协作规范
 
-This file is the agent entrypoint for the restart track. Keep it operational and
-short. Do not duplicate product facts that belong in `docs/prd.md`,
-`docs/project.md`, or GitHub Issues.
+本文件用于声明本仓库通用的 AI 协作规范，适用于所有 AI 编程助手和自动化写作者。
+本文件只记录项目级共识，不记录个人开发习惯、本地工具配置、临时 handoff 或运行状态。
 
-## Current Context
+如需为某个具体助手补充额外规范，请添加或更新对应的专属文件，例如 `CLAUDE.md`；
+不要把个人工作流、窗口管理器、代理、shell 函数或本地路径写入 `AGENTS.md`。
 
-- Worktree: `/home/q2635/wsl-workspace/case-library`
-- Branch: `develop/alpha-summary`
-- Origin fork: `https://github.com/LittleDrinks/case-library.git`
-- Upstream repo: `https://github.com/yangxuchen5898/case-library.git`
-- Summary PR: `https://github.com/yangxuchen5898/case-library/pull/62`
-- Kanban: `https://github.com/yangxuchen5898/case-library/issues`
-- Current AI contract issue: `https://github.com/yangxuchen5898/case-library/issues/63`
+## 信息来源
 
-Current local tracked changes:
+- 产品需求和前端体验约束：`docs/prd.md`
+- 项目架构、环境、质量门禁和工程事实：`docs/project.md`
+- API 说明：`docs/api.md`
+- AI 行为约束：`docs/ai.md`
+- 开发、验证和 PR 流程：`docs/development.md`
+- 看板索引：`docs/kanban.md`
+- 具体任务详情和状态：GitHub Issues
 
-- Documentation is being rewritten in concise Chinese to match current progress.
-- `docs/prd.md` now owns the alpha product definition.
-- `docs/handoff-alpha-issues.md` tells the next agent how to branch, finish all
-  alpha issues, merge back into `develop/alpha-summary`, and prepare tomorrow's
-  acceptance handoff.
-- `docs/frontend-rebuild.md` has been removed; frontend constraints now live in
-  `docs/prd.md` and current implementation facts live in `docs/project.md`.
+同一个事实只维护在一个地方。若事实已有归属文档，应链接到该文档，不要复制粘贴到
+多个文件中。
 
-Current ignored local tooling/state:
+## 工作边界
 
-- `.codex/skills/rmux-delegation/` contains the project-local rmux delegation
-  skill and wrapper.
-- `.codex/skills/gpt-tasteskill/` is local Codex skill state.
-- `agent-runs/` contains ignored one-off worker prompts and rmux captures,
-  organized by run/session subdirectory.
+- 一次只处理一个 GitHub Issue 或一个明确的维护切片。
+- 使用聚焦分支，保持 PR 小而可审查。
+- 不把临时提示词、运行日志、截图、审查草稿、worker 输出或本地工具状态提交到仓库。
+- 不从旧目录、其他项目或外部代码库整文件复制实现；需要复用时先理解行为，再在当前
+  代码结构中实现。
+- 未经明确要求，不做无关重构、格式化、依赖升级或目录搬迁。
 
-Historical directories are read-only references:
+## 密钥与数据
 
-- `/home/q2635/wsl-workspace/case-library-old`
-- `/home/q2635/wsl-workspace/case-library-worktree-backup-20260605`
+- 不打印、提交或暴露 `.env`、API Key、私有 URL、代理配置、账号表、Mongo dump、上传
+  材料、浏览器会话或 private token。
+- `.env.example` 只能包含配置名和非敏感示例。
+- 产品 AI 调用必须经过后端；浏览器端不得接收模型供应商凭据。
+- 原始运行数据、上传材料和数据库导出不得进入 git，除非已经转化为经过审查的 fixture
+  或文档。
 
-Do not develop from them and do not copy files wholesale.
+## 代码与文档
 
-## Source Of Truth
+- 遵循现有架构、命名、样式和测试组织方式。
+- 改 API 时同步 schema、测试和 `docs/api.md`。
+- 改 AI 行为时同步 `docs/ai.md` 和相关测试。
+- 改产品流程时先同步 `docs/prd.md`。
+- 改开发流程、验证命令或 PR 规则时同步 `docs/development.md`。
+- 文档默认使用中文，除非文件本身已有明确的英文约定。
 
-- Product requirements and frontend experience constraints: `docs/prd.md`
-- Next-agent implementation handoff: `docs/handoff-alpha-issues.md`
-- Project harness, architecture, environment, API policy, testing direction:
-  `docs/project.md`
-- Kanban index only: `docs/kanban.md`
-- Actual task details and status: GitHub Issues
-- Reusable worker prompt contracts: `agent-prompts/`
-- One-off worker prompts and run captures: `agent-runs/` (ignored)
+## 验证
 
-One fact belongs in one place. If a fact is already maintained in one of the
-above, link to it instead of copying it.
-
-## Prompt Tracking Policy
-
-Track `agent-prompts/` only for reusable worker contracts that are stable across
-issues, such as frontend slice or structure extraction roles. Do not track
-per-issue prompts, scratch prompts, rmux captures, or worker reports; keep those
-under ignored `agent-runs/<session>/`.
-
-Project-local Codex/rmux tooling belongs under ignored `.codex/skills/`, not
-`agent-prompts/` and not product `skills/`.
-
-## Local Environment
-
-- `.env.example` is tracked.
-- `.env` is local and ignored. It currently contains a test AI base URL/API key
-  and a model list pulled from the remote `/models` endpoint.
-- Never print or commit `AI_API_KEY`.
-- AI integration should use one OpenAI-compatible chat client configured by:
-  `AI_BASE_URL`, `AI_API_KEY`, `AI_MODELS`, `AI_DEFAULT_MODEL`,
-  `AI_TIMEOUT_SECONDS`, `AI_REVIEW_ENABLED`.
-
-## Verification Gate
-
-Before declaring scaffold or implementation work done, run the project gate from
-`docs/project.md`:
+实现或脚手架变更完成前，运行 `docs/project.md` 中的质量门禁，或说明为什么只运行了
+更小的检查子集。文档小改通常至少运行：
 
 ```bash
-docker compose up -d --build
-curl -fsS http://127.0.0.1:8001/api/constants
-curl -fsS http://127.0.0.1:18080/
-docker compose ps
-docker compose run --rm app make check
-docker compose config --quiet
 git diff --check
 ```
 
-Last known good evidence:
+## PR 规范
 
-- Local Compose startup succeeded.
-- API and frontend endpoints responded.
-- `docker compose run --rm app make check` passed.
-- PR #11 CI `App` check passed.
-- AI `/models` and `/chat/completions` test calls passed with `qwen-plus`.
-
-This evidence predates the latest local documentation/API-contract cleanup. Run
-the full gate again before reporting the current branch as release-ready.
-
-## Orchestrator Workflow
-
-1. Pick one GitHub Issue with `status:now`.
-2. Make or reuse a focused branch for that issue.
-3. If delegating, write a narrow worker prompt. Use `agent-prompts/` as reusable
-   templates and put the concrete prompt under `agent-runs/`.
-4. Give each worker:
-   - exact role and goal
-   - allowed files
-   - forbidden actions
-   - checks allowed
-   - required final line: `DONE <role>`
-5. Workers do not commit, push, delete volumes, read secrets, or modify old
-   directories.
-6. Review worker output and diffs yourself.
-7. Run the verification gate or the smallest justified subset, then document any
-   skipped checks in the PR.
-8. Push to `origin`, open/update a draft PR against upstream, and link the issue.
-9. Move labels as the issue progresses:
-   - `status:now`
-   - `status:next`
-   - `status:later`
-   - `status:blocked`
-10. Close issues only with concrete verification evidence.
-
-Prefer one issue per PR. Split PRs by workflow slice, not by arbitrary file
-groups.
-
-## rmux Delegation
-
-The current working local route is:
-
-```bash
-.codex/skills/rmux-delegation/scripts/rmux_worker.sh \
-  --session issue63-wrapper-intake-003 \
-  --role issue63-wrapper-intake \
-  --prompt agent-runs/issue63-wrapper-intake/prompt.md \
-  --worktree /home/q2635/wsl-workspace/case-library \
-  --wait \
-  --poll 60 \
-  --lines 700
-```
-
-Local reality:
-
-- `ccd` is available through `~/.zshrc` as
-  `claude --dangerously-skip-permissions`.
-- The wrapper now defaults to `ccd`, waits for shell/Claude readiness, pastes
-  the prompt, waits for a standalone `DONE <role>` line, and writes final
-  captures under `agent-runs/<session>/`.
-- After a worker finishes, collect and close the rmux session with:
-
-```bash
-.codex/skills/rmux-delegation/scripts/rmux_collect.sh \
-  --session issue63-wrapper-intake-003 \
-  --role issue63-wrapper-intake
-```
-
-  This writes `collect-*` artifacts under `agent-runs/<session>/` and closes
-  the session by default.
-- Verified smoke: `issue63-wrapper-intake-003` read GitHub issue #63 and local
-  docs, then produced `DONE issue63-wrapper-intake`.
-- Workers still do not commit, push, read `.env`, or touch historical dirs.
-
-## Frontend Rules
-
-Before implementing create-case screens, extract structure from
-`docs/design/create/*.png`. The extraction must include at least:
-
-- Shanghai University logo position and proportion
-- "强国有我 思政案例库" wordmark position, size, and visual weight
-- top navigation layout
-- search and icon cluster layout
-- left progress rail, step states, active/inactive colors
-- page content width, spacing, form fields, primary/secondary buttons
-
-Do not ask a worker to recreate the full frontend in one pass. Build vertical
-slices and compare screenshots.
-
-## AI And Skills Policy
-
-Keep current `skills/` as domain prompt/template assets. Do not migrate old
-`.claude/` or `.codex/` workflow bundles into this repo.
-
-Product AI review semantics are clarified in issue #63 and `docs/api.md`:
-`AI 审核` means user-facing pre-submit self-check. It is advisory material
-submitted as `ai_reviews` for human expert review, not automatic approval or
-rejection.
-
-AI integration should be rebuilt around the `.env` chat settings. Do not fake AI
-output or browser-side AI calls. When unavailable, return/show an explicit
-disabled or unavailable state.
-
-Useful built-in/local skills for orchestrators:
-
-- `rmux-orchestrator`: pane workers with DONE sentinels.
-- `github:gh-fix-ci`: inspect and fix failing GitHub Actions.
-- `github:gh-address-comments`: process PR review comments.
-- `github:yeet`: publish focused changes through GitHub.
-- `find-skills`: discover additional skills before installing anything.
-
-Supplemental skill candidates found but not installed:
-
-- `microsoft/playwright-cli@playwright-cli` for browser automation.
-- `currents-dev/playwright-best-practices-skill@playwright-best-practices` for
-  Playwright test quality.
-
-Do not install low-signal GitHub or design-review skills just because they
-exist. The current GitHub plugin and repo-specific design docs are enough until
-an issue proves otherwise.
+- 每个 PR 说明变更范围、关联 issue、验证证据和未运行检查的原因。
+- PR 合并前必须处理所有 CI、已产生的 AI review、人工 review 和 review conversation。
+- 未 resolve 的 review thread 视为阻塞合并。
+- 具体 PR 流程和分支保护建议见 `docs/development.md`。

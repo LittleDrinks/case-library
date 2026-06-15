@@ -1,0 +1,78 @@
+name: Review Conversations Resolved
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-review-threads:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check unresolved review threads
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const query = `
+              query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    reviewThreads(first: 100, after: $after) {
+                      pageInfo {
+                        hasNextPage
+                        endCursor
+                      }
+                      nodes {
+                        isResolved
+                        isOutdated
+                        path
+                        line
+                        comments(first: 1) {
+                          nodes {
+                            url
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const threads = [];
+            let after = null;
+            let hasNextPage = true;
+
+            while (hasNextPage) {
+              const result = await github.graphql(query, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                number: context.payload.pull_request.number,
+                after,
+              });
+              const reviewThreads = result.repository.pullRequest.reviewThreads;
+              threads.push(...reviewThreads.nodes);
+              hasNextPage = reviewThreads.pageInfo.hasNextPage;
+              after = reviewThreads.pageInfo.endCursor;
+            }
+
+            const unresolved = threads.filter((thread) => !thread.isResolved);
+
+            if (unresolved.length > 0) {
+              for (const thread of unresolved) {
+                const firstComment = thread.comments.nodes[0];
+                core.error(`Unresolved review thread: ${thread.path}:${thread.line || ''} ${firstComment?.url || ''}`);
+              }
+              core.setFailed(`Resolve all review conversations before merging. Unresolved threads: ${unresolved.length}`);
+              return;
+            }
+
+            core.info('All active review conversations are resolved.');

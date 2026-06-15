@@ -1,0 +1,180 @@
+name: AI Review Advisory
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  check-ai-review:
+    if: >
+      (github.event.pull_request && github.event.pull_request.draft == false) ||
+      (github.event.issue && github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check optional AI reviews for current head
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            let pull_number;
+            let headSha;
+            let draft;
+
+            if (context.payload.pull_request) {
+              pull_number = context.payload.pull_request.number;
+              headSha = context.payload.pull_request.head.sha;
+              draft = context.payload.pull_request.draft;
+            } else {
+              pull_number = context.payload.issue.number;
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number,
+              });
+              headSha = pullRequest.head.sha;
+              draft = pullRequest.draft;
+            }
+
+            if (draft) {
+              core.info('Draft PRs do not need optional AI review yet.');
+              return;
+            }
+
+            const shortSha = headSha.slice(0, 10);
+            const failedReviewPatterns = [
+              /unable to review/i,
+              /reached (?:your|their|the) .*quota/i,
+              /quota limit/i,
+              /usage limits/i,
+              /create an environment/i,
+              /failed to review/i,
+            ];
+            const reviewers = [
+              {
+                label: 'Codex',
+                logins: new Set([
+                  'chatgpt-codex-connector',
+                  'chatgpt-codex-connector[bot]',
+                ]),
+                issueCommentPatterns: [/Codex Review:?/i],
+                reviewBodyPatterns: [/Codex Review:?/i],
+                trigger: '@codex review',
+              },
+              {
+                label: 'Copilot',
+                logins: new Set([
+                  'copilot-pull-request-reviewer',
+                  'copilot-pull-request-reviewer[bot]',
+                  'Copilot',
+                ]),
+                issueCommentPatterns: [/Copilot reviewed/i, /Pull request overview/i],
+                reviewBodyPatterns: [/Copilot reviewed/i, /Pull request overview/i],
+                trigger: 'request Copilot from the Reviewers menu',
+              },
+            ];
+
+            function bodyMatches(patterns, body) {
+              return patterns.some((pattern) => pattern.test(body || ''));
+            }
+
+            function isFailedReview(body) {
+              return bodyMatches(failedReviewPatterns, body);
+            }
+
+            function mentionsHead(body) {
+              const text = body || '';
+              return text.includes(headSha) || text.includes(shortSha);
+            }
+
+            function findReviewerEvidence(reviewer, issueComments, reviews, reviewComments) {
+              const issueComment = issueComments.find((comment) =>
+                reviewer.logins.has(comment.user?.login) &&
+                bodyMatches(reviewer.issueCommentPatterns, comment.body) &&
+                mentionsHead(comment.body) &&
+                !isFailedReview(comment.body)
+              );
+
+              if (issueComment) {
+                return `PR conversation comment: ${issueComment.html_url}`;
+              }
+
+              const review = reviews.find((item) =>
+                reviewer.logins.has(item.user?.login) &&
+                item.commit_id === headSha &&
+                item.state !== 'DISMISSED' &&
+                bodyMatches(reviewer.reviewBodyPatterns, item.body) &&
+                !isFailedReview(item.body)
+              );
+
+              if (review) {
+                return `PR review: ${review.html_url}`;
+              }
+
+              const reviewComment = reviewComments.find((comment) =>
+                reviewer.logins.has(comment.user?.login) &&
+                comment.commit_id === headSha
+              );
+
+              if (reviewComment) {
+                return `Review comment: ${reviewComment.html_url}`;
+              }
+
+              return null;
+            }
+
+            const issueComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pull_number,
+              per_page: 100,
+            });
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            const reviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            const found = [];
+            const missing = [];
+            for (const reviewer of reviewers) {
+              const evidence = findReviewerEvidence(reviewer, issueComments, reviews, reviewComments);
+              if (evidence) {
+                found.push(`${reviewer.label}: ${evidence}`);
+              } else {
+                missing.push(`${reviewer.label} (${reviewer.trigger})`);
+              }
+            }
+
+            if (found.length > 0) {
+              core.info(`Optional AI review found for ${headSha}:`);
+              for (const evidence of found) {
+                core.info(`- ${evidence}`);
+              }
+              return;
+            }
+
+            core.warning(
+              `No optional AI review found for current head ${headSha}. ` +
+              `If quota and environment allow it, trigger one of: ${missing.join(', ')}. ` +
+              'This advisory check is non-blocking.'
+            );

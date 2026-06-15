@@ -45,6 +45,7 @@ Thumbs.db
 .gstack/
 .planning/
 .playwright-cli/
+CLAUDE.md
 agent-runs/
 agent-prompts/
 
