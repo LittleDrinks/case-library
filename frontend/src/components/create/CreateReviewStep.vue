@@ -41,82 +41,7 @@
           </span>
         </div>
 
-        <div v-if="aiReviewState[item.id].status === 'idle'" class="ai-placeholder">
-          尚未运行。点击下方按钮获取作者侧自查建议。
-        </div>
-
-        <div v-else-if="aiReviewState[item.id].status === 'loading'" class="ai-placeholder">
-          正在请求后端 AI 自查…
-        </div>
-
-        <div v-else-if="aiReviewState[item.id].status === 'error'" class="ai-error">
-          {{ aiReviewState[item.id].error }}
-        </div>
-
-        <div v-else class="ai-result">
-          <div v-if="aiReviewState[item.id].parsed" class="ai-result-body">
-            <div v-if="aiReviewState[item.id].parsed.detail" class="ai-detail">
-              {{ aiReviewState[item.id].parsed.detail }}
-            </div>
-            <div v-if="aiReviewState[item.id].parsed.score != null" class="ai-score">
-              评分 {{ aiReviewState[item.id].parsed.score }}
-            </div>
-            <ul
-              v-if="
-                Array.isArray(aiReviewState[item.id].parsed.suggestions) &&
-                aiReviewState[item.id].parsed.suggestions.length
-              "
-              class="ai-suggestions"
-            >
-              <li v-for="suggestion in aiReviewState[item.id].parsed.suggestions" :key="suggestion">
-                {{ suggestion }}
-              </li>
-            </ul>
-            <ul
-              v-if="
-                Array.isArray(aiReviewState[item.id].comments) &&
-                aiReviewState[item.id].comments.length &&
-                !hasAnnotationPreview(aiReviewState[item.id])
-              "
-              class="ai-suggestions"
-            >
-              <li v-for="comment in aiReviewState[item.id].comments" :key="comment.id || comment.message">
-                {{ comment.paragraph_id }}：{{ comment.message }}
-              </li>
-            </ul>
-            <div v-if="hasAnnotationPreview(aiReviewState[item.id])" class="ai-annotation-preview">
-              <div class="annotation-copy">
-                <strong>版本正文</strong>
-                <p
-                  v-for="paragraph in aiReviewState[item.id].version.paragraphs"
-                  :key="paragraph.paragraph_id"
-                  :class="{
-                    highlighted: commentsForParagraph(aiReviewState[item.id], paragraph.paragraph_id).length,
-                  }"
-                >
-                  <span>{{ paragraph.paragraph_id }}</span>
-                  {{ paragraph.text }}
-                </p>
-              </div>
-              <aside class="annotation-comments" aria-label="AI 段落批注">
-                <strong>AI 批注</strong>
-                <div
-                  v-for="comment in aiReviewState[item.id].comments"
-                  :key="comment.id || `${comment.paragraph_id}-${comment.message}`"
-                  class="annotation-comment"
-                >
-                  <strong>{{ comment.paragraph_id }}</strong>
-                  <p>{{ comment.message }}</p>
-                  <small v-if="comment.suggestion">{{ comment.suggestion }}</small>
-                </div>
-              </aside>
-            </div>
-          </div>
-          <pre v-else class="ai-answer">{{ aiReviewState[item.id].answer }}</pre>
-          <div v-if="aiReviewState[item.id].parse_error" class="ai-parse-warning">
-            {{ aiReviewState[item.id].parse_error }}
-          </div>
-        </div>
+        <AiReviewResult :state="aiReviewState[item.id]" />
 
         <button
           type="button"
@@ -132,6 +57,8 @@
 </template>
 
 <script setup>
+import AiReviewResult from "./AiReviewResult.vue";
+
 defineProps({
   aiReviewItems: {
     type: Array,
@@ -160,14 +87,6 @@ defineProps({
 });
 
 defineEmits(["run-all", "run-item"]);
-
-function commentsForParagraph(state, paragraphId) {
-  return (state.comments || []).filter((comment) => comment.paragraph_id === paragraphId);
-}
-
-function hasAnnotationPreview(state) {
-  return Boolean(state?.version?.paragraphs?.length && state?.comments?.length);
-}
 
 function aiStatusLabel(status) {
   if (status === "loading") return "运行中";
@@ -299,138 +218,6 @@ function aiStatusLabel(status) {
   color: #b91c1c;
 }
 
-.ai-placeholder,
-.ai-error,
-.ai-result {
-  flex: 1;
-  margin: 4px 0 14px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.ai-placeholder {
-  color: var(--color-text-muted);
-}
-
-.ai-error {
-  color: #b91c1c;
-}
-
-.ai-detail {
-  color: var(--color-text);
-  margin-bottom: 8px;
-}
-
-.ai-score {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--color-brand-light);
-  color: var(--color-brand);
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.ai-suggestions {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--color-text-secondary);
-}
-
-.ai-annotation-preview {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border);
-}
-
-.annotation-copy,
-.annotation-comments {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  align-content: start;
-}
-
-.annotation-copy > strong,
-.annotation-comments > strong {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  letter-spacing: 0;
-}
-
-.annotation-copy p {
-  margin: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.annotation-copy p.highlighted {
-  border-color: rgba(141, 27, 53, 0.35);
-  background: var(--color-brand-light);
-  color: var(--color-text);
-}
-
-.annotation-copy span {
-  display: inline-flex;
-  margin-right: 6px;
-  font-weight: 700;
-  color: var(--color-brand);
-}
-
-.annotation-comment {
-  padding: 9px 10px;
-  border: 1px solid rgba(141, 27, 53, 0.22);
-  border-left: 3px solid var(--color-brand);
-  border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 8px 20px rgba(141, 27, 53, 0.06);
-}
-
-.annotation-comment > strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--color-brand);
-}
-
-.annotation-comment p,
-.annotation-comment small {
-  display: block;
-  margin: 0;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.annotation-comment small {
-  margin-top: 4px;
-  color: var(--color-text-muted);
-}
-
-.ai-answer {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  margin: 0;
-  font: inherit;
-  color: var(--color-text-secondary);
-}
-
-.ai-parse-warning {
-  margin-top: 8px;
-  color: #92400e;
-  font-size: 12px;
-}
-
 .btn-primary,
 .btn-secondary {
   padding: 10px 18px;
@@ -466,10 +253,6 @@ function aiStatusLabel(status) {
 @media (min-width: 860px) {
   .review-grid {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .ai-annotation-preview {
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
   }
 }
 </style>
