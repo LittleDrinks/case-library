@@ -99,7 +99,15 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  defineAsyncComponent,
+  h,
+} from "vue";
 import {
   auth,
   isLoggedIn,
@@ -110,12 +118,54 @@ import {
 } from "./api/auth.js";
 import LoginModal from "./components/LoginModal.vue";
 import PasswordChangeModal from "./components/PasswordChangeModal.vue";
-import HomeView from "./views/HomeView.vue";
-import CaseLibraryView from "./views/CaseLibraryView.vue";
-import CreateCaseView from "./views/CreateCaseView.vue";
-import MySubmissionsView from "./views/MySubmissionsView.vue";
-import AdminReviewView from "./views/AdminReviewView.vue";
 import { TOAST_EVENT } from "./utils/toast.js";
+
+const AsyncViewLoading = {
+  name: "AsyncViewLoading",
+  setup() {
+    return () =>
+      h(
+        "div",
+        {
+          class: "route-state route-state-loading",
+          role: "status",
+          "aria-live": "polite",
+        },
+        [
+          h("div", { class: "route-spinner", "aria-hidden": "true" }),
+          h("p", "正在加载页面…"),
+        ],
+      );
+  },
+};
+
+const AsyncViewError = {
+  name: "AsyncViewError",
+  setup() {
+    return () =>
+      h("div", { class: "route-state route-state-error", role: "alert" }, [
+        h("p", "页面加载失败，请刷新后重试。"),
+      ]);
+  },
+};
+
+function lazyView(loader) {
+  return defineAsyncComponent({
+    loader,
+    loadingComponent: AsyncViewLoading,
+    errorComponent: AsyncViewError,
+    delay: 150,
+    timeout: 30000,
+  });
+}
+
+const HomeView = lazyView(() => import("./views/HomeView.vue"));
+const CaseLibraryView = lazyView(() => import("./views/CaseLibraryView.vue"));
+const CreateCaseView = lazyView(() => import("./views/CreateCaseView.vue"));
+const MySubmissionsView = lazyView(() =>
+  import("./views/MySubmissionsView.vue"),
+);
+const AdminReviewView = lazyView(() => import("./views/AdminReviewView.vue"));
 
 const currentView = ref("home");
 const showLogin = ref(false);

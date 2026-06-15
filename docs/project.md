@@ -17,7 +17,8 @@ AI 约束见 `docs/ai.md`。
 ## 目录职责
 
 - `backend/`：FastAPI、MongoDB 数据层、账号脚本、迁移和 smoke 脚本。
-- `frontend/`：Vue 3 + Vite 单页 alpha 前端，使用 hash 视图切换。
+- `frontend/`：Vue 3 + Vite 单页 alpha 前端，使用 hash 视图切换；顶层视图使用
+  `defineAsyncComponent` 懒加载，构建时保留独立 `vendor` chunk。
 - `skills/`：思政案例提示词、模板和分类规则，是产品领域资产。
 - `docs/`：项目、产品、API、AI、开发和质量文档。
 - `docs/design/`：已跟踪的创建案例视觉参考图。
