@@ -15,10 +15,10 @@ check: lint test frontend-build
 test:
 	@if find tests -type f -name 'test_*.py' 2>/dev/null | grep -q .; then \
 		pytest; \
-	elif [ -f backend/test_submit_flow.py ]; then \
-		python backend/test_submit_flow.py; \
 	else \
-		echo "No tests or smoke test found."; \
+		set -e; \
+		if [ -f backend/test_prompt_injection.py ]; then python backend/test_prompt_injection.py; fi; \
+		if [ -f backend/test_submit_flow.py ]; then python backend/test_submit_flow.py; fi; \
 	fi
 
 cov:

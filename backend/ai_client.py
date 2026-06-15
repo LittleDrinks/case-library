@@ -56,25 +56,27 @@ class AISettings:
         return model
 
 
-def build_chat_messages(prompt_text: str) -> list[dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": "你是高校思政案例库的提交前自查助手，只提供作者侧参考建议。",
-        },
-        {"role": "user", "content": prompt_text},
-    ]
+def build_chat_messages(
+    prompt_text: str, system_content: str = ""
+) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    if system_content:
+        messages.append({"role": "system", "content": system_content})
+    messages.append({"role": "user", "content": prompt_text})
+    return messages
 
 
 def call_chat_completion(
     prompt_text: str,
     model: str,
     settings: AISettings | None = None,
+    *,
+    system_content: str = "",
 ) -> str:
     settings = settings or AISettings.from_env()
     payload = {
         "model": model,
-        "messages": build_chat_messages(prompt_text),
+        "messages": build_chat_messages(prompt_text, system_content),
         "temperature": 0.2,
     }
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

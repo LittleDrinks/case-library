@@ -1092,9 +1092,10 @@ def main_test() -> None:
         )
         assert_status(response, 400)
 
-        def fake_chat_completion(prompt_text, model, settings=None):
+        def fake_chat_completion(prompt_text, model, settings=None, *, system_content=""):
             assert model == "qwen-plus"
             assert "secret-test-key" not in prompt_text
+            assert "secret-test-key" not in system_content
             return '{"pass": true, "detail": "可提交", "suggestions": []}'
 
         main.call_chat_completion = fake_chat_completion
@@ -1163,7 +1164,7 @@ def main_test() -> None:
         assert_status(response, 400)
         assert response.json()["status"] == "invalid_model"
 
-        def fake_malformed_structured_completion(prompt_text, model, settings=None):
+        def fake_malformed_structured_completion(prompt_text, model, settings=None, *, system_content=""):
             assert model == "qwen-plus"
             return "not json"
 
@@ -1176,7 +1177,7 @@ def main_test() -> None:
         assert_status(response, 502)
         assert response.json()["status"] == "parse_failed"
 
-        def fake_invalid_contract_completion(prompt_text, model, settings=None):
+        def fake_invalid_contract_completion(prompt_text, model, settings=None, *, system_content=""):
             assert model == "qwen-plus"
             return json.dumps(
                 {
@@ -1202,10 +1203,15 @@ def main_test() -> None:
         assert_status(response, 422)
         assert response.json()["status"] == "invalid_contract"
 
-        def fake_structured_completion(prompt_text, model, settings=None):
+        def fake_structured_completion(prompt_text, model, settings=None, *, system_content=""):
             assert model == "qwen-plus"
-            assert "p1:" in prompt_text and "p2:" in prompt_text
+            user_payload = json.loads(prompt_text)
+            paragraph_ids = {
+                item["paragraph_id"] for item in user_payload["paragraphs"]
+            }
+            assert {"p1", "p2"}.issubset(paragraph_ids)
             assert "secret-test-key" not in prompt_text
+            assert "secret-test-key" not in system_content
             return json.dumps(
                 {
                     "comments": [
