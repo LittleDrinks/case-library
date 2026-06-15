@@ -1,4 +1,4 @@
-.PHONY: install-dev lint format check test cov smoke smoke-e2e frontend-build compose-config run up dev down logs dev-up dev-seed dev-e2e dev-down
+.PHONY: install-dev lint format check test cov typecheck security audit smoke smoke-e2e frontend-build compose-config run up dev down logs dev-up dev-seed dev-e2e dev-down
 
 install-dev:
 	pip install -r requirements.txt -r requirements-dev.txt
@@ -11,6 +11,15 @@ format:
 	ruff format backend
 
 check: lint test frontend-build
+
+typecheck:
+	mypy backend
+
+security:
+	bandit -r backend
+
+audit:
+	pip-audit -r requirements.txt -r requirements-dev.txt
 
 test:
 	@if find tests -type f -name 'test_*.py' 2>/dev/null | grep -q .; then \

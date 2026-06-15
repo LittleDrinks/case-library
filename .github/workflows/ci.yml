@@ -34,3 +34,24 @@ jobs:
 
       - name: Validate Dev Container JSON in container
         run: docker compose run --rm --no-deps app python -m json.tool .devcontainer/devcontainer.json >/tmp/devcontainer.json
+
+  advisory-scans:
+    name: Advisory scans
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app container
+        run: docker compose build app
+
+      - name: Type check in container
+        run: docker compose run --rm --no-deps app make typecheck
+
+      - name: Security scan in container
+        run: docker compose run --rm --no-deps app make security
+
+      - name: Dependency audit in container
+        run: docker compose run --rm --no-deps app make audit

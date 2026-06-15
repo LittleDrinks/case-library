@@ -21,6 +21,14 @@ git diff --check
 - 后端提交流测试或 `pytest`
 - 前端依赖安装和 `npm run build`
 
+CI 另有 advisory 扫描 job，当前用于暴露已有问题但不阻塞合并：
+
+- `make typecheck`：运行 `mypy backend`
+- `make security`：运行 `bandit -r backend`
+- `make audit`：运行 `pip-audit -r requirements.txt -r requirements-dev.txt`
+
+这些扫描归零后再提升为 `make check` 的必需门禁。
+
 ## E2E
 
 前端 Playwright smoke 也应在容器环境中运行；仅在已确认宿主机环境完整时才可临时

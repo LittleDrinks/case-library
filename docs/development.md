@@ -121,6 +121,8 @@ Docker CLI/daemon 的宿主机执行，并通过 `SMOKE_E2E_COMPOSE_FILE=docker-
 
 - 每个 PR 应聚焦一个 GitHub Issue 或一个明确维护切片，不混入无关重构、格式化或本地工具状态。
 - CI 会在 `main`、`develop/**`、`feature/**`、`rescue/**` 分支 push，以及所有 PR 上运行。
+- CI 的 typecheck/security/audit 扫描当前是 advisory job，用于暴露 mypy、bandit 和
+  pip-audit 结果；归零前不作为必需门禁。
 - PR 描述必须说明变更范围、验证证据、关联 issue，以及未运行检查的原因。
 - 新建、重新打开、标记 ready for review 或更新 PR 后，如额度、环境和权限允许，应触发
   Codex 或 Copilot 至少一个 AI review。Codex 可以在 PR 中评论 `@codex review` 手动触发；
