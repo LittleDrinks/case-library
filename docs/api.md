@@ -37,10 +37,13 @@ FastAPI schema、测试和本文。
 
 ### 案例
 
-- `GET /api/cases`：案例列表。默认公开已通过案例；草稿、作者视图和管理视图需登录。
-- `GET /api/cases/{case_id}`：案例详情。公开已通过案例可匿名查看。
+- `GET /api/cases`：案例列表。默认公开已通过案例；公开列表展示审核通过时绑定的版本快照；
+  草稿、作者视图和管理视图需登录。
+- `GET /api/cases/{case_id}`：案例详情。公开已通过案例可匿名查看；匿名公开详情展示审核通过
+  时绑定的版本快照。
 - `POST /api/cases`：创建案例，需登录。支持 `auto_process=true`。
-- `PUT /api/cases/{case_id}`：更新案例并在正文、来源材料等字段变更时写版本记录，需作者或管理员。
+- `PUT /api/cases/{case_id}`：更新案例并在正文、来源材料等字段变更时写版本记录，需作者或管理员；
+  作者只能更新草稿或退回修改案例，待审核或已通过案例需先由管理员退回修改。
 - `POST /api/cases/{case_id}`：兼容更新端点，同上。
 - `DELETE /api/cases/{case_id}`：软删除案例，需作者或管理员。
 - `POST /api/cases/{case_id}/submit`：提交人工审核，需作者或管理员；可用 `version_id`

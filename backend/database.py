@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -44,6 +43,15 @@ VERSIONED_FIELDS = [
     "author",
     "department",
     "keywords",
+]
+PUBLIC_REVIEW_SNAPSHOT_FIELDS = [
+    "title",
+    "type",
+    "theme",
+    "content",
+    "source_material",
+    "author",
+    "department",
 ]
 DATETIME_FIELDS = {"created_at", "updated_at", "submitted_at", "review_at", "deployed_at"}
 AI_REVIEW_DATETIME_FIELDS = {"reviewed_at", "created_at"}
@@ -317,6 +325,31 @@ def _public_case_fields(case: dict) -> dict:
     return {key: case.get(key) for key in allowed if key in case}
 
 
+def _apply_reviewed_version_snapshot(case: dict) -> dict:
+    snapshot = dict(case)
+    reviewed_version_id = snapshot.get("reviewed_version_id")
+    if not reviewed_version_id:
+        return snapshot
+
+    try:
+        version_id = int(reviewed_version_id)
+        case_id = int(snapshot.get("id") or 0)
+    except (TypeError, ValueError):
+        return snapshot
+
+    version = get_db().versions.find_one(
+        {"id": version_id, "case_id": case_id}
+    )
+    serialized_version = serialize_version(version)
+    if not serialized_version:
+        return snapshot
+
+    for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS:
+        if field in serialized_version:
+            snapshot[field] = serialized_version.get(field)
+    return snapshot
+
+
 def serialize_case(case: dict | None) -> dict | None:
     if case is None:
         return None
@@ -341,6 +374,7 @@ def serialize_public_case(case: dict | None) -> dict | None:
     serialized = serialize_case(case)
     if not serialized:
         return None
+    serialized = _apply_reviewed_version_snapshot(serialized)
     return _public_case_fields(serialized)
 
 
@@ -747,6 +781,7 @@ def create_case(case_data: dict) -> int:
         "content": doc.get("content", ""),
         "source_material": doc.get("source_material", ""),
         "author": doc.get("author", ""),
+        "department": doc.get("department", ""),
         "owner_username": doc.get("owner_username", ""),
         "created_by": doc.get("owner_username") or doc.get("author", ""),
         "paragraphs": split_paragraphs(doc.get("content", "")),
@@ -884,6 +919,56 @@ def count_cases(
     )
 
 
+def _public_query_cases() -> list[dict]:
+    cursor = (
+        get_db()
+        .cases.find({**_status_search_filter("approved"), "is_hidden": {"$ne": True}})
+        .sort("created_at", DESCENDING)
+    )
+    cases = [serialize_case(row) for row in cursor]
+
+    # Batch fetch reviewed versions to avoid N+1 queries per public listing
+    version_ids = []
+    case_version_map: dict[int, list[dict]] = {}
+    for case in cases:
+        reviewed_version_id = case.get("reviewed_version_id")
+        if reviewed_version_id:
+            try:
+                version_id = int(reviewed_version_id)
+                version_ids.append(version_id)
+                case_version_map.setdefault(version_id, []).append(case)
+            except (TypeError, ValueError):
+                pass
+
+    if version_ids:
+        for version in get_db().versions.find({"id": {"$in": version_ids}}):
+            serialized_version = serialize_version(version)
+            if not serialized_version:
+                continue
+            version_id = serialized_version.get("id")
+            if version_id is None:
+                continue
+            for case in case_version_map.get(version_id, []):
+                for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS:
+                    if field in serialized_version:
+                        case[field] = serialized_version.get(field)
+
+    return [item for item in (_public_case_fields(case) for case in cases) if item is not None]
+
+
+def _public_field_matches(item: dict, query: str) -> bool:
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    searchable = [
+        str(item.get("title") or ""),
+        str(item.get("content") or ""),
+        str(item.get("source_material") or ""),
+        " ".join(str(value) for value in item.get("keywords") or []),
+    ]
+    return any(needle in value.lower() for value in searchable)
+
+
 def set_case_hidden(case_id: int, hidden: bool) -> bool:
     result = get_db().cases.update_one(
         {"id": int(case_id), "status": {"$ne": "deleted"}},
@@ -964,6 +1049,7 @@ def update_case(
             "content": (updated or {}).get("content", ""),
             "source_material": (updated or {}).get("source_material", ""),
             "author": (updated or {}).get("author", ""),
+            "department": (updated or {}).get("department", ""),
             "owner_username": (updated or {}).get("owner_username", ""),
             "created_by": updated_by,
             "paragraphs": split_paragraphs((updated or {}).get("content", "")),
@@ -1010,6 +1096,7 @@ def create_ai_review_version(
         "content": current.get("content", ""),
         "source_material": current.get("source_material", ""),
         "author": current.get("author", ""),
+        "department": current.get("department", ""),
         "owner_username": current.get("owner_username", ""),
         "created_by": reviewer,
         "paragraphs": paragraphs,
@@ -1338,26 +1425,13 @@ def search_cases(
     if not query or not query.strip():
         return []
 
-    escaped = re.escape(query.strip())
-    regex = {"$regex": escaped, "$options": "i"}
-    mongo_query: dict[str, Any] = {
-        **_status_search_filter(status),
-        "is_hidden": {"$ne": True},
-        "$or": [
-            {"title": regex},
-            {"content": regex},
-            {"source_material": regex},
-            {"keywords": regex},
-        ],
-    }
-    cursor = (
-        get_db()
-        .cases.find(mongo_query)
-        .sort("created_at", DESCENDING)
-        .skip(max(0, int(offset)))
-        .limit(_bounded_limit(limit, default=20))
-    )
-    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
+    if _status_search_filter(status).get("status") != "approved":
+        return []
+
+    matches = [item for item in _public_query_cases() if _public_field_matches(item, query)]
+    start = max(0, int(offset))
+    end = start + _bounded_limit(limit, default=20)
+    return matches[start:end]
 
 
 def filter_cases(
@@ -1368,53 +1442,40 @@ def filter_cases(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    query = _status_search_filter(status_filter)
-    query["is_hidden"] = {"$ne": True}
-    if type_filter:
-        query["type"] = type_filter
-    if theme_filter:
-        query["theme"] = theme_filter
-    if keyword_filter:
-        regex = {"$regex": re.escape(keyword_filter), "$options": "i"}
-        query["$or"] = [
-            {"title": regex},
-            {"content": regex},
-            {"source_material": regex},
-            {"keywords": regex},
-        ]
+    if _status_search_filter(status_filter).get("status") != "approved":
+        return []
 
-    cursor = (
-        get_db()
-        .cases.find(query)
-        .sort("created_at", DESCENDING)
-        .skip(max(0, int(offset)))
-        .limit(_bounded_limit(limit))
-    )
-    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
+    matches = _public_query_cases()
+    if type_filter:
+        matches = [item for item in matches if item.get("type") == type_filter]
+    if theme_filter:
+        matches = [item for item in matches if item.get("theme") == theme_filter]
+    if keyword_filter:
+        matches = [item for item in matches if _public_field_matches(item, keyword_filter)]
+
+    start = max(0, int(offset))
+    end = start + _bounded_limit(limit)
+    return matches[start:end]
 
 
 def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
-    current_case = get_case(case_id)
+    current_case = serialize_public_case(get_case(case_id))
     if not current_case:
         return []
 
-    query = {
-        "id": {"$ne": int(case_id)},
-        "status": "approved",
-        "is_hidden": {"$ne": True},
-        "$or": [{"type": current_case.get("type")}, {"theme": current_case.get("theme")}],
-    }
     bounded = _bounded_limit(limit, default=5)
-    cursor = get_db().cases.find(query).limit(bounded * 3)
-    cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
+    cases = [
+        item
+        for item in _public_query_cases()
+        if item.get("id") != int(case_id)
+        and (item.get("type") == current_case.get("type") or item.get("theme") == current_case.get("theme"))
+    ]
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:bounded]
 
 
 def get_trending_cases(limit: int = 10) -> list[dict]:
-    query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
-    cursor = get_db().cases.find(query)
-    cases = [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
+    cases = _public_query_cases()
     cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
     return cases[:_bounded_limit(limit, default=10)]
 
@@ -1431,41 +1492,25 @@ def get_latest_cases(limit: int = 10) -> list[dict]:
 
 
 def get_statistics() -> dict:
-    db = get_db()
-    approved_filter = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
+    public_cases = _public_query_cases()
 
-    stats: dict[str, Any] = {"total_cases": db.cases.count_documents(approved_filter)}
-    stats["by_type"] = {
-        row["_id"]: row["count"]
-        for row in db.cases.aggregate(
-            [{"$match": approved_filter}, {"$group": {"_id": "$type", "count": {"$sum": 1}}}]
-        )
-        if row.get("_id") is not None
-    }
-    stats["by_theme"] = {
-        row["_id"]: row["count"]
-        for row in db.cases.aggregate(
-            [{"$match": approved_filter}, {"$group": {"_id": "$theme", "count": {"$sum": 1}}}]
-        )
-        if row.get("_id") is not None
-    }
+    stats: dict[str, Any] = {"total_cases": len(public_cases), "by_type": {}, "by_theme": {}}
+    total_views = 0
+    total_likes = 0
+    for case in public_cases:
+        case_type = case.get("type")
+        if case_type is not None:
+            stats["by_type"][case_type] = stats["by_type"].get(case_type, 0) + 1
 
-    totals = list(
-        db.cases.aggregate(
-            [
-                {"$match": approved_filter},
-                {
-                    "$group": {
-                        "_id": None,
-                        "total_views": {"$sum": {"$ifNull": ["$view_count", 0]}},
-                        "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
-                    }
-                },
-            ]
-        )
-    )
-    stats["total_views"] = int(totals[0]["total_views"]) if totals else 0
-    stats["total_likes"] = int(totals[0]["total_likes"]) if totals else 0
+        case_theme = case.get("theme")
+        if case_theme is not None:
+            stats["by_theme"][case_theme] = stats["by_theme"].get(case_theme, 0) + 1
+
+        total_views += int(case.get("view_count") or 0)
+        total_likes += int(case.get("like_count") or 0)
+
+    stats["total_views"] = total_views
+    stats["total_likes"] = total_likes
     return stats
 
 

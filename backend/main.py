@@ -613,6 +613,9 @@ async def create_new_case(
     return {"success": True, "message": "案例创建成功", "case_id": case_id}
 
 
+AUTHOR_LOCKED_REVIEW_STATUSES = {"pending_review", "approved"}
+
+
 async def _update_existing_case_impl(
     case_id: int,
     title: str | None,
@@ -653,6 +656,16 @@ async def _update_existing_case_impl(
     if source_material is not None:
         case_data["source_material"] = source_material
 
+    if (
+        case_data
+        and current_user.get("role") != "admin"
+        and existing_case.get("status") in AUTHOR_LOCKED_REVIEW_STATUSES
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="案例已提交审核或已通过，需退回修改后才能更新审核内容",
+        )
+
     updated_by = current_user.get("username", "")
     if not update_case(case_id, case_data, updated_by, change_reason):
         if get_case(case_id):
@@ -667,8 +680,9 @@ async def _update_existing_case_impl(
     response_model=SuccessMessageResponse,
     summary="Update a case",
     description=(
-        "Update editable case fields and record a version entry. Requires owner or "
-        "admin bearer auth."
+        "Update editable case fields and record a version entry. Owners can edit "
+        "draft or revision-required cases; pending-review or approved content must "
+        "be returned for revision first. Admin bearer auth can update review states."
     ),
 )
 async def update_existing_case(
@@ -705,7 +719,10 @@ async def update_existing_case(
     "/api/cases/{case_id}",
     response_model=SuccessMessageResponse,
     summary="Update a case with POST compatibility",
-    description="Compatibility endpoint with the same behavior as PUT /api/cases/{case_id}.",
+    description=(
+        "Compatibility endpoint with the same behavior as PUT /api/cases/{case_id}; "
+        "owner edits are locked while a case is pending review or approved."
+    ),
 )
 async def update_existing_case_post_compat(
     case_id: int,
@@ -780,6 +797,14 @@ async def create_case_ai_review(
     owner_username = get_case_owner_username(case)
     if current_user.get("role") != "admin" and current_user.get("username") != owner_username:
         raise HTTPException(status_code=403, detail="无权审核该案例")
+    if (
+        current_user.get("role") != "admin"
+        and case.get("status") in AUTHOR_LOCKED_REVIEW_STATUSES
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="案例已提交审核或已通过，需退回修改后才能更新审核内容",
+        )
 
     try:
         payload = await request.json()
