@@ -2,6 +2,12 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import {
+  login,
+  logout,
+  openLoginDialog,
+  submitLoginCredentials,
+} from "./support/auth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -16,6 +22,29 @@ const FORCE_PWD_PASS = "ForcePwd123!";
 const FORCE_PWD_NEW_PASS = "NewForcePwd456!";
 const DOCKER_COMPOSE_FILE = process.env.SMOKE_E2E_COMPOSE_FILE || "";
 const DOCKER_COMPOSE_ARGS = DOCKER_COMPOSE_FILE ? ["-f", DOCKER_COMPOSE_FILE] : [];
+
+const SMOKE_USER = {
+  username: TEST_USER,
+  password: TEST_USER_PASS,
+  nickname: "SmokeUser",
+};
+
+const SMOKE_ADMIN = {
+  username: TEST_ADMIN,
+  password: TEST_ADMIN_PASS,
+  nickname: "SmokeAdmin",
+};
+
+const FORCE_PASSWORD_USER = {
+  username: FORCE_PWD_USER,
+  password: FORCE_PWD_PASS,
+  nickname: "ForcePwdUser",
+};
+
+const FORCE_PASSWORD_USER_WITH_NEW_PASSWORD = {
+  ...FORCE_PASSWORD_USER,
+  password: FORCE_PWD_NEW_PASS,
+};
 
 /**
  * Run a command inside the running `app` Compose service.
@@ -87,170 +116,160 @@ test(
     // Auto-accept any browser dialogs (alerts from window.alert)
     page.on("dialog", (dialog) => dialog.accept());
 
-    // ==========================================
-    // Step 1: Login as normal user
-    // ==========================================
-    await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
+    await test.step("作者创建并提交案例", async () => {
+      // ==========================================
+      // Step 1: Login as normal user
+      // ==========================================
+      await page.goto("/");
+      await login(page, SMOKE_USER, { waitForLoginButton: true });
 
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+      // ==========================================
+      // Step 2: Navigate to create case wizard
+      // ==========================================
+      await page.getByRole("link", { name: "创建案例" }).click();
+      await expect(page.getByText("填写基本信息")).toBeVisible();
 
-    await expect(page.locator(".user-name")).toContainText("SmokeUser");
+      // -- Step 1: Basic info --
+      await page.getByLabel(/案例标题/).fill(uniqueTitle);
+      await page.getByLabel(/所属部门\/学院/).fill("测试学院");
+      await page.getByRole("button", { name: "继续" }).click();
 
-    // ==========================================
-    // Step 2: Navigate to create case wizard
-    // ==========================================
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写基本信息")).toBeVisible();
+      // -- Step 2: Content --
+      await expect(page.getByText("编写案例内容")).toBeVisible();
+      await page.locator("#ccf-content").fill(
+        "这是一篇用于冒烟测试的案例正文。案例内容包含背景、问题、分析与反思等部分，以确保测试流程能够完整运行。"
+      );
+      await page.getByRole("button", { name: "继续" }).click();
 
-    // -- Step 1: Basic info --
-    await page.getByLabel(/案例标题/).fill(uniqueTitle);
-    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
-    await page.getByRole("button", { name: "继续" }).click();
+      // -- Step 3: Classification --
+      await expect(page.getByText("选择案例分类")).toBeVisible();
+      await page.locator("#ccf-type").selectOption("TYPE_A");
+      await page.locator("#ccf-theme").selectOption("铸魂育人");
+      await page.getByRole("button", { name: "继续" }).click();
 
-    // -- Step 2: Content --
-    await expect(page.getByText("编写案例内容")).toBeVisible();
-    await page.locator("#ccf-content").fill(
-      "这是一篇用于冒烟测试的案例正文。案例内容包含背景、问题、分析与反思等部分，以确保测试流程能够完整运行。"
-    );
-    await page.getByRole("button", { name: "继续" }).click();
-
-    // -- Step 3: Classification --
-    await expect(page.getByText("选择案例分类")).toBeVisible();
-    await page.locator("#ccf-type").selectOption("TYPE_A");
-    await page.locator("#ccf-theme").selectOption("铸魂育人");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    // -- Step 4: Pre-submit self-check --
-    await expect(
-      page.getByRole("heading", { name: "提交前自查" })
-    ).toBeVisible();
-    await expect(page.getByText("运行全部自查")).toBeVisible();
-    await page.getByRole("button", { name: "运行此项" }).first().click();
-    await expect(page.getByText("AI 审核功能未启用")).toBeVisible();
-    await page.getByRole("button", { name: "继续" }).click();
-
-    // -- Step 5: Submit --
-    await expect(page.getByText("确认并提交")).toBeVisible();
-    await expect(
-      page.getByText("提交后案例将进入专家人工审核流程")
-    ).toBeVisible();
-    await page.getByRole("button", { name: "正式提交案例" }).click();
-
-    // Wait for submit alert to be accepted and wizard to reset
-    await expect(page.getByText("填写基本信息")).toBeVisible();
-
-    // ==========================================
-    // Step 3: Logout and login as admin
-    // ==========================================
-    await page.getByRole("button", { name: "退出" }).click();
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(TEST_ADMIN);
-    await page.getByLabel("密码").fill(TEST_ADMIN_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
-
-    await expect(page.locator(".user-name")).toContainText("SmokeAdmin");
-
-    // ==========================================
-    // Step 4: Admin review and approve
-    // ==========================================
-    await page.getByRole("link", { name: "审核管理" }).click();
-    await expect(page.getByRole("tab", { name: "待审核" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    );
-
-    // Find the case card with our unique title
-    const caseCard = page.locator(".case-card").filter({ hasText: uniqueTitle });
-    await expect(caseCard).toBeVisible();
-
-    await caseCard.getByRole("button", { name: "审核" }).click();
-
-    // Fill review modal
-    await page.locator("#review-comment").fill("审核通过，测试用例。");
-    await page.getByLabel("通过").check();
-    await page.getByRole("button", { name: "提交审核" }).click();
-
-    // Wait for modal to close after review submission
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
-
-    // ==========================================
-    // Step 5: Verify public library visibility
-    // ==========================================
-    await page.getByRole("link", { name: "案例库" }).click();
-    await expect(
-      page.getByPlaceholder("搜索案例标题、内容...")
-    ).toBeVisible();
-
-    await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
-    await page.getByRole("button", { name: "搜索" }).click();
-
-    // The approved case should appear in the public library
-    const publicCaseCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
-    await expect(publicCaseCard).toBeVisible();
-
-    // Public visitors can like and unlike a case, with the visible count updating.
-    const initialLikeCount = await cardLikeCount(publicCaseCard);
-    expect(initialLikeCount).toBeGreaterThanOrEqual(0);
-
-    await expect(
-      publicCaseCard.getByRole("button", { name: "点赞", exact: true })
-    ).toBeVisible();
-    await publicCaseCard
-      .getByRole("button", { name: "点赞", exact: true })
-      .click();
-    await expect(
-      publicCaseCard.getByRole("button", { name: "已点赞", exact: true })
-    ).toBeVisible();
-    await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
-      `点赞 ${initialLikeCount + 1}`
-    );
-
-    await publicCaseCard
-      .getByRole("button", { name: "已点赞", exact: true })
-      .click();
-    await expect(
-      publicCaseCard.getByRole("button", { name: "点赞", exact: true })
-    ).toBeVisible();
-    await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
-      `点赞 ${initialLikeCount}`
-    );
-
-    // ==========================================
-    // Step 6: Global header search finds the approved case
-    // ==========================================
-    // Skip on mobile where .global-search is hidden by responsive CSS.
-    if (testInfo.project.name === "chromium-desktop") {
-      // Exercise the global header search form in App.vue (distinct from the
-      // local case-library search field) to locate the approved case.
-      await page
-        .locator(".global-search")
-        .getByLabel("搜索案例")
-        .fill(uniqueTitle);
-      await page
-        .locator(".global-search")
-        .getByRole("button", { name: "查找案例" })
-        .click();
-
-      // Should land on/remain on the case library view with the case visible
-      await expect(page).toHaveURL(/#library/);
+      // -- Step 4: Pre-submit self-check --
       await expect(
-        page.locator(".case-card").filter({ hasText: uniqueTitle })
+        page.getByRole("heading", { name: "提交前自查" })
       ).toBeVisible();
-    }
+      await expect(page.getByText("运行全部自查")).toBeVisible();
+      await page.getByRole("button", { name: "运行此项" }).first().click();
+      await expect(page.getByText("AI 审核功能未启用")).toBeVisible();
+      await page.getByRole("button", { name: "继续" }).click();
 
-    // Capture a success screenshot for UI review, distinguished by project name
-    const screenshotPath = testInfo.outputPath(
-      `smoke-success-${testInfo.project.name}.png`
-    );
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+      // -- Step 5: Submit --
+      await expect(page.getByText("确认并提交")).toBeVisible();
+      await expect(
+        page.getByText("提交后案例将进入专家人工审核流程")
+      ).toBeVisible();
+      await page.getByRole("button", { name: "正式提交案例" }).click();
+
+      // Wait for submit alert to be accepted and wizard to reset
+      await expect(page.getByText("填写基本信息")).toBeVisible();
+    });
+
+    await test.step("管理员审核并验证公开展示", async () => {
+      // ==========================================
+      // Step 3: Logout and login as admin
+      // ==========================================
+      await logout(page, { waitForLoginButton: true });
+      await login(page, SMOKE_ADMIN, { waitForLoginButton: true });
+
+      // ==========================================
+      // Step 4: Admin review and approve
+      // ==========================================
+      await page.getByRole("link", { name: "审核管理" }).click();
+      await expect(page.getByRole("tab", { name: "待审核" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      );
+
+      // Find the case card with our unique title
+      const caseCard = page.locator(".case-card").filter({ hasText: uniqueTitle });
+      await expect(caseCard).toBeVisible();
+
+      await caseCard.getByRole("button", { name: "审核" }).click();
+
+      // Fill review modal
+      await page.locator("#review-comment").fill("审核通过，测试用例。");
+      await page.getByLabel("通过").check();
+      await page.getByRole("button", { name: "提交审核" }).click();
+
+      // Wait for modal to close after review submission
+      await expect(page.locator(".modal-overlay")).toHaveCount(0);
+
+      // ==========================================
+      // Step 5: Verify public library visibility
+      // ==========================================
+      await page.getByRole("link", { name: "案例库" }).click();
+      await expect(
+        page.getByPlaceholder("搜索案例标题、内容...")
+      ).toBeVisible();
+
+      await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
+      await page.getByRole("button", { name: "搜索" }).click();
+
+      // The approved case should appear in the public library
+      const publicCaseCard = page
+        .locator(".case-card")
+        .filter({ hasText: uniqueTitle });
+      await expect(publicCaseCard).toBeVisible();
+
+      // Public visitors can like and unlike a case, with the visible count updating.
+      const initialLikeCount = await cardLikeCount(publicCaseCard);
+      expect(initialLikeCount).toBeGreaterThanOrEqual(0);
+
+      await expect(
+        publicCaseCard.getByRole("button", { name: "点赞", exact: true })
+      ).toBeVisible();
+      await publicCaseCard
+        .getByRole("button", { name: "点赞", exact: true })
+        .click();
+      await expect(
+        publicCaseCard.getByRole("button", { name: "已点赞", exact: true })
+      ).toBeVisible();
+      await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
+        `点赞 ${initialLikeCount + 1}`
+      );
+
+      await publicCaseCard
+        .getByRole("button", { name: "已点赞", exact: true })
+        .click();
+      await expect(
+        publicCaseCard.getByRole("button", { name: "点赞", exact: true })
+      ).toBeVisible();
+      await expect(publicCaseCard.locator(".case-stats-row")).toContainText(
+        `点赞 ${initialLikeCount}`
+      );
+
+      // ==========================================
+      // Step 6: Global header search finds the approved case
+      // ==========================================
+      // Skip on mobile where .global-search is hidden by responsive CSS.
+      if (testInfo.project.name === "chromium-desktop") {
+        // Exercise the global header search form in App.vue (distinct from the
+        // local case-library search field) to locate the approved case.
+        await page
+          .locator(".global-search")
+          .getByLabel("搜索案例")
+          .fill(uniqueTitle);
+        await page
+          .locator(".global-search")
+          .getByRole("button", { name: "查找案例" })
+          .click();
+
+        // Should land on/remain on the case library view with the case visible
+        await expect(page).toHaveURL(/#library/);
+        await expect(
+          page.locator(".case-card").filter({ hasText: uniqueTitle })
+        ).toBeVisible();
+      }
+
+      // Capture a success screenshot for UI review, distinguished by project name
+      const screenshotPath = testInfo.outputPath(
+        `smoke-success-${testInfo.project.name}.png`
+      );
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+    });
   }
 );
 
@@ -265,18 +284,11 @@ test(
     page.on("dialog", (dialog) => dialog.accept());
 
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page
-      .locator(".modal-panel")
-      .getByRole("button", { name: "登录" })
-      .click();
-
     // On mobile .user-name is hidden; use avatar as login indicator
-    await expect(page.locator(".user-avatar")).toBeVisible();
+    await login(page, SMOKE_USER, {
+      indicator: "avatar",
+      waitForLoginButton: true,
+    });
 
     // Navigate to create case wizard
     await page.getByRole("link", { name: "创建案例" }).click();
@@ -321,12 +333,10 @@ test(
   "classification helper provides local suggestion",
   async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await login(page, SMOKE_USER, {
+      indicator: "none",
+      waitForLoginButton: true,
+    });
 
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
@@ -363,12 +373,10 @@ test(
     const uniqueTitle = `Draft测试 ${Date.now()}`;
 
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await login(page, SMOKE_USER, {
+      indicator: "none",
+      waitForLoginButton: true,
+    });
 
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
@@ -424,12 +432,10 @@ test(
     page.on("dialog", (dialog) => dialog.accept());
 
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await login(page, SMOKE_USER, {
+      indicator: "none",
+      waitForLoginButton: true,
+    });
 
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
@@ -458,11 +464,10 @@ test(
     await page.getByRole("button", { name: "正式提交案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
 
-    await page.getByRole("button", { name: "退出" }).click();
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(TEST_ADMIN);
-    await page.getByLabel("密码").fill(TEST_ADMIN_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await logout(page);
+    await login(page, SMOKE_ADMIN, {
+      indicator: "none",
+    });
 
     await page.getByRole("link", { name: "审核管理" }).click();
     const reviewCard = page
@@ -475,11 +480,10 @@ test(
     await page.getByRole("button", { name: "提交审核" }).click();
     await expect(page.locator(".modal-overlay")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "退出" }).click();
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await logout(page);
+    await login(page, SMOKE_USER, {
+      indicator: "none",
+    });
 
     await page.getByRole("link", { name: "我的提交" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
@@ -510,12 +514,10 @@ test(
     page.on("dialog", (dialog) => dialog.accept());
 
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(TEST_USER);
-    await page.getByLabel("密码").fill(TEST_USER_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await login(page, SMOKE_USER, {
+      indicator: "none",
+      waitForLoginButton: true,
+    });
 
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
@@ -544,11 +546,10 @@ test(
     await page.getByRole("button", { name: "正式提交案例" }).click();
     await expect(page.getByText("填写基本信息")).toBeVisible();
 
-    await page.getByRole("button", { name: "退出" }).click();
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(TEST_ADMIN);
-    await page.getByLabel("密码").fill(TEST_ADMIN_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await logout(page);
+    await login(page, SMOKE_ADMIN, {
+      indicator: "none",
+    });
 
     await page.getByRole("link", { name: "审核管理" }).click();
     const pendingCard = page
@@ -618,12 +619,10 @@ test(
     // Step 1: Login as user with must_change_password=true
     // ==========================================
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await page.getByRole("button", { name: "登录" }).click();
-
-    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
-    await page.getByLabel("密码").fill(FORCE_PWD_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await login(page, FORCE_PASSWORD_USER, {
+      indicator: "none",
+      waitForLoginButton: true,
+    });
 
     // ==========================================
     // Step 2: Verify forced password change modal appears
@@ -650,22 +649,17 @@ test(
     // ==========================================
     // Step 4: Logout and verify password change took effect
     // ==========================================
-    await page.getByRole("button", { name: "退出" }).click();
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await logout(page, { waitForLoginButton: true });
 
     // Old password should no longer work
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
-    await page.getByLabel("密码").fill(FORCE_PWD_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await openLoginDialog(page, { waitForVisible: false });
+    await submitLoginCredentials(page, FORCE_PASSWORD_USER);
     await expect(page.locator(".modal-panel .error-msg")).toBeVisible();
 
     // Close modal and retry with new password
     await page.locator(".modal-panel .close-btn").click();
-    await page.getByRole("button", { name: "登录" }).click();
-    await page.getByLabel("用户名").fill(FORCE_PWD_USER);
-    await page.getByLabel("密码").fill(FORCE_PWD_NEW_PASS);
-    await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
+    await openLoginDialog(page, { waitForVisible: false });
+    await submitLoginCredentials(page, FORCE_PASSWORD_USER_WITH_NEW_PASSWORD);
 
     // Should log in successfully without forced password modal
     await expect(page.locator(".user-name")).toContainText("ForcePwdUser");

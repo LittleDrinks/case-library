@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { login, logout } from "./support/auth.js";
+import { cleanupAuditCases } from "./support/caseCleanup.js";
+import { capture } from "./support/capture.js";
 
 const USER = {
   username: "e2e_user",
@@ -11,39 +14,6 @@ const ADMIN = {
   password: "E2eAdminPass123!",
   nickname: "E2E管理员",
 };
-
-async function login(page, account) {
-  await page.getByRole("button", { name: "登录" }).click();
-  await page.getByLabel("用户名").fill(account.username);
-  await page.getByLabel("密码").fill(account.password);
-  await page.locator(".modal-panel").getByRole("button", { name: "登录" }).click();
-  await expect(page.locator(".user-name")).toContainText(account.nickname);
-}
-
-async function logout(page) {
-  await page.getByRole("button", { name: "退出" }).click();
-  await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-}
-
-async function capture(page, testInfo, name) {
-  await expect(page.locator(".toast")).toHaveCount(0, { timeout: 4000 });
-  await page.screenshot({
-    path: testInfo.outputPath(`${name}-${testInfo.project.name}.png`),
-    fullPage: true,
-  });
-}
-
-async function cleanupAuditCases(page, titlePrefix = "Audit案例 ") {
-  const token = await page.evaluate(() => localStorage.getItem("case_library_auth_token"));
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
-  const response = await page.request.get("/api/cases?status=all&limit=100", { headers });
-  if (!response.ok()) return;
-  const payload = await response.json();
-  const cases = Array.isArray(payload.data) ? payload.data : [];
-  for (const item of cases.filter((c) => c.title?.startsWith(titlePrefix))) {
-    await page.request.delete(`/api/cases/${item.id}`, { headers });
-  }
-}
 
 test.describe("manual audit candidate flows", () => {
   test("mobile create flow keeps critical screens readable", async ({ page }, testInfo) => {
