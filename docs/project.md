@@ -11,6 +11,8 @@ AI 约束见 `docs/ai.md`。
   AI/人工批注 + 版本快照”主流程。
 - 产品目标：上海大学专版思政案例库，继续围绕 alpha 验收收口视觉一致性、测试覆盖和
   文档一致性。
+- 前端基线：issue #156 将当前 UI/交互声明为 alpha frontend baseline，冻结范围见
+  `docs/frontend-baseline.md`。
 - 当前差距：创建流仍保留五步 wizard 形态；AI/人工批注已使用段落级 MVP，尚未实现
   字符级锚点、富文本编辑、文件上传、导出、多级审核或版本 diff/回滚。
 

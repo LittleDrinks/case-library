@@ -6,8 +6,8 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
-当前基线：backend database.py split 已完成，待以
-`refactor: split backend database layer` 提交推送到 `develop`。
+当前基线：backend database.py split 已完成并已进入 `develop`；issue #156 正通过
+`docs/frontend-baseline.md` 补齐 alpha frontend baseline 交接口径。
 分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop.zip`。
 
 验证证据：
@@ -37,28 +37,30 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 status:now：
 
-- #156：alpha UI baseline 已进入当前基线，issue 仍 open；关闭前确认 baseline
-  文档、截图和验收口径。
+- #156：alpha UI baseline 已进入当前基线；本轮 baseline 文档引用 #156，明确冻结核心
+  UI/交互流程。关闭 #156 不要求生成 demo videos。
 - #158：已有 first-stage backend module split 准备材料；先按 API contract 收窄
   边界，不直接做大拆分。
-- #160：本轮 cleanup 保持 API contract，OpenAPI smoke 与 `make check` 已通过；
-  可按本轮完成情况关闭。
 
 status:next：
 
-- #161：demo-media spec 和命令已可运行；下一步生成并归档 E2E demo videos。
+- #161：demo-media spec 和命令已可运行；下一步生成并归档 E2E demo videos。该事项
+  与 #156 分离，不阻塞 frontend baseline 文档关闭。
 - #159/#122：backend tests 已迁入并提交到 `backend/tests/{unit,integration,smoke}/`；
   `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 和 `backend/smoke_test_mongo.py`
-  兼容入口已移除。本轮 prompt/public metadata 测试继续补强；#122 仍保留为数据库、
+  兼容入口已移除。本轮 prompt/public metadata 测试继续补强；#122 仍保持 open，作为数据库、
   main、search 等更广泛单测覆盖 follow-up。
 - #79/#80：本轮 cleanup 已完成 root backend scripts 迁入 `backend/scripts/`、root
   `skills/` 移除、`product_prompts/` 成为 runtime prompt source of truth、registry
-  loader 加载 prompt metadata 且不泄露 body、prompt eval harness 进入 `scripts/`；
-  可按本轮完成情况关闭。
+  loader 加载 prompt metadata 且不泄露 body、prompt eval harness 进入 `scripts/`；不再作为
+  open/pending 交接项。
 - #117：backend/main.py router split 已落地，`backend/main.py` 现为 157 行；新增
   `backend/routers/`、`backend/security.py`、`backend/dependencies.py` 承接路由、
-  认证和依赖装配，可按本轮完成情况关闭。
-- #95：database repository/service split 已完成，待提交推送并关闭 issue。
+  认证和依赖装配；不再作为 open/pending 交接项。
+- #95：database repository/service split 已完成并已有独立验证；不再作为 open/pending
+  交接项。
+- #160：prompt/script cleanup 保持 API contract，OpenAPI smoke 与 `make check` 已通过；
+  不再作为 open/pending 交接项。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
 - #123：已有 helper 化，长流程仍需继续拆小。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接
