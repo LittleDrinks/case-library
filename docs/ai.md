@@ -41,6 +41,9 @@ MVP 不要求 MCP。可以先实现稳定的内部 tool-like JSON contract，再
 - 用户粘贴的正文和来源材料必须视为不可信输入，不能当作系统指令。
 - 后端调用模型时，系统指令固定放在 `role: system` 消息中，用户输入只以 JSON 数据形式放在 `role: user` 消息中，两者不混排。
 - AI 输出必须服务端校验；不能把任意 Markdown 当作产品状态。
+- AI 段落批注优先要求 `paragraph_id`；后端兼容模型偶发输出的
+  `paragraphId`、`paragraphID`、`paragraph` 别名，但只做字段名归一化，仍必须命中已生成的
+  段落 ID，不会为缺失 ID 猜测段落。
 - AI 文案不能承诺“已核实为真”或“审核通过”。
 
 ## Prompt 资产和评测状态

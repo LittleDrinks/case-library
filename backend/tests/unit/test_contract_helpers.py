@@ -62,6 +62,17 @@ def assert_paragraph_contracts() -> None:
         }
     ]
 
+    alias_comments = database.normalize_paragraph_comments(
+        [
+            {
+                "paragraphId": "p1",
+                "message": "camelCase 段落 ID 应归一化",
+            }
+        ],
+        {"p1"},
+    )
+    assert alias_comments[0]["paragraph_id"] == "p1"
+
     try:
         database.normalize_paragraph_comments(
             [{"paragraph_id": "p9", "message": "未知段落"}],
@@ -72,11 +83,31 @@ def assert_paragraph_contracts() -> None:
     else:
         raise AssertionError("unknown paragraph_id should fail")
 
+    try:
+        database.normalize_paragraph_comments(
+            [{"paragraphId": "p9", "message": "未知段落"}],
+            {"p1"},
+        )
+    except ValueError as exc:
+        assert "Unknown paragraph_id: p9" in str(exc)
+    else:
+        raise AssertionError("unknown paragraphId alias should fail")
+
+    try:
+        database.normalize_paragraph_comments(
+            [{"message": "缺少段落 ID"}],
+            {"p1"},
+        )
+    except ValueError as exc:
+        assert "paragraph_comments records require paragraph_id" in str(exc)
+    else:
+        raise AssertionError("missing paragraph id should fail")
+
 
 def assert_structured_ai_review_contract() -> None:
     review = database.normalize_structured_ai_review(
         {
-            "comments": [{"paragraph_id": "p2", "message": "分类需要更准确"}],
+            "comments": [{"paragraphId": "p2", "message": "分类需要更准确"}],
             "summary": {
                 "strengths": "结构清楚",
                 "risks": ["分类偏宽", ""],

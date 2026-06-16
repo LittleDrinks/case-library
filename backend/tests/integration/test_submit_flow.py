@@ -1305,7 +1305,7 @@ def main_test() -> None:
                 {
                     "comments": [
                         {
-                            "paragraph_id": "p2",
+                            "paragraphId": "p2",
                             "quote": "缺少来源支撑",
                             "category": "source",
                             "severity": "important",

@@ -7,6 +7,7 @@ from typing import Any
 
 COMMENT_CATEGORIES = {"source", "fact", "structure", "classification", "classroom", "clarity"}
 COMMENT_SEVERITIES = {"info", "suggestion", "important"}
+PARAGRAPH_ID_KEYS = ("paragraph_id", "paragraphId", "paragraphID", "paragraph")
 
 
 def split_paragraphs(content: str) -> list[dict[str, str]]:
@@ -51,7 +52,11 @@ def normalize_paragraph_comments(value: Any, paragraph_ids: set[str] | None = No
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise ValueError("paragraph_comments records must be objects")
-        paragraph_id = str(item.get("paragraph_id", "")).strip()
+        paragraph_id = ""
+        for key in PARAGRAPH_ID_KEYS:
+            if key in item:
+                paragraph_id = str(item.get(key, "")).strip()
+                break
         if not paragraph_id:
             raise ValueError("paragraph_comments records require paragraph_id")
         if allowed_ids and paragraph_id not in allowed_ids:
