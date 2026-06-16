@@ -6,7 +6,7 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
-当前基线：`develop/littledrinks` 已推送到 `099a08c Complete alpha handoff issues`。
+当前基线：`develop/littledrinks` 已推送到 `14cd7ef Complete test handoff migration`。
 分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop/littledrinks.zip`。
 
 验证证据：
@@ -17,12 +17,16 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
   `docker compose config --quiet`、`git diff --check` 均 PASS。
 - `agent-runs/test-handoff-fix-20260616/collect-20260616-091834.final.txt`
   记录 backend test layout migration 后续修复：`backend/tests/{unit,integration,smoke}/`
-  已建立，`make check`、`py_compile`、`git diff --check` 均通过。该迁移是当前
-  follow-up 工作，需在验证后单独 staging/提交。
+  已建立，`make check`、`py_compile`、`git diff --check` 均通过。
+- `agent-runs/test-handoff-fix-20260616/collect-20260616-093006.final.txt`
+  记录测试迁移后的最终验证：`py_compile`、`make check`、两个 desktop Playwright
+  规格、`docker compose config --quiet`、`git diff --check` 均 PASS。
+- `agent-runs/test-handoff-fix-20260616/collect-20260616-093300.final.txt`
+  记录已提交并推送 `14cd7ef`，工作区干净且对齐 `origin/develop/littledrinks`。
 
 status:now：
 
-- #156：alpha UI baseline 已进入 `099a08c`，issue 仍 open；关闭前确认 baseline
+- #156：alpha UI baseline 已进入当前基线，issue 仍 open；关闭前确认 baseline
   文档、截图和验收口径。
 - #158：已有 first-stage backend module split 准备材料；先按 API contract 收窄
   边界，不直接做大拆分。
@@ -32,8 +36,8 @@ status:now：
 status:next：
 
 - #161：demo-media spec 和命令已可运行；下一步生成并归档 E2E demo videos。
-- #159/#122：backend tests 已迁入 `backend/tests/{unit,integration,smoke}/`，当前
-  迁移改动是待提交的 follow-up。
+- #159/#122：backend tests 已迁入并提交到 `backend/tests/{unit,integration,smoke}/`；
+  `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 仅保留兼容 wrapper。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
 - #123：已有 helper 化，长流程仍需继续拆小。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接
