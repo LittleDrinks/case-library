@@ -70,7 +70,13 @@ status:next：
 - #160：prompt/script cleanup 保持 API contract，OpenAPI smoke 与 `make check` 已通过；
   不再作为 open/pending 交接项。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
-- #123：已有 helper 化，长流程仍需继续拆小。
+- #123：本轮按只读审计建议补 `auditFlow` 小 helper，复用创建向导基础段、
+  case-card 查找和公开搜索，降低 smoke/audit 长测试重复；可复现验证命令为
+  `node --check frontend/tests/support/auditFlow.js`、
+  `node --check frontend/tests/audit.spec.js`、
+  `node --check frontend/tests/smoke.spec.js`、`git diff --check`、
+  `docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e`。smoke 浏览器运行
+  仍因 Docker CLI/socket 权限未完成，#123 不标成完全关闭。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接
   合并，按当前 baseline 重新收窄 scope。
 - #97：仅有 API 方案；runtime 仍是单 `type` 字段。多选类型实现延后，不作为当前

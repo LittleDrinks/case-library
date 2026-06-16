@@ -8,7 +8,14 @@ import {
   openLoginDialog,
   submitLoginCredentials,
 } from "./support/auth.js";
-import { confirmAndSubmitCase, submitAdminReview } from "./support/auditFlow.js";
+import {
+  confirmAndSubmitCase,
+  fillCaseWizardBasics,
+  findCaseCard,
+  searchPublicCase,
+  startCreateCase,
+  submitAdminReview,
+} from "./support/auditFlow.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -127,25 +134,13 @@ test(
       // ==========================================
       // Step 2: Navigate to create case wizard
       // ==========================================
-      await page.getByRole("link", { name: "创建案例" }).click();
-      await expect(page.getByText("填写案例基本信息")).toBeVisible();
-
-      // -- Step 1: Basic info --
-      await page.getByLabel(/案例标题/).fill(uniqueTitle);
-      await page.getByLabel(/所属部门\/学院/).fill("测试学院");
-      await page.getByRole("button", { name: "继续" }).click();
-
-      // -- Step 2: Content --
-      await expect(page.getByText("撰写案例内容")).toBeVisible();
-      await page.locator("#ccf-content").fill(
-        "这是一篇用于冒烟测试的案例正文。案例内容包含背景、问题、分析与反思等部分，以确保测试流程能够完整运行。"
-      );
-      await page.getByRole("button", { name: "继续" }).click();
-
-      // -- Step 3: Classification --
-      await expect(page.getByText("选择分类")).toBeVisible();
-      await page.getByRole("button", { name: "思政课教学案例" }).click();
-      await page.getByRole("button", { name: "铸魂育人" }).click();
+      await startCreateCase(page);
+      await fillCaseWizardBasics(page, {
+        title: uniqueTitle,
+        department: "测试学院",
+        content:
+          "这是一篇用于冒烟测试的案例正文。案例内容包含背景、问题、分析与反思等部分，以确保测试流程能够完整运行。",
+      });
       await page.getByRole("button", { name: "继续" }).click();
 
       // -- Step 4: Pre-submit self-check --
@@ -185,7 +180,7 @@ test(
       );
 
       // Find the case card with our unique title
-      const caseCard = page.locator(".case-card").filter({ hasText: uniqueTitle });
+      const caseCard = findCaseCard(page, uniqueTitle);
       await expect(caseCard).toBeVisible();
 
       await caseCard.getByRole("button", { name: "审核" }).click();
@@ -198,18 +193,8 @@ test(
       // ==========================================
       // Step 5: Verify public library visibility
       // ==========================================
-      await page.getByRole("link", { name: "案例库" }).click();
-      await expect(
-        page.getByPlaceholder("搜索案例标题、内容...")
-      ).toBeVisible();
-
-      await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
-      await page.getByRole("button", { name: "搜索" }).click();
-
       // The approved case should appear in the public library
-      const publicCaseCard = page
-        .locator(".case-card")
-        .filter({ hasText: uniqueTitle });
+      const publicCaseCard = await searchPublicCase(page, uniqueTitle);
       await expect(publicCaseCard).toBeVisible();
 
       // Public visitors can like and unlike a case, with the visible count updating.
@@ -266,8 +251,7 @@ test(
     });
 
     // Navigate to create case wizard
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写案例基本信息")).toBeVisible();
+    await startCreateCase(page);
 
     // Verify header nav label "案例库" is not truncated
     const libraryLink = page
@@ -347,22 +331,12 @@ test(
       waitForLoginButton: true,
     });
 
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写案例基本信息")).toBeVisible();
-
-    await page.getByLabel(/案例标题/).fill(uniqueTitle);
-    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("撰写案例内容")).toBeVisible();
-    await page
-      .locator("#ccf-content")
-      .fill("这是用于草稿保存回归测试的案例正文内容。");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("选择分类")).toBeVisible();
-    await page.getByRole("button", { name: "思政课教学案例" }).click();
-    await page.getByRole("button", { name: "铸魂育人" }).click();
+    await startCreateCase(page);
+    await fillCaseWizardBasics(page, {
+      title: uniqueTitle,
+      department: "测试学院",
+      content: "这是用于草稿保存回归测试的案例正文内容。",
+    });
 
     const saveDialogPromise = page.waitForEvent("dialog");
     await page.getByRole("button", { name: "保存草稿" }).click();
@@ -373,9 +347,7 @@ test(
     await page.getByRole("link", { name: "我的提交" }).click();
     await page.getByRole("tab", { name: "草稿" }).click();
 
-    const draftCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
+    const draftCard = findCaseCard(page, uniqueTitle);
     await expect(draftCard).toBeVisible();
     await expect(draftCard.locator(".status-pill")).toContainText("草稿");
 
@@ -406,22 +378,12 @@ test(
       waitForLoginButton: true,
     });
 
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写案例基本信息")).toBeVisible();
-
-    await page.getByLabel(/案例标题/).fill(uniqueTitle);
-    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("撰写案例内容")).toBeVisible();
-    await page
-      .locator("#ccf-content")
-      .fill("这是用于驳回审核反馈回归测试的案例正文内容。");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("选择分类")).toBeVisible();
-    await page.getByRole("button", { name: "思政课教学案例" }).click();
-    await page.getByRole("button", { name: "铸魂育人" }).click();
+    await startCreateCase(page);
+    await fillCaseWizardBasics(page, {
+      title: uniqueTitle,
+      department: "测试学院",
+      content: "这是用于驳回审核反馈回归测试的案例正文内容。",
+    });
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(
@@ -439,9 +401,7 @@ test(
     });
 
     await page.getByRole("link", { name: "审核管理" }).click();
-    const reviewCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
+    const reviewCard = findCaseCard(page, uniqueTitle);
     await expect(reviewCard).toBeVisible();
     await reviewCard.getByRole("button", { name: "审核" }).click();
     await submitAdminReview(page, {
@@ -457,9 +417,7 @@ test(
     await page.getByRole("link", { name: "我的提交" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
 
-    const revisionCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
+    const revisionCard = findCaseCard(page, uniqueTitle);
     await expect(revisionCard).toBeVisible();
     await expect(revisionCard.locator(".status-pill")).toContainText("需修改");
 
@@ -490,22 +448,12 @@ test(
       waitForLoginButton: true,
     });
 
-    await page.getByRole("link", { name: "创建案例" }).click();
-    await expect(page.getByText("填写案例基本信息")).toBeVisible();
-
-    await page.getByLabel(/案例标题/).fill(uniqueTitle);
-    await page.getByLabel(/所属部门\/学院/).fill("测试学院");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("撰写案例内容")).toBeVisible();
-    await page
-      .locator("#ccf-content")
-      .fill("这是用于管理员隐藏展示回归测试的案例正文内容。");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("选择分类")).toBeVisible();
-    await page.getByRole("button", { name: "思政课教学案例" }).click();
-    await page.getByRole("button", { name: "铸魂育人" }).click();
+    await startCreateCase(page);
+    await fillCaseWizardBasics(page, {
+      title: uniqueTitle,
+      department: "测试学院",
+      content: "这是用于管理员隐藏展示回归测试的案例正文内容。",
+    });
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(
@@ -523,9 +471,7 @@ test(
     });
 
     await page.getByRole("link", { name: "审核管理" }).click();
-    const pendingCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
+    const pendingCard = findCaseCard(page, uniqueTitle);
     await expect(pendingCard).toBeVisible();
     await pendingCard.getByRole("button", { name: "审核" }).click();
     await submitAdminReview(page, {
@@ -534,9 +480,7 @@ test(
     });
 
     await page.getByRole("tab", { name: "已通过" }).click();
-    const approvedCard = page
-      .locator(".case-card")
-      .filter({ hasText: uniqueTitle });
+    const approvedCard = findCaseCard(page, uniqueTitle);
     await expect(approvedCard).toBeVisible();
     await approvedCard.getByRole("button", { name: "隐藏" }).click();
     await expect(approvedCard.locator(".pill-hidden")).toContainText("已隐藏");
@@ -544,12 +488,7 @@ test(
       approvedCard.getByRole("button", { name: "展示" })
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "案例库" }).click();
-    await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
-    await page.getByRole("button", { name: "搜索" }).click();
-    await expect(
-      page.locator(".case-card").filter({ hasText: uniqueTitle })
-    ).toHaveCount(0);
+    await expect(await searchPublicCase(page, uniqueTitle)).toHaveCount(0);
 
     await page.getByRole("link", { name: "审核管理" }).click();
     await page.getByRole("tab", { name: "已通过" }).click();
@@ -557,12 +496,7 @@ test(
     await approvedCard.getByRole("button", { name: "展示" }).click();
     await expect(approvedCard.locator(".pill-visible")).toContainText("未隐藏");
 
-    await page.getByRole("link", { name: "案例库" }).click();
-    await page.getByPlaceholder("搜索案例标题、内容...").fill(uniqueTitle);
-    await page.getByRole("button", { name: "搜索" }).click();
-    await expect(
-      page.locator(".case-card").filter({ hasText: uniqueTitle })
-    ).toBeVisible();
+    await expect(await searchPublicCase(page, uniqueTitle)).toBeVisible();
 
     await page.getByRole("link", { name: "审核管理" }).click();
     await page.getByRole("tab", { name: "已通过" }).click();

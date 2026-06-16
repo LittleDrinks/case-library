@@ -5,6 +5,9 @@ import {
   confirmAndSubmitCase,
   createAndSubmitAuditCase,
   expectPendingSubmission,
+  fillCaseWizardBasics,
+  findCaseCard,
+  searchPublicCase,
   submitAdminReview,
 } from "./support/auditFlow.js";
 import { cleanupAuditCases } from "./support/caseCleanup.js";
@@ -288,18 +291,12 @@ test.describe("manual audit candidate flows", () => {
     await login(page, USER);
     await page.getByRole("link", { name: "创建案例" }).click();
     await expect(page.getByText("填写案例基本信息")).toBeVisible();
-    await page.getByLabel(/案例标题/).fill(title);
-    await page.getByLabel(/所属部门\/学院/).fill("马克思主义学院");
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("撰写案例内容")).toBeVisible();
-    await page.locator("#ccf-content").fill(initialContent);
-    await page.locator("#ccf-source").fill(sourceMaterial);
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("选择分类")).toBeVisible();
-    await page.getByRole("button", { name: "思政课教学案例" }).click();
-    await page.getByRole("button", { name: "铸魂育人" }).click();
+    await fillCaseWizardBasics(page, {
+      title,
+      department: "马克思主义学院",
+      content: initialContent,
+      sourceMaterial,
+    });
     await page.getByRole("button", { name: "继续" }).click();
 
     await expect(page.getByRole("heading", { name: "AI 智能内容审核" })).toBeVisible();
@@ -315,7 +312,7 @@ test.describe("manual audit candidate flows", () => {
     await logout(page);
     await login(page, ADMIN);
     await page.getByRole("link", { name: "审核管理" }).click();
-    const pendingCard = page.locator(".case-card").filter({ hasText: title });
+    const pendingCard = findCaseCard(page, title);
     await expect(pendingCard).toBeVisible();
     await pendingCard.getByRole("button", { name: "审核" }).click();
     await submitAdminReview(page, {
@@ -330,7 +327,7 @@ test.describe("manual audit candidate flows", () => {
     await login(page, USER);
     await page.getByRole("link", { name: "我的提交" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
-    const revisionCard = page.locator(".case-card").filter({ hasText: title });
+    const revisionCard = findCaseCard(page, title);
     await expect(revisionCard).toBeVisible();
     await revisionCard.getByRole("button", { name: "查看详情" }).click();
     await page.getByRole("button", { name: "显示审核结果" }).click();
@@ -357,7 +354,7 @@ test.describe("manual audit candidate flows", () => {
     await logout(page);
     await login(page, ADMIN);
     await page.getByRole("link", { name: "审核管理" }).click();
-    const revisedPendingCard = page.locator(".case-card").filter({ hasText: title });
+    const revisedPendingCard = findCaseCard(page, title);
     await expect(revisedPendingCard).toBeVisible();
     await revisedPendingCard.getByRole("button", { name: "查看详情" }).click();
     await expect(page.getByRole("heading", { name: title })).toBeVisible();
@@ -370,10 +367,7 @@ test.describe("manual audit candidate flows", () => {
     });
     await logout(page);
 
-    await page.getByRole("link", { name: "案例库" }).click();
-    await page.getByPlaceholder("搜索案例标题、内容...").fill(title);
-    await page.getByRole("button", { name: "搜索" }).click();
-    const publicCard = page.locator(".case-card").filter({ hasText: title });
+    const publicCard = await searchPublicCase(page, title);
     await expect(publicCard).toBeVisible();
     await publicCard.getByRole("button", { name: "查看详情" }).click();
     await expect(page.getByRole("heading", { name: title })).toBeVisible();
@@ -550,7 +544,7 @@ test.describe("manual audit candidate flows", () => {
 
     await page.goto("/");
     const latestCases = page.getByLabel("最新案例");
-    const homeCard = latestCases.locator(".case-card").filter({ hasText: publicCase.title });
+    const homeCard = findCaseCard(latestCases, publicCase.title);
     await expect(homeCard).toBeVisible();
     await expect(homeCard.getByText("浏览 11")).toBeVisible();
     await expect(homeCard.getByText("点赞 3")).toBeVisible();
