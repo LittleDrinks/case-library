@@ -5,7 +5,10 @@ Mongo 文档结构或前端依赖字段。
 
 ## 当前职责盘点
 
-- `backend/main.py`：FastAPI app、CORS、认证依赖、OpenAPI 示例、路由函数和少量业务编排。
+- `backend/main.py`：FastAPI app、CORS、OpenAPI 示例、路由装配和静态资源装配。
+- `backend/security.py`、`backend/dependencies.py`：认证 token helper、当前用户解析和 FastAPI
+  bearer 依赖。
+- `backend/routers/`：按 auth、ai、cases、reviews、public、static 拆分 API 和前端 fallback 路由。
 - `backend/database.py`：Mongo 连接、索引、序列化、校验、用户、案例、版本、AI 审核、
   人工审核、公开检索辅助、统计聚合和兼容函数。
 - `backend/schemas.py`：响应模型和 OpenAPI schema 约束。
@@ -22,14 +25,15 @@ Mongo 文档结构或前端依赖字段。
 - `backend/serializers.py`：`serialize_case`、`serialize_public_case`、`serialize_version` 等响应
   序列化，公开字段白名单必须集中在这里。
 - `backend/routers/`：按 auth、cases、reviews、ai、public/search/statistics 拆路由；请求/响应
-  字段继续由 `schemas.py` 和 FastAPI 参数声明约束。
+  字段继续由 `schemas.py` 和 FastAPI 参数声明约束。当前已完成 `backend/main.py` 的路由拆分，
+  后续继续拆 `backend/database.py` 时不应把数据库写入编排回流到路由层。
 
 ## 兼容迁移策略
 
 1. 先抽纯函数和序列化函数，`backend/database.py` 保留同名导入或 wrapper，避免破坏现有脚本。
 2. 再抽 repository 函数，保持函数签名、返回 dict/list 结构和 Mongo 查询条件不变。
-3. 最后拆 `backend/main.py` routers；每一步都对比 `/openapi.json`，确保路径、方法、参数和
-   schema 名称不变。
+3. DONE：已拆 `backend/main.py` routers，保留 `/openapi.json` 路径、方法、自定义 requestBody
+   示例和 `HTTPBearer` security scheme。
 4. 每个阶段至少运行 `backend/tests/integration/test_submit_flow.py` 覆盖提交、版本、AI 审核、人工审核和公开面。
 
 ## 文件边界 TODO
@@ -44,5 +48,6 @@ Mongo 文档结构或前端依赖字段。
   `delete_case` 迁到 `backend/services/cases.py`，底层 Mongo 写入由 repository 承接。
 - TODO(`backend/database.py`): 将 `get_statistics` 及统计缓存迁到 public/statistics service；
   缓存失效点要随案例状态、隐藏、删除、浏览和点赞写入一起迁移。
-- TODO(`backend/main.py`): 拆分 routers 时先移动无状态公开端点，再移动需要权限判断的提交和审核
-  端点；每次移动后对比 OpenAPI。
+- DONE(`backend/main.py`): 已拆到 `backend/routers/auth.py`、`ai.py`、`cases.py`、`reviews.py`、
+  `public.py`、`static.py`，并保留 `main.create_auth_token`、`main.verify_auth_token`、
+  `main.get_current_user`、`main.render_prompt`、`main._build_paragraph_review_prompt` 兼容导出。
