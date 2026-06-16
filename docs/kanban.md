@@ -6,8 +6,8 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
-当前基线：backend prompt/script cleanup 已完成，待以
-`refactor: organize backend prompts and scripts` 提交推送到 `develop`。
+当前基线：backend database.py split 已完成，待以
+`refactor: split backend database layer` 提交推送到 `develop`。
 分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop.zip`。
 
 验证证据：
@@ -30,6 +30,10 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
   规格、`docker compose config --quiet`、`git diff --check` 均 PASS。
 - `agent-runs/test-handoff-fix-20260616/collect-20260616-093300.final.txt`
   记录已提交并推送 `14cd7ef`，工作区干净且对齐 `origin/develop`。
+- #95 database.py split 独立验证已通过：`backend/database.py` 现为 117 行兼容层，
+  `backend/main.py` 仍为 157 行；新增 `backend/db/`、`backend/repositories/`、
+  `backend/serializers.py`、`backend/services/public.py` 承接 public split；最大
+  split 模块为 `backend/repositories/cases.py` 439 行；develop ZIP URL 不变。
 
 status:now：
 
@@ -54,8 +58,7 @@ status:next：
 - #117：backend/main.py router split 已落地，`backend/main.py` 现为 157 行；新增
   `backend/routers/`、`backend/security.py`、`backend/dependencies.py` 承接路由、
   认证和依赖装配，可按本轮完成情况关闭。
-- #95：仍保持 open；`backend/database.py` 仍为 1503 行，database repository/service
-  split 仍是后续 backend module split follow-up。
+- #95：database repository/service split 已完成，待提交推送并关闭 issue。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
 - #123：已有 helper 化，长流程仍需继续拆小。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接

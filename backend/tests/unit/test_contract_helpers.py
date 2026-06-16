@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import database
+import serializers
 
 
 def assert_public_payload(item: dict) -> None:
@@ -120,8 +120,8 @@ class _FakeDb:
 
 
 def assert_public_serialization_uses_review_snapshot() -> None:
-    original_get_db = database.get_db
-    database.get_db = lambda: _FakeDb()
+    original_get_db = serializers.get_db
+    serializers.get_db = lambda: _FakeDb()
     try:
         public = database.serialize_public_case(
             {
@@ -145,7 +145,7 @@ def assert_public_serialization_uses_review_snapshot() -> None:
             }
         )
     finally:
-        database.get_db = original_get_db
+        serializers.get_db = original_get_db
 
     assert public["title"] == "审核通过标题"
     assert public["type"] == "TYPE_APPROVED"
@@ -160,7 +160,6 @@ def assert_public_serialization_uses_review_snapshot() -> None:
 
 
 def main() -> None:
-    database.MONGODB_DB_NAME = f"case_library_contract_unit_{uuid4().hex}"
     assert_paragraph_contracts()
     assert_structured_ai_review_contract()
     assert_public_serialization_uses_review_snapshot()

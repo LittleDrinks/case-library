@@ -34,13 +34,15 @@ AI 约束见 `docs/ai.md`。
 第一阶段布局：
 
 - 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、
-  `case_processor.py`、`search_engine.py`
+  `case_processor.py`、`search_engine.py`。`database.py` 是兼容导出层；Mongo 连接、计数器、
+  校验、序列化和 repository helper 分别位于 `backend/db/`、`backend/serializers.py` 和
+  `backend/repositories/`。
 - Prompt runtime：`product_prompts/runtime/` 保存运行时产品 prompt 元数据、配置和
   markdown body；`backend/prompt_registry/` 仅作为加载器和兼容 API，提供稳定 prompt ID、
   数据结构和查询入口；`backend/prompts.py` 仅保留兼容导出。`/api/prompts` 只返回元数据，
   不返回 prompt body。
-- `backend/services/`：低风险业务 helper 第一阶段归属；当前包含无数据库副作用的 review
-  helper，`backend/database.py` 保留同名兼容导出。
+- `backend/services/`：业务 helper 归属；当前包含无数据库副作用的 review helper，以及公开检索、
+  推荐、最新/热门和统计缓存 helper，`backend/database.py` 保留同名兼容导出。
 - Compose 启动账号初始化：`backend/scripts/init_users.py`
 - 管理员账号工具：`backend/scripts/account_admin.py`
 - 演示数据脚本：`backend/scripts/demo.py`

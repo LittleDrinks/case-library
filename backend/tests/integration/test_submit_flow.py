@@ -13,8 +13,8 @@ os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:1808
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import database
 import main
+import services.public as public_service
 from database import (
     create_case,
     create_user,
@@ -1020,7 +1020,7 @@ def main_test() -> None:
 
     invalidate_statistics_cache()
     query_calls = {"count": 0}
-    original_public_query_cases = database._public_query_cases
+    original_public_query_cases = public_service._public_query_cases
     try:
         def fake_public_query_cases():
             query_calls["count"] += 1
@@ -1034,7 +1034,7 @@ def main_test() -> None:
                 }
             ]
 
-        database._public_query_cases = fake_public_query_cases
+        public_service._public_query_cases = fake_public_query_cases
         first_stats = get_statistics()
         second_stats = get_statistics()
         assert query_calls["count"] == 1
@@ -1046,22 +1046,22 @@ def main_test() -> None:
         second_stats["by_type"]["TYPE_CACHE"] = 99
         assert get_statistics()["by_type"]["TYPE_CACHE"] == 1
 
-        database._statistics_cache["expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
+        public_service._statistics_cache["expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
         refreshed_stats = get_statistics()
         assert query_calls["count"] == 2
         assert refreshed_stats["by_type"]["TYPE_CACHE"] == 1
 
         invalidate_statistics_cache()
-        assert database._statistics_cache["data"] is None
-        assert database._statistics_cache["expires_at"] is None
+        assert public_service._statistics_cache["data"] is None
+        assert public_service._statistics_cache["expires_at"] is None
     finally:
-        database._public_query_cases = original_public_query_cases
+        public_service._public_query_cases = original_public_query_cases
         invalidate_statistics_cache()
 
     _ = get_statistics()
-    assert database._statistics_cache["data"] is not None
+    assert public_service._statistics_cache["data"] is not None
     assert increment_like_count(stats_visible_case) is True
-    assert database._statistics_cache["data"] is None
+    assert public_service._statistics_cache["data"] is None
 
     response = client.get("/api/trending?limit=20")
     assert_status(response, 200)
