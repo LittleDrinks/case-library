@@ -48,8 +48,16 @@ status:next：
   与 #156 分离，不阻塞 frontend baseline 文档关闭。
 - #159/#122：backend tests 已迁入并提交到 `backend/tests/{unit,integration,smoke}/`；
   `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 和 `backend/smoke_test_mongo.py`
-  兼容入口已移除。本轮 prompt/public metadata 测试继续补强；#122 仍保持 open，作为数据库、
-  main、search 等更广泛单测覆盖 follow-up。
+  兼容入口已移除。#122 本轮已新增
+  `backend/tests/unit/test_public_search_helpers.py`、
+  `backend/tests/unit/test_security_dependencies.py`、
+  `backend/tests/unit/test_database_repository_helpers.py` 补强公开检索、安全依赖和数据库
+  repository helper 单测；验证命令为
+  `docker compose run --rm app python backend/tests/unit/test_public_search_helpers.py`、
+  `docker compose run --rm app python backend/tests/unit/test_security_dependencies.py`、
+  `docker compose run --rm app python backend/tests/unit/test_database_repository_helpers.py`、
+  `docker compose run --rm app make check`、`git diff --check`。#122 可关闭，不再作为
+  open/follow-up 交接项。
 - #79/#80：本轮 cleanup 已完成 root backend scripts 迁入 `backend/scripts/`、root
   `skills/` 移除、`product_prompts/` 成为 runtime prompt source of truth、registry
   loader 加载 prompt metadata 且不泄露 body、prompt eval harness 进入 `scripts/`；不再作为

@@ -28,6 +28,9 @@ test:
 		set -e; \
 		python backend/tests/unit/test_contract_helpers.py; \
 		python backend/tests/unit/test_prompt_injection.py; \
+		python backend/tests/unit/test_public_search_helpers.py; \
+		python backend/tests/unit/test_security_dependencies.py; \
+		python backend/tests/unit/test_database_repository_helpers.py; \
 		python backend/tests/integration/test_submit_flow.py; \
 	fi
 

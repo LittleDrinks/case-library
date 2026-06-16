@@ -54,6 +54,9 @@ AI 约束见 `docs/ai.md`。
 - 单元脚本：`backend/tests/unit/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
   规范化、AI review summary 规范化和公开案例快照序列化白名单。
 - 单元脚本：`backend/tests/unit/test_prompt_injection.py` 覆盖产品 prompt/template 的注入边界。
+- 单元脚本：`backend/tests/unit/test_public_search_helpers.py` 覆盖公开检索、过滤、推荐、热门和最新 helper。
+- 单元脚本：`backend/tests/unit/test_security_dependencies.py` 覆盖认证、权限和依赖装配 helper。
+- 单元脚本：`backend/tests/unit/test_database_repository_helpers.py` 覆盖数据库 repository helper。
 - 集成检查：`backend/tests/integration/test_submit_flow.py`，由 `make check` 调用，仍作为提交、
   AI/人工审核、权限、公开可见性和统计缓存主流程的回归门禁。
 - 旧兼容入口：`backend/test_contract_helpers.py`、`backend/test_prompt_injection.py`、
