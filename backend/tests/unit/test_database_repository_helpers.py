@@ -13,6 +13,7 @@ os.environ["MONGODB_DB_NAME"] = f"case_library_repo_unit_{uuid4().hex[:8]}"
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import database
+from db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS
 from repositories import cases, users
 
 
@@ -51,9 +52,11 @@ class _FakeCursor:
 
 
 class _FakeCases:
-    def __init__(self, rows: list[dict]):
+    def __init__(self, rows: list[dict], versions: list[dict] | None = None):
         self.rows = rows
+        self.versions = versions or []
         self.find_calls: list[tuple[dict, dict | None]] = []
+        self.aggregate_calls: list[list[dict]] = []
         self.cursor: _FakeCursor | None = None
 
     def find(self, query, projection=None):
@@ -67,17 +70,80 @@ class _FakeCases:
         self.cursor = _FakeCursor(rows)
         return self.cursor
 
+    def aggregate(self, pipeline):
+        self.aggregate_calls.append(pipeline)
+        rows = [dict(row) for row in self.rows]
+        for stage in pipeline:
+            if "$match" in stage:
+                rows = [row for row in rows if _matches(row, stage["$match"])]
+            elif "$lookup" in stage:
+                for row in rows:
+                    version = next(
+                        (
+                            item
+                            for item in self.versions
+                            if item.get("id") == row.get("reviewed_version_id")
+                            and item.get("case_id") == row.get("id")
+                        ),
+                        None,
+                    )
+                    if version:
+                        row["reviewed_version"] = dict(version)
+            elif "$addFields" in stage:
+                add_fields = stage["$addFields"]
+                if "engagement_score" in add_fields:
+                    for row in rows:
+                        row["engagement_score"] = int(row.get("view_count") or 0) + int(
+                            row.get("like_count") or 0
+                        )
+                else:
+                    for row in rows:
+                        version = row.get("reviewed_version") or {}
+                        for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS:
+                            if field in version:
+                                row[field] = version[field]
+            elif "$sort" in stage:
+                for field, direction in reversed(list(stage["$sort"].items())):
+                    rows.sort(key=lambda row: row.get(field) or 0, reverse=direction == -1)
+            elif "$skip" in stage:
+                rows = rows[stage["$skip"]:]
+            elif "$limit" in stage:
+                rows = rows[: stage["$limit"]]
+        return rows
+
 
 class _FakeVersions:
+    def __init__(self):
+        self.find_one_calls: list[dict] = []
+
     def find_one(self, query):
-        return None
+        self.find_one_calls.append(query)
+        raise AssertionError("public list must not perform per-row version lookups")
 
 
 class _FakeDb:
-    def __init__(self, user_docs: dict[str, dict], case_rows: list[dict] | None = None):
+    def __init__(
+        self,
+        user_docs: dict[str, dict],
+        case_rows: list[dict] | None = None,
+        version_rows: list[dict] | None = None,
+    ):
         self.users = _FakeUsers(user_docs)
-        self.cases = _FakeCases(case_rows or [])
+        self.cases = _FakeCases(case_rows or [], version_rows)
         self.versions = _FakeVersions()
+
+
+def _matches(row: dict, query: dict) -> bool:
+    for key, expected in query.items():
+        actual = row.get(key)
+        if isinstance(expected, dict):
+            if "$ne" in expected and actual == expected["$ne"]:
+                return False
+            if "$nin" in expected and actual in expected["$nin"]:
+                return False
+        elif actual != expected:
+            return False
+    return True
 
 
 def test_case_list_filter_author_alias_status_hidden_and_deleted():
@@ -137,7 +203,21 @@ def test_case_lists_use_projection_and_omit_large_fields():
             "reviewed_version_id": 44,
         }
     ]
-    fake_db = _FakeDb({}, rows)
+    versions = [
+        {
+            "id": 44,
+            "case_id": 1,
+            "title": "审核快照标题",
+            "type": "SNAPSHOT_TYPE",
+            "theme": "审核主题",
+            "author": "reviewer-author",
+            "department": "review-dept",
+            "keywords": ["审核关键词"],
+            "content": "reviewed content",
+            "source_material": "reviewed source",
+        }
+    ]
+    fake_db = _FakeDb({}, rows, versions)
     old_get_db = cases.get_db
     try:
         cases.get_db = lambda: fake_db
@@ -149,10 +229,19 @@ def test_case_lists_use_projection_and_omit_large_fields():
         assert internal_items[0]["title"] == "列表案例"
 
         public_items = cases.get_all_public_cases(status="approved", limit=5)
-        assert fake_db.cases.find_calls[1][1] == cases.PUBLIC_CASE_LIST_PROJECTION
+        assert len(fake_db.cases.find_calls) == 1
+        assert fake_db.versions.find_one_calls == []
+        pipeline = fake_db.cases.aggregate_calls[-1]
+        assert pipeline[0] == {"$match": {"status": "approved", "is_hidden": {"$ne": True}}}
+        assert any("$lookup" in stage and stage["$lookup"]["from"] == "versions" for stage in pipeline)
         assert "content" not in public_items[0]
         assert "source_material" not in public_items[0]
-        assert public_items[0]["title"] == "列表案例"
+        assert public_items[0]["title"] == "审核快照标题"
+        assert public_items[0]["type"] == "SNAPSHOT_TYPE"
+        assert public_items[0]["theme"] == "审核主题"
+        assert public_items[0]["author"] == "reviewer-author"
+        assert public_items[0]["department"] == "review-dept"
+        assert public_items[0]["keywords"] == ["审核关键词"]
     finally:
         cases.get_db = old_get_db
 

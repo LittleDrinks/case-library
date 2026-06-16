@@ -80,10 +80,12 @@ class _FakeCursor:
 
 
 class _FakeCases:
-    def __init__(self, rows: list[dict]):
+    def __init__(self, rows: list[dict], versions: list[dict] | None = None):
         self.rows = rows
+        self.versions = versions or []
         self.queries: list[dict] = []
         self.cursor: _FakeCursor | None = None
+        self.pipelines: list[list[dict]] = []
 
     def find(self, query):
         self.queries.append(query)
@@ -95,16 +97,97 @@ class _FakeCases:
         self.cursor = _FakeCursor(visible)
         return self.cursor
 
+    def aggregate(self, pipeline):
+        self.pipelines.append(pipeline)
+        rows = [dict(row) for row in self.rows]
+        for row in rows:
+            version = next(
+                (
+                    item
+                    for item in self.versions
+                    if item.get("id") == row.get("reviewed_version_id")
+                    and item.get("case_id") == row.get("id")
+                ),
+                None,
+            )
+            if version:
+                row["reviewed_version"] = dict(version)
+                for field in public.PUBLIC_REVIEW_SNAPSHOT_FIELDS:
+                    if field in version:
+                        row[field] = version[field]
+            row["engagement_score"] = int(row.get("view_count") or 0) + int(row.get("like_count") or 0)
+
+        for stage in pipeline:
+            if "$match" in stage:
+                rows = [row for row in rows if _matches(row, stage["$match"])]
+            elif "$sort" in stage:
+                sort_items = list(stage["$sort"].items())
+                for field, direction in reversed(sort_items):
+                    rows.sort(key=lambda row: row.get(field) or 0, reverse=direction == -1)
+            elif "$skip" in stage:
+                rows = rows[stage["$skip"]:]
+            elif "$limit" in stage:
+                rows = rows[:stage["$limit"]]
+        return rows
+
 
 class _FakeDb:
-    def __init__(self, rows: list[dict]):
-        self.cases = _FakeCases(rows)
+    def __init__(self, rows: list[dict], versions: list[dict] | None = None):
+        self.cases = _FakeCases(rows, versions)
+
+
+def _matches(row: dict, query: dict) -> bool:
+    for key, expected in query.items():
+        if key == "$or":
+            if not any(_matches(row, option) for option in expected):
+                return False
+            continue
+        actual = row.get(key)
+        if isinstance(expected, dict):
+            if "$ne" in expected and actual == expected["$ne"]:
+                return False
+            if "$regex" in expected and expected["$regex"].lower() not in str(actual).lower():
+                return False
+        elif actual != expected:
+            return False
+    return True
 
 
 def _patch_public_cases(rows: list[dict]):
     old_query_cases = public._public_query_cases
-    public._public_query_cases = lambda: list(rows)
+    public._public_query_cases = (
+        lambda match_filters=None, sort=None, skip=None, limit=None: _query_rows(
+            rows,
+            match_filters=match_filters,
+            sort=sort,
+            skip=skip,
+            limit=limit,
+        )
+    )
     return old_query_cases
+
+
+def _query_rows(
+    rows: list[dict],
+    *,
+    match_filters: list[dict] | None = None,
+    sort: dict | None = None,
+    skip: int | None = None,
+    limit: int | None = None,
+):
+    matches = []
+    for row in rows:
+        item = dict(row)
+        item["engagement_score"] = int(item.get("view_count") or 0) + int(item.get("like_count") or 0)
+        matches.append(item)
+    for match_filter in match_filters or []:
+        matches = [row for row in matches if _matches(row, match_filter)]
+    if sort:
+        for field, direction in reversed(list(sort.items())):
+            matches.sort(key=lambda row: row.get(field) or 0, reverse=direction == -1)
+    start = max(0, int(skip or 0))
+    bounded = public._bounded_limit(limit) if limit is not None else None
+    return matches[start:] if bounded is None else matches[start:start + bounded]
 
 
 def test_case_search_engine_forwards_arguments():
@@ -202,6 +285,90 @@ def test_public_search_and_filter_apply_status_offset_limit_and_filters():
         public._public_query_cases = old_query_cases
 
 
+def test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields():
+    rows = [
+        {
+            "id": 10,
+            "title": "live title",
+            "type": "LIVE_TYPE",
+            "theme": "live-theme",
+            "content": "live content",
+            "source_material": "live source",
+            "keywords": ["live-keyword"],
+            "status": "approved",
+            "is_hidden": False,
+            "reviewed_version_id": 88,
+            "created_at": 10,
+        },
+        {
+            "id": 11,
+            "title": "hidden public case",
+            "status": "approved",
+            "is_hidden": True,
+            "created_at": 11,
+        },
+        {
+            "id": 12,
+            "title": "draft case",
+            "status": "draft",
+            "created_at": 12,
+        },
+    ]
+    versions = [
+        {
+            "id": 88,
+            "case_id": 10,
+            "title": "reviewed title",
+            "type": "REVIEWED_TYPE",
+            "theme": "reviewed-theme",
+            "content": "reviewed content",
+            "source_material": "reviewed source",
+            "keywords": ["reviewed-keyword"],
+        }
+    ]
+    fake_db = _FakeDb(rows, versions)
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        result = public._public_query_cases(
+            match_filters=[{"type": "REVIEWED_TYPE"}],
+            sort={"created_at": -1},
+            skip=0,
+            limit=1,
+        )
+    finally:
+        public.get_db = old_get_db
+
+    assert [item["id"] for item in result] == [10]
+    assert result[0]["title"] == "reviewed title"
+    assert result[0]["content"] == "reviewed content"
+    assert result[0]["source_material"] == "reviewed source"
+    assert result[0]["keywords"] == ["reviewed-keyword"]
+
+    pipeline = fake_db.cases.pipelines[-1]
+    assert pipeline[0] == {"$match": {"status": "approved", "is_hidden": {"$ne": True}}}
+    assert any("$lookup" in stage and stage["$lookup"]["from"] == "versions" for stage in pipeline)
+    assert any("$unwind" in stage for stage in pipeline)
+    assert {"$match": {"type": "REVIEWED_TYPE"}} in pipeline
+    assert pipeline[-3:] == [{"$sort": {"created_at": -1}}, {"$skip": 0}, {"$limit": 1}]
+
+
+def test_public_search_builds_snapshot_keyword_pipeline_before_pagination():
+    fake_db = _FakeDb([])
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        assert public.search_cases("reviewed-keyword", limit=3, offset=2) == []
+    finally:
+        public.get_db = old_get_db
+
+    pipeline = fake_db.cases.pipelines[-1]
+    match_stages = [stage["$match"] for stage in pipeline if "$match" in stage]
+    assert match_stages[0] == {"status": "approved", "is_hidden": {"$ne": True}}
+    assert match_stages[1] == public._public_keyword_filter("reviewed-keyword")
+    assert pipeline[-3:] == [{"$sort": {"created_at": -1}}, {"$skip": 2}, {"$limit": 3}]
+
+
 def test_public_recommendations_trending_and_latest_use_public_cases_only():
     old_query_cases = _patch_public_cases(PUBLIC_CASES)
     old_serialize_public_case = public.serialize_public_case
@@ -216,6 +383,7 @@ def test_public_recommendations_trending_and_latest_use_public_cases_only():
 
         assert [item["id"] for item in public.get_recommendation_candidates(1, limit=5)] == [3]
         assert [item["id"] for item in public.get_trending_cases(limit=2)] == [2, 1]
+        public._public_query_cases = old_query_cases
 
         rows = [
             {"id": 4, "status": "approved", "is_hidden": False, "created_at": 4},
@@ -226,9 +394,9 @@ def test_public_recommendations_trending_and_latest_use_public_cases_only():
         fake_db = _FakeDb(rows)
         public.get_db = lambda: fake_db
         assert [item["id"] for item in public.get_latest_cases(limit=1)] == [7]
-        assert fake_db.cases.queries == [{"status": "approved", "is_hidden": {"$ne": True}}]
-        assert fake_db.cases.cursor is not None
-        assert fake_db.cases.cursor.limit_value == 1
+        pipeline = fake_db.cases.pipelines[-1]
+        assert pipeline[0] == {"$match": {"status": "approved", "is_hidden": {"$ne": True}}}
+        assert pipeline[-2:] == [{"$sort": {"created_at": -1}}, {"$limit": 1}]
     finally:
         public._public_query_cases = old_query_cases
         public.serialize_public_case = old_serialize_public_case
@@ -241,6 +409,8 @@ def main() -> None:
     test_public_status_filter_rejects_non_public_statuses()
     test_public_field_matches_title_content_source_and_keywords()
     test_public_search_and_filter_apply_status_offset_limit_and_filters()
+    test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields()
+    test_public_search_builds_snapshot_keyword_pipeline_before_pagination()
     test_public_recommendations_trending_and_latest_use_public_cases_only()
     print("public search helper unit checks passed")
 

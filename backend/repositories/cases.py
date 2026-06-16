@@ -16,8 +16,12 @@ from db.validators import (
     _validate_case_status,
 )
 from pymongo import DESCENDING
-from serializers import serialize_case, serialize_case_list_item, serialize_public_case_list_item
-from services.public import invalidate_statistics_cache
+from serializers import serialize_case, serialize_case_list_item
+from services.public import (
+    _public_cases_pipeline,
+    _serialize_public_joined_case,
+    invalidate_statistics_cache,
+)
 from services.reviews import split_paragraphs
 
 CASE_LIST_PROJECTION = {
@@ -220,21 +224,24 @@ def get_all_public_cases(
     offset: int = 0,
     limit: int = 50,
 ) -> list[dict]:
-    return [
-        item
-        for item in (
-            serialize_public_case_list_item(row)
-            for row in get_db()
-            .cases.find(
-                _case_list_filter(status=status, include_hidden=False),
-                projection=PUBLIC_CASE_LIST_PROJECTION,
-            )
-            .sort("created_at", DESCENDING)
-            .skip(max(0, int(offset)))
-            .limit(_bounded_limit(limit))
-        )
-        if item is not None
-    ]
+    if status not in (None, "", "all", "approved", "approved_all"):
+        _validate_case_status(status)
+        return []
+
+    pipeline = _public_cases_pipeline(
+        sort={"created_at": DESCENDING},
+        skip=offset,
+        limit=limit,
+    )
+    items: list[dict] = []
+    for row in get_db().cases.aggregate(pipeline):
+        item = _serialize_public_joined_case(row)
+        if item is None:
+            continue
+        item.pop("content", None)
+        item.pop("source_material", None)
+        items.append(item)
+    return items
 
 def count_cases(
     status: str | None = None,

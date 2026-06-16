@@ -26,41 +26,120 @@ def invalidate_statistics_cache() -> None:
         _statistics_cache["expires_at"] = None
         _statistics_cache["data"] = None
 
-def _public_query_cases() -> list[dict]:
-    cursor = (
-        get_db()
-        .cases.find({**_status_search_filter("approved"), "is_hidden": {"$ne": True}})
-        .sort("created_at", DESCENDING)
+def _public_keyword_filter(query: str) -> dict[str, Any]:
+    needle = query.strip()
+    if not needle:
+        return {}
+    return {
+        "$or": [
+            {"title": {"$regex": needle, "$options": "i"}},
+            {"content": {"$regex": needle, "$options": "i"}},
+            {"source_material": {"$regex": needle, "$options": "i"}},
+            {"keywords": {"$regex": needle, "$options": "i"}},
+        ]
+    }
+
+def _public_snapshot_overlay_stage() -> dict[str, Any]:
+    return {
+        "$addFields": {
+            field: {
+                "$cond": [
+                    {"$ne": [{"$type": f"$reviewed_version.{field}"}, "missing"]},
+                    f"$reviewed_version.{field}",
+                    f"${field}",
+                ]
+            }
+            for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS
+        }
+    }
+
+def _public_cases_pipeline(
+    *,
+    match_filters: list[dict[str, Any]] | None = None,
+    sort: dict[str, int] | None = None,
+    skip: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    pipeline: list[dict[str, Any]] = [
+        {"$match": {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}},
+        {
+            "$lookup": {
+                "from": "versions",
+                "let": {"reviewed_version_id": "$reviewed_version_id", "case_id": "$id"},
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$and": [
+                                    {"$eq": ["$id", "$$reviewed_version_id"]},
+                                    {"$eq": ["$case_id", "$$case_id"]},
+                                ]
+                            }
+                        }
+                    },
+                    {"$limit": 1},
+                ],
+                "as": "reviewed_version",
+            }
+        },
+        {"$unwind": {"path": "$reviewed_version", "preserveNullAndEmptyArrays": True}},
+        _public_snapshot_overlay_stage(),
+        {
+            "$addFields": {
+                "engagement_score": {
+                    "$add": [
+                        {"$ifNull": ["$view_count", 0]},
+                        {"$ifNull": ["$like_count", 0]},
+                    ]
+                }
+            }
+        },
+    ]
+    for match_filter in match_filters or []:
+        if match_filter:
+            pipeline.append({"$match": match_filter})
+    if sort:
+        pipeline.append({"$sort": sort})
+    if skip is not None:
+        pipeline.append({"$skip": max(0, int(skip))})
+    if limit is not None:
+        pipeline.append({"$limit": _bounded_limit(limit)})
+    return pipeline
+
+def _serialize_public_joined_case(row: dict | None) -> dict | None:
+    case = serialize_case(row)
+    if not case:
+        return None
+
+    reviewed_version = case.pop("reviewed_version", None)
+    serialized_version = (
+        serialize_version(reviewed_version) if isinstance(reviewed_version, dict) else None
     )
-    cases = [serialize_case(row) for row in cursor]
+    if serialized_version:
+        for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS:
+            if field in serialized_version:
+                case[field] = serialized_version.get(field)
 
-    # Batch fetch reviewed versions to avoid N+1 queries per public listing
-    version_ids = []
-    case_version_map: dict[int, list[dict]] = {}
-    for case in cases:
-        reviewed_version_id = case.get("reviewed_version_id")
-        if reviewed_version_id:
-            try:
-                version_id = int(reviewed_version_id)
-                version_ids.append(version_id)
-                case_version_map.setdefault(version_id, []).append(case)
-            except (TypeError, ValueError):
-                pass
+    return _public_case_fields(case)
 
-    if version_ids:
-        for version in get_db().versions.find({"id": {"$in": version_ids}}):
-            serialized_version = serialize_version(version)
-            if not serialized_version:
-                continue
-            version_id = serialized_version.get("id")
-            if version_id is None:
-                continue
-            for case in case_version_map.get(version_id, []):
-                for field in PUBLIC_REVIEW_SNAPSHOT_FIELDS:
-                    if field in serialized_version:
-                        case[field] = serialized_version.get(field)
-
-    return [item for item in (_public_case_fields(case) for case in cases) if item is not None]
+def _public_query_cases(
+    *,
+    match_filters: list[dict[str, Any]] | None = None,
+    sort: dict[str, int] | None = None,
+    skip: int | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    pipeline = _public_cases_pipeline(
+        match_filters=match_filters,
+        sort=sort or {"created_at": DESCENDING},
+        skip=skip,
+        limit=limit,
+    )
+    return [
+        item
+        for item in (_serialize_public_joined_case(row) for row in get_db().cases.aggregate(pipeline))
+        if item is not None
+    ]
 
 def _public_field_matches(item: dict, query: str) -> bool:
     needle = query.strip().lower()
@@ -94,10 +173,12 @@ def search_cases(
     if _status_search_filter(status).get("status") != "approved":
         return []
 
-    matches = [item for item in _public_query_cases() if _public_field_matches(item, query)]
-    start = max(0, int(offset))
-    end = start + _bounded_limit(limit, default=20)
-    return matches[start:end]
+    return _public_query_cases(
+        match_filters=[_public_keyword_filter(query)],
+        sort={"created_at": DESCENDING},
+        skip=offset,
+        limit=_bounded_limit(limit, default=20),
+    )
 
 def filter_cases(
     type_filter: str | None = None,
@@ -110,17 +191,20 @@ def filter_cases(
     if _status_search_filter(status_filter).get("status") != "approved":
         return []
 
-    matches = _public_query_cases()
+    match_filters: list[dict[str, Any]] = []
     if type_filter:
-        matches = [item for item in matches if item.get("type") == type_filter]
+        match_filters.append({"type": type_filter})
     if theme_filter:
-        matches = [item for item in matches if item.get("theme") == theme_filter]
+        match_filters.append({"theme": theme_filter})
     if keyword_filter:
-        matches = [item for item in matches if _public_field_matches(item, keyword_filter)]
+        match_filters.append(_public_keyword_filter(keyword_filter))
 
-    start = max(0, int(offset))
-    end = start + _bounded_limit(limit)
-    return matches[start:end]
+    return _public_query_cases(
+        match_filters=match_filters,
+        sort={"created_at": DESCENDING},
+        skip=offset,
+        limit=limit,
+    )
 
 def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
     from repositories.cases import get_case
@@ -130,29 +214,31 @@ def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
         return []
 
     bounded = _bounded_limit(limit, default=5)
-    cases = [
-        item
-        for item in _public_query_cases()
-        if item.get("id") != int(case_id)
-        and (item.get("type") == current_case.get("type") or item.get("theme") == current_case.get("theme"))
-    ]
-    cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
-    return cases[:bounded]
+    return _public_query_cases(
+        match_filters=[
+            {
+                "id": {"$ne": int(case_id)},
+                "$or": [
+                    {"type": current_case.get("type")},
+                    {"theme": current_case.get("theme")},
+                ],
+            }
+        ],
+        sort={"engagement_score": DESCENDING},
+        limit=bounded,
+    )
 
 def get_trending_cases(limit: int = 10) -> list[dict]:
-    cases = _public_query_cases()
-    cases.sort(key=lambda item: item.get("view_count", 0) + item.get("like_count", 0), reverse=True)
-    return cases[:_bounded_limit(limit, default=10)]
+    return _public_query_cases(
+        sort={"engagement_score": DESCENDING},
+        limit=_bounded_limit(limit, default=10),
+    )
 
 def get_latest_cases(limit: int = 10) -> list[dict]:
-    query = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
-    cursor = (
-        get_db()
-        .cases.find(query)
-        .sort("created_at", DESCENDING)
-        .limit(_bounded_limit(limit, default=10))
+    return _public_query_cases(
+        sort={"created_at": DESCENDING},
+        limit=_bounded_limit(limit, default=10),
     )
-    return [item for item in (serialize_public_case(row) for row in cursor) if item is not None]
 
 def get_statistics() -> dict:
     now = datetime.now(UTC)
