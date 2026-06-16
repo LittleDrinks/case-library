@@ -3,61 +3,21 @@
     <div class="content-layout">
       <div class="content-editor-col">
         <div class="markdown-workspace">
-          <div class="field content-field">
-            <label for="ccf-content">
-              案例正文 <span class="required" aria-hidden="true">*</span>
-            </label>
-            <div class="editor-wrapper">
-              <div class="editor-toolbar" aria-hidden="true">
-                <button type="button" class="toolbar-btn" title="加粗">B</button>
-                <button type="button" class="toolbar-btn italic" title="斜体">I</button>
-                <button type="button" class="toolbar-btn underline" title="下划线">U</button>
-                <span class="toolbar-divider"></span>
-                <button type="button" class="toolbar-btn" title="无序列表">•</button>
-                <button type="button" class="toolbar-btn" title="有序列表">1.</button>
-                <span class="toolbar-divider"></span>
-                <button type="button" class="toolbar-btn" title="插入链接">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                  </svg>
-                </button>
-              </div>
-              <textarea
-                id="ccf-content"
-                ref="contentTextarea"
-                v-model="form.content"
-                rows="14"
-                placeholder="请在此撰写案例正文，建议包含以下内容。可使用 Markdown 语法，如 ## 标题：&#10;&#10;## 案例背景&#10;简述教学场景、课程名称、授课对象等基本信息。&#10;&#10;## 教学过程&#10;详细描述教学环节的设计与实施过程。&#10;&#10;## 思政元素融入&#10;阐述如何将思想政治教育有机融入专业教学。&#10;&#10;## 教学反思&#10;总结教学效果、经验与改进方向。"
-                :aria-invalid="!!errors.content"
-                @blur="$emit('touch', 'content')"
-                @scroll="syncPreviewScroll"
-              ></textarea>
-            </div>
-            <div class="textarea-meta">
-              <span>{{ wordCount }} / 5000 字</span>
-              <span>预计阅读 {{ readingTime }} 分钟</span>
-            </div>
-            <div v-if="errors.content" class="field-error" role="alert">{{ errors.content }}</div>
-          </div>
+          <CreateContentEditor
+            ref="contentEditor"
+            v-model="form.content"
+            :error="errors.content"
+            :word-count="wordCount"
+            :reading-time="readingTime"
+            @touch="$emit('touch', $event)"
+            @editor-scroll="syncPreviewScroll"
+          />
 
-          <section class="preview-field" aria-label="Markdown 预览">
-            <div class="preview-field-label">Markdown 预览</div>
-            <div class="markdown-preview">
-            <div class="preview-header">
-              <strong>预览</strong>
-              <span>按当前正文实时生成</span>
-            </div>
-            <div
-              v-if="form.content.trim()"
-              ref="previewBody"
-              class="preview-body"
-              v-html="renderMarkdown(form.content)"
-              @scroll="syncEditorScroll"
-            ></div>
-            <div v-else class="preview-empty">填写案例正文后，这里会显示排版预览。</div>
-            </div>
-          </section>
+          <CreateMarkdownPreview
+            ref="markdownPreview"
+            :content="form.content"
+            @preview-scroll="syncEditorScroll"
+          />
         </div>
 
         <div class="tip-card">
@@ -104,6 +64,8 @@
 
 <script setup>
 import { computed, ref } from "vue";
+import CreateContentEditor from "./CreateContentEditor.vue";
+import CreateMarkdownPreview from "./CreateMarkdownPreview.vue";
 
 const props = defineProps({
   form: {
@@ -126,8 +88,8 @@ const props = defineProps({
 
 defineEmits(["touch"]);
 
-const contentTextarea = ref(null);
-const previewBody = ref(null);
+const contentEditor = ref(null);
+const markdownPreview = ref(null);
 let syncingScroll = false;
 
 const tocItems = computed(() => {
@@ -151,52 +113,11 @@ function syncScroll(source, target) {
 }
 
 function syncPreviewScroll() {
-  syncScroll(contentTextarea.value, previewBody.value);
+  syncScroll(contentEditor.value?.contentTextarea, markdownPreview.value?.previewBody);
 }
 
 function syncEditorScroll() {
-  syncScroll(previewBody.value, contentTextarea.value);
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function renderInlineMarkdown(value) {
-  return escapeHtml(value)
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>");
-}
-
-function renderMarkdown(value) {
-  const lines = String(value || "").split(/\r?\n/);
-  return lines.map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return "<br>";
-    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
-    if (heading) {
-      const level = Math.min(4, heading[1].length + 2);
-      return `<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`;
-    }
-    const ordered = trimmed.match(/^(\d+)\.\s+(.+)$/);
-    if (ordered) {
-      return `<p class="md-list-item">${ordered[1]}. ${renderInlineMarkdown(ordered[2])}</p>`;
-    }
-    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
-    if (unordered) {
-      return `<p class="md-list-item">- ${renderInlineMarkdown(unordered[1])}</p>`;
-    }
-    const quote = trimmed.match(/^>\s*(.+)$/);
-    if (quote) {
-      return `<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`;
-    }
-    return `<p>${renderInlineMarkdown(line)}</p>`;
-  }).join("");
+  syncScroll(markdownPreview.value?.previewBody, contentEditor.value?.contentTextarea);
 }
 </script>
 
@@ -211,11 +132,6 @@ function renderMarkdown(value) {
   font-weight: 500;
   color: var(--color-text);
   margin-bottom: 8px;
-}
-
-.required {
-  color: var(--color-brand);
-  margin-left: 2px;
 }
 
 textarea {
@@ -242,10 +158,6 @@ textarea:focus {
   box-shadow: none;
 }
 
-#ccf-content {
-  min-height: 320px;
-}
-
 #ccf-source {
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
@@ -258,135 +170,12 @@ textarea:focus {
   color: var(--color-text-muted);
 }
 
-.field-error {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--color-error-text);
-  background: var(--color-error-bg);
-  padding: 6px 8px;
-  border-radius: 4px;
-}
-
-.textarea-meta {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin: 0 0 28px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
 .markdown-workspace {
   display: grid;
   grid-template-columns: 1fr;
   gap: 20px;
   align-items: start;
   margin-bottom: 24px;
-}
-
-.content-field {
-  min-width: 0;
-  margin-bottom: 0;
-}
-
-.preview-field {
-  min-width: 0;
-}
-
-.preview-field-label {
-  margin-bottom: 8px;
-  min-height: 18px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text);
-}
-
-.markdown-preview {
-  min-width: 0;
-  margin: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
-  overflow: hidden;
-}
-
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: #fafafa;
-}
-
-.preview-header strong {
-  font-size: 13px;
-  color: var(--color-text);
-}
-
-.preview-header span {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.preview-body {
-  padding: 18px 20px;
-  max-height: 420px;
-  overflow: auto;
-  color: var(--color-text);
-  font-size: 14px;
-  line-height: 1.85;
-}
-
-.preview-body :deep(p),
-.preview-body :deep(h3),
-.preview-body :deep(h4),
-.preview-body :deep(h5),
-.preview-body :deep(h6) {
-  margin: 0;
-  word-break: break-word;
-}
-
-.preview-body :deep(p + p),
-.preview-body :deep(p + h3),
-.preview-body :deep(h3 + p),
-.preview-body :deep(blockquote + p),
-.preview-body :deep(p + blockquote) {
-  margin-top: 10px;
-}
-
-.preview-body :deep(h3),
-.preview-body :deep(h4),
-.preview-body :deep(h5),
-.preview-body :deep(h6) {
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.preview-body :deep(.md-list-item) {
-  padding-left: 16px;
-}
-
-.preview-body :deep(blockquote) {
-  margin: 8px 0;
-  padding: 8px 12px;
-  border-left: 3px solid var(--color-brand);
-  background: #fafafa;
-  color: var(--color-text-secondary);
-}
-
-.preview-body :deep(code) {
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: #f3f4f6;
-  font-family: inherit;
-  font-size: 0.95em;
-}
-
-.preview-empty {
-  padding: 24px 20px;
-  color: var(--color-text-muted);
-  font-size: 13px;
 }
 
 .content-layout {
@@ -397,61 +186,6 @@ textarea:focus {
 
 .content-editor-col {
   min-width: 0;
-}
-
-.editor-wrapper {
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--color-surface);
-  margin-bottom: 8px;
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.toolbar-btn {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.toolbar-btn.italic {
-  font-style: italic;
-}
-
-.toolbar-btn.underline {
-  text-decoration: underline;
-}
-
-.toolbar-btn svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--color-border);
-  margin: 0 4px;
 }
 
 .upload-zone {
@@ -573,24 +307,6 @@ textarea:focus {
 }
 
 @media (min-width: 860px) {
-  .editor-wrapper,
-  .markdown-preview {
-    height: 568px;
-  }
-
-  .editor-wrapper,
-  .markdown-preview {
-    display: flex;
-    flex-direction: column;
-  }
-
-  #ccf-content {
-    flex: 1;
-    height: auto;
-    min-height: 0;
-    resize: none;
-  }
-
   #ccf-source {
     min-height: 240px;
   }
@@ -600,18 +316,6 @@ textarea:focus {
     gap: 24px;
   }
 
-  .preview-body,
-  .preview-empty {
-    flex: 1;
-    max-height: none;
-    min-height: 0;
-    overflow: auto;
-  }
-
-  .preview-empty {
-    display: flex;
-    align-items: center;
-  }
 }
 
 @media (min-width: 1200px) {

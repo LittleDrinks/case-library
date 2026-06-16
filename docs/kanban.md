@@ -6,6 +6,11 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
+#96 本轮最小切片：创建页样式从 `CreateCaseView.vue` 迁出到
+`frontend/src/views/create-case-view.css`，`CreateContentStep.vue` 拆出正文编辑器和
+Markdown 预览子组件，并为 `useCaseDraft` 建立 Vitest + jsdom 单测基线。验证命令：
+`cd frontend && npm run test:unit`、`cd frontend && npm run build`、`git diff --check`。
+
 当前基线：backend database.py split 已完成并已进入 `develop`；issue #156 正通过
 `docs/frontend-baseline.md` 补齐 alpha frontend baseline 交接口径。
 分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop.zip`。

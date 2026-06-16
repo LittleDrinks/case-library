@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
+    "test:unit": "vitest run tests/unit --environment jsdom",
     "test:e2e": "playwright test",
     "test:e2e:demo-media": "PLAYWRIGHT_OUTPUT_DIR=../agent-runs/demo-media PLAYWRIGHT_VIDEO=on playwright test tests/demo-media.spec.js --project=chromium-desktop",
     "test:e2e:install": "playwright install --with-deps chromium"
@@ -17,6 +18,8 @@
     "vue": "^3.5.25"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "^1.49.0",
+    "jsdom": "^26.1.0",
+    "vitest": "^3.2.4"
   }
 }
