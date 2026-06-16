@@ -1,19 +1,20 @@
-# "强国有我"上大大思政课案例库 Skill 组合 v2.0
+# "强国有我"上大大思政课案例库产品提示词组合 v2.0
 
 ## 概述
 
-这是上海大学"强国有我"大思政课案例库的**智能案例处理系统**，由一个主协调器和三个专项改写器组成。用户提供任意形式素材（文本/图片/视频/网页链接），系统自动完成分类、归主题、联网补充、模板改写，生成可直接提交的案例草稿。
+这是上海大学"强国有我"大思政课案例库的**产品提示词/模板资产**，由一个主流程和三个专项改写模板组成。用户提供任意形式素材（文本/图片/视频/网页链接），系统自动完成分类、归主题、联网补充、模板改写，生成可直接提交的案例草稿。
 
 **触发词**：大思政课案例、强国有我案例、思政案例入库、案例改写、案例生成
 
-## Skill 组合架构
+## 产品提示词组合架构
 
 ```
-shu-dasi-skill/                 ← 主协调器（本文件）
-  ├── classifier.md             ← 案例内容分类器
-  ├── template-sizhengke.md     ← 思政课教学案例模板改写器（附件1）
-  ├── template-kechengsizheng.md ← 课程思政案例模板改写器（附件2）
-  └── template-shijian.md       ← 实践育人案例模板改写器（附件3）
+product_prompts/
+  ├── shu-dasi-workflow.md                  ← 主流程（本文件）
+  ├── zhutifenlei/classifier.md             ← 案例内容分类器
+  ├── anlibianxie/template-sizhengke.md     ← 思政课教学案例模板改写器（附件1）
+  ├── anlibianxie/template-kechengsizheng.md ← 课程思政案例模板改写器（附件2）
+  └── anlibianxie/template-shijian.md       ← 实践育人案例模板改写器（附件3）
 ```
 
 ---
@@ -89,7 +90,7 @@ shu-dasi-skill/                 ← 主协调器（本文件）
 
 ### 第三步：调用分类器，判断案例类型
 
-读取 `classifier.md`，按照其中的分类规则和决策树判断案例类型。
+读取 `product_prompts/zhutifenlei/classifier.md`，按照其中的分类规则和决策树判断案例类型。
 
 | 类型代码 | 案例类型 | 适用情景 |
 |---------|---------|---------|
@@ -116,9 +117,9 @@ shu-dasi-skill/                 ← 主协调器（本文件）
 
 根据判断的案例类型，依次调用对应的改写器：
 
-- `TYPE_A` → 读取 `template-sizhengke.md`
-- `TYPE_B` → 读取 `template-kechengsizheng.md`
-- `TYPE_C` → 读取 `template-shijian.md`
+- `TYPE_A` → 读取 `product_prompts/anlibianxie/template-sizhengke.md`
+- `TYPE_B` → 读取 `product_prompts/anlibianxie/template-kechengsizheng.md`
+- `TYPE_C` → 读取 `product_prompts/anlibianxie/template-shijian.md`
 
 每个改写器会指导你完成信息提取、模板填写和正文改写。
 
@@ -229,4 +230,4 @@ shu-dasi-skill/                 ← 主协调器（本文件）
 *- 新增从两个实际案例（马靖萱/易码修）中积累的写作经验*
 *- 完善信息缺失的三级处理规则*
 
-*本 Skill 由上海大学落实新时代立德树人工程工作专班案例库方案提炼，v2.0，2026年4月*
+*本产品提示词资产由上海大学落实新时代立德树人工程工作专班案例库方案提炼，v2.0，2026年4月*

@@ -26,7 +26,7 @@ from typing import Any
 
 from bson import ObjectId
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from database import COUNTER_COLLECTIONS, DATETIME_FIELDS, format_beijing_datetime, get_db
 
@@ -118,7 +118,7 @@ def restore_backup(backup_path: Path) -> int:
 
 def default_backup_path() -> Path:
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    return Path(__file__).resolve().parent.parent / "data" / f"timestamp_backup_{stamp}.json"
+    return Path(__file__).resolve().parents[2] / "data" / f"timestamp_backup_{stamp}.json"
 
 
 def main() -> int:
@@ -164,7 +164,7 @@ def main() -> int:
     if not args.no_backup:
         write_backup(changes, backup_path)
         print(f"Wrote field backup: {backup_path}")
-        print(f"Rollback command: python backend/migrate_timestamps.py --restore {backup_path}")
+        print(f"Rollback command: python backend/scripts/migrate_timestamps.py --restore {backup_path}")
     else:
         print("WARNING: applying without JSON field backup. Ensure a full MongoDB backup exists.")
 

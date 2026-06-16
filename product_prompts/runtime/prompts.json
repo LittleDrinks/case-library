@@ -1,0 +1,49 @@
+{
+  "prompts": [
+    {
+      "id": "alpha/paragraph-review",
+      "asset_id": "alpha-paragraph-review",
+      "name": "段落批注自查",
+      "description": "生成只读版本，并按段落给出作者侧修改建议",
+      "category": "alpha",
+      "variables": ["title", "content", "source_material", "type", "theme"],
+      "output_schema": "json"
+    },
+    {
+      "id": "workflow/completeness",
+      "asset_id": "workflow-completeness",
+      "name": "完整性检查",
+      "description": "检查案例是否包含背景、做法、成效与反思等关键板块",
+      "category": "workflow",
+      "variables": ["title", "content"],
+      "output_schema": "json"
+    },
+    {
+      "id": "workflow/categorization",
+      "asset_id": "workflow-categorization",
+      "name": "分类检查",
+      "description": "检查案例类型和主题是否与正文内容匹配",
+      "category": "workflow",
+      "variables": ["title", "content", "type", "theme"],
+      "output_schema": "json"
+    },
+    {
+      "id": "workflow/expression",
+      "asset_id": "workflow-expression",
+      "name": "表达检查",
+      "description": "检查案例表达是否清晰、正式、适合专家审核",
+      "category": "workflow",
+      "variables": ["title", "content"],
+      "output_schema": "json"
+    },
+    {
+      "id": "workflow/score",
+      "asset_id": "workflow-score",
+      "name": "综合评分",
+      "description": "给出提交前综合自查评分和主要风险",
+      "category": "workflow",
+      "variables": ["title", "content"],
+      "output_schema": "json"
+    }
+  ]
+}

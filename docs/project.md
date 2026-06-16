@@ -19,7 +19,8 @@ AI 约束见 `docs/ai.md`。
 - `backend/`：FastAPI、MongoDB 数据层、账号脚本、迁移和 smoke 脚本。
 - `frontend/`：Vue 3 + Vite 单页 alpha 前端，使用 hash 视图切换；顶层视图使用
   `defineAsyncComponent` 懒加载，构建时保留独立 `vendor` chunk。
-- `skills/`：思政案例提示词、模板和分类规则，是产品领域资产。
+- `product_prompts/`：思政案例提示词、模板、分类规则和评测样例，是产品领域资产；
+  不再使用根目录 `skills/`，避免与 `.codex/skills` 等代理技能目录混淆。
 - `docs/`：项目、产品、API、AI、开发和质量文档。
 - `docs/design/`：已跟踪的创建案例视觉参考图。
 - `docs/case-library-design.zip`：本地 HTML 风格参考包，目前未跟踪，可作为设计参考。
@@ -28,19 +29,23 @@ AI 约束见 `docs/ai.md`。
 
 ### 后端脚本和默认值
 
-`backend/` 当前保留运行模块和操作脚本；后端测试脚本已迁入 `backend/tests/`
+`backend/` 当前保留运行模块；后端测试脚本已迁入 `backend/tests/`，操作脚本已迁入
+`backend/scripts/`。
 第一阶段布局：
 
 - 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、
   `case_processor.py`、`search_engine.py`
-- Prompt registry：`backend/prompt_registry/` 保存产品 prompt 定义、数据结构和查询入口；
-  `backend/prompts.py` 仅保留兼容导出。
+- Prompt runtime：`product_prompts/runtime/` 保存运行时产品 prompt 元数据、配置和
+  markdown body；`backend/prompt_registry/` 仅作为加载器和兼容 API，提供稳定 prompt ID、
+  数据结构和查询入口；`backend/prompts.py` 仅保留兼容导出。`/api/prompts` 只返回元数据，
+  不返回 prompt body。
 - `backend/services/`：低风险业务 helper 第一阶段归属；当前包含无数据库副作用的 review
   helper，`backend/database.py` 保留同名兼容导出。
-- Compose 启动账号初始化：`backend/init_users.py`
-- 管理员账号工具：`backend/account_admin.py`
-- 演示数据脚本：`backend/demo.py`
-- 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
+- Compose 启动账号初始化：`backend/scripts/init_users.py`
+- 管理员账号工具：`backend/scripts/account_admin.py`
+- 演示数据脚本：`backend/scripts/demo.py`
+- 迁移工具：`backend/scripts/migrate_sqlite_to_mongo.py`、
+  `backend/scripts/migrate_timestamps.py`
 - 本地 smoke/debug：`backend/tests/smoke/smoke_test_mongo.py`
 - 单元脚本：`backend/tests/unit/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
   规范化、AI review summary 规范化和公开案例快照序列化白名单。
@@ -53,16 +58,18 @@ AI 约束见 `docs/ai.md`。
 - Alpha/E2E seed：`scripts/seed_e2e_accounts.py`，仅在 `ENABLE_DEMO_SEED=true` 时运行；
   默认 `docker-compose.yml` 不再调用，开发/e2e 通过 `docker-compose.dev.yml` 显式启用
 
-`backend/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
+`backend/scripts/init_users.py` 中的 `default123456` 仅用于首次空库初始化默认账号，所有默认账号
 均设置 `must_change_password=true`。测试账号和 alpha demo 案例由
 `scripts/seed_e2e_accounts.py` 确定性创建，仅用于本地 alpha demo、dev 和 e2e 环境。
 该 seed 中的演示管理员 `10000002` 为便于浏览器验收不强制改密，不代表生产默认账号策略。
 不要把真实账号、真实密码或生产种子数据写入这些脚本。
 
 `/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
-后端测试、前端 fallback 和文档。产品 prompt/template 资产当前保留在 `skills/`，后续若做
-统一 prompt 管理，先按 issue #80 迁移路径和评测命令收口，不把 `.codex/` 代理技能混入产品
-资产。
+后端测试、前端 fallback 和文档。产品 prompt/template 资产已迁入 `product_prompts/`；
+后续若做统一 prompt 管理，应继续以 `product_prompts/runtime/` 管理运行时 prompt
+元数据、配置和 markdown body，并以 `backend/prompt_registry/` 提供的稳定 ID 为 API
+契约，不要把 `.codex/` 代理技能混入产品资产。issue #80 的完整自动评测 harness 尚未
+落地，当前仅保留 `product_prompts/anlibianxie/evals/evals.json` 样例和注入边界测试。
 
 历史目录、备份目录或其他项目目录只能作为只读参考；不从中开发，不整目录复制。
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 强国有我大思政课案例库 - 案例处理模块
-集成原有的Skill系统
+集成产品提示词资产
 """
 
 from pathlib import Path
@@ -10,8 +10,9 @@ from pathlib import Path
 from database import create_case, get_case, update_case
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-CLASSIFIER_PATH = ROOT_DIR / "skills" / "zhutifenlei" / "classifier.md"
-TEMPLATE_DIR = ROOT_DIR / "skills" / "anlibianxie"
+PRODUCT_PROMPTS_DIR = ROOT_DIR / "product_prompts"
+CLASSIFIER_PATH = PRODUCT_PROMPTS_DIR / "zhutifenlei" / "classifier.md"
+TEMPLATE_DIR = PRODUCT_PROMPTS_DIR / "anlibianxie"
 
 
 def classify_case(content: str) -> dict:

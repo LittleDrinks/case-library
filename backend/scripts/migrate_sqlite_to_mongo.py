@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from database import SQLITE_DB_PATH, format_beijing_datetime, get_db, init_db, sync_all_counters
 
@@ -20,7 +20,7 @@ TABLES = ["users", "cases", "reviews", "versions", "deployments"]
 def resolve_sqlite_path() -> Path:
     path = Path(os.getenv("SQLITE_DB_PATH", SQLITE_DB_PATH))
     if not path.is_absolute():
-        path = Path(__file__).resolve().parent.parent / path
+        path = Path(__file__).resolve().parents[2] / path
     return path.resolve()
 
 

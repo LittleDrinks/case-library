@@ -43,7 +43,7 @@ ACCOUNTS = [
         "role": "admin",
         "nickname": "小李",
         # Local demo/E2E admin for reviewer walkthroughs. Production/default
-        # init users still require password change in backend/init_users.py.
+        # init users still require password change in backend/scripts/init_users.py.
         "must_change_password": False,
         "status": "active",
     },

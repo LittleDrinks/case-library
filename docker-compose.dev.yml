@@ -30,7 +30,7 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "python backend/init_users.py || true;
+      sh -c "python backend/scripts/init_users.py || true;
              python scripts/seed_e2e_accounts.py || true;
              uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload"
     healthcheck:

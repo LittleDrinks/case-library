@@ -17,6 +17,7 @@ class Prompt:
     system_content: str = ""
 
     def metadata(self) -> dict:
+        """Return public prompt metadata without prompt body content."""
         data = {
             "id": self.id,
             "name": self.name,

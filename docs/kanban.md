@@ -6,11 +6,18 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
-当前基线：`develop` 已推送到 `14cd7ef Complete test handoff migration`。
+当前基线：backend prompt/script cleanup 已完成，待以
+`refactor: organize backend prompts and scripts` 提交推送到 `develop`。
 分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop.zip`。
 
 验证证据：
 
+- verifier 已完成本轮 backend prompt/script cleanup 验证：
+  `python3 scripts/prompt_eval_harness.py`、
+  `docker compose run --rm app python scripts/prompt_eval_harness.py`、
+  `docker compose run --rm app python backend/tests/unit/test_prompt_injection.py`、
+  `docker compose run --rm app make check`、`docker compose config --quiet`、
+  OpenAPI smoke、`git diff --check` 均通过。
 - `agent-runs/deadline-20260616-now-next/collect-20260616-032820.final.txt`
   记录最终独立验证：`docker compose run --rm app make check`、两个 desktop
   Playwright 规格（`demo-media` 4 passed，`audit` 6 passed、1 skipped mobile-only）、
@@ -30,15 +37,22 @@ status:now：
   文档、截图和验收口径。
 - #158：已有 first-stage backend module split 准备材料；先按 API contract 收窄
   边界，不直接做大拆分。
-- #160：API contract 已由文档和 backend contract checks 锁定；后续模块拆分继续
-  保持 OpenAPI 与字段兼容。
+- #160：本轮 cleanup 保持 API contract，OpenAPI smoke 与 `make check` 已通过；
+  可按本轮完成情况关闭。
 
 status:next：
 
 - #161：demo-media spec 和命令已可运行；下一步生成并归档 E2E demo videos。
 - #159/#122：backend tests 已迁入并提交到 `backend/tests/{unit,integration,smoke}/`；
   `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 和 `backend/smoke_test_mongo.py`
-  兼容入口已移除。
+  兼容入口已移除。本轮 prompt/public metadata 测试继续补强；#122 仍保留为数据库、
+  main、search 等更广泛单测覆盖 follow-up。
+- #79/#80：本轮 cleanup 已完成 root backend scripts 迁入 `backend/scripts/`、root
+  `skills/` 移除、`product_prompts/` 成为 runtime prompt source of truth、registry
+  loader 加载 prompt metadata 且不泄露 body、prompt eval harness 进入 `scripts/`；
+  可按本轮完成情况关闭。
+- #95/#117：本轮不是 database/main 大模块拆分，仍保留为后续 backend module split
+  follow-up。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
 - #123：已有 helper 化，长流程仍需继续拆小。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接

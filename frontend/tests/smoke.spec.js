@@ -74,38 +74,38 @@ async function cardLikeCount(caseCard) {
 test.beforeAll(async () => {
   // Clean up any stale test accounts from a previous interrupted run
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${TEST_USER}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${TEST_USER}`);
   } catch {}
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${TEST_ADMIN}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${TEST_ADMIN}`);
   } catch {}
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${FORCE_PWD_USER}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${FORCE_PWD_USER}`);
   } catch {}
 
   // Create deterministic test accounts with must_change_password=false
   dockerExec(
-    `python backend/account_admin.py create --username ${TEST_USER} --password ${TEST_USER_PASS} --role normal --nickname SmokeUser --must-change-password false --status active`
+    `python backend/scripts/account_admin.py create --username ${TEST_USER} --password ${TEST_USER_PASS} --role normal --nickname SmokeUser --must-change-password false --status active`
   );
   dockerExec(
-    `python backend/account_admin.py create --username ${TEST_ADMIN} --password ${TEST_ADMIN_PASS} --role admin --nickname SmokeAdmin --must-change-password false --status active`
+    `python backend/scripts/account_admin.py create --username ${TEST_ADMIN} --password ${TEST_ADMIN_PASS} --role admin --nickname SmokeAdmin --must-change-password false --status active`
   );
 
   // Create deterministic test account that requires forced password change
   dockerExec(
-    `python backend/account_admin.py create --username ${FORCE_PWD_USER} --password ${FORCE_PWD_PASS} --role normal --nickname ForcePwdUser --must-change-password true --status active`
+    `python backend/scripts/account_admin.py create --username ${FORCE_PWD_USER} --password ${FORCE_PWD_PASS} --role normal --nickname ForcePwdUser --must-change-password true --status active`
   );
 });
 
 test.afterAll(async () => {
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${TEST_USER}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${TEST_USER}`);
   } catch {}
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${TEST_ADMIN}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${TEST_ADMIN}`);
   } catch {}
   try {
-    dockerExec(`python backend/account_admin.py delete --username ${FORCE_PWD_USER}`);
+    dockerExec(`python backend/scripts/account_admin.py delete --username ${FORCE_PWD_USER}`);
   } catch {}
 });
 
