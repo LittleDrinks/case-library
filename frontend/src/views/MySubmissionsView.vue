@@ -120,7 +120,7 @@
                 </div>
               </article>
             </div>
-            <div v-else class="review-placeholder">暂无历史版本</div>
+            <div v-else class="review-placeholder">暂无版本记录</div>
           </section>
 
           <section v-if="showReviewFor(detailCase.status)" class="submission-detail-card">
@@ -210,7 +210,7 @@
               <span class="meta-item">创建 {{ formatDate(c.created_at) }}</span>
               <span class="meta-item" v-if="c.updated_at && c.updated_at !== c.created_at">更新 {{ formatDate(c.updated_at) }}</span>
             </div>
-            <p class="case-preview">{{ preview(c.content) }}</p>
+            <p v-if="preview(c)" class="case-preview">{{ preview(c) }}</p>
             <div class="case-stats-row">
               <span>浏览 {{ c.view_count || 0 }}</span>
               <span>点赞 {{ c.like_count || 0 }}</span>
@@ -220,22 +220,24 @@
           <!-- Inline detail -->
           <div v-if="expandedId === c.id" class="case-detail">
             <div class="detail-grid">
-              <div class="detail-item"><strong>作者：</strong>{{ c.author || '未知' }}</div>
-              <div class="detail-item"><strong>部门：</strong>{{ c.department || '未知' }}</div>
-              <div class="detail-item"><strong>类型：</strong>{{ typeLabel(c.type) }}</div>
-              <div class="detail-item"><strong>主题：</strong>{{ c.theme || '未设置' }}</div>
+              <div class="detail-item"><strong>作者：</strong>{{ expandedCase(c).author || '未知' }}</div>
+              <div class="detail-item"><strong>部门：</strong>{{ expandedCase(c).department || '未知' }}</div>
+              <div class="detail-item"><strong>类型：</strong>{{ typeLabel(expandedCase(c).type) }}</div>
+              <div class="detail-item"><strong>主题：</strong>{{ expandedCase(c).theme || '未设置' }}</div>
             </div>
+            <div v-if="detailLoading[c.id]" class="review-placeholder">详情加载中…</div>
+            <div v-else-if="detailError[c.id]" class="review-placeholder">{{ detailError[c.id] }}</div>
             <div class="detail-content-full">
               <strong>内容：</strong>
-              <div class="detail-content-body">{{ c.content || '暂无内容' }}</div>
+              <div class="detail-content-body">{{ expandedCase(c).content || '暂无内容' }}</div>
             </div>
-            <div class="detail-content-full" v-if="c.source_material">
+            <div class="detail-content-full" v-if="expandedCase(c).source_material">
               <strong>来源材料：</strong>
-              <div class="detail-content-body">{{ c.source_material }}</div>
+              <div class="detail-content-body">{{ expandedCase(c).source_material }}</div>
             </div>
-            <div v-if="c.keywords && c.keywords.length" class="detail-keywords">
+            <div v-if="expandedCase(c).keywords && expandedCase(c).keywords.length" class="detail-keywords">
               <strong>关键词：</strong>
-              <span v-for="k in c.keywords" :key="k" class="keyword-tag">{{ k }}</span>
+              <span v-for="k in expandedCase(c).keywords" :key="k" class="keyword-tag">{{ k }}</span>
             </div>
 
             <div class="version-history">
@@ -296,7 +298,7 @@
                   </div>
                 </article>
               </div>
-              <div v-else class="review-placeholder">暂无历史版本</div>
+              <div v-else class="review-placeholder">暂无版本记录</div>
             </div>
 
             <!-- Review info -->
@@ -319,7 +321,7 @@
 
           <!-- Card actions -->
           <div class="case-actions">
-            <button type="button" class="btn-secondary btn-sm" @click.stop="toggleDetail(c.id)">
+            <button type="button" class="btn-secondary btn-sm" @click.stop="openSubmissionDetail(c.id)">
               查看详情
             </button>
             <template v-if="isEditable(c.status)">
@@ -389,6 +391,9 @@ const reviewLoading = ref({});
 const versionMap = ref({});
 const versionLoading = ref({});
 const versionError = ref({});
+const detailMap = ref({});
+const detailLoading = ref({});
+const detailError = ref({});
 const detailCase = ref(null);
 const showDetailReviewResult = ref(false);
 let lastOpenedHashCaseId = '';
@@ -531,8 +536,13 @@ function formatDate(value) {
   });
 }
 
-function preview(content) {
-  const text = (content || '').replace(/\s+/g, ' ').trim();
+function preview(c) {
+  const content = c?.content || c?.summary || c?.excerpt || '';
+  const text = content.replace(/\s+/g, ' ').trim();
+  if (!text) {
+    const meta = [typeLabel(c?.type), c?.theme, c?.department].filter(Boolean);
+    return meta.length ? `${meta.join(' · ')}案例，展开查看完整内容。` : '';
+  }
   if (text.length <= 120) return text;
   return text.slice(0, 120) + '…';
 }
@@ -583,8 +593,36 @@ async function loadCases() {
   }
 }
 
-function toggleDetail(caseId) {
-  openSubmissionDetail(caseId);
+async function toggleDetail(caseId) {
+  if (expandedId.value === caseId) {
+    expandedId.value = null;
+    return;
+  }
+  expandedId.value = caseId;
+  await loadInlineDetail(caseId);
+}
+
+function expandedCase(c) {
+  return detailMap.value[c.id] || c;
+}
+
+async function loadInlineDetail(caseId) {
+  if (detailMap.value[caseId] || detailLoading.value[caseId]) return;
+  detailLoading.value[caseId] = true;
+  detailError.value[caseId] = '';
+  try {
+    const res = await fetchCaseDetail(caseId, false);
+    if (!res?.success || !res.data) {
+      throw new Error(res?.message || '加载案例详情失败');
+    }
+    detailMap.value[caseId] = res.data;
+    await loadVersions(caseId);
+    if (showReviewFor(res.data.status)) await loadReview(caseId);
+  } catch (err) {
+    detailError.value[caseId] = err.message || '加载案例详情失败';
+  } finally {
+    detailLoading.value[caseId] = false;
+  }
 }
 
 function openSubmissionDetail(caseId) {

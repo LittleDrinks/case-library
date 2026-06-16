@@ -64,6 +64,12 @@ def _public_case_fields(case: dict) -> dict:
     }
     return {key: case.get(key) for key in allowed if key in case}
 
+def _public_case_list_fields(case: dict) -> dict:
+    serialized = _public_case_fields(case)
+    serialized.pop("content", None)
+    serialized.pop("source_material", None)
+    return serialized
+
 def _apply_reviewed_version_snapshot(case: dict) -> dict:
     snapshot = dict(case)
     reviewed_version_id = snapshot.get("reviewed_version_id")
@@ -107,12 +113,27 @@ def serialize_case(case: dict | None) -> dict | None:
         case["display_at"] = case.get("submitted_at") or case.get("created_at")
     return case
 
+def serialize_case_list_item(case: dict | None) -> dict | None:
+    serialized = serialize_case(case)
+    if not serialized:
+        return None
+    serialized.pop("content", None)
+    serialized.pop("source_material", None)
+    return serialized
+
 def serialize_public_case(case: dict | None) -> dict | None:
     serialized = serialize_case(case)
     if not serialized:
         return None
     serialized = _apply_reviewed_version_snapshot(serialized)
     return _public_case_fields(serialized)
+
+def serialize_public_case_list_item(case: dict | None) -> dict | None:
+    serialized = serialize_case(case)
+    if not serialized:
+        return None
+    serialized = _apply_reviewed_version_snapshot(serialized)
+    return _public_case_list_fields(serialized)
 
 def serialize_version(version: dict | None) -> dict | None:
     serialized = serialize_doc(version)

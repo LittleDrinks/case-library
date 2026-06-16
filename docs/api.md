@@ -116,13 +116,14 @@ FastAPI schema、测试和本文。
   `pending_review`、`needs_revision`、`all` 或 `author=<username>` 视图需要登录并按作者/管理员
   权限过滤。
 - 列表响应：`{ success, data, total }`；`data[]` 至少包含 `id`、`title`、`type`、`theme`、
-  `content`、`source_material`、`author`、`department`、`status`、`created_at`、`updated_at`、
-  `submitted_at`、`review_at`、`display_at`、`view_count`、`like_count`、`is_hidden`、`keywords`。
+  `author`、`department`、`status`、`created_at`、`updated_at`、`submitted_at`、`review_at`、
+  `display_at`、`view_count`、`like_count`、`is_hidden`、`keywords`；列表项不返回大字段
+  `content`、`source_material`。
 - `GET /api/cases/{case_id}` 公开已通过案例可匿名访问；草稿、隐藏案例、未通过案例需要作者或
   管理员权限。公开读者看到的是公开字段白名单；作者/管理员看到内部字段。
 - 已通过案例如果存在 `reviewed_version_id`，公开列表、公开详情、公开搜索、推荐、热门、最新和
-  统计均以该审核通过版本快照的标题、正文、来源材料、类型/主题、作者、院系和关键词为准，
-  不展示审核后 live edit 的内部版本内容。
+  统计均以该审核通过版本快照的标题、正文、来源材料、类型/主题、作者、院系和关键词为准；
+  其中公开列表只返回轻量元数据，不返回正文和来源材料。
 
 ### 我的提交
 
@@ -165,7 +166,7 @@ FastAPI schema、测试和本文。
 
 ### 公开字段白名单
 
-匿名公开列表、详情、搜索、推荐、热门和最新接口只返回以下公开字段：
+匿名公开详情、搜索、推荐、热门和最新接口只返回以下公开字段：
 
 - `id`
 - `title`
@@ -189,9 +190,10 @@ FastAPI schema、测试和本文。
 公开接口不得返回 `ai_reviews`、`ai_review`、`admin_comments`、`paragraph_comments`、
 `prompt`、`prompt_id`、`model`、`submitted_version_id`、`reviewed_version_id`、
 `latest_review_version_id`、`owner_username` 等内部字段。
+匿名公开列表同样遵循该内部字段边界，但列表项额外省略 `content` 和 `source_material`。
 
 ## 公开字段边界
 
-匿名公开列表、详情、搜索、推荐、热门和最新接口只返回已通过且未隐藏案例的公开字段：
+匿名公开详情、搜索、推荐、热门和最新接口只返回已通过且未隐藏案例的公开字段：
 正文、元数据、类型/主题、标签、来源材料、浏览和点赞计数。不返回 AI 批注、人工批注、
-prompt、model 或版本内部字段。
+prompt、model 或版本内部字段。匿名公开列表返回同一批案例的轻量元数据，省略正文和来源材料。

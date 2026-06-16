@@ -417,7 +417,8 @@ def main_test() -> None:
         item for item in response.json()["data"] if item["id"] == snapshot_case
     )
     assert public_listed_snapshot["title"] == "approved snapshot title"
-    assert public_listed_snapshot["content"] == "approved snapshot content"
+    assert "content" not in public_listed_snapshot
+    assert "source_material" not in public_listed_snapshot
     assert public_listed_snapshot["department"] == "snapshot department"
 
     response = client.get("/api/search?q=approved%20snapshot")
@@ -622,7 +623,8 @@ def main_test() -> None:
     assert_status(public_list, 200)
     public_listed = next(item for item in public_list.json()["data"] if item["id"] == visibility_case)
     assert public_listed["is_hidden"] is False
-    assert public_listed["source_material"] == "source material test"
+    assert "content" not in public_listed
+    assert "source_material" not in public_listed
     assert_public_case_payload(public_listed)
 
     response = client.post(f"/api/cases/{visibility_case}/like")
@@ -718,7 +720,6 @@ def main_test() -> None:
 
     public_surfaces = [
         (f"/api/cases/{visibility_case}", visibility_case),
-        ("/api/cases?status=approved", visibility_case),
         ("/api/search?q=source%20material", visibility_case),
         ("/api/search/advanced?status=approved&type=TYPE_A&keyword=source%20material", visibility_case),
         (f"/api/recommendations/{visibility_case}?limit=20", recommendation_case),
@@ -735,6 +736,17 @@ def main_test() -> None:
         for item in matched:
             assert item["source_material"] == "source material test"
             assert_public_case_payload(item)
+
+    response = client.get("/api/cases?status=approved")
+    assert_status(response, 200)
+    public_list_items = [
+        item for item in response.json()["data"] if item.get("id") == visibility_case
+    ]
+    assert public_list_items
+    for item in public_list_items:
+        assert "content" not in item
+        assert "source_material" not in item
+        assert_public_case_payload(item)
 
     for idx in range(120):
         create_case(

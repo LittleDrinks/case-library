@@ -16,9 +16,54 @@ from db.validators import (
     _validate_case_status,
 )
 from pymongo import DESCENDING
-from serializers import serialize_case, serialize_public_case
+from serializers import serialize_case, serialize_case_list_item, serialize_public_case_list_item
 from services.public import invalidate_statistics_cache
 from services.reviews import split_paragraphs
+
+CASE_LIST_PROJECTION = {
+    "id": 1,
+    "title": 1,
+    "type": 1,
+    "theme": 1,
+    "author": 1,
+    "department": 1,
+    "status": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "submitted_at": 1,
+    "review_at": 1,
+    "display_at": 1,
+    "view_count": 1,
+    "like_count": 1,
+    "is_hidden": 1,
+    "keywords": 1,
+    "is_approved": 1,
+    "is_in_library": 1,
+    "owner_username": 1,
+    "submitted_version_id": 1,
+    "latest_review_version_id": 1,
+    "reviewed_version_id": 1,
+}
+
+PUBLIC_CASE_LIST_PROJECTION = {
+    "id": 1,
+    "title": 1,
+    "type": 1,
+    "theme": 1,
+    "author": 1,
+    "department": 1,
+    "status": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "submitted_at": 1,
+    "review_at": 1,
+    "display_at": 1,
+    "view_count": 1,
+    "like_count": 1,
+    "is_hidden": 1,
+    "keywords": 1,
+    "reviewed_version_id": 1,
+}
 
 
 def create_case(case_data: dict) -> int:
@@ -163,12 +208,12 @@ def get_all_cases(
     query = _case_list_filter(status=status, author=author, include_hidden=include_hidden)
     cursor = (
         get_db()
-        .cases.find(query)
+        .cases.find(query, projection=CASE_LIST_PROJECTION)
         .sort("created_at", DESCENDING)
         .skip(max(0, int(offset)))
         .limit(_bounded_limit(limit))
     )
-    return [serialize_case(row) for row in cursor]
+    return [item for item in (serialize_case_list_item(row) for row in cursor) if item is not None]
 
 def get_all_public_cases(
     status: str | None = "approved",
@@ -178,9 +223,12 @@ def get_all_public_cases(
     return [
         item
         for item in (
-            serialize_public_case(row)
+            serialize_public_case_list_item(row)
             for row in get_db()
-            .cases.find(_case_list_filter(status=status, include_hidden=False))
+            .cases.find(
+                _case_list_filter(status=status, include_hidden=False),
+                projection=PUBLIC_CASE_LIST_PROJECTION,
+            )
             .sort("created_at", DESCENDING)
             .skip(max(0, int(offset)))
             .limit(_bounded_limit(limit))

@@ -183,7 +183,7 @@
               <span v-if="c.department" class="meta-item">部门: {{ c.department }}</span>
               <span class="meta-item">日期: {{ formatDate(c.created_at) }}</span>
             </div>
-            <p class="case-preview">{{ preview(c.content) }}</p>
+            <p v-if="previewText(c)" class="case-preview">{{ previewText(c) }}</p>
             <div class="case-stats-row">
               <span>浏览 {{ c.view_count || 0 }}</span>
               <span>点赞 {{ c.like_count || 0 }}</span>
@@ -313,8 +313,13 @@ function formatDate(value) {
   });
 }
 
-function preview(content) {
-  const text = (content || '').replace(/\s+/g, ' ').trim();
+function previewText(c) {
+  const content = c?.content || c?.summary || c?.excerpt || '';
+  const text = content.replace(/\s+/g, ' ').trim();
+  if (!text) {
+    const meta = [typeLabel(c?.type), c?.theme, c?.department].filter(Boolean);
+    return meta.length ? `${meta.join(' · ')}案例，点击查看完整内容。` : '';
+  }
   if (text.length <= 150) return text;
   return text.slice(0, 150) + '…';
 }

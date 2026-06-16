@@ -26,9 +26,58 @@ class _FakeUsers:
         return self.docs.get(query.get("username"))
 
 
+class _FakeCursor:
+    def __init__(self, rows: list[dict]):
+        self.rows = list(rows)
+        self.sort_args = None
+        self.skip_value = None
+        self.limit_value = None
+
+    def sort(self, *args):
+        self.sort_args = args
+        return self
+
+    def skip(self, value):
+        self.skip_value = value
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        self.rows = self.rows[:value]
+        return self
+
+    def __iter__(self):
+        return iter(self.rows)
+
+
+class _FakeCases:
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+        self.find_calls: list[tuple[dict, dict | None]] = []
+        self.cursor: _FakeCursor | None = None
+
+    def find(self, query, projection=None):
+        self.find_calls.append((query, projection))
+        rows = list(self.rows)
+        if projection:
+            rows = [
+                {key: value for key, value in row.items() if projection.get(key)}
+                for row in rows
+            ]
+        self.cursor = _FakeCursor(rows)
+        return self.cursor
+
+
+class _FakeVersions:
+    def find_one(self, query):
+        return None
+
+
 class _FakeDb:
-    def __init__(self, user_docs: dict[str, dict]):
+    def __init__(self, user_docs: dict[str, dict], case_rows: list[dict] | None = None):
         self.users = _FakeUsers(user_docs)
+        self.cases = _FakeCases(case_rows or [])
+        self.versions = _FakeVersions()
 
 
 def test_case_list_filter_author_alias_status_hidden_and_deleted():
@@ -67,6 +116,52 @@ def test_database_compat_exports_case_filter_and_keyword_diff_helpers():
     assert database._values_differ("title", {"title": "旧标题"}, "新标题")
 
 
+def test_case_lists_use_projection_and_omit_large_fields():
+    rows = [
+        {
+            "id": 1,
+            "title": "列表案例",
+            "type": "TYPE_A",
+            "theme": "主题",
+            "content": "large content",
+            "source_material": "large source",
+            "author": "alice",
+            "department": "dept",
+            "status": "approved",
+            "created_at": "2020-01-01 08:00:00",
+            "updated_at": "2020-01-02 08:00:00",
+            "submitted_at": "2020-01-03 08:00:00",
+            "view_count": 2,
+            "like_count": 3,
+            "keywords": ["关键词"],
+            "reviewed_version_id": 44,
+        }
+    ]
+    fake_db = _FakeDb({}, rows)
+    old_get_db = cases.get_db
+    try:
+        cases.get_db = lambda: fake_db
+
+        internal_items = cases.get_all_cases(status="approved", limit=5)
+        assert fake_db.cases.find_calls[0][1] == cases.CASE_LIST_PROJECTION
+        assert "content" not in internal_items[0]
+        assert "source_material" not in internal_items[0]
+        assert internal_items[0]["title"] == "列表案例"
+
+        public_items = cases.get_all_public_cases(status="approved", limit=5)
+        assert fake_db.cases.find_calls[1][1] == cases.PUBLIC_CASE_LIST_PROJECTION
+        assert "content" not in public_items[0]
+        assert "source_material" not in public_items[0]
+        assert public_items[0]["title"] == "列表案例"
+    finally:
+        cases.get_db = old_get_db
+
+    assert "content" not in cases.CASE_LIST_PROJECTION
+    assert "source_material" not in cases.CASE_LIST_PROJECTION
+    assert "content" not in cases.PUBLIC_CASE_LIST_PROJECTION
+    assert "source_material" not in cases.PUBLIC_CASE_LIST_PROJECTION
+
+
 def test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets():
     password_hash = users.hash_password("password123")
     raw_user = {
@@ -102,6 +197,7 @@ def test_verify_password_returns_false_for_bad_hashes():
 def main() -> None:
     test_case_list_filter_author_alias_status_hidden_and_deleted()
     test_database_compat_exports_case_filter_and_keyword_diff_helpers()
+    test_case_lists_use_projection_and_omit_large_fields()
     test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets()
     test_verify_password_returns_false_for_bad_hashes()
     print("database repository helper unit checks passed")
