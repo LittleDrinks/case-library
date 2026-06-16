@@ -30,14 +30,16 @@ Mongo 文档结构或前端依赖字段。
 2. 再抽 repository 函数，保持函数签名、返回 dict/list 结构和 Mongo 查询条件不变。
 3. 最后拆 `backend/main.py` routers；每一步都对比 `/openapi.json`，确保路径、方法、参数和
    schema 名称不变。
-4. 每个阶段至少运行 `backend/test_submit_flow.py` 覆盖提交、版本、AI 审核、人工审核和公开面。
+4. 每个阶段至少运行 `backend/tests/integration/test_submit_flow.py` 覆盖提交、版本、AI 审核、人工审核和公开面。
 
 ## 文件边界 TODO
 
 - TODO(`backend/database.py`): 将 `serialize_case`、`serialize_public_case`、
   `serialize_version`、公开字段白名单迁到 `backend/serializers.py`，保留兼容导出。
-- TODO(`backend/database.py`): 将 `normalize_paragraph_comments`、
-  `normalize_structured_ai_review` 和 AI review 版本创建迁到 `backend/services/reviews.py`。
+- DONE(`backend/services/reviews.py`): `split_paragraphs`、`normalize_paragraph_comments`、
+  `normalize_structured_ai_review` 已迁出并由 `backend/database.py` 兼容导出。
+- TODO(`backend/database.py`): 将 AI review 版本创建迁到 `backend/services/reviews.py`，
+  当前先保留 Mongo 写入编排，避免混入 API 或 schema 变化。
 - TODO(`backend/database.py`): 将 `create_case`、`update_case`、`submit_for_review`、
   `delete_case` 迁到 `backend/services/cases.py`，底层 Mongo 写入由 repository 承接。
 - TODO(`backend/database.py`): 将 `get_statistics` 及统计缓存迁到 public/statistics service；

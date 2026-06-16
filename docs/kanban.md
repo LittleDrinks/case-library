@@ -37,7 +37,8 @@ status:next：
 
 - #161：demo-media spec 和命令已可运行；下一步生成并归档 E2E demo videos。
 - #159/#122：backend tests 已迁入并提交到 `backend/tests/{unit,integration,smoke}/`；
-  `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 仅保留兼容 wrapper。
+  `Makefile` 已直接调用新路径，旧 `backend/test_*.py` 和 `backend/smoke_test_mongo.py`
+  兼容入口已移除。
 - #157/#85：关键 desktop E2E 已恢复通过；移动端和完整 dev-e2e 后续补强。
 - #123：已有 helper 化，长流程仍需继续拆小。
 - #118/#144/#96：共享组件和 CreateCase split 已部分完成；旧工作分支不要直接

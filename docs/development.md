@@ -50,8 +50,8 @@ docker compose down
 ## 测试布局第一阶段
 
 后端测试脚本已经迁入 `backend/tests/` 第一阶段布局，`Makefile` 直接调用新路径。旧
-`backend/test_*.py` 和 `backend/smoke_test_mongo.py` 只保留薄兼容 wrapper，后续新命令和文档
-不要再依赖旧路径。
+`backend/test_*.py` 和 `backend/smoke_test_mongo.py` 兼容入口已移除，后续新命令和文档
+必须使用 `backend/tests/` 下的规范路径。
 
 - `backend/tests/unit/test_contract_helpers.py`：后端单元脚本，只覆盖不需要启动 FastAPI 或真实 MongoDB
   流程的 contract helper。当前范围包括段落拆分、段落批注规范化、AI review summary 规范化、

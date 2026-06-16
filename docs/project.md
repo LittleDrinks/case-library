@@ -5,7 +5,7 @@ AI 约束见 `docs/ai.md`。
 
 ## 当前状态
 
-- 分支：`develop/alpha-summary`
+- 分支：`develop`
 - 代码库：`https://github.com/yangxuchen5898/case-library`
 - 当前实现：可运行的 FastAPI + MongoDB + Vue/Vite alpha，已覆盖“正文 + 来源材料 +
   AI/人工批注 + 版本快照”主流程。
@@ -31,8 +31,12 @@ AI 约束见 `docs/ai.md`。
 `backend/` 当前保留运行模块和操作脚本；后端测试脚本已迁入 `backend/tests/`
 第一阶段布局：
 
-- 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、`prompts.py`、
+- 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、
   `case_processor.py`、`search_engine.py`
+- Prompt registry：`backend/prompt_registry/` 保存产品 prompt 定义、数据结构和查询入口；
+  `backend/prompts.py` 仅保留兼容导出。
+- `backend/services/`：低风险业务 helper 第一阶段归属；当前包含无数据库副作用的 review
+  helper，`backend/database.py` 保留同名兼容导出。
 - Compose 启动账号初始化：`backend/init_users.py`
 - 管理员账号工具：`backend/account_admin.py`
 - 演示数据脚本：`backend/demo.py`
@@ -43,8 +47,9 @@ AI 约束见 `docs/ai.md`。
 - 单元脚本：`backend/tests/unit/test_prompt_injection.py` 覆盖产品 prompt/template 的注入边界。
 - 集成检查：`backend/tests/integration/test_submit_flow.py`，由 `make check` 调用，仍作为提交、
   AI/人工审核、权限、公开可见性和统计缓存主流程的回归门禁。
-- 兼容入口：`backend/test_contract_helpers.py`、`backend/test_prompt_injection.py`、
-  `backend/test_submit_flow.py`、`backend/smoke_test_mongo.py` 仅保留薄 wrapper，新命令不依赖旧路径。
+- 旧兼容入口：`backend/test_contract_helpers.py`、`backend/test_prompt_injection.py`、
+  `backend/test_submit_flow.py`、`backend/smoke_test_mongo.py` 已移除，新命令只使用
+  `backend/tests/` 下的规范路径。
 - Alpha/E2E seed：`scripts/seed_e2e_accounts.py`，仅在 `ENABLE_DEMO_SEED=true` 时运行；
   默认 `docker-compose.yml` 不再调用，开发/e2e 通过 `docker-compose.dev.yml` 显式启用
 
