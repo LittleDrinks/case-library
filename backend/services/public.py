@@ -39,6 +39,18 @@ def _public_keyword_filter(query: str) -> dict[str, Any]:
         ]
     }
 
+def _public_text_filter(query: str) -> dict[str, Any]:
+    needle = query.strip()
+    if not needle:
+        return {}
+    if any(char.isspace() for char in needle):
+        escaped = needle.replace('"', '\\"')
+        needle = f'"{escaped}"'
+    return {"$text": {"$search": needle}}
+
+def _contains_cjk(query: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in query)
+
 def _public_snapshot_overlay_stage() -> dict[str, Any]:
     return {
         "$addFields": {
@@ -56,12 +68,17 @@ def _public_snapshot_overlay_stage() -> dict[str, Any]:
 def _public_cases_pipeline(
     *,
     match_filters: list[dict[str, Any]] | None = None,
-    sort: dict[str, int] | None = None,
+    sort: dict[str, Any] | None = None,
     skip: int | None = None,
     limit: int | None = None,
+    text_query: str | None = None,
 ) -> list[dict[str, Any]]:
+    first_match = {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}
+    if text_query and text_query.strip():
+        first_match.update(_public_text_filter(text_query))
+
     pipeline: list[dict[str, Any]] = [
-        {"$match": {**_status_search_filter("approved"), "is_hidden": {"$ne": True}}},
+        {"$match": first_match},
         {
             "$lookup": {
                 "from": "versions",
@@ -95,6 +112,8 @@ def _public_cases_pipeline(
             }
         },
     ]
+    if text_query and text_query.strip():
+        pipeline.append({"$addFields": {"public_text_score": {"$meta": "textScore"}}})
     for match_filter in match_filters or []:
         if match_filter:
             pipeline.append({"$match": match_filter})
@@ -125,15 +144,17 @@ def _serialize_public_joined_case(row: dict | None) -> dict | None:
 def _public_query_cases(
     *,
     match_filters: list[dict[str, Any]] | None = None,
-    sort: dict[str, int] | None = None,
+    sort: dict[str, Any] | None = None,
     skip: int | None = None,
     limit: int | None = None,
+    text_query: str | None = None,
 ) -> list[dict]:
     pipeline = _public_cases_pipeline(
         match_filters=match_filters,
         sort=sort or {"created_at": DESCENDING},
         skip=skip,
         limit=limit,
+        text_query=text_query,
     )
     return [
         item
@@ -173,11 +194,23 @@ def search_cases(
     if _status_search_filter(status).get("status") != "approved":
         return []
 
+    needle = query.strip()
+    bounded = _bounded_limit(limit, default=20)
+    text_results = _public_query_cases(
+        match_filters=[_public_keyword_filter(needle)],
+        text_query=needle,
+        sort={"public_text_score": {"$meta": "textScore"}, "created_at": DESCENDING},
+        skip=offset,
+        limit=bounded,
+    )
+    if text_results and not _contains_cjk(needle):
+        return text_results
+
     return _public_query_cases(
-        match_filters=[_public_keyword_filter(query)],
+        match_filters=[_public_keyword_filter(needle)],
         sort={"created_at": DESCENDING},
         skip=offset,
-        limit=_bounded_limit(limit, default=20),
+        limit=bounded,
     )
 
 def filter_cases(
@@ -197,7 +230,18 @@ def filter_cases(
     if theme_filter:
         match_filters.append({"theme": theme_filter})
     if keyword_filter:
-        match_filters.append(_public_keyword_filter(keyword_filter))
+        needle = keyword_filter.strip()
+        if needle:
+            text_results = _public_query_cases(
+                match_filters=[*match_filters, _public_keyword_filter(needle)],
+                text_query=needle,
+                sort={"public_text_score": {"$meta": "textScore"}, "created_at": DESCENDING},
+                skip=offset,
+                limit=limit,
+            )
+            if text_results and not _contains_cjk(needle):
+                return text_results
+            match_filters = [*match_filters, _public_keyword_filter(needle)]
 
     return _public_query_cases(
         match_filters=match_filters,

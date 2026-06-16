@@ -28,6 +28,7 @@ PUBLIC_CASES = [
         "view_count": 5,
         "like_count": 2,
         "status": "approved",
+        "created_at": 1,
     },
     {
         "id": 2,
@@ -40,6 +41,7 @@ PUBLIC_CASES = [
         "view_count": 1,
         "like_count": 9,
         "status": "approved",
+        "created_at": 2,
     },
     {
         "id": 3,
@@ -52,6 +54,7 @@ PUBLIC_CASES = [
         "view_count": 3,
         "like_count": 0,
         "status": "approved",
+        "created_at": 3,
     },
 ]
 
@@ -123,7 +126,10 @@ class _FakeCases:
             elif "$sort" in stage:
                 sort_items = list(stage["$sort"].items())
                 for field, direction in reversed(sort_items):
-                    rows.sort(key=lambda row: row.get(field) or 0, reverse=direction == -1)
+                    if isinstance(direction, dict) and direction.get("$meta") == "textScore":
+                        rows.sort(key=lambda row: row.get(field) or 0, reverse=True)
+                    else:
+                        rows.sort(key=lambda row: row.get(field) or 0, reverse=direction == -1)
             elif "$skip" in stage:
                 rows = rows[stage["$skip"]:]
             elif "$limit" in stage:
@@ -142,6 +148,22 @@ def _matches(row: dict, query: dict) -> bool:
             if not any(_matches(row, option) for option in expected):
                 return False
             continue
+        if key == "$text":
+            needle = str(expected.get("$search", "")).strip().lower()
+            if not needle:
+                continue
+            searchable = [
+                str(row.get("title") or ""),
+                str(row.get("content") or ""),
+                str(row.get("source_material") or ""),
+                " ".join(str(value) for value in row.get("keywords") or []),
+            ]
+            if not any(needle == token.lower() for value in searchable for token in value.split()):
+                return False
+            row["public_text_score"] = sum(
+                token.lower() == needle for value in searchable for token in value.split()
+            )
+            continue
         actual = row.get(key)
         if isinstance(expected, dict):
             if "$ne" in expected and actual == expected["$ne"]:
@@ -156,12 +178,13 @@ def _matches(row: dict, query: dict) -> bool:
 def _patch_public_cases(rows: list[dict]):
     old_query_cases = public._public_query_cases
     public._public_query_cases = (
-        lambda match_filters=None, sort=None, skip=None, limit=None: _query_rows(
+        lambda match_filters=None, sort=None, skip=None, limit=None, text_query=None: _query_rows(
             rows,
             match_filters=match_filters,
             sort=sort,
             skip=skip,
             limit=limit,
+            text_query=text_query,
         )
     )
     return old_query_cases
@@ -174,12 +197,16 @@ def _query_rows(
     sort: dict | None = None,
     skip: int | None = None,
     limit: int | None = None,
+    text_query: str | None = None,
 ):
     matches = []
     for row in rows:
         item = dict(row)
         item["engagement_score"] = int(item.get("view_count") or 0) + int(item.get("like_count") or 0)
         matches.append(item)
+    if text_query and text_query.strip():
+        text_filter = public._public_text_filter(text_query)
+        matches = [row for row in matches if _matches(row, text_filter)]
     for match_filter in match_filters or []:
         matches = [row for row in matches if _matches(row, match_filter)]
     if sort:
@@ -267,8 +294,8 @@ def test_public_field_matches_title_content_source_and_keywords():
 def test_public_search_and_filter_apply_status_offset_limit_and_filters():
     old_query_cases = _patch_public_cases(PUBLIC_CASES)
     try:
-        assert [item["id"] for item in public.search_cases("劳动", limit=1)] == [1]
-        assert [item["id"] for item in public.search_cases("劳动", limit=5, offset=1)] == [3]
+        assert [item["id"] for item in public.search_cases("劳动", limit=1)] == [3]
+        assert [item["id"] for item in public.search_cases("劳动", limit=5, offset=1)] == [1]
         assert public.search_cases("劳动", status="pending_review") == []
         assert public.search_cases("  ") == []
 
@@ -283,6 +310,183 @@ def test_public_search_and_filter_apply_status_offset_limit_and_filters():
         assert [item["id"] for item in public.filter_cases(limit=1, offset=1)] == [2]
     finally:
         public._public_query_cases = old_query_cases
+
+
+def test_public_search_uses_text_pipeline_before_regex_fallback():
+    fake_db = _FakeDb(
+        [
+            {
+                "id": 21,
+                "title": "Labor policy",
+                "content": "labor labor classroom",
+                "source_material": "",
+                "keywords": ["policy"],
+                "status": "approved",
+                "created_at": 21,
+            },
+            {
+                "id": 22,
+                "title": "Classroom labor",
+                "content": "community",
+                "source_material": "",
+                "keywords": ["labor"],
+                "status": "approved",
+                "created_at": 22,
+            },
+        ]
+    )
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        assert [item["id"] for item in public.search_cases("labor", limit=5)] == [21, 22]
+    finally:
+        public.get_db = old_get_db
+
+    assert len(fake_db.cases.pipelines) == 1
+    pipeline = fake_db.cases.pipelines[0]
+    assert pipeline[0]["$match"] == {
+        "status": "approved",
+        "is_hidden": {"$ne": True},
+        "$text": {"$search": "labor"},
+    }
+    assert {"$match": public._public_keyword_filter("labor")} in pipeline
+    assert pipeline[-5:] == [
+        {"$addFields": {"public_text_score": {"$meta": "textScore"}}},
+        {"$match": public._public_keyword_filter("labor")},
+        {"$sort": {"public_text_score": {"$meta": "textScore"}, "created_at": -1}},
+        {"$skip": 0},
+        {"$limit": 5},
+    ]
+
+
+def test_public_text_filter_quotes_multi_word_queries():
+    assert public._public_text_filter("approved snapshot") == {
+        "$text": {"$search": '"approved snapshot"'}
+    }
+    assert public._public_text_filter('approved "snapshot"') == {
+        "$text": {"$search": '"approved \\"snapshot\\""'}
+    }
+
+
+def test_public_search_falls_back_to_regex_for_chinese_substrings():
+    fake_db = _FakeDb(PUBLIC_CASES)
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        assert [item["id"] for item in public.search_cases("劳", limit=5)] == [3, 1]
+    finally:
+        public.get_db = old_get_db
+
+    assert len(fake_db.cases.pipelines) == 2
+    text_pipeline, fallback_pipeline = fake_db.cases.pipelines
+    assert text_pipeline[0]["$match"]["$text"] == {"$search": "劳"}
+    assert {"$match": public._public_keyword_filter("劳")} in fallback_pipeline
+    assert fallback_pipeline[-3:] == [
+        {"$sort": {"created_at": -1}},
+        {"$skip": 0},
+        {"$limit": 5},
+    ]
+
+
+def test_public_search_keeps_chinese_regex_results_when_text_has_partial_match():
+    rows = [
+        {
+            "id": 23,
+            "title": "劳动 课程",
+            "content": "",
+            "source_material": "",
+            "keywords": [],
+            "status": "approved",
+            "created_at": 23,
+        },
+        {
+            "id": 24,
+            "title": "劳动教育",
+            "content": "",
+            "source_material": "",
+            "keywords": [],
+            "status": "approved",
+            "created_at": 24,
+        },
+    ]
+    fake_db = _FakeDb(rows)
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        assert [item["id"] for item in public.search_cases("劳动", limit=5)] == [24, 23]
+    finally:
+        public.get_db = old_get_db
+
+    assert len(fake_db.cases.pipelines) == 2
+    text_pipeline, fallback_pipeline = fake_db.cases.pipelines
+    assert text_pipeline[0]["$match"]["$text"] == {"$search": "劳动"}
+    assert {"$match": public._public_keyword_filter("劳动")} in fallback_pipeline
+
+
+def test_public_filter_keyword_uses_text_first_with_type_theme_and_rejects_non_public_status():
+    rows = [
+        {
+            "id": 31,
+            "title": "labor plan",
+            "type": "实践教学",
+            "theme": "劳动",
+            "content": "labor activity",
+            "source_material": "",
+            "keywords": ["labor"],
+            "status": "approved",
+            "created_at": 31,
+        },
+        {
+            "id": 32,
+            "title": "labor draft",
+            "type": "实践教学",
+            "theme": "劳动",
+            "content": "labor activity",
+            "source_material": "",
+            "keywords": ["labor"],
+            "status": "draft",
+            "created_at": 32,
+        },
+        {
+            "id": 33,
+            "title": "labor other theme",
+            "type": "实践教学",
+            "theme": "法治",
+            "content": "labor activity",
+            "source_material": "",
+            "keywords": ["labor"],
+            "status": "approved",
+            "created_at": 33,
+        },
+    ]
+    fake_db = _FakeDb(rows)
+    old_get_db = public.get_db
+    try:
+        public.get_db = lambda: fake_db
+        assert [
+            item["id"]
+            for item in public.filter_cases(
+                type_filter="实践教学",
+                theme_filter="劳动",
+                keyword_filter="labor",
+                status_filter="approved",
+                limit=5,
+            )
+        ] == [31]
+        assert public.filter_cases(keyword_filter="labor", status_filter="draft") == []
+    finally:
+        public.get_db = old_get_db
+
+    assert len(fake_db.cases.pipelines) == 1
+    pipeline = fake_db.cases.pipelines[0]
+    assert pipeline[0]["$match"] == {
+        "status": "approved",
+        "is_hidden": {"$ne": True},
+        "$text": {"$search": "labor"},
+    }
+    assert {"$match": {"type": "实践教学"}} in pipeline
+    assert {"$match": {"theme": "劳动"}} in pipeline
+    assert {"$match": public._public_keyword_filter("labor")} in pipeline
 
 
 def test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields():
@@ -353,7 +557,7 @@ def test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields()
     assert pipeline[-3:] == [{"$sort": {"created_at": -1}}, {"$skip": 0}, {"$limit": 1}]
 
 
-def test_public_search_builds_snapshot_keyword_pipeline_before_pagination():
+def test_public_search_fallback_builds_snapshot_keyword_pipeline_before_pagination():
     fake_db = _FakeDb([])
     old_get_db = public.get_db
     try:
@@ -409,8 +613,13 @@ def main() -> None:
     test_public_status_filter_rejects_non_public_statuses()
     test_public_field_matches_title_content_source_and_keywords()
     test_public_search_and_filter_apply_status_offset_limit_and_filters()
+    test_public_search_uses_text_pipeline_before_regex_fallback()
+    test_public_text_filter_quotes_multi_word_queries()
+    test_public_search_falls_back_to_regex_for_chinese_substrings()
+    test_public_search_keeps_chinese_regex_results_when_text_has_partial_match()
+    test_public_filter_keyword_uses_text_first_with_type_theme_and_rejects_non_public_status()
     test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields()
-    test_public_search_builds_snapshot_keyword_pipeline_before_pagination()
+    test_public_search_fallback_builds_snapshot_keyword_pipeline_before_pagination()
     test_public_recommendations_trending_and_latest_use_public_cases_only()
     print("public search helper unit checks passed")
 
