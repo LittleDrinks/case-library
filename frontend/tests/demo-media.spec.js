@@ -3,6 +3,7 @@ import { login, logout } from "./support/auth.js";
 import {
   confirmAndSubmitCase,
   expectPendingSubmission,
+  startCreateCase,
   submitAdminReview,
 } from "./support/auditFlow.js";
 import { cleanupAuditCases } from "./support/caseCleanup.js";
@@ -65,7 +66,7 @@ async function mockAiReview(page) {
 }
 
 async function openMySubmissionDetail(page, title) {
-  await page.getByRole("link", { name: "我的提交" }).click();
+  await page.getByRole("link", { name: "我的材料" }).click();
   const caseCard = page.locator(".case-card").filter({ hasText: title });
   await expect(caseCard).toBeVisible();
   await caseCard.getByRole("button", { name: "查看详情" }).click();
@@ -115,9 +116,7 @@ test.describe.serial("baseline demo media", () => {
     await logout(page, { waitForLoginButton: true });
 
     await login(page, USER);
-    await page.getByRole("link", { name: "我的提交" }).click();
-    await expect(page.getByRole("heading", { name: "我的提交" })).toBeVisible();
-    await page.getByRole("link", { name: "创建案例" }).click();
+    await startCreateCase(page);
 
     await expect(page.getByText("填写案例基本信息")).toBeVisible();
     await page.getByLabel(/案例标题/).fill(TITLE);
@@ -174,7 +173,7 @@ test.describe.serial("baseline demo media", () => {
   test("03 author views review comments and resubmits a revision", async ({ page }) => {
     await page.goto("/");
     await login(page, USER);
-    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("link", { name: "我的材料" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
 
     const revisionCard = page.locator(".case-card").filter({ hasText: TITLE });

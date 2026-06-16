@@ -8,7 +8,8 @@ const DEFAULT_AUDIT_CASE_CONTENT =
 const DEFAULT_AUDIT_CASE_SOURCE = "E2E 来源材料：学院新闻与课堂反馈摘录。";
 
 export async function startCreateCase(page) {
-  await page.getByRole("link", { name: "创建案例" }).click();
+  await page.getByRole("link", { name: "我的材料" }).click();
+  await page.getByRole("button", { name: "新建案例" }).click();
   await expect(page.getByText("填写案例基本信息")).toBeVisible();
 }
 
@@ -58,7 +59,7 @@ export async function confirmAndSubmitCase(page) {
 }
 
 export async function expectPendingSubmission(page, title) {
-  await expect(page.getByRole("heading", { name: "我的提交" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的材料" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "全部" })).toHaveAttribute(
     "aria-selected",
     "true"
@@ -151,7 +152,7 @@ export async function createAndSubmitAuditCase(page, testInfo, { title }) {
   await confirmAndSubmitCase(page);
   await expectPendingSubmission(page, title);
 
-  await page.getByRole("link", { name: "我的提交" }).click();
+  await page.getByRole("link", { name: "我的材料" }).click();
   const teacherPendingCard = findCaseCard(page, title);
   await expect(teacherPendingCard).toBeVisible();
   await teacherPendingCard.getByRole("button", { name: "查看详情" }).click();

@@ -177,8 +177,8 @@ const userInitials = computed(() => {
 const allNavItems = [
   { id: "home", label: "首页", public: true },
   { id: "library", label: "案例库", public: true },
-  { id: "create", label: "创建案例", public: false },
-  { id: "submissions", label: "我的提交", public: false },
+  { id: "create", label: "创建案例", public: false, hidden: true },
+  { id: "submissions", label: "我的材料", public: false },
   { id: "admin", label: "审核管理", public: false, admin: true },
 ];
 

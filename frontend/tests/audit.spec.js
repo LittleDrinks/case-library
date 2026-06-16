@@ -8,6 +8,7 @@ import {
   fillCaseWizardBasics,
   findCaseCard,
   searchPublicCase,
+  startCreateCase,
   submitAdminReview,
 } from "./support/auditFlow.js";
 import { cleanupAuditCases } from "./support/caseCleanup.js";
@@ -34,7 +35,7 @@ test.describe("manual audit candidate flows", () => {
 
     await page.goto("/");
     await login(page, USER);
-    await page.getByRole("link", { name: "创建案例" }).click();
+    await startCreateCase(page);
 
     await expect(page.getByText("填写案例基本信息")).toBeVisible();
     await expect(page.locator(".wizard-main")).toBeInViewport();
@@ -126,7 +127,7 @@ test.describe("manual audit candidate flows", () => {
     });
 
     await login(page, USER);
-    await page.getByRole("link", { name: "创建案例" }).click();
+    await startCreateCase(page);
 
     await expect(page.getByLabel("作者姓名")).toHaveValue(USER.nickname);
     await expect(page.getByLabel("作者姓名")).not.toHaveValue("过期作者");
@@ -289,7 +290,7 @@ test.describe("manual audit candidate flows", () => {
     await logout(page);
 
     await login(page, USER);
-    await page.getByRole("link", { name: "创建案例" }).click();
+    await startCreateCase(page);
     await expect(page.getByText("填写案例基本信息")).toBeVisible();
     await fillCaseWizardBasics(page, {
       title,
@@ -325,7 +326,7 @@ test.describe("manual audit candidate flows", () => {
 
     await logout(page);
     await login(page, USER);
-    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("link", { name: "我的材料" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
     const revisionCard = findCaseCard(page, title);
     await expect(revisionCard).toBeVisible();

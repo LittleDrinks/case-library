@@ -14,9 +14,9 @@
       <div v-if="isEditingExisting" class="edit-context-bar">
         <div>
           <strong>正在修改已保存案例</strong>
-          <span>保存草稿会生成新的历史版本，可在“我的提交”中查看版本记录。</span>
+          <span>保存草稿会生成新的历史版本，可在“我的材料”中查看版本记录。</span>
         </div>
-        <button type="button" class="context-link" @click="goToSubmissions">返回我的提交</button>
+        <button type="button" class="context-link" @click="goToSubmissions">返回我的材料</button>
       </div>
 
       <LoginRequiredCard v-if="!isAuthenticated" />

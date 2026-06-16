@@ -297,7 +297,7 @@ test(
       waitForLoginButton: true,
     });
 
-    await page.getByRole("link", { name: "创建案例" }).click();
+    await startCreateCase(page);
     await expect(page.getByText("填写案例基本信息")).toBeVisible();
 
     await page.getByLabel(/案例标题/).fill("社会实践数字育人案例");
@@ -344,7 +344,7 @@ test(
     expect(saveDialog.message()).toContain("草稿已保存");
     await saveDialog.accept();
 
-    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("link", { name: "我的材料" }).click();
     await page.getByRole("tab", { name: "草稿" }).click();
 
     const draftCard = findCaseCard(page, uniqueTitle);
@@ -414,7 +414,7 @@ test(
       indicator: "none",
     });
 
-    await page.getByRole("link", { name: "我的提交" }).click();
+    await page.getByRole("link", { name: "我的材料" }).click();
     await page.getByRole("tab", { name: "需修改" }).click();
 
     const revisionCard = findCaseCard(page, uniqueTitle);
@@ -425,7 +425,7 @@ test(
     await expect(page.getByRole("heading", { name: uniqueTitle })).toBeVisible();
     await expect(page.getByText(rejectComment)).toBeVisible();
 
-    await page.getByRole("button", { name: "返回我的提交" }).click();
+    await page.getByRole("button", { name: "返回我的材料" }).click();
     await revisionCard.getByRole("button", { name: "删除" }).click();
     await page
       .locator(".confirm-panel")

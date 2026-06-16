@@ -1,8 +1,8 @@
 <template>
   <div class="my-submissions">
     <div class="submissions-header">
-      <h1 class="page-title">我的提交</h1>
-      <p class="page-desc">查看和管理您提交的案例，包括待审核、已通过、需修改和草稿状态。</p>
+      <h1 class="page-title">我的材料</h1>
+      <p class="page-desc">查看和管理您的案例材料，包括待审核、已通过、需修改和草稿状态。</p>
     </div>
 
     <!-- Login required -->
@@ -14,7 +14,7 @@
 
     <section v-else-if="detailCase" class="submission-detail-page">
       <div class="submission-detail-toolbar">
-        <button type="button" class="btn-secondary" @click="closeSubmissionDetail">返回我的提交</button>
+        <button type="button" class="btn-secondary" @click="closeSubmissionDetail">返回我的材料</button>
         <div class="submission-detail-actions">
           <button
             v-if="hasDetailReviewArtifacts"
@@ -198,7 +198,7 @@
           class="case-card"
           :data-case-id="c.id"
         >
-          <div class="case-card-main" @click="toggleDetail(c.id)">
+          <div class="case-card-main" @click="openSubmissionDetail(c.id)">
             <div class="case-card-top">
               <div class="case-type">{{ typeLabel(c.type) }}</div>
               <span :class="['status-pill', statusPillClass(c.status)]">{{ statusLabel(c.status) }}</span>
@@ -217,108 +217,6 @@
             </div>
           </div>
 
-          <!-- Inline detail -->
-          <div v-if="expandedId === c.id" class="case-detail">
-            <div class="detail-grid">
-              <div class="detail-item"><strong>作者：</strong>{{ expandedCase(c).author || '未知' }}</div>
-              <div class="detail-item"><strong>部门：</strong>{{ expandedCase(c).department || '未知' }}</div>
-              <div class="detail-item"><strong>类型：</strong>{{ typeLabel(expandedCase(c).type) }}</div>
-              <div class="detail-item"><strong>主题：</strong>{{ expandedCase(c).theme || '未设置' }}</div>
-            </div>
-            <div v-if="detailLoading[c.id]" class="review-placeholder">详情加载中…</div>
-            <div v-else-if="detailError[c.id]" class="review-placeholder">{{ detailError[c.id] }}</div>
-            <div class="detail-content-full">
-              <strong>内容：</strong>
-              <div class="detail-content-body">{{ expandedCase(c).content || '暂无内容' }}</div>
-            </div>
-            <div class="detail-content-full" v-if="expandedCase(c).source_material">
-              <strong>来源材料：</strong>
-              <div class="detail-content-body">{{ expandedCase(c).source_material }}</div>
-            </div>
-            <div v-if="expandedCase(c).keywords && expandedCase(c).keywords.length" class="detail-keywords">
-              <strong>关键词：</strong>
-              <span v-for="k in expandedCase(c).keywords" :key="k" class="keyword-tag">{{ k }}</span>
-            </div>
-
-            <div class="version-history">
-              <div class="section-head">
-                <strong>历史版本</strong>
-                <span v-if="versionMap[c.id]?.length" class="section-count">{{ versionMap[c.id].length }} 个版本</span>
-              </div>
-              <div v-if="versionLoading[c.id]" class="review-placeholder">加载中…</div>
-              <div v-else-if="versionError[c.id]" class="review-placeholder">{{ versionError[c.id] }}</div>
-              <div v-else-if="versionMap[c.id]?.length" class="version-list">
-                <article v-for="version in versionMap[c.id]" :key="version.id" class="version-item">
-                  <div class="version-head">
-                    <div>
-                      <strong>v{{ version.version_number }}</strong>
-                      <span v-if="version.change_reason" class="version-reason">{{ version.change_reason }}</span>
-                    </div>
-                    <button type="button" class="btn-secondary btn-sm" @click="copyVersion(version)">复制版本</button>
-                  </div>
-                  <div class="version-meta">
-                    <span>创建 {{ formatDate(version.created_at) }}</span>
-                    <span v-if="version.created_by">创建人 {{ version.created_by }}</span>
-                  </div>
-                  <div class="version-body">
-                    <div class="version-field">
-                      <span>正文</span>
-                      <p>{{ version.content || '暂无内容' }}</p>
-                    </div>
-                    <div class="version-field">
-                      <span>来源材料</span>
-                      <p>{{ version.source_material || '暂无来源材料' }}</p>
-                    </div>
-                  </div>
-                  <div v-if="version.admin_comments?.length" class="version-admin-comments">
-                    <strong>人工段落批注</strong>
-                    <div
-                      v-for="batch in version.admin_comments"
-                      :key="`${batch.created_at}-${batch.reviewer}`"
-                      class="version-comment-batch"
-                    >
-                      <div class="version-comment-meta">
-                        <span>{{ batch.reviewer || '审核员' }}</span>
-                        <span>{{ formatDate(batch.created_at) }}</span>
-                      </div>
-                      <p v-if="batch.comment" class="version-review-comment">{{ batch.comment }}</p>
-                      <ul>
-                        <li
-                          v-for="comment in batch.comments"
-                          :key="`${comment.paragraph_id}-${comment.message}`"
-                        >
-                          <span>{{ comment.paragraph_id }}</span>
-                          <p>
-                            {{ comment.message }}
-                            <em v-if="comment.suggestion">{{ comment.suggestion }}</em>
-                          </p>
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                </article>
-              </div>
-              <div v-else class="review-placeholder">暂无版本记录</div>
-            </div>
-
-            <!-- Review info -->
-            <div v-if="showReviewFor(c.status)" class="detail-review">
-              <strong>审核信息：</strong>
-              <div v-if="reviewLoading[c.id]" class="review-placeholder">加载中…</div>
-              <div v-else-if="reviewMap[c.id]" class="review-body">
-                <div><strong>审核人：</strong>{{ reviewMap[c.id].reviewer }}</div>
-                <div><strong>审核结果：</strong>{{ reviewMap[c.id].result }}</div>
-                <div><strong>审核意见：</strong>{{ reviewMap[c.id].comment }}</div>
-                <div v-if="reviewMap[c.id].reviewAt"><strong>审核时间：</strong>{{ reviewMap[c.id].reviewAt }}</div>
-              </div>
-              <div v-else class="review-placeholder">暂无审核信息</div>
-            </div>
-
-            <div class="detail-actions">
-              <button type="button" class="btn-secondary btn-sm" @click="toggleDetail(c.id)">收起详情</button>
-            </div>
-          </div>
-
           <!-- Card actions -->
           <div class="case-actions">
             <button type="button" class="btn-secondary btn-sm" @click.stop="openSubmissionDetail(c.id)">
@@ -328,10 +226,14 @@
               <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">修改</button>
             </template>
             <template v-if="c.status === 'draft'">
-              <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">提交审核</button>
+              <button type="button" class="btn-primary btn-sm" :disabled="submittingMap[c.id]" @click.stop="submitExistingCase(c)">
+                {{ submittingMap[c.id] ? '提交中…' : '提交审核' }}
+              </button>
             </template>
             <template v-if="c.status === 'needs_revision'">
-              <button type="button" class="btn-primary btn-sm" @click.stop="goToEdit(c)">重新提交</button>
+              <button type="button" class="btn-primary btn-sm" :disabled="submittingMap[c.id]" @click.stop="submitExistingCase(c)">
+                {{ submittingMap[c.id] ? '提交中…' : '重新提交' }}
+              </button>
             </template>
             <button type="button" class="btn-danger btn-sm" @click.stop="confirmDelete(c)">删除</button>
           </div>
@@ -370,6 +272,7 @@ import {
   fetchCaseReviews,
   fetchCaseVersions,
   deleteCaseById,
+  submitCaseById,
 } from '../api/cases.js';
 import { notify } from '../utils/toast.js';
 
@@ -385,17 +288,14 @@ const currentTab = ref('all');
 const cases = ref([]);
 const loading = ref(false);
 const error = ref('');
-const expandedId = ref(null);
 const reviewMap = ref({});
 const reviewLoading = ref({});
 const versionMap = ref({});
 const versionLoading = ref({});
 const versionError = ref({});
-const detailMap = ref({});
-const detailLoading = ref({});
-const detailError = ref({});
 const detailCase = ref(null);
 const showDetailReviewResult = ref(false);
+const submittingMap = ref({});
 let lastOpenedHashCaseId = '';
 
 const caseTypes = ref({
@@ -479,7 +379,6 @@ const hasDetailReviewArtifacts = computed(() => {
 
 function switchTab(tab) {
   currentTab.value = tab;
-  expandedId.value = null;
   loadCases();
 }
 
@@ -489,6 +388,20 @@ function goToCreate() {
 
 function goToEdit(c) {
   window.location.hash = `create?draft=${encodeURIComponent(c.id)}`;
+}
+
+async function submitExistingCase(c) {
+  if (!c?.id || submittingMap.value[c.id]) return;
+  submittingMap.value[c.id] = true;
+  try {
+    await submitCaseById(c.id);
+    notify(c.status === 'needs_revision' ? '案例已重新提交审核' : '案例已提交审核', 'success');
+    await loadCases();
+  } catch (err) {
+    notify(err.message || '提交失败，请稍后重试', 'error');
+  } finally {
+    submittingMap.value[c.id] = false;
+  }
 }
 
 function isEditable(status) {
@@ -541,7 +454,7 @@ function preview(c) {
   const text = content.replace(/\s+/g, ' ').trim();
   if (!text) {
     const meta = [typeLabel(c?.type), c?.theme, c?.department].filter(Boolean);
-    return meta.length ? `${meta.join(' · ')}案例，展开查看完整内容。` : '';
+    return meta.length ? `${meta.join(' · ')}案例，查看详情获取完整内容。` : '';
   }
   if (text.length <= 120) return text;
   return text.slice(0, 120) + '…';
@@ -590,38 +503,6 @@ async function loadCases() {
     cases.value = [];
   } finally {
     loading.value = false;
-  }
-}
-
-async function toggleDetail(caseId) {
-  if (expandedId.value === caseId) {
-    expandedId.value = null;
-    return;
-  }
-  expandedId.value = caseId;
-  await loadInlineDetail(caseId);
-}
-
-function expandedCase(c) {
-  return detailMap.value[c.id] || c;
-}
-
-async function loadInlineDetail(caseId) {
-  if (detailMap.value[caseId] || detailLoading.value[caseId]) return;
-  detailLoading.value[caseId] = true;
-  detailError.value[caseId] = '';
-  try {
-    const res = await fetchCaseDetail(caseId, false);
-    if (!res?.success || !res.data) {
-      throw new Error(res?.message || '加载案例详情失败');
-    }
-    detailMap.value[caseId] = res.data;
-    await loadVersions(caseId);
-    if (showReviewFor(res.data.status)) await loadReview(caseId);
-  } catch (err) {
-    detailError.value[caseId] = err.message || '加载案例详情失败';
-  } finally {
-    detailLoading.value[caseId] = false;
   }
 }
 
