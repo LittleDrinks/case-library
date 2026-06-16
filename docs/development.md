@@ -49,22 +49,20 @@ docker compose down
 
 ## 测试布局第一阶段
 
-当前先不搬动测试文件，避免在 alpha verifier 未稳定前同时修改路径、CI 和测试语义。第一阶段
-布局和覆盖边界如下：
+后端测试脚本已经迁入 `backend/tests/` 第一阶段布局，`Makefile` 直接调用新路径。旧
+`backend/test_*.py` 和 `backend/smoke_test_mongo.py` 只保留薄兼容 wrapper，后续新命令和文档
+不要再依赖旧路径。
 
-- `backend/test_contract_helpers.py`：后端单元脚本，只覆盖不需要启动 FastAPI 或真实 MongoDB
+- `backend/tests/unit/test_contract_helpers.py`：后端单元脚本，只覆盖不需要启动 FastAPI 或真实 MongoDB
   流程的 contract helper。当前范围包括段落拆分、段落批注规范化、AI review summary 规范化、
   公开案例字段白名单和 reviewed version 公开快照行为。
-- `backend/test_prompt_injection.py`：产品 prompt/template 的注入边界检查。
-- `backend/test_submit_flow.py`：后端集成门禁，继续覆盖登录改密、提交审核、AI/人工批注版本、
+- `backend/tests/unit/test_prompt_injection.py`：产品 prompt/template 的注入边界检查。
+- `backend/tests/integration/test_submit_flow.py`：后端集成门禁，继续覆盖登录改密、提交审核、AI/人工批注版本、
   作者/管理员权限、隐藏/公开可见性、公开搜索/推荐/统计缓存等主流程，不用单元测试替代。
-- `backend/smoke_test_mongo.py`：本地 MongoDB smoke/debug 脚本，不属于 `make check` 默认门禁。
+- `backend/tests/smoke/smoke_test_mongo.py`：本地 MongoDB smoke/debug 脚本，不属于 `make check`
+  默认门禁，由 `make smoke` 调用。
 - `frontend/tests/smoke.spec.js`、`frontend/tests/audit.spec.js`、`frontend/tests/demo-media.spec.js`：
   浏览器 E2E/baseline 验收；`frontend/tests/support/*` 只放浏览器测试辅助函数。
-
-后续等当前门禁稳定后，再按 `tests/backend/unit`、`tests/backend/integration`、
-`frontend/tests/e2e` 和 `frontend/tests/support` 迁移；迁移 PR 必须同步 `Makefile`、CI/compose
-命令和本文档。
 
 ## 前端依赖异常
 

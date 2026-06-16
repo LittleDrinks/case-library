@@ -28,7 +28,8 @@ AI 约束见 `docs/ai.md`。
 
 ### 后端脚本和默认值
 
-`backend/` 当前仍混放运行模块和操作脚本，暂不在 alpha PR 中搬目录：
+`backend/` 当前保留运行模块和操作脚本；后端测试脚本已迁入 `backend/tests/`
+第一阶段布局：
 
 - 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、`prompts.py`、
   `case_processor.py`、`search_engine.py`
@@ -36,11 +37,14 @@ AI 约束见 `docs/ai.md`。
 - 管理员账号工具：`backend/account_admin.py`
 - 演示数据脚本：`backend/demo.py`
 - 迁移工具：`backend/migrate_sqlite_to_mongo.py`、`backend/migrate_timestamps.py`
-- 本地 smoke/debug：`backend/smoke_test_mongo.py`
-- 单元脚本：`backend/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
+- 本地 smoke/debug：`backend/tests/smoke/smoke_test_mongo.py`
+- 单元脚本：`backend/tests/unit/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
   规范化、AI review summary 规范化和公开案例快照序列化白名单。
-- 集成检查：`backend/test_submit_flow.py`，由 `make check` 调用，仍作为提交、AI/人工审核、
-  权限、公开可见性和统计缓存主流程的回归门禁。
+- 单元脚本：`backend/tests/unit/test_prompt_injection.py` 覆盖产品 prompt/template 的注入边界。
+- 集成检查：`backend/tests/integration/test_submit_flow.py`，由 `make check` 调用，仍作为提交、
+  AI/人工审核、权限、公开可见性和统计缓存主流程的回归门禁。
+- 兼容入口：`backend/test_contract_helpers.py`、`backend/test_prompt_injection.py`、
+  `backend/test_submit_flow.py`、`backend/smoke_test_mongo.py` 仅保留薄 wrapper，新命令不依赖旧路径。
 - Alpha/E2E seed：`scripts/seed_e2e_accounts.py`，仅在 `ENABLE_DEMO_SEED=true` 时运行；
   默认 `docker-compose.yml` 不再调用，开发/e2e 通过 `docker-compose.dev.yml` 显式启用
 

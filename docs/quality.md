@@ -18,8 +18,13 @@ git diff --check
 `make check` 当前包含：
 
 - `ruff check backend`
-- 后端提交流测试或 `pytest`
+- 后端单元脚本 `backend/tests/unit/test_contract_helpers.py`
+- 后端 prompt 注入边界脚本 `backend/tests/unit/test_prompt_injection.py`
+- 后端集成提交流脚本 `backend/tests/integration/test_submit_flow.py`
 - 前端依赖安装和 `npm run build`
+
+本地 MongoDB smoke/debug 入口是 `make smoke`，实际脚本路径为
+`backend/tests/smoke/smoke_test_mongo.py`，不属于默认 `make check`。
 
 CI 另有 advisory 扫描 job，当前用于暴露已有问题但不阻塞合并：
 

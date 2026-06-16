@@ -26,16 +26,16 @@ test:
 		pytest; \
 	else \
 		set -e; \
-		if [ -f backend/test_contract_helpers.py ]; then python backend/test_contract_helpers.py; fi; \
-		if [ -f backend/test_prompt_injection.py ]; then python backend/test_prompt_injection.py; fi; \
-		if [ -f backend/test_submit_flow.py ]; then python backend/test_submit_flow.py; fi; \
+		python backend/tests/unit/test_contract_helpers.py; \
+		python backend/tests/unit/test_prompt_injection.py; \
+		python backend/tests/integration/test_submit_flow.py; \
 	fi
 
 cov:
 	pytest --cov=backend --cov-report=term-missing
 
 smoke:
-	python backend/smoke_test_mongo.py
+	python backend/tests/smoke/smoke_test_mongo.py
 
 dev-up:
 	docker compose -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120
