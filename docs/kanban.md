@@ -6,8 +6,8 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
 
 本节只记录当日交接快照；任务状态仍以 GitHub Issues 为准。
 
-当前基线：`develop/littledrinks` 已推送到 `14cd7ef Complete test handoff migration`。
-分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop/littledrinks.zip`。
+当前基线：`develop` 已推送到 `14cd7ef Complete test handoff migration`。
+分支 ZIP：`https://github.com/yangxuchen5898/case-library/archive/refs/heads/develop.zip`。
 
 验证证据：
 
@@ -22,7 +22,7 @@ GitHub Issues 是唯一任务看板，不在本文维护第二套任务列表。
   记录测试迁移后的最终验证：`py_compile`、`make check`、两个 desktop Playwright
   规格、`docker compose config --quiet`、`git diff --check` 均 PASS。
 - `agent-runs/test-handoff-fix-20260616/collect-20260616-093300.final.txt`
-  记录已提交并推送 `14cd7ef`，工作区干净且对齐 `origin/develop/littledrinks`。
+  记录已提交并推送 `14cd7ef`，工作区干净且对齐 `origin/develop`。
 
 status:now：
 
@@ -51,7 +51,7 @@ status:next：
   `issue/81-86-alpha-backend`、`work/alpha-triage-20260615`、
   `work/issue144-refactor-home-library`、`work/issue146-case-detail-demo`。
 - 已被覆盖/不要直接合并：多数旧 `issue/*`、`work/*`、`origin/work/*` 分支已由
-  `develop/littledrinks` 的 squash/PR commit 覆盖，应按当前 baseline 重开小切片。
+  `develop` 的 squash/PR commit 覆盖，应按当前 baseline 重开小切片。
 - 避免现在合并：`work/frontend-design-migration` 与
   `origin/work/frontend-design-migration` 属于 #90 later scope，且当前与基线冲突。
 - 候选合并：无。
