@@ -37,6 +37,7 @@
           <div class="case-meta-row">
             <span class="meta-item" v-if="detailCase.department">学院 {{ detailCase.department }}</span>
             <span class="meta-item" v-if="detailCase.theme">主题 {{ detailCase.theme }}</span>
+            <span class="meta-item" v-if="targetStageText(detailCase)">学段 {{ targetStageText(detailCase) }}</span>
             <span class="meta-item">创建 {{ formatDate(detailCase.created_at) }}</span>
             <span class="meta-item" v-if="detailCase.updated_at && detailCase.updated_at !== detailCase.created_at">更新 {{ formatDate(detailCase.updated_at) }}</span>
           </div>
@@ -304,6 +305,11 @@ const caseTypes = ref({
   TYPE_C: '实践育人案例',
 });
 const themes = ref(['强国建设', '实践育人', '数字赋能', '铸魂育人']);
+const targetStages = ref({
+  undergraduate: '本科生',
+  master: '硕士研究生',
+  doctor: '博士研究生',
+});
 
 const deletingCase = ref(null);
 const deleting = ref(false);
@@ -424,6 +430,13 @@ function statusLabel(status) {
 
 function typeLabel(type) {
   return caseTypes.value[type] || type;
+}
+
+function targetStageText(c) {
+  return (c?.target_stages || [])
+    .map(stage => targetStages.value[stage] || stage)
+    .filter(Boolean)
+    .join('、');
 }
 
 function statusPillClass(status) {
@@ -721,10 +734,11 @@ onMounted(async () => {
   }
   try {
     const data = await fetchCaseConstants();
-    if (data) {
-      if (data.case_types) caseTypes.value = data.case_types;
-      if (Array.isArray(data.themes)) themes.value = data.themes;
-    }
+      if (data) {
+        if (data.case_types) caseTypes.value = data.case_types;
+        if (Array.isArray(data.themes)) themes.value = data.themes;
+        if (data.target_stages) targetStages.value = data.target_stages;
+      }
   } catch {
     // Safe fallbacks already set
   }

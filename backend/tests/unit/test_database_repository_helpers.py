@@ -19,6 +19,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from backend.db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS
 from backend.db.transactions import multi_collection_write
+from backend.db.validators import _normalize_target_stages
 from backend.repositories import cases, users
 from backend.services import abuse
 
@@ -185,6 +186,24 @@ def test_case_filter_and_keyword_diff_helpers():
     assert cases._values_differ("title", {"title": "旧标题"}, "新标题")
 
 
+def test_target_stages_normalization_and_diff_helpers():
+    assert _normalize_target_stages(None) == ["undergraduate"]
+    assert _normalize_target_stages('["undergraduate", "master", "master"]') == [
+        "undergraduate",
+        "master",
+    ]
+    assert not cases._values_differ(
+        "target_stages",
+        {"target_stages": ["undergraduate", "master"]},
+        '["undergraduate", "master"]',
+    )
+    assert cases._values_differ(
+        "target_stages",
+        {"target_stages": ["undergraduate"]},
+        '["undergraduate", "doctor"]',
+    )
+
+
 def test_case_lists_use_projection_and_omit_large_fields():
     rows = [
         {
@@ -192,6 +211,7 @@ def test_case_lists_use_projection_and_omit_large_fields():
             "title": "列表案例",
             "type": "TYPE_A",
             "theme": "主题",
+            "target_stages": ["undergraduate"],
             "content": "large content",
             "source_material": "large source",
             "author": "alice",
@@ -213,6 +233,7 @@ def test_case_lists_use_projection_and_omit_large_fields():
             "title": "审核快照标题",
             "type": "SNAPSHOT_TYPE",
             "theme": "审核主题",
+            "target_stages": ["master", "doctor"],
             "author": "reviewer-author",
             "department": "review-dept",
             "keywords": ["审核关键词"],
@@ -242,6 +263,7 @@ def test_case_lists_use_projection_and_omit_large_fields():
         assert public_items[0]["title"] == "审核快照标题"
         assert public_items[0]["type"] == "SNAPSHOT_TYPE"
         assert public_items[0]["theme"] == "审核主题"
+        assert public_items[0]["target_stages"] == ["master", "doctor"]
         assert public_items[0]["author"] == "reviewer-author"
         assert public_items[0]["department"] == "review-dept"
         assert public_items[0]["keywords"] == ["审核关键词"]
@@ -250,8 +272,10 @@ def test_case_lists_use_projection_and_omit_large_fields():
 
     assert "content" not in cases.CASE_LIST_PROJECTION
     assert "source_material" not in cases.CASE_LIST_PROJECTION
+    assert cases.CASE_LIST_PROJECTION["target_stages"] == 1
     assert "content" not in cases.PUBLIC_CASE_LIST_PROJECTION
     assert "source_material" not in cases.PUBLIC_CASE_LIST_PROJECTION
+    assert cases.PUBLIC_CASE_LIST_PROJECTION["target_stages"] == 1
 
 
 def test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets():

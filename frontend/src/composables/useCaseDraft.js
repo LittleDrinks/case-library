@@ -30,6 +30,7 @@ export function useCaseDraft({
         source_material: form.source_material,
         type: form.type,
         theme: form.theme,
+        target_stages: form.target_stages,
       },
       caseId: caseId.value,
       latestReviewVersionId: latestReviewVersionId.value,

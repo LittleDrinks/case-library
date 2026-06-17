@@ -19,6 +19,7 @@ class CaseData(BaseModel):
     title: str | None = None
     type: str | None = None
     theme: str | None = None
+    target_stages: list[str] | None = None
     content: str | None = None
     source_material: str | None = None
     author: str | None = None
@@ -84,6 +85,7 @@ class VersionData(BaseModel):
     title: str | None = None
     type: str | None = None
     theme: str | None = None
+    target_stages: list[str] | None = None
     content: str | None = None
     source_material: str | None = None
     author: str | None = None

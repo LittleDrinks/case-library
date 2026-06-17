@@ -10,7 +10,7 @@ from backend.db.connection import get_db
 from backend.db.counters import _insert_with_generated_id
 from backend.db.datetime import _normalize_datetime_fields
 from backend.db.transactions import multi_collection_write
-from backend.db.validators import _normalize_keywords, _now
+from backend.db.validators import _normalize_keywords, _normalize_target_stages, _now
 
 
 class _CaseReviewUpdateConflictError(Exception):
@@ -53,6 +53,7 @@ def create_ai_review_version(
         "title": current.get("title", ""),
         "type": current.get("type", ""),
         "theme": current.get("theme", ""),
+        "target_stages": _normalize_target_stages(current.get("target_stages")),
         "content": current.get("content", ""),
         "source_material": current.get("source_material", ""),
         "author": current.get("author", ""),

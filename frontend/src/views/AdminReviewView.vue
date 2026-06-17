@@ -36,6 +36,7 @@
             <span class="meta-item" v-if="reviewingCase.owner_username">账号 {{ reviewingCase.owner_username }}</span>
             <span class="meta-item" v-if="reviewingCase.department">学院 {{ reviewingCase.department }}</span>
             <span class="meta-item" v-if="reviewingCase.theme">主题 {{ reviewingCase.theme }}</span>
+            <span class="meta-item" v-if="targetStageText(reviewingCase)">学段 {{ targetStageText(reviewingCase) }}</span>
           </div>
         </div>
         <span :class="['status-pill', statusPillClass(reviewingCase.status)]">
@@ -205,6 +206,7 @@
             <span class="meta-item" v-if="detailCase.owner_username">账号 {{ detailCase.owner_username }}</span>
             <span class="meta-item" v-if="detailCase.department">学院 {{ detailCase.department }}</span>
             <span class="meta-item" v-if="detailCase.theme">主题 {{ detailCase.theme }}</span>
+            <span class="meta-item" v-if="targetStageText(detailCase)">学段 {{ targetStageText(detailCase) }}</span>
             <span class="meta-item">创建 {{ formatDate(detailCase.created_at) }}</span>
           </div>
         </div>
@@ -419,6 +421,11 @@ const caseTypes = ref({
   TYPE_B: '课程思政共享资源案例',
   TYPE_C: '实践育人案例',
 });
+const targetStages = ref({
+  undergraduate: '本科生',
+  master: '硕士研究生',
+  doctor: '博士研究生',
+});
 
 const reviewingCase = ref(null);
 const reviewMode = ref('review');
@@ -486,6 +493,13 @@ function statusLabel(status) {
 
 function typeLabel(type) {
   return caseTypes.value[type] || type;
+}
+
+function targetStageText(c) {
+  return (c?.target_stages || [])
+    .map(stage => targetStages.value[stage] || stage)
+    .filter(Boolean)
+    .join('、');
 }
 
 function statusPillClass(status) {
@@ -864,6 +878,7 @@ onMounted(async () => {
     const data = await fetchCaseConstants();
     if (data) {
       if (data.case_types) caseTypes.value = data.case_types;
+      if (data.target_stages) targetStages.value = data.target_stages;
     }
   } catch {
     // Safe fallbacks already set

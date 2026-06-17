@@ -72,6 +72,9 @@ FastAPI schema、测试和本文。
 - `GET /api/latest`：最新案例。
 - `GET /api/statistics`：公开统计。
 - `GET /api/constants`：类型、主题、状态标签。
+- 案例创建/更新可传 `target_stages`，表示适用学段数组。表单提交使用 JSON 数组字符串，
+  例如 `["undergraduate","master"]`。后端会去重并保持顺序；允许值来自
+  `/api/constants.data.target_stages`；旧数据或缺省值回退为 `["undergraduate"]`。
 
 ## 状态映射
 

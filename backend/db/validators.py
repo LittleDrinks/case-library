@@ -11,6 +11,7 @@ from backend.db.constants import (
     CASE_STATUSES,
     MAX_QUERY_LIMIT,
     REVIEW_STATUSES,
+    TARGET_STAGE_LABELS,
     USER_ROLES,
     USER_STATUSES,
 )
@@ -82,6 +83,30 @@ def _normalize_keywords(value: Any) -> list[str]:
             pass
         return [value]
     return [str(value)]
+
+def _normalize_target_stages(value: Any) -> list[str]:
+    if value in (None, ""):
+        return ["undergraduate"]
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            value = [value]
+    if not isinstance(value, list):
+        raise ValueError("target_stages must be a list")
+
+    normalized: list[str] = []
+    for item in value:
+        stage = str(item or "").strip()
+        if not stage:
+            continue
+        if stage not in TARGET_STAGE_LABELS:
+            raise ValueError(f"Invalid target stage: {stage}")
+        if stage not in normalized:
+            normalized.append(stage)
+    if not normalized:
+        raise ValueError("target_stages cannot be empty")
+    return normalized
 
 def _normalize_ai_reviews(value: Any) -> list[dict[str, Any]]:
     if value in (None, ""):

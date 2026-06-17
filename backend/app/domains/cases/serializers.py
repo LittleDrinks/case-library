@@ -11,7 +11,11 @@ from backend.app.domains.reviews.helpers import split_paragraphs
 from backend.db.connection import get_db
 from backend.db.constants import DATETIME_FIELDS, PUBLIC_REVIEW_SNAPSHOT_FIELDS
 from backend.db.datetime import format_beijing_datetime
-from backend.db.validators import _normalize_ai_reviews, _normalize_keywords
+from backend.db.validators import (
+    _normalize_ai_reviews,
+    _normalize_keywords,
+    _normalize_target_stages,
+)
 
 
 def serialize_datetime(value: Any) -> Any:
@@ -50,6 +54,7 @@ def _public_case_fields(case: dict) -> dict:
         "title",
         "type",
         "theme",
+        "target_stages",
         "content",
         "source_material",
         "author",
@@ -105,6 +110,7 @@ def serialize_case(case: dict | None) -> dict | None:
     case = serialize_doc(case) or {}
     case["source_material"] = str(case.get("source_material") or "")
     case["keywords"] = _normalize_keywords(case.get("keywords"))
+    case["target_stages"] = _normalize_target_stages(case.get("target_stages"))
     case["is_approved"] = bool(case.get("is_approved", False))
     case["is_in_library"] = bool(case.get("is_in_library", False))
     case["is_hidden"] = bool(case.get("is_hidden", False))
@@ -150,6 +156,7 @@ def serialize_version(version: dict | None) -> dict | None:
     serialized.setdefault("title", "")
     serialized.setdefault("type", "")
     serialized.setdefault("theme", "")
+    serialized["target_stages"] = _normalize_target_stages(serialized.get("target_stages"))
     serialized.setdefault("content", "")
     serialized.setdefault("source_material", "")
     serialized.setdefault("author", "")

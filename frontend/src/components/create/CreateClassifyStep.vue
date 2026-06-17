@@ -47,22 +47,27 @@
     </div>
 
     <div class="tag-section">
-      <div class="tag-section-title">适用学段</div>
+      <div class="tag-section-title">
+        适用学段 <span class="required" aria-hidden="true">*</span>
+      </div>
       <div class="tag-grid compact">
-        <span class="tag-chip readonly selected">
+        <button
+          v-for="(label, key) in constants.target_stages"
+          :key="key"
+          type="button"
+          :class="['tag-chip', { selected: form.target_stages.includes(key) }]"
+          :aria-pressed="form.target_stages.includes(key)"
+          @click="toggleTargetStage(key)"
+        >
           <span class="tag-checkbox" aria-hidden="true">
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
           </span>
-          <span class="tag-label">本科生</span>
-        </span>
-        <span class="tag-chip readonly">
-          <span class="tag-checkbox" aria-hidden="true"></span>
-          <span class="tag-label">硕士研究生</span>
-        </span>
-        <span class="tag-chip readonly">
-          <span class="tag-checkbox" aria-hidden="true"></span>
-          <span class="tag-label">博士研究生</span>
-        </span>
+          <span class="tag-label">{{ label }}</span>
+        </button>
+      </div>
+      <div class="field-help">可选择一个或多个学段，用于标识案例适合的教学对象。</div>
+      <div v-if="errors.target_stages" class="field-error" role="alert">
+        {{ errors.target_stages }}
       </div>
     </div>
 
@@ -105,6 +110,17 @@ function selectType(key) {
 function selectTheme(theme) {
   props.form.theme = theme;
   emit("touch", "theme");
+}
+
+function toggleTargetStage(stage) {
+  const selected = props.form.target_stages;
+  const index = selected.indexOf(stage);
+  if (index >= 0) {
+    selected.splice(index, 1);
+  } else {
+    selected.push(stage);
+  }
+  emit("touch", "target_stages");
 }
 </script>
 

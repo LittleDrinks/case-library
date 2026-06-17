@@ -31,6 +31,7 @@ class StatisticsResponse(BaseModel):
 class ConstantsData(BaseModel):
     case_types: dict[str, str]
     themes: list[str]
+    target_stages: dict[str, str]
     statuses: dict[str, str]
 
 

@@ -48,6 +48,13 @@
           <span v-else>—</span>
         </div>
       </div>
+      <div class="field-row">
+        <div class="field-label">适用学段</div>
+        <div class="field-value">
+          <span v-if="targetStageSummary" class="field-tag">{{ targetStageSummary }}</span>
+          <span v-else>—</span>
+        </div>
+      </div>
     </section>
 
     <section class="confirm-box">
@@ -88,7 +95,7 @@
 import { computed, ref } from "vue";
 import CaseReader from "../cases/CaseReader.vue";
 
-defineProps({
+const props = defineProps({
   form: {
     type: Object,
     required: true,
@@ -116,6 +123,11 @@ defineEmits(["submit"]);
 const originalConfirmed = ref(false);
 const reviewConfirmed = ref(false);
 const canConfirmSubmit = computed(() => originalConfirmed.value && reviewConfirmed.value);
+const targetStageSummary = computed(() => {
+  return (props.form.target_stages || [])
+    .map((stage) => props.constants.target_stages?.[stage] || stage)
+    .join("、");
+});
 </script>
 
 <style scoped>
