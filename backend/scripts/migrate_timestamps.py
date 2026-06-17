@@ -17,6 +17,8 @@ this script can restore the fields it changed, but it is not a substitute for a
 full MongoDB backup.
 """
 
+# ruff: noqa: E402
+
 import argparse
 import json
 import sys
@@ -26,9 +28,14 @@ from typing import Any
 
 from bson import ObjectId
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-from database import COUNTER_COLLECTIONS, DATETIME_FIELDS, format_beijing_datetime, get_db
+from backend.db.connection import get_db
+from backend.db.constants import COUNTER_COLLECTIONS, DATETIME_FIELDS
+from backend.db.datetime import format_beijing_datetime
 
 
 def encode_backup_value(value: Any) -> Any:

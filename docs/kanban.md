@@ -35,10 +35,10 @@ Markdown 预览子组件，并为 `useCaseDraft` 建立 Vitest + jsdom 单测基
   规格、`docker compose config --quiet`、`git diff --check` 均 PASS。
 - `agent-runs/test-handoff-fix-20260616/collect-20260616-093300.final.txt`
   记录已提交并推送 `14cd7ef`，工作区干净且对齐 `origin/develop`。
-- #95 database.py split 独立验证已通过：`backend/database.py` 现为 117 行兼容层，
-  `backend/main.py` 仍为 157 行；新增 `backend/db/`、`backend/repositories/`、
-  `backend/serializers.py`、`backend/services/public.py` 承接 public split；最大
-  split 模块为 `backend/repositories/cases.py` 439 行；develop ZIP URL 不变。
+- #95 database repository/service split 独立验证已通过：新增 `backend/db/`、
+  `backend/repositories/`、case serializer domain 实现和 `backend/services/public.py`
+  承接数据、序列化和 public split；旧 top-level database 兼容入口后续已移除。最大
+  split 模块记录为 `backend/repositories/cases.py` 439 行；develop ZIP URL 不变。
 
 status:now：
 
@@ -64,12 +64,12 @@ status:next：
   `docker compose run --rm app make check`、`git diff --check`。#122 可关闭，不再作为
   open/follow-up 交接项。
 - #79/#80：本轮 cleanup 已完成 root backend scripts 迁入 `backend/scripts/`、root
-  `skills/` 移除、`product_prompts/` 成为 runtime prompt source of truth、registry
+  `skills/` 移除、`prompts/` 成为 runtime prompt source of truth、registry
   loader 加载 prompt metadata 且不泄露 body、prompt eval harness 进入 `scripts/`；不再作为
   open/pending 交接项。
-- #117：backend/main.py router split 已落地，`backend/main.py` 现为 157 行；新增
-  `backend/routers/`、`backend/security.py`、`backend/dependencies.py` 承接路由、
-  认证和依赖装配；不再作为 open/pending 交接项。
+- #117：FastAPI app/router split 已落地；新增 canonical app、route、core 边界承接
+  应用装配、路由、认证和依赖装配，旧 top-level main 兼容入口后续已移除；不再作为
+  open/pending 交接项。
 - #95：database repository/service split 已完成并已有独立验证；不再作为 open/pending
   交接项。
 - #160：prompt/script cleanup 保持 API contract，OpenAPI smoke 与 `make check` 已通过；

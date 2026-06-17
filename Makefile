@@ -1,4 +1,4 @@
-.PHONY: install-dev lint format check test cov typecheck security audit smoke smoke-e2e frontend-build compose-config run up dev down logs dev-up dev-seed dev-e2e dev-down
+.PHONY: install-dev lint format check test test-backend-unit test-backend-integration test-frontend-unit test-e2e-mock cov openapi-smoke typecheck security audit smoke smoke-e2e frontend-build compose-config run up dev down logs dev-up dev-seed dev-e2e dev-down
 
 install-dev:
 	pip install -r requirements.txt -r requirements-dev.txt
@@ -10,32 +10,42 @@ lint:
 format:
 	ruff format backend
 
-check: lint test frontend-build
+check: lint test-backend-unit test-backend-integration test-frontend-unit frontend-build
 
 typecheck:
 	mypy backend
 
 security:
-	bandit -r backend
+	bandit -c pyproject.toml -r backend
 
 audit:
 	pip-audit -r requirements.txt -r requirements-dev.txt
 
-test:
-	@if find tests -type f -name 'test_*.py' 2>/dev/null | grep -q .; then \
-		pytest; \
+test: test-backend-unit test-backend-integration
+
+test-backend-unit:
+	pytest backend/tests/unit -m "not real_ai"
+
+test-backend-integration:
+	pytest backend/tests/integration
+
+test-frontend-unit:
+	@if [ -f frontend/package.json ]; then \
+		cd frontend && \
+		if [ -f package-lock.json ]; then npm ci; else npm install; fi && \
+		npm run test:unit; \
 	else \
-		set -e; \
-		python backend/tests/unit/test_contract_helpers.py; \
-		python backend/tests/unit/test_prompt_injection.py; \
-		python backend/tests/unit/test_public_search_helpers.py; \
-		python backend/tests/unit/test_security_dependencies.py; \
-		python backend/tests/unit/test_database_repository_helpers.py; \
-		python backend/tests/integration/test_submit_flow.py; \
+		echo "No frontend/package.json found."; \
 	fi
 
+test-e2e-mock:
+	docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e npm run test:e2e:mock
+
 cov:
-	pytest --cov=backend --cov-report=term-missing
+	pytest backend/tests/unit backend/tests/integration -m "not real_ai" --cov=backend --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html:htmlcov --cov-fail-under=30
+
+openapi-smoke:
+	pytest backend/tests/integration/test_submit_flow.py::test_openapi_smoke
 
 smoke:
 	python backend/tests/smoke/smoke_test_mongo.py
@@ -68,7 +78,7 @@ compose-config:
 	docker compose config
 
 run:
-	uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
+	uvicorn backend.app.main:app --host 0.0.0.0 --port 8001 --reload
 
 dev up:
 	docker compose up -d

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -74,6 +75,10 @@ def call_chat_completion(
     system_content: str = "",
 ) -> str:
     settings = settings or AISettings.from_env()
+    parsed_base_url = urllib.parse.urlparse(settings.base_url)
+    if parsed_base_url.scheme not in {"http", "https"}:
+        raise AIClientError("AI 服务地址必须使用 HTTP 或 HTTPS")
+
     payload = {
         "model": model,
         "messages": build_chat_messages(prompt_text, system_content),
@@ -90,7 +95,7 @@ def call_chat_completion(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=settings.timeout_seconds) as response:
+        with urllib.request.urlopen(request, timeout=settings.timeout_seconds) as response:  # nosec B310
             raw = response.read().decode("utf-8")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise AIClientError("AI 服务暂不可用") from exc

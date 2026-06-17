@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unit checks for auth tokens and route dependency helpers."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import os
@@ -11,11 +13,14 @@ from uuid import uuid4
 os.environ["AUTH_SECRET"] = "unit-test-auth-secret"
 os.environ["MONGODB_DB_NAME"] = f"case_library_security_unit_{uuid4().hex[:8]}"
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-import dependencies
-import security
 from fastapi import HTTPException
+
+from backend.app.core import dependencies, security
 
 
 def test_create_and_verify_auth_token_normalizes_token_version():

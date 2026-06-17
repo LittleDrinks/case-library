@@ -1,0 +1,45 @@
+name: Real AI Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Allowed model name to smoke through the backend AI path"
+        required: true
+        type: string
+
+jobs:
+  real-ai-smoke:
+    name: Secret-safe real AI smoke
+    runs-on: ubuntu-latest
+    if: ${{ vars.REAL_AI_SMOKE_ENABLED == 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app container
+        run: docker compose build app
+
+      - name: Run opt-in real AI smoke
+        env:
+          AI_REVIEW_ENABLED: "true"
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODELS: ${{ github.event.inputs.model }}
+          AI_DEFAULT_MODEL: ${{ github.event.inputs.model }}
+          AI_TIMEOUT_SECONDS: "20"
+        run: |
+          set -euo pipefail
+          if [ -z "${AI_BASE_URL:-}" ] || [ -z "${AI_API_KEY:-}" ] || [ -z "${AI_MODELS:-}" ]; then
+            echo "Real AI smoke is missing required secret/config inputs."
+            exit 1
+          fi
+          docker compose run --rm \
+            -e AI_REVIEW_ENABLED \
+            -e AI_BASE_URL \
+            -e AI_API_KEY \
+            -e AI_MODELS \
+            -e AI_DEFAULT_MODEL \
+            -e AI_TIMEOUT_SECONDS \
+            app pytest backend/tests/unit/test_ai_review_service.py -m real_ai -q

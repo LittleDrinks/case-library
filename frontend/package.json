@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:unit": "vitest run tests/unit --environment jsdom",
     "test:e2e": "playwright test",
+    "test:e2e:mock": "playwright test tests/audit.spec.js --project=chromium-desktop --grep-invert '@real-ai'",
     "test:e2e:demo-media": "PLAYWRIGHT_OUTPUT_DIR=../agent-runs/demo-media PLAYWRIGHT_VIDEO=on playwright test tests/demo-media.spec.js --project=chromium-desktop",
     "test:e2e:install": "playwright install --with-deps chromium"
   },

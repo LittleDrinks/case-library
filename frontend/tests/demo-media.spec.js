@@ -85,20 +85,12 @@ async function openPendingAdminCard(page, title) {
 }
 
 test.describe.serial("baseline demo media", () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "baseline demo videos are recorded only for the desktop viewport"
-    );
+  test.beforeEach(async ({ page }) => {
     page.on("dialog", (dialog) => dialog.accept());
     await mockAiReview(page);
   });
 
-  test.afterAll(async ({ browser }, testInfo) => {
-    if (testInfo.project.name !== "chromium-desktop") {
-      return;
-    }
-
+  test.afterAll(async ({ browser }) => {
     const page = await browser.newPage();
     try {
       await page.goto("/");

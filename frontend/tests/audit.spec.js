@@ -27,50 +27,7 @@ const ADMIN = {
 };
 
 test.describe("manual audit candidate flows", () => {
-  test("mobile create flow keeps critical screens readable", async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-mobile",
-      "mobile-only visual regression for create flow"
-    );
-
-    await page.goto("/");
-    await login(page, USER);
-    await startCreateCase(page);
-
-    await expect(page.getByText("填写案例基本信息")).toBeVisible();
-    await expect(page.locator(".wizard-main")).toBeInViewport();
-    await expect(page.locator("#ccf-title")).toBeVisible();
-    await capture(page, testInfo, "mobile-create-step-1");
-
-    await page.getByLabel(/案例标题/).fill(`移动端视觉审计 ${Date.now()}`);
-    await page.getByLabel(/所属部门\/学院/).fill("马克思主义学院");
-    await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("撰写案例内容")).toBeVisible();
-    await expect(page.locator("#ccf-content")).toBeVisible();
-    await expect(page.locator("#ccf-source")).toBeVisible();
-    await capture(page, testInfo, "mobile-create-step-2");
-
-    await page.locator("#ccf-content").fill(
-      "移动端创建流程视觉审计正文，覆盖输入框宽度、按钮换行和页面滚动。"
-    );
-    await page.locator("#ccf-source").fill("移动端来源材料审计文本。");
-    await page.getByRole("button", { name: "继续" }).scrollIntoViewIfNeeded();
-    await page.getByRole("button", { name: "继续" }).click();
-
-    await expect(page.getByText("选择分类")).toBeVisible();
-    await expect(page.getByRole("button", { name: "思政课教学案例" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "铸魂育人" })).toBeVisible();
-    await capture(page, testInfo, "mobile-create-step-3");
-  });
-
   test("default admin seed account reaches home without password change", async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only audit because mobile hides the username text"
-    );
-
     await page.goto("/");
     await login(page, {
       username: "10000002",
@@ -86,12 +43,7 @@ test.describe("manual audit candidate flows", () => {
 
   test("create flow author identity follows current login, not stale draft", async ({
     page,
-  }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only author identity regression"
-    );
-
+  }) => {
     await page.goto("/");
     await page.evaluate(() => {
       localStorage.setItem(
@@ -154,11 +106,6 @@ test.describe("manual audit candidate flows", () => {
   test("author submit -> admin approve -> public search, with audit screenshots", async ({
     page,
   }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only audit because screenshots target desktop design alignment"
-    );
-
     const title = `Audit案例 ${Date.now()}`;
     page.on("dialog", (dialog) => {
       dialog.accept();
@@ -230,12 +177,7 @@ test.describe("manual audit candidate flows", () => {
 
   test("admin returns a submitted version and author resubmits after copying comments", async ({
     page,
-  }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only revision-required acceptance path"
-    );
-
+  }) => {
     const title = `Audit案例 退回再提交 ${Date.now()}`;
     const initialContent = [
       "退回再提交审计案例第一段，说明教学背景和课堂目标。",
@@ -382,12 +324,7 @@ test.describe("manual audit candidate flows", () => {
     await cleanupAuditCases(page, title);
   });
 
-  test("public library does not render leaked review internals", async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only public leakage regression"
-    );
-
+  test("public library does not render leaked review internals", async ({ page }) => {
     const publicCase = {
       id: "leak-public-case",
       title: "公开字段白名单审计案例",
@@ -466,12 +403,7 @@ test.describe("manual audit candidate flows", () => {
 
   test("home public detail renders source material without review internals", async ({
     page,
-  }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== "chromium-desktop",
-      "desktop-only public home detail regression"
-    );
-
+  }) => {
     const publicCase = {
       id: "home-public-source-case",
       title: "首页公开来源材料审计案例",

@@ -10,8 +10,8 @@ on:
   pull_request:
 
 jobs:
-  backend:
-    name: App
+  quality-gates:
+    name: Quality gates
     runs-on: ubuntu-latest
 
     steps:
@@ -24,13 +24,45 @@ jobs:
       - name: Lint in container
         run: docker compose run --rm --no-deps app make lint
 
-      - name: Check in container
+      - name: Backend unit tests
         run: |
           docker compose up -d mongo
-          docker compose run --rm app make check
+          docker compose run --rm app make test-backend-unit
+
+      - name: Backend integration tests
+        run: |
+          docker compose up -d mongo
+          docker compose run --rm app make test-backend-integration
+
+      - name: Frontend unit tests
+        run: docker compose run --rm --no-deps app make test-frontend-unit
+
+      - name: Stable mock E2E
+        run: docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e npm run test:e2e:mock
+
+      - name: OpenAPI smoke
+        run: docker compose run --rm app make openapi-smoke
+
+      - name: Coverage report
+        run: |
+          docker compose up -d mongo
+          docker compose run --rm app make cov
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
 
       - name: Docker Compose config
-        run: docker compose config
+        run: docker compose config --quiet
+
+      - name: Dev Docker Compose E2E config
+        run: docker compose -f docker-compose.dev.yml --profile e2e config --quiet
 
       - name: Validate Dev Container JSON in container
         run: docker compose run --rm --no-deps app python -m json.tool .devcontainer/devcontainer.json >/tmp/devcontainer.json

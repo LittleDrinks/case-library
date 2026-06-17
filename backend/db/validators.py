@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from db.constants import (
+from backend.db.constants import (
     AI_REVIEW_DATETIME_FIELDS,
     CASE_STATUSES,
     MAX_QUERY_LIMIT,
@@ -14,12 +14,12 @@ from db.constants import (
     USER_ROLES,
     USER_STATUSES,
 )
-from db.datetime import format_beijing_datetime
+from backend.db.datetime import format_beijing_datetime
 
 
 def _now() -> str:
     """Return the current UTC+8 wall-clock time as a plain string."""
-    return format_beijing_datetime(datetime.now(UTC))
+    return str(format_beijing_datetime(datetime.now(UTC)))
 
 def _bounded_limit(limit: Any, default: int = 50) -> int:
     try:

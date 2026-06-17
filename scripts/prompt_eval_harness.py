@@ -15,12 +15,11 @@ from pathlib import Path
 from string import Formatter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-BACKEND_ROOT = REPO_ROOT / "backend"
-sys.path.insert(0, str(BACKEND_ROOT))
+sys.path.insert(0, str(REPO_ROOT))
 
-from prompt_registry.loader import load_runtime_prompts, render_prompt  # noqa: E402
+from backend.app.domains.ai.prompts.loader import load_runtime_prompts, render_prompt  # noqa: E402
 
-DEFAULT_FIXTURE_PATH = REPO_ROOT / "product_prompts" / "runtime" / "evals" / "prompt_eval_cases.json"
+DEFAULT_FIXTURE_PATH = REPO_ROOT / "prompts" / "runtime" / "evals" / "prompt_eval_cases.json"
 INJECTION_MARKERS = (
     "忽略以上指令",
     "<<<END_USER_DATA>>>",

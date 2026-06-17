@@ -4,25 +4,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from db.connection import get_db
-from db.constants import VERSIONED_FIELDS
-from db.counters import _insert_with_generated_id
-from db.datetime import _normalize_datetime_fields
-from db.validators import (
+from pymongo import DESCENDING
+
+from backend.app.domains.cases.serializers import serialize_case, serialize_case_list_item
+from backend.app.domains.reviews.helpers import split_paragraphs
+from backend.db.connection import get_db
+from backend.db.constants import VERSIONED_FIELDS
+from backend.db.counters import _insert_with_generated_id
+from backend.db.datetime import _normalize_datetime_fields
+from backend.db.transactions import multi_collection_write
+from backend.db.validators import (
     _bounded_limit,
     _normalize_ai_reviews,
     _normalize_keywords,
     _now,
     _validate_case_status,
 )
-from pymongo import DESCENDING
-from serializers import serialize_case, serialize_case_list_item
-from services.public import (
+from backend.services.public import (
     _public_cases_pipeline,
     _serialize_public_joined_case,
     invalidate_statistics_cache,
 )
-from services.reviews import split_paragraphs
 
 CASE_LIST_PROJECTION = {
     "id": 1,
@@ -102,38 +104,41 @@ def create_case(case_data: dict) -> int:
     if case_data.get("deployed_by") is not None:
         doc["deployed_by"] = case_data.get("deployed_by")
 
-    case_id = _insert_with_generated_id("cases", doc)
+    with multi_collection_write("create_case_with_initial_version") as scope:
+        case_id = _insert_with_generated_id("cases", doc)
+        scope.compensate_with(lambda: get_db().cases.delete_one({"id": case_id}))
 
-    version_doc = {
-        "case_id": case_id,
-        "version_number": 1,
-        "title": doc.get("title", ""),
-        "type": doc.get("type", ""),
-        "theme": doc.get("theme", ""),
-        "content": doc.get("content", ""),
-        "source_material": doc.get("source_material", ""),
-        "author": doc.get("author", ""),
-        "department": doc.get("department", ""),
-        "keywords": _normalize_keywords(doc.get("keywords")),
-        "owner_username": doc.get("owner_username", ""),
-        "created_by": doc.get("owner_username") or doc.get("author", ""),
-        "paragraphs": split_paragraphs(doc.get("content", "")),
-        "ai_review": None,
-        "admin_comments": [],
-        "changed_by": doc.get("author", ""),
-        "change_reason": "初始创建",
-        "created_at": now,
-    }
-    version_id = _insert_with_generated_id("versions", version_doc)
-    if status == "pending_review":
-        get_db().cases.update_one(
-            {"id": case_id},
-            {
-                "$set": _normalize_datetime_fields(
-                    {"submitted_version_id": version_id, "submitted_at": doc["submitted_at"]}
-                )
-            },
-        )
+        version_doc = {
+            "case_id": case_id,
+            "version_number": 1,
+            "title": doc.get("title", ""),
+            "type": doc.get("type", ""),
+            "theme": doc.get("theme", ""),
+            "content": doc.get("content", ""),
+            "source_material": doc.get("source_material", ""),
+            "author": doc.get("author", ""),
+            "department": doc.get("department", ""),
+            "keywords": _normalize_keywords(doc.get("keywords")),
+            "owner_username": doc.get("owner_username", ""),
+            "created_by": doc.get("owner_username") or doc.get("author", ""),
+            "paragraphs": split_paragraphs(doc.get("content", "")),
+            "ai_review": None,
+            "admin_comments": [],
+            "changed_by": doc.get("author", ""),
+            "change_reason": "初始创建",
+            "created_at": now,
+        }
+        version_id = _insert_with_generated_id("versions", version_doc)
+        scope.compensate_with(lambda: get_db().versions.delete_one({"id": version_id}))
+        if status == "pending_review":
+            get_db().cases.update_one(
+                {"id": case_id},
+                {
+                    "$set": _normalize_datetime_fields(
+                        {"submitted_version_id": version_id, "submitted_at": doc["submitted_at"]}
+                    )
+                },
+            )
     if status == "approved" and not doc.get("is_hidden"):
         invalidate_statistics_cache()
     return case_id
@@ -248,8 +253,10 @@ def count_cases(
     author: str | None = None,
     include_hidden: bool = True,
 ) -> int:
-    return get_db().cases.count_documents(
-        _case_list_filter(status=status, author=author, include_hidden=include_hidden)
+    return int(
+        get_db().cases.count_documents(
+            _case_list_filter(status=status, author=author, include_hidden=include_hidden)
+        )
     )
 
 def set_case_hidden(case_id: int, hidden: bool) -> bool:
@@ -259,14 +266,14 @@ def set_case_hidden(case_id: int, hidden: bool) -> bool:
     )
     if result.matched_count > 0 and result.modified_count > 0:
         invalidate_statistics_cache()
-    return result.matched_count > 0
+    return bool(result.matched_count > 0)
 
 def _values_differ(field: str, current: dict, new_value: Any) -> bool:
     current_value = current.get(field)
     if field == "keywords":
         current_value = _normalize_keywords(current_value)
         new_value = _normalize_keywords(new_value)
-    return current_value != new_value
+    return bool(current_value != new_value)
 
 def update_case(
     case_id: int, case_data: dict, updated_by: str = "system", change_reason: str = ""
@@ -308,42 +315,50 @@ def update_case(
     version_changed = any(field in changed_updates for field in VERSIONED_FIELDS)
     changed_updates["updated_at"] = _now()
 
-    result = db.cases.update_one(
-        {"id": int(case_id), "status": {"$ne": "deleted"}},
-        {"$set": _normalize_datetime_fields(changed_updates)},
-    )
-    if result.matched_count == 0 or result.modified_count == 0:
-        return False
+    with multi_collection_write("update_case") as scope:
+        update_ops: dict[str, Any] = {"$set": _normalize_datetime_fields(changed_updates)}
+        if version_changed:
+            update_ops["$unset"] = {"latest_review_version_id": ""}
+            update_ops["$set"]["ai_reviews"] = []
 
-    if version_changed:
-        updated = db.cases.find_one({"id": int(case_id)})
-        max_version = db.versions.find_one(
-            {"case_id": int(case_id)},
-            sort=[("version_number", DESCENDING)],
-            projection={"version_number": 1},
+        result = db.cases.update_one(
+            {"id": int(case_id), "status": {"$ne": "deleted"}},
+            update_ops,
         )
-        new_version = int(max_version["version_number"]) + 1 if max_version else 1
-        version_doc = {
-            "case_id": int(case_id),
-            "version_number": new_version,
-            "title": (updated or {}).get("title", ""),
-            "type": (updated or {}).get("type", ""),
-            "theme": (updated or {}).get("theme", ""),
-            "content": (updated or {}).get("content", ""),
-            "source_material": (updated or {}).get("source_material", ""),
-            "author": (updated or {}).get("author", ""),
-            "department": (updated or {}).get("department", ""),
-            "keywords": _normalize_keywords((updated or {}).get("keywords")),
-            "owner_username": (updated or {}).get("owner_username", ""),
-            "created_by": updated_by,
-            "paragraphs": split_paragraphs((updated or {}).get("content", "")),
-            "ai_review": None,
-            "admin_comments": [],
-            "changed_by": updated_by,
-            "change_reason": change_reason,
-            "created_at": _now(),
-        }
-        _insert_with_generated_id("versions", version_doc)
+        if result.matched_count == 0 or result.modified_count == 0:
+            return False
+        scope.compensate_with(lambda: db.cases.replace_one({"id": int(case_id)}, current))
+
+        if version_changed:
+            updated = db.cases.find_one({"id": int(case_id)})
+            max_version = db.versions.find_one(
+                {"case_id": int(case_id)},
+                sort=[("version_number", DESCENDING)],
+                projection={"version_number": 1},
+            )
+            new_version = int(max_version["version_number"]) + 1 if max_version else 1
+            version_doc = {
+                "case_id": int(case_id),
+                "version_number": new_version,
+                "title": (updated or {}).get("title", ""),
+                "type": (updated or {}).get("type", ""),
+                "theme": (updated or {}).get("theme", ""),
+                "content": (updated or {}).get("content", ""),
+                "source_material": (updated or {}).get("source_material", ""),
+                "author": (updated or {}).get("author", ""),
+                "department": (updated or {}).get("department", ""),
+                "keywords": _normalize_keywords((updated or {}).get("keywords")),
+                "owner_username": (updated or {}).get("owner_username", ""),
+                "created_by": updated_by,
+                "paragraphs": split_paragraphs((updated or {}).get("content", "")),
+                "ai_review": None,
+                "admin_comments": [],
+                "changed_by": updated_by,
+                "change_reason": change_reason,
+                "created_at": _now(),
+            }
+            version_id = _insert_with_generated_id("versions", version_doc)
+            scope.compensate_with(lambda: db.versions.delete_one({"id": version_id}))
 
     if current.get("status") == "approved" or changed_updates.get("status") == "approved":
         invalidate_statistics_cache()
@@ -442,7 +457,7 @@ def increment_view_count(case_id: int) -> bool:
     changed = result.matched_count > 0 and result.modified_count > 0
     if changed:
         invalidate_statistics_cache()
-    return changed
+    return bool(changed)
 
 def increment_like_count(case_id: int) -> bool:
     result = get_db().cases.update_one(
@@ -452,7 +467,7 @@ def increment_like_count(case_id: int) -> bool:
     changed = result.matched_count > 0 and result.modified_count > 0
     if changed:
         invalidate_statistics_cache()
-    return changed
+    return bool(changed)
 
 def decrement_like_count(case_id: int) -> bool:
     db = get_db()
@@ -491,4 +506,4 @@ def decrement_like_count(case_id: int) -> bool:
     changed = correction.modified_count > 0
     if changed:
         invalidate_statistics_cache()
-    return changed
+    return bool(changed)

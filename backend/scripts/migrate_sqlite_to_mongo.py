@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Migrate SQLite data into MongoDB without deleting or overwriting data."""
 
+# ruff: noqa: E402
+
 import json
 import os
 import sqlite3
@@ -10,9 +12,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-from database import SQLITE_DB_PATH, format_beijing_datetime, get_db, init_db, sync_all_counters
+from backend.db.connection import get_db, init_db
+from backend.db.constants import SQLITE_DB_PATH
+from backend.db.counters import sync_all_counters
+from backend.db.datetime import format_beijing_datetime
 
 TABLES = ["users", "cases", "reviews", "versions", "deployments"]
 
@@ -45,7 +53,9 @@ def has_table(conn: sqlite3.Connection, table_name: str) -> bool:
 def fetch_rows(conn: sqlite3.Connection, table_name: str) -> list[dict]:
     if not has_table(conn, table_name):
         return []
-    return [dict(row) for row in conn.execute(f"SELECT * FROM {table_name}")]
+    if table_name not in TABLES:
+        raise ValueError(f"Unsupported migration table: {table_name}")
+    return [dict(row) for row in conn.execute(f"SELECT * FROM {table_name}")]  # nosec B608
 
 
 def parse_datetime(value: Any) -> datetime | None:

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Read-only MongoDB smoke checks for the case library."""
 
+# ruff: noqa: E402
+
 import sys
 from pathlib import Path
 from pprint import pprint
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-from database import get_all_cases, get_db, get_mongo_client, serialize_case
+from backend.app.domains.cases.serializers import serialize_case
+from backend.db.connection import get_db, get_mongo_client
+from backend.repositories.cases import get_all_cases
 
 COLLECTIONS = ["users", "cases", "reviews", "versions", "deployments"]
 

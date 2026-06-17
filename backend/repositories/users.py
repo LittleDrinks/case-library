@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import bcrypt
-from db.connection import get_db
-from db.counters import _insert_with_generated_id, sync_counter
-from db.datetime import _normalize_datetime_fields
-from db.validators import (
+from pymongo import ASCENDING
+from pymongo.errors import DuplicateKeyError
+
+from backend.app.domains.cases.serializers import serialize_doc
+from backend.db.connection import get_db
+from backend.db.counters import _insert_with_generated_id, sync_counter
+from backend.db.datetime import _normalize_datetime_fields
+from backend.db.validators import (
     _normalize_token_version,
     _normalize_user_role,
     _now,
     _validate_user_role,
     _validate_user_status,
 )
-from pymongo import ASCENDING
-from pymongo.errors import DuplicateKeyError
-from serializers import serialize_doc
 
 
 def _serialize_user_doc(user: dict | None) -> dict | None:
@@ -64,7 +65,7 @@ def create_user(
         "nickname": nickname,
         "must_change_password": bool(must_change_password),
         "status": status,
-        "token_version": 0,
+        "token_version": 0,  # nosec B105
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -74,7 +75,7 @@ def create_user(
         raise ValueError(f"Username already exists: {username}") from exc
 
 def get_users_count() -> int:
-    return get_db().users.count_documents({})
+    return int(get_db().users.count_documents({}))
 
 def serialize_user_public(user: dict | None) -> dict | None:
     serialized = _serialize_user_doc(user)
@@ -86,7 +87,7 @@ def serialize_user_public(user: dict | None) -> dict | None:
 
 def list_users() -> list[dict]:
     cursor = get_db().users.find({}).sort("username", ASCENDING)
-    return [serialize_user_public(user) for user in cursor]
+    return [serialized for user in cursor if (serialized := serialize_user_public(user)) is not None]
 
 def authenticate_user(username: str, password: str) -> dict | None:
     user = get_db().users.find_one({"username": username})
@@ -109,10 +110,10 @@ def set_user_password(username: str, new_password: str, must_change_password: bo
                     "updated_at": _now(),
                 }
             ),
-            "$inc": {"token_version": 1},
+            "$inc": {"token_version": 1},  # nosec B105
         },
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 def change_user_password(username: str, old_password: str, new_password: str) -> bool:
     user = get_db().users.find_one({"username": username, "status": "active"})
@@ -124,14 +125,14 @@ def change_user_password(username: str, old_password: str, new_password: str) ->
             "$set": _normalize_datetime_fields(
                 {
                     "password": hash_password(new_password),
-                    "must_change_password": False,
+                    "must_change_password": False,  # nosec B105
                     "updated_at": _now(),
                 }
             ),
-            "$inc": {"token_version": 1},
+            "$inc": {"token_version": 1},  # nosec B105
         },
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 def update_user_fields(
     username: str,
@@ -158,7 +159,7 @@ def update_user_fields(
     result = get_db().users.update_one(
         {"username": username}, {"$set": _normalize_datetime_fields(updates)}
     )
-    return result.matched_count > 0 and result.modified_count > 0
+    return bool(result.matched_count > 0 and result.modified_count > 0)
 
 def rename_user(old_username: str, new_username: str) -> bool:
     if not old_username or not new_username:
@@ -168,13 +169,13 @@ def rename_user(old_username: str, new_username: str) -> bool:
             {"username": old_username},
             {"$set": _normalize_datetime_fields({"username": new_username, "updated_at": _now()})},
         )
-        return result.matched_count > 0 and result.modified_count > 0
+        return bool(result.matched_count > 0 and result.modified_count > 0)
     except DuplicateKeyError as exc:
         raise ValueError(f"Username already exists: {new_username}") from exc
 
 def delete_user(username: str) -> bool:
     result = get_db().users.delete_one({"username": username})
-    return result.deleted_count > 0
+    return bool(result.deleted_count > 0)
 
 def clear_users() -> int:
     result = get_db().users.delete_many({})

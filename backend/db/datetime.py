@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from db.constants import BEIJING_TZ, DATETIME_FIELDS
+from backend.db.constants import BEIJING_TZ, DATETIME_FIELDS
 
 
 def normalize_to_beijing_datetime(value: Any) -> Any:
@@ -28,15 +28,18 @@ def normalize_to_beijing_datetime(value: Any) -> Any:
         try:
             parsed = datetime.fromisoformat(parse_text)
         except ValueError:
+            parsed = None
             for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
                 try:
                     parsed = datetime.strptime(text, fmt)
                     break
                 except ValueError:
-                    parsed = None
+                    continue
             if parsed is None:
                 return value
 
+        if parsed is None:
+            return value
         if parsed.tzinfo is not None and parsed.utcoffset() is not None:
             return normalize_to_beijing_datetime(parsed)
         return parsed.replace(tzinfo=None)

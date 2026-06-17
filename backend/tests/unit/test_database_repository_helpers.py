@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Unit checks for database compatibility exports and repository helpers."""
+"""Unit checks for database repository helpers."""
+
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -8,13 +10,17 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
-os.environ["MONGODB_DB_NAME"] = f"case_library_repo_unit_{uuid4().hex[:8]}"
+os.environ["MONGODB_DB_NAME"] = f"case_library_test_repo_unit_{uuid4().hex[:8]}"
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-import database
-from db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS
-from repositories import cases, users
+from backend.db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS
+from backend.db.transactions import multi_collection_write
+from backend.repositories import cases, users
+from backend.services import abuse
 
 
 class _FakeUsers:
@@ -172,14 +178,11 @@ def test_case_list_filter_author_alias_status_hidden_and_deleted():
     assert fake_db.users.queries == [{"username": "alice"}]
 
 
-def test_database_compat_exports_case_filter_and_keyword_diff_helpers():
-    assert database._case_list_filter is cases._case_list_filter
-    assert database._values_differ is cases._values_differ
-
+def test_case_filter_and_keyword_diff_helpers():
     current = {"keywords": ["劳动", "", "思政"]}
-    assert not database._values_differ("keywords", current, '["劳动", "思政"]')
-    assert database._values_differ("keywords", current, ["劳动", "法治"])
-    assert database._values_differ("title", {"title": "旧标题"}, "新标题")
+    assert not cases._values_differ("keywords", current, '["劳动", "思政"]')
+    assert cases._values_differ("keywords", current, ["劳动", "法治"])
+    assert cases._values_differ("title", {"title": "旧标题"}, "新标题")
 
 
 def test_case_lists_use_projection_and_omit_large_fields():
@@ -261,7 +264,7 @@ def test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets():
         "token_version": "bad",
     }
 
-    serialized = database._serialize_user_doc(raw_user)
+    serialized = users._serialize_user_doc(raw_user)
     assert serialized is not None
     assert serialized["role"] == "normal"
     assert serialized["nickname"] == ""
@@ -270,7 +273,7 @@ def test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets():
     assert serialized["token_version"] == 0
     assert serialized["password"] == password_hash
 
-    public_user = database.serialize_user_public(raw_user)
+    public_user = users.serialize_user_public(raw_user)
     assert public_user is not None
     assert public_user["username"] == "alice"
     assert "password" not in public_user
@@ -278,17 +281,62 @@ def test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets():
 
 
 def test_verify_password_returns_false_for_bad_hashes():
-    assert database.verify_password("password123", "not-a-bcrypt-hash") is False
-    assert database.verify_password("", users.hash_password("password123")) is False
-    assert database.verify_password("password123", "") is False
+    assert users.verify_password("password123", "not-a-bcrypt-hash") is False
+    assert users.verify_password("", users.hash_password("password123")) is False
+    assert users.verify_password("password123", "") is False
+
+
+def test_multi_collection_write_runs_compensations_on_error_in_reverse_order():
+    events = []
+    try:
+        with multi_collection_write("unit-test") as scope:
+            scope.compensate_with(lambda: events.append("first"))
+            scope.compensate_with(lambda: events.append("second"))
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+
+    assert events == ["second", "first"]
+
+    with multi_collection_write("unit-test-commit") as scope:
+        scope.compensate_with(lambda: events.append("committed"))
+    assert events == ["second", "first"]
+
+
+def test_public_interaction_identity_hashes_request_headers_without_secrets():
+    identity = abuse.public_interaction_identity(
+        headers={
+            "X-Forwarded-For": "203.0.113.10, 10.0.0.1",
+            "User-Agent": "unit-test",
+        }
+    )
+    assert identity.source == "request"
+    assert identity.key != "203.0.113.10|unit-test"
+    assert len(identity.key) == 64
+
+    assert abuse.public_interaction_identity(headers={}).key == "anonymous"
+
+
+def test_public_interaction_rate_limiter_defaults_to_permissive_and_can_block():
+    identity = abuse.PublicInteractionIdentity("unit")
+    limiter = abuse.FixedWindowRateLimiter()
+    assert limiter.allow("case.like", identity)
+    assert limiter.allow("case.like", identity)
+
+    limiter = abuse.FixedWindowRateLimiter(max_events=1, window_seconds=60)
+    assert limiter.allow("case.like", identity)
+    assert not limiter.allow("case.like", identity)
 
 
 def main() -> None:
     test_case_list_filter_author_alias_status_hidden_and_deleted()
-    test_database_compat_exports_case_filter_and_keyword_diff_helpers()
+    test_case_filter_and_keyword_diff_helpers()
     test_case_lists_use_projection_and_omit_large_fields()
     test_serialize_user_doc_normalizes_defaults_but_public_hides_secrets()
     test_verify_password_returns_false_for_bad_hashes()
+    test_multi_collection_write_runs_compensations_on_error_in_reverse_order()
+    test_public_interaction_identity_hashes_request_headers_without_secrets()
+    test_public_interaction_rate_limiter_defaults_to_permissive_and_can_block()
     print("database repository helper unit checks passed")
 
 

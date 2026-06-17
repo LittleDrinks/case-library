@@ -5,7 +5,7 @@ from __future__ import annotations
 from pymongo import ASCENDING, DESCENDING, TEXT, MongoClient
 from pymongo.errors import ServerSelectionTimeoutError
 
-from db.constants import MONGODB_DB_NAME, MONGODB_TIMEOUT_MS, MONGODB_URI
+from backend.db.constants import MONGODB_DB_NAME, MONGODB_TIMEOUT_MS, MONGODB_URI
 
 _client: MongoClient | None = None
 
@@ -25,9 +25,8 @@ def get_db():
 
 def init_db():
     """Initialize MongoDB indexes. This never drops data."""
-    from repositories.cases import backfill_owner_username
-
-    from db.counters import sync_all_counters
+    from backend.db.counters import sync_all_counters
+    from backend.repositories.cases import backfill_owner_username
 
     try:
         client = get_mongo_client()
@@ -43,7 +42,7 @@ def init_db():
     db.users.create_index([("username", ASCENDING)], unique=True)
     db.users.create_index([("role", ASCENDING), ("status", ASCENDING)])
     token_repair = db.users.update_many(
-        {"token_version": {"$exists": False}}, {"$set": {"token_version": 0}}
+        {"token_version": {"$exists": False}}, {"$set": {"token_version": 0}}  # nosec B105
     )
     if token_repair.modified_count:
         print(f"Backfilled token_version on {token_repair.modified_count} legacy user(s)")

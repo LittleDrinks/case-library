@@ -16,6 +16,7 @@ export default {
   projects: [
     {
       name: "chromium-desktop",
+      testIgnore: [],
       use: {
         browserName: "chromium",
         viewport: { width: 1280, height: 720 },
@@ -24,6 +25,7 @@ export default {
     },
     {
       name: "chromium-mobile",
+      testIgnore: ["**/audit.spec.js", "**/demo-media.spec.js"],
       use: {
         browserName: "chromium",
         viewport: { width: 375, height: 667 },

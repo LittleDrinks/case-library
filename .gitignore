@@ -54,6 +54,7 @@ agent-prompts/
 data/
 
 # Generated reports and local artifacts
+coverage.xml
 E2E-TEST-REPORT.md
 start.sh
 test-results/

@@ -2,26 +2,29 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from threading import RLock
-from typing import Any
+from typing import Any, cast
 
-from db.connection import get_db
-from db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS, STATISTICS_CACHE_TTL_SECONDS
-from db.validators import _bounded_limit, _validate_case_status
 from pymongo import DESCENDING
-from serializers import (
+
+from backend.app.domains.cases.serializers import (
     _public_case_fields,
     serialize_case,
     serialize_public_case,
     serialize_version,
 )
+from backend.db.connection import get_db
+from backend.db.constants import PUBLIC_REVIEW_SNAPSHOT_FIELDS, STATISTICS_CACHE_TTL_SECONDS
+from backend.db.validators import _bounded_limit, _validate_case_status
+from backend.services.cache import invalidate_public_read_caches, public_read_cache
 
 _statistics_cache: dict[str, Any] = {"expires_at": None, "data": None}
 _statistics_cache_lock = RLock()
+_STATISTICS_CACHE_KEY = "statistics"
 
 def invalidate_statistics_cache() -> None:
+    invalidate_public_read_caches("statistics")
     with _statistics_cache_lock:
         _statistics_cache["expires_at"] = None
         _statistics_cache["data"] = None
@@ -251,7 +254,7 @@ def filter_cases(
     )
 
 def get_recommendation_candidates(case_id: int, limit: int = 5) -> list[dict]:
-    from repositories.cases import get_case
+    from backend.repositories.cases import get_case
 
     current_case = serialize_public_case(get_case(case_id))
     if not current_case:
@@ -290,7 +293,15 @@ def get_statistics() -> dict:
         cached = _statistics_cache.get("data")
         expires_at = _statistics_cache.get("expires_at")
         if cached is not None and isinstance(expires_at, datetime) and expires_at > now:
-            return json.loads(json.dumps(cached))
+            cached_copy = public_read_cache.get(_STATISTICS_CACHE_KEY) or cached
+            return cast(
+                dict,
+                public_read_cache.set(
+                    _STATISTICS_CACHE_KEY,
+                    cached_copy,
+                    STATISTICS_CACHE_TTL_SECONDS,
+                ),
+            )
 
         public_cases = _public_query_cases()
 
@@ -311,6 +322,13 @@ def get_statistics() -> dict:
 
         stats["total_views"] = total_views
         stats["total_likes"] = total_likes
-        _statistics_cache["data"] = json.loads(json.dumps(stats))
-        _statistics_cache["expires_at"] = now + timedelta(seconds=max(0, STATISTICS_CACHE_TTL_SECONDS))
-        return stats
+        cached_stats = public_read_cache.set(
+            _STATISTICS_CACHE_KEY,
+            stats,
+            STATISTICS_CACHE_TTL_SECONDS,
+        )
+        _statistics_cache["data"] = cached_stats
+        _statistics_cache["expires_at"] = now + timedelta(
+            seconds=max(0, STATISTICS_CACHE_TTL_SECONDS)
+        )
+        return cast(dict, cached_stats)

@@ -40,29 +40,72 @@ docker compose up -d --build
 docker compose ps
 docker compose logs -f
 docker compose run --rm app make check
+docker compose run --rm app make test-backend-unit
+docker compose run --rm app make test-backend-integration
+docker compose run --rm app make test-frontend-unit
+docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e npm run test:e2e:mock
+docker compose run --rm app make openapi-smoke
+docker compose run --rm app make cov
 docker compose config --quiet
+docker compose -f docker-compose.dev.yml --profile e2e config --quiet
 docker compose down
 ```
 
 允许在宿主机执行的操作仅限于：git、文档编辑、文件搜索、网络诊断、Docker/Compose
 控制命令。所有项目运行、依赖安装、lint、测试、构建都必须在容器内完成。
 
+后端 canonical ASGI 入口是 `backend.app.main:app`。旧 top-level main 兼容入口已移除；
+新增运行命令、部署配置和文档必须使用 `backend.app.main:app`。
+
 ## 测试布局第一阶段
 
-后端测试脚本已经迁入 `backend/tests/` 第一阶段布局，`Makefile` 直接调用新路径。旧
+后端测试脚本已经迁入 `backend/tests/` 第一阶段布局，`pyproject.toml` 的 pytest
+发现路径固定为 `backend/tests/`，`Makefile` 直接调用新路径。旧
 `backend/test_*.py` 和 `backend/smoke_test_mongo.py` 兼容入口已移除，后续新命令和文档
 必须使用 `backend/tests/` 下的规范路径。
 
-- `backend/tests/unit/test_contract_helpers.py`：后端单元脚本，只覆盖不需要启动 FastAPI 或真实 MongoDB
-  流程的 contract helper。当前范围包括段落拆分、段落批注规范化、AI review summary 规范化、
+- `backend/tests/unit/test_contract_helpers.py`：后端 pure contract 单元脚本，只覆盖不需要启动
+  FastAPI 或真实 MongoDB 流程的 contract helper。当前范围包括段落拆分、段落批注规范化、AI review summary 规范化、
   公开案例字段白名单和 reviewed version 公开快照行为。
 - `backend/tests/unit/test_prompt_injection.py`：产品 prompt/template 的注入边界检查。
+- `backend/tests/unit/test_public_search_helpers.py`：公开检索、过滤、推荐、热门、最新和公开读缓存
+  seam 的单元检查。
+- `backend/tests/unit/test_database_repository_helpers.py`：repository helper、多集合写入补偿边界、
+  公开浏览/点赞类写入匿名身份和限流 seam 的单元检查。
 - `backend/tests/integration/test_submit_flow.py`：后端集成门禁，继续覆盖登录改密、提交审核、AI/人工批注版本、
   作者/管理员权限、隐藏/公开可见性、公开搜索/推荐/统计缓存等主流程，不用单元测试替代。
 - `backend/tests/smoke/smoke_test_mongo.py`：本地 MongoDB smoke/debug 脚本，不属于 `make check`
   默认门禁，由 `make smoke` 调用。
 - `frontend/tests/smoke.spec.js`、`frontend/tests/audit.spec.js`、`frontend/tests/demo-media.spec.js`：
   浏览器 E2E/baseline 验收；`frontend/tests/support/*` 只放浏览器测试辅助函数。
+
+### 本地和 CI 质量门禁
+
+`make check` 当前聚合后端 lint、后端单元、后端集成、前端单元和前端 build。CI 会进一步
+显式拆分执行以下门禁，便于定位失败原因：
+
+- `make test-backend-unit`：只跑 `backend/tests/unit`。pure contract 用例避免真实 MongoDB；
+  repository/service unit gate 依赖 compose MongoDB，并在隔离测试数据库中清理数据；默认排除
+  `real_ai` marker，避免常规门禁出现真实供应商依赖或跳过噪音。
+- `make test-backend-integration`：只跑 `backend/tests/integration`，依赖隔离的测试数据库和
+  compose MongoDB。
+- `make test-frontend-unit`：在 `frontend/` 内安装依赖并运行 Vitest 单元测试。
+- `make test-e2e-mock` / `npm run test:e2e:mock`：使用 dev compose e2e profile，运行 mock AI
+  的稳定 Playwright 回归；该入口在 e2e 容器内执行，只跑不依赖 Docker CLI 的 spec。
+- `make openapi-smoke`：直接验证 OpenAPI 关键 path、schema 和 bearer security scheme。
+- `make cov`：生成 `coverage.xml` 和 `htmlcov/`，并以 30% 作为当前后端 rewrite 的 measured
+  non-regression floor。提高覆盖后应同步上调阈值。
+- `docker compose config --quiet` 和
+  `docker compose -f docker-compose.dev.yml --profile e2e config --quiet`：验证默认和 e2e profile
+  compose 配置。
+
+Playwright 的 viewport 差异优先用 project 级过滤表达。`frontend/playwright.config.mjs` 已让
+`audit.spec.js`、`demo-media.spec.js` 只在桌面 project 调度；测试内的 viewport skip 仅用于
+`smoke.spec.js` 中明确的 mobile-only/desktop-only 断言。
+
+真实 AI 连通性只允许通过 `Real AI Smoke` 手动 workflow 或受控本地环境 opt-in。该路径必须
+使用环境变量/Actions secrets 传入 `AI_BASE_URL`、`AI_API_KEY` 和模型名，不得打印 key、base URL、
+prompt 或用户材料；测试内容只能使用合成样例。
 
 ## 前端依赖异常
 
@@ -104,8 +147,63 @@ make dev-seed
 该账号不会触发强制改密弹窗。生产或默认初始化账号仍由 `backend/scripts/init_users.py`
 创建，并保持首次登录强制改密。
 
+## 后台用户导入
+
+学校统一身份认证接入前，如需批量开通用户，使用离线后台脚本导入 CSV/XLSX；不要开放
+自助注册入口。所有命令必须在容器内执行：
+
+```bash
+docker compose run --rm app python backend/scripts/account_admin.py import-users \
+  --file /app/tmp/users.csv \
+  --dry-run
+```
+
+导入文件支持 `.csv` 和 `.xlsx`，第一行必须是表头。当前用户 schema 会落库：
+`username`、`role`、`nickname`、`must_change_password`、`status` 和密码哈希。支持列：
+
+- `username` 或 `school_id`：必填其一；`school_id` 会作为临时登录用户名。
+- `nickname`、`display_name` 或 `name`：必填其一；落库到 `nickname`。
+- `role`：必填，允许 `normal`、`admin`，兼容 `user` 并归一为 `normal`。
+- `password`：可选；为空时默认生成临时密码但不打印。
+- `must_change_password`：可选，默认 `true`。
+- `status`：可选，默认 `active`，允许 `active`、`no_active`。
+- `department`、`class`、`organization`：可放在表中用于过渡资料核对；当前 users schema
+  不存储这些列，导入时会提示忽略。
+
+建议先执行 dry-run。dry-run 会校验表头、必填字段、角色、状态、文件内重复用户名，以及
+数据库中已存在的用户名，只输出汇总和逐行错误，不写入数据库。正式导入去掉 `--dry-run`。
+如果任一行存在校验错误，脚本会退出非零且不创建有效行，避免半批次导入：
+
+```bash
+docker compose run --rm app python backend/scripts/account_admin.py import-users \
+  --file /app/tmp/users.xlsx
+```
+
+如不希望脚本生成临时密码，可要求缺失密码时报错：
+
+```bash
+docker compose run --rm app python backend/scripts/account_admin.py import-users \
+  --file /app/tmp/users.csv \
+  --missing-password error
+```
+
+也可通过环境变量提供同一个临时密码，脚本不会打印该值：
+
+```bash
+export IMPORT_DEFAULT_PASSWORD='change-me-strong'
+docker compose run --rm -e IMPORT_DEFAULT_PASSWORD app \
+  python backend/scripts/account_admin.py import-users \
+  --file /app/tmp/users.csv \
+  --default-password-env IMPORT_DEFAULT_PASSWORD
+unset IMPORT_DEFAULT_PASSWORD
+```
+
+不要提交真实用户表、真实学工号、默认密码或导入结果。若导入时生成了临时密码，脚本只会
+提示数量，不会输出密码；运营侧应通过 `reset-password` 或后续统一身份认证流程完成凭据发放。
+
 容器化 E2E 入口使用同一套 dev compose seed 路径，只运行不依赖宿主机 Docker 的
-`frontend/tests/audit.spec.js`：
+`frontend/tests/audit.spec.js`。`frontend/tests/smoke.spec.js` 会调用 `docker compose exec`
+创建临时账号，必须通过下面的宿主机 smoke 入口运行：
 
 ```bash
 make dev-e2e

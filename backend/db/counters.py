@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pymongo import DESCENDING, ReturnDocument
 
-from db.connection import get_db
-from db.constants import COUNTER_COLLECTIONS
-from db.datetime import _normalize_datetime_fields
+from backend.db.connection import get_db
+from backend.db.constants import COUNTER_COLLECTIONS
+from backend.db.datetime import _normalize_datetime_fields
 
 
 def _max_legacy_id(collection_name: str) -> int:

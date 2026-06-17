@@ -55,4 +55,4 @@ COPY pyproject.toml ./
 
 EXPOSE 8001
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8001"]

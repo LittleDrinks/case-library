@@ -84,9 +84,10 @@ body {
 }
 
 .header-inner {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 28px;
+  column-gap: 28px;
   width: 100%;
   max-width: none;
   margin: 0 auto;
@@ -98,43 +99,26 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
   flex-shrink: 0;
+  grid-column: 1;
+  justify-self: start;
+  max-width: 100%;
 }
 
 .brand-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--color-brand);
-  color: #fff;
-}
-
-.logo-shu {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 1px;
+  display: block;
+  width: clamp(132px, 16vw, 182px);
+  height: auto;
+  flex: 0 0 auto;
 }
 
 .brand-text {
   display: flex;
   align-items: baseline;
-  gap: 28px;
   min-width: 0;
-}
-
-.brand-university {
-  display: block;
-  max-width: 94px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-brand);
-  letter-spacing: 0;
-  line-height: 1.1;
+  flex: 0 1 auto;
 }
 
 .brand-wordmark {
@@ -167,7 +151,8 @@ body {
   align-items: center;
   gap: 6px;
   justify-content: center;
-  flex: 1 1 auto;
+  grid-column: 2;
+  justify-self: center;
 }
 
 .nav-link {
@@ -213,6 +198,9 @@ body {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
 }
 
 .btn-login {
@@ -339,6 +327,41 @@ button {
 }
 
 /* Responsive */
+@media (max-width: 1180px) {
+  .header-inner {
+    padding: 0 28px;
+    column-gap: 18px;
+  }
+
+  .brand {
+    gap: 12px;
+  }
+
+  .brand-logo {
+    width: clamp(128px, 14vw, 160px);
+  }
+
+  .brand-wordmark {
+    gap: 6px;
+  }
+
+  .wordmark-red {
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
+
+  .wordmark-black {
+    font-size: 17px;
+    letter-spacing: 0;
+  }
+}
+
+@media (max-width: 1040px) {
+  .brand-text {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .header-inner {
     display: flex;
@@ -378,8 +401,12 @@ button {
     gap: 8px;
   }
 
-  .brand-university {
-    display: none;
+  .brand {
+    gap: 10px;
+  }
+
+  .brand-logo {
+    width: 120px;
   }
 
   .wordmark-red {
@@ -449,12 +476,7 @@ button {
   }
 
   .brand-logo {
-    width: 36px;
-    height: 36px;
-  }
-
-  .logo-shu {
-    font-size: 14px;
+    width: 110px;
   }
 
   .wordmark-red {

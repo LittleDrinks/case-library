@@ -21,7 +21,7 @@ AI 约束见 `docs/ai.md`。
 - `backend/`：FastAPI、MongoDB 数据层、账号脚本、迁移和 smoke 脚本。
 - `frontend/`：Vue 3 + Vite 单页 alpha 前端，使用 hash 视图切换；顶层视图使用
   `defineAsyncComponent` 懒加载，构建时保留独立 `vendor` chunk。
-- `product_prompts/`：思政案例提示词、模板、分类规则和评测样例，是产品领域资产；
+- `prompts/`：思政案例提示词、模板、分类规则和评测样例，是产品领域资产；
   不再使用根目录 `skills/`，避免与 `.codex/skills` 等代理技能目录混淆。
 - `docs/`：项目、产品、API、AI、开发和质量文档。
 - `docs/design/`：已跟踪的创建案例视觉参考图。
@@ -35,16 +35,30 @@ AI 约束见 `docs/ai.md`。
 `backend/scripts/`。
 第一阶段布局：
 
-- 运行模块：`main.py`、`database.py`、`schemas.py`、`ai_client.py`、
-  `case_processor.py`、`search_engine.py`。`database.py` 是兼容导出层；Mongo 连接、计数器、
-  校验、序列化和 repository helper 分别位于 `backend/db/`、`backend/serializers.py` 和
-  `backend/repositories/`。
-- Prompt runtime：`product_prompts/runtime/` 保存运行时产品 prompt 元数据、配置和
-  markdown body；`backend/prompt_registry/` 仅作为加载器和兼容 API，提供稳定 prompt ID、
-  数据结构和查询入口；`backend/prompts.py` 仅保留兼容导出。`/api/prompts` 只返回元数据，
-  不返回 prompt body。
-- `backend/services/`：业务 helper 归属；当前包含无数据库副作用的 review helper，以及公开检索、
-  推荐、最新/热门和统计缓存 helper，`backend/database.py` 保留同名兼容导出。
+- 运行入口：`backend/app/main.py` 是唯一 canonical FastAPI app，Compose、Dockerfile 和
+  `make run` 使用 `backend.app.main:app`。旧 top-level main 兼容入口已移除；测试和脚本
+  必须使用 `backend.app.main` 或更具体的 canonical 模块。
+- API 装配：`backend/app/api/router.py` 聚合 API 路由；`backend/app/api/routes/` 是 canonical
+  route 实现。旧 `backend/routers/` 兼容导出已移除。
+- 核心和数据边界：`backend/app/core/` 保存认证与 FastAPI dependency helper；
+  `backend/app/db/database.py` 聚合 canonical db/repository/service 导出。旧 top-level
+  database 兼容导出已移除；
+  Mongo 连接、计数器、校验和 repository helper 分别位于 `backend/db/` 和
+  `backend/repositories/`；case serializer 实现位于 `backend/app/domains/cases/serializers.py`，
+  旧 `backend/serializers.py` 兼容导出已移除。
+- 其他运行模块：`backend/app/domains/*/schemas.py` 保存 domain schema 定义，
+  旧 `backend/schemas.py` 兼容导出已移除；`backend/app/domains/cases/processing.py` 保存
+  `auto_process` 案例处理 helper，`backend/app/domains/public/service.py` 保存公开搜索 facade。
+- Prompt runtime：`prompts/runtime/` 保存运行时产品 prompt 元数据、配置和
+  markdown body；`backend/app/domains/ai/prompts/` 作为 AI domain 内部加载器和查询 API，提供稳定 prompt ID、
+  数据结构和查询入口。`/api/prompts` 只返回元数据，不返回 prompt body。
+  `prompts/runtime/prompts.json` 中的 `asset_id` 映射到
+  `prompts/runtime/<asset_id>/` prompt body 目录；`prompts/case-writing/` 保存长文模板和参考材料，
+  `prompts/classification/` 保存分类器规则。
+- `backend/services/`：业务 helper 归属；当前包含公开检索、推荐、最新/热门和统计缓存 helper，
+  公开读缓存 seam，以及公开浏览/点赞类写入的身份和限流 seam。
+- `backend/db/transactions.py`：跨 cases、versions、reviews 的多集合写入边界；当前使用
+  best-effort compensation helper，保持现有 Mongo 部署兼容。
 - Compose 启动账号初始化：`backend/scripts/init_users.py`
 - 管理员账号工具：`backend/scripts/account_admin.py`
 - 演示数据脚本：`backend/scripts/demo.py`
@@ -54,9 +68,11 @@ AI 约束见 `docs/ai.md`。
 - 单元脚本：`backend/tests/unit/test_contract_helpers.py` 覆盖纯 contract helper，如段落拆分、段落批注
   规范化、AI review summary 规范化和公开案例快照序列化白名单。
 - 单元脚本：`backend/tests/unit/test_prompt_injection.py` 覆盖产品 prompt/template 的注入边界。
-- 单元脚本：`backend/tests/unit/test_public_search_helpers.py` 覆盖公开检索、过滤、推荐、热门和最新 helper。
+- 单元脚本：`backend/tests/unit/test_public_search_helpers.py` 覆盖公开检索、过滤、推荐、热门、最新和
+  公开读缓存 helper。
 - 单元脚本：`backend/tests/unit/test_security_dependencies.py` 覆盖认证、权限和依赖装配 helper。
-- 单元脚本：`backend/tests/unit/test_database_repository_helpers.py` 覆盖数据库 repository helper。
+- 单元脚本：`backend/tests/unit/test_database_repository_helpers.py` 覆盖数据库 repository helper、
+  多集合写入补偿边界和公开交互反滥用 seam。
 - 集成检查：`backend/tests/integration/test_submit_flow.py`，由 `make check` 调用，仍作为提交、
   AI/人工审核、权限、公开可见性和统计缓存主流程的回归门禁。
 - 旧兼容入口：`backend/test_contract_helpers.py`、`backend/test_prompt_injection.py`、
@@ -71,12 +87,14 @@ AI 约束见 `docs/ai.md`。
 该 seed 中的演示管理员 `10000002` 为便于浏览器验收不强制改密，不代表生产默认账号策略。
 不要把真实账号、真实密码或生产种子数据写入这些脚本。
 
-`/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；变更时需同步
-后端测试、前端 fallback 和文档。产品 prompt/template 资产已迁入 `product_prompts/`；
-后续若做统一 prompt 管理，应继续以 `product_prompts/runtime/` 管理运行时 prompt
-元数据、配置和 markdown body，并以 `backend/prompt_registry/` 提供的稳定 ID 为 API
+`/api/constants` 的类型、主题和状态标签是当前 alpha 前后端共享默认值；API-facing 常量集中在
+`backend/app/shared/constants.py`，变更时需同步后端测试、前端 fallback 和文档。
+产品 prompt/template 资产已迁入 `prompts/`；
+后续若做统一 prompt 管理，应继续以 `prompts/runtime/` 管理运行时 prompt
+元数据、配置和 markdown body，并以 `backend/app/domains/ai/prompts/` 提供的稳定 ID 为 API
 契约，不要把 `.codex/` 代理技能混入产品资产。issue #80 的完整自动评测 harness 尚未
-落地，当前仅保留 `product_prompts/anlibianxie/evals/evals.json` 样例和注入边界测试。
+落地，当前仅保留 `prompts/case-writing/evals/evals.json` 样例、`prompts/runtime/evals/`
+运行时 fixture 和注入边界测试。
 
 历史目录、备份目录或其他项目目录只能作为只读参考；不从中开发，不整目录复制。
 
@@ -121,7 +139,22 @@ AI 约束见 `docs/ai.md`。
 
 ## 质量门禁
 
-实现或脚手架变更完成前，在容器内运行：
+后端测试发现由 `pyproject.toml` 指向 `backend/tests/`，不再依赖根目录 `tests/` 或逐个
+执行脚本的 fallback。当前架构回归矩阵：
+
+| 层级 | 本地入口 | CI 入口 | 覆盖重点 |
+| --- | --- | --- | --- |
+| 后端 lint | `make lint` | `make lint` | `backend/` ruff 规则 |
+| 后端单元 | `make test-backend-unit` | `make test-backend-unit` | contract、prompt 注入、公开检索、权限、repository 和 AI service seam；repository/service seam 使用 compose MongoDB，默认排除 `real_ai` |
+| 后端集成 | `make test-backend-integration` | `make test-backend-integration` | 登录、提交、审核、公开可见性、统计缓存和 OpenAPI 文档主流程 |
+| 前端单元 | `make test-frontend-unit` | `make test-frontend-unit` | Vue draft/split helper 单元行为 |
+| Mock E2E | `make test-e2e-mock` | `npm run test:e2e:mock` in e2e profile | dev seed + mock AI 的稳定浏览器回归；容器内只跑不依赖 Docker CLI 的 spec |
+| OpenAPI smoke | `make openapi-smoke` | `make openapi-smoke` | `/docs`、`/openapi.json`、关键 path/schema/security scheme |
+| 覆盖率 | `make cov` | `make cov` + artifact | `coverage.xml`、`htmlcov/`，当前非回退阈值为 30% |
+| Compose 配置 | `docker compose config --quiet` / dev e2e config | 同左 | 默认 compose 和 dev e2e profile 可解析 |
+| 真实 AI smoke | 手动 workflow 或受控本地环境 | `Real AI Smoke` 手动 opt-in | 使用密钥环境变量调用真实供应商，不打印 key、base URL 或 prompt |
+
+实现或脚手架变更完成前，在容器内运行与变更相称的门禁；完整本地门禁为：
 
 ```bash
 docker compose up -d --build
@@ -129,7 +162,10 @@ curl -fsS http://127.0.0.1:8001/api/constants
 curl -fsS http://127.0.0.1:18080/
 docker compose ps
 docker compose run --rm app make check
+docker compose run --rm app make openapi-smoke
+docker compose run --rm app make cov
 docker compose config --quiet
+docker compose -f docker-compose.dev.yml --profile e2e config --quiet
 git diff --check
 ```
 

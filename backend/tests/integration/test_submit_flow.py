@@ -1,33 +1,37 @@
 #!/usr/bin/env python3
 """Executable submit-flow safety checks."""
 
+# ruff: noqa: E402
+
 import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
-os.environ["MONGODB_DB_NAME"] = f"case_library_submit_flow_test_{uuid4().hex}"
+os.environ["MONGODB_DB_NAME"] = f"case_library_test_submit_flow_{uuid4().hex}"
 os.environ["CORS_ALLOW_ORIGINS"] = "http://127.0.0.1:18080,http://localhost:18080"
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-import main
-import services.public as public_service
-from database import (
+from fastapi.testclient import TestClient
+
+import backend.app.main as main
+import backend.services.public as public_service
+from backend.db.connection import get_db, get_mongo_client
+from backend.repositories.cases import (
     create_case,
-    create_user,
     get_case,
-    get_db,
-    get_mongo_client,
-    get_statistics,
-    get_user_by_username,
     increment_like_count,
-    invalidate_statistics_cache,
     update_case,
 )
-from fastapi.testclient import TestClient
+from backend.repositories.users import create_user, get_user_by_username
+from backend.services.public import get_statistics, invalidate_statistics_cache
 
 client = TestClient(main.app)
 
@@ -140,6 +144,14 @@ def assert_openapi_documented() -> None:
     assert "alpha_paragraph_review" in ai_review_examples
     assert paths["/api/cases"]["post"].get("security") == [{"HTTPBearer": []}]
     assert paths["/api/reviews/{case_id}"]["post"].get("security") == [{"HTTPBearer": []}]
+
+
+def test_openapi_smoke() -> None:
+    assert_openapi_documented()
+
+
+def test_submit_flow_regressions() -> None:
+    main_test()
 
 
 def assert_cors_is_not_wildcard_with_credentials() -> None:
@@ -1046,7 +1058,7 @@ def main_test() -> None:
                 }
             ]
 
-        public_service._public_query_cases = fake_public_query_cases
+        public_service._public_query_cases = cast(Any, fake_public_query_cases)
         first_stats = get_statistics()
         second_stats = get_statistics()
         assert query_calls["count"] == 1
@@ -1453,6 +1465,18 @@ def main_test() -> None:
         assert revision_version["content"] == "第一段说明案例背景。\n第二段已经补充来源支撑。"
         assert revision_version["source_material"] == "来源材料：学院新闻摘录；活动记录补充。"
         assert revision_version["change_reason"] == "按人工审核意见补充来源材料"
+        stored_after_revision = get_db().cases.find_one({"id": structured_case})
+        assert "latest_review_version_id" not in stored_after_revision
+        assert stored_after_revision["ai_reviews"] == []
+
+        response = client.post(
+            f"/api/cases/{structured_case}/submit",
+            data={"version_id": review_version["id"]},
+            headers=auth("ownerflow"),
+        )
+        assert_status(response, 400)
+        stored_after_stale_submit = get_db().cases.find_one({"id": structured_case})
+        assert stored_after_stale_submit["status"] == "needs_revision"
 
         response = client.post(f"/api/cases/{structured_case}/submit", headers=auth("ownerflow"))
         assert_status(response, 200)

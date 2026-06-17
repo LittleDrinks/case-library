@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from db.connection import get_db
-from db.counters import _insert_with_generated_id
-from db.datetime import _normalize_datetime_fields
-from db.validators import _normalize_keywords, _now
 from pymongo import DESCENDING
-from serializers import serialize_doc, serialize_version
-from services.reviews import normalize_structured_ai_review, split_paragraphs
+
+from backend.app.domains.cases.serializers import serialize_doc, serialize_version
+from backend.app.domains.reviews.helpers import normalize_structured_ai_review, split_paragraphs
+from backend.db.connection import get_db
+from backend.db.counters import _insert_with_generated_id
+from backend.db.datetime import _normalize_datetime_fields
+from backend.db.transactions import multi_collection_write
+from backend.db.validators import _normalize_keywords, _now
+
+
+class _CaseReviewUpdateConflictError(Exception):
+    """The case changed or disappeared before the AI review pointer update."""
 
 
 def _latest_version_id(case_id: int) -> int | None:
@@ -23,9 +29,10 @@ def create_ai_review_version(
     ai_review: dict,
     model: str = "",
     raw_answer: str = "",
+    case_snapshot: dict | None = None,
 ) -> dict | None:
     db = get_db()
-    current = db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
+    current = case_snapshot or db.cases.find_one({"id": int(case_id), "status": {"$ne": "deleted"}})
     if not current:
         return None
 
@@ -66,28 +73,48 @@ def create_ai_review_version(
         "change_reason": "AI pre-submit review",
         "created_at": now,
     }
-    version_id = _insert_with_generated_id("versions", version_doc)
-    db.cases.update_one(
-        {"id": int(case_id)},
-        {
-            "$set": _normalize_datetime_fields(
+    try:
+        with multi_collection_write("create_ai_review_version") as scope:
+            version_id = _insert_with_generated_id("versions", version_doc)
+            scope.compensate_with(lambda: db.versions.delete_one({"id": version_id}))
+            update_filter = {"id": int(case_id), "status": current.get("status", {"$ne": "deleted"})}
+            if current.get("updated_at") is not None:
+                update_filter["updated_at"] = current.get("updated_at")
+            else:
+                update_filter.update(
+                    {
+                        "title": current.get("title", ""),
+                        "type": current.get("type", ""),
+                        "theme": current.get("theme", ""),
+                        "content": current.get("content", ""),
+                        "source_material": current.get("source_material", ""),
+                    }
+                )
+            result = db.cases.update_one(
+                update_filter,
                 {
-                    "latest_review_version_id": version_id,
-                    "updated_at": now,
-                    "ai_reviews": [
+                    "$set": _normalize_datetime_fields(
                         {
-                            "prompt_id": "alpha/paragraph-review",
-                            "name": "AI 段落审核",
-                            "answer": raw_answer,
-                            "parsed": normalized_review,
-                            "parse_error": None,
-                            "reviewed_at": now,
+                            "latest_review_version_id": version_id,
+                            "updated_at": now,
+                            "ai_reviews": [
+                                {
+                                    "prompt_id": "alpha/paragraph-review",
+                                    "name": "AI 段落审核",
+                                    "answer": raw_answer,
+                                    "parsed": normalized_review,
+                                    "parse_error": None,
+                                    "reviewed_at": now,
+                                }
+                            ],
                         }
-                    ],
-                }
+                    )
+                },
             )
-        },
-    )
+            if result.matched_count != 1 or result.modified_count != 1:
+                raise _CaseReviewUpdateConflictError
+    except _CaseReviewUpdateConflictError:
+        return None
     return serialize_doc(db.versions.find_one({"id": version_id}))
 
 def get_case_versions(case_id: int) -> list[dict]:

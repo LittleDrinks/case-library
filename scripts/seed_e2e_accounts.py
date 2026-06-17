@@ -5,17 +5,16 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
-from database import (
-    create_case,
+from backend.db.connection import get_db, init_db
+from backend.repositories.cases import create_case
+from backend.repositories.reviews import review_case, submit_for_review
+from backend.repositories.users import (
     create_user,
-    get_db,
     get_user_by_username,
-    init_db,
-    review_case,
     set_user_password,
-    submit_for_review,
     update_user_fields,
 )
 

@@ -5,11 +5,12 @@
       <div class="header-inner">
         <!-- Branding -->
         <div class="brand">
-          <div class="brand-logo">
-            <div class="logo-shu">上大</div>
-          </div>
+          <img
+            class="brand-logo"
+            :src="shuLogo"
+            alt="上海大学 / SHANGHAI UNIVERSITY"
+          />
           <div class="brand-text">
-            <div class="brand-university">上海大学 / SHANGHAI UNIVERSITY</div>
             <div class="brand-wordmark">
               <span class="wordmark-red">强国有我</span>
               <span class="wordmark-black">思政案例库</span>
@@ -102,6 +103,7 @@ import {
 } from "./api/auth.js";
 import LoginModal from "./components/LoginModal.vue";
 import PasswordChangeModal from "./components/PasswordChangeModal.vue";
+import shuLogo from "./assets/shanghai-university-horizontal-logo.png";
 import { TOAST_EVENT } from "./utils/toast.js";
 
 const AsyncViewLoading = {

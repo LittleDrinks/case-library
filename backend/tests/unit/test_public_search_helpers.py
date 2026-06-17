@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Unit checks for public search helpers and the search engine facade."""
+"""Unit checks for public search helpers and facade."""
+
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
-os.environ["MONGODB_DB_NAME"] = f"case_library_public_unit_{uuid4().hex[:8]}"
+os.environ["MONGODB_DB_NAME"] = f"case_library_test_public_unit_{uuid4().hex[:8]}"
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-import search_engine
-from repositories import cases
-from services import public
+from backend.app.domains.public import service as public_domain_service
+from backend.repositories import cases
+from backend.services import public
 
 PUBLIC_CASES = [
     {
@@ -177,8 +183,14 @@ def _matches(row: dict, query: dict) -> bool:
 
 def _patch_public_cases(rows: list[dict]):
     old_query_cases = public._public_query_cases
-    public._public_query_cases = (
-        lambda match_filters=None, sort=None, skip=None, limit=None, text_query=None: _query_rows(
+    def fake_public_query_cases(
+        match_filters=None,
+        sort=None,
+        skip=None,
+        limit=None,
+        text_query=None,
+    ):
+        return _query_rows(
             rows,
             match_filters=match_filters,
             sort=sort,
@@ -186,7 +198,8 @@ def _patch_public_cases(rows: list[dict]):
             limit=limit,
             text_query=text_query,
         )
-    )
+
+    public._public_query_cases = cast(Any, fake_public_query_cases)
     return old_query_cases
 
 
@@ -219,32 +232,54 @@ def _query_rows(
 
 def test_case_search_engine_forwards_arguments():
     calls = []
-    old_search = search_engine.search_cases
-    old_recommend = search_engine.get_recommendation_candidates
-    old_trending = search_engine.get_trending_cases
-    old_latest = search_engine.get_latest_cases
-    old_filter = search_engine.filter_cases
+    old_search = public_domain_service.search_cases
+    old_recommend = public_domain_service.get_recommendation_candidates
+    old_trending = public_domain_service.get_trending_cases
+    old_latest = public_domain_service.get_latest_cases
+    old_filter = public_domain_service.filter_cases
     try:
-        search_engine.search_cases = lambda query, status, limit: calls.append(
-            ("search", query, status, limit)
-        ) or ["search-result"]
-        search_engine.get_recommendation_candidates = lambda case_id, limit: calls.append(
-            ("recommend", case_id, limit)
-        ) or ["recommend-result"]
-        search_engine.get_trending_cases = lambda limit: calls.append(
-            ("trending", limit)
-        ) or ["trending-result"]
-        search_engine.get_latest_cases = lambda limit: calls.append(
-            ("latest", limit)
-        ) or ["latest-result"]
-        search_engine.filter_cases = (
-            lambda type_filter, theme_filter, status_filter, keyword_filter, limit: calls.append(
-                ("filter", type_filter, theme_filter, status_filter, keyword_filter, limit)
-            )
-            or ["filter-result"]
+        def fake_search(query, status, limit):
+            calls.append(("search", query, status, limit))
+            return ["search-result"]
+
+        def fake_recommend(case_id, limit):
+            calls.append(("recommend", case_id, limit))
+            return ["recommend-result"]
+
+        def fake_trending(limit):
+            calls.append(("trending", limit))
+            return ["trending-result"]
+
+        def fake_latest(limit):
+            calls.append(("latest", limit))
+            return ["latest-result"]
+
+        def fake_filter(type_filter, theme_filter, status_filter, keyword_filter, limit):
+            calls.append(("filter", type_filter, theme_filter, status_filter, keyword_filter, limit))
+            return ["filter-result"]
+
+        public_domain_service.search_cases = cast(
+            type(old_search),
+            fake_search,
+        )
+        public_domain_service.get_recommendation_candidates = cast(
+            type(old_recommend),
+            fake_recommend,
+        )
+        public_domain_service.get_trending_cases = cast(
+            type(old_trending),
+            fake_trending,
+        )
+        public_domain_service.get_latest_cases = cast(
+            type(old_latest),
+            fake_latest,
+        )
+        public_domain_service.filter_cases = cast(
+            type(old_filter),
+            fake_filter,
         )
 
-        engine = search_engine.CaseSearchEngine()
+        engine = public_domain_service.CaseSearchEngine()
         assert engine.search("劳动", status="approved_all", limit=7) == ["search-result"]
         assert engine.get_recommendations(42, limit=3) == ["recommend-result"]
         assert engine.get_trending(limit=4) == ["trending-result"]
@@ -253,11 +288,11 @@ def test_case_search_engine_forwards_arguments():
             "filter-result"
         ]
     finally:
-        search_engine.search_cases = old_search
-        search_engine.get_recommendation_candidates = old_recommend
-        search_engine.get_trending_cases = old_trending
-        search_engine.get_latest_cases = old_latest
-        search_engine.filter_cases = old_filter
+        public_domain_service.search_cases = old_search
+        public_domain_service.get_recommendation_candidates = old_recommend
+        public_domain_service.get_trending_cases = old_trending
+        public_domain_service.get_latest_cases = old_latest
+        public_domain_service.filter_cases = old_filter
 
     assert calls == [
         ("search", "劳动", "approved_all", 7),
@@ -579,11 +614,17 @@ def test_public_recommendations_trending_and_latest_use_public_cases_only():
     old_get_db = public.get_db
     old_get_case = cases.get_case
     try:
-        public.serialize_public_case = lambda row: row if row and row.get("status") == "approved" else None
-        cases.get_case = lambda case_id: next(
-            (item for item in PUBLIC_CASES if item.get("id") == int(case_id)),
-            None,
-        )
+        def fake_serialize_public_case(row):
+            return row if row and row.get("status") == "approved" else None
+
+        def fake_get_case(case_id):
+            return next(
+                (item for item in PUBLIC_CASES if item.get("id") == int(case_id)),
+                None,
+            )
+
+        public.serialize_public_case = cast(type(old_serialize_public_case), fake_serialize_public_case)
+        cases.get_case = cast(type(old_get_case), fake_get_case)
 
         assert [item["id"] for item in public.get_recommendation_candidates(1, limit=5)] == [3]
         assert [item["id"] for item in public.get_trending_cases(limit=2)] == [2, 1]
@@ -608,6 +649,36 @@ def test_public_recommendations_trending_and_latest_use_public_cases_only():
         cases.get_case = old_get_case
 
 
+def test_statistics_cache_uses_public_cache_copy_and_invalidation():
+    calls = []
+    old_query_cases = public._public_query_cases
+    try:
+        public.invalidate_statistics_cache()
+
+        def fake_query_cases(**_kwargs):
+            calls.append("query")
+            return [
+                {"id": 1, "type": "实践教学", "theme": "劳动", "view_count": 2, "like_count": 3}
+            ]
+
+        public._public_query_cases = fake_query_cases
+        first = public.get_statistics()
+        first["total_cases"] = 999
+
+        second = public.get_statistics()
+        assert second["total_cases"] == 1
+        assert second["total_views"] == 2
+        assert second["total_likes"] == 3
+        assert calls == ["query"]
+
+        public.invalidate_statistics_cache()
+        assert public.get_statistics()["total_cases"] == 1
+        assert calls == ["query", "query"]
+    finally:
+        public._public_query_cases = old_query_cases
+        public.invalidate_statistics_cache()
+
+
 def main() -> None:
     test_case_search_engine_forwards_arguments()
     test_public_status_filter_rejects_non_public_statuses()
@@ -621,6 +692,7 @@ def main() -> None:
     test_public_query_cases_uses_lookup_filters_skip_limit_and_snapshot_fields()
     test_public_search_fallback_builds_snapshot_keyword_pipeline_before_pagination()
     test_public_recommendations_trending_and_latest_use_public_cases_only()
+    test_statistics_cache_uses_public_cache_copy_and_invalidation()
     print("public search helper unit checks passed")
 
 

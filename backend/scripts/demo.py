@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Insert demo cases into MongoDB when the cases collection is empty."""
 
+# ruff: noqa: E402
+
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-from database import create_case, get_db, init_db, update_case
+from backend.db.connection import get_db, init_db
+from backend.repositories.cases import create_case, update_case
 
 DEMO_CASES = [
     {

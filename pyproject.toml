@@ -33,12 +33,18 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["backend/tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers"
 asyncio_mode = "auto"
+markers = [
+    "unit: backend unit tests, including repository/service seams against compose MongoDB",
+    "integration: backend integration tests using isolated test databases",
+    "smoke: explicit smoke checks that are not part of default pytest discovery",
+    "real_ai: opt-in smoke that may call a configured real AI provider",
+]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Unit-level checks for backend contract helper behavior."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 
-import database
-import serializers
+from backend.app.domains.cases import serializers
+from backend.app.domains.reviews import helpers as review_service
 
 
 def assert_public_payload(item: dict) -> None:
@@ -30,14 +35,14 @@ def assert_public_payload(item: dict) -> None:
 
 
 def assert_paragraph_contracts() -> None:
-    paragraphs = database.split_paragraphs(" 第一段 \n\n第二段\n  第三段  ")
+    paragraphs = review_service.split_paragraphs(" 第一段 \n\n第二段\n  第三段  ")
     assert paragraphs == [
         {"paragraph_id": "p1", "text": "第一段"},
         {"paragraph_id": "p2", "text": "第二段"},
         {"paragraph_id": "p3", "text": "第三段"},
     ]
 
-    comments = database.normalize_paragraph_comments(
+    comments = review_service.normalize_paragraph_comments(
         [
             {
                 "paragraph_id": "p1",
@@ -62,19 +67,24 @@ def assert_paragraph_contracts() -> None:
         }
     ]
 
-    alias_comments = database.normalize_paragraph_comments(
+    alias_comments = review_service.normalize_paragraph_comments(
         [
             {
                 "paragraphId": "p1",
                 "message": "camelCase 段落 ID 应归一化",
-            }
+            },
+            {
+                "paragraph": "p2",
+                "message": "paragraph 段落 ID 应归一化",
+            },
         ],
-        {"p1"},
+        {"p1", "p2"},
     )
     assert alias_comments[0]["paragraph_id"] == "p1"
+    assert alias_comments[1]["paragraph_id"] == "p2"
 
     try:
-        database.normalize_paragraph_comments(
+        review_service.normalize_paragraph_comments(
             [{"paragraph_id": "p9", "message": "未知段落"}],
             {"p1"},
         )
@@ -84,7 +94,7 @@ def assert_paragraph_contracts() -> None:
         raise AssertionError("unknown paragraph_id should fail")
 
     try:
-        database.normalize_paragraph_comments(
+        review_service.normalize_paragraph_comments(
             [{"paragraphId": "p9", "message": "未知段落"}],
             {"p1"},
         )
@@ -94,7 +104,17 @@ def assert_paragraph_contracts() -> None:
         raise AssertionError("unknown paragraphId alias should fail")
 
     try:
-        database.normalize_paragraph_comments(
+        review_service.normalize_paragraph_comments(
+            [{"paragraph": "p9", "message": "未知段落"}],
+            {"p1"},
+        )
+    except ValueError as exc:
+        assert "Unknown paragraph_id: p9" in str(exc)
+    else:
+        raise AssertionError("unknown paragraph alias should fail")
+
+    try:
+        review_service.normalize_paragraph_comments(
             [{"message": "缺少段落 ID"}],
             {"p1"},
         )
@@ -105,7 +125,7 @@ def assert_paragraph_contracts() -> None:
 
 
 def assert_structured_ai_review_contract() -> None:
-    review = database.normalize_structured_ai_review(
+    review = review_service.normalize_structured_ai_review(
         {
             "comments": [{"paragraphId": "p2", "message": "分类需要更准确"}],
             "summary": {
@@ -154,7 +174,7 @@ def assert_public_serialization_uses_review_snapshot() -> None:
     original_get_db = serializers.get_db
     serializers.get_db = lambda: _FakeDb()
     try:
-        public = database.serialize_public_case(
+        public = serializers.serialize_public_case(
             {
                 "id": 7,
                 "title": "当前内部标题",
@@ -178,6 +198,7 @@ def assert_public_serialization_uses_review_snapshot() -> None:
     finally:
         serializers.get_db = original_get_db
 
+    assert public is not None
     assert public["title"] == "审核通过标题"
     assert public["type"] == "TYPE_APPROVED"
     assert public["theme"] == "approved-theme"
