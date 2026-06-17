@@ -149,57 +149,8 @@ make dev-seed
 
 ## 后台用户导入
 
-学校统一身份认证接入前，如需批量开通用户，使用离线后台脚本导入 CSV/XLSX；不要开放
-自助注册入口。所有命令必须在容器内执行：
-
-```bash
-docker compose run --rm app python backend/scripts/account_admin.py import-users \
-  --file /app/tmp/users.csv \
-  --dry-run
-```
-
-导入文件支持 `.csv` 和 `.xlsx`，第一行必须是表头。当前用户 schema 会落库：
-`username`、`role`、`nickname`、`must_change_password`、`status` 和密码哈希。支持列：
-
-- `username` 或 `school_id`：必填其一；`school_id` 会作为临时登录用户名。
-- `nickname`、`display_name` 或 `name`：必填其一；落库到 `nickname`。
-- `role`：必填，允许 `normal`、`admin`，兼容 `user` 并归一为 `normal`。
-- `password`：可选；为空时默认生成临时密码但不打印。
-- `must_change_password`：可选，默认 `true`。
-- `status`：可选，默认 `active`，允许 `active`、`no_active`。
-- `department`、`class`、`organization`：可放在表中用于过渡资料核对；当前 users schema
-  不存储这些列，导入时会提示忽略。
-
-建议先执行 dry-run。dry-run 会校验表头、必填字段、角色、状态、文件内重复用户名，以及
-数据库中已存在的用户名，只输出汇总和逐行错误，不写入数据库。正式导入去掉 `--dry-run`。
-如果任一行存在校验错误，脚本会退出非零且不创建有效行，避免半批次导入：
-
-```bash
-docker compose run --rm app python backend/scripts/account_admin.py import-users \
-  --file /app/tmp/users.xlsx
-```
-
-如不希望脚本生成临时密码，可要求缺失密码时报错：
-
-```bash
-docker compose run --rm app python backend/scripts/account_admin.py import-users \
-  --file /app/tmp/users.csv \
-  --missing-password error
-```
-
-也可通过环境变量提供同一个临时密码，脚本不会打印该值：
-
-```bash
-export IMPORT_DEFAULT_PASSWORD='change-me-strong'
-docker compose run --rm -e IMPORT_DEFAULT_PASSWORD app \
-  python backend/scripts/account_admin.py import-users \
-  --file /app/tmp/users.csv \
-  --default-password-env IMPORT_DEFAULT_PASSWORD
-unset IMPORT_DEFAULT_PASSWORD
-```
-
-不要提交真实用户表、真实学工号、默认密码或导入结果。若导入时生成了临时密码，脚本只会
-提示数量，不会输出密码；运营侧应通过 `reset-password` 或后续统一身份认证流程完成凭据发放。
+学校统一身份认证接入前，如需批量开通用户，使用后台脚本导入 CSV/XLSX；不要开放自助
+注册入口。系统运行中新增用户的完整操作手册见 `docs/user-import.md`。
 
 容器化 E2E 入口使用同一套 dev compose seed 路径，只运行不依赖宿主机 Docker 的
 `frontend/tests/audit.spec.js`。`frontend/tests/smoke.spec.js` 会调用 `docker compose exec`

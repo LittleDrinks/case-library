@@ -82,11 +82,12 @@ docker compose -f docker-compose.dev.yml --profile e2e run --rm e2e npm run test
 
 ```bash
 docker compose run --rm app python backend/scripts/account_admin.py import-users \
-  --file /app/tmp/users.csv \
+  --file /app/backend/accounts.csv \
   --dry-run
 ```
 
-支持 `.csv` 和 `.xlsx`。导入列和细节见 `docs/development.md`。
+支持 `.csv` 和 `.xlsx`。完整操作步骤、表头模板、dry-run 和单账号维护命令见
+`docs/user-import.md`。
 
 ## 文档入口
 
@@ -95,4 +96,5 @@ docker compose run --rm app python backend/scripts/account_admin.py import-users
 - API 说明：`docs/api.md`
 - AI 行为和 prompt 边界：`docs/ai.md`
 - 开发与验证流程：`docs/development.md`
+- 用户导入操作手册：`docs/user-import.md`
 - 质量门禁：`docs/quality.md`
