@@ -10,6 +10,12 @@ const DEFAULT_CASE_TYPES = {
 
 const DEFAULT_THEMES = ["强国建设", "实践育人", "数字赋能", "铸魂育人"];
 
+const DEFAULT_TARGET_STAGES = {
+  undergraduate: "本科生",
+  master: "硕士研究生",
+  doctor: "博士研究生",
+};
+
 const DEFAULT_STATUSES = {
   draft: "草稿",
   pending_review: "待审核",
@@ -32,6 +38,7 @@ export function useCaseForm() {
     source_material: "",
     type: "",
     theme: "",
+    target_stages: ["undergraduate"],
   });
 
   const touched = reactive({
@@ -40,11 +47,13 @@ export function useCaseForm() {
     content: false,
     type: false,
     theme: false,
+    target_stages: false,
   });
 
   const constants = reactive({
     case_types: { ...DEFAULT_CASE_TYPES },
     themes: [...DEFAULT_THEMES],
+    target_stages: { ...DEFAULT_TARGET_STAGES },
     statuses: { ...DEFAULT_STATUSES },
   });
 
@@ -81,6 +90,9 @@ export function useCaseForm() {
     if (touched.content && !form.content.trim()) e.content = "请输入案例正文";
     if (touched.type && !form.type) e.type = "请选择案例类型";
     if (touched.theme && !form.theme) e.theme = "请选择案例主题";
+    if (touched.target_stages && !form.target_stages.length) {
+      e.target_stages = "请选择至少一个适用学段";
+    }
     return e;
   });
 
@@ -90,7 +102,8 @@ export function useCaseForm() {
       !!form.department.trim() &&
       !!form.content.trim() &&
       !!form.type &&
-      !!form.theme
+      !!form.theme &&
+      form.target_stages.length > 0
     );
   });
 
@@ -111,7 +124,8 @@ export function useCaseForm() {
     if (step === 2) {
       touched.type = true;
       touched.theme = true;
-      return !errors.value.type && !errors.value.theme;
+      touched.target_stages = true;
+      return !errors.value.type && !errors.value.theme && !errors.value.target_stages;
     }
     return true;
   }
@@ -124,12 +138,14 @@ export function useCaseForm() {
     form.source_material = "";
     form.type = "";
     form.theme = "";
+    form.target_stages = ["undergraduate"];
 
     touched.title = false;
     touched.department = false;
     touched.content = false;
     touched.type = false;
     touched.theme = false;
+    touched.target_stages = false;
   }
 
   async function loadConstants() {
@@ -138,6 +154,7 @@ export function useCaseForm() {
       if (data) {
         if (data.case_types) constants.case_types = data.case_types;
         if (Array.isArray(data.themes)) constants.themes = data.themes;
+        if (data.target_stages) constants.target_stages = data.target_stages;
         if (data.statuses) constants.statuses = data.statuses;
       }
     } catch {

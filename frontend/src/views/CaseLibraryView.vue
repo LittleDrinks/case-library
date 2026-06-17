@@ -24,6 +24,14 @@
           <BaseBadge v-if="detailCase.theme" variant="secondary" class="badge-theme">
             {{ detailCase.theme }}
           </BaseBadge>
+          <BaseBadge
+            v-for="stage in targetStageLabels(detailCase)"
+            :key="stage"
+            variant="secondary"
+            class="badge-stage"
+          >
+            {{ stage }}
+          </BaseBadge>
           <BaseBadge variant="success" shape="pill" class="badge-status">
             已通过
           </BaseBadge>
@@ -254,6 +262,11 @@ const caseTypes = ref({
   TYPE_C: '实践育人案例',
 });
 const themes = ref(['强国建设', '实践育人', '数字赋能', '铸魂育人']);
+const targetStages = ref({
+  undergraduate: '本科生',
+  master: '硕士研究生',
+  doctor: '博士研究生',
+});
 
 const detailCase = ref(null);
 const detailLikeCount = ref(0);
@@ -298,6 +311,10 @@ watch(() => props.searchTrigger, applyExternalSearch, { deep: true });
 
 function typeLabel(type) {
   return caseTypes.value[type] || type || '未知类型';
+}
+
+function targetStageLabels(c) {
+  return (c?.target_stages || []).map(stage => targetStages.value[stage] || stage).filter(Boolean);
 }
 
 function formatDate(value) {
@@ -499,10 +516,11 @@ onMounted(async () => {
   }
   try {
     const data = await fetchCaseConstants();
-    if (data) {
-      if (data.case_types) caseTypes.value = data.case_types;
-      if (Array.isArray(data.themes)) themes.value = data.themes;
-    }
+      if (data) {
+        if (data.case_types) caseTypes.value = data.case_types;
+        if (Array.isArray(data.themes)) themes.value = data.themes;
+        if (data.target_stages) targetStages.value = data.target_stages;
+      }
   } catch {
     // Safe fallbacks already set
   }

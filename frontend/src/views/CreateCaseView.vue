@@ -170,6 +170,9 @@ function applyCaseToForm(data) {
   form.source_material = data.source_material || "";
   form.type = data.type || "";
   form.theme = data.theme || "";
+  form.target_stages = Array.isArray(data.target_stages) && data.target_stages.length
+    ? data.target_stages
+    : ["undergraduate"];
 }
 
 async function loadCaseForEdit(draftId) {

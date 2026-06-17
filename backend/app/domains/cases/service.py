@@ -148,6 +148,7 @@ def create_case_for_user(
     department: str = "",
     type: str = "TYPE_A",
     theme: str = "铸魂育人",
+    target_stages: str | None = None,
     status: str = "pending_review",
     ai_reviews: str | None = None,
     auto_process: bool = False,
@@ -181,6 +182,7 @@ def create_case_for_user(
             "title": title,
             "type": case_type,
             "theme": case_theme,
+            "target_stages": target_stages,
             "content": content,
             "source_material": source_material,
             "author": author,
@@ -203,6 +205,7 @@ def update_case_for_user(
     department: str | None = None,
     type: str | None = None,
     theme: str | None = None,
+    target_stages: str | None = None,
     ai_reviews: str | None = None,
     change_reason: str = "",
     current_user: dict | None = None,
@@ -226,6 +229,7 @@ def update_case_for_user(
         "department": department,
         "type": type,
         "theme": theme,
+        "target_stages": target_stages,
         "ai_reviews": ai_reviews,
     }.items():
         if value is not None and value != "":

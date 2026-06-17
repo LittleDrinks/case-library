@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.db.constants import TARGET_STAGE_LABELS
+
 CASE_TYPE_LABELS = {
     "TYPE_A": "思政课教学案例",
     "TYPE_B": "课程思政共享资源案例",
@@ -23,6 +25,7 @@ def get_api_constants_payload() -> dict:
     return {
         "case_types": dict(CASE_TYPE_LABELS),
         "themes": list(THEME_LABELS),
+        "target_stages": dict(TARGET_STAGE_LABELS),
         "statuses": dict(CASE_STATUS_LABELS),
     }
 

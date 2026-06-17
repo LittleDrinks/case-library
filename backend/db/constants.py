@@ -26,6 +26,11 @@ CASE_STATUSES = {
     "needs_revision",
     "deleted",
 }
+TARGET_STAGE_LABELS = {
+    "undergraduate": "本科生",
+    "master": "硕士研究生",
+    "doctor": "博士研究生",
+}
 REVIEW_STATUSES = {"pending", "approved", "rejected", "approve", "reject", "needs_revision"}
 USER_ROLES = {"normal", "admin"}
 USER_STATUSES = {"active", "no_active"}
@@ -35,6 +40,7 @@ VERSIONED_FIELDS = [
     "title",
     "type",
     "theme",
+    "target_stages",
     "content",
     "source_material",
     "author",
@@ -45,6 +51,7 @@ PUBLIC_REVIEW_SNAPSHOT_FIELDS = [
     "title",
     "type",
     "theme",
+    "target_stages",
     "content",
     "source_material",
     "author",

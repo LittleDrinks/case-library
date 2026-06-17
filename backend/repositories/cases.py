@@ -17,6 +17,7 @@ from backend.db.validators import (
     _bounded_limit,
     _normalize_ai_reviews,
     _normalize_keywords,
+    _normalize_target_stages,
     _now,
     _validate_case_status,
 )
@@ -31,6 +32,7 @@ CASE_LIST_PROJECTION = {
     "title": 1,
     "type": 1,
     "theme": 1,
+    "target_stages": 1,
     "author": 1,
     "department": 1,
     "status": 1,
@@ -56,6 +58,7 @@ PUBLIC_CASE_LIST_PROJECTION = {
     "title": 1,
     "type": 1,
     "theme": 1,
+    "target_stages": 1,
     "author": 1,
     "department": 1,
     "status": 1,
@@ -81,6 +84,7 @@ def create_case(case_data: dict) -> int:
         "title": case_data.get("title", ""),
         "type": case_data.get("type", ""),
         "theme": case_data.get("theme", ""),
+        "target_stages": _normalize_target_stages(case_data.get("target_stages")),
         "content": case_data.get("content", ""),
         "source_material": case_data.get("source_material", ""),
         "status": status,
@@ -114,6 +118,7 @@ def create_case(case_data: dict) -> int:
             "title": doc.get("title", ""),
             "type": doc.get("type", ""),
             "theme": doc.get("theme", ""),
+            "target_stages": _normalize_target_stages(doc.get("target_stages")),
             "content": doc.get("content", ""),
             "source_material": doc.get("source_material", ""),
             "author": doc.get("author", ""),
@@ -273,6 +278,9 @@ def _values_differ(field: str, current: dict, new_value: Any) -> bool:
     if field == "keywords":
         current_value = _normalize_keywords(current_value)
         new_value = _normalize_keywords(new_value)
+    if field == "target_stages":
+        current_value = _normalize_target_stages(current_value)
+        new_value = _normalize_target_stages(new_value)
     return bool(current_value != new_value)
 
 def update_case(
@@ -290,6 +298,7 @@ def update_case(
         "title",
         "type",
         "theme",
+        "target_stages",
         "content",
         "source_material",
         "author",
@@ -303,6 +312,8 @@ def update_case(
 
     if "keywords" in case_data:
         updates["keywords"] = _normalize_keywords(case_data.get("keywords"))
+    if "target_stages" in case_data:
+        updates["target_stages"] = _normalize_target_stages(case_data.get("target_stages"))
     if "ai_reviews" in case_data:
         updates["ai_reviews"] = _normalize_ai_reviews(case_data.get("ai_reviews"))
 
@@ -343,6 +354,9 @@ def update_case(
                 "title": (updated or {}).get("title", ""),
                 "type": (updated or {}).get("type", ""),
                 "theme": (updated or {}).get("theme", ""),
+                "target_stages": _normalize_target_stages(
+                    (updated or {}).get("target_stages")
+                ),
                 "content": (updated or {}).get("content", ""),
                 "source_material": (updated or {}).get("source_material", ""),
                 "author": (updated or {}).get("author", ""),

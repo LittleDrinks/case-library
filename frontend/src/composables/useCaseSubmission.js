@@ -38,6 +38,7 @@ export function useCaseSubmission({
       department: form.department.trim(),
       type: form.type,
       theme: form.theme,
+      target_stages: JSON.stringify(form.target_stages),
       status,
     };
     appendAiReviews(payload);
@@ -60,6 +61,7 @@ export function useCaseSubmission({
           department: form.department.trim(),
           type: form.type,
           theme: form.theme,
+          target_stages: JSON.stringify(form.target_stages),
           change_reason: "保存草稿",
         };
         appendAiReviews(payload);
@@ -80,7 +82,14 @@ export function useCaseSubmission({
   }
 
   async function submitCase() {
-    if (!form.title.trim() || !form.department.trim() || !form.content.trim() || !form.type || !form.theme) {
+    if (
+      !form.title.trim() ||
+      !form.department.trim() ||
+      !form.content.trim() ||
+      !form.type ||
+      !form.theme ||
+      !form.target_stages.length
+    ) {
       notify("请完善所有必填项后再提交", "error");
       return;
     }
@@ -99,6 +108,7 @@ export function useCaseSubmission({
           department: form.department.trim(),
           type: form.type,
           theme: form.theme,
+          target_stages: JSON.stringify(form.target_stages),
           change_reason: "提交前更新",
         };
         appendAiReviews(payload);
