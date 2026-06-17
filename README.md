@@ -42,6 +42,67 @@ docker compose up -d --build
 docker compose down
 ```
 
+## 开发环境启动（不用 Docker）
+
+开发环境也可以在宿主机直接启动后端和前端，但浏览器端必须继续通过同源 `/api`
+访问后端，不要把前端 API 地址改成 `http://127.0.0.1:8001`，避免跨域。
+
+前置要求：
+
+- Python 3.12
+- Node.js 20+
+- 本机 MongoDB，监听 `mongodb://127.0.0.1:27017`
+
+准备本地配置：
+
+```bash
+cp .env.example .env
+```
+
+本机启动时建议在 `.env` 中至少确认：
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017
+MONGODB_DB_NAME=case_library
+VITE_API_BASE_URL=/api
+AI_REVIEW_ENABLED=false
+```
+
+安装后端依赖并启动 API：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+python backend/scripts/init_users.py
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+另开一个终端安装前端依赖并启动 Vite：
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+前端开发地址：
+
+- `http://127.0.0.1:5173/`
+
+本仓库的 Vite 开发代理把 `/api` 转发到 `http://app:8001`。不用 Docker 启动时，
+需要让本机能解析 `app` 到 `127.0.0.1`，否则前端代理无法连到后端：
+
+```bash
+sudo sh -c 'grep -q "^127.0.0.1 app$" /etc/hosts || echo "127.0.0.1 app" >> /etc/hosts'
+```
+
+验证同源代理是否可用：
+
+```bash
+curl -fsS http://127.0.0.1:5173/api/constants
+```
+
 ## 配置
 
 复制 `.env.example` 为 `.env` 后按需修改本地配置。
