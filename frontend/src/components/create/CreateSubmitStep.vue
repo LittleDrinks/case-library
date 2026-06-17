@@ -95,7 +95,7 @@
 import { computed, ref } from "vue";
 import CaseReader from "../cases/CaseReader.vue";
 
-const props = defineProps({
+const { form, constants, canSubmit, submitting, contentSummary } = defineProps({
   form: {
     type: Object,
     required: true,
@@ -124,8 +124,8 @@ const originalConfirmed = ref(false);
 const reviewConfirmed = ref(false);
 const canConfirmSubmit = computed(() => originalConfirmed.value && reviewConfirmed.value);
 const targetStageSummary = computed(() => {
-  return (props.form.target_stages || [])
-    .map((stage) => props.constants.target_stages?.[stage] || stage)
+  return (form.target_stages || [])
+    .map((stage) => constants.target_stages?.[stage] || stage)
     .join("、");
 });
 </script>
