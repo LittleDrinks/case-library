@@ -209,7 +209,7 @@ onMounted(async () => {
     } else {
       caseId.value = null;
       latestReviewVersionId.value = null;
-      loadDraft();
+      loadDraft({ includeBackendIds: false, includeExistingCaseDraft: false });
     }
   } else {
     loadDraft();
