@@ -46,27 +46,38 @@ export function useCaseDraft({
     }
   }
 
-  function loadDraft() {
+  function loadDraft(options = {}) {
+    const {
+      includeBackendIds = true,
+      includeExistingCaseDraft = true,
+    } = options;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
       const user = getCurrentUser();
       const sameUser = !saved.username || saved.username === user?.username;
+      const hasBackendIds = Boolean(saved?.caseId || saved?.latestReviewVersionId);
+
+      if (sameUser && hasBackendIds && !includeExistingCaseDraft) {
+        caseId.value = null;
+        latestReviewVersionId.value = null;
+        return;
+      }
 
       if (saved?.form) {
         Object.assign(form, saved.form);
       }
 
-      if (sameUser && saved?.caseId) {
+      if (sameUser && includeBackendIds && saved?.caseId) {
         caseId.value = saved.caseId;
       }
 
-      if (sameUser && saved?.latestReviewVersionId) {
+      if (sameUser && includeBackendIds && saved?.latestReviewVersionId) {
         latestReviewVersionId.value = saved.latestReviewVersionId;
       }
 
-      if (!sameUser) {
+      if (!sameUser || !includeBackendIds) {
         // 切换用户时只保留表单字段，重置后端标识，防止误用他人草稿
         caseId.value = null;
         latestReviewVersionId.value = null;

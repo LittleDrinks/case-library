@@ -71,6 +71,48 @@ describe("useCaseDraft", () => {
     expect(target.latestReviewVersionId.value).toBe("version-1");
   });
 
+  it("skips existing-case draft content when entering a new case flow", () => {
+    const source = createDraftHarness("alice");
+    source.form.title = "已有案例标题";
+    source.draft.persistDraft();
+
+    const target = createDraftHarness("alice");
+    target.form.title = "";
+    target.caseId.value = null;
+    target.latestReviewVersionId.value = null;
+
+    target.draft.loadDraft({
+      includeBackendIds: false,
+      includeExistingCaseDraft: false,
+    });
+
+    expect(target.form.title).toBe("");
+    expect(target.caseId.value).toBeNull();
+    expect(target.latestReviewVersionId.value).toBeNull();
+  });
+
+  it("can restore local-only new case draft content without backend identifiers", () => {
+    const source = createDraftHarness("alice");
+    source.form.title = "未保存新案例";
+    source.caseId.value = null;
+    source.latestReviewVersionId.value = null;
+    source.draft.persistDraft();
+
+    const target = createDraftHarness("alice");
+    target.form.title = "";
+    target.caseId.value = "stale-case";
+    target.latestReviewVersionId.value = "stale-version";
+
+    target.draft.loadDraft({
+      includeBackendIds: false,
+      includeExistingCaseDraft: false,
+    });
+
+    expect(target.form.title).toBe("未保存新案例");
+    expect(target.caseId.value).toBeNull();
+    expect(target.latestReviewVersionId.value).toBeNull();
+  });
+
   it("keeps form fields but clears backend identifiers across users", () => {
     const source = createDraftHarness("alice");
     source.form.title = "跨用户草稿";
