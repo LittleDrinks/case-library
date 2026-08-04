@@ -19,7 +19,11 @@
    素材语料只索引 status=正常 的，候选不进生成语料）；
 11. /api/ai/agent    —— 统一 AI 入口（MoA 多智能体编排：主Agent/资料管理员/写作手/内容审校员，SSE）；
 12. /api/cases 等    —— 案例业务闭环（SQLite 持久层 db.py）：案例 CRUD、提交/撤回/审核流转留痕、
-   批注与回复线程、版本快照/回滚、收藏、点赞；首启自动灌入 files/cases_seed.json；
+   批注与回复线程、版本快照（含与上一版 diffSummary）/回滚、收藏、点赞；
+   提交自动进 checking 机审（词库规则 files/review_lexicon.json 始终执行 +
+   反例库 few-shot LLM 审校 files/review_counterexamples.json，AI_REVIEW_ENABLED 控制），
+   命中写 risk 批注并留痕 action=checking；退回/要求补充必须带 reasonType；
+   /api/admin/review-ledger 输出被退回表达台账；首启自动灌入 files/cases_seed.json；
 13. /api/materials 等 —— 素材登记闭环（SQLite materials 表，ADR 0003/0011）：列表/详情/采集入库闸
    （URL 查重 + 相似度查重 + 必填校验，新素材一律先落候选）、admin 治理 PATCH 与批量 PATCH、
    素材收藏、recommendFor 上下文推荐、recentCitedBy 最近引用、来源健康检查；
@@ -93,6 +97,8 @@ USERS_FILE = os.path.join(FILES_DIR, "users.json")
 KNOWLEDGE_FILE = os.path.join(FILES_DIR, "knowledge.json")
 CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
 MATERIALS_SEED_FILE = os.path.join(FILES_DIR, "materials_seed.json")
+LEXICON_FILE = os.path.join(FILES_DIR, "review_lexicon.json")
+COUNTEREXAMPLES_FILE = os.path.join(FILES_DIR, "review_counterexamples.json")
 SQLITE_DB_PATH = os.path.join(ROOT, ENV.get("SQLITE_DB_PATH", "./data/cases.db"))
 CASEDB = None  # main() 启动时初始化（SQLite 业务库）
 TOKEN_TTL_SECONDS = 12 * 3600
@@ -857,6 +863,19 @@ def load_seed_materials():
         return []
 
 
+def _load_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+# 机审词库 v0 与反例库 v0（WP4，构建期产物，直接在仓库维护）
+REVIEW_LEXICON = _load_json(LEXICON_FILE, {})
+REVIEW_COUNTEREXAMPLES = _load_json(COUNTEREXAMPLES_FILE, [])
+
+
 def _need_login(user):
     if not user:
         return {"ok": False, "error": "未登录或登录已过期，请重新切换账号"}, 401
@@ -925,6 +944,9 @@ def api_case_transition(user, cid, action, payload):
         offline_from=(payload.get("offlineFrom") or "").strip())
     if e:
         return {"ok": False, "error": e}, code
+    if action == "submit":
+        # 提交后自动机审（checking → pending），词库规则 + LLM 反例审校异步执行
+        threading.Thread(target=run_machine_check, args=(cid,), daemon=True).start()
     mark_search_dirty()
     return {"ok": True, "case": c, "reviews": CASEDB.list_reviews(50, cid)}, 200
 
@@ -1020,6 +1042,17 @@ def api_reseed(user):
     n = CASEDB.reseed(load_seed_cases(), load_seed_materials())
     mark_search_dirty()
     return {"ok": True, "cases": n}, 200
+
+
+def api_review_ledger(user):
+    """组织资产·被退回表达台账：reject/supplement 留痕按 reasonType 聚合（admin）。"""
+    err = _need_login(user)
+    if err:
+        return err
+    if not user.get("admin"):
+        return {"ok": False, "error": "仅案例管理员可查看退回台账"}, 403
+    res = CASEDB.review_ledger()
+    return {"ok": True, "items": res["items"], "byType": res["byType"]}, 200
 
 
 # ---------------------------------------------------------------- 素材登记（SQLite，WP2）
@@ -1644,6 +1677,110 @@ def _moa_check_citations(text, chunks):
     return out, risks
 
 
+# ------------------------------------------------------------ 机审第一层（WP4）
+# provider 接口位：机审 = 多个 provider 并联，各自返回统一形状的批注 dict 列表
+# （quote/text/author/lowRisk）。当前 provider：
+#   review_lexicon_rules  —— 思政垂直词库规则（始终执行，不依赖 LLM）
+#   review_llm_check      —— 反例库 few-shot LLM 审校（AI_REVIEW_ENABLED 开关控制）
+# 后续接入黑马/蜜度等内容安全 API 时，在此新增 provider 函数并加入
+# run_machine_check 的调用序列即可，批注形状保持一致。
+
+def review_lexicon_rules(text):
+    """词库规则 provider：wrong 写法精确匹配，命中即产出 risk 批注。"""
+    hits, seen = [], set()
+
+    def add(quote, msg):
+        if quote in seen:
+            return
+        seen.add(quote)
+        hits.append({"quote": quote, "text": msg, "author": "机审·词库"})
+
+    for key, label in (("officials", "职务错误"), ("party", "规范表述"), ("typos", "易错词")):
+        for e in REVIEW_LEXICON.get(key) or []:
+            wrong = e.get("wrong") or ""
+            if wrong and wrong in text:
+                add(wrong, "【%s】疑似误写「%s」，应为「%s」。%s"
+                    % (label, wrong, e.get("right", ""), e.get("note", "")))
+    for e in REVIEW_LEXICON.get("bookTerms") or []:
+        for w in e.get("wrongs") or []:
+            if w and w in text:
+                add(w, "【教材固定表述】疑似误写「%s」，教材规范表述为「%s」。"
+                    % (w, e.get("term", "")))
+    return hits
+
+
+def _fewshot_block():
+    """反例库注入 prompt 的 few-shot 段：每类风险取 1 条（控制 token）。"""
+    lines, seen = [], set()
+    for e in REVIEW_COUNTEREXAMPLES:
+        cat = e.get("category") or ""
+        if not cat or cat in seen:
+            continue
+        seen.add(cat)
+        lines.append("【%s】错误示例：「%s」—— %s" % (cat, e.get("bad", ""), e.get("why", "")))
+    return ("\n以下是十类典型风险的错误示例，审校时对照识别同类问题：\n" + "\n".join(lines)
+            if lines else "")
+
+
+def _reviewer_prompt():
+    return REVIEWER_PROMPT + _fewshot_block()
+
+
+def review_llm_check(text):
+    """LLM 反例审校 provider：反例库 few-shot 注入审校员 prompt，risk/confirm 项产批注。
+    返回 (批注列表, 说明, 是否真正调用了模型)。AI_REVIEW_ENABLED 关闭时直接跳过。"""
+    if not AI_REVIEW_ENABLED:
+        return [], "LLM 反例审校未启用（AI_REVIEW_ENABLED）", False
+    if not (AI_BASE_URL and AI_API_KEY):
+        return [], "LLM 反例审校跳过（未配置模型）", False
+    content, err = llm_call(MOA_MODEL_REVIEWER, [
+        {"role": "system", "content": _reviewer_prompt()},
+        {"role": "user", "content": "请审校以下思政教学案例正文：\n" + text[:6000]},
+    ], temperature=0.2)
+    if err:
+        return [], "LLM 反例审校调用失败：" + err, True
+    arr = _extract_json(content, want_array=True)
+    annos = []
+    if isinstance(arr, list):
+        for it in arr:
+            if not isinstance(it, dict) or it.get("status") not in ("risk", "confirm"):
+                continue
+            annos.append({
+                "quote": str(it.get("ref") or "")[:60],
+                "text": "【%s】%s" % (it.get("standard") or "审校", it.get("note") or ""),
+                "author": "机审·审校", "lowRisk": it.get("status") == "confirm",
+            })
+    return annos, "LLM 反例审校命中 %d 条" % len(annos), True
+
+
+def _case_body_text(data):
+    parts = [data.get("title", ""), data.get("summary", "")]
+    parts += [str(b.get("text") or "") for b in (data.get("blocks") or [])]
+    return "\n".join(parts)
+
+
+def run_machine_check(cid):
+    """submit 后异步机审：词库规则（始终）+ LLM 反例审校（开关控制），
+    结果落库（risk 批注 + reviews 留痕 action=checking）后状态 checking → pending。"""
+    try:
+        data = CASEDB.get_case_data(cid)
+        if data is None:
+            return
+        text = _case_body_text(data)
+        rule_hits = review_lexicon_rules(text)
+        llm_annos, llm_note, llm_ran = review_llm_check(text)
+        note = "词库规则命中 %d 条；%s" % (len(rule_hits), llm_note)
+        CASEDB.machine_check_apply(cid, rule_hits + llm_annos, note,
+                                   MOA_MODEL_REVIEWER if llm_ran else "")
+        sys.stderr.write("[review] 机审完成 %s：%s\n" % (cid, note))
+    except Exception as e:
+        sys.stderr.write("[review] 机审异常 %s: %s\n" % (cid, e))
+        try:
+            CASEDB.machine_check_apply(cid, [], "机审执行异常，直接转入人工审核")
+        except Exception:
+            pass
+
+
 # --------------------------------------------------------------- docx 导出
 def export_docx(payload):
     """导出成套教学材料。payload:
@@ -1705,11 +1842,22 @@ def export_docx(payload):
             doc.add_paragraph("[%d] %s — %s" % (i, r.get("title", ""), r.get("source", "")),
                               style="List Number")
 
-    # 页脚追踪元数据：状态、生成时间、使用范围提示
+    # 页脚追踪元数据：状态、生成时间、使用范围提示 + AI 生成标识（来源/模型/审核人）
     footer_note = meta.get("footerNote") or (
         "上海大学思政教学案例智能平台 · 生成时间：%s · 状态：%s"
         % (time.strftime("%Y-%m-%d %H:%M"), meta.get("statusNote", "未定"))
     )
+    ORIGIN_NAMES = {"ai": "AI 生成", "ai_assisted": "AI 辅助", "human": "人工撰写"}
+    trace = []
+    if meta.get("origin"):
+        trace.append("来源：" + ORIGIN_NAMES.get(meta["origin"], str(meta["origin"])))
+    models = meta.get("modelVersions") or []
+    if models:
+        trace.append("模型：" + "/".join(str(m) for m in models))
+    if meta.get("reviewedBy"):
+        trace.append("审核人：" + str(meta["reviewedBy"]))
+    if trace:
+        footer_note += " · " + " · ".join(trace)
     for section in doc.sections:
         p = section.footer.paragraphs[0]
         p.text = footer_note
@@ -1908,7 +2056,7 @@ class Handler(BaseHTTPRequestHandler):
         if chunks:
             user_text += ("\n\n【引用 chunk 表（文中〔n〕对应的资料原文，做引用蕴含判断的依据）】\n"
                           + _moa_chunks_brief(chunks))
-        msgs = ([{"role": "system", "content": REVIEWER_PROMPT}] + history
+        msgs = ([{"role": "system", "content": _reviewer_prompt()}] + history
                 + [{"role": "user", "content": user_text}])
         content, err = llm_call(MOA_MODEL_REVIEWER, msgs, temperature=0.2)
         if err:
@@ -2015,6 +2163,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/reviews":
             res, status = api_reviews(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/admin/review-ledger":
+            res, status = api_review_ledger(auth_user(self))
             return self._send_json(res, status)
         if path == "/api/favorites":
             res, status = api_favorites(auth_user(self))

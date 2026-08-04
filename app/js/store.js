@@ -333,12 +333,35 @@
   S.withdrawCase = (c) => caseAction(c, "withdraw", {}, "撤回");
   S.startReview = (c) => caseAction(c, "review", { action: "start" }, "开始审核");
   // 批注即意见：具体问题以批注形式挂在正文上，opinion 只是可选总评
-  S.reviewCase = (c, action, opinion, offlineFrom) =>
+  S.reviewCase = (c, action, opinion, offlineFrom, reasonType) =>
     caseAction(c, "review", {
       action: action === "return" ? "reject" : action,
-      reason: opinion || "", offlineFrom: offlineFrom || "",
+      reason: opinion || "", offlineFrom: offlineFrom || "", reasonType: reasonType || "",
     }, "审核操作");
   S.unhideCase = (c) => caseAction(c, "review", { action: "unhide" }, "恢复公开");
+
+  // 结构化退回理由（与服务端 db.py REASON_TYPES 一致；reject/supplement 必选）
+  S.reasonTypeNames = {
+    fact_error: "事实错误", citation_unsupported: "引用不支持", forced_mapping: "牵强映射",
+    over_praise: "过度拔高", wording: "表述不规范", other: "其他",
+  };
+
+  // AI 生成标识（WP4）：采纳 AI 内容后打标 origin=ai_assisted 并记录所用模型；
+  // 随后的 Store.touch 会把 meta 同步到服务端
+  S.markAiAssist = (c, model) => {
+    const meta = c.meta = c.meta || {};
+    if (meta.origin !== "ai") meta.origin = "ai_assisted";
+    meta.modelVersions = meta.modelVersions || [];
+    if (model && !meta.modelVersions.includes(model)) meta.modelVersions.push(model);
+  };
+
+  // 组织资产·被退回表达台账（admin）：reviews 留痕按 reasonType 聚合
+  S.fetchReviewLedger = async () => {
+    try {
+      const d = await apiJSON("/api/admin/review-ledger");
+      return d && d.ok ? d : null;
+    } catch (e) { return null; }
+  };
 
   // 被打回待改：草稿态且最近一次流转是退回/要求补充
   S.isReturned = (c) => {

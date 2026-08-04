@@ -31,7 +31,11 @@
   `app/data.js`、`files/index.json`、`files/users.json`、`files/cases_seed.json`、
   `files/materials_seed.json` 等，保留已有上传条目；提取 `app/seed.js` 种子案例需要本机有 node）。
 - **冒烟测试**：`node tools/smoke_materials.js [baseUrl]`（加载真实 store.js 打真实服务端，
-  覆盖素材同步/收藏/推荐/候选确认/查重/批量操作/被引计数）。
+  覆盖素材同步/收藏/推荐/候选确认/查重/批量操作/被引计数）；`node tools/smoke_evidence.js`
+  （引用证据链）；`node tools/smoke_review.js`（审核闭环：checking 机审/词库命中/reasonType/
+  退回台账/diffSummary/AI 生成标识）。
+- **记忆 bench**：`python3 tools/bench_memory.py [--rejudge]`（用户级记忆三臂对照评测，
+  需先以临时 `SQLITE_DB_PATH` 启动服务，报告见 `docs/memory-bench.md`）。
 
 ## 云端仓库
 

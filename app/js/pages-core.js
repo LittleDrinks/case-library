@@ -7,8 +7,8 @@ window.Pages = window.Pages || {};
   P.H = H;
 
   const STATUS = {
-    draft: ["草稿", ""], pending: ["待审", "amber"], reviewing: ["审核中", "blue"],
-    published: ["已发布", "green"], hidden: ["已隐藏", "red"],
+    draft: ["草稿", ""], checking: ["机审中", "amber"], pending: ["待审", "amber"],
+    reviewing: ["审核中", "blue"], published: ["已发布", "green"], hidden: ["已隐藏", "red"],
   };
   H.statusTag = (s) => {
     const t = STATUS[s] || [s, ""];

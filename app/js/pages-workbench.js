@@ -40,7 +40,7 @@ window.Pages = window.Pages || {};
     let phaseTimer = null, paintTimer = null; // 阶段切换定时器与增量渲染节流
     let showDiff = false;
     let pendingFetch = null;
-    let rvOpinion = "", rvFrom = "";
+    let rvOpinion = "", rvFrom = "", rvReasonType = "";
     let selBtn = null;
 
     // ---------------- 正文模型 ----------------
@@ -904,6 +904,7 @@ window.Pages = window.Pages || {};
     // 服务端后处理标「待核实」的无源引用 → risk 批注（不静默放行）
     async function adoptEvidence(msg) {
       Copilot.materializeCitations(c, msg);
+      Store.markAiAssist(c, msg.meta && msg.meta.model); // AI 起草/改写打标 origin + 模型
       for (const rk of msg.risks || []) {
         await Store.addAnnotation(c, {
           kind: "risk", status: "pending", section: 0,
@@ -1438,6 +1439,12 @@ window.Pages = window.Pages || {};
           : `<div class="small" style="color:var(--amber);margin-bottom:8px">退回或要求补充前，请先在正文选中文字添加至少一条批注。</div>`}
         <label class="field"><span>总评（可选）</span>
           <textarea class="text" id="rv-opinion" style="height:72px" placeholder="整体评价，可不填">${U.esc(rvOpinion)}</textarea></label>
+        <label class="field"><span>退回类型（退回/要求补充必选）</span>
+          <select class="text" id="rv-reason-type">
+            <option value="">请选择退回类型…</option>
+            ${Object.entries(Store.reasonTypeNames).map(([k, n]) =>
+              `<option value="${k}" ${rvReasonType === k ? "selected" : ""}>${n}</option>`).join("")}
+          </select></label>
         <label class="field"><span>线下意见来源（可选）</span>
           <select class="text" id="rv-from">
             ${["无", "教研室讨论", "专家评审会", "上级部门意见"].map((x) =>
@@ -1458,7 +1465,7 @@ window.Pages = window.Pages || {};
       return `<div class="card card-pad">
         <div class="section-title small"><span>历史审核记录</span></div>
         ${recs.map((r) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
-          <div class="row spread"><b class="small">${U.esc(REVIEW_ACT_NAMES[r.action])}</b>
+          <div class="row spread"><b class="small">${U.esc(REVIEW_ACT_NAMES[r.action])}${r.reasonType ? `<span class="tag amber" style="margin-left:6px">${U.esc(Store.reasonTypeNames[r.reasonType] || r.reasonType)}</span>` : ""}</b>
           <span class="small muted">第 ${r.round || 1} 轮 · ${U.esc(r.at)}</span></div>
           ${r.opinion ? `<div class="small muted">${U.esc(r.opinion)}</div>` : ""}
         </div>`).join("")}
@@ -1476,9 +1483,14 @@ window.Pages = window.Pages || {};
       }
       const opinion = (U.$("#rv-opinion") ? U.$("#rv-opinion").value : rvOpinion).trim();
       const from = U.$("#rv-from") ? U.$("#rv-from").value : "";
+      const reasonType = U.$("#rv-reason-type") ? U.$("#rv-reason-type").value : rvReasonType;
+      if ((action === "return" || action === "supplement") && !reasonType) {
+        U.toast("退回/要求补充必须选择退回类型", 3200);
+        return;
+      }
       const verb = REVIEW_ACT_NAMES[action] || action;
       if (!(await U.confirmModal(`确认「${verb}」该案例？`, { danger: action === "hide" }))) return;
-      if (await Store.reviewCase(c, action, opinion, from === "无" ? "" : from)) {
+      if (await Store.reviewCase(c, action, opinion, from === "无" ? "" : from, reasonType)) {
         U.toast("已完成：" + verb);
         location.hash = "#/admin/audit";
       }
@@ -1602,6 +1614,7 @@ window.Pages = window.Pages || {};
       }
       const statusNote = c.status === "published" ? "已发布公开版" : "草稿（仅供内部教学参考）";
       const footerNote = `上海大学思政教学案例智能平台 · 生成时间：${U.now()} · 状态：${statusNote} · ${external ? "对外申报版（已脱敏）" : "校内完整版"}`;
+      const cm = c.meta || {}; // AI 生成标识：服务端写入页脚追踪元数据
       const resp = await fetch("/api/export-docx", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1612,6 +1625,9 @@ window.Pages = window.Pages || {};
             caseType: Store.typeName(c.typeId), course: c.course || "-",
             mode: external ? "对外申报版" : "校内完整版",
             statusNote, footerNote,
+            origin: cm.origin || "human",
+            modelVersions: cm.modelVersions || [],
+            reviewedBy: cm.reviewedBy || "",
           },
           parts, refs,
         }),
@@ -2182,6 +2198,7 @@ window.Pages = window.Pages || {};
         });
         el.addEventListener("change", (e) => {
           if (e.target.id === "rv-from") rvFrom = e.target.value;
+          if (e.target.id === "rv-reason-type") rvReasonType = e.target.value;
         });
         el.addEventListener("keydown", (e) => {
           if (e.target.id === "case-tag-add" && e.key === "Enter") {

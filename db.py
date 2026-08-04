@@ -9,6 +9,7 @@ materials 表是素材登记的唯一权威（WP2，ADR 0003/0011）：种子来
 citedCount/lastCitedAt 由案例写入时统一重算（_sync_material_usage）；
 「待淘汰」是派生态（30 天未被引且未豁免），不落库，读取时计算（ADR 0003）。
 """
+import difflib
 import json
 import os
 import sqlite3
@@ -101,7 +102,12 @@ MAT_STATUSES = ("候选", "正常", "停用", "来源失效")
 MAT_GRADES = ("S", "A", "B", "C")
 DORMANT_DAYS = 30  # 满 30 天未被引用且未豁免 → 待淘汰（ADR 0003）
 
-# 状态机：draft/pending/reviewing/published/hidden（checking 预留给机审）
+# 状态机：draft → checking（机审，提交后自动进入）→ pending → reviewing → published/hidden；
+# 退回/要求补充回 draft。机审（词库规则 + LLM 反例审校）由服务端在 submit 后异步执行，
+# 结果以 kind=risk 批注呈现，reviews 留痕 action=checking。
+# 结构化退回理由（reject/supplement 必选）：
+REASON_TYPES = ("fact_error", "citation_unsupported", "forced_mapping",
+                "over_praise", "wording", "other")
 SNAP_KEYS = ["title", "summary", "theoryPoints", "blocks", "citations", "kit",
              "typeId", "audience", "course", "author", "org", "stageText", "applyCourses"]
 
@@ -252,6 +258,10 @@ class CaseDB:
             c = dict(c)
             c["ownerId"] = user["id"]
             c["status"] = "draft"
+            meta = c.setdefault("meta", {})  # AI 生成标识：origin/modelVersions/reviewedBy
+            meta.setdefault("origin", "human")
+            meta.setdefault("modelVersions", [])
+            meta.setdefault("reviewedBy", "")
             c.setdefault("createdAt", _now())
             c["updatedAt"] = _now()
             self._insert_case(c)
@@ -317,9 +327,49 @@ class CaseDB:
         v = {"id": _uid("v"), "label": label, "at": _now(), "note": note}
         if snapshot is not None:
             v["snapshot"] = snapshot
+            ds = self._diff_summary(cid, snapshot)
+            if ds:
+                v["diffSummary"] = ds
         self._conn.execute(
             "INSERT INTO versions(id,caseId,actorId,label,at,data) VALUES(?,?,?,?,?,?)",
             (v["id"], cid, actor_id, label, v["at"], json.dumps(v, ensure_ascii=False)))
+
+    @staticmethod
+    def _block_lines(blocks):
+        return [str(b.get("text") or "") for b in blocks or []]
+
+    def _diff_summary(self, cid, new_snap):
+        """与上一版快照的 blocks 文本 diff 统计：增/删/改行数 + 变更块 id（b+块序号）。
+        首个带快照的版本没有上一版，返回 None。"""
+        prev = None
+        for r in self._conn.execute(
+                "SELECT data FROM versions WHERE caseId=? ORDER BY rowid DESC", (cid,)):
+            x = json.loads(r["data"])
+            if x.get("snapshot"):
+                prev = x
+                break
+        if not prev:
+            return None
+        old = self._block_lines(prev["snapshot"].get("blocks"))
+        new = self._block_lines(new_snap.get("blocks"))
+        added = removed = changed = 0
+        ids = []
+
+        def nlines(texts):
+            return sum(t.count("\n") + 1 for t in texts)
+
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+                None, old, new, autojunk=False).get_opcodes():
+            if tag == "insert":
+                added += nlines(new[j1:j2])
+                ids += ["b%d" % j for j in range(j1, j2)]
+            elif tag == "delete":
+                removed += nlines(old[i1:i2])
+            elif tag == "replace":
+                changed += max(nlines(old[i1:i2]), nlines(new[j1:j2]))
+                ids += ["b%d" % j for j in range(j1, j2)]
+        return {"vs": prev.get("id", ""), "added": added,
+                "removed": removed, "changed": changed, "blocks": ids}
 
     def transition(self, user, cid, action, reason="", reason_type="", offline_from=""):
         """submit/withdraw 限作者本人；start/approve/reject/supplement/hide/unhide 限 admin。"""
@@ -341,7 +391,8 @@ class CaseDB:
                     return None, "仅草稿可提交审核", 409
                 n = self._submit_round(cid) + 1
                 self._add_version(cid, user["id"], "提交版 v%d" % n, "提交审核", snapshot_of(c))
-                self._conn.execute("UPDATE cases SET status='pending', submittedAt=?, updatedAt=? WHERE id=?",
+                # 先进 checking：服务端异步机审完成后转 pending（见 machine_check_apply）
+                self._conn.execute("UPDATE cases SET status='checking', submittedAt=?, updatedAt=? WHERE id=?",
                                    (now, now, cid))
                 self._add_review(cid, user["id"], "submit", rnd=n)
             elif action == "withdraw":
@@ -365,6 +416,8 @@ class CaseDB:
                                   "审核通过并发布" + (reason and "：" + reason or ""), snap)
                 data = json.loads(r["data"])
                 data["publishedSnapshot"] = snap
+                meta = data.setdefault("meta", {})
+                meta["reviewedBy"] = user.get("name") or user["id"]
                 self._conn.execute(
                     "UPDATE cases SET status='published', publishedAt=?, updatedAt=?, data=? WHERE id=?",
                     (pub_day, now, json.dumps(data, ensure_ascii=False), cid))
@@ -373,6 +426,8 @@ class CaseDB:
             elif action in ("reject", "supplement"):
                 if st not in ("pending", "reviewing"):
                     return None, "案例不在审核流程中", 409
+                if reason_type not in REASON_TYPES:
+                    return None, "退回/要求补充必须选择退回类型 reasonType（%s）" % "/".join(REASON_TYPES), 400
                 self._add_version(cid, user["id"],
                                   "退回" if action == "reject" else "要求补充", reason)
                 self._conn.execute("UPDATE cases SET status='draft', updatedAt=? WHERE id=?", (now, cid))
@@ -411,6 +466,74 @@ class CaseDB:
                 "opinion": r["reason"], "reasonType": r["reasonType"],
                 "offlineFrom": r["offlineFrom"], "by": r["actorId"],
                 "at": r["at"], "round": r["round"]}
+
+    # ------------------------------------------------------------ 机审（WP4）
+    def get_case_data(self, cid):
+        """机审等后台流程用的原始读取（不做可见性过滤）。"""
+        with self._lock:
+            r = self._row(cid)
+            return json.loads(r["data"]) if r else None
+
+    def machine_check_apply(self, cid, annotations, note, model=""):
+        """机审落库（submit 后由服务端异步调用）：命中项写 kind=risk 批注、
+        reviews 留痕 action=checking，状态 checking → pending；
+        机审用过的模型记入 meta.modelVersions。"""
+        with self._lock:
+            r = self._row(cid)
+            if not r or r["status"] != "checking":
+                return None, "案例不在机审中"
+            data = json.loads(r["data"])
+            if model:
+                mv = data.setdefault("meta", {}).setdefault("modelVersions", [])
+                if model not in mv:
+                    mv.append(model)
+            now = _now()
+            for a in annotations:
+                a = dict(a)
+                a.setdefault("id", _uid("an"))
+                a.setdefault("kind", "risk")
+                a.setdefault("status", "pending")
+                a.setdefault("section", 0)
+                a.setdefault("quote", "")
+                a.setdefault("lowRisk", False)
+                a.setdefault("createdAt", now)
+                a.setdefault("replies", [])
+                self._conn.execute(
+                    "INSERT INTO annotations(id,caseId,kind,status,authorId,at,data)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (a["id"], cid, "risk", "pending", "", a["createdAt"],
+                     json.dumps(a, ensure_ascii=False)))
+            self._conn.execute(
+                "UPDATE cases SET status='pending', updatedAt=?, data=? WHERE id=?",
+                (now, json.dumps(data, ensure_ascii=False), cid))
+            self._add_review(cid, "system", "checking", note, rnd=self._submit_round(cid))
+            self._sync_selfchecks(cid)
+            self._conn.commit()
+            return self._case_obj(self._row(cid)), None
+
+    def review_ledger(self, limit=200):
+        """被退回表达台账（组织资产）：reject/supplement 留痕按 reasonType 聚合，附关联批注。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM reviews WHERE action IN ('reject','supplement') AND reasonType!=''"
+                " ORDER BY at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
+            items, by_type = [], {}
+            for r in rows:
+                cr = self._row(r["caseId"])
+                title = json.loads(cr["data"]).get("title", "") if cr else "（已删除）"
+                annos = [{
+                    "kind": a.get("kind", ""), "quote": a.get("quote", ""),
+                    "text": a.get("text", ""),
+                } for a in (json.loads(x["data"]) for x in self._conn.execute(
+                        "SELECT data FROM annotations WHERE caseId=?"
+                        " AND kind IN ('risk','admin') ORDER BY rowid DESC LIMIT 3",
+                        (r["caseId"],)))]
+                items.append({"id": r["id"], "caseId": r["caseId"], "caseTitle": title,
+                              "action": r["action"], "reasonType": r["reasonType"],
+                              "reason": r["reason"], "by": r["actorId"],
+                              "at": r["at"], "round": r["round"], "annotations": annos})
+                by_type[r["reasonType"]] = by_type.get(r["reasonType"], 0) + 1
+            return {"items": items, "byType": by_type}
 
     # ------------------------------------------------------------ 批注
     def add_annotation(self, user, cid, anno):

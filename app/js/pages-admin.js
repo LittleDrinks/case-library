@@ -7,7 +7,8 @@ window.Pages = window.Pages || {};
 
   const TABS = [
     ["audit", "案例审核"], ["publish", "发布管理"], ["materials", "素材管理"],
-    ["knowledge", "知识管理"], ["types", "类型与模板"], ["accounts", "账号权限"], ["ann", "公告管理"],
+    ["knowledge", "知识管理"], ["types", "类型与模板"], ["assets", "组织资产"],
+    ["accounts", "账号权限"], ["ann", "公告管理"],
   ];
 
   P.admin = (tab, params) => {
@@ -22,7 +23,8 @@ window.Pages = window.Pages || {};
 
     const bodies = {
       audit: auditTab, publish: publishTab, materials: materialsTab,
-      knowledge: knowledgeTab, types: typesTab, accounts: accountsTab, ann: annTab,
+      knowledge: knowledgeTab, types: typesTab, assets: assetsTab,
+      accounts: accountsTab, ann: annTab,
     };
     return {
       html: `
@@ -43,7 +45,8 @@ window.Pages = window.Pages || {};
   // ---------------------------------------------------------- 审核队列
   let auditQ = "", auditAuthor = "", auditSort = "newest", auditQApplied = null;
   function auditTab() {
-    let queue = Store.db.cases.filter((c) => c.status === "pending" || c.status === "reviewing");
+    let queue = Store.db.cases.filter((c) =>
+      c.status === "checking" || c.status === "pending" || c.status === "reviewing");
     const authors = Array.from(new Set(queue.map((c) => c.ownerId)));
     if (auditQ) queue = queue.filter((c) =>
       c.title.includes(auditQ) || (Store.userById(c.ownerId) || {}).name.includes(auditQ));
@@ -93,7 +96,7 @@ window.Pages = window.Pages || {};
         ${done.map((r) => {
           const c = Store.db.cases.find((x) => x.id === r.caseId);
           return `<tr><td>${U.esc(r.at)}</td><td>${U.esc(c ? c.title : "（已删除）")}</td>
-            <td>${{ approve: "通过", reject: "退回", return: "退回", supplement: "要求补充", hide: "隐藏", submit: "提交", withdraw: "撤回", start: "开始审核", unhide: "恢复公开" }[r.action] || r.action}</td>
+            <td>${{ approve: "通过", reject: "退回", return: "退回", supplement: "要求补充", hide: "隐藏", submit: "提交", withdraw: "撤回", start: "开始审核", unhide: "恢复公开", checking: "机审" }[r.action] || r.action}${r.reasonType ? ` <span class="tag amber">${U.esc(Store.reasonTypeNames[r.reasonType] || r.reasonType)}</span>` : ""}</td>
             <td>${U.esc(r.opinion || "—")}</td><td>${U.esc(r.offlineFrom || "—")}</td></tr>`;
         }).join("")}
       </table>
@@ -389,6 +392,66 @@ window.Pages = window.Pages || {};
       U.toast("模板已保存");
       P.rerender();
     });
+  }
+
+  // ---------------------------------------------------------- 组织资产（WP4）
+  // ①被退回表达台账：reviews 留痕（reasonType+reason+关联批注）服务端聚合，人工可读，不接生成 prompt；
+  // ②教研组模板与常用思政元素：现有模板数据静态展示（编辑仍在「类型与模板」页签）。
+  let ledgerData = null, ledgerType = "";
+  function assetsTab() {
+    const names = Store.reasonTypeNames;
+    const items = (ledgerData ? ledgerData.items : []).filter((x) => !ledgerType || x.reasonType === ledgerType);
+    const byType = (ledgerData && ledgerData.byType) || {};
+    // 常用思政元素：全库案例理论点词频 Top 20（静态聚合展示）
+    const freq = {};
+    Store.db.cases.forEach((c) => (c.theoryPoints || []).forEach((t) => { freq[t] = (freq[t] || 0) + 1; }));
+    const topPoints = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    return `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
+        <span>被退回表达台账（${items.length}）</span>
+        <span class="row" style="gap:8px">
+          <select id="ledger-type" class="text" style="max-width:150px">
+            <option value="">全部类型${ledgerData ? `（${ledgerData.items.length}）` : ""}</option>
+            ${Object.keys(names).map((k) => byType[k]
+              ? `<option value="${k}" ${ledgerType === k ? "selected" : ""}>${names[k]}（${byType[k]}）</option>` : "").join("")}
+          </select>
+          <button class="btn sm plain" id="ledger-reload">刷新</button>
+        </span>
+      </div>
+      ${!ledgerData ? `<div class="card-pad muted small">台账加载中…</div>` : items.length ? `<table class="data">
+        <tr><th>时间</th><th>案例</th><th>动作</th><th>类型</th><th>退回理由</th><th>关联批注</th></tr>
+        ${items.map((x) => `<tr>
+          <td class="small">${U.esc(x.at)}</td>
+          <td>${U.esc(x.caseTitle)}</td>
+          <td>${{ reject: "退回", supplement: "要求补充" }[x.action] || x.action}</td>
+          <td><span class="tag amber">${U.esc(names[x.reasonType] || x.reasonType)}</span></td>
+          <td class="small" style="max-width:220px">${U.esc(x.reason || "—")}</td>
+          <td class="small" style="max-width:280px">${(x.annotations || []).map((a) =>
+            U.esc((a.quote ? "「" + a.quote + "」" : "") + a.text).slice(0, 60)).join("<br>") || "—"}</td>
+        </tr>`).join("")}
+      </table>` : H.empty("暂无退回记录")}
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>教研组模板</span></div>
+      <table class="data">
+        <tr><th>案例类型</th><th>模板</th><th>用途</th><th>适用学段</th><th>章节结构</th></tr>
+        ${Store.db.caseTypes.map((t) => t.templates.map((tp, i) => `<tr>
+          ${i === 0 ? `<td rowspan="${t.templates.length}">${U.esc(t.name)}</td>` : ""}
+          <td>${U.esc(tp.name)}</td>
+          <td><span class="tag primary">${U.esc(tp.purpose || "日常授课")}</span></td>
+          <td>${tp.stages.map((s) => Store.audienceName(s)).join("、")}</td>
+          <td class="small">${tp.sections.map(U.esc).join(" / ")}</td>
+        </tr>`).join("")).join("")}
+      </table>
+      <div class="card-pad small muted" style="border-top:1px solid var(--line)">模板编辑在「类型与模板」页签，此处只读汇总。</div>
+    </div>
+    <div class="card">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>常用思政元素（案例理论点词频 Top ${topPoints.length}）</span></div>
+      <div class="card-pad row wrap">
+        ${topPoints.map(([t, n]) => `<span class="tag green">${U.esc(t)} × ${n}</span>`).join("") || `<span class="muted small">暂无理论点数据</span>`}
+      </div>
+    </div>`;
   }
 
   // ---------------------------------------------------------- 账号权限
@@ -700,6 +763,17 @@ window.Pages = window.Pages || {};
           templates: [{ id: U.uid("tp"), name: "标准模板", purpose: "日常授课", stages: ["ug", "grad"], sections: ["案例背景", "案例正文", "分析讨论", "总结启示"] }],
         });
         Store.saveCase(); P.rerender();
+      });
+    },
+    assets(el) {
+      // 台账走服务端聚合接口（admin）；首次进入拉取，「刷新」强制重拉
+      if (!ledgerData) {
+        Store.fetchReviewLedger().then((d) => { ledgerData = d || { items: [], byType: {} }; P.rerender(); });
+      }
+      U.$("#ledger-type", el).addEventListener("change", (e) => { ledgerType = e.target.value; P.rerender(); });
+      U.$("#ledger-reload", el).addEventListener("click", async () => {
+        ledgerData = await Store.fetchReviewLedger() || { items: [], byType: {} };
+        P.rerender();
       });
     },
     accounts(el) {
