@@ -1,5 +1,10 @@
 # Case Library V2 Agent Handoff
 
+## 版本管理
+
+- `main` 只放稳定基线并打 tag；每个迭代一个分支（`v2.1`、`v2.2`…），验收后合回 main 打同名 tag。
+- 当前：`v2.0` = demo 基线；`v2.1` = 开发中（范围见 `docs/demo-improvement-todo.md`）。
+
 ## 本目录：可运行演示原型
 
 本目录是思政教学案例库的**可运行演示原型**，与下方云端主仓库（FastAPI + MongoDB + Vue 3）
