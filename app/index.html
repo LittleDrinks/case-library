@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>思政教学案例智能平台</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="app.css?v=5">
+</head>
+<body>
+<header id="topbar">
+  <a class="brand" href="#/home"><img src="assets/shu-logo.png" alt="上海大学"><span>思政教学案例智能平台</span></a>
+  <nav id="mainnav">
+    <a href="#/home" data-nav="home">首页</a>
+    <a href="#/mine" data-nav="mine">我的案例<span id="mine-badge" class="nav-badge" hidden></span></a>
+    <a href="#/search" data-nav="search">资源检索</a>
+    <a href="#/admin" data-nav="admin" id="nav-admin" hidden>管理后台</a>
+  </nav>
+  <div id="account">
+    <select id="user-switch" title="切换账号"></select>
+    <button id="prefs-btn" class="ghost-btn" title="教学偏好设置">偏好</button>
+  </div>
+</header>
+<main id="view"></main>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script src="data.js"></script>
+<script src="seed.js?v=5"></script>
+<script src="js/util.js?v=5"></script>
+<script src="js/store.js?v=5"></script>
+<script src="js/copilot.js?v=5"></script>
+<script src="js/graph.js?v=5"></script>
+<script src="js/pages-core.js?v=5"></script>
+<script src="js/pages-workbench.js?v=5"></script>
+<script src="js/pages-browse.js?v=5"></script>
+<script src="js/pages-admin.js?v=5"></script>
+<script src="js/main.js?v=5"></script>
+</body>
+</html>

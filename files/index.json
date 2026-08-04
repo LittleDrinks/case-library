@@ -1,0 +1,634 @@
+{
+ "files": [
+  {
+   "id": "f-lr-001",
+   "materialId": "lr-001",
+   "name": "上海大学中心组学习资料（2026年第23期 总第332期）.md",
+   "path": "seed/learn/lr-001.md",
+   "size": 155936,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-002",
+   "materialId": "lr-002",
+   "name": "上海大学中心组学习资料（2026年第22期 总第331期）.md",
+   "path": "seed/learn/lr-002.md",
+   "size": 103104,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-003",
+   "materialId": "lr-003",
+   "name": "上海大学中心组学习资料（2026年第21期 总第330期）.md",
+   "path": "seed/learn/lr-003.md",
+   "size": 110348,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-004",
+   "materialId": "lr-004",
+   "name": "上海大学中心组学习资料（2026年第20期 总第329期）.md",
+   "path": "seed/learn/lr-004.md",
+   "size": 169193,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-005",
+   "materialId": "lr-005",
+   "name": "上海大学中心组学习资料（2026年第19期 总第328期）.md",
+   "path": "seed/learn/lr-005.md",
+   "size": 109970,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-006",
+   "materialId": "lr-006",
+   "name": "上海大学中心组学习资料（2026年第18期 总第327期）.md",
+   "path": "seed/learn/lr-006.md",
+   "size": 126448,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-007",
+   "materialId": "lr-007",
+   "name": "上海大学中心组学习资料（2026年第15期 总第324期）.md",
+   "path": "seed/learn/lr-007.md",
+   "size": 97142,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-008",
+   "materialId": "lr-008",
+   "name": "上海大学中心组学习资料（2026年第14期 总第323期）.md",
+   "path": "seed/learn/lr-008.md",
+   "size": 86924,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-009",
+   "materialId": "lr-009",
+   "name": "上海大学中心组学习资料（2026年第13期 总第322期）.md",
+   "path": "seed/learn/lr-009.md",
+   "size": 164650,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-010",
+   "materialId": "lr-010",
+   "name": "上海大学中心组学习资料（2026年第12期 总第321期）.md",
+   "path": "seed/learn/lr-010.md",
+   "size": 87788,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-011",
+   "materialId": "lr-011",
+   "name": "上海大学中心组学习资料（2026年第11期 总第320期.md",
+   "path": "seed/learn/lr-011.md",
+   "size": 81995,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-012",
+   "materialId": "lr-012",
+   "name": "上海大学中心组学习资料（2026年第10期 总第319期）.md",
+   "path": "seed/learn/lr-012.md",
+   "size": 119632,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-013",
+   "materialId": "lr-013",
+   "name": "上海大学中心组学习资料（2026年第9期 总第318期）.md",
+   "path": "seed/learn/lr-013.md",
+   "size": 65452,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-014",
+   "materialId": "lr-014",
+   "name": "上海大学中心组学习资料（2026年第8期 总第317期）.md",
+   "path": "seed/learn/lr-014.md",
+   "size": 107647,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-015",
+   "materialId": "lr-015",
+   "name": "上海大学中心组学习资料（2026年第5期 总第316期）.md",
+   "path": "seed/learn/lr-015.md",
+   "size": 258078,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-016",
+   "materialId": "lr-016",
+   "name": "上海大学中心组学习资料（2026年第7期 总第316期）.md",
+   "path": "seed/learn/lr-016.md",
+   "size": 119963,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-017",
+   "materialId": "lr-017",
+   "name": "上海大学中心组学习资料（2026年第6期 总第315期）.md",
+   "path": "seed/learn/lr-017.md",
+   "size": 235185,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-018",
+   "materialId": "lr-018",
+   "name": "上海大学中心组学习资料（2026年第4期 总第313期）.md",
+   "path": "seed/learn/lr-018.md",
+   "size": 93322,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-019",
+   "materialId": "lr-019",
+   "name": "上海大学中心组学习资料（2026年第3期 总第312期）.md",
+   "path": "seed/learn/lr-019.md",
+   "size": 193743,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-020",
+   "materialId": "lr-020",
+   "name": "上海大学中心组学习资料（2026年第2期 总第311期）.md",
+   "path": "seed/learn/lr-020.md",
+   "size": 109128,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-021",
+   "materialId": "lr-021",
+   "name": "上海大学中心组学习资料（2026年1期 总第310期）.md",
+   "path": "seed/learn/lr-021.md",
+   "size": 149934,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-022",
+   "materialId": "lr-022",
+   "name": "上海大学中心组学习资料（2025年46期 总第309期）.md",
+   "path": "seed/learn/lr-022.md",
+   "size": 87055,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-023",
+   "materialId": "lr-023",
+   "name": "上海大学中心组学习资料（2025年45期 总第308期）.md",
+   "path": "seed/learn/lr-023.md",
+   "size": 312650,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-024",
+   "materialId": "lr-024",
+   "name": "上海大学中心组学习资料（2025年44期 总第307期）.md",
+   "path": "seed/learn/lr-024.md",
+   "size": 108484,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-025",
+   "materialId": "lr-025",
+   "name": "上海大学中心组学习资料（2025年43期 总第306期）.md",
+   "path": "seed/learn/lr-025.md",
+   "size": 107202,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-026",
+   "materialId": "lr-026",
+   "name": "上海大学中心组学习资料（2025年42期 总第305期）.md",
+   "path": "seed/learn/lr-026.md",
+   "size": 87824,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-027",
+   "materialId": "lr-027",
+   "name": "上海大学中心组学习资料（2025年41期 总第304期）.md",
+   "path": "seed/learn/lr-027.md",
+   "size": 93759,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-028",
+   "materialId": "lr-028",
+   "name": "上海大学中心组学习资料（2025年40期 总第303期）.md",
+   "path": "seed/learn/lr-028.md",
+   "size": 121710,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-029",
+   "materialId": "lr-029",
+   "name": "上海大学中心组学习资料（2025年39期 总第302期）.md",
+   "path": "seed/learn/lr-029.md",
+   "size": 96439,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-030",
+   "materialId": "lr-030",
+   "name": "上海大学中心组学习资料（2025年38期 总第301期）.md",
+   "path": "seed/learn/lr-030.md",
+   "size": 123078,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-031",
+   "materialId": "lr-031",
+   "name": "上海大学中心组学习资料（2025年37期 总第300期）.md",
+   "path": "seed/learn/lr-031.md",
+   "size": 252780,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-032",
+   "materialId": "lr-032",
+   "name": "上海大学中心组学习资料（2025年36期 总第299期）.md",
+   "path": "seed/learn/lr-032.md",
+   "size": 96735,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-033",
+   "materialId": "lr-033",
+   "name": "上海大学中心组学习资料（2025年35期 总第298期）.md",
+   "path": "seed/learn/lr-033.md",
+   "size": 84201,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-034",
+   "materialId": "lr-034",
+   "name": "上海大学中心组学习资料（2025年34期 总第297期）.md",
+   "path": "seed/learn/lr-034.md",
+   "size": 159374,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-035",
+   "materialId": "lr-035",
+   "name": "上海大学中心组学习资料（2025年33期 总第296期）.md",
+   "path": "seed/learn/lr-035.md",
+   "size": 97793,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-036",
+   "materialId": "lr-036",
+   "name": "上海大学中心组学习资料（2025年32期 总第295期.md",
+   "path": "seed/learn/lr-036.md",
+   "size": 76053,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-037",
+   "materialId": "lr-037",
+   "name": "上海大学中心组学习资料（2025年31期 总第294期）.md",
+   "path": "seed/learn/lr-037.md",
+   "size": 91721,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-038",
+   "materialId": "lr-038",
+   "name": "上海大学中心组学习资料（2025年30期 总第293期）.md",
+   "path": "seed/learn/lr-038.md",
+   "size": 117264,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-039",
+   "materialId": "lr-039",
+   "name": "上海大学中心组学习资料（2025年29期 总第292期）.md",
+   "path": "seed/learn/lr-039.md",
+   "size": 219612,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-040",
+   "materialId": "lr-040",
+   "name": "上海大学中心组学习资料（2025年28期 总第291期）.md",
+   "path": "seed/learn/lr-040.md",
+   "size": 133974,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-041",
+   "materialId": "lr-041",
+   "name": "上海大学中心组学习资料（2025年27期 总第290期）.md",
+   "path": "seed/learn/lr-041.md",
+   "size": 88372,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-042",
+   "materialId": "lr-042",
+   "name": "上海大学中心组学习资料（2025年第26期 总第289期）.md",
+   "path": "seed/learn/lr-042.md",
+   "size": 114447,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-043",
+   "materialId": "lr-043",
+   "name": "上海大学中心组学习资料（2025年第25期 总第288期）.md",
+   "path": "seed/learn/lr-043.md",
+   "size": 134997,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-044",
+   "materialId": "lr-044",
+   "name": "上海大学中心组学习资料（2025年第24期 总第287期）.md",
+   "path": "seed/learn/lr-044.md",
+   "size": 67336,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-045",
+   "materialId": "lr-045",
+   "name": "上海大学中心组学习资料（2025年第23期 总第286期）.md",
+   "path": "seed/learn/lr-045.md",
+   "size": 86176,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-046",
+   "materialId": "lr-046",
+   "name": "上海大学中心组学习资料（2025年第22期 总第285期）.md",
+   "path": "seed/learn/lr-046.md",
+   "size": 75242,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-047",
+   "materialId": "lr-047",
+   "name": "上海大学中心组学习资料（2025年第21期 总第284期）.md",
+   "path": "seed/learn/lr-047.md",
+   "size": 76503,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-048",
+   "materialId": "lr-048",
+   "name": "上海大学中心组学习资料（2025年第20期 总第283期）.md",
+   "path": "seed/learn/lr-048.md",
+   "size": 84803,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-049",
+   "materialId": "lr-049",
+   "name": "上海大学中心组学习资料（2025年第19期 总第282期）.md",
+   "path": "seed/learn/lr-049.md",
+   "size": 113642,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-050",
+   "materialId": "lr-050",
+   "name": "上海大学中心组学习资料（2025年第18期 总第281期）.md",
+   "path": "seed/learn/lr-050.md",
+   "size": 86333,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-051",
+   "materialId": "lr-051",
+   "name": "上海大学中心组学习资料（2025年第17期 总第280期）.md",
+   "path": "seed/learn/lr-051.md",
+   "size": 91683,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-052",
+   "materialId": "lr-052",
+   "name": "上海大学中心组学习资料（2025年第16期 总第279期）.md",
+   "path": "seed/learn/lr-052.md",
+   "size": 84725,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-053",
+   "materialId": "lr-053",
+   "name": "上海大学中心组学习资料（2025年第15期 总第278期）.md",
+   "path": "seed/learn/lr-053.md",
+   "size": 110733,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-054",
+   "materialId": "lr-054",
+   "name": "上海大学中心组学习资料（2025年第14期 总第277期）.md",
+   "path": "seed/learn/lr-054.md",
+   "size": 106953,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-055",
+   "materialId": "lr-055",
+   "name": "上海大学中心组学习资料（2025年第13期 总第276期）.md",
+   "path": "seed/learn/lr-055.md",
+   "size": 93847,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-056",
+   "materialId": "lr-056",
+   "name": "上海大学中心组学习资料（2025年第12期 总第275期）.md",
+   "path": "seed/learn/lr-056.md",
+   "size": 85983,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-057",
+   "materialId": "lr-057",
+   "name": "上海大学中心组学习资料（2025年第11期 总第274期）.md",
+   "path": "seed/learn/lr-057.md",
+   "size": 93497,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-058",
+   "materialId": "lr-058",
+   "name": "上海大学中心组学习资料（2025年第10期 总第273期）.md",
+   "path": "seed/learn/lr-058.md",
+   "size": 79970,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-059",
+   "materialId": "lr-059",
+   "name": "上海大学中心组学习资料（2025年第9期 总第272期）.md",
+   "path": "seed/learn/lr-059.md",
+   "size": 96099,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-060",
+   "materialId": "lr-060",
+   "name": "上海大学中心组学习资料（2025年第8期 总第271期）.md",
+   "path": "seed/learn/lr-060.md",
+   "size": 116055,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-061",
+   "materialId": "lr-061",
+   "name": "上海大学中心组学习资料（2025年第7期 总第270期）.md",
+   "path": "seed/learn/lr-061.md",
+   "size": 100011,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-062",
+   "materialId": "lr-062",
+   "name": "上海大学中心组学习资料（2025年第6期 总第269期）.md",
+   "path": "seed/learn/lr-062.md",
+   "size": 50826,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-063",
+   "materialId": "lr-063",
+   "name": "上海大学中心组学习资料（2025年第5期 总第268期）.md",
+   "path": "seed/learn/lr-063.md",
+   "size": 71043,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-064",
+   "materialId": "lr-064",
+   "name": "上海大学中心组学习资料（2025年第4期 总第267期）.md",
+   "path": "seed/learn/lr-064.md",
+   "size": 79053,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-065",
+   "materialId": "lr-065",
+   "name": "上海大学中心组学习资料（2025年第3期 总第266期）.md",
+   "path": "seed/learn/lr-065.md",
+   "size": 110108,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-066",
+   "materialId": "lr-066",
+   "name": "上海大学中心组学习资料（2025年第2期 总第265期）.md",
+   "path": "seed/learn/lr-066.md",
+   "size": 68809,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-067",
+   "materialId": "lr-067",
+   "name": "上海大学中心组学习资料（2025年第1期 总第264期）.md",
+   "path": "seed/learn/lr-067.md",
+   "size": 126007,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-068",
+   "materialId": "lr-068",
+   "name": "上海大学中心组学习资料（2026年第17期 总第236期）.md",
+   "path": "seed/learn/lr-068.md",
+   "size": 120468,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-lr-069",
+   "materialId": "lr-069",
+   "name": "上海大学中心组学习资料（2026年第16期 总第235期）.md",
+   "path": "seed/learn/lr-069.md",
+   "size": 164372,
+   "level": 1,
+   "seed": true
+  },
+  {
+   "id": "f-book-zrdb",
+   "materialId": "ks-zr",
+   "name": "《自然辩证法概论（2025版）》.md",
+   "path": "seed/book/zrbjf-2025.md",
+   "size": 314634,
+   "level": 0,
+   "seed": true
+  }
+ ]
+}

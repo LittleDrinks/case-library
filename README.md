@@ -1,0 +1,116 @@
+# Case Library V2 Agent Handoff
+
+## 本目录：可运行演示原型
+
+本目录是思政教学案例库的**可运行演示原型**，与下方云端主仓库（FastAPI + MongoDB + Vue 3）
+不是同一套代码，请勿混淆。
+
+- **技术形态**：无构建的原生 JS 前端（`app/`，`index.html` 直接引用 `app/js/*.js`）+
+  单文件 Python 后端（`server.py`，仅依赖标准库 + `python-docx`）。
+- **启动方式**：`/usr/bin/python3 server.py`（或 `python3 server.py [port]`）。
+  端口优先取命令行参数，其次取 `.env` 的 `PROTOTYPE_PORT`，默认 `8080`
+  （见 `server.py` 尾部启动代码）。
+- **数据架构**：业务数据（案例、收藏、批注、偏好等）保存在浏览器 `localStorage`；
+  后端只负责 AI 代理（`/api/ai/chat`，含 SSE 流式）、文件库（`/api/files`，上传
+  md/txt/docx 自动抽取纯文本）、知识库在线导入（`/api/knowledge/import`）与 docx 导出
+  （`/api/export-docx`）等服务端能力。种子数据构建期写入 `app/data.js` 与 `files/`。
+- **AI 配置**：`.env` 中的 `AI_BASE_URL` / `AI_API_KEY` / `AI_MODELS` /
+  `AI_DEFAULT_MODEL` 等 `AI_*` 变量；密钥只存在服务端，浏览器通过
+  `GET /api/constants` 的 `aiConfigured` 判断能力开关。
+- **重建静态数据**：`python3 tools/build_data.py`（从 `assets/`、`examples/` 重新生成
+  `app/data.js`、`files/index.json`、`files/users.json` 等，保留已有上传条目）。
+
+## 云端仓库
+
+### 产品代码仓库
+
+- `https://github.com/LittleDrinks/case-library.git`
+- 这是当前 FastAPI + MongoDB + Vue 3/Vite 项目的主仓库。
+
+### 原始参考仓库
+
+- `https://github.com/yangxuchen5898/case-library.git`
+- 仅用于参考原始 Skills、分类思路和案例资产，不要整目录复制实现。
+
+## 技术栈
+
+### 后端
+
+- Python 3.12；
+- FastAPI + Uvicorn；
+- PyMongo；
+- MongoDB 7；
+- `python-docx` 用于 Docs/DOCX 导出；
+- OpenAI-compatible 服务端 AI 客户端；
+- AI 凭据只能存在后端环境变量，浏览器不得接收。
+
+### 前端
+
+- Vue 3；
+- Vite 7；
+- Node.js 20；
+- Vitest + jsdom；
+- Playwright。
+
+### 工程环境
+
+- Docker Compose 是默认运行、安装依赖、测试和构建环境；
+- Dockerfile 基于 `python:3.12-slim`，复用 Node 20；
+- 不要求宿主机安装 Python、Node 或 MongoDB 项目依赖。
+
+## 端口和服务
+
+| 服务 | 容器端口 | 宿主端口 | 地址 |
+| --- | ---: | ---: | --- |
+| Vue/Vite 前端 | 5173 | **18080** | `http://127.0.0.1:18080` |
+| FastAPI 后端 | 8001 | 8001 | `http://127.0.0.1:8001` |
+| MongoDB | 27017 | 不暴露 | Compose 网络内使用 |
+
+18080 是前端演示和浏览器 QA 的固定入口，不要改成其他默认端口。后端 API 通过前端代理
+使用 `/api`，健康检查地址为 `http://127.0.0.1:8001/api/constants`。
+
+## Docker 启动
+
+```bash
+# 日常开发
+docker compose up --build
+
+# 后台启动
+docker compose up --build -d
+
+# 查看日志
+docker compose logs -f app frontend
+
+# 停止
+docker compose down
+```
+
+开发/测试 Compose：
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+
+# 需要 Playwright 时
+docker compose -f docker-compose.dev.yml --profile e2e up --build
+```
+
+不要把 Mongo 数据卷、上传材料、Playwright 截图、运行日志或 Agent 过程文件提交到 Git。
+
+## AI 环境变量
+
+只在本地 `.env` 或受控部署环境配置，不要写入 README、源码、截图或测试报告：
+
+```dotenv
+AI_BASE_URL=
+AI_API_KEY=
+AI_MODELS=
+AI_DEFAULT_MODEL=
+AI_TIMEOUT_SECONDS=60
+AI_REVIEW_ENABLED=false
+VECTOR_SEARCH_ENABLED=false
+VECTOR_BACKEND=none
+EMBEDDING_MODEL=
+```
+
+MVP 不提供教师侧模型选择、自定义模型页或 MCP 配置页。模型、Agent 和内置 Skills 由服务端
+处理；回答中显示实际使用的 Skill 名称即可。

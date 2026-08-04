@@ -1,0 +1,16 @@
+# 密钥与本地配置
+.env
+AGENTS.md
+
+# Python
+__pycache__/
+*.pyc
+
+# 运行时数据
+data/
+files/up/*
+!files/up/.gitkeep
+
+# 系统与编辑器
+.DS_Store
+*.log
