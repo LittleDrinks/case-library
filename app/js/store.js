@@ -612,13 +612,61 @@
     clearTimeout(matSyncTimer);
     matSyncTimer = setTimeout(() => { S.syncMaterials(); }, 800);
   }
-  S.cite = (c, targetId) => {
-    c.citations = c.citations || [];
-    if (!c.citations.some((r) => r.target === targetId)) {
-      c.citations.push({ target: targetId, at: U.now() });
-      syncCaseSoon(c);
-      if (!targetId.startsWith("kn-")) syncMaterialsSoon();
+
+  // 证据片段：quote（被引用句）在来源文本中命中时截取命中句前后文，否则取开头一段
+  function pickSnippet(text, quote, width) {
+    const flat = String(text || "").replace(/\s+/g, " ").trim();
+    if (!flat) return "";
+    const w = width || 160;
+    const probe = String(quote || "").trim().slice(0, 20);
+    if (probe) {
+      const p = flat.indexOf(probe);
+      if (p >= 0) return flat.slice(Math.max(0, p - 40), p + w).trim();
     }
+    return flat.slice(0, w + 40).trim();
+  }
+
+  // 手工挂接时自动捕获 evidence（WP3）：kn 节用 fileSec 作切片锚点；素材优先用上传全文
+  // （按 ADR 0010 切片定位 sec），没有全文时退化为内容副本 excerpt。best-effort，失败返回 null。
+  S.buildEvidence = (target, quote) => {
+    const kn = S.knowledgeById(target);
+    if (kn) {
+      return { materialId: kn.id, sec: kn.fileSec || "",
+               snippet: pickSnippet(kn.text, quote), capturedAt: U.now() };
+    }
+    const m = S.db.materials.find((x) => x.id === target);
+    if (!m) return null;
+    const up = uploadTexts[m.id];
+    if (up && up.text) {
+      const probe = String(quote || "").trim().slice(0, 20);
+      const chunks = U.chunkMd(up.text);
+      const hit = probe && chunks.find((ck) => ck.text.includes(probe));
+      if (hit) {
+        return { materialId: m.id, sec: hit.path,
+                 snippet: pickSnippet(hit.text, quote), capturedAt: U.now() };
+      }
+      return { materialId: m.id, sec: "",
+               snippet: pickSnippet(up.text, quote), capturedAt: U.now() };
+    }
+    const snippet = pickSnippet(m.excerpt || m.summary, quote);
+    return snippet ? { materialId: m.id, sec: "", snippet, capturedAt: U.now() } : null;
+  };
+
+  // citations[] 元素：{target, at, note, blockId?, quote?, evidence?}
+  // quote = 被引用句原文片段（句内锚点/文本指纹）；evidence = {materialId, sec, snippet, capturedAt}
+  S.cite = (c, targetId, opts) => {
+    c.citations = c.citations || [];
+    if (c.citations.some((r) => r.target === targetId)) return;
+    opts = opts || {};
+    const ref = { target: targetId, at: U.now() };
+    if (opts.note) ref.note = opts.note;
+    if (opts.blockId) ref.blockId = opts.blockId;
+    if (opts.quote) ref.quote = String(opts.quote).slice(0, 120);
+    const ev = opts.evidence || S.buildEvidence(targetId, ref.quote);
+    if (ev) ref.evidence = ev;
+    c.citations.push(ref);
+    syncCaseSoon(c);
+    if (!targetId.startsWith("kn-")) syncMaterialsSoon();
   };
   S.uncite = (c, targetId) => {
     c.citations = (c.citations || []).filter((r) => r.target !== targetId);
@@ -626,6 +674,15 @@
     if (!targetId.startsWith("kn-")) syncMaterialsSoon();
   };
   S.isCited = (c, targetId) => (c.citations || []).some((r) => r.target === targetId);
+
+  // 来源健康（WP3）：引用目标是素材且已删除/停用/来源失效 → true（角标判定，按本地素材缓存实时判定）
+  S.citeFailed = (ref) => {
+    const target = typeof ref === "string" ? ref : (ref && ref.target);
+    if (!target || target.indexOf("kn-") === 0) return false;
+    if (!S.db.materials.length) return false; // 缓存未加载不误判
+    const m = S.db.materials.find((x) => x.id === target);
+    return !m || m.status === "停用" || m.status === "来源失效";
+  };
 
   // ------------------------------------------------------------ 素材使用度与生命周期
   // 「被用」= 被案例正文引用；浏览不计入。citedCount/lastCitedAt/dormant 均由服务端维护（ADR 0003）

@@ -635,9 +635,10 @@ window.Pages = window.Pages || {};
     const blocks = Store.blocksOf(v);
     const tocItems = blocks.map((b, i) => ({ b, i })).filter((x) => x.b.kind === "h2" && x.b.text.trim());
 
-    // 正文〔n〕上标 → 可点击，与引用清单互跳（ADR 0005）
-    const markCites = (text) => U.esc(text).replace(/〔(\d+)〕/g,
-      `<a class="cite-mark" data-cite-jump="$1">〔$1〕</a>`);
+    // 正文〔n〕上标 → 可点击（句级锚点：有 quote 的引用跟在 quote 句后，漂移退化块尾），与引用清单互跳（ADR 0005/WP3）
+    const citeAnchors = U.citeAnchors(blocks, v.citations || []);
+    const citeBad = (n) => Store.citeFailed((v.citations || [])[n - 1]);
+    const markCites = (text, bi) => U.markCites(text, bi, citeAnchors, citeBad);
 
     const kitBlock = (title, items) => items && items.length ? `
       <div class="result-group"><div class="section-title"><span>${title}</span></div>
@@ -647,14 +648,28 @@ window.Pages = window.Pages || {};
     // kit 展示：作者/管理员看工作副本（备课生成物写回后立即可见），其余访客看发布快照
     const kitView = mine ? (c.kit || v.kit) : v.kit;
 
-    // 引用区：列表/图谱双视图，图谱为两跳力导向图（ADR 0008）
+    // 引用区：列表/图谱双视图，图谱为两跳力导向图（ADR 0008）；列表卡可展开看证据片段（WP3）
     let citeView = "list";
+    const evdOpen = new Set();
     const citeHref = (t) => t.kind === "knowledge" ? "#/knowledge/" + t.id : "#/material/" + t.id;
     const citeListHTML = () => cites.length
-      ? cites.map((x) => `<a class="case-item" id="cite-card-${x.i + 1}" href="${citeHref(x.t)}">
-          <h4>〔${x.i + 1}〕${U.esc(x.t.name)}</h4>
-          <div class="small muted">${U.esc(x.t.src || "")}${x.r.note ? " · " + U.esc(x.r.note) : ""}</div>
-        </a>`).join("")
+      ? cites.map((x) => {
+          const ev = x.r.evidence || {};
+          const open = evdOpen.has(x.i + 1);
+          const secHref = citeHref(x.t) + (ev.sec && x.t.kind !== "knowledge" ? "?sec=" + encodeURIComponent(ev.sec) : "");
+          return `<div class="case-item" id="cite-card-${x.i + 1}">
+            <div class="row spread">
+              <h4><a href="${citeHref(x.t)}">〔${x.i + 1}〕${U.esc(x.t.name)}</a></h4>
+              <span class="row" style="gap:6px">
+                ${Store.citeFailed(x.r) ? `<span class="tag red sm">来源失效</span>` : ""}
+                ${ev.snippet ? `<button class="btn sm plain" data-evd-toggle="${x.i + 1}">${open ? "收起证据" : "证据"}</button>` : ""}
+              </span>
+            </div>
+            <div class="small muted">${U.esc(x.t.src || "")}${x.r.note ? " · " + U.esc(x.r.note) : ""}</div>
+            ${open ? `<div class="evd-snip">${U.esc(ev.snippet)}</div>
+              <div class="small muted" style="margin-top:4px">${ev.sec ? "切片 " + U.esc(ev.sec) + " · " : ""}${ev.capturedAt ? "采集 " + U.esc(ev.capturedAt) + " · " : ""}<a href="${secHref}">打开原文切片 →</a></div>` : ""}
+          </div>`;
+        }).join("")
       : `<div class="card-pad muted small">暂无引用。引用教材章节或素材后，这里会显示清单与关系图。</div>`;
 
     return {
@@ -679,8 +694,8 @@ window.Pages = window.Pages || {};
             ${v.summary ? `<p style="background:var(--gray-soft);border-radius:6px;padding:10px 12px">${U.esc(v.summary)}</p>` : ""}
             ${(v.theoryPoints || []).length ? `<div class="row wrap" style="margin-bottom:10px">${v.theoryPoints.map((t) => `<span class="tag blue">${U.esc(t)}</span>`).join("")}</div>` : ""}
             ${blocks.map((b, i) => b.kind === "h2"
-              ? `<h3 id="sec-${i}">${markCites(b.text)}</h3>`
-              : `<p id="sec-${i}">${markCites(b.text)}</p>`).join("")}
+              ? `<h3 id="sec-${i}">${markCites(b.text, i)}</h3>`
+              : `<p id="sec-${i}">${markCites(b.text, i)}</p>`).join("")}
             ${cites.length ? `<div class="doc-refs"><div class="doc-refs-title">参考文献</div>
               ${cites.map((x) => `<div class="doc-ref-item" id="ref-${x.i + 1}">
                 <span>〔${x.i + 1}〕</span>
@@ -799,6 +814,13 @@ window.Pages = window.Pages || {};
               card.classList.add("flash");
               setTimeout(() => card.classList.remove("flash"), 1600);
             }
+            return;
+          }
+          const et = e.target.closest("[data-evd-toggle]");
+          if (et) {
+            const n = Number(et.dataset.evdToggle);
+            evdOpen.has(n) ? evdOpen.delete(n) : evdOpen.add(n);
+            renderCiteBody();
             return;
           }
           const pb = e.target.closest("[data-prep]");

@@ -590,5 +590,43 @@
     return { res, pool };
   };
 
+  // ---------------------------------------------------------- 采纳 AI 内容时落地引用（WP3）
+  // 结果文本中的〔n〕落成真实 citations：quote=所在句原文，evidence 从本次检索 chunk 填充；
+  // 服务端后处理已把对不上 chunk 的编号改写为〔n·待核实〕（不匹配本正则），其 risks 由调用方转 risk 批注。
+  const sentenceAt = (text, pos) => {
+    const t = String(text || "");
+    let s = Math.max(t.lastIndexOf("。", pos - 1), t.lastIndexOf("！", pos - 1),
+      t.lastIndexOf("？", pos - 1), t.lastIndexOf("\n", pos - 1)) + 1;
+    let e = t.length;
+    for (const p of ["。", "！", "？", "\n"]) {
+      const q = t.indexOf(p, pos);
+      if (q >= 0 && q < e) e = q + 1;
+    }
+    return t.slice(s, e).replace(/〔\d+[^〕]*〕/g, "").trim().slice(0, 120);
+  };
+
+  C.materializeCitations = (c, msg) => {
+    const chunks = (msg && msg.chunks) || [];
+    if (!chunks.length) return [];
+    const byN = {};
+    chunks.forEach((ch) => { byN[Number(ch.n)] = ch; });
+    const added = [];
+    const re = /〔(\d+)〕/g;
+    let m;
+    while ((m = re.exec(msg.text || ""))) {
+      const ch = byN[Number(m[1])];
+      if (!ch) continue;
+      const target = ch.materialId || ch.id;
+      if (!target || Store.isCited(c, target)) continue;
+      Store.cite(c, target, {
+        quote: sentenceAt(msg.text, m.index),
+        evidence: { materialId: target, sec: ch.sec || "",
+                    snippet: ch.snippet || "", capturedAt: U.now() },
+      });
+      added.push(target);
+    }
+    return added;
+  };
+
   window.Copilot = C;
 })();

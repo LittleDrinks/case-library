@@ -155,6 +155,54 @@
     });
   };
 
+  // ------------------------------------------------------------ 句级引用锚点（WP3）
+  // 引用带 quote（被引用句原文片段，文本指纹）时，〔n〕上标定位到 quote 对应句子后；
+  // quote 在正文中找不到时退化为块尾并标「锚点漂移」；无 quote 的引用保持字面位置。
+  // 返回 {blockIdx: [{n, at(quote 在该块文本中的结束位置, -1=块尾), drift}]}
+  U.citeAnchors = (blocks, citations) => {
+    const anchors = {};
+    const push = (bi, a) => { (anchors[bi] = anchors[bi] || []).push(a); };
+    (citations || []).forEach((r, i) => {
+      const n = i + 1;
+      const probe = String((r && r.quote) || "").trim().slice(0, 30);
+      if (!probe) return;
+      let hit = -1, at = -1;
+      (blocks || []).forEach((b, bi) => {
+        if (hit >= 0) return;
+        const p = String(b.text || "").indexOf(probe);
+        if (p >= 0) { hit = bi; at = p + probe.length; }
+      });
+      if (hit >= 0) { push(hit, { n, at, drift: false }); return; }
+      // 锚点漂移：挂到字面〔n〕所在块（没有则最后一块）的块尾
+      let bi2 = (blocks || []).findIndex((b) => String(b.text || "").includes("〔" + n + "〕"));
+      if (bi2 < 0) bi2 = Math.max(0, (blocks || []).length - 1);
+      push(bi2, { n, at: -1, drift: true });
+    });
+    return anchors;
+  };
+
+  const citeMarkHTML = (n, isBad, drift) =>
+    `<a class="cite-mark${drift ? " drift" : ""}" data-cite-jump="${n}"` +
+    (drift ? ` title="锚点漂移：被引用句已改动，标记移至块尾"` : "") + `>〔${n}〕</a>` +
+    (isBad && isBad(n) ? `<i class="cite-bad" title="素材已停用或来源失效">来源失效</i>` : "");
+
+  // 渲染一个正文块：有锚点的引用从字面位置剔除、按锚点放置（占位符先于转义插入，避免转义改变偏移）；
+  // isBad(n) 判定该编号引用的来源是否失效（角标）
+  U.markCites = (text, blockIdx, anchors, isBad) => {
+    const anchored = {};
+    Object.keys(anchors || {}).forEach((k) => (anchors[k] || []).forEach((a) => { anchored[a.n] = true; }));
+    let t = String(text == null ? "" : text).replace(/〔(\d+)〕/g,
+      (m, n) => (anchored[Number(n)] ? "" : m));
+    const marks = ((anchors || {})[blockIdx] || []).slice();
+    marks.filter((a) => a.at >= 0).sort((a, b) => b.at - a.at).forEach((a) => {
+      t = t.slice(0, a.at) + "\u0001" + a.n + (a.drift ? "d" : "") + "\u0002" + t.slice(a.at);
+    });
+    marks.filter((a) => a.at < 0).forEach((a) => { t += "\u0001" + a.n + "d\u0002"; });
+    return U.esc(t)
+      .replace(/〔(\d+)〕/g, (m, n) => citeMarkHTML(Number(n), isBad, false))
+      .replace(/\u0001(\d+)(d?)\u0002/g, (m, n, d) => citeMarkHTML(Number(n), isBad, d === "d"));
+  };
+
   U.download = (filename, blob) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

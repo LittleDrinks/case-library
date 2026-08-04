@@ -704,3 +704,15 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-3); margi
 #wb-outline .wb-outline-row > a { flex: 1; min-width: 0; border-bottom: none; }
 .wb-sec-gen { border: none; background: none; cursor: pointer; color: var(--ink-3); font-size: 12px; padding: 2px 4px; border-radius: 4px; }
 .wb-sec-gen:hover { color: var(--primary); background: var(--primary-soft); }
+
+/* WP3 句级引用锚点与证据面板 */
+.cite-mark.drift { color: var(--amber); border-bottom: 1px dashed var(--amber); }
+.cite-bad { font-style: normal; font-size: 10px; color: var(--red); background: var(--red-soft);
+  border-radius: 4px; padding: 0 3px; margin-left: 2px; vertical-align: super; cursor: default; }
+.tag.sm, .tag.red.sm { font-size: 10px; padding: 1px 5px; }
+.evd-drawer { position: fixed; right: 18px; top: 90px; width: 340px; max-height: 70vh; overflow: auto;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .12); padding: 14px 16px; z-index: 60; font-size: 13px; }
+.evd-snip { margin-top: 10px; padding: 10px 12px; background: var(--gray-soft); border-radius: 6px;
+  line-height: 1.7; font-size: 13px; }
+.evd-snip mark { background: var(--amber-soft); color: inherit; padding: 0 1px; border-radius: 2px; }

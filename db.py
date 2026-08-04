@@ -693,6 +693,45 @@ class CaseDB:
                 return None
             return self._mat_obj(r)
 
+    def get_material_raw(self, mid):
+        """不做可见性过滤的素材读取（服务端内部：引用证据迁移/兜底回填用）。"""
+        with self._lock:
+            r = self._mat_row(mid)
+            return self._mat_obj(r) if r else None
+
+    def migrate_citation_evidence(self, resolve):
+        """启动迁移（WP3）：案例 citations（含发布快照）缺 evidence 的 best-effort 回填。
+        resolve(target) -> dict(sec/snippet/capturedAt 等） 或 None；返回回填条数。
+        resolve 可能回调本库（get_material_raw），故在锁外执行，仅写入时持锁。"""
+        with self._lock:
+            rows = [(r["id"], r["data"]) for r in
+                    self._conn.execute("SELECT id, data FROM cases").fetchall()]
+        n, updates = 0, []
+        for cid, raw in rows:
+            data = json.loads(raw)
+            changed = False
+            holders = [data]
+            if isinstance(data.get("publishedSnapshot"), dict):
+                holders.append(data["publishedSnapshot"])
+            for holder in holders:
+                for ref in holder.get("citations") or []:
+                    if not isinstance(ref, dict) or ref.get("evidence"):
+                        continue
+                    ev = resolve(ref.get("target") or "")
+                    if not ev:
+                        continue
+                    ref["evidence"] = ev
+                    changed = True
+                    n += 1
+            if changed:
+                updates.append((json.dumps(data, ensure_ascii=False), cid))
+        if updates:
+            with self._lock:
+                for d, cid in updates:
+                    self._conn.execute("UPDATE cases SET data=? WHERE id=?", (d, cid))
+                self._conn.commit()
+        return n
+
     def find_material_by_url(self, url):
         """URL 查重（入库闸，ADR 0003）。"""
         if not url:

@@ -29,6 +29,7 @@ window.Pages = window.Pages || {};
     let wsResults = [];
     let pendingIntent = null, lastChipText = "";
     let selQuote = null; // 选区引用 chip：待发送的选区原文（发送/移除/切换案例后清除）
+    let citeAnchor = null; // 最近一次正文选区 {text, blockIdx}：挂引用时作句级锚点（quote）
     const annoFilter = { status: new Set(["pending"]), kind: new Set() };
     const chat = [];
     let sending = false;
@@ -70,23 +71,28 @@ window.Pages = window.Pages || {};
       return (s && s.title) || "正文开头";
     }
 
-    // 引用编号按正文出现顺序自动重排（ADR 0005），并同步改写正文里的〔n〕
+    // 引用编号按正文出现顺序自动重排（ADR 0005），并同步改写正文里的〔n〕；
+    // 带 quote 的引用（WP3 句级锚点）按 quote 句位置排序，找不到 quote 时按字面〔n〕位置
     function renumberCitations() {
       const cites = c.citations || [];
       if (!cites.length) return;
       const bs = blocksOf();
-      const order = [];
-      const re = /〔(\d+)〕/g;
-      bs.forEach((b) => {
-        let m;
-        re.lastIndex = 0;
-        while ((m = re.exec(b.text))) {
-          const oi = Number(m[1]) - 1;
-          if (oi >= 0 && oi < cites.length && !order.includes(oi)) order.push(oi);
+      const pos = cites.map((r, i) => {
+        const probe = String((r && r.quote) || "").trim().slice(0, 30);
+        if (probe) {
+          for (let bi = 0; bi < bs.length; bi++) {
+            const p = bs[bi].text.indexOf(probe);
+            if (p >= 0) return { bi, p, i };
+          }
         }
+        const re = new RegExp("〔" + (i + 1) + "〕");
+        for (let bi = 0; bi < bs.length; bi++) {
+          const m = re.exec(bs[bi].text);
+          if (m) return { bi, p: m.index, i };
+        }
+        return { bi: bs.length + 1, p: i, i }; // 未出现在正文：保持相对顺序排尾
       });
-      const rest = cites.map((_, i) => i).filter((i) => !order.includes(i));
-      const newOrder = order.concat(rest);
+      const newOrder = pos.slice().sort((a, b) => a.bi - b.bi || a.p - b.p).map((x) => x.i);
       if (newOrder.every((v, i) => v === i)) return;
       const map = {};
       newOrder.forEach((oi, ni) => { map[oi] = ni + 1; });
@@ -104,10 +110,65 @@ window.Pages = window.Pages || {};
     }
 
     // ---------------- 文档渲染 ----------------
-    // 只读模式下正文里的〔n〕渲染为可点击锚点，与参考文献区互跳
-    function markCites(text) {
-      return U.esc(text).replace(/〔(\d+)〕/g,
-        `<a class="cite-mark" data-cite-jump="$1">〔$1〕</a>`);
+    // 只读模式下正文里的〔n〕渲染为可点击锚点（句级定位：有 quote 的引用跟在 quote 句后，
+    // 找不到 quote 退化块尾并标「锚点漂移」；来源失效的引用带角标），点击打开证据面板
+    const citeAnchorsOf = () => U.citeAnchors(blocksOf(), c.citations || []);
+    const citeBad = (n) => Store.citeFailed((c.citations || [])[n - 1]);
+    function markCites(text, bi) {
+      return U.markCites(text, bi, citeAnchorsOf(), citeBad);
+    }
+
+    // ---------------- 证据面板（WP3） ----------------
+    function evidenceVM(n) {
+      const r = (c.citations || [])[n - 1];
+      if (!r) return null;
+      const t = H.citeName(r.target);
+      const kn = t.kind === "knowledge";
+      const m = kn ? null : Store.db.materials.find((x) => x.id === r.target);
+      const ev = r.evidence || {};
+      return {
+        n, r, kn, ev, t,
+        title: t.name,
+        source: t.src || "",
+        grade: m ? m.grade : "",
+        publishedAt: m ? (m.publishedAt || "") : (kn ? (Store.db.book.edition || "") : ""),
+        failed: Store.citeFailed(r),
+        deepHref: kn ? "#/knowledge/" + t.id
+          : "#/material/" + t.id + (ev.sec ? "?sec=" + encodeURIComponent(ev.sec) : ""),
+      };
+    }
+
+    function showEvidence(n) {
+      const vm = evidenceVM(n);
+      const box = U.$("#evd-box");
+      if (!box) return;
+      if (!vm) { box.innerHTML = ""; return; }
+      const ev = vm.ev;
+      // 命中句高亮：quote 探针在证据片段中出现时加 mark
+      let snip = U.esc(ev.snippet || "");
+      const probe = String(vm.r.quote || "").trim().slice(0, 12);
+      if (probe && ev.snippet && ev.snippet.indexOf(probe) >= 0) {
+        snip = snip.split(U.esc(probe)).join(`<mark>${U.esc(probe)}</mark>`);
+      }
+      box.innerHTML = `<div class="evd-drawer">
+        <div class="row spread">
+          <b>证据 · 引用〔${vm.n}〕</b>
+          <button class="btn sm plain" data-evd-close>×</button>
+        </div>
+        <div class="row wrap" style="margin:6px 0">
+          ${vm.grade ? H.gradeTag(vm.grade) : ""}
+          ${vm.failed ? `<span class="tag red">来源失效</span>` : ""}
+          ${ev.sec ? `<span class="tag">切片 ${U.esc(ev.sec)}</span>` : ""}
+        </div>
+        <h5 style="margin:2px 0">${U.esc(vm.title)}</h5>
+        <div class="small muted">${U.esc(vm.source)}${vm.publishedAt ? " · 发布 " + U.esc(vm.publishedAt) : ""}</div>
+        ${snip ? `<div class="evd-snip">${snip}</div>` : `<div class="small muted" style="margin-top:8px">暂无证据片段（老引用未回填）</div>`}
+        ${vm.r.quote ? `<div class="small muted" style="margin-top:8px">正文锚点句：${U.esc(vm.r.quote.slice(0, 60))}</div>` : ""}
+        <div class="row spread" style="margin-top:10px">
+          <a class="btn sm plain" href="${vm.deepHref}">打开原文切片 →</a>
+          ${ev.capturedAt ? `<span class="small muted">采集 ${U.esc(ev.capturedAt)}</span>` : ""}
+        </div>
+      </div>`;
     }
 
     const refsHTML = () => {
@@ -124,6 +185,8 @@ window.Pages = window.Pages || {};
               ? `<a href="#/knowledge/${t.id}">${U.esc(t.name)}</a>`
               : `<a href="#/material/${t.id}">${U.esc(t.name)}</a>`}
             <span class="small muted"> — ${U.esc(t.src || "")}</span>
+            ${Store.citeFailed(r) ? `<span class="tag red sm">来源失效</span>` : ""}
+            <a href="javascript:void 0" class="small" data-evd="${i + 1}" title="查看证据片段">证据</a>
           </div>`;
         }).join("")}
       </div>`;
@@ -171,8 +234,8 @@ window.Pages = window.Pages || {};
         <button data-fmt="ol" title="有序列表">1. 列表</button>
         <button data-fmt="quote" title="引用块">❝ 引用</button>
       </div>` : ""}
-      <div class="doc-editor" id="doc-editor" ${editable() ? "contenteditable='true' spellcheck='false'" : ""}>${blocksOf().map((b) =>
-        blockHTML(b, editable() ? U.esc : markCites)).join("")}</div>
+      <div class="doc-editor" id="doc-editor" ${editable() ? "contenteditable='true' spellcheck='false'" : ""}>${blocksOf().map((b, bi) =>
+        blockHTML(b, editable() ? U.esc : (txt) => markCites(txt, bi))).join("")}</div>
       ${refsHTML()}
     </div>`;
 
@@ -376,7 +439,9 @@ window.Pages = window.Pages || {};
         bodyExcerpt: bs.map((b) => b.text).join("\n").slice(0, 1500),
         citations: (c.citations || []).map((r, i) => {
           const t = H.citeName(r.target);
-          return { n: i + 1, target: r.target, title: t.name, kind: t.kind, note: r.note || "" };
+          const ev = r.evidence || {};
+          return { n: i + 1, target: r.target, title: t.name, kind: t.kind, note: r.note || "",
+                   source: t.src || "", sec: ev.sec || "", snippet: ev.snippet || "" };
         }),
       };
     }
@@ -488,9 +553,11 @@ window.Pages = window.Pages || {};
       return `<a class="ai-cite" href="${kn ? "#/knowledge/" : "#/material/"}${U.esc(id)}" title="${U.esc(kn ? t.chapter + " " + t.title : t.title)}">${s}</a>`;
     });
 
-    // 审校条目 → parseReview 可识别的问题类型（引用/事实/文字/格式/风险）
+    // 审校条目 → parseReview 可识别的问题类型（引用/事实/文字/格式/风险）；
+    // 引用蕴含不支持（unsupported）按风险批注入库（WP3）
     const reviewAnnoType = (it) => {
       const s = String((it && it.standard) || "");
+      if (/蕴含/.test(s) && it && it.status === "risk") return "风险";
       if (/引用|出处|来源/.test(s)) return "引用";
       if (/事实|数据|真实/.test(s)) return "事实";
       if (/文字|错别|标点|语病/.test(s)) return "文字";
@@ -695,10 +762,13 @@ window.Pages = window.Pages || {};
             retryPayload: { text, intent, skipDirective, opts }, // 守卫 stale 态的「重新生成」沿用
           };
           if (result.kind === "candidates" && result.main) {
-            // 写作双候选：msg.text 始终镜像当前显示候选，采纳/追加/新节对当前候选生效
+            // 写作双候选：msg.text 始终镜像当前显示候选，采纳/追加/新节对当前候选生效；
+            // chunks 为本次检索资料（采纳时把〔n〕落成真实引用），risks 为后处理校验出的无源引用
             msg.candidates = { main: result.main, alt: result.alt || null };
             msg.cand = "main";
             msg.text = result.main.text || "";
+            msg.chunks = result.chunks || [];
+            msg.risks = result.main.risks || [];
             msg.meta.model = result.main.model || msg.meta.model;
             msg.meta.workHash = wHash;   // 采纳守卫基线
             msg.meta.baseText = baseText;
@@ -830,6 +900,20 @@ window.Pages = window.Pages || {};
       return same ? "ok" : "stale";
     }
 
+    // 采纳 AI 内容后（WP3）：把〔n〕落成真实引用（quote=所在句、evidence 来自本次检索 chunk）；
+    // 服务端后处理标「待核实」的无源引用 → risk 批注（不静默放行）
+    async function adoptEvidence(msg) {
+      Copilot.materializeCitations(c, msg);
+      for (const rk of msg.risks || []) {
+        await Store.addAnnotation(c, {
+          kind: "risk", status: "pending", section: 0,
+          quote: String(rk.quote || "").replace(/〔\d+[^〕]*〕/g, "").slice(0, 60),
+          text: "AI 生成内容中的引用〔" + rk.n + "〕没有对应的检索资料，正文已标「待核实」，请人工核实来源。",
+          author: "Copilot", lowRisk: false,
+        });
+      }
+    }
+
     async function runAction(msg, act, force) {
       const paras = msg.text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
       if (editable() && ["replace", "append", "newsec", "replace-sel", "sec-fill"].includes(act.type)) {
@@ -838,8 +922,8 @@ window.Pages = window.Pages || {};
         if (guard === "stale") { msg.confirming = null; U.toast("正文已变化，请重新生成"); drawPanel(); return; }
         if (guard === "confirm" && !force) { msg.confirming = act.type; drawPanel(); return; }
         msg.confirming = null;
-        if (act.type === "replace-sel") { applyReplaceSel(msg); return; }
-        if (act.type === "sec-fill") { applySecFill(msg); return; }
+        if (act.type === "replace-sel") { await applyReplaceSel(msg); return; }
+        if (act.type === "sec-fill") { await applySecFill(msg); return; }
         const bs = blocksOf().slice();
         const secs = logicalSections();
         const sec = secs[sectionOfBlock(focusBlock)] || { title: "", from: 0, to: bs.length };
@@ -856,6 +940,7 @@ window.Pages = window.Pages || {};
         Store.setBlocks(c, bs);
         Store.touch(c);
         Copilot.invalidateContext(c.id); // AI 内容写入正文，清上下文缓存
+        await adoptEvidence(msg);
         U.toast("已写入");
         drawAll();
         return;
@@ -893,7 +978,7 @@ window.Pages = window.Pages || {};
     }
 
     // 选区改写采纳：在当前正文唯一匹配选区原文（可跨块），替换为提案文本
-    function applyReplaceSel(msg) {
+    async function applyReplaceSel(msg) {
       const m = matchNormalized(docPlainText(), msg.meta.baseText || "");
       if (!m || !m.unique) { U.toast("原文已变化，无法唯一匹配选中内容，请重新生成"); drawPanel(); return; }
       const bs = blocksOf().slice();
@@ -914,12 +999,13 @@ window.Pages = window.Pages || {};
       Store.setBlocks(c, bs);
       Store.touch(c);
       Copilot.invalidateContext(c.id);
+      await adoptEvidence(msg);
       U.toast("已替换选中内容");
       drawAll();
     }
 
     // 逐节生成采纳：目标节当前为空 → replace 该节；非空 → append。优先按发送时的块索引定位，失败按标题唯一匹配
-    function applySecFill(msg) {
+    async function applySecFill(msg) {
       const bs = blocksOf().slice();
       const secs = logicalSections();
       const from = msg.meta.secFrom;
@@ -945,6 +1031,7 @@ window.Pages = window.Pages || {};
       Store.setBlocks(c, bs);
       Store.touch(c);
       Copilot.invalidateContext(c.id);
+      await adoptEvidence(msg);
       U.toast(empty ? "已写入本节" : "已追加到本节");
       drawAll();
     }
@@ -1097,6 +1184,7 @@ window.Pages = window.Pages || {};
       let blockEl = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
       while (blockEl && blockEl.parentElement !== ed) blockEl = blockEl.parentElement;
       const idx = Math.max(0, Array.from(ed.children).indexOf(blockEl));
+      citeAnchor = { text: text.slice(0, 200), blockIdx: idx }; // 供挂引用时作句级锚点
       const rect = sel.getRangeAt(0).getBoundingClientRect();
       selBtn = document.createElement("div");
       selBtn.className = "sel-float";
@@ -1178,8 +1266,10 @@ window.Pages = window.Pages || {};
         return `<div class="res-item">
           <div class="row spread"><h5>〔${i + 1}〕${t.kind === "knowledge"
               ? `<a href="#/knowledge/${t.id}">${U.esc(t.name)}</a>`
-              : `<a href="#/material/${t.id}">${U.esc(t.name)}</a>`}</h5>
+              : `<a href="#/material/${t.id}">${U.esc(t.name)}</a>`}
+            ${Store.citeFailed(r) ? `<span class="tag red sm">来源失效</span>` : ""}</h5>
             <span class="row" style="gap:6px">
+              <button class="btn sm plain" data-evd="${i + 1}" title="查看证据片段">证据</button>
               <button class="btn sm plain" data-cite-locate="${i + 1}" title="定位到正文引用处">定位</button>
               ${editable() ? `<button class="btn sm plain" data-uncite="${U.esc(r.target)}">移除</button>` : ""}
             </span></div>
@@ -1255,18 +1345,41 @@ window.Pages = window.Pages || {};
 
     function cite(target, silent) {
       const already = Store.isCited(c, target);
-      Store.cite(c, target);
+      // 用户选中了正文句子时挂引用：quote=选中文本（句内锚点/文本指纹），blockId 作次级锚
+      const anchor = (!already && citeAnchor && citeAnchor.text) ? citeAnchor : null;
+      citeAnchor = null;
+      const bs = blocksOf();
+      const opts = {};
+      if (anchor && bs[anchor.blockIdx] && bs[anchor.blockIdx].text.includes(anchor.text.slice(0, 20))) {
+        opts.quote = anchor.text.slice(0, 120);
+        const b = bs[anchor.blockIdx];
+        if (!b.id) b.id = U.uid("b");
+        opts.blockId = b.id;
+      }
+      Store.cite(c, target, opts);
       const n = (c.citations || []).findIndex((r) => r.target === target) + 1;
       const ed = U.$("#doc-editor");
+      let domDirty = false;
       if (ed && editable() && !already) {
-        ed.focus();
-        try { document.execCommand("insertText", false, `〔${n}〕`); } catch (e) { /* ignore */ }
-        serializeDoc();
+        if (opts.quote) {
+          // 句级锚点：标记插到被引用句后（数据层修改，drawAll 重建 DOM）
+          const b = bs[anchor.blockIdx];
+          const p = b.text.indexOf(anchor.text.slice(0, 20));
+          const full = b.text.indexOf(anchor.text, p);
+          const end = full >= 0 ? full + anchor.text.length : p + anchor.text.slice(0, 20).length;
+          b.text = b.text.slice(0, end) + `〔${n}〕` + b.text.slice(end);
+          Store.setBlocks(c, bs);
+          domDirty = true;
+        } else {
+          ed.focus();
+          try { document.execCommand("insertText", false, `〔${n}〕`); } catch (e) { /* ignore */ }
+          serializeDoc();
+        }
       }
       renumberCitations();
       Store.touch(c);
       if (!silent) U.toast(already ? "该资源已在引用中" : `已添加引用〔${n}〕`);
-      if (!silent) drawAll();
+      if (!silent || domDirty) drawAll();
     }
 
     // 库内搜索：筛选资料是写作前最耗人工的环节，这里直接检索全库知识/素材并可一键引用（ADR 0005）
@@ -1689,7 +1802,8 @@ window.Pages = window.Pages || {};
           </div>
           <div class="wb-panel" id="wb-panel"></div>
         </div>
-      </div>`,
+      </div>
+      <div id="evd-box"></div>`,
       mount(el) {
         // 工具栏按钮 mousedown 阻止默认行为：避免点击按钮时编辑器失焦、选区丢失，
         // 否则 execCommand 会作用在错误位置或失效（contenteditable 工具栏惯例）
@@ -1697,7 +1811,7 @@ window.Pages = window.Pages || {};
           if (e.target.closest("[data-fmt]")) e.preventDefault();
         });
         el.addEventListener("click", async (e) => {
-          const t = e.target.closest("[data-tab],[data-quick],[data-act],[data-retry],[data-afs],[data-afk],[data-anno-ok],[data-anno-no],[data-anno-done],[data-anno-remount],[data-anno-reply],[data-locate],[data-cite-kn],[data-cite-m],[data-uncite],[data-cite-locate],[data-cite-jump],[data-outline],[data-goto-intent],[data-fmt],[data-ws-add],[data-tag-del],[data-res-view],[data-cp-view],[data-chat-clear],[data-task-replay],[data-cand],[data-agents-toggle],[data-sec-gen],[data-diff-open],[data-guard-ok],[data-guard-no],[data-sel-clear]");
+          const t = e.target.closest("[data-tab],[data-quick],[data-act],[data-retry],[data-afs],[data-afk],[data-anno-ok],[data-anno-no],[data-anno-done],[data-anno-remount],[data-anno-reply],[data-locate],[data-cite-kn],[data-cite-m],[data-uncite],[data-cite-locate],[data-cite-jump],[data-evd],[data-evd-close],[data-outline],[data-goto-intent],[data-fmt],[data-ws-add],[data-tag-del],[data-res-view],[data-cp-view],[data-chat-clear],[data-task-replay],[data-cand],[data-agents-toggle],[data-sec-gen],[data-diff-open],[data-guard-ok],[data-guard-no],[data-sel-clear]");
           if (t) {
             if (t.dataset.tab) { tab = t.dataset.tab; drawPanel(); return; }
             if (t.dataset.resView) { resView = t.dataset.resView; drawPanel(); return; }
@@ -1748,6 +1862,7 @@ window.Pages = window.Pages || {};
               if (msg && msg.candidates && msg.candidates[which] && msg.cand !== which) {
                 msg.cand = which;
                 msg.text = msg.candidates[which].text || "";
+                msg.risks = msg.candidates[which].risks || [];
                 msg.diffOpen = null;
                 msg.meta = msg.meta || {};
                 if (msg.candidates[which].model) msg.meta.model = msg.candidates[which].model;
@@ -1852,6 +1967,7 @@ window.Pages = window.Pages || {};
               return;
             }
             if (t.dataset.citeJump) {
+              showEvidence(Number(t.dataset.citeJump));
               const item = U.$("#ref-" + t.dataset.citeJump);
               if (item) {
                 item.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1860,6 +1976,8 @@ window.Pages = window.Pages || {};
               }
               return;
             }
+            if (t.dataset.evd) { showEvidence(Number(t.dataset.evd)); return; }
+            if (t.dataset.evdClose != null) { U.$("#evd-box").innerHTML = ""; return; }
             if (t.dataset.gotoIntent) {
               tab = "copilot";
               sendChat("", t.dataset.gotoIntent);

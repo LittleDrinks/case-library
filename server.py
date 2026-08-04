@@ -617,7 +617,8 @@ def _build_search_index():
             add("material", m["id"], m["title"], "",
                 "\n".join([m["title"], m["summary"], m["excerpt"]]),
                 source=m["source"], level=m["level"], credibility=m["credibility"],
-                materialId=m["id"], grade=m["grade"], kind=m["kind"])
+                materialId=m["id"], grade=m["grade"], kind=m["kind"],
+                publishedAt=m["publishedAt"])
             e = entries_by_fid.get(m["fileId"]) if m["fileId"] else None
             tp = e.get("textPath") if e else None
             if not tp:
@@ -632,7 +633,7 @@ def _build_search_index():
                     ((ck["h"] + "\n") if ck["h"] else "") + ck["text"],
                     source=m["source"], level=m["level"], credibility=m["credibility"],
                     materialId=m["id"], grade=m["grade"], kind=m["kind"],
-                    sec=ck["path"], secTitle=ck["h"])
+                    publishedAt=m["publishedAt"], sec=ck["path"], secTitle=ck["h"])
 
     # 3) 运行时导入的知识条目（无 knowledge.json 时跳过）
     for src in load_knowledge():
@@ -741,6 +742,7 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
                 "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
                 "level": d["level"], "credibility": d["credibility"],
                 "grade": d.get("grade", ""), "kind": d.get("kind", ""),
+                "publishedAt": d.get("publishedAt", ""),
                 "materialId": d.get("materialId") or d["id"],
             }
             if d.get("sec"):
@@ -754,6 +756,64 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
                 "status": d.get("status", ""), "ownerId": d.get("ownerId", ""),
             })
     return {"knowledge": knowledge, "materials": materials, "cases": cases}
+
+
+# ------------------------------------------------------------ 引用证据（WP3）
+_BOOK_SECS_CACHE = {}
+
+
+def _book_sections():
+    """教材节（含 fileSec 切片锚点），惰性缓存；供引用证据回填与 chunk 组装。"""
+    if "secs" not in _BOOK_SECS_CACHE:
+        try:
+            with open(BOOK_MD, encoding="utf-8") as f:
+                text = f.read()
+            _c, secs = parse_knowledge_markdown("kn", text)
+            fsecs = assign_file_secs(text, secs)
+            for s in secs:
+                s["fileSec"] = fsecs.get(s["id"], "")
+            _BOOK_SECS_CACHE["secs"] = secs
+        except OSError:
+            _BOOK_SECS_CACHE["secs"] = []
+    return _BOOK_SECS_CACHE["secs"]
+
+
+def _evidence_for_target(target):
+    """按引用目标 best-effort 取证据片段：kn 节 → fileSec + 节正文摘录；
+    素材 → 内容副本 excerpt（无 excerpt 但有文件文本时取首个切片）。"""
+    if not target:
+        return None
+    now = time.strftime("%Y-%m-%d %H:%M")
+    if target.startswith("kn-"):
+        s = next((x for x in _book_sections() if x["id"] == target), None)
+        if not s:
+            return None
+        return {"materialId": target, "sec": s.get("fileSec") or "",
+                "snippet": re.sub(r"\s+", " ", s.get("text") or "")[:200],
+                "capturedAt": now}
+    if CASEDB is None:
+        return None
+    m = CASEDB.get_material_raw(target)
+    if not m:
+        return None
+    snippet = re.sub(r"\s+", " ", m.get("excerpt") or m.get("summary") or "")[:200]
+    sec = ""
+    if not snippet and m.get("fileId"):
+        e = next((x for x in load_index() if x.get("id") == m["fileId"]), None)
+        tp = e.get("textPath") if e else None
+        if tp:
+            try:
+                with open(os.path.join(FILES_DIR, tp), encoding="utf-8") as f:
+                    text = f.read(30000)
+                chunks = chunk_md(text)
+                if chunks:
+                    sec = chunks[0]["path"] if len(chunks) > 1 else ""
+                    snippet = re.sub(r"\s+", " ", chunks[0]["text"])[:200]
+            except OSError:
+                pass
+    if not snippet:
+        return None
+    return {"materialId": m["id"], "sec": sec, "snippet": snippet, "capturedAt": now}
 
 
 def api_search(user, payload):
@@ -1294,12 +1354,22 @@ LIBRARIAN_PROMPT = (
 WRITER_PROMPT = (
     "你是思政教学案例平台的「写作手」，擅长教学案例文本的起草、润色与改写。"
     "根据用户意图和案例上下文直接输出成稿文本本身，不要解释、不要加任何前后缀。"
-    "保持思政教学语言规范、理论表述准确；引用素材用〔n〕标注。"
+    "保持思政教学语言规范、理论表述准确。"
+    "文本分三层，写法不同："
+    "1) 事实陈述（人物、事件、数据、文件、时间等）必须依据用户消息中给出的资料 chunk，"
+    "句末用〔n〕标注对应 chunk 编号，不得新增任何无来源事实；"
+    "2) 理论解释依据知识库（教材）chunk 表述，同样用〔n〕标注；"
+    "3) 教学设计类内容（目标、流程、讨论题等）可以发挥，但不得新增事实。"
+    "用户消息里已关联的既有引用保持其原编号；新增引用只能使用本次检索到的 chunk 编号。"
+    "资料不足以支撑时必须输出[资料不足]并说明缺什么，严禁按常识补齐事实。"
 )
 
 REVIEWER_PROMPT = (
     "你是思政教学案例平台的「内容审校员」。按标准清单逐条审校用户给出的文本："
     "理论准确性、事实与引用一致性、语言规范、风险与待人工确认。"
+    "另外对用户消息中每个带〔n〕引用的句子做引用蕴含判断：对应 chunk 的内容是否真实支持该句；"
+    "不支持（unsupported）时输出一条 standard 为「引用蕴含」、status 为 risk 的条目，"
+    "note 说明 chunk 与实际句子的出入，ref 填被引用句原文；支持的不必逐条报告。"
     "只输出严格 JSON 数组，不要输出任何其他内容："
     "[{\"standard\":\"标准名\",\"status\":\"pass|risk|confirm\",\"note\":\"一句话说明\",\"ref\":\"〔n〕可选\"}]。"
     "status 含义：pass=通过，risk=有风险需修改，confirm=需人工确认。"
@@ -1464,10 +1534,13 @@ def _moa_user_text(payload):
         parts.append("案例内容摘要：\n" + str(ctx["bodyExcerpt"])[:1500])
     citations = ctx.get("citations") or []
     if citations:
-        lines = ["已关联的引用素材："]
+        lines = ["已关联的引用素材（含证据片段，编号即 chunk 编号）："]
         for i, c in enumerate(citations[:20], 1):
             if isinstance(c, dict):
-                lines.append("〔%d〕%s — %s" % (i, c.get("title", ""), c.get("source", "")))
+                line = "〔%d〕%s — %s" % (c.get("n") or i, c.get("title", ""), c.get("source", ""))
+                if c.get("snippet"):
+                    line += "：证据「%s」" % str(c["snippet"])[:120]
+                lines.append(line)
             else:
                 lines.append("〔%d〕%s" % (i, c))
         parts.append("\n".join(lines))
@@ -1489,6 +1562,86 @@ def _moa_classify(user_text):
             return obj["route"], str(obj.get("reason") or "")
     sys.stderr.write("[moa] 分类失败（%s），回落 writer\n" % (err or "JSON 解析失败"))
     return "writer", "分类失败，按写作处理"
+
+
+def _moa_evidence_chunks(payload, max_level, limit=6):
+    """写作/审校前的资料检索（资料管理员同套检索）：统一编号的 chunk 列表，
+    = 案例已关联引用（保持原编号）+ 本次新检索命中（跳过已关联目标，续号）。
+    chunk: {n, kind(knowledge|material), materialId, sec, title, source, publishedAt, grade, snippet}"""
+    ctx = payload.get("caseContext") or {}
+    chunks, cited = [], set()
+    for i, c in enumerate((ctx.get("citations") or [])[:20], 1):
+        if not isinstance(c, dict) or not c.get("target"):
+            continue
+        target = c["target"]
+        cited.add(target)
+        chunks.append({
+            "n": c.get("n") or i, "kind": "material" if not str(target).startswith("kn-") else "knowledge",
+            "materialId": target, "sec": c.get("sec") or "",
+            "title": c.get("title") or target, "source": c.get("source") or "",
+            "publishedAt": "", "grade": "",
+            "snippet": c.get("snippet") or "",
+        })
+    q = " ".join(x for x in [(payload.get("text") or "")[:200],
+                             ctx.get("title") or "", ctx.get("sectionTitle") or ""] if x).strip()
+    res = search_corpus(q or "课程思政", max_level=max_level, limit=limit)
+    for it in res["knowledge"]:
+        if it["id"] in cited:
+            continue
+        chunks.append({"n": len(chunks) + 1, "kind": "knowledge", "materialId": it["id"],
+                       "sec": it.get("sec", ""),
+                       "title": " ".join(x for x in [it.get("chapter"), it.get("title")] if x),
+                       "source": "《自然辩证法概论（2025版）》", "publishedAt": "2025",
+                       "grade": "", "snippet": it.get("snippet") or ""})
+    for it in res["materials"]:
+        mid = it.get("materialId") or it["id"]
+        if mid in cited:
+            continue
+        chunks.append({"n": len(chunks) + 1, "kind": "material", "materialId": mid,
+                       "sec": it.get("sec", ""), "title": it.get("title") or mid,
+                       "source": it.get("source") or "",
+                       "publishedAt": it.get("publishedAt") or "",
+                       "grade": it.get("grade") or "", "snippet": it.get("snippet") or ""})
+    return chunks
+
+
+def _moa_chunks_brief(chunks):
+    """给模型的 chunk 编号表（写作手引用与审校员蕴含判断共用）。"""
+    lines = []
+    for ch in chunks:
+        meta = "｜".join(x for x in [ch.get("source"), ch.get("publishedAt"),
+                                    ("信源等级%s" % ch["grade"]) if ch.get("grade") else ""] if x)
+        lines.append("〔%d〕%s｜%s%s：%s" % (
+            ch["n"], "知识" if ch["kind"] == "knowledge" else "素材",
+            ch.get("title") or ch["materialId"],
+            ("（%s）" % meta) if meta else "",
+            (ch.get("snippet") or "")[:160]))
+    return "\n".join(lines)
+
+
+def _moa_check_citations(text, chunks):
+    """后处理校验：写作手输出中的〔n〕与本次实际检索/已关联的 chunk 集比对，
+    对不上的降级为〔n·待核实〕并产出 risk 记录（前端落成 risk 批注），不静默放行。"""
+    valid = len(chunks)
+    risks = []
+
+    def repl(m):
+        n = int(m.group(1))
+        if 1 <= n <= valid:
+            return m.group(0)
+        start = max(text.rfind("。", 0, m.start()), text.rfind("\n", 0, m.start()),
+                    text.rfind("！", 0, m.start()), text.rfind("？", 0, m.start())) + 1
+        end = len(text)
+        for p in ("。", "！", "？", "\n"):
+            q = text.find(p, m.end())
+            if 0 <= q < end:
+                end = q + 1
+        risks.append({"n": n, "quote": text[start:end].strip()[:120],
+                      "note": "引用编号〔%d〕无对应检索资料" % n})
+        return "〔%d·待核实〕" % n
+
+    out = re.sub(r"〔(\d+)〕", repl, text)
+    return out, risks
 
 
 # --------------------------------------------------------------- docx 导出
@@ -1644,9 +1797,9 @@ class Handler(BaseHTTPRequestHandler):
             if route == "librarian":
                 self._agent_librarian(user_text, history, max_level)
             elif route == "reviewer":
-                self._agent_reviewer(user_text, history)
+                self._agent_reviewer(user_text, history, payload, max_level)
             else:
-                self._agent_writer(user_text, history)
+                self._agent_writer(user_text, history, payload, max_level)
             self._sse_frame({"type": "done"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -1702,8 +1855,17 @@ class Handler(BaseHTTPRequestHandler):
                              "which": "main", "text": piece})
         self._sse_frame({"type": "result", "kind": "text", "text": final_text})
 
-    def _agent_writer(self, user_text, history):
-        """写作手：ThreadPoolExecutor 并行双候选（主=默认模型，备=MOA_MODEL_WRITER_ALT）。"""
+    def _agent_writer(self, user_text, history, payload, max_level):
+        """写作手：先做资料检索（chunk 编号表注入 prompt），ThreadPoolExecutor 并行双候选，
+        成稿经引用后处理校验（对不上 chunk 的〔n〕降级「待核实」+ risk 记录）。"""
+        self._sse_role("librarian", MOA_MODEL_LIBRARIAN)
+        chunks = _moa_evidence_chunks(payload, max_level)
+        self._sse_frame({"type": "tool", "agent": "librarian", "tool": "search_corpus",
+                         "args": {"q": (payload.get("text") or "")[:60]},
+                         "summary": "可用资料 chunk %d 条（含已关联引用）" % len(chunks)})
+        if chunks:
+            user_text += ("\n\n【本次可用资料 chunk（事实与理论只能依据下表，〔n〕为引用编号）】\n"
+                          + _moa_chunks_brief(chunks))
         self._sse_role("writer", AI_DEFAULT_MODEL)
         msgs = ([{"role": "system", "content": WRITER_PROMPT}] + history
                 + [{"role": "user", "content": user_text}])
@@ -1730,14 +1892,22 @@ class Handler(BaseHTTPRequestHandler):
                         "text": full if full is not None else "（该候选生成失败：%s）" % err,
                     }
                     ended += 1
+        for r in results.values():
+            if r.get("text"):
+                r["text"], r["risks"] = _moa_check_citations(r["text"], chunks)
         fallback = {"model": "", "text": ""}
         self._sse_frame({"type": "result", "kind": "candidates",
                          "main": results.get("main") or fallback,
-                         "alt": results.get("alt") or fallback})
+                         "alt": results.get("alt") or fallback,
+                         "chunks": chunks})
 
-    def _agent_reviewer(self, user_text, history):
-        """内容审校员：按标准清单输出严格 JSON 数组；解析失败包成单条 confirm。"""
+    def _agent_reviewer(self, user_text, history, payload, max_level):
+        """内容审校员：检索 chunk 表作为引用蕴含判断依据；按标准清单输出严格 JSON 数组。"""
         self._sse_role("reviewer", MOA_MODEL_REVIEWER)
+        chunks = _moa_evidence_chunks(payload, max_level)
+        if chunks:
+            user_text += ("\n\n【引用 chunk 表（文中〔n〕对应的资料原文，做引用蕴含判断的依据）】\n"
+                          + _moa_chunks_brief(chunks))
         msgs = ([{"role": "system", "content": REVIEWER_PROMPT}] + history
                 + [{"role": "user", "content": user_text}])
         content, err = llm_call(MOA_MODEL_REVIEWER, msgs, temperature=0.2)
@@ -2055,6 +2225,9 @@ def main():
     global CASEDB
     CASEDB = CaseDB(SQLITE_DB_PATH)
     seeded = CASEDB.seed(load_seed_cases(), load_seed_materials())
+    backfilled = CASEDB.migrate_citation_evidence(_evidence_for_target)
+    if backfilled:
+        sys.stderr.write("[cite] 老引用证据回填 %d 条\n" % backfilled)
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(ENV.get("PROTOTYPE_PORT", "8080") or 8080)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print("服务已启动: http://127.0.0.1:%d  (AI: %s, model=%s, 文件库: %s, 种子文件 %d 个, 业务库 %s%s)"
