@@ -71,6 +71,7 @@
       Store.setUser(sel.value);
       await Store.login(sel.value);
       await Store.syncServerMaterials();
+      await Store.syncCases();
       draw();
       route();
       U.toast("已切换到 " + Store.me().name);
@@ -86,6 +87,7 @@
     .catch(() => { Store.flags = {}; })
     .then(() => Store.login(Store.userId))
     .then(() => Store.syncServerMaterials())
+    .then(() => Store.syncCases())
     .finally(() => {
       initAccount();
       if (!location.hash) location.hash = "#/home";

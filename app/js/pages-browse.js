@@ -26,7 +26,7 @@ window.Pages = window.Pages || {};
       ran: !!params.q, aiLoading: false, aiHtml: "", aiCount: 0, aiSeq: 0, aiSkipped: false,
       aiStreaming: false, aiText: "", aiSources: [], aiStream: null,
       aiFold: localStorage.getItem("sizheng-ai-fold") === "1",
-      terms: null, expanded: [],
+      terms: null, expanded: [], base: null, loading: false,
     };
     const graphState = { expanded: new Set() };
 
@@ -41,7 +41,9 @@ window.Pages = window.Pages || {};
 
     // 当前查询的基础结果（未加筛选）；空查询 = 全量目录（浏览 = 不带关键词的检索，ADR 0007）
     // 目录态下知识按「资源实体」聚合为教材 1 条（碎片进教材主页浏览，ADR 0011）；检索态仍按节命中
-    const base = () => {
+    // 检索态命中来自服务端 /api/search（BM25 统一口径），refresh 异步拉取后缓存进 state.base
+    const base = () => state.base || { cases: [], knowledge: [], materials: [], terms: state.terms || [] };
+    const refresh = async () => {
       if (!state.ran) {
         const bookEntry = Store.db.bookFile ? [{
           item: {
@@ -51,14 +53,17 @@ window.Pages = window.Pages || {};
             updatedAt: knDate(),
           },
         }] : [];
-        return {
+        state.base = {
           cases: Store.visibleCases().map((item) => ({ item })),
           knowledge: bookEntry,
           materials: Store.visibleMaterials().map((item) => ({ item })),
           terms: [],
         };
+        return;
       }
-      return Store.search(state.q, { sort: state.sort, limit: 500 }, state.terms || undefined);
+      state.loading = true;
+      state.base = await Store.search(state.q, { limit: 500 }, state.terms || undefined);
+      state.loading = false;
     };
 
     // 筛选过滤；skipGroup 用于「结果集口径」的选项计数（本组不参与自己的计数）
@@ -186,7 +191,8 @@ window.Pages = window.Pages || {};
     const KIND_META = {
       case: { name: "案例", cls: "primary", href: (x) => "#/case/" + x.item.id, title: (x) => x.item.title, text: (x) => x.item.summary || "" },
       knowledge: { name: "知识", cls: "blue", href: (x) => x.item.bookEntry ? "#/book" : "#/knowledge/" + x.item.id, title: (x) => x.item.chapter + " · " + x.item.title, text: (x) => x.item.text || "" },
-      material: { name: "素材", cls: "green", href: (x) => "#/material/" + x.item.id, title: (x) => x.item.title, text: (x) => x.item.summary || "" },
+      // 服务端切片命中带 sec 结构路径时直达切片（ADR 0010 深链）
+      material: { name: "素材", cls: "green", href: (x) => "#/material/" + x.item.id + (x.sec ? "?sec=" + encodeURIComponent(x.sec) : ""), title: (x) => x.item.title, text: (x) => x.item.summary || "" },
     };
     const kindRow = (hl, kind) => (x) => {
       const m = KIND_META[kind];
@@ -295,12 +301,14 @@ window.Pages = window.Pages || {};
         ordered = pairs.case.concat(pairs.knowledge, pairs.material).sort(cmp);
         emptyText = state.ran ? "平台内没有命中结果，可换个关键词，或让 AI 联网补充公开来源" : "平台内暂无资源";
       } else {
-        // 检索态单页签沿用 Store.search 的排序，目录态用 cmp 排
-        ordered = state.ran ? pairs[state.kindTab] : pairs[state.kindTab].slice().sort(cmp);
+        // 检索态服务端按相关度（score）返回，其余排序口径在本地 cmp（ADR 0007）
+        ordered = pairs[state.kindTab].slice().sort(cmp);
         emptyText = "当前筛选下没有结果";
       }
       const list = ordered.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE);
-      const body = `<div class="card">${list.map(([k, x]) => kindRow(hl, k)(x)).join("") || H.empty(emptyText)}</div>${pager(ordered.length)}`;
+      const body = state.loading
+        ? `<div class="card card-pad small muted">检索中<span class="loading-dots">…</span></div>`
+        : `<div class="card">${list.map(([k, x]) => kindRow(hl, k)(x)).join("") || H.empty(emptyText)}</div>${pager(ordered.length)}`;
       return `
       ${state.expanded.length ? `<div class="small muted" style="margin-bottom:10px">已扩展检索：${state.expanded.map(U.esc).join("、")}</div>` : ""}
       ${aiBlockHTML()}
@@ -435,15 +443,18 @@ window.Pages = window.Pages || {};
             const local = U.terms(state.q);
             state.expanded = ex.core.concat(ex.expand).filter((t) => !local.includes(t)).slice(0, 8);
             state.terms = Array.from(new Set(local.concat(ex.core, ex.expand)));
-            redraw();
           }
+          // 查询理解扩展后的词重新拉一次命中（结果列表与 AI 资源池同口径）
+          await refresh();
+          if (seq !== state.aiSeq) return;
+          redraw();
           if (!force && !shouldAnswer()) {
             state.aiLoading = false;
             state.aiSkipped = true;
             redraw();
             return;
           }
-          const { messages, pool } = buildAnswerPrompt(state.q, Store.search(state.q, {}, state.terms || undefined));
+          const { messages, pool } = buildAnswerPrompt(state.q, base());
           if (seq !== state.aiSeq) return;
           state.aiCount = pool.length;
           state.aiSources = pool.map((p, i) => ({
@@ -473,12 +484,14 @@ window.Pages = window.Pages || {};
             },
           });
         };
-        const run = () => {
+        const run = async () => {
           state.q = U.$("#sq", el).value.trim();
           state.terms = null; state.expanded = []; state.page = 1;
-          if (!state.q) { state.ran = false; redraw(); return; }
+          if (!state.q) { state.ran = false; await refresh(); redraw(); return; }
           state.ran = true;
           state.sort = "smart"; // 新检索默认回到相关度排序
+          redraw();
+          await refresh();
           redraw();
           if (state.view === "list" && Store.flags.aiConfigured !== false) runAi();
         };
@@ -565,8 +578,13 @@ window.Pages = window.Pages || {};
           if (state.aiStream) { state.aiStream.abort(); state.aiStream = null; }
           if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
         };
-        if (state.view === "graph") renderGraph(el);
-        else if (state.ran && state.q && Store.flags.aiConfigured !== false) runAi();
+        if (state.view === "graph") { refresh().then(() => renderGraph(el)); }
+        else if (state.ran && state.q) {
+          refresh().then(() => {
+            redraw();
+            if (state.view === "list" && Store.flags.aiConfigured !== false) runAi();
+          });
+        } else refresh();
       },
       unmount() { Graph.stop(); if (this._unmount) this._unmount(); },
     };
@@ -696,8 +714,8 @@ window.Pages = window.Pages || {};
         </div>
       </div>`,
       mount(el) {
-        U.$("#cd-like").addEventListener("click", () => { Store.likeCase(c); P.rerender(); });
-        U.$("#cd-fav").addEventListener("click", () => { Store.toggleFav(c); P.rerender(); });
+        U.$("#cd-like").addEventListener("click", async () => { if (await Store.likeCase(c)) P.rerender(); });
+        U.$("#cd-fav").addEventListener("click", async () => { if (await Store.toggleFav(c)) P.rerender(); });
         U.$("#cd-share").addEventListener("click", () => {
           const url = location.origin + location.pathname + "#/case/" + c.id;
           (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
@@ -768,7 +786,7 @@ window.Pages = window.Pages || {};
           const box = U.$("#prep-result", el);
           const kindName = (PREP_KINDS.find(([k]) => k === intent) || [])[1] || "材料";
           box.innerHTML = `<div class="small muted" style="margin-top:10px">Copilot 正在生成${kindName}<span class="loading-dots">…</span></div>`;
-          const messages = Copilot.buildMessages(c, 0, "", intent);
+          const messages = await Copilot.buildMessages(c, 0, "", intent);
           const res = await Copilot.ask(messages, { max_tokens: 2200 });
           prepBusy = false;
           if (!res.ok) {

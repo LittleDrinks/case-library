@@ -93,7 +93,7 @@ window.Pages = window.Pages || {};
         ${done.map((r) => {
           const c = Store.db.cases.find((x) => x.id === r.caseId);
           return `<tr><td>${U.esc(r.at)}</td><td>${U.esc(c ? c.title : "（已删除）")}</td>
-            <td>${{ approve: "通过", return: "退回", supplement: "要求补充", hide: "隐藏" }[r.action] || r.action}</td>
+            <td>${{ approve: "通过", reject: "退回", return: "退回", supplement: "要求补充", hide: "隐藏", submit: "提交", withdraw: "撤回", start: "开始审核", unhide: "恢复公开" }[r.action] || r.action}</td>
             <td>${U.esc(r.opinion || "—")}</td><td>${U.esc(r.offlineFrom || "—")}</td></tr>`;
         }).join("")}
       </table>
@@ -431,25 +431,24 @@ window.Pages = window.Pages || {};
       U.$$("[data-hide]", el).forEach((b) => b.addEventListener("click", async () => {
         const c = Store.db.cases.find((x) => x.id === b.dataset.hide);
         if (c && await U.confirmModal("隐藏后公共检索与详情页将不再展示该案例，确认？")) {
-          Store.reviewCase(c, "hide", "管理员暂时隐藏", "");
-          P.rerender();
+          if (await Store.reviewCase(c, "hide", "管理员暂时隐藏", "")) P.rerender();
         }
       }));
-      U.$$("[data-unhide]", el).forEach((b) => b.addEventListener("click", () => {
+      U.$$("[data-unhide]", el).forEach((b) => b.addEventListener("click", async () => {
         const c = Store.db.cases.find((x) => x.id === b.dataset.unhide);
-        if (c) { Store.unhideCase(c); P.rerender(); }
+        if (c && await Store.unhideCase(c)) P.rerender();
       }));
-      U.$$("[data-recheck]", el).forEach((b) => b.addEventListener("click", () => {
+      U.$$("[data-recheck]", el).forEach((b) => b.addEventListener("click", async () => {
         const [cid, mid] = b.dataset.recheck.split(":");
         const c = Store.db.cases.find((x) => x.id === cid);
         const m = Store.db.materials.find((x) => x.id === mid);
         if (c && m) {
-          Store.addAnnotation(c, {
+          const saved = await Store.addAnnotation(c, {
             kind: "admin", status: "pending", section: 0, quote: "",
             text: `引用来源「${m.title}」状态为${m.status}，请复核相关引用，必要时替换素材或暂时撤回。`,
             author: Store.me().name, lowRisk: false,
           });
-          U.toast("已向案例作者发出复核要求");
+          if (saved) U.toast("已向案例作者发出复核要求");
         }
       }));
       U.$$("[data-normal]", el).forEach((b) => b.addEventListener("click", () => {
@@ -640,7 +639,7 @@ window.Pages = window.Pages || {};
       }));
       U.$("#reset-all", el).addEventListener("click", async () => {
         if (await U.confirmModal("重置后将清空本机浏览器中的全部改动，恢复初始数据。确认？", { danger: true })) {
-          Store.resetAll();
+          await Store.resetAll();
           location.hash = "#/home";
           location.reload();
         }

@@ -14,8 +14,11 @@
    上传 md/txt/docx 自动抽取纯文本，GET /api/files/{fid}/text 在线查看；
 8. /api/knowledge    —— 知识库在线导入（admin，markdown 按 # 章/### 节解析）与公开查询；
 9. /api/constants    —— 健康检查与能力开关；
-10. /api/search      —— 服务端语料检索（BM25 + 中文 bigram，惰性索引，按用户密级过滤素材）；
-11. /api/ai/agent    —— 统一 AI 入口（MoA 多智能体编排：主Agent/资料管理员/写作手/内容审校员，SSE）。
+10. /api/search      —— 服务端语料检索（BM25 + 中文 bigram，惰性索引，按用户密级过滤素材，
+   案例按身份过滤；命中带 materialId/sec 结构路径供切片深链，ADR 0010）；
+11. /api/ai/agent    —— 统一 AI 入口（MoA 多智能体编排：主Agent/资料管理员/写作手/内容审校员，SSE）；
+12. /api/cases 等    —— 案例业务闭环（SQLite 持久层 db.py）：案例 CRUD、提交/撤回/审核流转留痕、
+   批注与回复线程、版本快照/回滚、收藏、点赞；首启自动灌入 files/cases_seed.json。
 
 仅依赖标准库 + python-docx。运行：python3 server.py [port]
 """
@@ -39,6 +42,8 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from db import CaseDB
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(ROOT, "app")
@@ -81,6 +86,9 @@ FILES_DIR = os.path.join(ROOT, "files")
 INDEX_FILE = os.path.join(FILES_DIR, "index.json")
 USERS_FILE = os.path.join(FILES_DIR, "users.json")
 KNOWLEDGE_FILE = os.path.join(FILES_DIR, "knowledge.json")
+CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
+SQLITE_DB_PATH = os.path.join(ROOT, ENV.get("SQLITE_DB_PATH", "./data/cases.db"))
+CASEDB = None  # main() 启动时初始化（SQLite 业务库）
 TOKEN_TTL_SECONDS = 12 * 3600
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 LEVEL_NAMES = ["公开", "校内", "受限"]
@@ -499,31 +507,101 @@ def _tokenize(text):
     return tokens
 
 
+def chunk_md(text):
+    """派生切片（ADR 0010，与前端 U.chunkMd / tools/build_data.py 同规则）：
+    按 #{1,3} 标题行切标题树，地址 = 结构路径（如教材 2.1.1、学习资料 1.4）。"""
+    lines = (text or "").split("\n")
+    present = sorted({len(m.group(1))
+                      for m in (re.match(r"^(#{1,3})\s+", l) for l in lines) if m})
+    ranks = {h: i + 1 for i, h in enumerate(present)}
+    chunks, counters, cur = [], [0, 0, 0, 0], None
+
+    def flush():
+        nonlocal cur
+        if cur is None:
+            return
+        body = "\n".join(cur["buf"]).strip()
+        if cur["h"] or body:
+            chunks.append({"path": cur["path"], "level": cur["level"],
+                           "h": cur["h"], "text": body})
+        cur = None
+
+    for ln in lines:
+        m = re.match(r"^(#{1,3})\s+(.+)$", ln)
+        if m:
+            flush()
+            r = ranks[len(m.group(1))]
+            counters[r] += 1
+            for i in range(r + 1, 4):
+                counters[i] = 0
+            cur = {"h": m.group(2).strip(), "buf": [], "level": r,
+                   "path": ".".join(str(n) for n in counters[1:r + 1] if n > 0)}
+        elif cur is not None:
+            cur["buf"].append(ln)
+        else:
+            cur = {"h": "", "buf": [ln], "path": "0", "level": 0}
+    flush()
+    return chunks
+
+
+def assign_file_secs(text, sections):
+    """按 ADR 0010 规则计算每个知识节（### 标题）的文件结构路径，与 build_data.py 一致。"""
+    lines = text.splitlines()
+    levels = sorted({len(re.match(r"^(#{1,3})\s+", l).group(1))
+                     for l in lines if re.match(r"^#{1,3}\s+", l)})
+    ranks = {h: i + 1 for i, h in enumerate(levels)}
+    counters = [0, 0, 0, 0]
+    sec_i = 0
+    seen_chapter = False
+    out = {}
+    for ln in lines:
+        m = re.match(r"^(#{1,3})\s+", ln)
+        if not m:
+            continue
+        r = ranks[len(m.group(1))]
+        counters[r] += 1
+        for i in range(r + 1, 4):
+            counters[i] = 0
+        if re.match(r"^#\s+", ln):
+            seen_chapter = True
+        elif re.match(r"^###\s+", ln) and seen_chapter and sec_i < len(sections):
+            out[sections[sec_i]["id"]] = ".".join(str(n) for n in counters[1:r + 1] if n > 0)
+            sec_i += 1
+    return out
+
+
 def _build_search_index():
-    """收集四类语料并构建 Okapi BM25 索引。
-    doc: {id, cls(knowledge|material), title, chapter, source, text, level, credibility}"""
+    """收集语料并构建 Okapi BM25 索引。
+    doc: {id, cls(knowledge|material|case), title, chapter, source, text, level,
+          credibility, materialId?, sec?, secTitle?, status?, ownerId?}"""
     docs = []
 
-    def add(cls, doc_id, title, chapter, text, source="", level=0, credibility=""):
+    def add(cls, doc_id, title, chapter, text, source="", level=0, credibility="", **extra):
         text = (text or "").strip()
         if not doc_id or not text:
             return
-        docs.append({
+        d = {
             "id": doc_id, "cls": cls, "title": (title or doc_id).strip(),
             "chapter": (chapter or "").strip(), "source": source, "text": text,
             "level": level, "credibility": credibility,
-        })
+        }
+        d.update(extra)
+        docs.append(d)
 
-    # 1) 教材：与知识库导入同规则（# 章 / ### 节）切节
+    # 1) 教材：与知识库导入同规则（# 章 / ### 节）切节；节 id 与前端知识库一致（kn-xx-xx），
+    #    sec 为教材文件的结构路径切片锚点（ADR 0010 深链）
     try:
         with open(BOOK_MD, encoding="utf-8") as f:
-            _chapters, sections = parse_knowledge_markdown("book-zrbjf-2025", f.read())
+            book_text = f.read()
+        _chapters, sections = parse_knowledge_markdown("kn", book_text)
+        secs_map = assign_file_secs(book_text, sections)
         for s in sections:
-            add("knowledge", s["id"], s["title"], s["chapter"], s["text"])
+            add("knowledge", s["id"], s["title"], s["chapter"], s["text"],
+                sec=secs_map.get(s["id"], ""))
     except OSError:
         pass
 
-    # 2) 学习资料：每期一条（标题 + 正文前 800 字），全员可见
+    # 2) 学习资料：每期一条（标题 + 正文前 800 字），素材类，校内密级（与前端素材库一致）
     entries_by_path = {e.get("path"): e for e in load_index()}
     if os.path.isdir(LEARN_DIR):
         for name in sorted(os.listdir(LEARN_DIR)):
@@ -538,8 +616,10 @@ def _build_search_index():
             title = os.path.splitext(entry.get("name") or name)[0]
             body = re.sub(r"^#+.*$", "", raw, flags=re.M)
             body = re.sub(r"\s+", " ", body).strip()[:800]
-            add("knowledge", entry.get("materialId") or os.path.splitext(name)[0],
-                title, "学习资料", title + "。" + body)
+            add("material", entry.get("materialId") or os.path.splitext(name)[0],
+                title, "", title + "。" + body,
+                source="上海大学党委宣传部 · 中心组学习资料",
+                level=entry.get("level", 1), credibility="high")
 
     # 3) 运行时导入的知识条目（无 knowledge.json 时跳过）
     for src in load_knowledge():
@@ -548,7 +628,8 @@ def _build_search_index():
                 "%s / %s" % (src.get("name") or "知识库", s.get("chapter") or ""),
                 s.get("text"))
 
-    # 4) 教师上传抽取文本（files/up/*.txt），元数据来自 files/index.json，按密级过滤
+    # 4) 教师上传抽取文本（files/up/*.txt）：按 ADR 0010 切片入索引，
+    #    命中带 materialId + sec 结构路径，前端可拼 #/material/<id>?sec=<path> 深链
     for e in load_index():
         tp = e.get("textPath")
         if not tp:
@@ -558,10 +639,19 @@ def _build_search_index():
                 text = f.read(30000)
         except OSError:
             continue
-        add("material", e.get("materialId") or e.get("id"),
-            e.get("title") or e.get("name"), "",
-            text, source="教师上传 · " + (e.get("byName") or e.get("by") or ""),
-            level=e.get("level", 0), credibility=e.get("credibility") or "normal")
+        mid = e.get("materialId") or e.get("id")
+        for ck in chunk_md(text):
+            add("material", mid, e.get("title") or e.get("name"), "",
+                ((ck["h"] + "\n") if ck["h"] else "") + ck["text"],
+                source="教师上传 · " + (e.get("byName") or e.get("by") or ""),
+                level=e.get("level", 0), credibility=e.get("credibility") or "normal",
+                materialId=mid, sec=ck["path"], secTitle=ck["h"])
+
+    # 5) 案例（SQLite 业务库）：查询时按用户身份过滤（published 全员，草稿/待审仅作者与管理员）
+    if CASEDB is not None:
+        for c in CASEDB.cases_for_index():
+            add("case", c["id"], c["title"], "", c["text"],
+                status=c["status"], ownerId=c["ownerId"])
 
     tf = [Counter(_tokenize(d["title"] + "\n" + d["text"])) for d in docs]
     dl = [sum(c.values()) for c in tf]
@@ -598,16 +688,22 @@ def _make_snippet(text, q_tokens, width=60):
     return flat[max(0, pos - width):pos + width + 2].strip()
 
 
-def search_corpus(q, max_level=0, kinds=None, limit=8):
-    """BM25 统一打分，分 knowledge / materials 两类返回；materials 按用户密级过滤。"""
-    empty = {"knowledge": [], "materials": []}
-    q_tokens = _tokenize(q)
+def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
+    """BM25 统一打分，分 knowledge / materials / cases 三类返回；
+    materials 按用户密级过滤，cases 仅 published 对所有人可见（草稿/待审限作者与管理员）。
+    terms 为前端扩展后的查询词（缺省对 q 做 bigram 分词）。"""
+    empty = {"knowledge": [], "materials": [], "cases": []}
+    q_tokens = [t.lower() for t in terms if t and t.strip()] if terms else _tokenize(q)
     idx = get_search_index()
     if not q_tokens or not idx["n"]:
         return empty
     if kinds:
-        kinds = {"material" if k in ("material", "materials") else k for k in kinds}
-        kinds = {k for k in kinds if k in ("knowledge", "material")} or None
+        mapped = set()
+        for k in kinds:
+            k = {"materials": "material", "cases": "case"}.get(k, k)
+            if k in ("knowledge", "material", "case"):
+                mapped.add(k)
+        kinds = mapped or None
     avgdl = idx["avgdl"] or 1.0
     scored = []
     for i, d in enumerate(idx["docs"]):
@@ -615,6 +711,9 @@ def search_corpus(q, max_level=0, kinds=None, limit=8):
             continue
         if d["cls"] == "material" and d["level"] > max_level:
             continue
+        if d["cls"] == "case" and d.get("status") != "published":
+            if not user or (not user.get("admin") and d.get("ownerId") != user["id"]):
+                continue
         c, dl = idx["tf"][i], idx["dl"][i] or 1
         score = 0.0
         for t in q_tokens:
@@ -627,23 +726,39 @@ def search_corpus(q, max_level=0, kinds=None, limit=8):
         if score > 0:
             scored.append((score, i))
     scored.sort(key=lambda x: -x[0])
-    knowledge, materials = [], []
+    knowledge, materials, cases = [], [], []
+    seen_materials = set()
     for score, i in scored:
         d = idx["docs"][i]
         if d["cls"] == "knowledge" and len(knowledge) < limit:
-            knowledge.append({
+            hit = {
                 "id": d["id"], "title": d["title"], "chapter": d["chapter"],
                 "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
-            })
+            }
+            if d.get("sec"):
+                hit["sec"] = d["sec"]
+            knowledge.append(hit)
         elif d["cls"] == "material" and len(materials) < limit:
-            materials.append({
+            if d["id"] in seen_materials:  # 一个素材多个切片命中时只保留最高分切片
+                continue
+            seen_materials.add(d["id"])
+            hit = {
                 "id": d["id"], "title": d["title"], "source": d["source"],
                 "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
                 "level": d["level"], "credibility": d["credibility"],
+                "materialId": d.get("materialId") or d["id"],
+            }
+            if d.get("sec"):
+                hit["sec"] = d["sec"]
+                hit["secTitle"] = d.get("secTitle", "")
+            materials.append(hit)
+        elif d["cls"] == "case" and len(cases) < limit:
+            cases.append({
+                "id": d["id"], "title": d["title"],
+                "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
+                "status": d.get("status", ""), "ownerId": d.get("ownerId", ""),
             })
-        if len(knowledge) >= limit and len(materials) >= limit:
-            break
-    return {"knowledge": knowledge, "materials": materials}
+    return {"knowledge": knowledge, "materials": materials, "cases": cases}
 
 
 def api_search(user, payload):
@@ -651,7 +766,7 @@ def api_search(user, payload):
     if not q:
         return {"ok": False, "error": "缺少检索词 q"}, 400
     try:
-        limit = min(max(int(payload.get("limit") or 8), 1), 50)
+        limit = min(max(int(payload.get("limit") or 8), 1), 500)
     except Exception:
         limit = 8
     kinds = payload.get("kinds")
@@ -659,9 +774,187 @@ def api_search(user, payload):
         kinds = [k.strip() for k in kinds.split(",")]
     if not isinstance(kinds, list):
         kinds = None
-    res = search_corpus(q, max_level=req_max_level(user), kinds=kinds, limit=limit)
-    return {"ok": True, "q": q,
-            "knowledge": res["knowledge"], "materials": res["materials"]}, 200
+    terms = payload.get("terms")
+    if not (isinstance(terms, list) and any(isinstance(t, str) and t.strip() for t in terms)):
+        terms = None
+    res = search_corpus(q, max_level=req_max_level(user), kinds=kinds, limit=limit,
+                        terms=terms, user=user)
+    return {"ok": True, "q": q, "knowledge": res["knowledge"],
+            "materials": res["materials"], "cases": res["cases"]}, 200
+
+
+# ------------------------------------------------------------ 案例业务 API（SQLite 持久层，db.py）
+def load_seed_cases():
+    try:
+        with open(CASES_SEED_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _need_login(user):
+    if not user:
+        return {"ok": False, "error": "未登录或登录已过期，请重新切换账号"}, 401
+    return None
+
+
+def api_cases_list(user, query):
+    status = (query.get("status") or [""])[0].strip()
+    owner = (query.get("ownerId") or [""])[0].strip()
+    return {"ok": True,
+            "cases": CASEDB.list_cases(user, status or None, owner or None)}, 200
+
+
+def api_case_get(user, cid):
+    c = CASEDB.get_case(cid, user)
+    if not c:
+        return {"ok": False, "error": "案例不存在或无权查看"}, 404
+    return {"ok": True, "case": c}, 200
+
+
+def api_case_create(user, payload):
+    err = _need_login(user)
+    if err:
+        return err
+    payload = dict(payload or {})
+    payload.setdefault("id", "c-" + uuid.uuid4().hex[:10])
+    c, e = CASEDB.create_case(user, payload)
+    if e:
+        return {"ok": False, "error": e}, 409
+    mark_search_dirty()
+    return {"ok": True, "case": c}, 200
+
+
+def api_case_patch(user, cid, payload):
+    err = _need_login(user)
+    if err:
+        return err
+    c, e = CASEDB.update_case(user, cid, payload or {})
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    mark_search_dirty()
+    return {"ok": True, "case": c}, 200
+
+
+def api_case_delete(user, cid):
+    err = _need_login(user)
+    if err:
+        return err
+    e = CASEDB.delete_case(user, cid)
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    mark_search_dirty()
+    return {"ok": True}, 200
+
+
+def api_case_transition(user, cid, action, payload):
+    """submit/withdraw（作者）与 start/approve/reject/supplement/hide/unhide（admin）。"""
+    err = _need_login(user)
+    if err:
+        return err
+    payload = payload or {}
+    c, e, code = CASEDB.transition(
+        user, cid, action,
+        reason=(payload.get("reason") or "").strip(),
+        reason_type=(payload.get("reasonType") or "").strip(),
+        offline_from=(payload.get("offlineFrom") or "").strip())
+    if e:
+        return {"ok": False, "error": e}, code
+    mark_search_dirty()
+    return {"ok": True, "case": c, "reviews": CASEDB.list_reviews(50, cid)}, 200
+
+
+def api_annotation_add(user, cid, payload):
+    err = _need_login(user)
+    if err:
+        return err
+    a, e = CASEDB.add_annotation(user, cid, payload or {})
+    if e:
+        return {"ok": False, "error": e}, 404
+    c = CASEDB.get_case(cid, user)
+    return {"ok": True, "annotation": a,
+            "annotations": c["annotations"] if c else [a]}, 200
+
+
+def api_annotation_patch(user, aid, payload):
+    err = _need_login(user)
+    if err:
+        return err
+    a, e = CASEDB.patch_annotation(user, aid, payload or {})
+    if e:
+        return {"ok": False, "error": e}, 404
+    return {"ok": True, "annotation": a}, 200
+
+
+def api_version_add(user, cid, payload):
+    err = _need_login(user)
+    if err:
+        return err
+    v, e = CASEDB.save_version(user, cid, (payload or {}).get("label"))
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    c = CASEDB.get_case(cid, user)
+    return {"ok": True, "version": v, "versions": c["versions"] if c else [v]}, 200
+
+
+def api_version_rollback(user, cid, vid):
+    err = _need_login(user)
+    if err:
+        return err
+    c, e = CASEDB.rollback(user, cid, vid)
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e or "快照" in e else 403
+    mark_search_dirty()
+    return {"ok": True, "case": c}, 200
+
+
+def api_favorites(user):
+    err = _need_login(user)
+    if err:
+        return err
+    return {"ok": True, "caseIds": CASEDB.list_favorites(user)}, 200
+
+
+def api_favorite_set(user, cid, on):
+    err = _need_login(user)
+    if err:
+        return err
+    e = CASEDB.set_favorite(user, cid, on)
+    if e:
+        return {"ok": False, "error": e}, 404
+    return {"ok": True, "caseIds": CASEDB.list_favorites(user)}, 200
+
+
+def api_like_set(user, cid, on):
+    err = _need_login(user)
+    if err:
+        return err
+    res, e = CASEDB.set_like(user, cid, on)
+    if e:
+        return {"ok": False, "error": e}, 404
+    return {"ok": True, "likes": res["likes"], "likedBy": res["likedBy"]}, 200
+
+
+def api_reviews(user):
+    err = _need_login(user)
+    if err:
+        return err
+    if not user.get("admin"):
+        return {"ok": False, "error": "仅案例管理员可查看审核留痕"}, 403
+    return {"ok": True, "reviews": CASEDB.list_reviews(50)}, 200
+
+
+def api_reseed(user):
+    """管理后台「重置演示数据」：清空业务表并重灌种子。"""
+    err = _need_login(user)
+    if err:
+        return err
+    if not user.get("admin"):
+        return {"ok": False, "error": "仅案例管理员可重置数据"}, 403
+    n = CASEDB.reseed(load_seed_cases())
+    mark_search_dirty()
+    return {"ok": True, "cases": n}, 200
 
 
 # ---------------------------------------------------------------- AI 代理
@@ -1382,6 +1675,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(api_files_list(auth_user(self)))
         if path == "/api/knowledge":
             return self._send_json(load_knowledge())
+        if path == "/api/cases":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_cases_list(auth_user(self), qs)
+            return self._send_json(res, status)
+        if path == "/api/reviews":
+            res, status = api_reviews(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/favorites":
+            res, status = api_favorites(auth_user(self))
+            return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+?)(?:/(annotations|versions))?/?$", path)
+        if m:
+            cid = urllib.parse.unquote(m.group(1))
+            res, status = api_case_get(auth_user(self), cid)
+            if status == 200 and m.group(2):
+                res = {"ok": True, m.group(2): res["case"][m.group(2)]}
+            return self._send_json(res, status)
         if path.startswith("/api/files/"):
             rest = path[len("/api/files/"):]
             if rest.endswith("/text"):
@@ -1422,6 +1732,37 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/search":
             res, status = api_search(auth_user(self), payload)
             return self._send_json(res, status)
+        if path == "/api/cases":
+            res, status = api_case_create(auth_user(self), payload)
+            return self._send_json(res, status)
+        if path == "/api/admin/reseed":
+            res, status = api_reseed(auth_user(self))
+            return self._send_json(res, status)
+        m = re.match(
+            r"^/api/cases/([^/]+?)/(submit|withdraw|review|annotations|versions|favorite|like)/?$",
+            path)
+        if m:
+            cid, sub = urllib.parse.unquote(m.group(1)), m.group(2)
+            if sub in ("submit", "withdraw"):
+                res, status = api_case_transition(auth_user(self), cid, sub, payload)
+            elif sub == "review":
+                res, status = api_case_transition(
+                    auth_user(self), cid, (payload or {}).get("action") or "", payload)
+            elif sub == "annotations":
+                res, status = api_annotation_add(auth_user(self), cid, payload)
+            elif sub == "versions":
+                res, status = api_version_add(auth_user(self), cid, payload)
+            elif sub == "favorite":
+                res, status = api_favorite_set(auth_user(self), cid, True)
+            else:
+                res, status = api_like_set(auth_user(self), cid, True)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+?)/versions/([^/]+?)/rollback/?$", path)
+        if m:
+            res, status = api_version_rollback(
+                auth_user(self), urllib.parse.unquote(m.group(1)),
+                urllib.parse.unquote(m.group(2)))
+            return self._send_json(res, status)
         if path == "/api/ai/agent":
             return self._ai_agent(payload)
         if path == "/api/web-search":
@@ -1453,6 +1794,16 @@ class Handler(BaseHTTPRequestHandler):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_delete(auth_user(self), fid)
             return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+?)(?:/(favorite|like))?/?$", path)
+        if m:
+            cid, sub = urllib.parse.unquote(m.group(1)), m.group(2)
+            if sub == "favorite":
+                res, status = api_favorite_set(auth_user(self), cid, False)
+            elif sub == "like":
+                res, status = api_like_set(auth_user(self), cid, False)
+            else:
+                res, status = api_case_delete(auth_user(self), cid)
+            return self._send_json(res, status)
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
     def do_PATCH(self):
@@ -1460,6 +1811,16 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/files/"):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_patch(auth_user(self), fid, self._read_json())
+            return self._send_json(res, status)
+        m = re.match(r"^/api/annotations/([^/]+?)/?$", path)
+        if m:
+            res, status = api_annotation_patch(
+                auth_user(self), urllib.parse.unquote(m.group(1)), self._read_json())
+            return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+?)/?$", path)
+        if m:
+            res, status = api_case_patch(
+                auth_user(self), urllib.parse.unquote(m.group(1)), self._read_json())
             return self._send_json(res, status)
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
@@ -1497,11 +1858,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global CASEDB
+    CASEDB = CaseDB(SQLITE_DB_PATH)
+    seeded = CASEDB.seed(load_seed_cases())
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(ENV.get("PROTOTYPE_PORT", "8080") or 8080)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print("服务已启动: http://127.0.0.1:%d  (AI: %s, model=%s, 文件库: %s, 种子文件 %d 个)"
+    print("服务已启动: http://127.0.0.1:%d  (AI: %s, model=%s, 文件库: %s, 种子文件 %d 个, 业务库 %s%s)"
           % (port, "已配置" if (AI_BASE_URL and AI_API_KEY) else "未配置", AI_DEFAULT_MODEL,
-             "鉴权开启" if APP_SECRET else "未配置 APP_SECRET", len(load_index())))
+             "鉴权开启" if APP_SECRET else "未配置 APP_SECRET", len(load_index()),
+             os.path.relpath(SQLITE_DB_PATH, ROOT),
+             "，首启灌入种子案例 %d 篇" % seeded if seeded else ""))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -335,7 +335,7 @@ window.Pages = window.Pages || {};
           state.audience = b.dataset.aud;
           drawAud(); drawTemplates();
         }));
-        U.$("#nc-create", el).addEventListener("click", () => {
+        U.$("#nc-create", el).addEventListener("click", async () => {
           if (!state.typeId) { U.toast("请先选择案例类型"); return; }
           const t = Store.typeById(state.typeId);
           const tp = t && t.templates.find((x) => x.id === state.templateId);
@@ -351,7 +351,8 @@ window.Pages = window.Pages || {};
             tasks: [], likes: 0, likedBy: [],
             createdAt: U.now(), updatedAt: U.now(),
           };
-          Store.addCase(c);
+          const saved = await Store.addCase(c);
+          if (!saved) return; // 失败提示由 Store 统一弹出
           U.toast("已创建");
           location.hash = "#/workbench/" + c.id;
         });

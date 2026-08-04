@@ -17,6 +17,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,7 @@ SEED_JS = os.path.join(ROOT, "app", "seed.js")
 FILES_DIR = os.path.join(ROOT, "files")
 INDEX_FILE = os.path.join(FILES_DIR, "index.json")
 USERS_FILE = os.path.join(FILES_DIR, "users.json")
+CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
 EXCERPT_ISSUES = 69      # 最新多少期保留内容副本（检索摘录用，全文一律落盘）
 EXCERPT_CHARS = 800      # 每期副本截取长度
 
@@ -263,6 +265,93 @@ def make_book_file(chapters, sections):
     return book_file, entry
 
 
+# ------------------------------------------------------------ 种子案例（服务端 SQLite 首启灌库用）
+SNAP_KEYS = ["title", "summary", "theoryPoints", "blocks", "citations", "kit",
+             "typeId", "audience", "course", "author", "org", "stageText", "applyCourses"]
+
+
+def sections_to_blocks(sections):
+    blocks = []
+    for s in sections or []:
+        if s.get("title"):
+            blocks.append({"kind": "h2", "text": s["title"]})
+        blocks.extend({"kind": "p", "text": p} for p in s.get("paras", []))
+    return blocks
+
+
+def strip_junk_blocks(case):
+    """剥掉 docx 尾部的附录/素材来源/参考文献块（现由引用体系表达，ADR 0011）。"""
+    blocks = case.get("blocks") or []
+    cut = next((i for i, b in enumerate(blocks)
+                if (b.get("text") or "").strip() == "附录"), -1)
+    if cut < 0:
+        return
+    junk = re.compile(r"^(附录|素材来源|参考文献|\[\d+\]|$)")
+    if all(junk.match((b.get("text") or "").strip()) for b in blocks[cut:]):
+        case["blocks"] = blocks[:cut]
+
+
+def extract_seed_cases():
+    """用 node 从 app/seed.js 提取 draftCases/publishedMeta（JS 对象字面量，正则不可靠）。"""
+    script = ("global.window={};require(%s);"
+              "console.log(JSON.stringify({drafts:window.SEED.draftCases,meta:window.SEED.publishedMeta}));"
+              % json.dumps(SEED_JS))
+    try:
+        out = subprocess.run(["node", "-e", script], check=True,
+                             capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as e:
+        raise RuntimeError("需要 node 提取 app/seed.js 种子案例: %s" % e)
+    return json.loads(out.stdout)
+
+
+def write_cases_seed(imported, drafts, meta):
+    """组装完整案例对象（与前端既有形状一致），输出 files/cases_seed.json。"""
+    out = []
+    for c in imported:
+        prefix = next((p for p in meta if c["sourceFile"].startswith(p)), None)
+        m = meta.get(prefix, {})
+        case = {
+            "id": "c-" + c["sourceFile"][:2],
+            "title": c["title"], "typeId": m.get("typeId", "ct-general"),
+            "audience": m.get("audience", "ug"),
+            "course": (c["courses"] or [""])[0], "purpose": "案例申报",
+            "ownerId": "u-admin", "status": "published",
+            "author": c["author"], "org": c["org"], "summary": c["summary"],
+            "theoryPoints": c["theoryPoints"], "applyCourses": c["courses"],
+            "stageText": c["stage"],
+            "blocks": sections_to_blocks(c["sections"]),
+            "citations": list(m.get("citations", [])),
+            "kit": {"design": "", "discussion": [], "ppt": [], "reflist": []},
+            "annotations": [], "likes": m.get("likes", 0),
+            "createdAt": "2026-05-20 10:00",
+            "updatedAt": m.get("publishedAt", "2026-06-02"),
+            "publishedAt": m.get("publishedAt", "2026-06-02"),
+            "sourceFile": c["sourceFile"],
+        }
+        strip_junk_blocks(case)
+        case["publishedSnapshot"] = {k: case[k] for k in SNAP_KEYS if k in case}
+        case["versions"] = [{
+            "id": "v-pub", "label": "公开版 v1", "at": case["publishedAt"] + " 09:00",
+            "note": "审核通过，发布为公开版本", "snapshot": case["publishedSnapshot"],
+        }]
+        out.append(case)
+    for d in drafts:
+        d = json.loads(json.dumps(d))  # 深拷贝，避免污染 seed.js 原对象
+        if not d.get("blocks"):
+            d["blocks"] = sections_to_blocks(d.pop("sections", []))
+        for a in d.get("annotations", []):
+            a.setdefault("replies", [])
+        d["citations"] = [{"target": r} if isinstance(r, str) else r
+                          for r in d.get("citations", [])]
+        d["kit"] = dict({"design": "", "discussion": [], "ppt": [], "reflist": []},
+                        **(d.get("kit") or {}))
+        out.append(d)
+    os.makedirs(FILES_DIR, exist_ok=True)
+    with open(CASES_SEED_FILE, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+    return len(out)
+
+
 # ------------------------------------------------------------ 服务端运行文件
 def write_index(seed_entries):
     """种子条目整体重建；已存在的上传条目（seed=false）原样保留。"""
@@ -311,6 +400,8 @@ def main():
         s["fileSec"] = secs_map.get(s["id"])
     kept_uploads = write_index(learn_entries + [book_entry])
     users = write_users()
+    seed_cases = extract_seed_cases()
+    n_cases = write_cases_seed(cases, seed_cases["drafts"], seed_cases["meta"])
 
     data = {
         "book": {"title": BOOK_TITLE, "edition": "2025版",
@@ -333,6 +424,7 @@ def main():
              len(learn), len(learn_entries)))
     print("files/index.json：种子 %d 条，保留上传 %d 条；files/users.json：账号 %d 个"
           % (len(learn_entries) + 1, kept_uploads, len(users)))
+    print("files/cases_seed.json：种子案例 %d 篇（服务端首启灌入 SQLite）" % n_cases)
 
 
 if __name__ == "__main__":

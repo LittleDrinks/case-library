@@ -78,7 +78,7 @@
     let messages = opts.messages;
     let sources = opts.sources || [];
     if (!messages) {
-      messages = C.buildMessages(opts.c, opts.focusIdx, opts.text || "", opts.intent || "chat", opts.skipDirective, opts.conversationKey);
+      messages = await C.buildMessages(opts.c, opts.focusIdx, opts.text || "", opts.intent || "chat", opts.skipDirective, opts.conversationKey);
       sources = C.lastSources || [];
     }
     const res = await C.ask(messages, opts);
@@ -131,7 +131,7 @@
       let messages = opts.messages;
       let sources = opts.sources || [];
       if (!messages) {
-        messages = C.buildMessages(opts.c, opts.focusIdx, opts.text || "", opts.intent || "chat", opts.skipDirective, opts.conversationKey);
+        messages = await C.buildMessages(opts.c, opts.focusIdx, opts.text || "", opts.intent || "chat", opts.skipDirective, opts.conversationKey);
         sources = C.lastSources || [];
       }
       const finish = (text, meta) => {
@@ -343,13 +343,13 @@
   }
 
   // 取当前小节及其前后各一节作为关注窗口，其余小节只给标题
-  C.buildContext = (c, focusIdx, query) => {
+  C.buildContext = async (c, focusIdx, query) => {
     const cacheKey = c.id + "|" + (query || "").slice(0, 40);
     let retrieved = sessionCache[cacheKey];
     let fallbackUsed = false;
     if (!retrieved) {
       const q = [query, c.title, (c.theoryPoints || []).join(" ")].filter(Boolean).join(" ");
-      const r = Store.search(q, {});
+      const r = await Store.search(q, {});
       retrieved = { knowledge: r.knowledge.slice(0, 3), materials: r.materials.slice(0, 3) };
       sessionCache[cacheKey] = retrieved;
     }
@@ -488,8 +488,8 @@
 
   // 组装发给模型的消息；skipDirective 用于快捷指令文案已在输入框中的情况。
   // 传 conversationKey 时：system + 上下文之后插入该会话最近若干轮历史，最后放当前 user。
-  C.buildMessages = (c, focusIdx, userText, intent, skipDirective, conversationKey) => {
-    const ctx = C.buildContext(c, focusIdx, userText);
+  C.buildMessages = async (c, focusIdx, userText, intent, skipDirective, conversationKey) => {
+    const ctx = await C.buildContext(c, focusIdx, userText);
     const directive = skipDirective ? "" : (INTENT_PROMPT[intent] || "");
     const prefs = Store.me().prefs || {};
     const prefLine = "教师偏好：语言风格" + (prefs.style || "简练") +

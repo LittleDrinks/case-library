@@ -1,4 +1,4 @@
-// 数据层：组装种子数据、权限、持久化、检索
+// 数据层：组装静态数据、权限、服务端业务数据缓存、检索
 (function () {
   const LS_DB = "sizheng-db-v4";
   const LS_USER = "sizheng-user";
@@ -7,6 +7,9 @@
   const S = { db: null, userId: null, flags: {}, token: localStorage.getItem(LS_TOKEN) || "" };
 
   // ------------------------------------------------------------ 组装
+  // 案例/批注/版本/审核留痕/收藏/点赞的权威在服务端 SQLite（db.py），
+  // db.cases/db.reviews/db.favorites 只是登录后从服务端拉取的本地缓存；
+  // localStorage 只保留纯前端偏好与本地素材登记（模板改动、上传前登记、公告、备课材料等）
   function buildBase() {
     const R = window.RAWDATA, D = window.SEED;
     const db = {
@@ -44,54 +47,7 @@
         noSnapshot: !d.excerpt,
       });
     });
-
-    // 已发布案例：示例文本 + 类型/引用映射
-    R.importedCases.forEach((c) => {
-      const prefix = Object.keys(D.publishedMeta).find((p) => c.sourceFile.startsWith(p));
-      const meta = prefix ? D.publishedMeta[prefix] : {};
-      db.cases.push({
-        id: "c-" + c.sourceFile.slice(0, 2),
-        title: c.title, typeId: meta.typeId || "ct-general",
-        audience: meta.audience || "ug", course: c.courses[0] || "",
-        purpose: "案例申报", ownerId: "u-admin", status: "published",
-        author: c.author, org: c.org,
-        summary: c.summary, theoryPoints: c.theoryPoints, applyCourses: c.courses,
-        stageText: c.stage,
-        sections: c.sections.map((s) => ({ title: s.title, paras: s.paras.slice() })),
-        citations: (meta.citations || []).slice(),
-        kit: { design: "", discussion: [], ppt: [], reflist: [] },
-        annotations: [], versions: [],
-        likes: meta.likes || 0, likedBy: [],
-        createdAt: "2026-05-20 10:00", updatedAt: meta.publishedAt || "2026-06-02",
-        publishedAt: meta.publishedAt || "2026-06-02",
-        sourceFile: c.sourceFile,
-      });
-    });
-
-    // 演示工作稿
-    D.draftCases.forEach((c) => db.cases.push(JSON.parse(JSON.stringify(c))));
-
-    // 正文统一转为 blocks（标题=h2、段落=p，自由增删）
-    db.cases.forEach((c) => { if (!c.blocks) S.setBlocks(c, sectionsToBlocks(c.sections)); });
-
-    // 已发布案例的公开版本快照（公开内容只读取该版本）
-    db.cases.filter((c) => c.status === "published").forEach((c) => {
-      c.publishedSnapshot = snapshotOf(c);
-      c.versions = [{
-        id: "v-pub", label: "公开版 v1", at: c.publishedAt + " 09:00",
-        note: "审核通过，发布为公开版本", snapshot: c.publishedSnapshot,
-      }];
-    });
     return db;
-  }
-
-  function snapshotOf(c) {
-    return JSON.parse(JSON.stringify({
-      title: c.title, summary: c.summary, theoryPoints: c.theoryPoints,
-      blocks: S.blocksOf(c), citations: c.citations, kit: c.kit,
-      typeId: c.typeId, audience: c.audience, course: c.course,
-      author: c.author, org: c.org, stageText: c.stageText, applyCourses: c.applyCourses,
-    }));
   }
 
   function applyOverrides(db) {
@@ -101,44 +57,17 @@
     });
   }
 
-  // 旧数据补齐新字段（批注线程、引用时间、版本号等）
-  function normalize(db) {
-    db.cases.forEach((c) => {
-      c.annotations = c.annotations || [];
-      c.annotations.forEach((a) => { a.replies = a.replies || []; });
-      c.citations = (c.citations || []).map((r) => (typeof r === "string" ? { target: r } : r));
-      c.versions = c.versions || [];
-      c.kit = Object.assign({ design: "", discussion: [], ppt: [], reflist: [] }, c.kit || {});
-    });
-    // 内容迁移：剥掉早期 build 带入 docx 尾部的附录/素材来源/参考文献块（现由引用体系表达，ADR 0011）
-    db.cases.forEach((c) => {
-      if (!c.sourceFile || !c.blocks) return;
-      const cut = c.blocks.findIndex((b) => (b.text || "").trim() === "附录");
-      if (cut < 0) return;
-      const junk = /^(附录|素材来源|参考文献|\[\d+\]|$)/;
-      if (!c.blocks.slice(cut).every((b) => junk.test((b.text || "").trim()))) return;
-      c.blocks = c.blocks.slice(0, cut);
-      if (c.publishedSnapshot) c.publishedSnapshot = snapshotOf(c);
-      c.versions.forEach((v) => { if (v.id === "v-pub") v.snapshot = c.publishedSnapshot; });
-    });
-    db.favorites = db.favorites || {};
-    db.announcements = db.announcements || [];
-    db.prepMaterials = db.prepMaterials || [];
-  }
-
   function load() {
     const base = buildBase();
     try {
       const raw = localStorage.getItem(LS_DB);
       if (raw) {
         const saved = JSON.parse(raw);
-        ["users", "caseTypes", "knowledgeSources", "whitelist", "reviews", "materialOverrides", "customMaterials", "favorites", "announcements", "prepMaterials"].forEach((k) => {
+        ["users", "caseTypes", "knowledgeSources", "whitelist", "materialOverrides", "customMaterials", "announcements", "prepMaterials"].forEach((k) => {
           if (saved[k] != null) base[k] = saved[k];
         });
-        if (saved.cases) base.cases = saved.cases;
       }
     } catch (e) { console.warn("本地数据读取失败，使用初始数据", e); }
-    normalize(base);
     base.customMaterials.forEach((m) => {
       if (!base.materials.find((x) => x.id === m.id)) base.materials.unshift(m);
     });
@@ -153,15 +82,14 @@
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       try {
-        invalidateCorpus();
         localStorage.setItem(LS_DB, JSON.stringify({
           users: S.db.users, caseTypes: S.db.caseTypes,
           // 运行时知识源（runtime 标记）权威在服务端 /api/knowledge，不随本地数据持久化
           knowledgeSources: S.db.knowledgeSources.filter((s) => !s.runtime),
-          whitelist: S.db.whitelist, reviews: S.db.reviews,
-          materialOverrides: S.db.materialOverrides, cases: S.db.cases,
+          whitelist: S.db.whitelist,
+          materialOverrides: S.db.materialOverrides,
           customMaterials: S.db.customMaterials,
-          favorites: S.db.favorites, announcements: S.db.announcements,
+          announcements: S.db.announcements,
           prepMaterials: S.db.prepMaterials,
         }));
       } catch (e) { console.warn("保存失败", e); }
@@ -209,22 +137,21 @@
     });
   }
 
-  // 上传素材全文入检索：服务端对 md/txt/docx 上传抽取了纯文本（textPath），
-  // 登录态下拉取并按种子素材同一规则切片（ADR 0010）并入 BM25 语料；
-  // 拉取失败/未登录静默降级为 title/summary 检索。按 fileId+textPath+size 缓存，未变不重复拉。
+  // 上传素材全文：服务端对 md/txt/docx 上传抽取了纯文本（textPath），登录态下拉取
+  // 供素材卡片摘录与素材详情页切片预览；拉取失败/未登录静默降级为 title/summary。
   const LS_UPTEXT = "sizheng-uptext";
   const UPTEXT_MAX = 200 * 1000; // 单文件文本缓存上限（防 localStorage 爆配额）
-  const uploadTexts = {}; // materialId -> { text, slices }（运行时数据，不持久化）
+  const uploadTexts = {}; // materialId -> { text }（运行时数据，不持久化）
 
   function upCacheLoad() {
     try { return JSON.parse(localStorage.getItem(LS_UPTEXT) || "{}") || {}; } catch (e) { return {}; }
   }
   function applyUploadText(m, text) {
-    if (text && text.trim()) uploadTexts[m.id] = { text: text, slices: U.chunkMd(text) };
+    if (text && text.trim()) uploadTexts[m.id] = { text: text };
     else delete uploadTexts[m.id];
   }
   async function fetchUploadTexts() {
-    if (!S.token) return false; // 未登录：保持现状（仅 title/summary 可检索）
+    if (!S.token) return false; // 未登录：保持现状（仅 title/summary 可见）
     const cache = upCacheLoad();
     const next = {};
     let fetched = false;
@@ -245,7 +172,7 @@
         next[key] = text;
         fetched = true;
         applyUploadText(m, text);
-      } catch (e) { /* 静默降级：仅 title/summary 可检索 */ }
+      } catch (e) { /* 静默降级：仅 title/summary 可见 */ }
     });
     await Promise.all(jobs);
     if (fetched) {
@@ -273,7 +200,6 @@
         S.db.fileIndex = d.files || {};
         const got = await fetchUploadTexts();
         mergeServerMaterials();
-        invalidateCorpus();
         if (got) rerenderIfReading();
       }
     } catch (e) { /* 服务端不可用时保持本地数据 */ }
@@ -322,53 +248,115 @@
   S.audienceName = (a) => S.db.audienceNames ? S.db.audienceNames[a] : (window.SEED.audienceNames[a] || a);
   S.citeTarget = (id) => S.knowledgeById(id) || S.materialById(id);
 
-  // ------------------------------------------------------------ 变更
-  S.saveCase = () => persist();
-  S.touch = (c) => { c.updatedAt = U.now(); persist(); };
+  // ------------------------------------------------------------ 服务端业务数据（案例闭环）
+  async function apiJSON(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    const resp = await S.apiFetch(path, opts);
+    try { return await resp.json(); } catch (e) { return null; }
+  }
+  // 写操作失败必须让用户看见（不静默丢数据、不假装成功）
+  const apiFail = (d, verb) => {
+    U.toast(verb + "失败：" + ((d && d.error) || "服务不可用，请稍后重试"), 3600);
+    return null;
+  };
 
-  S.addCase = (c) => { S.db.cases.unshift(c); persist(); return c; };
-  S.deleteCase = (id) => {
-    S.db.cases = S.db.cases.filter((c) => c.id !== id);
-    persist();
+  // 服务端返回的案例整体替换本地缓存（保持对象身份，页面持有的引用不失效）
+  function replaceCase(fresh) {
+    const cur = S.db.cases.find((x) => x.id === fresh.id);
+    if (!cur) { S.db.cases.unshift(fresh); return fresh; }
+    Object.keys(cur).forEach((k) => { if (!(k in fresh)) delete cur[k]; });
+    Object.assign(cur, fresh);
+    return cur;
+  }
+
+  // 登录后/切换账号后拉取业务数据；审核留痕仅 admin 可见，收藏按当前账号
+  S.syncCases = async () => {
+    try {
+      const d = await apiJSON("/api/cases");
+      if (!d || !d.ok) throw new Error((d && d.error) || "cases");
+      S.db.cases = d.cases || [];
+      if (S.me() && S.me().admin) {
+        const r = await apiJSON("/api/reviews");
+        S.db.reviews = (r && r.ok) ? r.reviews : [];
+      } else S.db.reviews = [];
+      const f = await apiJSON("/api/favorites");
+      S.db.favorites = {};
+      if (f && f.ok) S.db.favorites[S.userId] = f.caseIds || [];
+      return true;
+    } catch (e) {
+      U.toast("案例数据加载失败：服务不可用，请稍后刷新重试", 4000);
+      return false;
+    }
+  };
+
+  // 高频编辑（正文/引用/kit/标签）先落本地缓存保持编辑流畅，再防抖 PATCH 到服务端；
+  // 失败明确提示；响应里的服务端自检批注（selfcheck）同步回本地
+  const caseSyncTimers = {};
+  function syncCaseSoon(c) {
+    clearTimeout(caseSyncTimers[c.id]);
+    caseSyncTimers[c.id] = setTimeout(async () => {
+      delete caseSyncTimers[c.id];
+      try {
+        const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id), {
+          method: "PATCH", body: JSON.stringify(c),
+        });
+        if (!d || !d.ok) { apiFail(d, "保存"); return; }
+        c.updatedAt = d.case.updatedAt;
+        c.annotations = d.case.annotations;
+      } catch (e) { apiFail(null, "保存"); }
+    }, 400);
+  }
+
+  // ------------------------------------------------------------ 变更
+  // persist 仍负责 localStorage 里的前端偏好；传入案例时同步内容到服务端
+  S.saveCase = (c) => { persist(); if (c) syncCaseSoon(c); };
+  S.touch = (c) => { c.updatedAt = U.now(); syncCaseSoon(c); };
+
+  S.addCase = async (c) => {
+    try {
+      const d = await apiJSON("/api/cases", { method: "POST", body: JSON.stringify(c) });
+      if (!d || !d.ok) return apiFail(d, "创建案例");
+      return replaceCase(d.case);
+    } catch (e) { return apiFail(null, "创建案例"); }
+  };
+  S.deleteCase = async (id) => {
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(id), { method: "DELETE" });
+      if (!d || !d.ok) { apiFail(d, "删除案例"); return false; }
+      S.db.cases = S.db.cases.filter((c) => c.id !== id);
+      return true;
+    } catch (e) { apiFail(null, "删除案例"); return false; }
   };
 
   // 提交轮次 = 已生成的「提交版」数量
   S.submitRound = (c) => c.versions.filter((v) => v.label.indexOf("提交版") === 0).length;
 
-  S.submitCase = (c) => {
-    c.status = "pending";
-    c.submittedAt = U.now();
-    const n = S.submitRound(c) + 1;
-    c.versions.push({ id: U.uid("v"), label: "提交版 v" + n, at: U.now(), note: "提交审核", snapshot: snapshotOf(c) });
-    persist();
-  };
-  // 仅在管理员开始审核前可撤回
-  S.withdrawCase = (c) => {
-    if (c.status !== "pending") return;
-    c.status = "draft";
-    c.versions.push({ id: U.uid("v"), label: "撤回", at: U.now(), note: "审核开始前撤回提交" });
-    persist();
-  };
-  S.startReview = (c) => { c.status = "reviewing"; persist(); };
-  S.reviewCase = (c, action, opinion, offlineFrom) => {
-    const rec = { id: U.uid("rv"), caseId: c.id, action, opinion, offlineFrom: offlineFrom || "", by: S.userId, at: U.now(), round: S.submitRound(c) };
-    S.db.reviews.unshift(rec);
-    if (action === "approve") {
-      c.status = "published";
-      c.publishedAt = U.plainDate(U.now());
-      c.publishedSnapshot = snapshotOf(c);
-      c.versions.push({ id: U.uid("v"), label: "公开版 v" + Math.max(1, S.submitRound(c)), at: U.now(), note: "审核通过并发布" + (opinion ? "：" + opinion : ""), snapshot: c.publishedSnapshot });
-    } else if (action === "return" || action === "supplement") {
-      // 批注即意见：具体问题以批注形式挂在正文上，opinion 只是可选总评
-      c.status = "draft";
-      c.versions.push({ id: U.uid("v"), label: action === "return" ? "退回" : "要求补充", at: U.now(), note: opinion || "" });
-    } else if (action === "hide") {
-      c.status = "hidden";
-    }
-    persist();
-    return rec;
-  };
-  S.unhideCase = (c) => { c.status = "published"; persist(); };
+  // 审核流转：先调 API，成功后用服务端返回的案例与留痕更新本地缓存
+  async function caseAction(c, path, body, verb) {
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) + "/" + path, {
+        method: "POST", body: JSON.stringify(body || {}),
+      });
+      if (!d || !d.ok) { apiFail(d, verb); return false; }
+      replaceCase(d.case);
+      if (d.reviews) {
+        S.db.reviews = d.reviews.concat(S.db.reviews.filter((r) => r.caseId !== c.id));
+      }
+      return true;
+    } catch (e) { apiFail(null, verb); return false; }
+  }
+  S.submitCase = (c) => caseAction(c, "submit", {}, "提交审核");
+  // 仅在管理员开始审核前可撤回（服务端校验）
+  S.withdrawCase = (c) => caseAction(c, "withdraw", {}, "撤回");
+  S.startReview = (c) => caseAction(c, "review", { action: "start" }, "开始审核");
+  // 批注即意见：具体问题以批注形式挂在正文上，opinion 只是可选总评
+  S.reviewCase = (c, action, opinion, offlineFrom) =>
+    caseAction(c, "review", {
+      action: action === "return" ? "reject" : action,
+      reason: opinion || "", offlineFrom: offlineFrom || "",
+    }, "审核操作");
+  S.unhideCase = (c) => caseAction(c, "review", { action: "unhide" }, "恢复公开");
 
   // 被打回待改：草稿态且最近一次流转是退回/要求补充
   S.isReturned = (c) => {
@@ -380,63 +368,79 @@
   };
 
   // 手动版本快照：结构与自动快照一致（at/label/正文序列化），仅作者本人
-  S.saveVersion = (caseId, label) => {
+  S.saveVersion = async (caseId, label) => {
     const c = S.db.cases.find((x) => x.id === caseId);
-    if (!c || c.ownerId !== S.userId) return null;
-    const v = {
-      id: U.uid("v"), label: (label || "").trim() || "手动存档",
-      at: U.now(), note: "手动保存版本", snapshot: snapshotOf(c),
-    };
-    c.versions = c.versions || [];
-    c.versions.push(v);
-    persist();
-    return v;
+    if (!c) return null;
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(caseId) + "/versions", {
+        method: "POST", body: JSON.stringify({ label: label || "" }),
+      });
+      if (!d || !d.ok) { apiFail(d, "保存版本"); return null; }
+      c.versions = d.versions;
+      return d.version;
+    } catch (e) { apiFail(null, "保存版本"); return null; }
   };
 
-  // 版本回滚：先给当前正文打「回滚前自动快照」留退路，再把指定版本恢复为当前正文；仅作者本人
-  S.rollbackVersion = (caseId, versionId) => {
+  // 版本回滚：服务端先给当前正文打「回滚前自动快照」留退路，再恢复指定版本；仅作者本人
+  S.rollbackVersion = async (caseId, versionId) => {
     const c = S.db.cases.find((x) => x.id === caseId);
-    if (!c || c.ownerId !== S.userId) return false;
-    const v = (c.versions || []).find((x) => x.id === versionId);
-    if (!v || !v.snapshot) return false; // 无快照的流转记录（撤回/退回等）不能作为回滚目标
-    c.versions.push({
-      id: U.uid("v"), label: "回滚前自动快照", at: U.now(),
-      note: "恢复到「" + v.label + "」前的自动存档", snapshot: snapshotOf(c),
-    });
-    const s = JSON.parse(JSON.stringify(v.snapshot));
-    ["title", "summary", "theoryPoints", "citations", "kit", "typeId", "audience",
-      "course", "author", "org", "stageText", "applyCourses"].forEach((k) => {
-      if (s[k] !== undefined) c[k] = s[k];
-    });
-    if (s.blocks) S.setBlocks(c, s.blocks);
-    S.touch(c);
-    return true;
+    if (!c) return false;
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(caseId) +
+        "/versions/" + encodeURIComponent(versionId) + "/rollback", { method: "POST", body: "{}" });
+      if (!d || !d.ok) { apiFail(d, "回滚"); return false; }
+      replaceCase(d.case);
+      return true;
+    } catch (e) { apiFail(null, "回滚"); return false; }
   };
 
-  S.setAnnoStatus = (c, annoId, status) => {
-    const a = c.annotations.find((x) => x.id === annoId);
-    if (a) { a.status = status; persist(); }
+  // 批注：先调 API，成功后用服务端返回的批注列表更新本地缓存（含服务端自检批注）
+  S.setAnnoStatus = async (c, annoId, status, extra) => {
+    try {
+      const d = await apiJSON("/api/annotations/" + encodeURIComponent(annoId), {
+        method: "PATCH", body: JSON.stringify(Object.assign({ status: status }, extra || {})),
+      });
+      if (!d || !d.ok) { apiFail(d, "更新批注"); return false; }
+      const a = c.annotations.find((x) => x.id === annoId);
+      if (a) Object.assign(a, d.annotation);
+      return true;
+    } catch (e) { apiFail(null, "更新批注"); return false; }
   };
-  S.addAnnotation = (c, anno) => {
-    c.annotations.push(Object.assign({ id: U.uid("an"), createdAt: U.now(), status: "pending", replies: [] }, anno));
-    persist();
+  S.addAnnotation = async (c, anno) => {
+    anno = Object.assign({ id: U.uid("an"), createdAt: U.now(), status: "pending", replies: [] }, anno);
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) + "/annotations", {
+        method: "POST", body: JSON.stringify(anno),
+      });
+      if (!d || !d.ok) { apiFail(d, "保存批注"); return null; }
+      c.annotations = d.annotations;
+      return d.annotation;
+    } catch (e) { apiFail(null, "保存批注"); return null; }
   };
   // 批注线程：作者回应/审核员追问都追加到同一条批注下；追问会重开已解决的批注
-  S.replyAnnotation = (c, annoId, text, reopen) => {
-    const a = c.annotations.find((x) => x.id === annoId);
-    if (!a) return;
-    a.replies = a.replies || [];
-    a.replies.push({ id: U.uid("rp"), by: S.userId, byName: S.me().name, text, at: U.now() });
-    if (reopen) a.status = "pending";
-    persist();
+  S.replyAnnotation = async (c, annoId, text, reopen) => {
+    try {
+      const d = await apiJSON("/api/annotations/" + encodeURIComponent(annoId), {
+        method: "PATCH", body: JSON.stringify({ reply: { text: text, reopen: !!reopen } }),
+      });
+      if (!d || !d.ok) { apiFail(d, "回复批注"); return false; }
+      const a = c.annotations.find((x) => x.id === annoId);
+      if (a) Object.assign(a, d.annotation);
+      return true;
+    } catch (e) { apiFail(null, "回复批注"); return false; }
   };
 
-  S.likeCase = (c) => {
-    c.likedBy = c.likedBy || [];
-    const i = c.likedBy.indexOf(S.userId);
-    if (i >= 0) { c.likedBy.splice(i, 1); c.likes = Math.max(0, (c.likes || 0) - 1); }
-    else { c.likedBy.push(S.userId); c.likes = (c.likes || 0) + 1; }
-    persist();
+  S.likeCase = async (c) => {
+    const liked = (c.likedBy || []).includes(S.userId);
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) + "/like", {
+        method: liked ? "DELETE" : "POST",
+      });
+      if (!d || !d.ok) { apiFail(d, "点赞"); return false; }
+      c.likes = d.likes;
+      c.likedBy = d.likedBy;
+      return true;
+    } catch (e) { apiFail(null, "点赞"); return false; }
   };
 
   S.updateMaterial = (id, patch) => {
@@ -463,15 +467,27 @@
     return m;
   };
   S.savePrefs = (prefs) => { S.me().prefs = prefs; persist(); };
-  S.resetAll = () => { clearTimeout(persistTimer); localStorage.removeItem(LS_DB); load(); };
+  // 重置演示数据：清本地偏好 + 服务端业务表重灌种子（仅 admin，服务端再校验）
+  S.resetAll = async () => {
+    Object.keys(caseSyncTimers).forEach((k) => clearTimeout(caseSyncTimers[k]));
+    clearTimeout(persistTimer);
+    localStorage.removeItem(LS_DB);
+    try { await apiJSON("/api/admin/reseed", { method: "POST", body: "{}" }); } catch (e) { /* 忽略 */ }
+    load();
+  };
 
   // ------------------------------------------------------------ 收藏
   S.isFav = (c) => (S.db.favorites[S.userId] || []).includes(c.id);
-  S.toggleFav = (c) => {
-    const list = (S.db.favorites[S.userId] = S.db.favorites[S.userId] || []);
-    const i = list.indexOf(c.id);
-    if (i >= 0) list.splice(i, 1); else list.push(c.id);
-    persist();
+  S.toggleFav = async (c) => {
+    const on = !S.isFav(c);
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) + "/favorite", {
+        method: on ? "POST" : "DELETE",
+      });
+      if (!d || !d.ok) { apiFail(d, "收藏"); return false; }
+      S.db.favorites[S.userId] = d.caseIds;
+      return true;
+    } catch (e) { apiFail(null, "收藏"); return false; }
   };
   S.favCases = () => S.visibleCases().filter((c) => S.isFav(c));
 
@@ -522,7 +538,7 @@
       value = content == null ? [] : [String(content)];
     }
     c.kit[key] = value;
-    persist();
+    syncCaseSoon(c);
     return { kind: key, kindName: KIT_KEYS[key], content: c.kit[key] };
   };
 
@@ -538,12 +554,12 @@
     c.citations = c.citations || [];
     if (!c.citations.some((r) => r.target === targetId)) {
       c.citations.push({ target: targetId, at: U.now() });
-      persist();
+      syncCaseSoon(c);
     }
   };
   S.uncite = (c, targetId) => {
     c.citations = (c.citations || []).filter((r) => r.target !== targetId);
-    persist();
+    syncCaseSoon(c);
   };
   S.isCited = (c, targetId) => (c.citations || []).some((r) => r.target === targetId);
 
@@ -575,12 +591,12 @@
     const y = parseInt(String(m.publishedAt || "").slice(0, 4), 10);
     return m.kind === "文档" && !!y && y <= new Date().getFullYear() - 3;
   };
-  // 采集查重双闸：URL 查重 + 相似度查重（top-3）
-  S.dupCheck = (url, titleText) => {
+  // 采集查重双闸：URL 查重 + 相似度查重（top-3，服务端检索）
+  S.dupCheck = async (url, titleText) => {
     const urlDup = url ? S.db.materials.find((m) => m.sourceUrl && m.sourceUrl === url) : null;
     let similar = [];
     if (titleText && titleText.trim()) {
-      const r = S.search(titleText, { kind: "materials", limit: 3 });
+      const r = await S.search(titleText, { kind: "materials", limit: 3 });
       similar = r.materials.map((e) => e.item).filter((m) => !urlDup || m.id !== urlDup.id).slice(0, 3);
     }
     return { urlDup, similar };
@@ -615,7 +631,7 @@
   S.setCaseTags = (c, tags) => {
     // 理论知识点保持不动，自有标签 = 全部标签减去理论知识点
     c.tags = Array.from(new Set(tags.filter((t) => !(c.theoryPoints || []).includes(t))));
-    persist();
+    syncCaseSoon(c);
   };
   S.setMaterialTags = (id, tags) => {
     S.db.materialOverrides[id] = Object.assign(S.db.materialOverrides[id] || {}, { tags });
@@ -672,7 +688,8 @@
       .slice(0, n || 3).map((e) => e.x);
   };
 
-  // ------------------------------------------------------------ 提交前自检（自检未过项即批注）
+  // ------------------------------------------------------------ 提交前自检
+  // 未过项的「系统自检」批注由服务端在每次写入后同步（所有客户端看到同一份）
   S.selfChecks = (c) => {
     const blocks = S.blocksOf(c);
     const paras = blocks.filter((b) => b.kind === "p" && b.text.trim());
@@ -692,25 +709,6 @@
       { id: "ck-len", name: "正文不少于 600 字", ok: chars >= 600 },
       { id: "ck-risk", name: "无待处理的风险提示批注", ok: !c.annotations.some((a) => a.kind === "risk" && a.status === "pending") },
     ];
-  };
-  // 未过项生成/维持 selfcheck 批注；恢复通过则自动标记解决
-  S.syncSelfCheckAnnos = (c) => {
-    let changed = false;
-    S.selfChecks(c).forEach((ck) => {
-      const existing = c.annotations.find((a) => a.kind === "selfcheck" && a.checkId === ck.id);
-      if (!ck.ok && !existing) {
-        c.annotations.push({
-          id: U.uid("an"), kind: "selfcheck", checkId: ck.id, status: "pending",
-          section: 0, quote: "", text: "提交前自检未通过：" + ck.name,
-          author: "系统自检", lowRisk: false, createdAt: U.now(), replies: [],
-        });
-        changed = true;
-      } else if (ck.ok && existing && existing.status === "pending") {
-        existing.status = "resolved";
-        changed = true;
-      }
-    });
-    if (changed) persist();
   };
 
   // ------------------------------------------------------------ 首页推荐与平台动态
@@ -751,127 +749,58 @@
   S.affectedByMaterial = (mid) => S.db.cases.filter((c) =>
     (c.citations || []).some((r) => r.target === mid));
 
-  // ------------------------------------------------------------ 检索
-  // 词面召回 + BM25 排序：稀有词权重高、长文档归一；权威/时间/点赞只作微调
-  const BM25_K1 = 1.5, BM25_B = 0.75;
-  let _corpus = null;
-  const invalidateCorpus = () => { _corpus = null; };
-
-  function corpus() {
-    if (_corpus) return _corpus;
-    const docs = [];
-    const push = (kind, item, fields) => {
-      docs.push({ kind, item, fields, text: fields.join("\n"), len: fields.join("\n").length });
-    };
-    S.db.cases.forEach((c) => push("case", c, [
-      c.title, c.summary || "", (c.theoryPoints || []).join(" "),
-      S.blocksOf(c).map((b) => b.text).join(" "),
-    ]));
-    S.db.knowledge.forEach((k) => push("knowledge", k, [k.chapter + " " + k.title, k.text]));
-    S.db.materials.forEach((m) => {
-      const fields = [m.title, m.summary || "", m.excerpt || ""];
-      // 上传素材全文切片并入语料（与种子素材同一标题树切片规则，一个素材仍是单篇文档）
-      const up = uploadTexts[m.id];
-      if (up && up.slices.length) {
-        fields.push(up.slices.map((s) => (s.h ? s.h + " " : "") + s.text).join("\n"));
-      }
-      push("material", m, fields);
-    });
-    const avgLen = docs.reduce((s, d) => s + d.len, 0) / Math.max(1, docs.length);
-    _corpus = { docs, avgLen };
-    return _corpus;
-  }
-
-  function countIn(text, term) {
-    let n = 0, i = text.indexOf(term);
-    while (i >= 0 && n < 50) { n++; i = text.indexOf(term, i + term.length); }
-    return n;
-  }
-
-  // 权威加权、时间权重、使用反馈（点赞不作唯一依据）叠加在 BM25 之上
-  function adjustScore(item, bm25) {
-    let s = bm25;
-    if (item.credibility === "high") s *= 1.5;
-    if (item.credibility === "low") s *= 0.6;
-    const year = parseInt(String(item.publishedAt || item.updatedAt || "").slice(0, 4), 10);
-    if (year) s += Math.max(0, year - 2018) * 0.15;
-    if (item.likes) s += Math.min(item.likes, 50) * 0.02;
-    return s;
-  }
-
-  S.search = (q, filters, termsOverride) => {
+  // ------------------------------------------------------------ 检索（服务端 BM25，统一口径，ADR 0004/0010）
+  // 服务端返回 id/snippet/score/深链字段（materialId/sec），这里映射回本地条目：
+  // 渲染、权限与深链都基于本地对象
+  S.search = async (q, filters, termsOverride) => {
     filters = filters || {};
     const terms = (termsOverride && termsOverride.length ? termsOverride : U.terms(q)).slice(0, 30);
     const out = { cases: [], knowledge: [], materials: [], terms };
     if (!terms.length) return out;
-
-    const { docs, avgLen } = corpus();
-    const N = docs.length;
-    // 每个词的文档频率与 IDF
-    const idf = {};
-    terms.forEach((t) => {
-      let df = 0;
-      docs.forEach((d) => { if (d.text.includes(t)) df++; });
-      idf[t] = Math.log(1 + (N - df + 0.5) / (df + 0.5));
-    });
-
-    docs.forEach((d) => {
-      // 权限与筛选
-      if (d.kind === "case") {
-        if (!S.canSeeCase(d.item)) return;
-        if (filters.typeId && d.item.typeId !== filters.typeId) return;
-        if (filters.audience && d.item.audience !== filters.audience) return;
-      } else if (d.kind === "material") {
-        if (!S.canSeeMaterial(d.item)) return;
-        if (filters.credibility && d.item.credibility !== filters.credibility) return;
-        if (filters.level !== undefined && filters.level !== "" && d.item.level !== Number(filters.level)) return;
-      } else if (filters.kind === "materials" || filters.kind === "cases") {
-        // knowledge 在指定素材/案例检索时跳过
-      }
-      if (filters.kind === "materials" && d.kind !== "material") return;
-      if (filters.kind === "cases" && d.kind !== "case") return;
-
-      let score = 0;
-      const hits = [];
-      terms.forEach((t) => {
-        const tf = countIn(d.text, t);
-        if (!tf) return;
-        score += idf[t] * (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * d.len / avgLen));
-        // 标题（首字段）命中加权
-        if (d.fields[0] && d.fields[0].includes(t)) score += idf[t] * 1.5;
-        if (hits.length < 3) {
-          const at = d.text.indexOf(t);
-          hits.push({ term: t, context: d.text.slice(Math.max(0, at - 24), at + t.length + 24) });
-        }
+    const kinds = filters.kind === "materials" ? ["material"]
+      : filters.kind === "cases" ? ["case"] : ["case", "knowledge", "material"];
+    let d = null;
+    try {
+      d = await apiJSON("/api/search", {
+        method: "POST",
+        body: JSON.stringify({ q: q, terms: terms, kinds: kinds, limit: filters.limit || 20 }),
       });
-      if (score <= 0) return;
-      hits.sort((a, b) => b.term.length - a.term.length);
-      const reasons = ["命中「" + hits.map((h) => h.term).join("」「") + "」：" + hits[0].context];
-      const entry = { item: d.item, reasons, score: adjustScore(d.item, score) };
-      if (d.kind === "case") out.cases.push(entry);
-      else if (d.kind === "knowledge") out.knowledge.push(entry);
-      else out.materials.push(entry);
+    } catch (e) { d = null; }
+    if (!d || !d.ok) {
+      U.toast("检索服务不可用，请稍后重试", 3200);
+      return out;
+    }
+    (d.cases || []).forEach((h) => {
+      const item = S.caseById(h.id);
+      if (!item) return;
+      if (filters.typeId && item.typeId !== filters.typeId) return;
+      if (filters.audience && item.audience !== filters.audience) return;
+      out.cases.push({ item: item, reasons: [h.snippet], score: h.score });
     });
-
-    const sorter = {
-      smart: (a, b) => b.score - a.score,
-      newest: (a, b) => String(b.item.publishedAt || b.item.updatedAt).localeCompare(String(a.item.publishedAt || a.item.updatedAt)),
-      likes: (a, b) => (b.item.likes || 0) - (a.item.likes || 0),
-      cited: (a, b) => S.materialUsage(b.item.id).count - S.materialUsage(a.item.id).count,
-      bookorder: (a, b) => S.db.knowledge.indexOf(a.item) - S.db.knowledge.indexOf(b.item),
-    }[filters.sort || "smart"] || ((a, b) => b.score - a.score);
-    const limit = filters.limit || 20;
-    out.cases.sort(sorter); out.knowledge.sort(sorter); out.materials.sort(sorter);
-    out.cases = out.cases.slice(0, limit);
-    out.knowledge = out.knowledge.slice(0, limit);
-    out.materials = out.materials.slice(0, limit);
+    (d.knowledge || []).forEach((h) => {
+      const item = S.knowledgeById(h.id) ||
+        { id: h.id, title: h.title, chapter: h.chapter, text: h.snippet };
+      out.knowledge.push({ item: item, reasons: [h.snippet], score: h.score });
+    });
+    (d.materials || []).forEach((h) => {
+      const item = S.materialById(h.materialId || h.id) || {
+        id: h.materialId || h.id, title: h.title, source: h.source,
+        level: h.level, credibility: h.credibility, summary: h.snippet,
+        kind: "文档", status: "正常", tags: [],
+      };
+      if (filters.credibility && item.credibility !== filters.credibility) return;
+      if (filters.level !== undefined && filters.level !== "" && item.level !== Number(filters.level)) return;
+      const e = { item: item, reasons: [h.snippet], score: h.score };
+      if (h.sec) e.sec = h.sec;
+      out.materials.push(e);
+    });
     return out;
   };
 
   // 与当前案例相关的资料（工作台资料区）
-  S.relatedForCase = (c) => {
+  S.relatedForCase = async (c) => {
     const q = [c.title, (c.theoryPoints || []).join(" "), c.course].join(" ");
-    const r = S.search(q, {});
+    const r = await S.search(q, {});
     return {
       knowledge: r.knowledge.slice(0, 6),
       materials: r.materials.slice(0, 6),
@@ -919,7 +848,6 @@
         });
       });
     });
-    invalidateCorpus();
   }
   S.syncKnowledge = async () => {
     try {
@@ -935,7 +863,7 @@
   };
 
   load();
-  // 初始化后异步合并服务端运行时知识源：完成后重建语料，停留在知识/检索相关页时自动重渲染
+  // 初始化后异步合并服务端运行时知识源：停留在知识/检索相关页时自动重渲染
   S.syncKnowledge();
   window.Store = S;
 })();

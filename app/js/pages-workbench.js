@@ -100,7 +100,7 @@ window.Pages = window.Pages || {};
       });
       c.citations = newOrder.map((i) => cites[i]);
       if (changed) Store.setBlocks(c, bs);
-      Store.saveCase();
+      Store.saveCase(c);
     }
 
     // ---------------- 文档渲染 ----------------
@@ -802,7 +802,7 @@ window.Pages = window.Pages || {};
         excerpt: String(res.content || res.error || "").replace(/\s+/g, " ").trim().slice(0, 140),
       });
       c.tasks = c.tasks.slice(0, 30);
-      Store.saveCase();
+      Store.saveCase(c);
     }
 
     function actionsFor(intent, content) {
@@ -830,7 +830,7 @@ window.Pages = window.Pages || {};
       return same ? "ok" : "stale";
     }
 
-    function runAction(msg, act, force) {
+    async function runAction(msg, act, force) {
       const paras = msg.text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
       if (editable() && ["replace", "append", "newsec", "replace-sel", "sec-fill"].includes(act.type)) {
         // hash 守卫层：stale 阻断；confirm 先在结果卡顶部弹确认条，确认后带 force 重进
@@ -868,14 +868,14 @@ window.Pages = window.Pages || {};
           .map((it) => "[" + reviewAnnoType(it) + "] " + (it.ref || "") + " | " + (it.note || it.standard || ""));
         const annos = Copilot.parseReview(c, lines.join("\n"));
         if (!annos.length) { U.toast("没有可转入的批注"); return; }
-        annos.forEach((a) => Store.addAnnotation(c, a));
+        for (const a of annos) await Store.addAnnotation(c, a);
         act.transferred = annos.length;
         U.toast("已转 " + annos.length + " 条批注");
         drawPanel();
         return;
       }
       if (act.type === "annos") {
-        act.annos.forEach((a) => Store.addAnnotation(c, a));
+        for (const a of act.annos) await Store.addAnnotation(c, a);
         U.toast(`已加入 ${act.annos.length} 条批注`);
         tab = "anno";
         drawAll();
@@ -985,7 +985,7 @@ window.Pages = window.Pages || {};
     async function handleFetch(url) {
       const res = await Copilot.fetchUrl(url);
       if (!res.ok) return { ok: false, error: res.error || "采集失败" };
-      const dup = Store.dupCheck(url, res.title || "");
+      const dup = await Store.dupCheck(url, res.title || "");
       if (dup.urlDup) {
         return {
           ok: true, model: "url-fetch", elapsed_ms: 0,
@@ -1057,7 +1057,7 @@ window.Pages = window.Pages || {};
       return `<div class="panel-scroll">${chips}${cards || H.empty("当前筛选下没有批注")}</div>`;
     };
 
-    function remountAnno(a) {
+    async function remountAnno(a) {
       let best = -1, bestBlock = 0;
       blocksOf().forEach((b, i) => {
         for (let len = Math.min(20, a.quote.length); len >= 6; len -= 2) {
@@ -1065,10 +1065,9 @@ window.Pages = window.Pages || {};
         }
       });
       if (best >= 6) {
-        a.section = bestBlock;
-        a.status = "pending";
-        Store.saveCase();
-        U.toast(`检测到表述调整，已将批注重新挂载至「${blockLabel(bestBlock)}」`);
+        if (await Store.setAnnoStatus(c, a.id, "pending", { section: bestBlock })) {
+          U.toast(`检测到表述调整，已将批注重新挂载至「${blockLabel(bestBlock)}」`);
+        }
       } else {
         U.toast("无法在当前正文中重新定位，保持失效状态", 3200);
       }
@@ -1145,14 +1144,15 @@ window.Pages = window.Pages || {};
         <button class="btn" id="sa-go">保存批注</button>
       </div>`, { sticky: true });
       U.$("#sa-text").focus();
-      U.$("#sa-go").addEventListener("click", () => {
+      U.$("#sa-go").addEventListener("click", async () => {
         const text = U.$("#sa-text").value.trim();
         if (!text) { U.toast("请填写批注内容"); return; }
-        Store.addAnnotation(c, {
+        const saved = await Store.addAnnotation(c, {
           kind: reviewer ? "admin" : "author",
           status: "pending", section: blockIdx, quote: quote.slice(0, 60),
           text, author: me.name, lowRisk: false,
         });
+        if (!saved) return;
         close();
         window.getSelection().removeAllRanges();
         tab = "anno";
@@ -1177,19 +1177,6 @@ window.Pages = window.Pages || {};
           <div class="small muted">${U.esc(t.src || "")}${r.note ? " · " + U.esc(r.note) : ""}</div>
         </div>`;
       }).join("");
-      const rel = Store.relatedForCase(c);
-      const relKn = rel.knowledge.map((r) => `
-        <div class="res-item">
-          <h5>${U.esc(r.item.chapter)} · ${U.esc(r.item.title)}</h5>
-          <div class="small muted">${U.esc(r.item.text.slice(0, 70))}…</div>
-          ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-kn="${r.item.id}">引用</button></div>` : ""}
-        </div>`).join("");
-      const relM = rel.materials.map((r) => `
-        <div class="res-item">
-          <div class="row spread"><h5>${U.esc(r.item.title)}</h5>${H.credTag(r.item.credibility)}</div>
-          <div class="small muted">${U.esc(r.item.source)} · ${U.esc((r.item.excerpt || r.item.summary || "").slice(0, 60))}</div>
-          ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${r.item.id}">引用</button></div>` : ""}
-        </div>`).join("");
       return `<div class="panel-scroll">
         <div class="section-title small row spread"><span>本案例引用（${(c.citations || []).length}）</span>
           ${(c.citations || []).length ? `<span class="view-toggle sm">
@@ -1220,11 +1207,31 @@ window.Pages = window.Pages || {};
         </div>
         <div id="ws-results" style="margin-bottom:12px"></div>` : ""}` : ""}
         <div class="section-title small"><span>相关知识</span></div>
-        ${relKn || H.empty("暂无匹配")}
+        <div id="rel-kn"><div class="small muted">加载中…</div></div>
         <div class="section-title small" style="margin-top:10px"><span>相关素材</span></div>
-        ${relM || H.empty("暂无匹配")}
+        <div id="rel-m"><div class="small muted">加载中…</div></div>
       </div>`;
     };
+
+    // 相关知识/素材：服务端检索异步填充（渲染路径保持同步）
+    async function fillRelated() {
+      const knBox = U.$("#rel-kn"), mBox = U.$("#rel-m");
+      if (!knBox || !mBox) return;
+      const rel = await Store.relatedForCase(c);
+      if (!U.$("#rel-kn")) return; // 面板已切换
+      knBox.innerHTML = rel.knowledge.map((r) => `
+        <div class="res-item">
+          <h5>${U.esc(r.item.chapter)} · ${U.esc(r.item.title)}</h5>
+          <div class="small muted">${U.esc((r.item.text || "").slice(0, 70))}…</div>
+          ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-kn="${r.item.id}">引用</button></div>` : ""}
+        </div>`).join("") || H.empty("暂无匹配");
+      mBox.innerHTML = rel.materials.map((r) => `
+        <div class="res-item">
+          <div class="row spread"><h5>${U.esc(r.item.title)}</h5>${H.credTag(r.item.credibility)}</div>
+          <div class="small muted">${U.esc(r.item.source)} · ${U.esc((r.item.excerpt || r.item.summary || "").slice(0, 60))}</div>
+          ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${r.item.id}">引用</button></div>` : ""}
+        </div>`).join("") || H.empty("暂无匹配");
+    }
 
     function cite(target, silent) {
       const already = Store.isCited(c, target);
@@ -1243,13 +1250,14 @@ window.Pages = window.Pages || {};
     }
 
     // 库内搜索：筛选资料是写作前最耗人工的环节，这里直接检索全库知识/素材并可一键引用（ADR 0005）
-    function doResSearch() {
+    async function doResSearch() {
       const inp = U.$("#rs-q");
       const box = U.$("#rs-results");
       if (!inp || !box) return;
       const q = (inp.value || "").trim();
       if (!q) return;
-      const r = Store.search(q);
+      box.innerHTML = `<div class="small muted">检索中…</div>`;
+      const r = await Store.search(q);
       const kn = (r.knowledge || []).slice(0, 5);
       const ms = (r.materials || []).slice(0, 6);
       if (!kn.length && !ms.length) {
@@ -1312,18 +1320,19 @@ window.Pages = window.Pages || {};
     };
 
     const reviewHistHTML = () => {
-      const recs = Store.db.reviews.filter((r) => r.caseId === c.id);
+      const recs = Store.db.reviews.filter((r) => r.caseId === c.id && r.action in REVIEW_ACT_NAMES);
       if (!recs.length) return "";
-      const actName = { approve: "通过并发布", return: "退回修改", supplement: "要求补充", hide: "暂时隐藏" };
       return `<div class="card card-pad">
         <div class="section-title small"><span>历史审核记录</span></div>
         ${recs.map((r) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
-          <div class="row spread"><b class="small">${U.esc(actName[r.action] || r.action)}</b>
+          <div class="row spread"><b class="small">${U.esc(REVIEW_ACT_NAMES[r.action])}</b>
           <span class="small muted">第 ${r.round || 1} 轮 · ${U.esc(r.at)}</span></div>
           ${r.opinion ? `<div class="small muted">${U.esc(r.opinion)}</div>` : ""}
         </div>`).join("")}
       </div>`;
     };
+    // 服务端留痕动作 → 显示名（reject 即退回修改）
+    const REVIEW_ACT_NAMES = { approve: "通过并发布", reject: "退回修改", return: "退回修改", supplement: "要求补充", hide: "暂时隐藏" };
 
     async function doReview(action) {
       if ((action === "return" || action === "supplement") && pendingReviewAnnos() === 0) {
@@ -1334,11 +1343,12 @@ window.Pages = window.Pages || {};
       }
       const opinion = (U.$("#rv-opinion") ? U.$("#rv-opinion").value : rvOpinion).trim();
       const from = U.$("#rv-from") ? U.$("#rv-from").value : "";
-      const verb = { approve: "通过并发布", return: "退回修改", supplement: "要求补充", hide: "暂时隐藏" }[action];
+      const verb = REVIEW_ACT_NAMES[action] || action;
       if (!(await U.confirmModal(`确认「${verb}」该案例？`, { danger: action === "hide" }))) return;
-      Store.reviewCase(c, action, opinion, from === "无" ? "" : from);
-      U.toast("已完成：" + verb);
-      location.hash = "#/admin/audit";
+      if (await Store.reviewCase(c, action, opinion, from === "无" ? "" : from)) {
+        U.toast("已完成：" + verb);
+        location.hash = "#/admin/audit";
+      }
     }
 
     // ---------------- 版本对比 ----------------
@@ -1479,9 +1489,8 @@ window.Pages = window.Pages || {};
       U.toast("已导出");
     }
 
-    // ---------------- 提交前自检（未过项即批注，ADR 0001） ----------------
+    // ---------------- 提交前自检（未过项即批注，ADR 0001；批注由服务端同步） ----------------
     function checklistModal() {
-      Store.syncSelfCheckAnnos(c);
       const checks = Store.selfChecks(c);
       const passed = checks.filter((x) => x.ok).length;
       const level = passed === checks.length ? ["高", "green"] : passed >= checks.length - 2 ? ["中", "amber"] : ["低", "red"];
@@ -1506,11 +1515,12 @@ window.Pages = window.Pages || {};
       U.$$("[data-goto-anno]").forEach((b) => b.addEventListener("click", () => {
         close(); tab = "anno"; annoFilter.kind = new Set(["selfcheck"]); drawPanel();
       }));
-      U.$("#submit-go").addEventListener("click", () => {
+      U.$("#submit-go").addEventListener("click", async () => {
         close();
-        Store.submitCase(c);
-        U.toast("已提交审核，内容已冻结");
-        drawAll();
+        if (await Store.submitCase(c)) {
+          U.toast("已提交审核，内容已冻结");
+          drawAll();
+        }
       });
     }
 
@@ -1563,18 +1573,18 @@ window.Pages = window.Pages || {};
         const v = (c.versions || []).find((x) => x.id === b.dataset.vroll);
         if (!v || !v.snapshot) return;
         if (!(await U.confirmModal(`回滚到「${v.label}」？当前内容会先自动打「回滚前自动快照」留退路。`))) return;
-        if (Store.rollbackVersion(c.id, v.id)) {
+        if (await Store.rollbackVersion(c.id, v.id)) {
           Copilot.invalidateContext(c.id);
           U.toast("已回滚到「" + v.label + "」");
           drawAll();
           versionsModal();
-        } else U.toast("回滚失败：该版本没有可用快照");
+        }
       }));
       const saveBtn = U.$("#v-save");
-      if (saveBtn) saveBtn.addEventListener("click", () => {
+      if (saveBtn) saveBtn.addEventListener("click", async () => {
         const label = (U.$("#v-new-label") && U.$("#v-new-label").value) || "";
-        const v = Store.saveVersion(c.id, label);
-        if (!v) { U.toast("保存失败：仅作者本人可存版本"); return; }
+        const v = await Store.saveVersion(c.id, label);
+        if (!v) return; // 失败提示由 Store 统一弹出
         U.toast("已保存版本「" + v.label + "」");
         close();
         versionsModal();
@@ -1619,6 +1629,7 @@ window.Pages = window.Pages || {};
       if (tab === "copilot") box.innerHTML = chatHTML();
       else if (tab === "anno") box.innerHTML = annoHTML();
       else box.innerHTML = resHTML();
+      if (tab === "res") fillRelated();
       const scroll = U.$("#chat-scroll");
       if (scroll) scroll.scrollTop = scroll.scrollHeight;
       if (tab !== "res") Graph.stop();
@@ -1770,21 +1781,22 @@ window.Pages = window.Pages || {};
             }
             if (t.dataset.afs) { toggleSet(annoFilter.status, t.dataset.afs); drawPanel(); return; }
             if (t.dataset.afk) { toggleSet(annoFilter.kind, t.dataset.afk); drawPanel(); return; }
-            if (t.dataset.annoOk) { Store.setAnnoStatus(c, t.dataset.annoOk, "accepted"); drawAll(); return; }
-            if (t.dataset.annoNo) { Store.setAnnoStatus(c, t.dataset.annoNo, "rejected"); drawAll(); return; }
-            if (t.dataset.annoDone) { Store.setAnnoStatus(c, t.dataset.annoDone, "resolved"); drawAll(); return; }
+            if (t.dataset.annoOk) { if (await Store.setAnnoStatus(c, t.dataset.annoOk, "accepted")) drawAll(); return; }
+            if (t.dataset.annoNo) { if (await Store.setAnnoStatus(c, t.dataset.annoNo, "rejected")) drawAll(); return; }
+            if (t.dataset.annoDone) { if (await Store.setAnnoStatus(c, t.dataset.annoDone, "resolved")) drawAll(); return; }
             if (t.dataset.annoReply) {
               const inp = U.$(`[data-reply-for="${t.dataset.annoReply}"]`);
               const v = inp && inp.value.trim();
               if (!v) { U.toast("请先填写回复内容"); return; }
-              Store.replyAnnotation(c, t.dataset.annoReply, v, t.dataset.reopen === "1");
-              U.toast(t.dataset.reopen === "1" ? "已追问，批注重新打开" : "已回复");
-              drawAll();
+              if (await Store.replyAnnotation(c, t.dataset.annoReply, v, t.dataset.reopen === "1")) {
+                U.toast(t.dataset.reopen === "1" ? "已追问，批注重新打开" : "已回复");
+                drawAll();
+              }
               return;
             }
             if (t.dataset.annoRemount) {
               const a = c.annotations.find((x) => x.id === t.dataset.annoRemount);
-              if (a) remountAnno(a);
+              if (a) await remountAnno(a);
               return;
             }
             if (t.dataset.locate) {
@@ -1855,7 +1867,7 @@ window.Pages = window.Pages || {};
             if (t.dataset.wsAdd != null) {
               const r = wsResults[Number(t.dataset.wsAdd)];
               if (r) {
-                const dup = Store.dupCheck(r.url, "");
+                const dup = await Store.dupCheck(r.url, "");
                 if (dup.urlDup) { U.toast("该链接已在素材库中，可直接引用", 3000); return; }
                 const credibility = Copilot.credibilityFor(r.url);
                 Store.addMaterial({
@@ -1879,8 +1891,11 @@ window.Pages = window.Pages || {};
           }
           if (e.target.id === "anno-batch") {
             let n = 0;
-            c.annotations.forEach((a) => { if (a.status === "pending" && a.lowRisk) { a.status = "accepted"; n++; } });
-            Store.saveCase();
+            for (const a of c.annotations) {
+              if (a.status === "pending" && a.lowRisk) {
+                if (await Store.setAnnoStatus(c, a.id, "accepted")) n++;
+              }
+            }
             U.toast(n ? `已批量采纳 ${n} 条低风险建议` : "没有可批量采纳的低风险建议");
             drawAll();
             return;
@@ -1939,9 +1954,10 @@ window.Pages = window.Pages || {};
           if (e.target.id === "wb-submit") {
             const checks = Store.selfChecks(c);
             if (checks.every((x) => x.ok)) {
-              Store.submitCase(c);
-              U.toast("已提交审核，内容已冻结");
-              drawAll();
+              if (await Store.submitCase(c)) {
+                U.toast("已提交审核，内容已冻结");
+                drawAll();
+              }
             } else {
               checklistModal();
             }
@@ -1949,12 +1965,13 @@ window.Pages = window.Pages || {};
           }
           if (e.target.id === "wb-check") { checklistModal(); return; }
           if (e.target.id === "wb-withdraw") {
-            Store.withdrawCase(c);
-            U.toast("已撤回，可继续修改");
-            drawAll();
+            if (await Store.withdrawCase(c)) {
+              U.toast("已撤回，可继续修改");
+              drawAll();
+            }
             return;
           }
-          if (e.target.id === "wb-unhide") { Store.unhideCase(c); drawAll(); return; }
+          if (e.target.id === "wb-unhide") { if (await Store.unhideCase(c)) drawAll(); return; }
           if (e.target.id === "wb-versions") { versionsModal(); return; }
           if (e.target.id === "wb-export") { exportModal(); return; }
           if (e.target.id === "wb-diff") { showDiff = !showDiff; drawAll(); return; }
@@ -1963,15 +1980,16 @@ window.Pages = window.Pages || {};
             if (o) o.hidden = !o.hidden;
             return;
           }
-          if (e.target.id === "rv-start") { Store.startReview(c); drawAll(); return; }
+          if (e.target.id === "rv-start") { if (await Store.startReview(c)) drawAll(); return; }
           if (e.target.id === "rv-approve") { doReview("approve"); return; }
           if (e.target.id === "rv-return") { doReview("return"); return; }
           if (e.target.id === "rv-supplement") { doReview("supplement"); return; }
           if (e.target.id === "rv-hide") { doReview("hide"); return; }
           if (e.target.id === "wb-delete") {
             if (await U.confirmModal("删除该案例？此操作不可恢复。", { danger: true })) {
-              Store.deleteCase(c.id);
-              location.hash = reviewer ? "#/admin/audit" : "#/mine";
+              if (await Store.deleteCase(c.id)) {
+                location.hash = reviewer ? "#/admin/audit" : "#/mine";
+              }
             }
             return;
           }

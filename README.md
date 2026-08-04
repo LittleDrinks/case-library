@@ -15,15 +15,19 @@
 - **启动方式**：`/usr/bin/python3 server.py`（或 `python3 server.py [port]`）。
   端口优先取命令行参数，其次取 `.env` 的 `PROTOTYPE_PORT`，默认 `8080`
   （见 `server.py` 尾部启动代码）。
-- **数据架构**：业务数据（案例、收藏、批注、偏好等）保存在浏览器 `localStorage`；
-  后端只负责 AI 代理（`/api/ai/chat`，含 SSE 流式）、文件库（`/api/files`，上传
-  md/txt/docx 自动抽取纯文本）、知识库在线导入（`/api/knowledge/import`）与 docx 导出
-  （`/api/export-docx`）等服务端能力。种子数据构建期写入 `app/data.js` 与 `files/`。
+- **数据架构**：业务数据（案例、审核留痕、批注、版本、收藏、点赞）持久化在服务端
+  SQLite（`db.py`，库文件 `data/cases.db`，首启自动灌入 `files/cases_seed.json`）；
+  前端 `app/js/store.js` 只缓存服务端数据并调 `/api/cases` 等 REST 端点，
+  `localStorage` 仅保留纯前端偏好。后端另有 AI 代理（`/api/ai/chat`，含 SSE 流式）、
+  文件库（`/api/files`，上传 md/txt/docx 自动抽取纯文本）、知识库在线导入
+  （`/api/knowledge/import`）、服务端检索（`/api/search`，BM25，检索页与 AI 共用）
+  与 docx 导出（`/api/export-docx`）。种子数据构建期写入 `app/data.js` 与 `files/`。
 - **AI 配置**：`.env` 中的 `AI_BASE_URL` / `AI_API_KEY` / `AI_MODELS` /
   `AI_DEFAULT_MODEL` 等 `AI_*` 变量；密钥只存在服务端，浏览器通过
   `GET /api/constants` 的 `aiConfigured` 判断能力开关。
 - **重建静态数据**：`python3 tools/build_data.py`（从 `assets/`、`examples/` 重新生成
-  `app/data.js`、`files/index.json`、`files/users.json` 等，保留已有上传条目）。
+  `app/data.js`、`files/index.json`、`files/users.json`、`files/cases_seed.json` 等，
+  保留已有上传条目；提取 `app/seed.js` 种子案例需要本机有 node）。
 
 ## 云端仓库
 
