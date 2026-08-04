@@ -21,7 +21,7 @@ window.Pages = window.Pages || {};
     const state = {
       q: params.q || "", kindTab: "all", page: 1, sort: "smart",
       view: params.view === "graph" ? "graph" : "list",
-      fTypes: new Set(), fAud: new Set(), fCred: new Set(), fLevel: new Set(), fTags: new Set(),
+      fTypes: new Set(), fAud: new Set(), fGrade: new Set(), fKind: new Set(), fTags: new Set(),
       fTime: "", ddOpen: null,
       ran: !!params.q, aiLoading: false, aiHtml: "", aiCount: 0, aiSeq: 0, aiSkipped: false,
       aiStreaming: false, aiText: "", aiSources: [], aiStream: null,
@@ -72,8 +72,8 @@ window.Pages = window.Pages || {};
         if (skipGroup !== "type" && state.fTypes.size && !state.fTypes.has(item.typeId)) return false;
         if (skipGroup !== "aud" && state.fAud.size && !state.fAud.has(item.audience)) return false;
       } else if (kind === "material") {
-        if (skipGroup !== "cred" && state.fCred.size && !state.fCred.has(item.credibility)) return false;
-        if (skipGroup !== "level" && state.fLevel.size && !state.fLevel.has(item.level)) return false;
+        if (skipGroup !== "grade" && state.fGrade.size && !state.fGrade.has(item.grade || "未定级")) return false;
+        if (skipGroup !== "mkind" && state.fKind.size && !state.fKind.has(item.kind)) return false;
       }
       // 知识条目无标签，标签筛选不作用于它（保留历史行为）
       if (kind !== "knowledge" && skipGroup !== "tags" && state.fTags.size && !Store.hasTag(kind, item, state.fTags)) return false;
@@ -103,8 +103,8 @@ window.Pages = window.Pages || {};
         }, {});
       const typeN = cnt(r.cases, "case", "type", (c) => c.typeId);
       const audN = cnt(r.cases, "case", "aud", (c) => c.audience);
-      const credN = cnt(r.materials, "material", "cred", (m) => m.credibility);
-      const levelN = cnt(r.materials, "material", "level", (m) => m.level);
+      const gradeN = cnt(r.materials, "material", "grade", (m) => m.grade || "未定级");
+      const kindN = cnt(r.materials, "material", "mkind", (m) => m.kind);
       const tagN = {};
       r.cases.filter((x) => pass(x.item, "case", "tags")).forEach((x) =>
         Store.tagsOf("case", x.item).forEach((t) => { tagN[t] = (tagN[t] || 0) + 1; }));
@@ -114,8 +114,8 @@ window.Pages = window.Pages || {};
       return {
         types: only(Store.db.caseTypes.map((t) => ({ id: t.id, name: t.name, n: typeN[t.id] || 0 })), state.fTypes),
         aud: only(["grad", "ug", "embed"].map((a) => ({ id: a, name: Store.audienceName(a), n: audN[a] || 0 })), state.fAud),
-        cred: only([["high", "权威来源"], ["normal", "一般来源"], ["low", "待核实"]].map(([id, name]) => ({ id, name, n: credN[id] || 0 })), state.fCred),
-        level: only([[0, "公开"], [1, "校内"], [2, "受限"]].map(([id, name]) => ({ id, name, n: levelN[id] || 0 })), state.fLevel),
+        grade: only(["S", "A", "B", "C", "未定级"].map((id) => ({ id, name: id === "未定级" ? id : id + " 级", n: gradeN[id] || 0 })), state.fGrade),
+        kind: only(Object.keys(kindN).sort().map((id) => ({ id, name: id, n: kindN[id] })), state.fKind),
         tags: Object.entries(tagN).sort((a, b) => b[1] - a[1]).slice(0, 14).map(([t, n]) => ({ id: t, name: t, n })),
       };
     };
@@ -131,14 +131,14 @@ window.Pages = window.Pages || {};
       </select>`;
     };
 
-    // 筛选维度按页签出项（ADR 0007）
+    // 筛选维度按页签出项（ADR 0007）；素材分面 = 信源等级/类型/标签/时间（ADR 0004 方向）
     const filterDefs = () => {
       const f = facetData();
       return [
         { key: "type", title: "案例类型", items: f.types, set: state.fTypes, tabs: ["case"] },
         { key: "aud", title: "学段", items: f.aud, set: state.fAud, tabs: ["case"] },
-        { key: "cred", title: "可信度", items: f.cred, set: state.fCred, tabs: ["material"] },
-        { key: "level", title: "公开范围", items: f.level, set: state.fLevel, tabs: ["material"] },
+        { key: "grade", title: "信源等级", items: f.grade, set: state.fGrade, tabs: ["material"] },
+        { key: "mkind", title: "类型", items: f.kind, set: state.fKind, tabs: ["material"] },
         { key: "tags", title: "标签", items: f.tags, set: state.fTags, tabs: ["all", "case", "material"] },
         { key: "time", title: "时间", single: true, tabs: ["all", "case", "material", "knowledge"],
           items: TIME_OPTS.map(([id, name]) => ({ id, name })) },
@@ -149,7 +149,10 @@ window.Pages = window.Pages || {};
     const filterBar = () => {
       const dds = filterDefs().filter((d) => d.tabs.includes(state.kindTab) && (d.single || d.items.length));
       const sort = sortSelect();
-      if (!dds.length && !sort) return "";
+      // 范围（我的/机构/公共）预留 UI 位，逻辑待 scope 字段启用
+      const scope = state.kindTab === "material"
+        ? `<button class="btn sm plain" disabled title="范围筛选（我的/机构/公共）待开通">范围 ▾</button>` : "";
+      if (!dds.length && !sort && !scope) return "";
       const html = dds.map((d) => {
         const active = d.single ? !!state.fTime : d.set.size > 0;
         const label = d.single
@@ -165,7 +168,7 @@ window.Pages = window.Pages || {};
           </span>` : ""}
         </span>`;
       }).join("");
-      return `<div class="filter-bar">${html}${sort}</div>`;
+      return `<div class="filter-bar">${html}${scope}${sort}</div>`;
     };
 
     const chipsRow = () => {
@@ -188,11 +191,24 @@ window.Pages = window.Pages || {};
     };
 
     // 结果条目统一极简格式：小字类型标 + 标题 + 90 字摘要（ADR 0007）
+    // 素材条目加元信息行：信源等级/可信度/来源/发布日期/状态/被引次数/时效标（ADR 0005）
+    const materialMeta = (x) => {
+      const m = x.item;
+      const bits = [
+        H.gradeTag(m.grade), H.credTag(m.credibility),
+        `<span>${U.esc(m.source || "")}</span>`,
+        m.publishedAt ? `<span>${U.esc(U.plainDate(m.publishedAt))}</span>` : "",
+        m.status && m.status !== "正常" ? `<span class="tag red">${U.esc(m.status)}</span>` : "",
+        `<span>被引 ${m.citedCount || 0}</span>`,
+        Store.isPolicyDated(m) ? `<span class="tag amber" title="政策类文件发布超过 3 年">注意时效</span>` : "",
+      ];
+      return `<div class="row wrap small muted" style="gap:6px;margin-top:2px">${bits.filter(Boolean).join("")}</div>`;
+    };
     const KIND_META = {
       case: { name: "案例", cls: "primary", href: (x) => "#/case/" + x.item.id, title: (x) => x.item.title, text: (x) => x.item.summary || "" },
       knowledge: { name: "知识", cls: "blue", href: (x) => x.item.bookEntry ? "#/book" : "#/knowledge/" + x.item.id, title: (x) => x.item.chapter + " · " + x.item.title, text: (x) => x.item.text || "" },
       // 服务端切片命中带 sec 结构路径时直达切片（ADR 0010 深链）
-      material: { name: "素材", cls: "green", href: (x) => "#/material/" + x.item.id + (x.sec ? "?sec=" + encodeURIComponent(x.sec) : ""), title: (x) => x.item.title, text: (x) => x.item.summary || "" },
+      material: { name: "素材", cls: "green", href: (x) => "#/material/" + x.item.id + (x.sec ? "?sec=" + encodeURIComponent(x.sec) : ""), title: (x) => x.item.title, text: (x) => x.item.summary || "", meta: materialMeta },
     };
     const kindRow = (hl, kind) => (x) => {
       const m = KIND_META[kind];
@@ -200,6 +216,7 @@ window.Pages = window.Pages || {};
       <a class="result-item" href="${m.href(x)}">
         <div class="row"><span class="tag ${m.cls}">${m.name}</span><h4>${hl(m.title(x))}</h4></div>
         <div class="small muted" style="margin:2px 0">${hl(m.text(x).slice(0, 90))}</div>
+        ${m.meta ? m.meta(x) : ""}
       </a>`;
     };
 
@@ -284,8 +301,18 @@ window.Pages = window.Pages || {};
       const sortValid = (SORTS[state.kindTab] || SORTS.all).some(([v]) => v === state.sort);
       let sortKey = sortValid ? state.sort : "smart";
       if (!state.ran && sortKey === "smart") sortKey = "newest";
+      // 素材综合排序 = 等级权重 × 相关度 × 新鲜度 × 被引（其余页签按服务端相关度）
+      const GRADE_W = { S: 1.3, A: 1.2, B: 1.0, C: 0.8, "": 0.9 };
+      const matSmart = (e) => {
+        const m = e.item;
+        const fresh = Store.isPolicyDated(m) ? 0.85 : 1;
+        return (e.score || 0.1) * (GRADE_W[m.grade || ""] || 0.9) * fresh *
+          (1 + Math.min(m.citedCount || 0, 10) * 0.05);
+      };
       const cmp = {
-        smart: (a, b) => (b[1].score || 0) - (a[1].score || 0),
+        smart: state.kindTab === "material"
+          ? (a, b) => matSmart(b[1]) - matSmart(a[1])
+          : (a, b) => (b[1].score || 0) - (a[1].score || 0),
         newest: (a, b) => String(dateOf(b[0], b[1].item)).localeCompare(String(dateOf(a[0], a[1].item))),
         likes: (a, b) => (b[1].item.likes || 0) - (a[1].item.likes || 0),
         cited: (a, b) => Store.materialUsage(b[1].item.id).count - Store.materialUsage(a[1].item.id).count,
@@ -517,9 +544,8 @@ window.Pages = window.Pages || {};
           if (ft) { state.fTime = ft.dataset.fTime; state.ddOpen = null; state.page = 1; redraw(); return; }
           const f = e.target.closest("[data-facet]");
           if (f) {
-            const set = { type: state.fTypes, aud: state.fAud, cred: state.fCred, level: state.fLevel, tags: state.fTags }[f.dataset.facet];
-            const val = f.dataset.facet === "level" ? Number(f.value) : f.value;
-            f.checked ? set.add(val) : set.delete(val);
+            const set = { type: state.fTypes, aud: state.fAud, grade: state.fGrade, mkind: state.fKind, tags: state.fTags }[f.dataset.facet];
+            f.checked ? set.add(f.value) : set.delete(f.value);
             state.page = 1;
             redraw();
           }
@@ -550,13 +576,13 @@ window.Pages = window.Pages || {};
             const k = cd.dataset.chipKey;
             if (k === "time") state.fTime = "";
             else {
-              const set = { type: state.fTypes, aud: state.fAud, cred: state.fCred, level: state.fLevel, tags: state.fTags }[k];
-              set.delete(k === "level" ? Number(cd.dataset.chipVal) : cd.dataset.chipVal);
+              const set = { type: state.fTypes, aud: state.fAud, grade: state.fGrade, mkind: state.fKind, tags: state.fTags }[k];
+              set.delete(cd.dataset.chipVal);
             }
             state.page = 1; redraw(); return;
           }
           if (e.target.id === "flt-clear") {
-            state.fTypes.clear(); state.fAud.clear(); state.fCred.clear(); state.fLevel.clear(); state.fTags.clear();
+            state.fTypes.clear(); state.fAud.clear(); state.fGrade.clear(); state.fKind.clear(); state.fTags.clear();
             state.fTime = ""; state.page = 1; redraw(); return;
           }
           const kt = e.target.closest("[data-ktab]");
@@ -1026,6 +1052,7 @@ window.Pages = window.Pages || {};
             <h2 style="font-size:19px">${U.esc(m.title)}</h2>
             <div class="row wrap" style="margin-bottom:10px">
               ${H.levelTag(m.level)}
+              ${H.gradeTag(m.grade)}
               <span class="tag ${credInfo[1]}" title="${U.esc(credInfo[2])}">${credInfo[0]}</span>
               <span class="tag">${U.esc(m.kind)}</span>
               ${m.status !== "正常" ? `<span class="tag red">${U.esc(m.status)}</span>` : ""}
@@ -1036,6 +1063,7 @@ window.Pages = window.Pages || {};
             <table class="meta-table">
               <tr><th>来源</th><td>${U.esc(m.source)}</td></tr>
               ${m.sourceUrl ? `<tr><th>原始链接</th><td><a href="${U.esc(m.sourceUrl)}" target="_blank" rel="noopener">${U.esc(m.sourceUrl)}</a></td></tr>` : ""}
+              <tr><th>信源等级</th><td>${m.grade ? U.esc(m.grade) + " 级" : "未定级"}${m.gradeReason ? `<span class="small muted"> — ${U.esc(m.gradeReason)}</span>` : ""}</td></tr>
               <tr><th>发布时间</th><td>${U.esc(m.publishedAt)}</td></tr>
               <tr><th>采集时间</th><td>${U.esc(m.collectedAt)}</td></tr>
               <tr><th>适用范围</th><td>${U.esc(m.scope)}</td></tr>
@@ -1045,6 +1073,7 @@ window.Pages = window.Pages || {};
             <p>${U.esc(m.summary)}</p>
             <div class="row wrap" style="margin-top:8px">
               <button class="btn sm" id="md-intake" title="把该素材登记为我的案例引用，并转到工作台继续写作">引入到案例</button>
+              <button class="btn sm ${Store.isFavMat(m) ? "" : "plain"}" id="md-fav">${Store.isFavMat(m) ? "已收藏" : "收藏"}</button>
               <button class="btn sm plain" id="md-copyid" title="复制后粘贴到工作台 Copilot，即可把该素材加入案例引用">复制引用 ID</button>
               ${m.sourceUrl ? `<button class="btn sm plain" id="md-refetch" title="按原始链接重新采集，更新内容副本">重新采集</button>` : ""}
             </div>
@@ -1070,6 +1099,12 @@ window.Pages = window.Pages || {};
                 <option value="1" ${m.level === 1 ? "selected" : ""}>校内</option>
                 <option value="2" ${m.level === 2 ? "selected" : ""}>受限</option>
               </select></label>
+            <label class="field"><span>信源等级</span>
+              <select class="text" id="md-grade">
+                ${["", "S", "A", "B", "C"].map((g) => `<option value="${g}" ${m.grade === g ? "selected" : ""}>${g || "未定级"}</option>`).join("")}
+              </select></label>
+            <label class="field"><span>定级依据</span>
+              <input class="text" id="md-gradereason" value="${U.esc(m.gradeReason || "")}" placeholder="定级依据（如：教育部官网首发）"></label>
             <label class="field"><span>可信度</span>
               <select class="text" id="md-cred">
                 <option value="high" ${m.credibility === "high" ? "selected" : ""}>权威来源</option>
@@ -1078,7 +1113,7 @@ window.Pages = window.Pages || {};
               </select></label>
             <label class="field"><span>状态</span>
               <select class="text" id="md-status">
-                ${["正常", "来源失效", "停用"].map((s) => `<option ${m.status === s ? "selected" : ""}>${s}</option>`).join("")}
+                ${["候选", "正常", "来源失效", "停用"].map((s) => `<option ${m.status === s ? "selected" : ""}>${s}</option>`).join("")}
               </select></label>
             <label class="field"><span>标签</span>
               <div class="row wrap" id="mtag-box">
@@ -1094,6 +1129,7 @@ window.Pages = window.Pages || {};
       </div>`,
       mount() {
         U.$("#md-intake").addEventListener("click", () => intakeToCaseModal(m.id, m.title));
+        U.$("#md-fav").addEventListener("click", async () => { if (await Store.toggleFavMat(m)) P.rerender(); });
         U.$("#md-copyid").addEventListener("click", () => {
           (navigator.clipboard ? navigator.clipboard.writeText(m.id) : Promise.reject())
             .then(() => U.toast(`已复制 ${m.id}，粘贴到工作台 Copilot 即可引用`))
@@ -1107,32 +1143,32 @@ window.Pages = window.Pages || {};
           rf.disabled = false;
           rf.textContent = "重新采集";
           if (!res.ok) { U.toast(res.error || "采集失败", 3000); return; }
-          Store.updateMaterial(m.id, {
+          const ok = await Store.updateMaterial(m.id, {
             title: res.title || m.title,
             excerpt: (res.text || "").slice(0, 2000),
             collectedAt: U.plainDate(U.now()),
           });
-          U.toast("内容副本已更新");
-          P.rerender();
+          if (ok) { U.toast("内容副本已更新"); P.rerender(); }
         });
         const btn = U.$("#md-save");
-        if (btn) btn.addEventListener("click", () => {
-          Store.updateMaterial(m.id, {
+        if (btn) btn.addEventListener("click", async () => {
+          const ok = await Store.updateMaterial(m.id, {
             level: Number(U.$("#md-level").value),
+            grade: U.$("#md-grade").value,
+            gradeReason: U.$("#md-gradereason").value.trim(),
             credibility: U.$("#md-cred").value,
             status: U.$("#md-status").value,
           });
-          U.toast("已保存");
-          P.rerender();
+          if (ok) { U.toast("已保存"); P.rerender(); }
         });
-        U.$$("[data-mtag-del]").forEach((b) => b.addEventListener("click", () => {
-          Store.setMaterialTags(m.id, (m.tags || []).filter((x) => x !== b.dataset.mtagDel));
+        U.$$("[data-mtag-del]").forEach((b) => b.addEventListener("click", async () => {
+          await Store.setMaterialTags(m.id, (m.tags || []).filter((x) => x !== b.dataset.mtagDel));
           P.rerender();
         }));
         const addInp = U.$("#mtag-add");
-        if (addInp) addInp.addEventListener("keydown", (e) => {
+        if (addInp) addInp.addEventListener("keydown", async (e) => {
           if (e.key === "Enter" && addInp.value.trim()) {
-            Store.setMaterialTags(m.id, (m.tags || []).concat([addInp.value.trim()]));
+            await Store.setMaterialTags(m.id, (m.tags || []).concat([addInp.value.trim()]));
             P.rerender();
           }
         });

@@ -70,7 +70,7 @@
     sel.addEventListener("change", async () => {
       Store.setUser(sel.value);
       await Store.login(sel.value);
-      await Store.syncServerMaterials();
+      await Store.syncMaterials();
       await Store.syncCases();
       draw();
       route();
@@ -86,7 +86,7 @@
     .then((d) => { Store.flags = d; })
     .catch(() => { Store.flags = {}; })
     .then(() => Store.login(Store.userId))
-    .then(() => Store.syncServerMaterials())
+    .then(() => Store.syncMaterials())
     .then(() => Store.syncCases())
     .finally(() => {
       initAccount();

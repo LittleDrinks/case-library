@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""案例业务数据 SQLite 持久层：案例/审核留痕/批注/版本/收藏/点赞。
+"""案例业务数据 SQLite 持久层：案例/审核留痕/批注/版本/收藏/点赞 + 素材登记。
 
 cases.data 存完整案例 JSON（blocks/citations/kit 等）；批注、版本、点赞人独立成表，
 读取时按前端既有对象形状组装（annotations/versions/likedBy 内嵌进案例对象）。
 提交前自检批注（selfcheck）由服务端在每次写入后同步，所有客户端看到同一份。
+
+materials 表是素材登记的唯一权威（WP2，ADR 0003/0011）：种子来自 files/materials_seed.json；
+citedCount/lastCitedAt 由案例写入时统一重算（_sync_material_usage）；
+「待淘汰」是派生态（30 天未被引且未豁免），不落库，读取时计算（ADR 0003）。
 """
 import json
 import os
@@ -63,7 +67,39 @@ CREATE TABLE IF NOT EXISTS likes(
   userId TEXT NOT NULL, caseId TEXT NOT NULL, at TEXT,
   PRIMARY KEY(userId, caseId)
 );
+CREATE TABLE IF NOT EXISTS materials(
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  kind TEXT DEFAULT '',
+  tags TEXT DEFAULT '[]',
+  source TEXT DEFAULT '',
+  sourceUrl TEXT DEFAULT '',
+  level INTEGER NOT NULL DEFAULT 0,
+  credibility TEXT DEFAULT 'normal',
+  grade TEXT DEFAULT '',
+  gradeReason TEXT DEFAULT '',
+  publishedAt TEXT DEFAULT '',
+  collectedAt TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT '候选',
+  summary TEXT DEFAULT '',
+  excerpt TEXT DEFAULT '',
+  fileId TEXT DEFAULT '',
+  citedCount INTEGER NOT NULL DEFAULT 0,
+  lastCitedAt TEXT DEFAULT '',
+  scope TEXT DEFAULT '',
+  exempt INTEGER NOT NULL DEFAULT 0,
+  createdAt TEXT, updatedAt TEXT
+);
+CREATE TABLE IF NOT EXISTS mat_favorites(
+  userId TEXT NOT NULL, materialId TEXT NOT NULL, at TEXT,
+  PRIMARY KEY(userId, materialId)
+);
 """
+
+# 素材状态：候选（入库闸，待 admin 确认）/正常/停用/来源失效；「待淘汰」为派生态不落库
+MAT_STATUSES = ("候选", "正常", "停用", "来源失效")
+MAT_GRADES = ("S", "A", "B", "C")
+DORMANT_DAYS = 30  # 满 30 天未被引用且未豁免 → 待淘汰（ADR 0003）
 
 # 状态机：draft/pending/reviewing/published/hidden（checking 预留给机审）
 SNAP_KEYS = ["title", "summary", "theoryPoints", "blocks", "citations", "kit",
@@ -102,23 +138,37 @@ class CaseDB:
             self._conn.commit()
 
     # ------------------------------------------------------------ 种子
-    def seed(self, cases):
-        """cases 表为空时灌入种子案例（files/cases_seed.json），返回灌入数量。"""
+    def seed(self, cases, materials=None):
+        """cases/materials 表为空时灌入种子（files/cases_seed.json、files/materials_seed.json）。"""
         with self._lock:
-            if self._conn.execute("SELECT COUNT(*) c FROM cases").fetchone()["c"]:
-                return 0
+            n = 0
+            if not self._conn.execute("SELECT COUNT(*) c FROM cases").fetchone()["c"]:
+                for c in cases:
+                    self._insert_case(c)
+                n = len(cases)
+            if materials and not self._conn.execute(
+                    "SELECT COUNT(*) c FROM materials").fetchone()["c"]:
+                for m in materials:
+                    self._insert_material(m)
+            self._conn.commit()
+            self._sync_material_usage()
+            self._conn.commit()
+            return n
+
+    def reseed(self, cases, materials=None):
+        """清空业务表并重新灌入种子（管理后台「重置演示数据」）。"""
+        with self._lock:
+            for t in ("cases", "reviews", "annotations", "versions", "favorites", "likes",
+                      "mat_favorites"):
+                self._conn.execute("DELETE FROM " + t)
+            if materials is not None:
+                self._conn.execute("DELETE FROM materials")
+                for m in materials:
+                    self._insert_material(m)
             for c in cases:
                 self._insert_case(c)
             self._conn.commit()
-            return len(cases)
-
-    def reseed(self, cases):
-        """清空业务表并重新灌入种子（管理后台「重置演示数据」）。"""
-        with self._lock:
-            for t in ("cases", "reviews", "annotations", "versions", "favorites", "likes"):
-                self._conn.execute("DELETE FROM " + t)
-            for c in cases:
-                self._insert_case(c)
+            self._sync_material_usage()
             self._conn.commit()
             return len(cases)
 
@@ -206,6 +256,7 @@ class CaseDB:
             c["updatedAt"] = _now()
             self._insert_case(c)
             self._sync_selfchecks(c["id"])
+            self._sync_material_usage()
             self._conn.commit()
             return self._case_obj(self._row(c["id"])), None
 
@@ -231,6 +282,7 @@ class CaseDB:
                 (data.get("title", ""), data["updatedAt"],
                  json.dumps(data, ensure_ascii=False), cid))
             self._sync_selfchecks(cid)
+            self._sync_material_usage()
             self._conn.commit()
             return self._case_obj(r), None
 
@@ -244,6 +296,7 @@ class CaseDB:
             for t in ("cases", "reviews", "annotations", "versions", "favorites", "likes"):
                 self._conn.execute("DELETE FROM %s WHERE %s=?" % (
                     t, "id" if t == "cases" else "caseId"), (cid,))
+            self._sync_material_usage()
             self._conn.commit()
             return None
 
@@ -337,6 +390,7 @@ class CaseDB:
             else:
                 return None, "未知操作: " + action, 400
             self._sync_selfchecks(cid)
+            self._sync_material_usage()
             self._conn.commit()
             return self._case_obj(self._row(cid)), None, 200
 
@@ -445,6 +499,7 @@ class CaseDB:
                                (data.get("title", ""), data["updatedAt"],
                                 json.dumps(data, ensure_ascii=False), cid))
             self._sync_selfchecks(cid)
+            self._sync_material_usage()
             self._conn.commit()
             return self._case_obj(self._row(cid)), None
 
@@ -551,3 +606,317 @@ class CaseDB:
                 out.append({"id": r["id"], "title": c.get("title", ""),
                             "status": r["status"], "ownerId": r["ownerId"], "text": text})
             return out
+
+    # ============================================================ 素材登记（WP2）
+    MAT_COLS = ["id", "title", "kind", "tags", "source", "sourceUrl", "level",
+                "credibility", "grade", "gradeReason", "publishedAt", "collectedAt",
+                "status", "summary", "excerpt", "fileId", "citedCount", "lastCitedAt",
+                "scope", "exempt", "createdAt", "updatedAt"]
+
+    def _insert_material(self, m):
+        vals = []
+        for k in self.MAT_COLS:
+            v = m.get(k)
+            if k == "tags":
+                v = json.dumps(m.get("tags") or [], ensure_ascii=False)
+            elif k in ("level", "citedCount", "exempt"):
+                v = int(v or 0)
+            elif v is None:
+                v = "" if k not in ("createdAt", "updatedAt") else None
+            vals.append(v)
+        self._conn.execute(
+            "INSERT INTO materials(%s) VALUES(%s)"
+            % (",".join(self.MAT_COLS), ",".join("?" * len(self.MAT_COLS))),
+            vals)
+
+    @staticmethod
+    def _dormant(m):
+        """待淘汰（派生态，ADR 0003）：从未被引且入库满 30 天，且未被管理员豁免。"""
+        if m["status"] != "正常" or m["citedCount"] > 0 or m["exempt"]:
+            return False
+        born = m["collectedAt"] or m["publishedAt"] or ""
+        try:
+            t = time.mktime(time.strptime(born[:10], "%Y-%m-%d"))
+        except Exception:
+            return False
+        return (time.time() - t) > DORMANT_DAYS * 86400
+
+    def _mat_obj(self, row):
+        m = {k: row[k] for k in self.MAT_COLS if k != "tags"}
+        m["tags"] = json.loads(row["tags"] or "[]")
+        m["dormant"] = self._dormant(m)
+        m["uploaded"] = m["fileId"].startswith("f-up-")
+        return m
+
+    def _mat_row(self, mid):
+        return self._conn.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
+
+    def _mat_visible(self, row, user):
+        if user and user.get("admin"):
+            return True
+        if row["status"] in ("候选", "停用"):
+            return False
+        return row["level"] <= (user["maxLevel"] if user else 0)
+
+    def list_materials(self, user, status=None, kind=None, grade=None, q=None):
+        """status 取 候选/正常/停用/来源失效/待淘汰（派生）；grade 支持 S/A/B/C 与「未定级」。"""
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM materials ORDER BY collectedAt DESC, rowid").fetchall()
+            out = []
+            for r in rows:
+                if not self._mat_visible(r, user):
+                    continue
+                m = self._mat_obj(r)
+                if status:
+                    if status == "待淘汰":
+                        if not m["dormant"]:
+                            continue
+                    elif m["status"] != status:
+                        continue
+                if kind and m["kind"] != kind:
+                    continue
+                if grade:
+                    want = "" if grade == "未定级" else grade
+                    if m["grade"] != want:
+                        continue
+                if q:
+                    hay = m["title"] + m["source"] + m["summary"] + " ".join(m["tags"])
+                    if q not in hay:
+                        continue
+                out.append(m)
+            return out
+
+    def get_material(self, mid, user):
+        with self._lock:
+            r = self._mat_row(mid)
+            if not r or not self._mat_visible(r, user):
+                return None
+            return self._mat_obj(r)
+
+    def find_material_by_url(self, url):
+        """URL 查重（入库闸，ADR 0003）。"""
+        if not url:
+            return None
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT * FROM materials WHERE sourceUrl=? AND sourceUrl!=''", (url,)).fetchone()
+            return self._mat_obj(r) if r else None
+
+    def create_material(self, user, m, status="候选"):
+        """采集入库：新素材默认落「候选」，admin 确认（改状态）后才进检索语料（入库闸）；
+        admin 上传真实文件直通 status='正常'（文件已在库内，管理员即入库闸）。"""
+        with self._lock:
+            m = dict(m)
+            m.setdefault("id", _uid("m"))
+            if self._mat_row(m["id"]):
+                return None, "素材 id 已存在"
+            m["status"] = status if status in MAT_STATUSES else "候选"
+            now = _now()
+            m.setdefault("collectedAt", now[:10])
+            m["createdAt"] = now
+            m["updatedAt"] = now
+            self._insert_material(m)
+            self._conn.commit()
+            return self._mat_obj(self._mat_row(m["id"])), None
+
+    # admin 可改的治理字段；非 admin 仅允许「重新采集」刷新内容副本
+    MAT_ADMIN_FIELDS = ("title", "kind", "tags", "source", "sourceUrl", "level",
+                        "credibility", "grade", "gradeReason", "publishedAt",
+                        "collectedAt", "status", "summary", "excerpt", "scope", "exempt")
+    MAT_REFETCH_FIELDS = ("title", "excerpt", "collectedAt")
+
+    def update_material(self, user, mid, patch):
+        with self._lock:
+            r = self._mat_row(mid)
+            if not r:
+                return None, "素材不存在"
+            admin = bool(user and user.get("admin"))
+            allowed = self.MAT_ADMIN_FIELDS if admin else self.MAT_REFETCH_FIELDS
+            sets, vals = [], []
+            for k, v in (patch or {}).items():
+                if k not in allowed:
+                    continue
+                if k == "status" and v not in MAT_STATUSES:
+                    return None, "状态取值无效"
+                if k == "grade" and v and v not in MAT_GRADES:
+                    return None, "信源等级取值无效"
+                if k == "level" and v not in (0, 1, 2):
+                    return None, "密级取值无效"
+                if k == "tags":
+                    v = json.dumps(v or [], ensure_ascii=False)
+                if k in ("level", "exempt"):
+                    v = int(v or 0)
+                sets.append("%s=?" % k)
+                vals.append(v)
+            if not sets:
+                return None, "没有可更新的字段" if not admin else "没有可更新的字段"
+            sets.append("updatedAt=?")
+            vals.append(_now())
+            vals.append(mid)
+            self._conn.execute("UPDATE materials SET %s WHERE id=?" % ",".join(sets), vals)
+            self._conn.commit()
+            return self._mat_obj(self._mat_row(mid)), None
+
+    def batch_update_materials(self, user, ids, patch):
+        """批量治理（admin）：调密级/停用恢复/豁免淘汰/确认候选入库等。"""
+        if not (user and user.get("admin")):
+            return None, "仅案例管理员可批量操作"
+        out = []
+        for mid in ids or []:
+            m, _e = self.update_material(user, mid, patch)
+            if m:
+                out.append(m)
+        return out, None
+
+    def delete_material_by_file(self, file_id):
+        """上传文件删除时联动删除素材行（文件库是上传素材的实体来源）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM materials WHERE fileId=?", (file_id,))
+            self._conn.execute("DELETE FROM mat_favorites WHERE materialId NOT IN (SELECT id FROM materials)")
+            self._conn.commit()
+            return cur.rowcount
+
+    def mark_materials_failed(self, ids):
+        """来源健康检查失败的素材标「来源失效」（不停用、不删除）。"""
+        with self._lock:
+            n = 0
+            for mid in ids:
+                cur = self._conn.execute(
+                    "UPDATE materials SET status='来源失效', updatedAt=? WHERE id=? AND status!='停用'",
+                    (_now(), mid))
+                n += cur.rowcount
+            self._conn.commit()
+            return n
+
+    # ------------------------------------------------------------ 素材使用度
+    def _sync_material_usage(self):
+        """citedCount/lastCitedAt 全量重算：「被用」= 进入案例引用清单（含发布快照，ADR 0003）。
+        在每次案例写入后调用，所有客户端看到同一份。"""
+        if not self._conn.execute("SELECT COUNT(*) c FROM materials").fetchone()["c"]:
+            return
+        usage = {}
+        for r in self._conn.execute("SELECT data, updatedAt FROM cases").fetchall():
+            c = json.loads(r["data"])
+            sets = [c.get("citations") or []]
+            snap = c.get("publishedSnapshot") or {}
+            if snap.get("citations"):
+                sets.append(snap["citations"])
+            for s in sets:
+                for ref in s:
+                    t = ref.get("target") if isinstance(ref, dict) else ref
+                    if not t:
+                        continue
+                    at = (isinstance(ref, dict) and ref.get("at")) or c.get("updatedAt") or r["updatedAt"] or ""
+                    cnt, last = usage.get(t, (0, ""))
+                    usage[t] = (cnt + 1, max(last, at))
+        # 未被任何案例引用的素材清零（案例删引用/删除后计数要回落）
+        self._conn.execute("UPDATE materials SET citedCount=0, lastCitedAt=''")
+        for mid, (cnt, last) in usage.items():
+            self._conn.execute(
+                "UPDATE materials SET citedCount=?, lastCitedAt=? WHERE id=?", (cnt, last, mid))
+
+    # ------------------------------------------------------------ 素材收藏
+    def set_mat_favorite(self, user, mid, on):
+        with self._lock:
+            if not self._mat_row(mid):
+                return "素材不存在"
+            if on:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO mat_favorites(userId,materialId,at) VALUES(?,?,?)",
+                    (user["id"], mid, _now()))
+            else:
+                self._conn.execute(
+                    "DELETE FROM mat_favorites WHERE userId=? AND materialId=?",
+                    (user["id"], mid))
+            self._conn.commit()
+            return None
+
+    def list_mat_favorites(self, user):
+        with self._lock:
+            return [r["materialId"] for r in self._conn.execute(
+                "SELECT materialId FROM mat_favorites WHERE userId=? ORDER BY at DESC",
+                (user["id"],))]
+
+    # ------------------------------------------------------------ 推荐与最近引用
+    def recommend_materials(self, user, case_id, limit=12):
+        """工作台无输入推荐（ADR 0004 方向）：共享标签/理论点 + 同类型案例引用 + 共引关系打分，
+        排除已引用与不可见素材。"""
+        with self._lock:
+            cr = self._row(case_id)
+            if not cr or not self._visible(cr, user):
+                return None, "案例不存在或无权查看"
+            c = json.loads(cr["data"])
+            cited = {ref.get("target") for ref in (c.get("citations") or [])
+                     if isinstance(ref, dict) and ref.get("target")}
+            cited_kn = {t for t in cited if t.startswith("kn-")}
+            words = set(c.get("theoryPoints") or []) | set(c.get("tags") or [])
+            score = {}
+            for r in self._conn.execute("SELECT data FROM cases WHERE id!=?", (case_id,)).fetchall():
+                x = json.loads(r["data"])
+                refs = [ref.get("target") for ref in (x.get("citations") or [])
+                        if isinstance(ref, dict) and ref.get("target")]
+                mats = [t for t in refs if t and not t.startswith("kn-")]
+                if not mats:
+                    continue
+                same_type = x.get("typeId") == c.get("typeId")
+                # 共引：与本案例引用过同一素材，或同一教材节（共享 kn 节）
+                co = bool(cited & set(mats)) or bool(cited_kn & set(refs))
+                for t in mats:
+                    if t in cited:
+                        continue
+                    s = 0
+                    if co:
+                        s += 2
+                    if same_type:
+                        s += 1  # 同类型案例引用过
+                    if s:
+                        score[t] = score.get(t, 0) + s
+            rows = self._conn.execute("SELECT * FROM materials").fetchall()
+            out = []
+            for r in rows:
+                if r["id"] in cited or not self._mat_visible(r, user) or r["status"] != "正常":
+                    continue
+                m = self._mat_obj(r)
+                s = score.get(r["id"], 0)
+                overlap = words & set(m["tags"])
+                s += 2 * len(overlap)
+                hay = m["title"] + m["summary"]
+                s += sum(1 for w in words if w and w in hay)  # 理论点命中标题/摘要
+                if s <= 0:
+                    continue
+                s += min(m["citedCount"], 10) * 0.2
+                out.append((s, m))
+            out.sort(key=lambda e: -e[0])
+            return [m for _s, m in out[:limit]], None
+
+    def recent_cited_materials(self, user, uid, limit=12):
+        """最近引用：从本人案例的引用清单派生（按引用时间倒序去重）。"""
+        if uid != user["id"] and not user.get("admin"):
+            return None, "仅本人或管理员可查看"
+        with self._lock:
+            seen, order = set(), []
+            rows = self._conn.execute(
+                "SELECT data, updatedAt FROM cases WHERE ownerId=? ORDER BY updatedAt DESC",
+                (uid,)).fetchall()
+            for r in rows:
+                c = json.loads(r["data"])
+                refs = list(c.get("citations") or [])
+                refs.reverse()  # 列表尾部是最新挂接
+                for ref in refs:
+                    t = ref.get("target") if isinstance(ref, dict) else ref
+                    if not t or t.startswith("kn-") or t in seen:
+                        continue
+                    mr = self._mat_row(t)
+                    if not mr or not self._mat_visible(mr, user):
+                        continue
+                    seen.add(t)
+                    order.append(self._mat_obj(mr))
+                    if len(order) >= limit:
+                        return order, None
+            return order, None
+
+    def materials_for_index(self):
+        """检索语料：仅 status=正常 的素材进索引（候选只可在管理台检索，入库闸）。"""
+        with self._lock:
+            return [self._mat_obj(r) for r in self._conn.execute(
+                "SELECT * FROM materials WHERE status='正常'").fetchall()]

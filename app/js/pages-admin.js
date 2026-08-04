@@ -105,7 +105,7 @@ window.Pages = window.Pages || {};
   function publishTab() {
     let list = Store.db.cases.filter((c) => c.status === "published" || c.status === "hidden");
     if (pubQ) list = list.filter((c) => c.title.includes(pubQ));
-    const risky = Store.db.materials.filter((m) => m.status !== "正常" && m.status !== "停用");
+    const risky = Store.db.materials.filter((m) => m.status === "来源失效");
     return `
     <div class="card">
       <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
@@ -146,17 +146,33 @@ window.Pages = window.Pages || {};
   }
 
   // ---------------------------------------------------------- 素材管理
-  let matPage = 1, matFilter = "", matDormantOnly = false, matQApplied = null;
+  let matPage = 1, matFilter = "", matStatus = "", matQApplied = null;
+  const matSel = new Set(); // 多选（跨页保持）
   const MAT_PAGE_SIZE = 15;
 
   function materialsTab() {
+    const stats = Store.materialStats();
     let all = Store.db.materials.filter((m) =>
       !matFilter || m.title.includes(matFilter) || m.source.includes(matFilter));
-    if (matDormantOnly) all = all.filter((m) => Store.isDormant(m));
+    if (matStatus === "待淘汰") all = all.filter((m) => m.dormant);
+    else if (matStatus) all = all.filter((m) => m.status === matStatus);
     const pages = Math.max(1, Math.ceil(all.length / MAT_PAGE_SIZE));
     matPage = Math.min(matPage, pages);
     const ms = all.slice((matPage - 1) * MAT_PAGE_SIZE, matPage * MAT_PAGE_SIZE);
+    for (const id of Array.from(matSel)) {
+      if (!Store.db.materials.find((m) => m.id === id)) matSel.delete(id);
+    }
     return `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-pad dyn-nums">
+        <div><b>${stats.total}</b><span>素材总量</span></div>
+        <div><b>${stats.candidate}</b><span>候选待确认</span></div>
+        <div><b>${stats.uncited}</b><span>零引用</span></div>
+        <div><b>${stats.dormant}</b><span>待淘汰</span></div>
+        <div><b>${stats.failed}</b><span>来源失效</span></div>
+        <div><b>${["S", "A", "B", "C", "未定级"].map((g) => (stats.grades[g] || 0) ? g + "级 " + stats.grades[g] : "").filter(Boolean).join(" · ") || "—"}</b><span>信源等级分布</span></div>
+      </div>
+    </div>
     <div class="card" style="margin-bottom:14px">
       <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>上传资料文件</span></div>
       <div class="card-pad">
@@ -190,38 +206,54 @@ window.Pages = window.Pages || {};
     </div>
     <div class="card">
       <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
-        <span>素材分级与可信度（共 ${all.length} 条）</span>
+        <span>素材治理（共 ${all.length} 条）</span>
         <span class="row" style="gap:8px">
-          <label class="row small" style="gap:4px"><input type="checkbox" id="mat-dormant" ${matDormantOnly ? "checked" : ""} style="width:auto"> 只看待淘汰</label>
-          <input class="text" id="mat-filter" placeholder="按标题或来源筛选" style="max-width:220px" value="${U.esc(matFilter)}">
+          <select id="mat-status" class="text" style="max-width:120px">
+            ${[["", "全部状态"], ["候选", "候选"], ["待淘汰", "待淘汰"], ["来源失效", "来源失效"], ["停用", "停用"], ["正常", "正常"]]
+              .map(([v, n]) => `<option value="${v}" ${matStatus === v ? "selected" : ""}>${n}</option>`).join("")}
+          </select>
+          <input class="text" id="mat-filter" placeholder="按标题或来源筛选" style="max-width:200px" value="${U.esc(matFilter)}">
+          <button class="btn sm plain" id="mat-health" title="对全部有原始链接的素材发 HEAD/GET 检查，失败的标来源失效">来源健康检查</button>
+        </span>
+      </div>
+      <div class="card-pad row wrap" style="border-bottom:1px solid var(--line);gap:8px">
+        <span class="small muted">已选 <b id="mat-sel-n">${matSel.size}</b> 条：</span>
+        <button class="btn sm" data-mat-batch="confirm" title="候选 → 正常，进入检索语料">确认入库</button>
+        <button class="btn sm plain" data-mat-batch="disable">停用</button>
+        <button class="btn sm plain" data-mat-batch="enable">恢复</button>
+        <button class="btn sm plain" data-mat-batch="exempt" title="清除待淘汰标（豁免 30 天未引淘汰规则）">豁免淘汰</button>
+        <span class="row" style="gap:4px">
+          <select id="mat-batch-level" class="text" style="max-width:90px">
+            <option value="0">公开</option><option value="1">校内</option><option value="2">受限</option>
+          </select>
+          <button class="btn sm plain" data-mat-batch="level">调密级</button>
         </span>
       </div>
       <table class="data">
-        <tr><th>素材</th><th>来源</th><th>密级</th><th>可信度</th><th>被引</th><th>状态</th><th></th></tr>
+        <tr><th><input type="checkbox" id="mat-sel-all" style="width:auto" ${ms.length && ms.every((m) => matSel.has(m.id)) ? "checked" : ""}></th>
+          <th>素材</th><th>来源</th><th>密级</th><th>信源等级</th><th>被引</th><th>状态</th><th></th></tr>
         ${ms.map((m) => {
           const usage = Store.materialUsage(m.id);
-          const dormant = Store.isDormant(m);
-          return `<tr class="${dormant ? "row-dormant" : ""}">
+          return `<tr class="${m.dormant ? "row-dormant" : ""}">
+          <td><input type="checkbox" data-m-sel="${m.id}" style="width:auto" ${matSel.has(m.id) ? "checked" : ""}></td>
           <td style="max-width:260px"><a href="#/material/${m.id}">${U.esc(m.title)}</a>
             ${m.fileId ? `<span class="tag green" title="已挂真实文件，可在线预览/下载">文件</span>` : ""}
             ${m.uploaded ? `<span class="tag blue" title="演示期间上传，记录存于服务端">上传</span>` : ""}
-            ${dormant ? `<span class="tag amber" title="入库超过 30 天且从未被引用">待淘汰</span>` : ""}</td>
+            ${m.dormant ? `<span class="tag amber" title="入库超过 30 天且从未被引用">待淘汰</span>` : ""}</td>
           <td>${U.esc(m.source)}</td>
           <td><select data-m-level="${m.id}">
             ${["公开", "校内", "受限"].map((n, i) => `<option value="${i}" ${m.level === i ? "selected" : ""}>${n}</option>`).join("")}
           </select></td>
-          <td><select data-m-cred="${m.id}">
-            <option value="high" ${m.credibility === "high" ? "selected" : ""}>权威来源</option>
-            <option value="normal" ${m.credibility === "normal" ? "selected" : ""}>一般来源</option>
-            <option value="low" ${m.credibility === "low" ? "selected" : ""}>待核实</option>
+          <td><select data-m-grade="${m.id}">
+            ${["", "S", "A", "B", "C"].map((g) => `<option value="${g}" ${m.grade === g ? "selected" : ""}>${g || "未定级"}</option>`).join("")}
           </select></td>
           <td title="${usage.lastAt ? "最近被引 " + U.esc(usage.lastAt) : "从未被引用"}">${usage.count}</td>
           <td><select data-m-status="${m.id}">
-            ${["正常", "来源失效", "停用"].map((s) => `<option ${m.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            ${["候选", "正常", "来源失效", "停用"].map((s) => `<option ${m.status === s ? "selected" : ""}>${s}</option>`).join("")}
           </select></td>
           <td class="row">
-            <button class="btn sm" data-m-save="${m.id}" title="保存本行的密级/可信度/状态修改">保存</button>
-            ${dormant ? `<button class="btn sm plain" data-m-retire="${m.id}" title="确认淘汰：状态置为停用">淘汰</button>` : ""}
+            <button class="btn sm" data-m-save="${m.id}" title="保存本行的密级/信源等级/状态修改">保存</button>
+            ${m.dormant ? `<button class="btn sm plain" data-m-retire="${m.id}" title="确认淘汰：状态置为停用">淘汰</button>` : ""}
             ${m.uploaded ? `<button class="btn sm danger" data-m-del="${U.esc(m.fileId)}" title="删除该上传素材：文件从服务器移除，所有人不可再访问">删除</button>` : ""}
           </td>
         </tr>`;
@@ -451,9 +483,8 @@ window.Pages = window.Pages || {};
           if (saved) U.toast("已向案例作者发出复核要求");
         }
       }));
-      U.$$("[data-normal]", el).forEach((b) => b.addEventListener("click", () => {
-        Store.updateMaterial(b.dataset.normal, { status: "正常" });
-        P.rerender();
+      U.$$("[data-normal]", el).forEach((b) => b.addEventListener("click", async () => {
+        if (await Store.updateMaterial(b.dataset.normal, { status: "正常" })) P.rerender();
       }));
     },
     materials(el) {
@@ -462,8 +493,8 @@ window.Pages = window.Pages || {};
         matPage = 1;
         P.rerender();
       }, 300));
-      U.$("#mat-dormant", el).addEventListener("change", (e) => {
-        matDormantOnly = e.target.checked;
+      U.$("#mat-status", el).addEventListener("change", (e) => {
+        matStatus = e.target.value;
         matPage = 1;
         P.rerender();
       });
@@ -471,6 +502,47 @@ window.Pages = window.Pages || {};
         matPage = Number(b.dataset.matPage);
         P.rerender();
       }));
+      // 多选与批量操作（跨页保持选择）
+      const syncSelN = () => { const n = U.$("#mat-sel-n", el); if (n) n.textContent = matSel.size; };
+      U.$$("[data-m-sel]", el).forEach((cb) => cb.addEventListener("change", () => {
+        cb.checked ? matSel.add(cb.dataset.mSel) : matSel.delete(cb.dataset.mSel);
+        syncSelN();
+      }));
+      const selAll = U.$("#mat-sel-all", el);
+      if (selAll) selAll.addEventListener("change", () => {
+        U.$$("[data-m-sel]", el).forEach((cb) => {
+          cb.checked = selAll.checked;
+          selAll.checked ? matSel.add(cb.dataset.mSel) : matSel.delete(cb.dataset.mSel);
+        });
+        syncSelN();
+      });
+      U.$$("[data-mat-batch]", el).forEach((b) => b.addEventListener("click", async () => {
+        const ids = Array.from(matSel);
+        if (!ids.length) { U.toast("请先勾选素材"); return; }
+        const act = b.dataset.matBatch;
+        const patch = { confirm: { status: "正常" }, disable: { status: "停用" },
+          enable: { status: "正常" }, exempt: { exempt: true } }[act]
+          || { level: Number(U.$("#mat-batch-level", el).value) };
+        const verb = { confirm: "确认入库", disable: "停用", enable: "恢复", exempt: "豁免淘汰", level: "调密级" }[act];
+        if (act === "disable" && !(await U.confirmModal(`确认停用选中的 ${ids.length} 条素材？检索与详情页不再展示。`, { danger: true }))) return;
+        if (await Store.batchUpdateMaterials(ids, patch)) {
+          matSel.clear();
+          U.toast(`已${verb} ${ids.length} 条素材`);
+          P.rerender();
+        }
+      }));
+      U.$("#mat-health", el).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "检查中…";
+        const d = await Store.materialHealthCheck();
+        e.target.disabled = false;
+        e.target.textContent = "来源健康检查";
+        if (!d) return;
+        U.toast(d.failed.length
+          ? `检查 ${d.checked} 条：${d.failed.length} 条来源失效（已标记）`
+          : `检查 ${d.checked} 条，全部可达`, 4000);
+        P.rerender();
+      });
       // 上传资料文件：服务端落盘、全员可见（仅 admin 页面可达，服务端再校验一次）
       const upBtn = U.$("#up-submit", el);
       if (upBtn) upBtn.addEventListener("click", async () => {
@@ -511,21 +583,22 @@ window.Pages = window.Pages || {};
           else U.toast((res && res.error) || "删除失败", 3000);
         }
       }));
-      U.$$("[data-m-save]", el).forEach((b) => b.addEventListener("click", () => {
+      U.$$("[data-m-save]", el).forEach((b) => b.addEventListener("click", async () => {
         const id = b.dataset.mSave;
-        Store.updateMaterial(id, {
+        const ok = await Store.updateMaterial(id, {
           level: Number(U.$(`[data-m-level="${id}"]`, el).value),
-          credibility: U.$(`[data-m-cred="${id}"]`, el).value,
+          grade: U.$(`[data-m-grade="${id}"]`, el).value,
           status: U.$(`[data-m-status="${id}"]`, el).value,
         });
-        U.toast("已保存");
+        if (ok) { U.toast("已保存"); P.rerender(); }
       }));
       U.$$("[data-m-retire]", el).forEach((b) => b.addEventListener("click", async () => {
         const m = Store.db.materials.find((x) => x.id === b.dataset.mRetire);
         if (m && await U.confirmModal(`确认淘汰「${m.title}」？状态将置为停用，检索与详情页不再展示。`)) {
-          Store.updateMaterial(m.id, { status: "停用" });
-          U.toast("已淘汰（停用）");
-          P.rerender();
+          if (await Store.updateMaterial(m.id, { status: "停用" })) {
+            U.toast("已淘汰（停用）");
+            P.rerender();
+          }
         }
       }));
       U.$$("[data-wl-del]", el).forEach((b) => b.addEventListener("click", () => {

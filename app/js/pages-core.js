@@ -17,6 +17,12 @@ window.Pages = window.Pages || {};
   H.levelTag = (lv) => ["<span class='tag green'>公开</span>", "<span class='tag blue'>校内</span>", "<span class='tag red'>受限</span>"][lv] || "";
   H.credTag = (c) => c === "high" ? "<span class='tag green'>权威来源</span>"
     : c === "low" ? "<span class='tag amber'>待核实</span>" : "<span class='tag'>一般来源</span>";
+  // 信源等级（ADR 0005 三档可信度之上的治理定级）：S/A/B/C 四色 + 未定级灰
+  H.gradeTag = (g) => {
+    const cls = { S: "amber", A: "green", B: "blue", C: "red" }[g];
+    return cls ? `<span class="tag ${cls}" title="信源等级 ${g} 级">${g} 级</span>`
+      : `<span class="tag" title="信源等级未定">未定级</span>`;
+  };
   H.typeTag = (id) => `<span class="tag primary">${U.esc(Store.typeName(id))}</span>`;
   H.audTag = (a) => `<span class="tag">${U.esc(Store.audienceName(a))}</span>`;
 

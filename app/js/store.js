@@ -9,7 +9,8 @@
   // ------------------------------------------------------------ 组装
   // 案例/批注/版本/审核留痕/收藏/点赞的权威在服务端 SQLite（db.py），
   // db.cases/db.reviews/db.favorites 只是登录后从服务端拉取的本地缓存；
-  // localStorage 只保留纯前端偏好与本地素材登记（模板改动、上传前登记、公告、备课材料等）
+  // 素材登记同样在服务端（materials 表，/api/materials），db.materials 是其本地缓存；
+  // localStorage 只保留纯前端偏好（模板改动、公告、备课材料等）
   function buildBase() {
     const R = window.RAWDATA, D = window.SEED;
     const db = {
@@ -18,9 +19,8 @@
       knowledgeSources: JSON.parse(JSON.stringify(D.knowledgeSources)),
       whitelist: D.whitelist.slice(),
       reviews: [],
-      materialOverrides: {},
-      customMaterials: [],
       favorites: {},
+      matFavorites: [],
       announcements: [],
       prepMaterials: [],
       knowledge: R.knowledge,
@@ -28,33 +28,12 @@
       book: R.book,
       materials: [],
       cases: [],
-      serverMaterials: [],
       fileIndex: {},
     };
 
-    // 素材：手工登记 + 中心组学习资料（教材是知识不是素材，见 db.bookFile，ADR 0011）
+    // 教材是知识不是素材（见 db.bookFile，ADR 0011）
     db.bookFile = R.bookFile || null;
-    db.materials = D.extraMaterials.map((m) => Object.assign({}, m));
-    R.learnDocs.forEach((d) => {
-      db.materials.push({
-        id: d.id, title: d.title, kind: "资料包", fileId: d.fileId,
-        source: "上海大学党委宣传部 · 中心组学习资料",
-        sourceUrl: "", publishedAt: d.year + " 年（总第" + d.issue + "期）",
-        collectedAt: "2026-07-18", level: 1, credibility: "high",
-        scope: "校内教师", status: "正常",
-        summary: "校党委中心组学习资料，" + d.year + " 年出版，全文约 " + Math.round(d.chars / 1000) + " 千字。",
-        excerpt: d.excerpt || "",
-        noSnapshot: !d.excerpt,
-      });
-    });
     return db;
-  }
-
-  function applyOverrides(db) {
-    Object.keys(db.materialOverrides).forEach((id) => {
-      const m = db.materials.find((x) => x.id === id);
-      if (m) Object.assign(m, db.materialOverrides[id]);
-    });
   }
 
   function load() {
@@ -63,15 +42,11 @@
       const raw = localStorage.getItem(LS_DB);
       if (raw) {
         const saved = JSON.parse(raw);
-        ["users", "caseTypes", "knowledgeSources", "whitelist", "materialOverrides", "customMaterials", "announcements", "prepMaterials"].forEach((k) => {
+        ["users", "caseTypes", "knowledgeSources", "whitelist", "announcements", "prepMaterials"].forEach((k) => {
           if (saved[k] != null) base[k] = saved[k];
         });
       }
     } catch (e) { console.warn("本地数据读取失败，使用初始数据", e); }
-    base.customMaterials.forEach((m) => {
-      if (!base.materials.find((x) => x.id === m.id)) base.materials.unshift(m);
-    });
-    applyOverrides(base);
     S.db = base;
     S.userId = localStorage.getItem(LS_USER) || "u-chen";
     if (!base.users.find((u) => u.id === S.userId)) S.userId = base.users[0].id;
@@ -87,8 +62,6 @@
           // 运行时知识源（runtime 标记）权威在服务端 /api/knowledge，不随本地数据持久化
           knowledgeSources: S.db.knowledgeSources.filter((s) => !s.runtime),
           whitelist: S.db.whitelist,
-          materialOverrides: S.db.materialOverrides,
-          customMaterials: S.db.customMaterials,
           announcements: S.db.announcements,
           prepMaterials: S.db.prepMaterials,
         }));
@@ -125,15 +98,13 @@
     return fetch(path, opts);
   };
 
-  // 服务端上传素材并入 db.materials（权威在服务端，不写入 localStorage）
-  function mergeServerMaterials() {
-    const overrides = S.db.materialOverrides;
-    S.db.materials = S.db.materials.filter((m) => !m.uploaded);
-    (S.db.serverMaterials || []).forEach((m) => {
+  // 服务端素材（/api/materials，权威在 SQLite）并入 db.materials；
+  // 上传素材的全文缓存在 uploadTexts，用于补内容副本摘录
+  function mergeMaterialExcerpts() {
+    S.db.materials.forEach((m) => {
+      if (m.excerpt) return;
       const up = uploadTexts[m.id];
-      // 已拉到全文的素材补一份摘录，供素材卡片与 Copilot 上下文引用
-      const ex = m.excerpt || (up ? up.text.slice(0, 2000) : "");
-      S.db.materials.unshift(Object.assign({}, m, ex ? { excerpt: ex } : {}, overrides[m.id] || {}));
+      if (up) m.excerpt = up.text.slice(0, 2000);
     });
   }
 
@@ -155,8 +126,8 @@
     const cache = upCacheLoad();
     const next = {};
     let fetched = false;
-    const jobs = (S.db.serverMaterials || []).map(async (m) => {
-      if (!m.fileId) return;
+    const jobs = (S.db.materials || []).map(async (m) => {
+      if (!m.uploaded || !m.fileId) return;
       const fi = (S.db.fileIndex || {})[m.fileId] || {};
       if ("textPath" in fi && !fi.textPath) return; // 索引明确标记无可抽取文本
       const key = m.fileId + "|" + (fi.textPath || "") + "|" + (fi.size || 0);
@@ -191,18 +162,25 @@
     } catch (e) { /* 渲染层未就绪时忽略 */ }
   }
 
-  S.syncServerMaterials = async () => {
+  // 素材与文件索引同步：/api/materials（SQLite 权威，按身份过滤）+ /api/files（文件元信息）
+  S.syncMaterials = async () => {
     try {
-      const resp = await S.apiFetch("/api/files");
-      const d = await resp.json();
-      if (d && d.ok) {
-        S.db.serverMaterials = d.materials || [];
-        S.db.fileIndex = d.files || {};
+      const [fresp, mresp] = await Promise.all([
+        S.apiFetch("/api/files"),
+        S.apiFetch("/api/materials"),
+      ]);
+      const fd = await fresp.json();
+      const md = await mresp.json();
+      if (fd && fd.ok) S.db.fileIndex = fd.files || {};
+      if (md && md.ok) {
+        S.db.materials = md.materials || [];
         const got = await fetchUploadTexts();
-        mergeServerMaterials();
+        mergeMaterialExcerpts();
         if (got) rerenderIfReading();
       }
+      return true;
     } catch (e) { /* 服务端不可用时保持本地数据 */ }
+    return false;
   };
   S.fileInfo = (fileId) => (S.db.fileIndex || {})[fileId] || null;
   S.uploadMaterialFile = async (payload) => {
@@ -213,7 +191,7 @@
         body: JSON.stringify(payload),
       });
       const d = await resp.json();
-      if (d && d.ok) await S.syncServerMaterials();
+      if (d && d.ok) await S.syncMaterials();
       return d;
     } catch (e) {
       return { ok: false, error: "上传请求失败（服务不可用）" };
@@ -223,14 +201,15 @@
     try {
       const resp = await S.apiFetch("/api/files/" + encodeURIComponent(fileId), { method: "DELETE" });
       const d = await resp.json();
-      if (d && d.ok) await S.syncServerMaterials();
+      if (d && d.ok) await S.syncMaterials();
       return d;
     } catch (e) {
       return { ok: false, error: "删除请求失败（服务不可用）" };
     }
   };
 
-  S.canSeeMaterial = (m) => m.level <= S.me().maxLevel && m.status !== "停用";
+  S.canSeeMaterial = (m) => S.me().admin ||
+    (m.level <= S.me().maxLevel && m.status !== "停用" && m.status !== "候选");
   S.canSeeCase = (c) => c.status === "published" || c.ownerId === S.userId || S.me().admin;
   S.visibleMaterials = () => S.db.materials.filter(S.canSeeMaterial);
   S.visibleCases = () => S.db.cases.filter(S.canSeeCase);
@@ -282,7 +261,10 @@
       } else S.db.reviews = [];
       const f = await apiJSON("/api/favorites");
       S.db.favorites = {};
-      if (f && f.ok) S.db.favorites[S.userId] = f.caseIds || [];
+      if (f && f.ok) {
+        S.db.favorites[S.userId] = f.caseIds || [];
+        S.db.matFavorites = f.materialIds || [];
+      }
       return true;
     } catch (e) {
       U.toast("案例数据加载失败：服务不可用，请稍后刷新重试", 4000);
@@ -443,28 +425,88 @@
     } catch (e) { apiFail(null, "点赞"); return false; }
   };
 
-  S.updateMaterial = (id, patch) => {
-    S.db.materialOverrides[id] = Object.assign(S.db.materialOverrides[id] || {}, patch);
-    applyOverrides(S.db);
-    persist();
-    // 挂了真实文件的素材：密级调整同步到服务端索引，保持下载强制与界面一致
-    const m = S.db.materials.find((x) => x.id === id);
-    if (m && m.fileId && patch.level != null) S.syncFileLevel(m.fileId, Number(patch.level));
-  };
-  S.syncFileLevel = async (fileId, level) => {
+  // ------------------------------------------------------------ 素材治理（API-backed，权威在服务端）
+  // 单条治理：admin 可改密级/状态/信源等级等；非 admin 仅「重新采集」刷新副本（服务端再校验）
+  S.updateMaterial = async (id, patch) => {
     try {
-      await S.apiFetch("/api/files/" + encodeURIComponent(fileId), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level: level }),
+      const d = await apiJSON("/api/materials/" + encodeURIComponent(id), {
+        method: "PATCH", body: JSON.stringify(patch),
       });
-    } catch (e) { /* 服务端不可用时仅本地生效 */ }
+      if (!d || !d.ok) { apiFail(d, "保存素材"); return false; }
+      const m = S.db.materials.find((x) => x.id === id);
+      if (m) Object.assign(m, d.material);
+      else S.db.materials.unshift(d.material);
+      return true;
+    } catch (e) { apiFail(null, "保存素材"); return false; }
   };
-  S.addMaterial = (m) => {
-    S.db.customMaterials.unshift(m);
-    S.db.materials.unshift(m);
-    persist();
-    return m;
+  S.setMaterialTags = (id, tags) => S.updateMaterial(id, { tags });
+  // 批量治理（admin）：调密级/停用恢复/豁免淘汰/确认候选入库
+  S.batchUpdateMaterials = async (ids, patch) => {
+    try {
+      const d = await apiJSON("/api/materials", {
+        method: "PATCH", body: JSON.stringify({ ids, patch }),
+      });
+      if (!d || !d.ok) { apiFail(d, "批量操作"); return false; }
+      (d.materials || []).forEach((fresh) => {
+        const m = S.db.materials.find((x) => x.id === fresh.id);
+        if (m) Object.assign(m, fresh);
+      });
+      return true;
+    } catch (e) { apiFail(null, "批量操作"); return false; }
+  };
+  // 来源健康检查（admin）：失败的素材服务端标「来源失效」，返回汇总
+  S.materialHealthCheck = async (ids) => {
+    try {
+      const d = await apiJSON("/api/admin/materials/healthcheck", {
+        method: "POST", body: JSON.stringify(ids && ids.length ? { ids } : {}),
+      });
+      if (!d || !d.ok) { apiFail(d, "健康检查"); return null; }
+      await S.syncMaterials();
+      return d;
+    } catch (e) { apiFail(null, "健康检查"); return null; }
+  };
+  // 采集入库（入库闸）：服务端做必填校验 + URL 查重 + 相似度查重；
+  // 新素材一律先落「候选」，admin 确认后才进检索语料。force=true 跳过相似度闸。
+  S.addMaterial = async (m, force) => {
+    try {
+      const d = await apiJSON("/api/materials", {
+        method: "POST", body: JSON.stringify(Object.assign({}, m, force ? { force: true } : {})),
+      });
+      if (d && d.ok) {
+        S.db.materials.unshift(d.material);
+        return { ok: true, material: d.material };
+      }
+      return { ok: false, error: (d && d.error) || "采集失败", code: d && d.code, similar: d && d.similar };
+    } catch (e) {
+      return { ok: false, error: "采集请求失败（服务不可用）" };
+    }
+  };
+  // 上下文推荐（工作台资料页签无输入默认）与最近引用（个人层）
+  S.recommendedMaterials = async (caseId) => {
+    try {
+      const d = await apiJSON("/api/materials?recommendFor=" + encodeURIComponent(caseId));
+      return d && d.ok ? d.materials || [] : [];
+    } catch (e) { return []; }
+  };
+  S.recentCitedMaterials = async () => {
+    try {
+      const d = await apiJSON("/api/materials?recentCitedBy=" + encodeURIComponent(S.userId));
+      return d && d.ok ? d.materials || [] : [];
+    } catch (e) { return []; }
+  };
+  // 管理台统计看板（admin 视角全量）
+  S.materialStats = () => {
+    const ms = S.db.materials;
+    const gradeN = {};
+    ms.forEach((m) => { const g = m.grade || "未定级"; gradeN[g] = (gradeN[g] || 0) + 1; });
+    return {
+      total: ms.length,
+      candidate: ms.filter((m) => m.status === "候选").length,
+      uncited: ms.filter((m) => !m.citedCount).length,
+      dormant: ms.filter((m) => m.dormant).length,
+      failed: ms.filter((m) => m.status === "来源失效").length,
+      grades: gradeN,
+    };
   };
   S.savePrefs = (prefs) => { S.me().prefs = prefs; persist(); };
   // 重置演示数据：清本地偏好 + 服务端业务表重灌种子（仅 admin，服务端再校验）
@@ -490,6 +532,20 @@
     } catch (e) { apiFail(null, "收藏"); return false; }
   };
   S.favCases = () => S.visibleCases().filter((c) => S.isFav(c));
+
+  // 素材收藏（个人层）
+  S.isFavMat = (m) => (S.db.matFavorites || []).includes(m.id);
+  S.toggleFavMat = async (m) => {
+    const on = !S.isFavMat(m);
+    try {
+      const d = await apiJSON("/api/materials/" + encodeURIComponent(m.id) + "/favorite", {
+        method: on ? "POST" : "DELETE",
+      });
+      if (!d || !d.ok) { apiFail(d, "收藏"); return false; }
+      S.db.matFavorites = d.materialIds;
+      return true;
+    } catch (e) { apiFail(null, "收藏"); return false; }
+  };
 
   // ------------------------------------------------------------ 平台公告（管理后台维护，首页展示）
   S.activeAnnouncements = () => S.db.announcements.filter((a) => a.online);
@@ -550,56 +606,38 @@
   };
 
   // ------------------------------------------------------------ 引用挂接（集中维护，使用度统计的基础）
+  // 服务端在案例写入后统一重算素材 citedCount/lastCitedAt，本地防抖刷新素材缓存
+  let matSyncTimer = null;
+  function syncMaterialsSoon() {
+    clearTimeout(matSyncTimer);
+    matSyncTimer = setTimeout(() => { S.syncMaterials(); }, 800);
+  }
   S.cite = (c, targetId) => {
     c.citations = c.citations || [];
     if (!c.citations.some((r) => r.target === targetId)) {
       c.citations.push({ target: targetId, at: U.now() });
       syncCaseSoon(c);
+      if (!targetId.startsWith("kn-")) syncMaterialsSoon();
     }
   };
   S.uncite = (c, targetId) => {
     c.citations = (c.citations || []).filter((r) => r.target !== targetId);
     syncCaseSoon(c);
+    if (!targetId.startsWith("kn-")) syncMaterialsSoon();
   };
   S.isCited = (c, targetId) => (c.citations || []).some((r) => r.target === targetId);
 
   // ------------------------------------------------------------ 素材使用度与生命周期
-  // 「被用」= 被案例正文引用；浏览不计入
+  // 「被用」= 被案例正文引用；浏览不计入。citedCount/lastCitedAt/dormant 均由服务端维护（ADR 0003）
   S.materialUsage = (mid) => {
-    let count = 0, lastAt = "";
-    S.db.cases.forEach((c) => {
-      const sets = [c.citations || []];
-      if (c.publishedSnapshot && c.publishedSnapshot.citations) sets.push(c.publishedSnapshot.citations);
-      sets.forEach((set) => set.forEach((r) => {
-        const t = typeof r === "string" ? r : r.target;
-        if (t !== mid) return;
-        count++;
-        const at = (typeof r === "object" && r.at) || c.updatedAt || "";
-        if (at > lastAt) lastAt = at;
-      }));
-    });
-    return { count, lastAt };
+    const m = S.db.materials.find((x) => x.id === mid);
+    return { count: (m && m.citedCount) || 0, lastAt: (m && m.lastCitedAt) || "" };
   };
-  // 待淘汰：从未被引用且入库超过 30 天（被引过的素材视为持续在用）
-  S.isDormant = (m) => {
-    if (S.materialUsage(m.id).count > 0) return false;
-    const born = Date.parse(m.collectedAt || m.publishedAt || "") || 0;
-    return !!born && (Date.now() - born) > 30 * 86400000;
-  };
+  S.isDormant = (m) => !!m.dormant;
   // 时效提示：文档类（政策文件）发布超过 3 年
   S.isPolicyDated = (m) => {
     const y = parseInt(String(m.publishedAt || "").slice(0, 4), 10);
     return m.kind === "文档" && !!y && y <= new Date().getFullYear() - 3;
-  };
-  // 采集查重双闸：URL 查重 + 相似度查重（top-3，服务端检索）
-  S.dupCheck = async (url, titleText) => {
-    const urlDup = url ? S.db.materials.find((m) => m.sourceUrl && m.sourceUrl === url) : null;
-    let similar = [];
-    if (titleText && titleText.trim()) {
-      const r = await S.search(titleText, { kind: "materials", limit: 3 });
-      similar = r.materials.map((e) => e.item).filter((m) => !urlDup || m.id !== urlDup.id).slice(0, 3);
-    }
-    return { urlDup, similar };
   };
 
   // ------------------------------------------------------------ 引用关系
@@ -632,11 +670,6 @@
     // 理论知识点保持不动，自有标签 = 全部标签减去理论知识点
     c.tags = Array.from(new Set(tags.filter((t) => !(c.theoryPoints || []).includes(t))));
     syncCaseSoon(c);
-  };
-  S.setMaterialTags = (id, tags) => {
-    S.db.materialOverrides[id] = Object.assign(S.db.materialOverrides[id] || {}, { tags });
-    applyOverrides(S.db);
-    persist();
   };
   S.hasTag = (kind, item, tagSet) => {
     if (!tagSet || !tagSet.size) return true;

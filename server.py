@@ -15,10 +15,15 @@
 8. /api/knowledge    —— 知识库在线导入（admin，markdown 按 # 章/### 节解析）与公开查询；
 9. /api/constants    —— 健康检查与能力开关；
 10. /api/search      —— 服务端语料检索（BM25 + 中文 bigram，惰性索引，按用户密级过滤素材，
-   案例按身份过滤；命中带 materialId/sec 结构路径供切片深链，ADR 0010）；
+   案例按身份过滤；命中带 materialId/sec 结构路径供切片深链，ADR 0010；
+   素材语料只索引 status=正常 的，候选不进生成语料）；
 11. /api/ai/agent    —— 统一 AI 入口（MoA 多智能体编排：主Agent/资料管理员/写作手/内容审校员，SSE）；
 12. /api/cases 等    —— 案例业务闭环（SQLite 持久层 db.py）：案例 CRUD、提交/撤回/审核流转留痕、
-   批注与回复线程、版本快照/回滚、收藏、点赞；首启自动灌入 files/cases_seed.json。
+   批注与回复线程、版本快照/回滚、收藏、点赞；首启自动灌入 files/cases_seed.json；
+13. /api/materials 等 —— 素材登记闭环（SQLite materials 表，ADR 0003/0011）：列表/详情/采集入库闸
+   （URL 查重 + 相似度查重 + 必填校验，新素材一律先落候选）、admin 治理 PATCH 与批量 PATCH、
+   素材收藏、recommendFor 上下文推荐、recentCitedBy 最近引用、来源健康检查；
+   首启自动灌入 files/materials_seed.json，被引计数由案例写入时统一重算。
 
 仅依赖标准库 + python-docx。运行：python3 server.py [port]
 """
@@ -87,6 +92,7 @@ INDEX_FILE = os.path.join(FILES_DIR, "index.json")
 USERS_FILE = os.path.join(FILES_DIR, "users.json")
 KNOWLEDGE_FILE = os.path.join(FILES_DIR, "knowledge.json")
 CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
+MATERIALS_SEED_FILE = os.path.join(FILES_DIR, "materials_seed.json")
 SQLITE_DB_PATH = os.path.join(ROOT, ENV.get("SQLITE_DB_PATH", "./data/cases.db"))
 CASEDB = None  # main() 启动时初始化（SQLite 业务库）
 TOKEN_TTL_SECONDS = 12 * 3600
@@ -164,17 +170,13 @@ def save_index(entries):
     os.replace(tmp, INDEX_FILE)
 
 
-def entry_to_material(e):
-    """上传文件条目 → 前端素材记录（种子素材的记录在 app/data.js，不走这里）。"""
+def api_files_list(user):
+    ml = req_max_level(user)
+    entries = [e for e in load_index() if e.get("level", 0) <= ml]
+    # 素材登记权威在 SQLite materials 表（/api/materials），这里只回文件索引
     return {
-        "id": e["materialId"], "fileId": e["id"], "uploaded": True,
-        "title": e.get("title") or e["name"], "kind": "文档", "tags": ["教师上传"],
-        "source": "教师上传 · " + (e.get("byName") or e.get("by") or ""),
-        "sourceUrl": "", "publishedAt": e.get("at", ""), "collectedAt": e.get("at", ""),
-        "level": e["level"], "credibility": "normal",
-        "scope": "全体教师", "status": "正常",
-        "summary": e.get("summary") or "", "excerpt": "",
-        "textPath": e.get("textPath"),
+        "ok": True,
+        "files": {e["id"]: {"name": e["name"], "size": e.get("size", 0), "textPath": e.get("textPath")} for e in entries},
     }
 
 
@@ -189,16 +191,6 @@ def api_login(payload):
     if not u:
         return {"ok": False, "error": "账号不存在"}
     return {"ok": True, "token": make_token(uid), "user": u}
-
-
-def api_files_list(user):
-    ml = req_max_level(user)
-    entries = [e for e in load_index() if e.get("level", 0) <= ml]
-    return {
-        "ok": True,
-        "files": {e["id"]: {"name": e["name"], "size": e.get("size", 0), "textPath": e.get("textPath")} for e in entries},
-        "materials": [entry_to_material(e) for e in entries if not e.get("seed")],
-    }
 
 
 def extract_upload_text(full_path, ext):
@@ -267,8 +259,16 @@ def api_file_upload(user, payload):
         entries = load_index()
         entries.append(entry)
         save_index(entries)
+    # 同步登记进 SQLite materials 表（admin 上传直通正常，文件已在库内，管理员即入库闸）
+    mat, _e = CASEDB.create_material(user, {
+        "id": entry["materialId"], "fileId": entry["id"],
+        "title": entry["title"], "kind": "文档", "tags": ["教师上传"],
+        "source": "教师上传 · " + (entry.get("byName") or entry.get("by") or ""),
+        "publishedAt": entry["at"], "level": level, "credibility": "normal",
+        "scope": "全体教师", "summary": entry.get("summary") or "",
+    }, status="正常")
     mark_search_dirty()
-    return {"ok": True, "material": entry_to_material(entry)}, 200
+    return {"ok": True, "material": mat}, 200
 
 
 def find_entry(fid):
@@ -352,8 +352,21 @@ def api_file_delete(user, fid):
             os.remove(os.path.join(FILES_DIR, e["textPath"]))
         except OSError:
             pass
+    CASEDB.delete_material_by_file(fid)  # 联动删除素材登记行
     mark_search_dirty()
     return {"ok": True}, 200
+
+
+def _set_file_level(fid, level):
+    """调整文件索引密级；素材治理（/api/materials PATCH）与文件 PATCH 共用。"""
+    with _INDEX_LOCK:
+        entries = load_index()
+        e = next((x for x in entries if x.get("id") == fid), None)
+        if not e:
+            return False
+        e["level"] = level
+        save_index(entries)
+    return True
 
 
 def api_file_patch(user, fid, payload):
@@ -368,13 +381,8 @@ def api_file_patch(user, fid, payload):
         level = -1
     if level not in (0, 1, 2):
         return {"ok": False, "error": "密级取值无效"}, 400
-    with _INDEX_LOCK:
-        entries = load_index()
-        e = next((x for x in entries if x.get("id") == fid), None)
-        if not e:
-            return {"ok": False, "error": "文件不存在"}, 404
-        e["level"] = level
-        save_index(entries)
+    if not _set_file_level(fid, level):
+        return {"ok": False, "error": "文件不存在"}, 404
     mark_search_dirty()
     return {"ok": True}, 200
 
@@ -484,7 +492,6 @@ def api_knowledge_import(user, payload):
 _SEARCH_LOCK = threading.Lock()
 _SEARCH_STATE = {"version": 0, "built_version": -1, "index": None}
 BOOK_MD = os.path.join(FILES_DIR, "seed", "book", "zrbjf-2025.md")
-LEARN_DIR = os.path.join(FILES_DIR, "seed", "learn")
 BM25_K1, BM25_B = 1.5, 0.75
 
 
@@ -601,25 +608,31 @@ def _build_search_index():
     except OSError:
         pass
 
-    # 2) 学习资料：每期一条（标题 + 正文前 800 字），素材类，校内密级（与前端素材库一致）
-    entries_by_path = {e.get("path"): e for e in load_index()}
-    if os.path.isdir(LEARN_DIR):
-        for name in sorted(os.listdir(LEARN_DIR)):
-            if not name.startswith("lr-") or not name.endswith(".md"):
+    # 2) 素材（SQLite 登记库，WP2）：仅 status=正常 的进语料（入库闸，候选不进生成语料）。
+    #    正文 = 标题+摘要+内容副本；上传素材有抽取文本（textPath）的按 ADR 0010 切片入索引，
+    #    命中带 materialId + sec 结构路径，前端可拼 #/material/<id>?sec=<path> 深链
+    if CASEDB is not None:
+        entries_by_fid = {e.get("id"): e for e in load_index()}
+        for m in CASEDB.materials_for_index():
+            add("material", m["id"], m["title"], "",
+                "\n".join([m["title"], m["summary"], m["excerpt"]]),
+                source=m["source"], level=m["level"], credibility=m["credibility"],
+                materialId=m["id"], grade=m["grade"], kind=m["kind"])
+            e = entries_by_fid.get(m["fileId"]) if m["fileId"] else None
+            tp = e.get("textPath") if e else None
+            if not tp:
                 continue
             try:
-                with open(os.path.join(LEARN_DIR, name), encoding="utf-8") as f:
-                    raw = f.read()
+                with open(os.path.join(FILES_DIR, tp), encoding="utf-8") as f:
+                    text = f.read(30000)
             except OSError:
                 continue
-            entry = entries_by_path.get("seed/learn/" + name) or {}
-            title = os.path.splitext(entry.get("name") or name)[0]
-            body = re.sub(r"^#+.*$", "", raw, flags=re.M)
-            body = re.sub(r"\s+", " ", body).strip()[:800]
-            add("material", entry.get("materialId") or os.path.splitext(name)[0],
-                title, "", title + "。" + body,
-                source="上海大学党委宣传部 · 中心组学习资料",
-                level=entry.get("level", 1), credibility="high")
+            for ck in chunk_md(text):
+                add("material", m["id"], m["title"], "",
+                    ((ck["h"] + "\n") if ck["h"] else "") + ck["text"],
+                    source=m["source"], level=m["level"], credibility=m["credibility"],
+                    materialId=m["id"], grade=m["grade"], kind=m["kind"],
+                    sec=ck["path"], secTitle=ck["h"])
 
     # 3) 运行时导入的知识条目（无 knowledge.json 时跳过）
     for src in load_knowledge():
@@ -628,26 +641,7 @@ def _build_search_index():
                 "%s / %s" % (src.get("name") or "知识库", s.get("chapter") or ""),
                 s.get("text"))
 
-    # 4) 教师上传抽取文本（files/up/*.txt）：按 ADR 0010 切片入索引，
-    #    命中带 materialId + sec 结构路径，前端可拼 #/material/<id>?sec=<path> 深链
-    for e in load_index():
-        tp = e.get("textPath")
-        if not tp:
-            continue
-        try:
-            with open(os.path.join(FILES_DIR, tp), encoding="utf-8") as f:
-                text = f.read(30000)
-        except OSError:
-            continue
-        mid = e.get("materialId") or e.get("id")
-        for ck in chunk_md(text):
-            add("material", mid, e.get("title") or e.get("name"), "",
-                ((ck["h"] + "\n") if ck["h"] else "") + ck["text"],
-                source="教师上传 · " + (e.get("byName") or e.get("by") or ""),
-                level=e.get("level", 0), credibility=e.get("credibility") or "normal",
-                materialId=mid, sec=ck["path"], secTitle=ck["h"])
-
-    # 5) 案例（SQLite 业务库）：查询时按用户身份过滤（published 全员，草稿/待审仅作者与管理员）
+    # 4) 案例（SQLite 业务库）：查询时按用户身份过滤（published 全员，草稿/待审仅作者与管理员）
     if CASEDB is not None:
         for c in CASEDB.cases_for_index():
             add("case", c["id"], c["title"], "", c["text"],
@@ -746,6 +740,7 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
                 "id": d["id"], "title": d["title"], "source": d["source"],
                 "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
                 "level": d["level"], "credibility": d["credibility"],
+                "grade": d.get("grade", ""), "kind": d.get("kind", ""),
                 "materialId": d.get("materialId") or d["id"],
             }
             if d.get("sec"):
@@ -787,6 +782,15 @@ def api_search(user, payload):
 def load_seed_cases():
     try:
         with open(CASES_SEED_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def load_seed_materials():
+    try:
+        with open(MATERIALS_SEED_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except Exception:
@@ -913,7 +917,8 @@ def api_favorites(user):
     err = _need_login(user)
     if err:
         return err
-    return {"ok": True, "caseIds": CASEDB.list_favorites(user)}, 200
+    return {"ok": True, "caseIds": CASEDB.list_favorites(user),
+            "materialIds": CASEDB.list_mat_favorites(user)}, 200
 
 
 def api_favorite_set(user, cid, on):
@@ -952,9 +957,168 @@ def api_reseed(user):
         return err
     if not user.get("admin"):
         return {"ok": False, "error": "仅案例管理员可重置数据"}, 403
-    n = CASEDB.reseed(load_seed_cases())
+    n = CASEDB.reseed(load_seed_cases(), load_seed_materials())
     mark_search_dirty()
     return {"ok": True, "cases": n}, 200
+
+
+# ---------------------------------------------------------------- 素材登记（SQLite，WP2）
+def api_materials_list(user, query):
+    """列表 + 过滤（status/kind/grade/q）；recommendFor=案例上下文推荐、
+    recentCitedBy=本人最近引用（个人层）。"""
+    def g(k):
+        return (query.get(k) or [""])[0].strip()
+    rec_for = g("recommendFor")
+    if rec_for:
+        err = _need_login(user)
+        if err:
+            return err
+        ms, e = CASEDB.recommend_materials(user, rec_for)
+        if e:
+            return {"ok": False, "error": e}, 404
+        return {"ok": True, "materials": ms}, 200
+    rec_by = g("recentCitedBy")
+    if rec_by:
+        err = _need_login(user)
+        if err:
+            return err
+        ms, e = CASEDB.recent_cited_materials(user, rec_by)
+        if e:
+            return {"ok": False, "error": e}, 403
+        return {"ok": True, "materials": ms}, 200
+    return {"ok": True, "materials": CASEDB.list_materials(
+        user, status=g("status") or None, kind=g("kind") or None,
+        grade=g("grade") or None, q=g("q") or None)}, 200
+
+
+def api_material_get(user, mid):
+    m = CASEDB.get_material(mid, user)
+    if not m:
+        return {"ok": False, "error": "素材不存在或无权查看"}, 404
+    return {"ok": True, "material": m}, 200
+
+
+def api_material_create(user, payload):
+    """采集入库闸（ADR 0003）：必填校验 → URL 查重 → 相似度查重（top-3，force=true 跳过）。
+    所有新素材一律先落「候选」，admin 在素材管理确认（改 status=正常）后才进检索语料。"""
+    err = _need_login(user)
+    if err:
+        return err
+    p = payload or {}
+    if not (p.get("title") or "").strip():
+        return {"ok": False, "error": "缺少素材标题 title"}, 400
+    for k, name in (("grade", "信源等级"), ("gradeReason", "定级依据"),
+                    ("sourceUrl", "原始链接"), ("publishedAt", "发布时间")):
+        if not str(p.get(k) or "").strip():
+            return {"ok": False, "error": "入库必填项缺失：%s（%s）" % (name, k)}, 400
+    if p["grade"] not in ("S", "A", "B", "C"):
+        return {"ok": False, "error": "信源等级取值无效（S/A/B/C）"}, 400
+    dup = CASEDB.find_material_by_url(p["sourceUrl"].strip())
+    if dup:
+        return {"ok": False, "code": "dup",
+                "error": "该链接此前已采集过：「%s」，可直接引用，无需重复入库" % dup["title"],
+                "dup": {"id": dup["id"], "title": dup["title"]}}, 409
+    if not p.get("force"):
+        res = search_corpus(p["title"] + " " + str(p.get("summary") or "")[:200],
+                            max_level=2, kinds=["material"], limit=3, user=user)
+        # BM25 实测：真重复 ≥70，跨主题噪声 ≤12；阈值之下视为不相似，避免逢采必拦
+        similar = [{"id": h["materialId"], "title": h["title"], "source": h["source"]}
+                   for h in res["materials"] if h["score"] >= 25][:3]
+        if similar:
+            return {"ok": False, "code": "similar",
+                    "error": "库中已有相似素材，建议优先复用；确认仍要采集请带 force=true",
+                    "similar": similar}, 409
+    m, e = CASEDB.create_material(user, p)
+    if e:
+        return {"ok": False, "error": e}, 409
+    return {"ok": True, "material": m}, 200
+
+
+def api_material_patch(user, mid, payload):
+    """治理字段（密级/状态/信源等级等）限 admin；非 admin 仅可「重新采集」刷新内容副本。"""
+    err = _need_login(user)
+    if err:
+        return err
+    m, e = CASEDB.update_material(user, mid, payload or {})
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e else 400
+    if m["fileId"] and "level" in (payload or {}):
+        _set_file_level(m["fileId"], m["level"])  # 保持下载强制与界面一致
+    mark_search_dirty()
+    return {"ok": True, "material": m}, 200
+
+
+def api_materials_batch(user, payload):
+    """批量治理（admin）：body {ids:[...], patch:{level/status/grade/exempt/...}}。"""
+    err = _need_login(user)
+    if err:
+        return err
+    p = payload or {}
+    ids = p.get("ids")
+    if not (isinstance(ids, list) and ids):
+        return {"ok": False, "error": "缺少批量对象 ids"}, 400
+    out, e = CASEDB.batch_update_materials(user, ids, p.get("patch") or {})
+    if e:
+        return {"ok": False, "error": e}, 403
+    if "level" in (p.get("patch") or {}):
+        for m in out:
+            if m["fileId"]:
+                _set_file_level(m["fileId"], m["level"])
+    mark_search_dirty()
+    return {"ok": True, "updated": len(out), "materials": out}, 200
+
+
+def api_mat_favorite(user, mid, on):
+    err = _need_login(user)
+    if err:
+        return err
+    e = CASEDB.set_mat_favorite(user, mid, on)
+    if e:
+        return {"ok": False, "error": e}, 404
+    return {"ok": True, "materialIds": CASEDB.list_mat_favorites(user)}, 200
+
+
+def api_materials_healthcheck(user, payload):
+    """来源健康检查（admin）：对有 sourceUrl 的素材发 HEAD（失败回退 GET，超时 5s，并发 8），
+    失败的标 status=来源失效；body 可选 ids 限定范围。返回结果汇总。"""
+    err = _need_login(user)
+    if err:
+        return err
+    if not user.get("admin"):
+        return {"ok": False, "error": "仅案例管理员可执行来源健康检查"}, 403
+    ids = (payload or {}).get("ids")
+    targets = [m for m in CASEDB.list_materials(user)
+               if m["sourceUrl"] and (not ids or m["id"] in ids)]
+
+    def check(m):
+        url = m["sourceUrl"]
+        if not re.match(r"^https?://", url):
+            return m, "非 http/https 链接"
+        last = "未知错误"
+        for method in ("HEAD", "GET"):  # 部分站点不支持 HEAD，用 GET 复核
+            try:
+                req = urllib.request.Request(url, method=method, headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=5,
+                                            context=ssl.create_default_context()) as resp:
+                    if resp.status < 400:
+                        return m, None
+                    last = "HTTP %s" % resp.status
+            except urllib.error.HTTPError as e:
+                last = "HTTP %s" % e.code
+            except Exception as e:
+                last = str(e)[:120]
+        return m, last
+
+    failed = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for m, err2 in ex.map(check, targets):
+            if err2:
+                failed.append({"id": m["id"], "title": m["title"],
+                               "url": m["sourceUrl"], "error": err2})
+    marked = CASEDB.mark_materials_failed([f["id"] for f in failed])
+    if marked:
+        mark_search_dirty()
+    return {"ok": True, "checked": len(targets), "failed": failed, "marked": marked}, 200
 
 
 # ---------------------------------------------------------------- AI 代理
@@ -1685,6 +1849,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/favorites":
             res, status = api_favorites(auth_user(self))
             return self._send_json(res, status)
+        if path == "/api/materials":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_materials_list(auth_user(self), qs)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/materials/([^/]+?)/?$", path)
+        if m:
+            res, status = api_material_get(auth_user(self), urllib.parse.unquote(m.group(1)))
+            return self._send_json(res, status)
         m = re.match(r"^/api/cases/([^/]+?)(?:/(annotations|versions))?/?$", path)
         if m:
             cid = urllib.parse.unquote(m.group(1))
@@ -1737,6 +1909,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/admin/reseed":
             res, status = api_reseed(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/admin/materials/healthcheck":
+            res, status = api_materials_healthcheck(auth_user(self), payload)
+            return self._send_json(res, status)
+        if path == "/api/materials":
+            res, status = api_material_create(auth_user(self), payload)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/materials/([^/]+?)/favorite/?$", path)
+        if m:
+            res, status = api_mat_favorite(auth_user(self), urllib.parse.unquote(m.group(1)), True)
             return self._send_json(res, status)
         m = re.match(
             r"^/api/cases/([^/]+?)/(submit|withdraw|review|annotations|versions|favorite|like)/?$",
@@ -1794,6 +1976,10 @@ class Handler(BaseHTTPRequestHandler):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_delete(auth_user(self), fid)
             return self._send_json(res, status)
+        m = re.match(r"^/api/materials/([^/]+?)/favorite/?$", path)
+        if m:
+            res, status = api_mat_favorite(auth_user(self), urllib.parse.unquote(m.group(1)), False)
+            return self._send_json(res, status)
         m = re.match(r"^/api/cases/([^/]+?)(?:/(favorite|like))?/?$", path)
         if m:
             cid, sub = urllib.parse.unquote(m.group(1)), m.group(2)
@@ -1811,6 +1997,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/files/"):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_patch(auth_user(self), fid, self._read_json())
+            return self._send_json(res, status)
+        if path == "/api/materials":
+            res, status = api_materials_batch(auth_user(self), self._read_json())
+            return self._send_json(res, status)
+        m = re.match(r"^/api/materials/([^/]+?)/?$", path)
+        if m:
+            res, status = api_material_patch(
+                auth_user(self), urllib.parse.unquote(m.group(1)), self._read_json())
             return self._send_json(res, status)
         m = re.match(r"^/api/annotations/([^/]+?)/?$", path)
         if m:
@@ -1860,7 +2054,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global CASEDB
     CASEDB = CaseDB(SQLITE_DB_PATH)
-    seeded = CASEDB.seed(load_seed_cases())
+    seeded = CASEDB.seed(load_seed_cases(), load_seed_materials())
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(ENV.get("PROTOTYPE_PORT", "8080") or 8080)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print("服务已启动: http://127.0.0.1:%d  (AI: %s, model=%s, 文件库: %s, 种子文件 %d 个, 业务库 %s%s)"

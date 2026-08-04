@@ -882,8 +882,11 @@ window.Pages = window.Pages || {};
         return;
       }
       if (act.type === "fetch-force" && pendingFetch) {
-        addFetchedMaterial(pendingFetch.url, pendingFetch.res);
+        const pf = pendingFetch;
         pendingFetch = null;
+        const r = await addFetchedMaterial(pf.url, pf.res, true);
+        if (r.ok) U.toast("已采集入库（候选池，待管理员确认后进入检索语料）");
+        else U.toast(r.error || "采集失败", 3000);
         tab = "res";
         drawAll();
       }
@@ -967,43 +970,49 @@ window.Pages = window.Pages || {};
         "section-draft", false, { baseText: body, caseContext: ctx, secFrom: bi, secTitle: b.text });
     }
 
-    function addFetchedMaterial(url, res) {
-      const credibility = Copilot.credibilityFor(res.finalUrl || url);
-      const m = {
-        id: U.uid("m"), title: res.title || url, kind: "链接",
-        source: (() => { try { return new URL(res.finalUrl || url).hostname; } catch (e) { return url; } })(),
-        sourceUrl: url, publishedAt: U.plainDate(U.now()), collectedAt: U.plainDate(U.now()),
-        level: 0, credibility, scope: "全体教师" + (credibility === "low" ? "（非白名单来源，引用前需核验）" : ""),
-        status: "正常", summary: "通过 Copilot 采集的网页内容。",
-        excerpt: (res.text || "").slice(0, 2000),
+    // 采集载荷：按白名单定可信度并映射信源等级（high→A / low→C），gradeReason 记录定级依据
+    function collectPayload(url, res) {
+      const link = (res && (res.finalUrl || res.url)) || url;
+      const credibility = Copilot.credibilityFor(link);
+      return {
+        title: (res && res.title) || url, kind: "链接",
+        source: (() => { try { return new URL(link).hostname; } catch (e) { return url; } })(),
+        sourceUrl: url, publishedAt: U.plainDate(U.now()),
+        level: 0, credibility,
+        grade: credibility === "high" ? "A" : "C",
+        gradeReason: credibility === "high" ? "来源在权威白名单内，自动定 A 级" : "非白名单来源，自动定 C 级，引用前需核验",
+        scope: "全体教师" + (credibility === "low" ? "（非白名单来源，引用前需核验）" : ""),
+        summary: "通过 Copilot 采集的网页内容。",
+        excerpt: ((res && res.text) || "").slice(0, 2000),
       };
-      Store.addMaterial(m);
-      return m;
     }
 
-    // 采集查重双闸（ADR 0003）：URL 查重直接拦；相似素材提示可复用
-    async function handleFetch(url) {
+    async function addFetchedMaterial(url, res, force) {
+      return Store.addMaterial(collectPayload(url, res), force);
+    }
+
+    // 采集查重双闸（ADR 0003，服务端执行）：URL 查重直接拦；相似素材提示可复用，force 仍要采集
+    async function handleFetch(url, force) {
       const res = await Copilot.fetchUrl(url);
       if (!res.ok) return { ok: false, error: res.error || "采集失败" };
-      const dup = await Store.dupCheck(url, res.title || "");
-      if (dup.urlDup) {
+      const r = await addFetchedMaterial(url, res, force);
+      if (r.ok) {
         return {
           ok: true, model: "url-fetch", elapsed_ms: 0,
-          content: `该链接此前已采集过：「${dup.urlDup.title}」。已在素材库中，可直接在“资料”页签引用，无需重复采集。`,
+          content: `已采集网页并保存内容副本：\n标题：${r.material.title}\n来源：${r.material.source}\n信源等级：${r.material.grade} 级\n副本：${(res.text || "").length} 字\n\n已进入「候选」池，管理员确认入库后进入检索语料。`,
         };
       }
-      if (dup.similar.length) {
+      if (r.code === "dup") {
+        return { ok: true, model: "url-fetch", elapsed_ms: 0, content: r.error };
+      }
+      if (r.code === "similar") {
         pendingFetch = { url, res };
         return {
           ok: true, model: "url-fetch", elapsed_ms: 0, actions: [{ label: "仍要采集", type: "fetch-force" }],
-          content: `库中已有相似素材，建议优先复用：\n${dup.similar.map((m, i) => `${i + 1}. ${m.title}（${m.source}）`).join("\n")}\n\n如确属不同内容，可点击「仍要采集」。`,
+          content: `库中已有相似素材，建议优先复用：\n${r.similar.map((m, i) => `${i + 1}. ${m.title}（${m.source}）`).join("\n")}\n\n如确属不同内容，可点击「仍要采集」。`,
         };
       }
-      const m = addFetchedMaterial(url, res);
-      return {
-        ok: true, model: "url-fetch", elapsed_ms: 0,
-        content: `已采集网页并保存内容副本：\n标题：${m.title}\n来源：${m.source}\n可信度：${m.credibility === "high" ? "权威来源（白名单）" : "待核实（非白名单来源）"}\n副本：${(res.text || "").length} 字\n\n已在“资料”页签中，可点击“引用”挂接到当前小节。`,
-      };
+      return { ok: false, error: r.error || "采集失败" };
     }
 
     // ---------------- 批注 ----------------
@@ -1206,18 +1215,33 @@ window.Pages = window.Pages || {};
           <button class="btn sm" id="ws-go">检索</button>
         </div>
         <div id="ws-results" style="margin-bottom:12px"></div>` : ""}` : ""}
-        <div class="section-title small"><span>相关知识</span></div>
-        <div id="rel-kn"><div class="small muted">加载中…</div></div>
-        <div class="section-title small" style="margin-top:10px"><span>相关素材</span></div>
+        <div class="section-title small"><span>推荐素材（按本案例上下文）</span></div>
         <div id="rel-m"><div class="small muted">加载中…</div></div>
+        <div class="section-title small" style="margin-top:10px"><span>相关知识</span></div>
+        <div id="rel-kn"><div class="small muted">加载中…</div></div>
+        <div class="section-title small" style="margin-top:10px"><span>最近引用</span></div>
+        <div id="rel-recent"><div class="small muted">加载中…</div></div>
       </div>`;
     };
 
-    // 相关知识/素材：服务端检索异步填充（渲染路径保持同步）
+    // 相关/推荐资料：知识走服务端检索，素材走服务端 recommendFor 上下文推荐（共享 kn 节/标签/共引），
+    // 最近引用从本人案例引用清单派生（个人层）；均异步填充（渲染路径保持同步）
     async function fillRelated() {
-      const knBox = U.$("#rel-kn"), mBox = U.$("#rel-m");
-      if (!knBox || !mBox) return;
-      const rel = await Store.relatedForCase(c);
+      const knBox = U.$("#rel-kn"), mBox = U.$("#rel-m"), rcBox = U.$("#rel-recent");
+      if (!knBox || !mBox || !rcBox) return;
+      const citeBtn = (id) => Store.isCited(c, id) ? `<span class="tag green">已引用</span>`
+        : (editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${id}">引用</button></div>` : "");
+      const matCard = (m) => `
+        <div class="res-item">
+          <div class="row spread"><h5><a href="#/material/${m.id}">${U.esc(m.title)}</a></h5>${H.gradeTag(m.grade)}</div>
+          <div class="small muted">${U.esc(m.source)} · 被引 ${m.citedCount || 0} · ${U.esc((m.excerpt || m.summary || "").slice(0, 60))}</div>
+          ${citeBtn(m.id)}
+        </div>`;
+      const [rel, recM, recent] = await Promise.all([
+        Store.relatedForCase(c),
+        Store.recommendedMaterials(c.id),
+        Store.recentCitedMaterials(),
+      ]);
       if (!U.$("#rel-kn")) return; // 面板已切换
       knBox.innerHTML = rel.knowledge.map((r) => `
         <div class="res-item">
@@ -1225,12 +1249,8 @@ window.Pages = window.Pages || {};
           <div class="small muted">${U.esc((r.item.text || "").slice(0, 70))}…</div>
           ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-kn="${r.item.id}">引用</button></div>` : ""}
         </div>`).join("") || H.empty("暂无匹配");
-      mBox.innerHTML = rel.materials.map((r) => `
-        <div class="res-item">
-          <div class="row spread"><h5>${U.esc(r.item.title)}</h5>${H.credTag(r.item.credibility)}</div>
-          <div class="small muted">${U.esc(r.item.source)} · ${U.esc((r.item.excerpt || r.item.summary || "").slice(0, 60))}</div>
-          ${editable() ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${r.item.id}">引用</button></div>` : ""}
-        </div>`).join("") || H.empty("暂无匹配");
+      mBox.innerHTML = recM.map(matCard).join("") || H.empty("暂无推荐（引用更多素材后推荐会更准）");
+      rcBox.innerHTML = recent.map(matCard).join("") || `<div class="small muted">你还没有在案例中引用过素材</div>`;
     }
 
     function cite(target, silent) {
@@ -1272,8 +1292,8 @@ window.Pages = window.Pages || {};
           ${Store.isCited(c, x.item.id) ? `<span class="tag green">已引用</span>` : `<div style="margin-top:6px"><button class="btn sm plain" data-cite-kn="${x.item.id}">引用</button></div>`}
         </div>`).join("") +
         ms.map((x) => `<div class="res-item">
-          <div class="row spread"><h5><a href="#/material/${x.item.id}">${U.esc(x.item.title)}</a></h5>${H.credTag(x.item.credibility)}</div>
-          <div class="small muted">${U.esc(x.item.source || "")} · ${U.esc((x.item.excerpt || x.item.summary || "").slice(0, 60))}</div>
+          <div class="row spread"><h5><a href="#/material/${x.item.id}">${U.esc(x.item.title)}</a></h5>${H.gradeTag(x.item.grade)}</div>
+          <div class="small muted">${U.esc(x.item.source || "")} · 被引 ${x.item.citedCount || 0} · ${U.esc((x.item.excerpt || x.item.summary || "").slice(0, 60))}</div>
           <div class="small muted">${U.esc((x.reasons || []).slice(0, 3).join(" · "))}</div>
           ${Store.isCited(c, x.item.id) ? `<span class="tag green">已引用</span>` : `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${x.item.id}">引用</button></div>`}
         </div>`).join("");
@@ -1867,20 +1887,26 @@ window.Pages = window.Pages || {};
             if (t.dataset.wsAdd != null) {
               const r = wsResults[Number(t.dataset.wsAdd)];
               if (r) {
-                const dup = await Store.dupCheck(r.url, "");
-                if (dup.urlDup) { U.toast("该链接已在素材库中，可直接引用", 3000); return; }
-                const credibility = Copilot.credibilityFor(r.url);
-                Store.addMaterial({
-                  id: U.uid("m"), title: r.title || r.url, kind: "链接",
-                  source: (() => { try { return new URL(r.url).hostname; } catch (err) { return r.url; } })(),
-                  sourceUrl: r.url, publishedAt: U.plainDate(U.now()), collectedAt: U.plainDate(U.now()),
-                  level: 0, credibility, scope: "全体教师" + (credibility === "low" ? "（非白名单来源，引用前需核验）" : ""),
-                  status: "正常", summary: "通过联网检索采集的公开资料。",
-                  excerpt: (r.content || "").slice(0, 2000),
-                });
-                r.collected = true;
-                U.toast("已采集入库");
-                drawPanel();
+                const payload = collectPayload(r.url, { title: r.title, text: r.content, finalUrl: r.url });
+                payload.summary = "通过联网检索采集的公开资料。";
+                const r0 = await Store.addMaterial(payload);
+                if (r0.ok) {
+                  r.collected = true;
+                  U.toast("已采集入库（候选池，待管理员确认）");
+                  drawPanel();
+                  return;
+                }
+                if (r0.code === "dup") { U.toast(r0.error, 3600); return; }
+                if (r0.code === "similar") {
+                  const yes = await U.confirmModal(
+                    "库中已有相似素材：" + r0.similar.map((m) => "「" + m.title + "」").join("、") + "。仍要采集？");
+                  if (yes) {
+                    const r2 = await Store.addMaterial(payload, true);
+                    if (r2.ok) { r.collected = true; U.toast("已采集入库（候选池）"); drawPanel(); }
+                  }
+                  return;
+                }
+                U.toast(r0.error || "采集失败", 3000);
               }
               return;
             }

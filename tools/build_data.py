@@ -8,8 +8,10 @@
 - assets/学习资料md.rar                → 中心组学习资料素材（69 期全文落盘 files/seed/learn/）
 
 同时生成服务端运行所需：
-- files/index.json  种子文件索引（保留已有的上传条目）
-- files/users.json  演示账号（从 app/seed.js 抽取，供服务端鉴权）
+- files/index.json        种子文件索引（保留已有的上传条目）
+- files/users.json        演示账号（从 app/seed.js 抽取，供服务端鉴权）
+- files/materials_seed.json 素材登记种子（app/seed.js extraMaterials 8 条 + 学习资料 69 期，
+  服务端首启灌入 SQLite materials 表；教材是知识不是素材，不入库，ADR 0011）
 
 运行：python3 tools/build_data.py
 """
@@ -32,6 +34,7 @@ FILES_DIR = os.path.join(ROOT, "files")
 INDEX_FILE = os.path.join(FILES_DIR, "index.json")
 USERS_FILE = os.path.join(FILES_DIR, "users.json")
 CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
+MATERIALS_SEED_FILE = os.path.join(FILES_DIR, "materials_seed.json")
 EXCERPT_ISSUES = 69      # 最新多少期保留内容副本（检索摘录用，全文一律落盘）
 EXCERPT_CHARS = 800      # 每期副本截取长度
 
@@ -292,15 +295,16 @@ def strip_junk_blocks(case):
 
 
 def extract_seed_cases():
-    """用 node 从 app/seed.js 提取 draftCases/publishedMeta（JS 对象字面量，正则不可靠）。"""
+    """用 node 从 app/seed.js 提取 draftCases/publishedMeta/extraMaterials（JS 对象字面量，正则不可靠）。"""
     script = ("global.window={};require(%s);"
-              "console.log(JSON.stringify({drafts:window.SEED.draftCases,meta:window.SEED.publishedMeta}));"
+              "console.log(JSON.stringify({drafts:window.SEED.draftCases,meta:window.SEED.publishedMeta,"
+              "materials:window.SEED.extraMaterials}));"
               % json.dumps(SEED_JS))
     try:
         out = subprocess.run(["node", "-e", script], check=True,
                              capture_output=True, text=True)
     except (OSError, subprocess.CalledProcessError) as e:
-        raise RuntimeError("需要 node 提取 app/seed.js 种子案例: %s" % e)
+        raise RuntimeError("需要 node 提取 app/seed.js 种子数据: %s" % e)
     return json.loads(out.stdout)
 
 
@@ -350,6 +354,55 @@ def write_cases_seed(imported, drafts, meta):
     with open(CASES_SEED_FILE, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     return len(out)
+
+
+# ------------------------------------------------------------ 素材登记种子（服务端 SQLite 首启灌库用）
+# 信源等级映射（S 级暂空，由管理员定）：credibility high→A / normal→B / low→C
+GRADE_BY_CRED = {"high": "A", "normal": "B", "low": "C"}
+GRADE_REASON = {
+    "high": "按可信度自动定级：权威来源 → A",
+    "normal": "按可信度自动定级：一般来源 → B",
+    "low": "按可信度自动定级：待核实 → C",
+}
+
+
+def material_row(m):
+    """统一补齐素材行字段（与 db.py materials 表对应）。"""
+    cred = m.get("credibility", "normal")
+    return {
+        "id": m["id"], "title": m["title"], "kind": m.get("kind", ""),
+        "tags": m.get("tags") or [], "source": m.get("source", ""),
+        "sourceUrl": m.get("sourceUrl", ""), "level": m.get("level", 0),
+        "credibility": cred,
+        "grade": m.get("grade") or GRADE_BY_CRED.get(cred, ""),
+        "gradeReason": m.get("gradeReason") or GRADE_REASON.get(cred, ""),
+        "publishedAt": m.get("publishedAt", ""), "collectedAt": m.get("collectedAt", ""),
+        "status": m.get("status", "正常"),
+        "summary": m.get("summary", ""), "excerpt": m.get("excerpt", ""),
+        "fileId": m.get("fileId", ""), "scope": m.get("scope", ""),
+        "citedCount": 0, "lastCitedAt": "",
+        "createdAt": m.get("collectedAt", ""), "updatedAt": m.get("collectedAt", ""),
+    }
+
+
+def write_materials_seed(extra, learn):
+    """8 条登记素材（seed.js extraMaterials）+ 69 期学习资料 → files/materials_seed.json。"""
+    rows = [material_row(m) for m in extra]
+    for d in learn:
+        rows.append(material_row({
+            "id": d["id"], "title": d["title"], "kind": "资料包", "fileId": d["fileId"],
+            "source": "上海大学党委宣传部 · 中心组学习资料",
+            "publishedAt": d["year"] + " 年（总第%d期）" % d["issue"],
+            "collectedAt": "2026-07-18", "level": 1, "credibility": "high",
+            "scope": "校内教师",
+            "summary": "校党委中心组学习资料，%s 年出版，全文约 %d 千字。"
+                       % (d["year"], round(d["chars"] / 1000)),
+            "excerpt": d.get("excerpt", ""),
+        }))
+    os.makedirs(FILES_DIR, exist_ok=True)
+    with open(MATERIALS_SEED_FILE, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=1)
+    return len(rows)
 
 
 # ------------------------------------------------------------ 服务端运行文件
@@ -402,6 +455,7 @@ def main():
     users = write_users()
     seed_cases = extract_seed_cases()
     n_cases = write_cases_seed(cases, seed_cases["drafts"], seed_cases["meta"])
+    n_materials = write_materials_seed(seed_cases["materials"], learn)
 
     data = {
         "book": {"title": BOOK_TITLE, "edition": "2025版",
@@ -409,7 +463,6 @@ def main():
         "chapters": chapters,
         "knowledge": sections,
         "importedCases": cases,
-        "learnDocs": learn,
         "bookFile": book_file,
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
@@ -425,6 +478,7 @@ def main():
     print("files/index.json：种子 %d 条，保留上传 %d 条；files/users.json：账号 %d 个"
           % (len(learn_entries) + 1, kept_uploads, len(users)))
     print("files/cases_seed.json：种子案例 %d 篇（服务端首启灌入 SQLite）" % n_cases)
+    print("files/materials_seed.json：种子素材 %d 条（服务端首启灌入 SQLite）" % n_materials)
 
 
 if __name__ == "__main__":
