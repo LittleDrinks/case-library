@@ -27,11 +27,19 @@
 13. /api/materials 等 —— 素材登记闭环（SQLite materials 表，ADR 0003/0011）：列表/详情/采集入库闸
    （URL 查重 + 相似度查重 + 必填校验，新素材一律先落候选）、admin 治理 PATCH 与批量 PATCH、
    素材收藏、recommendFor 上下文推荐、recentCitedBy 最近引用、来源健康检查；
-   首启自动灌入 files/materials_seed.json，被引计数由案例写入时统一重算。
+   首启自动灌入 files/materials_seed.json，被引计数由案例写入时统一重算；
+14. /api/admin/watch/* —— 自动盯源（WP5）：栏目源 CRUD 与启停、每小时定时扫描 + 手动触发
+   （抓栏目页 → AI 抽取候选条目并做关键词过滤，AI 不可用跳过该源并记录 → URL+标题指纹双重去重
+   → 落 watch_items 待审），候选卡入库（走同一入库闸落素材候选，同事件报道作多方验证附注）/忽略；
+   版权默认策略：只存标题+摘要+原文链接+元数据，不抓全文；
+15. /api/contributions、/api/my/impact —— 众筹雏形（WP5）：素材链接（link）与知识点-素材关联
+   （kn_link）贡献先审后发（kn_link 通过后体现在 recommendFor 打分里），仅本人可见自己的贡献；
+   /api/my/impact 聚合素材贡献被引次数与案例被收藏/被点赞数。
 
 仅依赖标准库 + python-docx。运行：python3 server.py [port]
 """
 import base64
+import difflib
 import hashlib
 import hmac
 import json
@@ -1355,6 +1363,337 @@ def web_search(payload):
     return {"ok": True, "query": query, "results": results}
 
 
+# ------------------------------------------------------------ 自动盯源（WP5）
+# 管道：抓栏目页 → AI 抽取候选条目（标题+链接+日期+摘要，含关键词过滤；
+# AI 不可用时跳过该源并记录）→ URL+标题指纹双重去重 → 写 watch_items「待审」。
+# 版权默认策略：只存标题+摘要+原文链接+元数据，不抓全文入库。
+WATCH_INTERVAL_SECONDS = 3600
+_WATCH_LOCK = threading.Lock()
+
+WATCH_SOURCES_PRESET = [
+    {"name": "新华网·时政频道", "url": "http://www.xinhuanet.com/politics/",
+     "keywords": ["思政", "教育", "科技", "创新"]},
+    {"name": "人民日报·评论", "url": "http://opinion.people.com.cn/",
+     "keywords": ["教育", "青年", "科技"]},
+    {"name": "求是网", "url": "http://www.qstheory.cn/",
+     "keywords": ["理论", "教育", "文化"]},
+]
+
+WATCH_EXTRACT_PROMPT = (
+    "你是思政素材采集助手。用户给你一个栏目页的链接清单（JSON 数组，含 title/url）"
+    "和一组关注关键词。请从中挑出与关键词相关、适合作为高校思政教学素材的报道条目，"
+    "只输出严格 JSON 数组（不要输出任何其他内容），最多 10 条："
+    "[{\"title\":\"报道标题\",\"url\":\"原文链接\",\"date\":\"YYYY-MM-DD 或空字符串\","
+    "\"summary\":\"一句话摘要\"}]。"
+    "规则：只能从给定清单中选取，不得编造或改写 url；导航/广告/栏目名等非报道链接不要选；"
+    "没有相关条目时输出 []。"
+)
+
+
+def _watch_fetch(url):
+    """盯源抓取：栏目页 URL 由 admin 配置（可信），允许内网/本机演示源，
+    不走 /api/fetch-url 的公网限制。返回 (html, error)。"""
+    if not re.match(r"^https?://", url):
+        return None, "仅支持 http/https 链接"
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=15,
+                                    context=ssl.create_default_context()) as resp:
+            ctype = resp.headers.get("Content-Type", "")
+            raw = resp.read(1024 * 1024)
+    except Exception as e:
+        return None, "抓取失败: %s" % e
+    m = re.search(r"charset=([\w-]+)", ctype, re.I)
+    enc = m.group(1) if m else "utf-8"
+    try:
+        return raw.decode(enc, "ignore"), None
+    except Exception:
+        return raw.decode("utf-8", "ignore"), None
+
+
+def _watch_links(html, base_url):
+    """从栏目页 HTML 提取锚链接清单（锚文本≥8字），喂给 AI 做条目抽取。"""
+    links, seen = [], set()
+    for m in re.finditer(r"<a\s[^>]*?href=[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)</a>", html, re.I):
+        text = re.sub(r"<[^>]+>", "", m.group(2))
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) < 8:
+            continue
+        url = urllib.parse.urljoin(base_url, m.group(1))
+        if not re.match(r"^https?://", url) or url in seen:
+            continue
+        seen.add(url)
+        links.append({"title": text[:80], "url": url})
+        if len(links) >= 120:
+            break
+    return links
+
+
+def _watch_extract(src, html):
+    """AI 条目抽取 + 关键词过滤。返回 (items, error)；AI 不可用返回 (None, 说明)。"""
+    links = _watch_links(html, src["url"])
+    if not links:
+        return [], None
+    if not (AI_BASE_URL and AI_API_KEY):
+        return None, "AI 不可用（未配置模型），跳过该源"
+    kw = "、".join(src.get("keywords") or []) or "（不限）"
+    content, err = llm_call(AI_DEFAULT_MODEL, [
+        {"role": "system", "content": WATCH_EXTRACT_PROMPT},
+        {"role": "user", "content": "关注关键词：%s\n\n栏目页链接清单：\n%s"
+         % (kw, json.dumps(links, ensure_ascii=False)[:6000])},
+    ], temperature=0.1)
+    if err:
+        return None, "AI 抽取失败：" + err
+    arr = _extract_json(content, want_array=True)
+    items = []
+    if isinstance(arr, list):
+        for it in arr:
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title") or "").strip()
+            url = str(it.get("url") or "").strip()
+            if not title or not re.match(r"^https?://", url):
+                continue
+            items.append({"title": title[:120], "url": url,
+                          "summary": str(it.get("summary") or "")[:300],
+                          "publishedAt": str(it.get("date") or "")[:10]})
+    return items[:10], None
+
+
+def run_watch(source_ids=None):
+    """盯源主管道（手动触发与定时线程共用）：逐源抓取抽取、去重落库、记录运行结果。"""
+    if CASEDB is None:
+        return {"ok": False, "error": "业务库未初始化"}
+    targets = [s for s in CASEDB.list_watch_sources()
+               if s["enabled"] and (not source_ids or s["id"] in source_ids)]
+    results = []
+    with _WATCH_LOCK:
+        for s in targets:
+            res = {"sourceId": s["id"], "name": s["name"], "ok": False, "added": 0}
+            html, err = _watch_fetch(s["url"])
+            if err:
+                res["note"] = "源不可达：" + err
+            else:
+                items, err = _watch_extract(s, html)
+                if err:
+                    res["note"] = err  # AI 不可用：跳过该源并记录
+                else:
+                    res["ok"] = True
+                    res["added"] = CASEDB.add_watch_items(s["id"], items)
+                    res["note"] = ("本次无新增" if not res["added"]
+                                   else "新增 %d 条候选" % res["added"])
+            CASEDB.mark_watch_run(s["id"], res["added"])
+            results.append(res)
+    return {"ok": True, "added": sum(r["added"] for r in results), "results": results}
+
+
+def watch_scheduler():
+    """轻量定时扫描：每小时跑一遍 enabled 源（线程循环，不引入调度框架）。"""
+    while True:
+        time.sleep(WATCH_INTERVAL_SECONDS)
+        try:
+            res = run_watch()
+            sys.stderr.write("[watch] 定时扫描完成：新增 %d 条候选\n" % res.get("added", 0))
+        except Exception as e:
+            sys.stderr.write("[watch] 定时扫描异常: %s\n" % e)
+
+
+def _need_admin(user):
+    err = _need_login(user)
+    if err:
+        return err
+    if not user.get("admin"):
+        return {"ok": False, "error": "仅案例管理员可管理盯源"}, 403
+    return None
+
+
+def api_watch_sources(user):
+    err = _need_admin(user)
+    if err:
+        return err
+    return {"ok": True, "sources": CASEDB.list_watch_sources()}, 200
+
+
+def api_watch_source_create(user, payload):
+    err = _need_admin(user)
+    if err:
+        return err
+    s, e = CASEDB.create_watch_source(payload or {})
+    if e:
+        return {"ok": False, "error": e}, 400
+    return {"ok": True, "source": s}, 200
+
+
+def api_watch_source_patch(user, sid, payload):
+    err = _need_admin(user)
+    if err:
+        return err
+    s, e = CASEDB.update_watch_source(sid, payload or {})
+    if e:
+        return {"ok": False, "error": e}, 404 if "不存在" in e else 400
+    return {"ok": True, "source": s}, 200
+
+
+def api_watch_source_delete(user, sid):
+    err = _need_admin(user)
+    if err:
+        return err
+    if not CASEDB.delete_watch_source(sid):
+        return {"ok": False, "error": "盯源不存在"}, 404
+    return {"ok": True}, 200
+
+
+def api_watch_items(user, query):
+    err = _need_admin(user)
+    if err:
+        return err
+    status = (query.get("status") or [""])[0].strip()
+    return {"ok": True, "items": CASEDB.list_watch_items(status or None),
+            "sources": CASEDB.list_watch_sources()}, 200
+
+
+def api_watch_run(user, payload):
+    """手动触发扫描（admin）；body 可选 sourceId 限定单个源。同步执行并返回每源结果。"""
+    err = _need_admin(user)
+    if err:
+        return err
+    sid = ((payload or {}).get("sourceId") or "").strip()
+    return run_watch([sid] if sid else None), 200
+
+
+def _title_sim(a, b):
+    return difflib.SequenceMatcher(
+        None, re.sub(r"\s+", "", a or ""), re.sub(r"\s+", "", b or "")).ratio()
+
+
+def api_watch_item_import(user, iid, payload):
+    """候选卡入库（admin）：走与 POST /api/materials 同一入库闸（URL 查重 + 必填 grade），
+    落素材「候选」待确认定级；同事件其他待审报道作为「多方验证」附注写入摘要。"""
+    err = _need_admin(user)
+    if err:
+        return err
+    it = CASEDB.get_watch_item(iid)
+    if not it:
+        return {"ok": False, "error": "候选卡不存在"}, 404
+    if it["status"] == "已入库":
+        return {"ok": False, "error": "该候选卡已入库"}, 409
+    p = payload or {}
+    grade = (p.get("grade") or "B").strip()
+    if grade not in ("S", "A", "B", "C"):
+        return {"ok": False, "error": "信源等级取值无效（S/A/B/C）"}, 400
+    dup = CASEDB.find_material_by_url(it["url"])
+    if dup:  # 入库闸 URL 查重：已有人采过同一链接，直接关联不再重复入库
+        CASEDB.set_watch_item(iid, "已入库", dup["id"])
+        return {"ok": True, "material": dup, "note": "链接已在素材库中，已关联既有素材"}, 200
+    src_name = next((s["name"] for s in CASEDB.list_watch_sources()
+                     if s["id"] == it["sourceId"]), "盯源")
+    peers = [x for x in CASEDB.list_watch_items("待审")
+             if x["id"] != iid and _title_sim(x["title"], it["title"]) >= 0.5]
+    src_names = {s["id"]: s["name"] for s in CASEDB.list_watch_sources()}
+    summary = it["summary"]
+    if peers:
+        summary += ("\n多方验证：" + "；".join(
+            "%s《%s》" % (src_names.get(x["sourceId"], "盯源"), x["title"])
+            for x in peers[:3]))
+    m, e = CASEDB.create_material(user, {
+        "title": it["title"], "kind": "报道", "source": src_name,
+        "sourceUrl": it["url"], "publishedAt": it["publishedAt"] or time.strftime("%Y-%m-%d"),
+        "grade": grade,
+        "gradeReason": (p.get("gradeReason") or "").strip()
+                       or "盯源候选入库，管理员定级 %s 级" % grade,
+        "summary": summary, "credibility": "normal",
+    }, status="候选")
+    if e:
+        return {"ok": False, "error": e}, 409
+    CASEDB.set_watch_item(iid, "已入库", m["id"])
+    mark_search_dirty()
+    return {"ok": True, "material": m}, 200
+
+
+def api_watch_item_patch(user, iid, payload):
+    """候选卡治理（admin）：目前仅「忽略」（status=已忽略，不再出现在待审列表）。"""
+    err = _need_admin(user)
+    if err:
+        return err
+    status = ((payload or {}).get("status") or "").strip()
+    if status != "已忽略":
+        return {"ok": False, "error": "仅支持忽略（status=已忽略）；入库请用 import"}, 400
+    it, e = CASEDB.set_watch_item(iid, status)
+    if e:
+        return {"ok": False, "error": e}, 404
+    return {"ok": True, "item": it}, 200
+
+
+# ------------------------------------------------------------ 众筹贡献（WP5）
+def api_contributions(user):
+    err = _need_login(user)
+    if err:
+        return err
+    return {"ok": True, "contributions": CASEDB.list_contributions(user)}, 200
+
+
+def api_contribution_create(user, payload):
+    """教师贡献（先审后发）：link=素材链接（URL+摘要+grade 建议）；
+    kn_link=知识点-素材关联。完整案例贡献走既有「提交审核」流程，不在此提交。"""
+    err = _need_login(user)
+    if err:
+        return err
+    p = (payload or {}).get("payload") or {}
+    kind = (payload or {}).get("kind") or ""
+    if kind == "link":
+        url = (p.get("url") or "").strip()
+        if not re.match(r"^https?://", url):
+            return {"ok": False, "error": "请填写有效的 http/https 链接"}, 400
+        if not (p.get("title") or "").strip():
+            return {"ok": False, "error": "请填写素材标题"}, 400
+        if p.get("grade") and p["grade"] not in ("S", "A", "B", "C"):
+            return {"ok": False, "error": "信源等级取值无效（S/A/B/C）"}, 400
+        p["url"] = url
+        dup = CASEDB.find_material_by_url(url)
+        if dup:
+            return {"ok": False, "code": "dup",
+                    "error": "该链接此前已采集过：「%s」，可直接引用，无需重复贡献" % dup["title"]}, 409
+    elif kind == "kn_link":
+        kn_id = (p.get("knId") or "").strip()
+        if not any(s["id"] == kn_id for s in _book_sections()):
+            return {"ok": False, "error": "知识点不存在"}, 400
+        if not CASEDB.get_material_raw((p.get("materialId") or "").strip()):
+            return {"ok": False, "error": "素材不存在"}, 400
+    else:
+        return {"ok": False, "error": "贡献类型取值无效（link/kn_link）；"
+                                      "完整案例请走案例「提交审核」流程"}, 400
+    c, e = CASEDB.create_contribution(user, kind, p)
+    if e:
+        return {"ok": False, "error": e}, 400
+    return {"ok": True, "contribution": c}, 200
+
+
+def api_contribution_review(user, cid, payload):
+    """admin 审核贡献：action=approve/reject。link 通过走入库闸落素材「候选」。"""
+    err = _need_login(user)
+    if err:
+        return err
+    p = payload or {}
+    res, e, code = CASEDB.review_contribution(
+        user, cid, (p.get("action") or "").strip(), (p.get("reason") or "").strip())
+    if e:
+        return {"ok": False, "error": e}, code
+    contrib, material = res
+    out = {"ok": True, "contribution": contrib}
+    if material:
+        out["material"] = material
+        mark_search_dirty()
+    return out, 200
+
+
+def api_my_impact(user):
+    """作者「被引用/被改编」聚合：素材贡献被引次数 + 案例被收藏/被点赞数。"""
+    err = _need_login(user)
+    if err:
+        return err
+    return dict({"ok": True}, **CASEDB.my_impact(user)), 200
+
+
 # ------------------------------------------------------------ MoA 多智能体编排（/api/ai/agent）
 INTENT_ROUTES = {
     "find-theory": "librarian", "find-material": "librarian",
@@ -2174,6 +2513,19 @@ class Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             res, status = api_materials_list(auth_user(self), qs)
             return self._send_json(res, status)
+        if path == "/api/admin/watch/sources":
+            res, status = api_watch_sources(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/admin/watch/items":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_watch_items(auth_user(self), qs)
+            return self._send_json(res, status)
+        if path == "/api/contributions":
+            res, status = api_contributions(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/my/impact":
+            res, status = api_my_impact(auth_user(self))
+            return self._send_json(res, status)
         m = re.match(r"^/api/materials/([^/]+?)/?$", path)
         if m:
             res, status = api_material_get(auth_user(self), urllib.parse.unquote(m.group(1)))
@@ -2272,6 +2624,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(web_search(payload))
         if path == "/api/fetch-url":
             return self._send_json(fetch_url(payload))
+        if path == "/api/admin/watch/sources":
+            res, status = api_watch_source_create(auth_user(self), payload)
+            return self._send_json(res, status)
+        if path == "/api/admin/watch/run":
+            res, status = api_watch_run(auth_user(self), payload)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/admin/watch/items/([^/]+?)/import/?$", path)
+        if m:
+            res, status = api_watch_item_import(
+                auth_user(self), urllib.parse.unquote(m.group(1)), payload)
+            return self._send_json(res, status)
+        if path == "/api/contributions":
+            res, status = api_contribution_create(auth_user(self), payload)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/contributions/([^/]+?)/review/?$", path)
+        if m:
+            res, status = api_contribution_review(
+                auth_user(self), urllib.parse.unquote(m.group(1)), payload)
+            return self._send_json(res, status)
         if path == "/api/export-docx":
             try:
                 data, title = export_docx(payload)
@@ -2293,6 +2664,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urllib.parse.urlparse(self.path).path
+        m = re.match(r"^/api/admin/watch/sources/([^/]+?)/?$", path)
+        if m:
+            res, status = api_watch_source_delete(
+                auth_user(self), urllib.parse.unquote(m.group(1)))
+            return self._send_json(res, status)
         if path.startswith("/api/files/"):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_delete(auth_user(self), fid)
@@ -2315,6 +2691,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         path = urllib.parse.urlparse(self.path).path
+        m = re.match(r"^/api/admin/watch/sources/([^/]+?)/?$", path)
+        if m:
+            res, status = api_watch_source_patch(
+                auth_user(self), urllib.parse.unquote(m.group(1)), self._read_json())
+            return self._send_json(res, status)
+        m = re.match(r"^/api/admin/watch/items/([^/]+?)/?$", path)
+        if m:
+            res, status = api_watch_item_patch(
+                auth_user(self), urllib.parse.unquote(m.group(1)), self._read_json())
+            return self._send_json(res, status)
         if path.startswith("/api/files/"):
             fid = urllib.parse.unquote(path.rsplit("/", 1)[1])
             res, status = api_file_patch(auth_user(self), fid, self._read_json())
@@ -2376,6 +2762,8 @@ def main():
     global CASEDB
     CASEDB = CaseDB(SQLITE_DB_PATH)
     seeded = CASEDB.seed(load_seed_cases(), load_seed_materials())
+    CASEDB.seed_watch_sources(WATCH_SOURCES_PRESET)
+    threading.Thread(target=watch_scheduler, daemon=True).start()
     backfilled = CASEDB.migrate_citation_evidence(_evidence_for_target)
     if backfilled:
         sys.stderr.write("[cite] 老引用证据回填 %d 条\n" % backfilled)

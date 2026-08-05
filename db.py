@@ -10,8 +10,10 @@ citedCount/lastCitedAt 由案例写入时统一重算（_sync_material_usage）�
 「待淘汰」是派生态（30 天未被引且未豁免），不落库，读取时计算（ADR 0003）。
 """
 import difflib
+import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -95,12 +97,48 @@ CREATE TABLE IF NOT EXISTS mat_favorites(
   userId TEXT NOT NULL, materialId TEXT NOT NULL, at TEXT,
   PRIMARY KEY(userId, materialId)
 );
+CREATE TABLE IF NOT EXISTS watch_sources(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  keywords TEXT DEFAULT '[]',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  lastRunAt TEXT DEFAULT '',
+  lastItemCount INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS watch_items(
+  id TEXT PRIMARY KEY,
+  sourceId TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  summary TEXT DEFAULT '',
+  publishedAt TEXT DEFAULT '',
+  fingerprint TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT '待审',
+  materialId TEXT DEFAULT '',
+  fetchedAt TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_watch_items_source ON watch_items(sourceId);
+CREATE TABLE IF NOT EXISTS contributions(
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT '待审',
+  reviewedBy TEXT DEFAULT '',
+  at TEXT
+);
 """
 
 # 素材状态：候选（入库闸，待 admin 确认）/正常/停用/来源失效；「待淘汰」为派生态不落库
 MAT_STATUSES = ("候选", "正常", "停用", "来源失效")
 MAT_GRADES = ("S", "A", "B", "C")
 DORMANT_DAYS = 30  # 满 30 天未被引用且未豁免 → 待淘汰（ADR 0003）
+
+# 盯源候选卡与教师贡献的状态机（WP5）
+WATCH_ITEM_STATUSES = ("待审", "已入库", "已忽略")
+CONTRIB_KINDS = ("link", "kn_link")
+CONTRIB_STATUSES = ("待审", "通过", "驳回")
 
 # 状态机：draft → checking（机审，提交后自动进入）→ pending → reviewing → published/hidden；
 # 退回/要求补充回 draft。机审（词库规则 + LLM 反例审校）由服务端在 submit 后异步执行，
@@ -165,7 +203,7 @@ class CaseDB:
         """清空业务表并重新灌入种子（管理后台「重置演示数据」）。"""
         with self._lock:
             for t in ("cases", "reviews", "annotations", "versions", "favorites", "likes",
-                      "mat_favorites"):
+                      "mat_favorites", "watch_items", "contributions"):
                 self._conn.execute("DELETE FROM " + t)
             if materials is not None:
                 self._conn.execute("DELETE FROM materials")
@@ -1012,6 +1050,16 @@ class CaseDB:
                      if isinstance(ref, dict) and ref.get("target")}
             cited_kn = {t for t in cited if t.startswith("kn-")}
             words = set(c.get("theoryPoints") or []) | set(c.get("tags") or [])
+            # 教师贡献的知识点-素材关联（admin 通过的 kn_link）：本案例引用了该 kn 节时加分
+            kn_links = {}
+            for lr in self._conn.execute(
+                    "SELECT payload FROM contributions WHERE kind='kn_link' AND status='通过'"):
+                try:
+                    lp = json.loads(lr["payload"])
+                except Exception:
+                    continue
+                if lp.get("knId") and lp.get("materialId"):
+                    kn_links.setdefault(lp["materialId"], set()).add(lp["knId"])
             score = {}
             for r in self._conn.execute("SELECT data FROM cases WHERE id!=?", (case_id,)).fetchall():
                 x = json.loads(r["data"])
@@ -1040,6 +1088,8 @@ class CaseDB:
                     continue
                 m = self._mat_obj(r)
                 s = score.get(r["id"], 0)
+                if cited_kn & kn_links.get(r["id"], set()):
+                    s += 3  # 已确认的知识点-素材关联
                 overlap = words & set(m["tags"])
                 s += 2 * len(overlap)
                 hay = m["title"] + m["summary"]
@@ -1082,3 +1132,268 @@ class CaseDB:
         with self._lock:
             return [self._mat_obj(r) for r in self._conn.execute(
                 "SELECT * FROM materials WHERE status='正常'").fetchall()]
+
+    # ============================================================ 盯源（WP5）
+    def seed_watch_sources(self, sources):
+        """预置盯源（空表时灌入；只配置不保证可达）。"""
+        with self._lock:
+            if self._conn.execute("SELECT COUNT(*) c FROM watch_sources").fetchone()["c"]:
+                return 0
+            for s in sources:
+                self._conn.execute(
+                    "INSERT INTO watch_sources(id,name,url,keywords,enabled) VALUES(?,?,?,?,1)",
+                    (_uid("ws"), s.get("name", ""), s.get("url", ""),
+                     json.dumps(s.get("keywords") or [], ensure_ascii=False)))
+            self._conn.commit()
+            return len(sources)
+
+    @staticmethod
+    def _source_obj(r):
+        return {"id": r["id"], "name": r["name"], "url": r["url"],
+                "keywords": json.loads(r["keywords"] or "[]"),
+                "enabled": bool(r["enabled"]), "lastRunAt": r["lastRunAt"],
+                "lastItemCount": r["lastItemCount"]}
+
+    def list_watch_sources(self):
+        with self._lock:
+            return [self._source_obj(r) for r in self._conn.execute(
+                "SELECT * FROM watch_sources ORDER BY rowid").fetchall()]
+
+    def create_watch_source(self, s):
+        with self._lock:
+            name = (s.get("name") or "").strip()
+            url = (s.get("url") or "").strip()
+            if not name or not url:
+                return None, "缺少来源名称 name 或栏目链接 url"
+            if self._conn.execute("SELECT 1 FROM watch_sources WHERE url=?", (url,)).fetchone():
+                return None, "该栏目链接已在盯源列表中"
+            sid = _uid("ws")
+            self._conn.execute(
+                "INSERT INTO watch_sources(id,name,url,keywords,enabled) VALUES(?,?,?,?,?)",
+                (sid, name, url,
+                 json.dumps(s.get("keywords") or [], ensure_ascii=False),
+                 1 if s.get("enabled", True) else 0))
+            self._conn.commit()
+            r = self._conn.execute("SELECT * FROM watch_sources WHERE id=?", (sid,)).fetchone()
+            return self._source_obj(r), None
+
+    def update_watch_source(self, sid, patch):
+        with self._lock:
+            if not self._conn.execute("SELECT 1 FROM watch_sources WHERE id=?", (sid,)).fetchone():
+                return None, "盯源不存在"
+            sets, vals = [], []
+            for k in ("name", "url"):
+                if k in patch and str(patch[k]).strip():
+                    sets.append("%s=?" % k)
+                    vals.append(str(patch[k]).strip())
+            if "keywords" in patch:
+                sets.append("keywords=?")
+                vals.append(json.dumps(patch["keywords"] or [], ensure_ascii=False))
+            if "enabled" in patch:
+                sets.append("enabled=?")
+                vals.append(1 if patch["enabled"] else 0)
+            if not sets:
+                return None, "没有可更新的字段"
+            vals.append(sid)
+            self._conn.execute("UPDATE watch_sources SET %s WHERE id=?" % ",".join(sets), vals)
+            self._conn.commit()
+            r = self._conn.execute("SELECT * FROM watch_sources WHERE id=?", (sid,)).fetchone()
+            return self._source_obj(r), None
+
+    def delete_watch_source(self, sid):
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM watch_sources WHERE id=?", (sid,))
+            self._conn.execute("DELETE FROM watch_items WHERE sourceId=?", (sid,))
+            self._conn.commit()
+            return cur.rowcount
+
+    def mark_watch_run(self, sid, count):
+        with self._lock:
+            self._conn.execute(
+                "UPDATE watch_sources SET lastRunAt=?, lastItemCount=? WHERE id=?",
+                (_now(), count, sid))
+            self._conn.commit()
+
+    # ------------------------------------------------------------ 盯源候选卡
+    @staticmethod
+    def _fingerprint(title):
+        """内容指纹：标题去空白小写后的 md5（同事件重复报道的第一道去重）。"""
+        norm = re.sub(r"\s+", "", (title or "").lower())
+        return hashlib.md5(norm.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _watch_item_obj(r):
+        return {"id": r["id"], "sourceId": r["sourceId"], "title": r["title"],
+                "url": r["url"], "summary": r["summary"], "publishedAt": r["publishedAt"],
+                "fingerprint": r["fingerprint"], "status": r["status"],
+                "materialId": r["materialId"], "fetchedAt": r["fetchedAt"]}
+
+    def add_watch_items(self, source_id, items):
+        """候选卡落库：URL + 标题指纹双重去重（对 watch_items 与 materials.sourceUrl）。"""
+        added = 0
+        with self._lock:
+            for it in items or []:
+                url = (it.get("url") or "").strip()
+                title = (it.get("title") or "").strip()
+                if not url or not title:
+                    continue
+                fp = self._fingerprint(title)
+                if self._conn.execute(
+                        "SELECT 1 FROM watch_items WHERE url=? OR fingerprint=? LIMIT 1",
+                        (url, fp)).fetchone():
+                    continue
+                if self._conn.execute(
+                        "SELECT 1 FROM materials WHERE sourceUrl=? AND sourceUrl!='' LIMIT 1",
+                        (url,)).fetchone():
+                    continue
+                self._conn.execute(
+                    "INSERT INTO watch_items(id,sourceId,title,url,summary,publishedAt,"
+                    "fingerprint,status,fetchedAt) VALUES(?,?,?,?,?,?,?,'待审',?)",
+                    (_uid("wi"), source_id, title, url, it.get("summary") or "",
+                     (it.get("publishedAt") or "")[:10], fp, _now()))
+                added += 1
+            self._conn.commit()
+        return added
+
+    def list_watch_items(self, status=None, limit=300):
+        with self._lock:
+            sql = "SELECT * FROM watch_items"
+            args = ()
+            if status:
+                sql += " WHERE status=?"
+                args = (status,)
+            rows = self._conn.execute(
+                sql + " ORDER BY fetchedAt DESC, rowid DESC LIMIT ?", args + (limit,)).fetchall()
+            return [self._watch_item_obj(r) for r in rows]
+
+    def get_watch_item(self, iid):
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM watch_items WHERE id=?", (iid,)).fetchone()
+            return self._watch_item_obj(r) if r else None
+
+    def set_watch_item(self, iid, status, material_id=""):
+        if status not in WATCH_ITEM_STATUSES:
+            return None, "候选卡状态取值无效"
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE watch_items SET status=?, materialId=? WHERE id=?",
+                (status, material_id, iid))
+            self._conn.commit()
+            if not cur.rowcount:
+                return None, "候选卡不存在"
+            r = self._conn.execute("SELECT * FROM watch_items WHERE id=?", (iid,)).fetchone()
+            return self._watch_item_obj(r), None
+
+    # ============================================================ 众筹贡献（WP5）
+    @staticmethod
+    def _contrib_obj(r):
+        return {"id": r["id"], "userId": r["userId"], "kind": r["kind"],
+                "payload": json.loads(r["payload"] or "{}"), "status": r["status"],
+                "reviewedBy": r["reviewedBy"], "at": r["at"]}
+
+    def create_contribution(self, user, kind, payload):
+        if kind not in CONTRIB_KINDS:
+            return None, "贡献类型取值无效（%s）" % "/".join(CONTRIB_KINDS)
+        with self._lock:
+            cid = _uid("cb")
+            self._conn.execute(
+                "INSERT INTO contributions(id,userId,kind,payload,status,at) VALUES(?,?,?,?,'待审',?)",
+                (cid, user["id"], kind, json.dumps(payload or {}, ensure_ascii=False), _now()))
+            self._conn.commit()
+            r = self._conn.execute("SELECT * FROM contributions WHERE id=?", (cid,)).fetchone()
+            return self._contrib_obj(r), None
+
+    def list_contributions(self, user):
+        """先审后发：普通用户仅见本人贡献与状态，admin 见全量。"""
+        with self._lock:
+            if user.get("admin"):
+                rows = self._conn.execute(
+                    "SELECT * FROM contributions ORDER BY at DESC, rowid DESC LIMIT 300").fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM contributions WHERE userId=? ORDER BY at DESC, rowid DESC LIMIT 300",
+                    (user["id"],)).fetchall()
+            return [self._contrib_obj(r) for r in rows]
+
+    def review_contribution(self, user, cid, action, reason=""):
+        """admin 审核贡献：link 通过 → 走入库闸落素材「候选」（URL 查重沿用）；
+        kn_link 通过 → 关联生效（体现在 recommend_materials 打分里）；驳回记 reviewNote。"""
+        if not user.get("admin"):
+            return None, "仅案例管理员可审核贡献", 403
+        if action not in ("approve", "reject"):
+            return None, "未知审核动作", 400
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM contributions WHERE id=?", (cid,)).fetchone()
+            if not r:
+                return None, "贡献不存在", 404
+            if r["status"] != "待审":
+                return None, "该贡献已审核过", 409
+            row = dict(r)
+        p = json.loads(row["payload"] or "{}")
+        material = None
+        if action == "approve" and row["kind"] == "link":
+            dup = self.find_material_by_url(p.get("url") or "")
+            if dup:
+                material = dup  # 链接已在库中，直接关联既有素材
+            else:
+                grade = p.get("grade") if p.get("grade") in MAT_GRADES else "B"
+                material, e = self.create_material(user, {
+                    "title": p.get("title") or p.get("url"),
+                    "kind": "链接",
+                    "source": p.get("source") or "教师贡献",
+                    "sourceUrl": p["url"],
+                    "publishedAt": (p.get("publishedAt") or "")[:10] or _now()[:10],
+                    "grade": grade,
+                    "gradeReason": p.get("gradeReason")
+                                   or "教师贡献链接（建议 %s 级），管理员确认定级" % grade,
+                    "summary": p.get("summary") or "",
+                    "credibility": "normal",
+                }, status="候选")
+                if e:
+                    return None, "入库失败：" + e, 409
+            p["materialId"] = material["id"]
+        if action == "reject" and reason:
+            p["reviewNote"] = reason
+        with self._lock:
+            self._conn.execute(
+                "UPDATE contributions SET status=?, reviewedBy=?, payload=? WHERE id=?",
+                ("通过" if action == "approve" else "驳回",
+                 user.get("name") or user["id"],
+                 json.dumps(p, ensure_ascii=False), cid))
+            self._conn.commit()
+            r = self._conn.execute("SELECT * FROM contributions WHERE id=?", (cid,)).fetchone()
+            return (self._contrib_obj(r), material), None, 200
+
+    # ------------------------------------------------------------ 我的影响力
+    def my_impact(self, user):
+        """被引用/被改编数据页（从简）：素材贡献被引次数 + 案例被收藏/被点赞聚合。"""
+        with self._lock:
+            case_ids = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM cases WHERE ownerId=?", (user["id"],))]
+            likes = favs = 0
+            if case_ids:
+                marks = ",".join("?" * len(case_ids))
+                likes = self._conn.execute(
+                    "SELECT COUNT(*) c FROM likes WHERE caseId IN (%s)" % marks,
+                    case_ids).fetchone()["c"]
+                favs = self._conn.execute(
+                    "SELECT COUNT(*) c FROM favorites WHERE caseId IN (%s)" % marks,
+                    case_ids).fetchone()["c"]
+            rows = self._conn.execute(
+                "SELECT kind, status, payload FROM contributions WHERE userId=?",
+                (user["id"],)).fetchall()
+            mat_ids, by_status = [], {}
+            for r in rows:
+                by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+                if r["kind"] == "link" and r["status"] == "通过":
+                    mid = (json.loads(r["payload"] or "{}")).get("materialId")
+                    if mid:
+                        mat_ids.append(mid)
+            cited = 0
+            for mid in mat_ids:
+                mr = self._mat_row(mid)
+                if mr:
+                    cited += mr["citedCount"]
+            return {"caseLikes": likes, "caseFavorites": favs,
+                    "materialsCited": cited, "contributedMaterials": len(mat_ids),
+                    "contributions": by_status}

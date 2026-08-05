@@ -7,8 +7,8 @@ window.Pages = window.Pages || {};
 
   const TABS = [
     ["audit", "案例审核"], ["publish", "发布管理"], ["materials", "素材管理"],
-    ["knowledge", "知识管理"], ["types", "类型与模板"], ["assets", "组织资产"],
-    ["accounts", "账号权限"], ["ann", "公告管理"],
+    ["watch", "盯源"], ["knowledge", "知识管理"], ["types", "类型与模板"],
+    ["assets", "组织资产"], ["accounts", "账号权限"], ["ann", "公告管理"],
   ];
 
   P.admin = (tab, params) => {
@@ -23,7 +23,7 @@ window.Pages = window.Pages || {};
 
     const bodies = {
       audit: auditTab, publish: publishTab, materials: materialsTab,
-      knowledge: knowledgeTab, types: typesTab, assets: assetsTab,
+      watch: watchTab, knowledge: knowledgeTab, types: typesTab, assets: assetsTab,
       accounts: accountsTab, ann: annTab,
     };
     return {
@@ -267,6 +267,118 @@ window.Pages = window.Pages || {};
         <span class="pager-dots">${matPage} / ${pages}</span>
         <button data-mat-page="${matPage + 1}" ${matPage >= pages ? "disabled" : ""}>下一页</button>
       </div>` : ""}
+    </div>`;
+  }
+
+  // ---------------------------------------------------------- 盯源（WP5）
+  // 候选卡 = watch_items（待审/已入库/已忽略）；同事件多条报道按标题相似度聚成组，
+  // 选一条入库（走服务端入库闸落素材「候选」），同组其余报道作「多方验证」附注写入摘要。
+  let watchData = null; // {sources, items} 会话内缓存，操作后强制重拉
+  const watchSim = (a, b) => {
+    const bg = (s) => {
+      s = String(s || "").replace(/\s+/g, "");
+      const set = new Set();
+      for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+      return set;
+    };
+    const A = bg(a), B = bg(b);
+    let inter = 0;
+    A.forEach((x) => { if (B.has(x)) inter++; });
+    return (2 * inter) / ((A.size + B.size) || 1);
+  };
+  function watchGroups(items) {
+    const groups = [];
+    items.forEach((it) => {
+      const g = groups.find((x) => watchSim(x[0].title, it.title) >= 0.4);
+      if (g) g.push(it);
+      else groups.push([it]);
+    });
+    return groups;
+  }
+
+  function watchTab() {
+    const d = watchData;
+    if (!d) return `<div class="card card-pad muted small">盯源数据加载中…</div>`;
+    const srcNames = {};
+    d.sources.forEach((s) => { srcNames[s.id] = s.name; });
+    const pending = d.items.filter((x) => x.status === "待审");
+    const done = d.items.filter((x) => x.status !== "待审").slice(0, 10);
+    // 教师贡献与盯源候选同池管理（先审后发）：link 通过落素材「候选」，kn_link 通过进推荐打分
+    const cbPending = (d.contribs || []).filter((c) => c.status === "待审");
+    const cbDone = (d.contribs || []).filter((c) => c.status !== "待审").slice(0, 8);
+    const cbBrief = (c) => c.kind === "link"
+      ? (c.payload.title || c.payload.url) + "（建议 " + (c.payload.grade || "B") + " 级）"
+      : "知识点 " + c.payload.knId + " ↔ 素材 " + c.payload.materialId;
+    return `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
+        <span>教师贡献待审（${cbPending.length}）</span>
+      </div>
+      ${cbPending.length ? `<table class="data">
+        <tr><th>类型</th><th>提交人</th><th>内容</th><th>时间</th><th></th></tr>
+        ${cbPending.map((c) => `<tr>
+          <td>${{ link: "素材链接", kn_link: "知识点关联" }[c.kind] || c.kind}</td>
+          <td>${U.esc((Store.userById(c.userId) || {}).name || c.userId)}</td>
+          <td class="small" style="max-width:320px">${U.esc(cbBrief(c))}${c.payload.url ? ` <a href="${U.esc(c.payload.url)}" target="_blank" rel="noopener">原文</a>` : ""}</td>
+          <td class="small">${U.esc(c.at)}</td>
+          <td class="row">
+            <button class="btn sm" data-cb-approve="${c.id}">通过</button>
+            <button class="btn sm plain" data-cb-reject="${c.id}">驳回</button>
+          </td>
+        </tr>`).join("")}
+      </table>` : `<div class="card-pad muted small">暂无待审贡献</div>`}
+      ${cbDone.length ? `<div class="card-pad small muted" style="border-top:1px solid var(--line)">最近已审：${cbDone.map((c) => `${U.esc(cbBrief(c))}（${c.status}）`).join("；")}</div>` : ""}
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
+        <span>盯源（${d.sources.length}）</span>
+        <button class="btn sm" id="watch-run-all" title="立即扫描全部启用中的源（定时任务每小时也会扫一遍）">立即扫描</button>
+      </div>
+      <table class="data">
+        <tr><th>来源</th><th>栏目链接</th><th>关键词</th><th>启用</th><th>上次运行</th><th>新增</th><th></th></tr>
+        ${d.sources.map((s) => `<tr>
+          <td>${U.esc(s.name)}</td>
+          <td class="small" style="max-width:220px;word-break:break-all"><a href="${U.esc(s.url)}" target="_blank" rel="noopener">${U.esc(s.url)}</a></td>
+          <td class="small">${(s.keywords || []).map(U.esc).join("、") || "—"}</td>
+          <td><input type="checkbox" data-ws-enabled="${s.id}" style="width:auto" ${s.enabled ? "checked" : ""}></td>
+          <td class="small">${U.esc(s.lastRunAt || "—")}</td>
+          <td>${s.lastItemCount || 0}</td>
+          <td class="row">
+            <button class="btn sm plain" data-ws-run="${s.id}">扫描</button>
+            <button class="btn sm danger" data-ws-del="${s.id}">删除</button>
+          </td>
+        </tr>`).join("")}
+      </table>
+      <div class="card-pad row wrap" style="border-top:1px solid var(--line);gap:8px">
+        <input class="text" id="ws-name" placeholder="来源名称" style="max-width:160px">
+        <input class="text" id="ws-url" placeholder="栏目/板块链接，http(s)://" style="max-width:280px">
+        <input class="text" id="ws-kw" placeholder="关键词，用、分隔（可空）" style="max-width:200px">
+        <button class="btn sm" id="ws-add">添加盯源</button>
+      </div>
+      <div class="card-pad small muted" style="border-top:1px solid var(--line)">只保存标题+摘要+原文链接，不抓全文入库。源不可达或 AI 不可用时本次扫描跳过该源并在结果中记录。</div>
+    </div>
+    <div class="card">
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>待审候选卡（${pending.length}）</span></div>
+      ${pending.length ? watchGroups(pending).map((g) => `
+      <div class="card-pad" style="border-bottom:1px solid var(--line)">
+        ${g.length > 1 ? `<div class="small" style="margin-bottom:6px"><span class="tag blue">同事件 ${g.length} 条报道</span> <span class="muted">选最高权威来源那条入库，其余作「多方验证」附注</span></div>` : ""}
+        ${g.map((it) => `
+        <div class="case-item">
+          <div class="row spread">
+            <h4><a href="${U.esc(it.url)}" target="_blank" rel="noopener">${U.esc(it.title)}</a></h4>
+            <span class="row" style="gap:6px">
+              <select data-wi-grade="${it.id}" title="信源等级（默认 B，入库后可在素材管理调整）">
+                ${["S", "A", "B", "C"].map((x) => `<option ${x === "B" ? "selected" : ""}>${x}</option>`).join("")}
+              </select>
+              <button class="btn sm" data-wi-import="${it.id}">入库</button>
+              <button class="btn sm plain" data-wi-ignore="${it.id}">忽略</button>
+            </span>
+          </div>
+          <div class="small muted" style="margin-top:4px">${U.esc(srcNames[it.sourceId] || "盯源")} · ${U.esc(it.publishedAt || it.fetchedAt)} · 入库后落素材「候选」，确认定级请前往素材管理</div>
+          ${it.summary ? `<div class="small" style="margin-top:4px">${U.esc(it.summary)}</div>` : ""}
+        </div>`).join("")}
+      </div>`).join("") : H.empty("暂无待审候选，点「立即扫描」或等待定时扫描")}
+      ${done.length ? `<div class="card-pad small muted" style="border-top:1px solid var(--line)">最近处理：${done.map((x) => `${U.esc(x.title)}（${x.status}${x.materialId ? ` · <a href="#/material/${x.materialId}">素材</a>` : ""}）`).join("；")}</div>` : ""}
     </div>`;
   }
 
@@ -675,6 +787,73 @@ window.Pages = window.Pages || {};
           Store.saveCase(); P.rerender();
         }
       });
+    },
+    watch(el) {
+      const reload = async () => {
+        const d = await Store.fetchWatchItems();
+        watchData = {
+          sources: (d && d.sources) || [],
+          items: (d && d.items) || [],
+          contribs: await Store.fetchContributions(),
+        };
+        P.rerender();
+      };
+      if (!watchData) { reload(); return; }
+      // 教师贡献审核（先审后发）：link 通过落素材「候选」，kn_link 通过进推荐打分
+      U.$$("[data-cb-approve]", el).forEach((b) => b.addEventListener("click", async () => {
+        b.disabled = true;
+        const d = await Store.reviewContribution(b.dataset.cbApprove, "approve");
+        if (d) {
+          if (d.material) { await Store.syncMaterials(); U.toast("已通过，素材落「候选」，请到素材管理确认定级", 4000); }
+          else U.toast("已通过");
+          await reload();
+        } else b.disabled = false;
+      }));
+      U.$$("[data-cb-reject]", el).forEach((b) => b.addEventListener("click", async () => {
+        if (await Store.reviewContribution(b.dataset.cbReject, "reject")) await reload();
+      }));
+      const toastRun = (d) => {
+        if (!d) return;
+        U.toast((d.results || []).map((r) => `${r.name}：${r.note}`).join("；") || "没有启用中的源", 5000);
+      };
+      U.$("#watch-run-all", el).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "扫描中…";
+        toastRun(await Store.runWatch());
+        await reload();
+      });
+      U.$$("[data-ws-run]", el).forEach((b) => b.addEventListener("click", async () => {
+        b.disabled = true;
+        toastRun(await Store.runWatch(b.dataset.wsRun));
+        await reload();
+      }));
+      U.$$("[data-ws-enabled]", el).forEach((cb) => cb.addEventListener("change", async () => {
+        if (await Store.updateWatchSource(cb.dataset.wsEnabled, { enabled: cb.checked })) await reload();
+      }));
+      U.$$("[data-ws-del]", el).forEach((b) => b.addEventListener("click", async () => {
+        if (await U.confirmModal("删除该盯源？其候选卡会一并清除。", { danger: true })) {
+          if (await Store.delWatchSource(b.dataset.wsDel)) await reload();
+        }
+      }));
+      U.$("#ws-add", el).addEventListener("click", async () => {
+        const name = U.$("#ws-name", el).value.trim();
+        const url = U.$("#ws-url", el).value.trim();
+        const keywords = U.$("#ws-kw", el).value.split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+        if (!name || !/^https?:\/\//.test(url)) { U.toast("请填写来源名称和有效的栏目链接"); return; }
+        if (await Store.addWatchSource({ name, url, keywords })) await reload();
+      });
+      U.$$("[data-wi-import]", el).forEach((b) => b.addEventListener("click", async () => {
+        const id = b.dataset.wiImport;
+        const grade = U.$(`[data-wi-grade="${id}"]`, el).value;
+        b.disabled = true;
+        if (await Store.importWatchItem(id, grade)) {
+          U.toast("已入库为「候选」素材，请到素材管理确认定级", 4000);
+          await reload();
+        } else b.disabled = false;
+      }));
+      U.$$("[data-wi-ignore]", el).forEach((b) => b.addEventListener("click", async () => {
+        if (await Store.ignoreWatchItem(b.dataset.wiIgnore)) await reload();
+      }));
     },
     knowledge(el) {
       const dl = U.$("#kb-download", el);

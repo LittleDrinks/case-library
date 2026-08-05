@@ -532,6 +532,101 @@
     };
   };
   S.savePrefs = (prefs) => { S.me().prefs = prefs; persist(); };
+
+  // ------------------------------------------------------------ 盯源与众筹（WP5，权威在服务端）
+  // 盯源（admin）：返回 {sources, items}；items 含各状态候选卡，页面前端按标题相似度分组
+  S.fetchWatchItems = async () => {
+    try {
+      const d = await apiJSON("/api/admin/watch/items");
+      return d && d.ok ? { sources: d.sources || [], items: d.items || [] } : null;
+    } catch (e) { return null; }
+  };
+  S.addWatchSource = async (src) => {
+    const d = await apiJSON("/api/admin/watch/sources", {
+      method: "POST", body: JSON.stringify(src),
+    }).catch(() => null);
+    if (!d || !d.ok) { apiFail(d, "添加盯源"); return false; }
+    return true;
+  };
+  S.updateWatchSource = async (id, patch) => {
+    const d = await apiJSON("/api/admin/watch/sources/" + encodeURIComponent(id), {
+      method: "PATCH", body: JSON.stringify(patch),
+    }).catch(() => null);
+    if (!d || !d.ok) { apiFail(d, "保存盯源"); return false; }
+    return true;
+  };
+  S.delWatchSource = async (id) => {
+    const d = await apiJSON("/api/admin/watch/sources/" + encodeURIComponent(id), {
+      method: "DELETE",
+    }).catch(() => null);
+    if (!d || !d.ok) { apiFail(d, "删除盯源"); return false; }
+    return true;
+  };
+  // 手动触发扫描：同步执行，返回 {added, results:[{name, ok, added, note}]}
+  S.runWatch = async (sourceId) => {
+    try {
+      const d = await apiJSON("/api/admin/watch/run", {
+        method: "POST", body: JSON.stringify(sourceId ? { sourceId } : {}),
+      });
+      if (!d || !d.ok) { apiFail(d, "扫描"); return null; }
+      return d;
+    } catch (e) { apiFail(null, "扫描"); return null; }
+  };
+  // 候选卡入库（走服务端同一入库闸，落素材「候选」）；忽略后不再出现在待审列表
+  S.importWatchItem = async (id, grade) => {
+    try {
+      const d = await apiJSON("/api/admin/watch/items/" + encodeURIComponent(id) + "/import", {
+        method: "POST", body: JSON.stringify({ grade }),
+      });
+      if (!d || !d.ok) { apiFail(d, "入库"); return false; }
+      if (d.material) {
+        const m = S.db.materials.find((x) => x.id === d.material.id);
+        if (m) Object.assign(m, d.material);
+        else S.db.materials.unshift(d.material);
+      }
+      return true;
+    } catch (e) { apiFail(null, "入库"); return false; }
+  };
+  S.ignoreWatchItem = async (id) => {
+    const d = await apiJSON("/api/admin/watch/items/" + encodeURIComponent(id), {
+      method: "PATCH", body: JSON.stringify({ status: "已忽略" }),
+    }).catch(() => null);
+    if (!d || !d.ok) { apiFail(d, "忽略"); return false; }
+    return true;
+  };
+  // 众筹贡献（先审后发）：link=素材链接、kn_link=知识点-素材关联；完整案例走「提交审核」
+  S.addContribution = async (kind, payload) => {
+    try {
+      const d = await apiJSON("/api/contributions", {
+        method: "POST", body: JSON.stringify({ kind, payload }),
+      });
+      if (d && d.ok) return { ok: true, contribution: d.contribution };
+      return { ok: false, error: (d && d.error) || "提交失败" };
+    } catch (e) {
+      return { ok: false, error: "提交请求失败（服务不可用）" };
+    }
+  };
+  S.fetchContributions = async () => {
+    try {
+      const d = await apiJSON("/api/contributions");
+      return d && d.ok ? d.contributions || [] : [];
+    } catch (e) { return []; }
+  };
+  S.reviewContribution = async (id, action) => {
+    const d = await apiJSON("/api/contributions/" + encodeURIComponent(id) + "/review", {
+      method: "POST", body: JSON.stringify({ action }),
+    }).catch(() => null);
+    if (!d || !d.ok) { apiFail(d, "审核贡献"); return null; }
+    return d;
+  };
+  // 我的影响力：素材贡献被引次数 + 案例被收藏/被点赞聚合
+  S.fetchMyImpact = async () => {
+    try {
+      const d = await apiJSON("/api/my/impact");
+      return d && d.ok ? d : null;
+    } catch (e) { return null; }
+  };
+
   // 重置演示数据：清本地偏好 + 服务端业务表重灌种子（仅 admin，服务端再校验）
   S.resetAll = async () => {
     Object.keys(caseSyncTimers).forEach((k) => clearTimeout(caseSyncTimers[k]));
