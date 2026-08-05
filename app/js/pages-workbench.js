@@ -621,11 +621,15 @@ window.Pages = window.Pages || {};
         else if (useDiff(m)) body = diffBodyHTML(m, i);
         else body = m.agent ? agentBodyHTML(m) : aiBodyHTML(m);
         const chain = m.role !== "user" && (m.agents || []).length ? agentsCollapsedHTML(m, i) : "";
+        // 禁用词命中警示（WP4b）：服务端在候选 risks 里标注 banned 项，采纳时转 risk 批注
+        const bannedHits = (m.risks || []).filter((r) => r.banned);
+        const bannedBar = bannedHits.length
+          ? `<div class="cp-guard soft">⚠ 命中你的禁用词：${U.esc(bannedHits.map((r) => r.quote).join("、"))}（采纳时将转为风险批注）</div>` : "";
         // hash 守卫提示条：确认态（点采纳后）带确认/取消按钮；moved 为被动提示
         const guardBar = m.confirming
           ? `<div class="cp-guard"><span>正文在生成后有改动${useDiff(m) ? "，以下 diff 基于生成时版本" : ""}，确认采纳？</span><span class="cp-guard-btns"><button class="btn sm" data-guard-ok="${i}">确认采纳</button><button class="btn sm plain" data-guard-no="${i}">取消</button></span></div>`
           : guard === "moved" ? `<div class="cp-guard soft">正文在生成后有改动${useDiff(m) ? "，diff 基于生成时版本" : ""}；采纳前会请你确认。</div>` : "";
-        return `<div class="chat-msg ${m.role === "user" ? "user" : ""}"><div class="bubble">${chain}${guardBar}${body}
+        return `<div class="chat-msg ${m.role === "user" ? "user" : ""}"><div class="bubble">${chain}${guardBar}${bannedBar}${body}
           ${m.meta ? `<div class="small" style="opacity:.65;margin-top:6px">${U.esc(m.meta.model || "")} · ${(m.meta.ms / 1000).toFixed(1)}s</div>` : ""}
           ${m.role !== "user" ? srcChipsHTML(m.sources) : ""}
           ${acts ? `<div class="actions">${acts}</div>` : ""}
@@ -909,7 +913,9 @@ window.Pages = window.Pages || {};
         await Store.addAnnotation(c, {
           kind: "risk", status: "pending", section: 0,
           quote: String(rk.quote || "").replace(/〔\d+[^〕]*〕/g, "").slice(0, 60),
-          text: "AI 生成内容中的引用〔" + rk.n + "〕没有对应的检索资料，正文已标「待核实」，请人工核实来源。",
+          text: rk.banned
+            ? "【教师偏好·禁用词】" + (rk.note || ("命中禁用词「" + rk.quote + "」"))
+            : "AI 生成内容中的引用〔" + rk.n + "〕没有对应的检索资料，正文已标「待核实」，请人工核实来源。",
           author: "Copilot", lowRisk: false,
         });
       }

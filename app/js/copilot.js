@@ -491,10 +491,16 @@
   C.buildMessages = async (c, focusIdx, userText, intent, skipDirective, conversationKey) => {
     const ctx = await C.buildContext(c, focusIdx, userText);
     const directive = skipDirective ? "" : (INTENT_PROMPT[intent] || "");
+    // 偏好行：服务端显式生成偏好（WP4b，篇幅/风格/禁用词/常用主题）+ 本地教学偏好（权威来源/课堂形式）
+    const gp = await Store.fetchMyPrefs() || {};
     const prefs = Store.me().prefs || {};
-    const prefLine = "教师偏好：语言风格" + (prefs.style || "简练") +
-      (prefs.authorityFirst ? "；优先权威来源" : "") +
-      (prefs.classForm ? "；常用课堂形式：" + prefs.classForm : "");
+    const parts = ["语言风格" + (gp.style || prefs.style || "简练")];
+    if (gp.length) parts.push("篇幅：" + gp.length);
+    if (gp.themes) parts.push("常结合思政主题：" + gp.themes);
+    if (gp.bannedWords) parts.push("以下禁用词绝对不得出现：" + gp.bannedWords);
+    if (prefs.authorityFirst) parts.push("优先权威来源");
+    if (prefs.classForm) parts.push("常用课堂形式：" + prefs.classForm);
+    const prefLine = "教师偏好：" + parts.join("；");
     const requirement = "【教师要求】" + (directive ? directive + "\n" : "") + userText;
     if (!conversationKey) {
       const user = ctx + "\n" + prefLine + "\n" + requirement;

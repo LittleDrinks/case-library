@@ -533,6 +533,27 @@
   };
   S.savePrefs = (prefs) => { S.me().prefs = prefs; persist(); };
 
+  // 我的生成偏好（WP4b，服务端 user_prefs 表为权威；本地仅按账号缓存一份）
+  let genPrefsCache = null; // {uid, prefs}
+  S.fetchMyPrefs = async () => {
+    if (genPrefsCache && genPrefsCache.uid === S.userId) return genPrefsCache.prefs;
+    let prefs = {};
+    try {
+      const d = await apiJSON("/api/my/prefs");
+      if (d && d.ok && d.prefs) prefs = d.prefs;
+    } catch (e) { /* 服务不可用时按无偏好处理 */ }
+    genPrefsCache = { uid: S.userId, prefs };
+    return prefs;
+  };
+  S.saveMyPrefs = async (prefs) => {
+    try {
+      const d = await apiJSON("/api/my/prefs", { method: "PUT", body: JSON.stringify(prefs || {}) });
+      if (!d || !d.ok) { apiFail(d, "保存偏好"); return null; }
+      genPrefsCache = { uid: S.userId, prefs: d.prefs };
+      return d.prefs;
+    } catch (e) { apiFail(null, "保存偏好"); return null; }
+  };
+
   // ------------------------------------------------------------ 盯源与众筹（WP5，权威在服务端）
   // 盯源（admin）：返回 {sources, items}；items 含各状态候选卡，页面前端按标题相似度分组
   S.fetchWatchItems = async () => {

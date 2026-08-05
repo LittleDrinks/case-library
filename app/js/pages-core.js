@@ -140,6 +140,8 @@ window.Pages = window.Pages || {};
   const minePages = { doing: 1, reviewing: 1, published: 1 };
   // 影响力与贡献（WP5）：按账号缓存，切换账号后重拉
   let impactData = null, contribData = null;
+  // 我的生成偏好（WP4b，服务端 user_prefs）：按账号缓存
+  let genPrefsData = null;
 
   P.myCases = () => {
     const me = Store.me();
@@ -203,6 +205,33 @@ window.Pages = window.Pages || {};
 
     const PREP_NAME = { "kit-design": "教学设计", "kit-discussion": "讨论题", "kit-ppt": "PPT 提纲" };
 
+    // 我的生成偏好（WP4b）：教师亲手填写、可见、可改、可清空；AI 起草/改写时注入
+    const gp = genPrefsData && genPrefsData.uid === me.id ? genPrefsData.prefs : null;
+    const genPrefsCard = `
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
+          <span>我的生成偏好</span><span class="small muted">AI 起草/改写时生效${gp && gp.updatedAt ? " · 更新于 " + U.esc(gp.updatedAt) : ""}</span>
+        </div>
+        <div class="card-pad">
+          ${!gp ? `<div class="small muted">加载中…</div>` : `
+          <div class="row wrap" style="gap:8px;align-items:flex-end">
+            <label class="field" style="flex:1;min-width:150px"><span>篇幅偏好</span>
+              <input class="text" id="gp-length" value="${U.esc(gp.length || "")}" placeholder="如：800字以内"></label>
+            <label class="field" style="flex:1;min-width:150px"><span>语言风格</span>
+              <select class="text" id="gp-style">
+                ${["", "朴实课堂型", "理论阐释型", "故事叙事型"].map((s) =>
+                  `<option value="${s}" ${gp.style === s ? "selected" : ""}>${s || "（不限）"}</option>`).join("")}
+              </select></label>
+            <label class="field" style="flex:1;min-width:180px"><span>禁用词</span>
+              <input class="text" id="gp-banned" value="${U.esc(gp.bannedWords || "")}" placeholder="逗号分隔，如：赋能，抓手"></label>
+            <label class="field" style="flex:1;min-width:180px"><span>常用思政主题</span>
+              <input class="text" id="gp-themes" value="${U.esc(gp.themes || "")}" placeholder="如：科学家精神，科技自立自强"></label>
+            <button class="btn sm" id="gp-save">保存</button>
+            <button class="btn sm plain" id="gp-clear">清空</button>
+          </div>`}
+        </div>
+      </div>`;
+
     // 我的影响力（被引用/被改编，从简统计卡）与众筹贡献列表
     const impact = impactData && impactData.uid === me.id ? impactData.data : null;
     const contribs = contribData && contribData.uid === me.id ? contribData.list : null;
@@ -225,6 +254,7 @@ window.Pages = window.Pages || {};
         <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>待办</span></div>
         <div>${todoRows.join("") || `<div class="card-pad muted small">没有待处理的事项</div>`}</div>
       </div>
+      ${genPrefsCard}
       <div class="card" style="margin-bottom:18px">
         <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>我的影响力</span></div>
         ${impact ? `<div class="card-pad dyn-nums">
@@ -306,6 +336,25 @@ window.Pages = window.Pages || {};
         if (!contribData || contribData.uid !== me.id) {
           Store.fetchContributions().then((list) => { contribData = { uid: me.id, list: list || [] }; P.rerender(); });
         }
+        if (!genPrefsData || genPrefsData.uid !== me.id) {
+          Store.fetchMyPrefs().then((p) => { genPrefsData = { uid: me.id, prefs: p || {} }; P.rerender(); });
+        }
+        const saveGp = async (prefs, verb) => {
+          const saved = await Store.saveMyPrefs(prefs);
+          if (!saved) return;
+          genPrefsData = { uid: me.id, prefs: saved };
+          U.toast(verb);
+          P.rerender();
+        };
+        const gpSave = U.$("#gp-save", el);
+        if (gpSave) gpSave.addEventListener("click", () => saveGp({
+          length: U.$("#gp-length", el).value.trim(),
+          style: U.$("#gp-style", el).value,
+          bannedWords: U.$("#gp-banned", el).value.trim(),
+          themes: U.$("#gp-themes", el).value.trim(),
+        }, "生成偏好已保存"));
+        const gpClear = U.$("#gp-clear", el);
+        if (gpClear) gpClear.addEventListener("click", () => saveGp({}, "生成偏好已清空"));
         const refreshContribs = async () => {
           contribData = { uid: me.id, list: await Store.fetchContributions() || [] };
           P.rerender();

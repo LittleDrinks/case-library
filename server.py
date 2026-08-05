@@ -34,7 +34,9 @@
    版权默认策略：只存标题+摘要+原文链接+元数据，不抓全文；
 15. /api/contributions、/api/my/impact —— 众筹雏形（WP5）：素材链接（link）与知识点-素材关联
    （kn_link）贡献先审后发（kn_link 通过后体现在 recommendFor 打分里），仅本人可见自己的贡献；
-   /api/my/impact 聚合素材贡献被引次数与案例被收藏/被点赞数。
+   /api/my/impact 聚合素材贡献被引次数与案例被收藏/被点赞数；
+16. /api/my/prefs（GET/PUT）—— 教师显式生成偏好（WP4b，user_prefs 表：篇幅/风格/禁用词/常用主题，
+   只来自教师亲手填写，四项全空即清空）；写作手生成时注入 prompt，禁用词命中在结果中标 risk 警示。
 
 仅依赖标准库 + python-docx。运行：python3 server.py [port]
 """
@@ -1694,6 +1696,41 @@ def api_my_impact(user):
     return dict({"ok": True}, **CASEDB.my_impact(user)), 200
 
 
+# ------------------------------------------------------------ 教师生成偏好（WP4b）
+def api_my_prefs_get(user):
+    err = _need_login(user)
+    if err:
+        return err
+    return {"ok": True, "prefs": CASEDB.get_prefs(user["id"])}, 200
+
+
+def api_my_prefs_put(user, payload):
+    """整体覆盖：{length, style, bannedWords, themes}；四项全空即清空。"""
+    err = _need_login(user)
+    if err:
+        return err
+    return {"ok": True, "prefs": CASEDB.set_prefs(user["id"], payload or {})}, 200
+
+
+PREF_LABELS = (("length", "篇幅"), ("style", "语言风格"),
+               ("bannedWords", "禁用词（生成结果中绝对不得出现）"), ("themes", "常结合的思政主题"))
+
+
+def prefs_prompt_block(prefs):
+    """教师偏好注入 prompt 的说明段；无偏好（全空）返回空串。"""
+    lines = ["%s：%s" % (label, (prefs or {}).get(k, ""))
+             for k, label in PREF_LABELS if (prefs or {}).get(k)]
+    if not lines:
+        return ""
+    return ("【教师偏好（教师本人填写，生成时必须遵守）】\n" + "\n".join(lines))
+
+
+def banned_word_hits(text, prefs):
+    """禁用词服务端检查：逗号/顿号分隔，命中词按序去重返回。"""
+    words = [w.strip() for w in re.split(r"[,，、;；]", (prefs or {}).get("bannedWords") or "")]
+    return [w for w in dict.fromkeys(w for w in words if w) if w in (text or "")]
+
+
 # ------------------------------------------------------------ MoA 多智能体编排（/api/ai/agent）
 INTENT_ROUTES = {
     "find-theory": "librarian", "find-material": "librarian",
@@ -2271,7 +2308,9 @@ class Handler(BaseHTTPRequestHandler):
         if not ((payload.get("text") or "").strip()
                 or payload.get("selection") or ctx.get("sectionText")):
             return self._send_json({"ok": False, "error": "缺少请求内容 text"}, 400)
-        max_level = req_max_level(auth_user(self))
+        user = auth_user(self)
+        max_level = req_max_level(user)
+        prefs = CASEDB.get_prefs(user["id"]) if (user and CASEDB is not None) else {}
         self._sse_begin()
         try:
             hint = (payload.get("intentHint") or "").strip()
@@ -2286,7 +2325,7 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "reviewer":
                 self._agent_reviewer(user_text, history, payload, max_level)
             else:
-                self._agent_writer(user_text, history, payload, max_level)
+                self._agent_writer(user_text, history, payload, max_level, prefs)
             self._sse_frame({"type": "done"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -2342,9 +2381,10 @@ class Handler(BaseHTTPRequestHandler):
                              "which": "main", "text": piece})
         self._sse_frame({"type": "result", "kind": "text", "text": final_text})
 
-    def _agent_writer(self, user_text, history, payload, max_level):
+    def _agent_writer(self, user_text, history, payload, max_level, prefs=None):
         """写作手：先做资料检索（chunk 编号表注入 prompt），ThreadPoolExecutor 并行双候选，
-        成稿经引用后处理校验（对不上 chunk 的〔n〕降级「待核实」+ risk 记录）。"""
+        成稿经引用后处理校验（对不上 chunk 的〔n〕降级「待核实」+ risk 记录）。
+        教师有生成偏好（WP4b）时注入偏好段；禁用词命中在候选 risks 里加警示（前端转 risk 批注）。"""
         self._sse_role("librarian", MOA_MODEL_LIBRARIAN)
         chunks = _moa_evidence_chunks(payload, max_level)
         self._sse_frame({"type": "tool", "agent": "librarian", "tool": "search_corpus",
@@ -2353,6 +2393,10 @@ class Handler(BaseHTTPRequestHandler):
         if chunks:
             user_text += ("\n\n【本次可用资料 chunk（事实与理论只能依据下表，〔n〕为引用编号）】\n"
                           + _moa_chunks_brief(chunks))
+        pref_block = prefs_prompt_block(prefs)
+        if pref_block:
+            user_text += "\n\n" + pref_block
+        sys.stderr.write("[prefs] 写作手 prompt %s教师偏好段\n" % ("含" if pref_block else "不含"))
         self._sse_role("writer", AI_DEFAULT_MODEL)
         msgs = ([{"role": "system", "content": WRITER_PROMPT}] + history
                 + [{"role": "user", "content": user_text}])
@@ -2382,6 +2426,9 @@ class Handler(BaseHTTPRequestHandler):
         for r in results.values():
             if r.get("text"):
                 r["text"], r["risks"] = _moa_check_citations(r["text"], chunks)
+                for w in banned_word_hits(r["text"], prefs):
+                    r["risks"].append({"n": 0, "quote": w, "banned": True,
+                                       "note": "生成结果命中你的禁用词「%s」，建议修改后再采纳" % w})
         fallback = {"model": "", "text": ""}
         self._sse_frame({"type": "result", "kind": "candidates",
                          "main": results.get("main") or fallback,
@@ -2526,6 +2573,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my/impact":
             res, status = api_my_impact(auth_user(self))
             return self._send_json(res, status)
+        if path == "/api/my/prefs":
+            res, status = api_my_prefs_get(auth_user(self))
+            return self._send_json(res, status)
         m = re.match(r"^/api/materials/([^/]+?)/?$", path)
         if m:
             res, status = api_material_get(auth_user(self), urllib.parse.unquote(m.group(1)))
@@ -2660,6 +2710,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        return self._send_json({"ok": False, "error": "not found"}, 404)
+
+    def do_PUT(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/my/prefs":
+            res, status = api_my_prefs_put(auth_user(self), self._read_json())
+            return self._send_json(res, status)
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
     def do_DELETE(self):

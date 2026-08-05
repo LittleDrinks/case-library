@@ -128,6 +128,14 @@ CREATE TABLE IF NOT EXISTS contributions(
   reviewedBy TEXT DEFAULT '',
   at TEXT
 );
+CREATE TABLE IF NOT EXISTS user_prefs(
+  userId TEXT PRIMARY KEY,
+  length TEXT DEFAULT '',
+  style TEXT DEFAULT '',
+  bannedWords TEXT DEFAULT '',
+  themes TEXT DEFAULT '',
+  updatedAt TEXT
+);
 """
 
 # 素材状态：候选（入库闸，待 admin 确认）/正常/停用/来源失效；「待淘汰」为派生态不落库
@@ -1363,6 +1371,33 @@ class CaseDB:
             self._conn.commit()
             r = self._conn.execute("SELECT * FROM contributions WHERE id=?", (cid,)).fetchone()
             return (self._contrib_obj(r), material), None, 200
+
+    # ------------------------------------------------------------ 我的生成偏好（WP4b）
+    PREF_KEYS = ("length", "style", "bannedWords", "themes")
+
+    def get_prefs(self, user_id):
+        """教师显式填写的生成偏好；未填写时四个字段均为空串。"""
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT * FROM user_prefs WHERE userId=?", (user_id,)).fetchone()
+            out = {k: (r[k] or "") if r else "" for k in self.PREF_KEYS}
+            out["updatedAt"] = (r["updatedAt"] or "") if r else ""
+            return out
+
+    def set_prefs(self, user_id, prefs):
+        """整体覆盖（PUT 语义）；四项全空即清空（删行）。偏好只来自教师亲手填写。"""
+        vals = {k: str((prefs or {}).get(k) or "").strip()[:200] for k in self.PREF_KEYS}
+        with self._lock:
+            if any(vals.values()):
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO user_prefs(userId,length,style,bannedWords,themes,updatedAt)"
+                    " VALUES(?,?,?,?,?,?)",
+                    (user_id, vals["length"], vals["style"], vals["bannedWords"],
+                     vals["themes"], _now()))
+            else:
+                self._conn.execute("DELETE FROM user_prefs WHERE userId=?", (user_id,))
+            self._conn.commit()
+        return self.get_prefs(user_id)
 
     # ------------------------------------------------------------ 我的影响力
     def my_impact(self, user):
