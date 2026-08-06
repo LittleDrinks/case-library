@@ -43,6 +43,13 @@ window.Pages = window.Pages || {};
     let rvOpinion = "", rvFrom = "", rvReasonType = "";
     let selBtn = null;
 
+    // ---------------- OnlyOffice 主编辑器（WP6） ----------------
+    // OO 可达时编辑区换 DocEditor iframe（docx 为编辑真源，c.blocks 只是服务端回写副本，
+    // 故 OO 模式下 Store PATCH 不回写 blocks，见 store.js _ooManaged）；不可达或手动切换时
+    // 回退兼容块编辑器（OnlyOffice 验收前保留，验收后退役）。
+    let ooEditor = null, ooAvail = false, ooOff = false, ooCfg = null, ooApiLoading = null;
+    const ooMode = () => ooAvail && !ooOff;
+
     // ---------------- 正文模型 ----------------
     let focusBlock = 0;
     const blocksOf = () => Store.blocksOf(c);
@@ -207,8 +214,7 @@ window.Pages = window.Pages || {};
       return `<p>${render(b.text)}</p>`;
     };
 
-    const docHTML = () => `
-    <div class="doc-page">
+    const docHeadHTML = () => `
       <div class="doc-head">
         ${editable()
           ? `<input class="doc-title-input" id="wb-title" value="${U.esc(c.title)}" placeholder="案例标题">`
@@ -224,7 +230,15 @@ window.Pages = window.Pages || {};
           <input class="tag-input" id="case-tag-add" placeholder="+ 标签">
           <button class="btn sm plain" id="tag-suggest" title="按正文关键词推荐标签">建议标签</button>` : ""}
         </div>
-      </div>
+      </div>`;
+
+    const docHTML = () => `
+    <div class="doc-page">
+      <div id="wb-doc-head-box">${docHeadHTML()}</div>
+      ${ooMode() ? `
+      <div class="small muted" style="margin:4px 0 8px">OnlyOffice 编辑中（自动保存）：AI 采纳内容以「修订」形式进入文档，在编辑器内接受或拒绝；提交/导出前请确认编辑器已保存（💾）。</div>
+      <div id="oo-holder" style="height:72vh;border:1px solid var(--line);border-radius:6px"></div>
+      <div id="doc-refs-box">${refsHTML()}</div>` : `
       ${editable() ? `
       <div class="doc-tools">
         <button data-fmt="bold" title="加粗选中文字"><b>B</b></button>
@@ -236,7 +250,7 @@ window.Pages = window.Pages || {};
       </div>` : ""}
       <div class="doc-editor" id="doc-editor" ${editable() ? "contenteditable='true' spellcheck='false'" : ""}>${blocksOf().map((b, bi) =>
         blockHTML(b, editable() ? U.esc : (txt) => markCites(txt, bi))).join("")}</div>
-      ${refsHTML()}
+      ${refsHTML()}`}
     </div>`;
 
     function serializeDoc() {
@@ -284,6 +298,90 @@ window.Pages = window.Pages || {};
       Store.touch(c);
       Copilot.invalidateContext(c.id); // 正文变了，清该案例的 Copilot 上下文缓存
       setSaveState("已保存 " + U.now().slice(11));
+    }
+
+    // ---------------- OnlyOffice 编辑器装载 ----------------
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error("script load failed: " + src));
+        document.head.appendChild(s);
+      });
+    }
+
+    function destroyOO() {
+      if (ooEditor) {
+        try { ooEditor.destroyEditor(); } catch (e) { /* ignore */ }
+        ooEditor = null;
+      }
+    }
+
+    // 拉取签名 config → 置 ooAvail → drawAll（ooEditor 为空时 drawAll 负责渲染 holder 并建编辑器）；
+    // 失败保持兼容块编辑器并提示
+    async function initOO() {
+      let d = null;
+      try {
+        d = await fetch("/api/onlyoffice/config/" + encodeURIComponent(c.id), {
+          headers: Store.authHeaders(),
+        }).then((r) => r.json());
+      } catch (e) { /* 网络错误按不可用处理 */ }
+      if (!d || !d.ok) {
+        if (!ooAvail) U.toast("OnlyOffice 不可用，使用兼容编辑器", 3000);
+        ooAvail = false;
+        return false;
+      }
+      ooCfg = d;
+      ooAvail = true;
+      c._ooManaged = true; // docx 为真源：本案例 PATCH 不再回写 blocks
+      drawAll();
+      return true;
+    }
+
+    // 在 #oo-holder 里建 DocEditor（drawAll OO 分支在 ooEditor 为空时调用）
+    async function initOOEditor() {
+      const holder = U.$("#oo-holder");
+      if (!holder || ooEditor || !ooCfg) return;
+      try {
+        if (!window.DocsAPI) {
+          ooApiLoading = ooApiLoading || loadScript(ooCfg.apiJs);
+          await ooApiLoading;
+        }
+        const config = Object.assign({ width: "100%", height: "100%" }, ooCfg.config);
+        config.events = Object.assign({
+          onError: (e) => U.toast("OnlyOffice 错误：" + ((e && e.data) || "未知"), 3600),
+        }, config.events || {});
+        ooEditor = new window.DocsAPI.DocEditor("oo-holder", config);
+      } catch (e) {
+        ooAvail = false;
+        U.toast("OnlyOffice 加载失败，已切换兼容编辑器", 3200);
+        drawAll();
+      }
+    }
+
+    // AI 修订插入等服务端变更后：docxVer 已 bump，取新 config 重建编辑器强制 DS 重载
+    async function reloadOO() {
+      destroyOO();
+      await initOO();
+    }
+
+    // 按文本在文档中定位（批注/大纲/引用卡共用）：Automation API 搜索并选中；
+    // 无浏览器环境未实测，失败或不可用时提示手动 Ctrl+F
+    function ooSearchJump(text) {
+      text = String(text || "").trim().slice(0, 80);
+      if (!ooEditor || !text) return false;
+      try {
+        window.Asc = window.Asc || {};
+        window.Asc.scope = { q: text };
+        ooEditor.createConnector().callCommand(function () {
+          var a = Api.GetDocument().Search(Asc.scope.q, true);
+          if (a && a.length) a[0].Select();
+        });
+        return true;
+      } catch (e) {
+        return false;
+      }
     }
 
     // ---------------- 提案-采纳守卫基线 ----------------
@@ -375,6 +473,7 @@ window.Pages = window.Pages || {};
         btns.push(`<button class="btn plain" id="wb-export">导出</button>`);
         if (c.status === "draft" && editable()) btns.push(`<button class="btn plain" id="wb-delete">删除</button>`);
       }
+      if (ooAvail) btns.push(`<button class="btn plain" id="wb-editor-toggle" title="主编辑器（OnlyOffice）与兼容块编辑器切换">${ooOff ? "OnlyOffice 编辑" : "兼容模式"}</button>`);
       btns.push(`<button class="btn plain" id="wb-outline-btn">大纲</button>`);
       const frozenNote = c.status === "pending" ? "已提交待审，内容已冻结"
         : c.status === "reviewing" ? "管理员审核中，内容已冻结" : "";
@@ -518,6 +617,7 @@ window.Pages = window.Pages || {};
 
     // 渲染用守卫状态：moved=正文生成后有改动但可确认采纳；stale=改写类按钮禁用并给重发入口
     function guardTag(msg) {
+      if (ooMode()) return null; // OO 模式下 blocks 是服务端回写副本，hash 守卫不适用
       const meta = msg.meta || {};
       if (!meta.workHash) return null;
       const types = (msg.actions || []).map((a) => a.type);
@@ -819,8 +919,18 @@ window.Pages = window.Pages || {};
       sendChat(v, intent, skip, opts);
     }
 
-    // 结果卡采纳动作：选区改写只保留「替换选中内容」；逐节生成为写入本节/存为新节；其余写作类为现状三件套
+    // 结果卡采纳动作：OO 模式下采纳 = 服务端把内容以 track-changes 修订写入 docx
+    // （选区改写不可用：跨域 iframe 拿不到编辑器选区）；兼容模式为现状三件套
     function adoptActionsFor(msg, sel, opts) {
+      if (ooMode()) {
+        if (sel) return [];
+        if (msg.intent === "section-draft") {
+          msg.meta.secFrom = opts.secFrom;
+          msg.meta.secTitle = opts.secTitle;
+          return [{ label: "以修订写入本节", type: "sec-fill" }, { label: "以修订存为新节", type: "newsec" }];
+        }
+        return [{ label: "以修订追加到文末", type: "append" }, { label: "以修订存为新节", type: "newsec" }];
+      }
       if (sel) return [{ label: "替换选中内容", type: "replace-sel" }];
       if (msg.intent === "section-draft") {
         msg.meta.secFrom = opts.secFrom;
@@ -882,7 +992,8 @@ window.Pages = window.Pages || {};
     function actionsFor(intent, content) {
       const acts = [];
       if (editable() && ["polish", "adapt-grad", "adapt-ug", "adapt-embed", "draft"].includes(intent)) {
-        acts.push({ label: "替换当前节", type: "replace" }, { label: "追加到当前节", type: "append" }, { label: "存为新节", type: "newsec" });
+        if (ooMode()) acts.push({ label: "以修订追加到文末", type: "append" }, { label: "以修订存为新节", type: "newsec" });
+        else acts.push({ label: "替换当前节", type: "replace" }, { label: "追加到当前节", type: "append" }, { label: "存为新节", type: "newsec" });
       } else if (intent === "review") {
         const annos = Copilot.parseReview(c, content);
         if (annos.length) acts.push({ label: `加入批注（${annos.length} 条）`, type: "annos", annos });
@@ -893,6 +1004,7 @@ window.Pages = window.Pages || {};
     // 采纳守卫层（不改既有分支语义）：hash 一致直接放行；不一致时 append/newsec/sec-fill 仅确认，
     // replace/replace-sel 需 baseText 在当前正文唯一匹配（confirm），匹配失败阻断（stale）
     function adoptGuard(msg, type) {
+      if (ooMode()) return "ok"; // 采纳走服务端修订插入，不依赖本地 blocks 匹配
       const meta = msg.meta || {};
       if (!meta.workHash) return "ok";
       if (editable()) serializeDoc(); // 冲刷未落块的编辑，保证 hash 对的是最新正文
@@ -923,6 +1035,30 @@ window.Pages = window.Pages || {};
 
     async function runAction(msg, act, force) {
       const paras = msg.text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      // OO 模式：采纳 = 服务端把内容以 track-changes 修订写入 docx，随后按新 key 重建编辑器
+      if (editable() && ooMode() && ["replace", "append", "newsec", "replace-sel", "sec-fill"].includes(act.type)) {
+        if (act.type === "replace" || act.type === "replace-sel") {
+          U.toast("改写类采纳请在 OnlyOffice 中手动处理（OO 模式暂只支持追加/新节/写入本节）", 3600);
+          return;
+        }
+        const d = await fetch("/api/onlyoffice/insert", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, Store.authHeaders()),
+          body: JSON.stringify({
+            caseId: c.id,
+            mode: act.type === "newsec" ? "newsec" : "append",
+            text: msg.text,
+            secTitle: act.type === "sec-fill" ? (msg.meta && msg.meta.secTitle) || "" : "",
+          }),
+        }).then((r) => r.json()).catch(() => null);
+        if (!d || !d.ok) { U.toast((d && d.error) || "AI 修订写入失败"); return; }
+        Object.assign(c, d.case);
+        c._ooManaged = true;
+        await adoptEvidence(msg);
+        U.toast("已作为修订插入文档，请在 OnlyOffice 中接受或拒绝", 3200);
+        await reloadOO();
+        return;
+      }
       if (editable() && ["replace", "append", "newsec", "replace-sel", "sec-fill"].includes(act.type)) {
         // hash 守卫层：stale 阻断；confirm 先在结果卡顶部弹确认条，确认后带 force 重进
         const guard = adoptGuard(msg, act.type);
@@ -1385,7 +1521,8 @@ window.Pages = window.Pages || {};
       }
       renumberCitations();
       Store.touch(c);
-      if (!silent) U.toast(already ? "该资源已在引用中" : `已添加引用〔${n}〕`);
+      if (!silent) U.toast(already ? "该资源已在引用中"
+        : ooMode() ? `已添加引用〔${n}〕，请在 OnlyOffice 正文相应句后手动标注〔${n}〕` : `已添加引用〔${n}〕`);
       if (!silent || domDirty) drawAll();
     }
 
@@ -1801,7 +1938,22 @@ window.Pages = window.Pages || {};
     function drawAll() {
       renumberCitations();
       U.$("#wb-head-box").innerHTML = headHTML();
-      U.$("#wb-secs").innerHTML = showDiff ? diffHTML() : docHTML();
+      if (ooMode() && !showDiff) {
+        // OO 编辑器 iframe 不能随每次重绘销毁：只在未建编辑器时整区渲染，
+        // 其余时候只刷新文档头与参考文献区
+        if (!ooEditor) {
+          U.$("#wb-secs").innerHTML = docHTML();
+          initOOEditor();
+        } else {
+          const dh = U.$("#wb-doc-head-box");
+          if (dh) dh.innerHTML = docHeadHTML();
+          const rb = U.$("#doc-refs-box");
+          if (rb) rb.innerHTML = refsHTML();
+        }
+      } else {
+        if (ooEditor) destroyOO(); // 审核员的版本对比视图覆盖编辑区
+        U.$("#wb-secs").innerHTML = showDiff ? diffHTML() : docHTML();
+      }
       U.$("#wb-outline-box").innerHTML = outlineHTML();
       drawPanel();
     }
@@ -1958,11 +2110,18 @@ window.Pages = window.Pages || {};
             }
             if (t.dataset.locate) {
               const a = c.annotations.find((x) => x.id === t.dataset.locate);
-              if (a) locateBlock(a.section || 0);
+              if (a) {
+                if (ooMode()) {
+                  if (!ooSearchJump(a.quote || "")) U.toast("请在 OnlyOffice 中 Ctrl+F 查找该句定位", 3000);
+                } else locateBlock(a.section || 0);
+              }
               return;
             }
             if (t.dataset.outline) {
-              locateBlock(Number(t.dataset.outline));
+              if (ooMode()) {
+                const b = blocksOf()[Number(t.dataset.outline)];
+                if (!b || !ooSearchJump(b.text)) U.toast("请在 OnlyOffice 中 Ctrl+F 查找该标题", 3000);
+              } else locateBlock(Number(t.dataset.outline));
               return;
             }
             if (t.dataset.citeKn) { cite(t.dataset.citeKn); return; }
@@ -1976,6 +2135,12 @@ window.Pages = window.Pages || {};
             }
             if (t.dataset.citeLocate) {
               const n = Number(t.dataset.citeLocate);
+              if (ooMode()) {
+                const r = (c.citations || [])[n - 1];
+                const probe = (r && String(r.quote || "").trim().slice(0, 60)) || "〔" + n + "〕";
+                if (!ooSearchJump(probe)) U.toast("请在 OnlyOffice 中 Ctrl+F 查找「" + probe.slice(0, 20) + "」", 3200);
+                return;
+              }
               const ed = U.$("#doc-editor");
               if (ed) {
                 const mark = Array.from(ed.querySelectorAll(".cite-mark")).find((x) => x.dataset.citeJump === String(n));
@@ -2141,6 +2306,13 @@ window.Pages = window.Pages || {};
           if (e.target.id === "wb-versions") { versionsModal(); return; }
           if (e.target.id === "wb-export") { exportModal(); return; }
           if (e.target.id === "wb-diff") { showDiff = !showDiff; drawAll(); return; }
+          if (e.target.id === "wb-editor-toggle") {
+            ooOff = !ooOff;
+            destroyOO();
+            if (ooOff) drawAll();
+            else initOO();
+            return;
+          }
           if (e.target.id === "wb-outline-btn") {
             const o = U.$("#wb-outline");
             if (o) o.hidden = !o.hidden;
@@ -2228,11 +2400,13 @@ window.Pages = window.Pages || {};
         });
 
         drawPanel();
+        initOO(); // 尝试 OnlyOffice 主编辑器；不可达时保持兼容块编辑器
 
         this._unmount = () => {
           document.removeEventListener("mousedown", hideOnDown);
           hideSelBtn();
           Graph.stop();
+          destroyOO();
           // 路由切换会 clone #view 重渲染：取消进行中的流式请求与渲染定时器
           if (streamHandle) { streamHandle.abort(); streamHandle = null; }
           clearTimeout(phaseTimer); phaseTimer = null;

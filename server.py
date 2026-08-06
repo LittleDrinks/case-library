@@ -37,6 +37,11 @@
    /api/my/impact 聚合素材贡献被引次数与案例被收藏/被点赞数；
 16. /api/my/prefs（GET/PUT）—— 教师显式生成偏好（WP4b，user_prefs 表：篇幅/风格/禁用词/常用主题，
    只来自教师亲手填写，四项全空即清空）；写作手生成时注入 prompt，禁用词命中在结果中标 risk 警示。
+17. /api/onlyoffice/* —— OnlyOffice 主编辑器（WP6）：DS docker 部署（docker-compose.yml，8081，JWT）。
+   docx 为编辑真源（files/cases/{caseId}.docx，无则启动时从 blocks 迁移生成）；config 端点发 JWT 签名
+   的 DocEditor 配置（key=caseId-docxVer，内容变化即变）；callback 接收 DS 保存（status 2/6 下载落盘
+   并回写 blocks、bump docxVer）；insert 端点把 Copilot 采纳内容以 track-changes（w:ins/w:del）写入；
+   版本快照复制 docx 到 files/cases/versions/，回滚重建 docx 强制 DS 重载。
 
 仅依赖标准库 + python-docx。运行：python3 server.py [port]
 """
@@ -926,6 +931,9 @@ def api_case_patch(user, cid, payload):
     c, e = CASEDB.update_case(user, cid, payload or {})
     if e:
         return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    if "blocks" in (payload or {}):
+        # 兼容编辑器改 blocks 后同步 docx（docx 为编辑真源，仅对已 docx 化的案例）
+        sync_docx_from_blocks(cid, c.get("blocks"), only_if_exists=True)
     mark_search_dirty()
     return {"ok": True, "case": c}, 200
 
@@ -937,6 +945,7 @@ def api_case_delete(user, cid):
     e = CASEDB.delete_case(user, cid)
     if e:
         return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    delete_case_docx(cid)
     mark_search_dirty()
     return {"ok": True}, 200
 
@@ -990,6 +999,7 @@ def api_version_add(user, cid, payload):
     v, e = CASEDB.save_version(user, cid, (payload or {}).get("label"))
     if e:
         return {"ok": False, "error": e}, 404 if "不存在" in e else 403
+    save_version_docx(cid, v.get("id"))  # docx 副本到 files/cases/versions/
     c = CASEDB.get_case(cid, user)
     return {"ok": True, "version": v, "versions": c["versions"] if c else [v]}, 200
 
@@ -1001,6 +1011,8 @@ def api_version_rollback(user, cid, vid):
     c, e = CASEDB.rollback(user, cid, vid)
     if e:
         return {"ok": False, "error": e}, 404 if "不存在" in e or "快照" in e else 403
+    # 回滚后重建 docx 并 bump key，强制 DS 下次按新内容重载
+    sync_docx_from_blocks(cid, c.get("blocks"))
     mark_search_dirty()
     return {"ok": True, "case": c}, 200
 
@@ -2246,6 +2258,447 @@ def export_docx(payload):
     return buf.getvalue(), title
 
 
+# ------------------------------------------------------------ OnlyOffice 集成（WP6）
+# DS（Document Server）docker 部署，JWT HS256 用标准库 hmac 实现（不引依赖）。
+# docx 为编辑真源：files/cases/{caseId}.docx；blocks 保留作详情页渲染/检索/AI 上下文，
+# 每次 DS 保存回调 / AI 修订插入 / 版本回滚后由 docx 解析回写，并 bump docxVer（document.key 随内容变化）。
+OO_DS_URL = ENV.get("ONLYOFFICE_DS_URL", "").rstrip("/")       # 浏览器可达的 DS 地址（api.js 来源）
+OO_SERVER_URL = ENV.get("ONLYOFFICE_SERVER_URL", "").rstrip("/")  # DS 容器可达的本服务地址
+OO_JWT_SECRET = ENV.get("ONLYOFFICE_JWT_SECRET", "")
+CASES_DOCX_DIR = os.path.join(FILES_DIR, "cases")
+OO_LOCK = threading.Lock()  # docx 文件读写串行化
+OO_AUTHOR = "AI 助手"       # AI 修订（w:ins/w:del）的作者署名
+
+
+def oo_configured():
+    return bool(OO_DS_URL and OO_JWT_SECRET)
+
+
+def _oo_jwt_sign(payload_obj):
+    """JWT HS256（OnlyOffice 官方签名格式）：header/payload/signature 三段 b64url。"""
+    header = _b64url(b'{"alg":"HS256","typ":"JWT"}')
+    payload = _b64url(json.dumps(payload_obj, separators=(",", ":"),
+                                 ensure_ascii=False).encode("utf-8"))
+    sig = _b64url(hmac.new(OO_JWT_SECRET.encode("utf-8"),
+                           (header + "." + payload).encode("ascii"),
+                           hashlib.sha256).digest())
+    return header + "." + payload + "." + sig
+
+
+def _oo_jwt_verify(token):
+    """校验 DS 回传 JWT 签名，返回 payload；无效返回 None。"""
+    if not OO_JWT_SECRET or not token or token.count(".") != 2:
+        return None
+    header, payload, sig = token.split(".")
+    want = _b64url(hmac.new(OO_JWT_SECRET.encode("utf-8"),
+                            (header + "." + payload).encode("ascii"),
+                            hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, want):
+        return None
+    try:
+        return json.loads(_b64url_decode(payload))
+    except Exception:
+        return None
+
+
+def case_docx_path(cid):
+    return os.path.join(CASES_DOCX_DIR, cid + ".docx")
+
+
+def blocks_to_docx(blocks, path):
+    """blocks → docx：h2→Heading 1，p→正文，ul/ol→List Bullet/Number（一项一段），
+    quote→Quote 样式；〔n〕上标引用标记保留为字面文本。"""
+    from docx import Document
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc = Document()
+    for b in blocks or []:
+        kind = b.get("kind")
+        lines = [ln.strip() for ln in str(b.get("text") or "").split("\n") if ln.strip()]
+        if not lines:
+            continue
+        if kind == "h2":
+            doc.add_heading(lines[0], level=1)
+        elif kind == "ul":
+            for ln in lines:
+                doc.add_paragraph(ln, style="List Bullet")
+        elif kind == "ol":
+            for ln in lines:
+                doc.add_paragraph(ln, style="List Number")
+        elif kind == "quote":
+            for ln in lines:
+                try:
+                    doc.add_paragraph(ln, style="Quote")
+                except KeyError:
+                    doc.add_paragraph(ln)
+        else:
+            for ln in lines:
+                doc.add_paragraph(ln)
+    doc.save(path)
+
+
+def _para_full_text(p):
+    """段落全文：含 w:ins 修订内文本（python-docx p.text 会漏掉），排除 w:del 已删文本。"""
+    from docx.oxml.ns import qn
+    out = []
+    for node in p._p.iter():
+        if node.tag == qn("w:t"):
+            out.append(node.text or "")
+    return "".join(out)
+
+
+def docx_to_blocks(path):
+    """docx → blocks：Heading*→h2，List Bullet/Number 连续段合并为一个 ul/ol 块（一项一行），
+    Quote 连续段合并为 quote 块（一行一段），其余非空段→p。"""
+    from docx import Document
+    doc = Document(path)
+    blocks, acc_kind, acc = [], None, []
+
+    def flush():
+        nonlocal acc_kind, acc
+        if acc_kind and acc:
+            blocks.append({"kind": acc_kind, "text": "\n".join(acc)})
+        acc_kind, acc = None, []
+
+    for p in doc.paragraphs:
+        style = p.style.name if p.style is not None else ""
+        text = _para_full_text(p).strip()
+        if style.startswith("Heading"):
+            flush()
+            if text:
+                blocks.append({"kind": "h2", "text": text})
+            continue
+        kind = ("ul" if "Bullet" in style else
+                "ol" if "Number" in style else
+                "quote" if "Quote" in style else None)
+        if kind:
+            if acc_kind != kind:
+                flush()
+                acc_kind = kind
+            if text:
+                acc.append(text)
+            continue
+        flush()
+        if text:
+            blocks.append({"kind": "p", "text": text})
+    flush()
+    return blocks
+
+
+def ensure_case_docx(cid, blocks):
+    """无 docx 时从 blocks 生成（老案例迁移/文件丢失兜底）；返回是否新生成。"""
+    path = case_docx_path(cid)
+    if os.path.isfile(path):
+        return False
+    blocks_to_docx(blocks, path)
+    return True
+
+
+def migrate_cases_docx():
+    """启动迁移：为全部存量案例补齐 docx（种子 4 篇含在内）。"""
+    n = 0
+    with OO_LOCK:
+        for c in CASEDB.list_cases({"id": "system", "admin": True}):
+            if ensure_case_docx(c["id"], c.get("blocks")):
+                n += 1
+    return n
+
+
+def _oo_rev_mark(p_el, tag, author, date, rev_id):
+    """把段落内的 run 包进 w:ins/w:del 修订标记；w:del 时 w:t 改 w:delText。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    el = OxmlElement(tag)
+    el.set(qn("w:id"), str(rev_id))
+    el.set(qn("w:author"), author)
+    el.set(qn("w:date"), date)
+    for r in p_el.findall(qn("w:r")):
+        if tag == "w:del":
+            for t in r.findall(qn("w:t")):
+                t.tag = qn("w:delText")
+        p_el.remove(r)
+        el.append(r)
+    p_el.append(el)
+
+
+_OO_REV_ID = [1000]
+
+
+def _oo_rev_next():
+    _OO_REV_ID[0] += 1
+    return _OO_REV_ID[0]
+
+
+def oo_insert_revision(cid, mode, text, sec_title=""):
+    """AI 内容以 track-changes 修订形式写入 docx（教师在 OnlyOffice 里接受/拒绝）：
+    append=插到 secTitle 节末（无 secTitle 插文末）；newsec=文末新 h2 节；
+    replace=secTitle 节正文整体 w:del 标记删除 + 新内容 w:ins 紧随其后。
+    全部新段落以 w:ins 包裹。返回 (blocks, error)；成功后由调用方回写 blocks 并 bump docxVer。"""
+    from docx import Document
+    from docx.oxml.ns import qn
+    path = case_docx_path(cid)
+    if not os.path.isfile(path):
+        return None, "案例 docx 不存在"
+    paras = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
+    if mode == "newsec" and paras and paras[0].replace("#", "").strip() == (sec_title or "").strip():
+        pass  # 模型复述节标题时保留为首行标题
+    if not paras:
+        return None, "没有可写入的内容"
+    date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with OO_LOCK:
+        doc = Document(path)
+        body_pars = list(doc.paragraphs)
+        # 定位节：h2 文本与 sec_title 相同的段落；节末=下一个 Heading 或文末
+        sec_head, sec_end = None, None
+        if sec_title and mode in ("append", "replace"):
+            for i, p in enumerate(body_pars):
+                style = p.style.name if p.style is not None else ""
+                if style.startswith("Heading") and _para_full_text(p).strip() == sec_title:
+                    sec_head = i
+                    for j in range(i + 1, len(body_pars)):
+                        st = body_pars[j].style.name if body_pars[j].style is not None else ""
+                        if st.startswith("Heading"):
+                            sec_end = j
+                            break
+                    break
+            if sec_head is None:
+                return None, "docx 中未找到小节「%s」" % sec_title
+
+        def new_par(txt, style=None, tracked=True):
+            np = doc.add_paragraph(txt)  # 先挂到文末，再移动到目标位置
+            if style:
+                try:
+                    np.style = doc.styles[style]
+                except KeyError:
+                    pass
+            if tracked:
+                _oo_rev_mark(np._p, "w:ins", OO_AUTHOR, date, _oo_rev_next())
+            return np
+
+        anchor = None  # 插入点：插到 anchor 段之前；None=文末
+        if mode == "newsec":
+            head = paras[0].lstrip("#").strip()[:60]
+            rest = paras[1:] if len(paras) > 1 else paras
+            new_par(head, "Heading 1")
+            for t in rest:
+                new_par(t)
+        elif mode == "replace" and sec_head is not None:
+            # 节正文（标题之后、下一标题之前）整体标记删除，新内容插在下一标题前
+            end = sec_end if sec_end is not None else len(body_pars)
+            for p in body_pars[sec_head + 1:end]:
+                if _para_full_text(p).strip():
+                    _oo_rev_mark(p._p, "w:del", OO_AUTHOR, date, _oo_rev_next())
+            anchor = body_pars[sec_end]._p if sec_end is not None else None
+            news = [new_par(t) for t in paras]
+            if anchor is not None:
+                for np in news:
+                    anchor.addprevious(np._p)
+        else:  # append（有 secTitle 插节末，否则插文末）
+            if sec_head is not None:
+                anchor = body_pars[sec_end]._p if sec_end is not None else None
+            news = [new_par(t) for t in paras]
+            if anchor is not None:
+                for np in news:
+                    anchor.addprevious(np._p)
+        doc.save(path)
+        return docx_to_blocks(path), None
+
+
+def oo_download(url):
+    """从 DS 下载文件（callback 的 body.url）；JWT 头优先，失败降级裸 GET。"""
+    for headers in ({"Authorization": "Bearer " + _oo_jwt_sign({})},
+                    {"User-Agent": UA}):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read(), None
+        except Exception:
+            continue
+    return None, "从 Document Server 下载保存文件失败"
+
+
+# ------------------------------------------------------------ OnlyOffice API
+def _oo_doc_ver(cid):
+    data = CASEDB.get_case_data(cid) or {}
+    return int(data.get("docxVer") or 1)
+
+
+def api_oo_config(user, cid):
+    """DocEditor 初始化 config：document.url 指回本服务文件端点，callbackUrl 指回 callback，
+    key=caseId-docxVer（内容变化即变），permissions 按 owner/admin/只读区分；整体 JWT 签名。"""
+    err = _need_login(user)
+    if err:
+        return err
+    if not oo_configured():
+        return {"ok": False, "error": "服务端未配置 ONLYOFFICE_*"}, 503
+    c = CASEDB.get_case(cid, user)
+    if not c:
+        return {"ok": False, "error": "案例不存在或无权查看"}, 404
+    base = OO_SERVER_URL or ""
+    if not base:
+        return {"ok": False, "error": "服务端未配置 ONLYOFFICE_SERVER_URL"}, 503
+    with OO_LOCK:
+        ensure_case_docx(cid, c.get("blocks"))
+    can_edit = c["ownerId"] == user["id"] and c.get("status") == "draft"
+    can_comment = bool(user.get("admin"))
+    ver = _oo_doc_ver(cid)
+    config = {
+        "document": {
+            "fileType": "docx",
+            "key": "%s-v%d" % (cid, ver),
+            "title": (c.get("title") or cid) + ".docx",
+            "url": "%s/api/onlyoffice/file/%s" % (base, urllib.parse.quote(cid)),
+            "permissions": {
+                "edit": can_edit,
+                "comment": can_edit or can_comment,
+                "review": can_edit,
+                "download": True,
+                "print": True,
+            },
+        },
+        "documentType": "word",
+        "editorConfig": {
+            "callbackUrl": "%s/api/onlyoffice/callback?caseId=%s" % (base, urllib.parse.quote(cid)),
+            "lang": "zh-CN",
+            "mode": "edit" if can_edit else "view",
+            "user": {"id": user["id"], "name": user.get("name") or user["id"]},
+            "customization": {
+                "autosave": True,
+                "forcesave": True,
+                "comments": can_edit or can_comment,
+                "compactToolbar": False,
+            },
+        },
+    }
+    config["token"] = _oo_jwt_sign(config)
+    return {"ok": True, "config": config, "docxVer": ver,
+            "apiJs": OO_DS_URL + "/web-apps/apps/api/documents/api.js",
+            "editable": can_edit}, 200
+
+
+def api_oo_file(handler, cid):
+    """DS 拉取 docx：仅接受带有效 JWT 签名的请求（DS 下载时自动附带）。"""
+    if not oo_configured():
+        return None, {"ok": False, "error": "服务端未配置 ONLYOFFICE_*"}, 404
+    ah = handler.headers.get("Authorization") or ""
+    tok = ah[7:].strip() if ah.startswith("Bearer ") else ""
+    if _oo_jwt_verify(tok) is None:
+        return None, {"ok": False, "error": "JWT 校验失败"}, 403
+    path = case_docx_path(cid)
+    if not os.path.isfile(path):
+        return None, {"ok": False, "error": "案例 docx 不存在"}, 404
+    with OO_LOCK, open(path, "rb") as f:
+        data = f.read()
+    return data, None, 200
+
+
+def api_oo_callback(handler, query, payload):
+    """DS 保存回调：status 2/6=保存（下载 body.url 落盘 + 回写 blocks + bump key）；
+    status 4=关闭无修改。请求须带有效 JWT（payload 为回调 body）。恒回 {"error":0} 防 DS 重试。"""
+    cid = (query.get("caseId") or [""])[0].strip()
+    if not oo_configured():
+        return {"error": 0}, 200
+    ah = handler.headers.get("Authorization") or ""
+    tok = ah[7:].strip() if ah.startswith("Bearer ") else ""
+    if _oo_jwt_verify(tok) is None:
+        sys.stderr.write("[oo] callback JWT 校验失败 %s\n" % cid)
+        return {"error": 0}, 200
+    status = payload.get("status")
+    if status in (2, 6) and payload.get("url") and cid:
+        raw, derr = oo_download(payload["url"])
+        if derr:
+            sys.stderr.write("[oo] callback 下载失败 %s: %s\n" % (cid, derr))
+            return {"error": 0}, 200
+        with OO_LOCK:
+            path = case_docx_path(cid)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(raw)
+            try:
+                blocks = docx_to_blocks(path)
+            except Exception as e:
+                sys.stderr.write("[oo] callback 解析 docx 失败 %s: %s\n" % (cid, e))
+                return {"error": 0}, 200
+            c, e = CASEDB.apply_blocks_from_docx(cid, blocks)
+        if e:
+            sys.stderr.write("[oo] callback 回写失败 %s: %s\n" % (cid, e))
+        else:
+            mark_search_dirty()
+            sys.stderr.write("[oo] 已保存 %s（blocks %d 块，docxVer %d）\n"
+                             % (cid, len(blocks), _oo_doc_ver(cid)))
+    return {"error": 0}, 200
+
+
+def api_oo_insert(user, payload):
+    """AI 修订插入（track-changes）：Copilot 起草/改写采纳时调用；
+    成功后 docxVer 已 bump，前端用新 config 重建编辑器强制 DS 重载。"""
+    err = _need_login(user)
+    if err:
+        return err
+    if not oo_configured():
+        return {"ok": False, "error": "服务端未配置 ONLYOFFICE_*"}, 503
+    cid = (payload.get("caseId") or "").strip()
+    c = CASEDB.get_case(cid, user)
+    if not c:
+        return {"ok": False, "error": "案例不存在或无权查看"}, 404
+    if c["ownerId"] != user["id"] or c.get("status") != "draft":
+        return {"ok": False, "error": "仅作者本人的草稿可写入 AI 修订"}, 403
+    mode = (payload.get("mode") or "append").strip()
+    if mode not in ("append", "newsec", "replace"):
+        return {"ok": False, "error": "mode 取值无效（append/newsec/replace）"}, 400
+    with OO_LOCK:
+        ensure_case_docx(cid, c.get("blocks"))
+    blocks, ierr = oo_insert_revision(cid, mode, payload.get("text") or "",
+                                      (payload.get("secTitle") or "").strip())
+    if ierr:
+        return {"ok": False, "error": ierr}, 400
+    c2, e = CASEDB.apply_blocks_from_docx(cid, blocks)
+    if e:
+        return {"ok": False, "error": e}, 404
+    mark_search_dirty()
+    return {"ok": True, "case": c2, "docxVer": _oo_doc_ver(cid)}, 200
+
+
+def sync_docx_from_blocks(cid, blocks, only_if_exists=False):
+    """blocks 直写路径（兼容编辑器 PATCH / 版本回滚）后同步 docx 并 bump key。"""
+    if not oo_configured():
+        return
+    if only_if_exists and not os.path.isfile(case_docx_path(cid)):
+        return  # 从未用 OnlyOffice 打开过的案例不预生成，docx 首开时惰性迁移
+    with OO_LOCK:
+        try:
+            blocks_to_docx(blocks, case_docx_path(cid))
+        except Exception as e:
+            sys.stderr.write("[oo] docx 同步失败 %s: %s\n" % (cid, e))
+            return
+    CASEDB.apply_blocks_from_docx(cid, blocks)
+
+
+def save_version_docx(cid, vid):
+    """版本快照：复制当前 docx 到 files/cases/versions/{cid}-{vid}.docx。"""
+    src = case_docx_path(cid)
+    if not os.path.isfile(src):
+        return
+    dst_dir = os.path.join(CASES_DOCX_DIR, "versions")
+    os.makedirs(dst_dir, exist_ok=True)
+    with OO_LOCK, open(src, "rb") as f:
+        data = f.read()
+    with open(os.path.join(dst_dir, "%s-%s.docx" % (cid, vid)), "wb") as f:
+        f.write(data)
+
+
+def delete_case_docx(cid):
+    """删除案例时联动清理 docx 与版本副本。"""
+    for p in [case_docx_path(cid)] + [
+            os.path.join(CASES_DOCX_DIR, "versions", n)
+            for n in (os.listdir(os.path.join(CASES_DOCX_DIR, "versions"))
+                      if os.path.isdir(os.path.join(CASES_DOCX_DIR, "versions")) else [])
+            if n.startswith(cid + "-")]:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 # --------------------------------------------------------------- HTTP 处理
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -2576,6 +3029,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/my/prefs":
             res, status = api_my_prefs_get(auth_user(self))
             return self._send_json(res, status)
+        m = re.match(r"^/api/onlyoffice/config/([^/]+?)/?$", path)
+        if m:
+            res, status = api_oo_config(auth_user(self), urllib.parse.unquote(m.group(1)))
+            return self._send_json(res, status)
+        m = re.match(r"^/api/onlyoffice/file/([^/]+?)/?$", path)
+        if m:
+            data, err2, status = api_oo_file(self, urllib.parse.unquote(m.group(1)))
+            if err2:
+                return self._send_json(err2, status)
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         m = re.match(r"^/api/materials/([^/]+?)/?$", path)
         if m:
             res, status = api_material_get(auth_user(self), urllib.parse.unquote(m.group(1)))
@@ -2670,6 +3141,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/ai/agent":
             return self._ai_agent(payload)
+        if path == "/api/onlyoffice/callback":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_oo_callback(self, qs, payload)
+            return self._send_json(res, status)
+        if path == "/api/onlyoffice/insert":
+            res, status = api_oo_insert(auth_user(self), payload)
+            return self._send_json(res, status)
         if path == "/api/web-search":
             return self._send_json(web_search(payload))
         if path == "/api/fetch-url":
@@ -2824,6 +3302,12 @@ def main():
     backfilled = CASEDB.migrate_citation_evidence(_evidence_for_target)
     if backfilled:
         sys.stderr.write("[cite] 老引用证据回填 %d 条\n" % backfilled)
+    if oo_configured():
+        migrated = migrate_cases_docx()
+        if migrated:
+            sys.stderr.write("[oo] 案例 docx 迁移 %d 篇\n" % migrated)
+    else:
+        sys.stderr.write("[oo] 未配置 ONLYOFFICE_*，工作台使用兼容编辑器\n")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(ENV.get("PROTOTYPE_PORT", "8080") or 8080)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print("服务已启动: http://127.0.0.1:%d  (AI: %s, model=%s, 文件库: %s, 种子文件 %d 个, 业务库 %s%s)"

@@ -310,6 +310,7 @@ class CaseDB:
             meta.setdefault("reviewedBy", "")
             c.setdefault("createdAt", _now())
             c["updatedAt"] = _now()
+            c.setdefault("docxVer", 1)  # OnlyOffice document.key 版本号（内容变化即 bump）
             self._insert_case(c)
             self._sync_selfchecks(c["id"])
             self._sync_material_usage()
@@ -329,7 +330,7 @@ class CaseDB:
             for k, v in patch.items():
                 if k in ("id", "ownerId", "status", "likes", "likedBy", "annotations",
                          "versions", "publishedSnapshot", "createdAt", "submittedAt",
-                         "publishedAt"):
+                         "publishedAt", "docxVer", "_ooManaged"):
                     continue
                 data[k] = v
             data["updatedAt"] = _now()
@@ -355,6 +356,26 @@ class CaseDB:
             self._sync_material_usage()
             self._conn.commit()
             return None
+
+    def apply_blocks_from_docx(self, cid, blocks):
+        """docx 为编辑真源时的 blocks 回写（OnlyOffice 保存回调 / AI 修订插入 / 回滚后用）：
+        覆盖 blocks、bump docxVer（document.key 随之变化，强制 DS 下次重载）、刷新自检。
+        内部流程专用，不做作者校验（鉴权在 API 层）。"""
+        with self._lock:
+            r = self._row(cid)
+            if not r:
+                return None, "案例不存在"
+            data = json.loads(r["data"])
+            data["blocks"] = blocks
+            data["docxVer"] = int(data.get("docxVer") or 1) + 1
+            data["updatedAt"] = _now()
+            self._conn.execute(
+                "UPDATE cases SET updatedAt=?, data=? WHERE id=?",
+                (data["updatedAt"], json.dumps(data, ensure_ascii=False), cid))
+            self._sync_selfchecks(cid)
+            self._sync_material_usage()
+            self._conn.commit()
+            return self._case_obj(self._row(cid)), None
 
     # ------------------------------------------------------------ 审核流转
     def _submit_round(self, cid):

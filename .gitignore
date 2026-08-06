@@ -10,6 +10,7 @@ __pycache__/
 data/
 files/up/*
 !files/up/.gitkeep
+files/cases/
 
 # 系统与编辑器
 .DS_Store

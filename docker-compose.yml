@@ -1,0 +1,21 @@
+services:
+  onlyoffice-ds:
+    image: onlyoffice/documentserver:latest
+    container_name: case-library-onlyoffice
+    ports:
+      - "8081:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # DS（容器内）→ server.py（宿主 127.0.0.1）的桥接：监听 docker0 网关地址转发到宿主回环。
+  # 要求 server.py 跑在 ONLYOFFICE_SERVER_URL 指向的端口（默认 8080）。
+  app-forward:
+    image: alpine/socat:latest
+    container_name: case-library-app-forward
+    network_mode: host
+    command: TCP-LISTEN:8080,fork,bind=172.17.0.1,reuseaddr TCP:127.0.0.1:8080
+    restart: unless-stopped

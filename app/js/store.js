@@ -280,8 +280,13 @@
     caseSyncTimers[c.id] = setTimeout(async () => {
       delete caseSyncTimers[c.id];
       try {
+        // OnlyOffice 管理正文时（_ooManaged）docx 为编辑真源，前端 blocks 可能滞后，
+        // 不回写以免覆盖保存回调同步来的内容（服务端 update_case 对缺失键保持原值）
+        const body = Object.assign({}, c);
+        delete body._ooManaged;
+        if (c._ooManaged) delete body.blocks;
         const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id), {
-          method: "PATCH", body: JSON.stringify(c),
+          method: "PATCH", body: JSON.stringify(body),
         });
         if (!d || !d.ok) { apiFail(d, "保存"); return; }
         c.updatedAt = d.case.updatedAt;
