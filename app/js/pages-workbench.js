@@ -1895,16 +1895,24 @@ window.Pages = window.Pages || {};
     }
 
     // ---------------- 面板 ----------------
-    // 资料页签引用区图谱：两跳力导向图，单击节点直达详情（ADR 0008）
-    function renderCiteBody() {
+    // 资料页签引用区图谱：两跳力导向图（服务端 Neo4j ego 子图，WP7），单击节点直达详情（ADR 0008）
+    async function renderCiteBody() {
       const body = U.$("#cite-body");
       if (!body || tab !== "res" || resView !== "graph" || !(c.citations || []).length) return;
       body.innerHTML = `<div class="ego-force" style="height:260px"><canvas id="wb-ego-canvas"></canvas><div class="graph-tip" id="wb-ego-tip"></div></div>`;
-      Graph.render(U.$("#wb-ego-canvas", body), {
-        data: Graph.egoData(c.id), noCache: true,
+      const d = await Graph.fetchEgo("case", c.id);
+      const canvas = U.$("#wb-ego-canvas", body);
+      if (!canvas) return; // 已切走
+      if (!d || !d.ok) {
+        body.innerHTML = `<div class="small muted card-pad">图谱服务不可用（Neo4j 未连接），请用列表视图查看引用。</div>`;
+        return;
+      }
+      Graph.render(canvas, {
+        data: d, noCache: true,
         tip: U.$("#wb-ego-tip", body),
         onCard: (n) => {
           if (n.ref.kind === "self") return;
+          if (n.ref.kind === "tag") { location.hash = "#/search?q=" + encodeURIComponent(n.ref.id); return; }
           location.hash = n.ref.kind === "case" ? "#/case/" + n.ref.id
             : n.ref.kind === "knowledge" ? "#/knowledge/" + n.ref.id : "#/material/" + n.ref.id;
         },

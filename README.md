@@ -14,7 +14,13 @@
   单文件 Python 后端（`server.py`，仅依赖标准库 + `python-docx`）。
 - **启动方式**：`/usr/bin/python3 server.py`（或 `python3 server.py [port]`）。
   端口优先取命令行参数，其次取 `.env` 的 `PROTOTYPE_PORT`，默认 `8080`
-  （见 `server.py` 尾部启动代码）。
+  （见 `server.py` 尾部启动代码）。知识图谱（WP7）需要 `.venv` 里的 neo4j 驱动：
+  `python3 -m venv .venv && .venv/bin/pip install neo4j python-docx` 后用
+  `.venv/bin/python server.py` 启动；`/usr/bin/python3` 启动时图谱接口降级，其余功能不变。
+- **知识图谱（WP7）**：`docker compose up -d neo4j`（bolt 7687 / browser 7474，密码取
+  `.env` 的 `NEO4J_PASSWORD`）；服务端启动时从 SQLite 全量灌库（LLM 实体增强后台补边，
+  AI 不可用则跳过），案例/素材写路径增量同步。接口：`/api/graph/overview|ego|reverse|qa`
+  与 `POST /api/admin/graph/rebuild`；Neo4j 不可达时返回降级提示，不影响其他功能。
 - **数据架构**：业务数据（案例、审核留痕、批注、版本、收藏、点赞、素材登记）持久化在服务端
   SQLite（`db.py`，库文件 `data/cases.db`，首启自动灌入 `files/cases_seed.json` 与
   `files/materials_seed.json`）；素材的被引计数/待淘汰由服务端维护，新采集一律先落「候选」，
@@ -33,7 +39,8 @@
 - **冒烟测试**：`node tools/smoke_materials.js [baseUrl]`（加载真实 store.js 打真实服务端，
   覆盖素材同步/收藏/推荐/候选确认/查重/批量操作/被引计数）；`node tools/smoke_evidence.js`
   （引用证据链）；`node tools/smoke_review.js`（审核闭环：checking 机审/词库命中/reasonType/
-  退回台账/diffSummary/AI 生成标识）。
+  退回台账/diffSummary/AI 生成标识）；`node tools/smoke_graph.js`（图谱：灌库计数/ego/reverse/
+  全局问答/增量同步/AI 降级，需 Neo4j 在线）。
 - **记忆 bench**：`python3 tools/bench_memory.py [--rejudge]`（用户级记忆三臂对照评测，
   需先以临时 `SQLITE_DB_PATH` 启动服务，报告见 `docs/memory-bench.md`）。
 

@@ -148,6 +148,21 @@ WATCH_ITEM_STATUSES = ("待审", "已入库", "已忽略")
 CONTRIB_KINDS = ("link", "kn_link")
 CONTRIB_STATUSES = ("待审", "通过", "驳回")
 
+# 图谱同步钩子（WP7）：server.py 启动时注入 fn(kind, nid)；
+# kind ∈ case/case_deleted/material/material_deleted/rebuild；未注入时静默跳过。
+GRAPH_HOOK = None
+
+
+def _graph_notify(kind, nid=None):
+    fn = GRAPH_HOOK
+    if not fn:
+        return
+    try:
+        fn(kind, nid)
+    except Exception:
+        pass
+
+
 # 状态机：draft → checking（机审，提交后自动进入）→ pending → reviewing → published/hidden；
 # 退回/要求补充回 draft。机审（词库规则 + LLM 反例审校）由服务端在 submit 后异步执行，
 # 结果以 kind=risk 批注呈现，reviews 留痕 action=checking。
@@ -184,7 +199,7 @@ class CaseDB:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # 图谱钩子在锁内回读本库（_graph_notify），需可重入
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
@@ -222,6 +237,7 @@ class CaseDB:
             self._conn.commit()
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("rebuild")
             return len(cases)
 
     def _insert_case(self, c):
@@ -315,6 +331,7 @@ class CaseDB:
             self._sync_selfchecks(c["id"])
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case", c["id"])
             return self._case_obj(self._row(c["id"])), None
 
     def update_case(self, user, cid, patch):
@@ -341,6 +358,7 @@ class CaseDB:
             self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case", cid)
             return self._case_obj(r), None
 
     def delete_case(self, user, cid):
@@ -355,6 +373,7 @@ class CaseDB:
                     t, "id" if t == "cases" else "caseId"), (cid,))
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case_deleted", cid)
             return None
 
     def apply_blocks_from_docx(self, cid, blocks):
@@ -375,6 +394,7 @@ class CaseDB:
             self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case", cid)
             return self._case_obj(self._row(cid)), None
 
     # ------------------------------------------------------------ 审核流转
@@ -514,6 +534,7 @@ class CaseDB:
             self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case", cid)
             return self._case_obj(self._row(cid)), None, 200
 
     def list_reviews(self, limit=50, case_id=None):
@@ -576,6 +597,7 @@ class CaseDB:
             self._add_review(cid, "system", "checking", note, rnd=self._submit_round(cid))
             self._sync_selfchecks(cid)
             self._conn.commit()
+            _graph_notify("case", cid)
             return self._case_obj(self._row(cid)), None
 
     def review_ledger(self, limit=200):
@@ -691,6 +713,7 @@ class CaseDB:
             self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
+            _graph_notify("case", cid)
             return self._case_obj(self._row(cid)), None
 
     # ------------------------------------------------------------ 收藏与点赞
@@ -946,6 +969,7 @@ class CaseDB:
             m["updatedAt"] = now
             self._insert_material(m)
             self._conn.commit()
+            _graph_notify("material", m["id"])
             return self._mat_obj(self._mat_row(m["id"])), None
 
     # admin 可改的治理字段；非 admin 仅允许「重新采集」刷新内容副本
@@ -984,6 +1008,7 @@ class CaseDB:
             vals.append(mid)
             self._conn.execute("UPDATE materials SET %s WHERE id=?" % ",".join(sets), vals)
             self._conn.commit()
+            _graph_notify("material", mid)
             return self._mat_obj(self._mat_row(mid)), None
 
     def batch_update_materials(self, user, ids, patch):
@@ -1000,10 +1025,14 @@ class CaseDB:
     def delete_material_by_file(self, file_id):
         """上传文件删除时联动删除素材行（文件库是上传素材的实体来源）。"""
         with self._lock:
-            cur = self._conn.execute("DELETE FROM materials WHERE fileId=?", (file_id,))
+            ids = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM materials WHERE fileId=?", (file_id,))]
+            self._conn.execute("DELETE FROM materials WHERE fileId=?", (file_id,))
             self._conn.execute("DELETE FROM mat_favorites WHERE materialId NOT IN (SELECT id FROM materials)")
             self._conn.commit()
-            return cur.rowcount
+            for mid in ids:
+                _graph_notify("material_deleted", mid)
+            return len(ids)
 
     def mark_materials_failed(self, ids):
         """来源健康检查失败的素材标「来源失效」（不停用、不删除）。"""
@@ -1013,6 +1042,8 @@ class CaseDB:
                 cur = self._conn.execute(
                     "UPDATE materials SET status='来源失效', updatedAt=? WHERE id=? AND status!='停用'",
                     (_now(), mid))
+                if cur.rowcount:
+                    _graph_notify("material", mid)
                 n += cur.rowcount
             self._conn.commit()
             return n
@@ -1161,6 +1192,53 @@ class CaseDB:
         with self._lock:
             return [self._mat_obj(r) for r in self._conn.execute(
                 "SELECT * FROM materials WHERE status='正常'").fetchall()]
+
+    # ------------------------------------------------------------ 图谱数据（WP7）
+    @staticmethod
+    def _graph_case(r, data):
+        """图谱节点视图：CITES 目标 = 当前引用 ∪ 发布快照引用（与 _sync_material_usage 同口径）。"""
+        targets = set()
+        for holder in (data, data.get("publishedSnapshot") or {}):
+            for ref in holder.get("citations") or []:
+                t = ref.get("target") if isinstance(ref, dict) else ref
+                if t:
+                    targets.add(t)
+        tags = list(dict.fromkeys(
+            (data.get("theoryPoints") or []) + (data.get("tags") or []) +
+            ([data["typeId"]] if data.get("typeId") else [])))
+        return {"id": r["id"], "title": data.get("title", ""), "status": r["status"],
+                "ownerId": r["ownerId"], "typeId": data.get("typeId", ""),
+                "summary": (data.get("summary") or "")[:200],
+                "tags": tags,
+                "knTargets": sorted(t for t in targets if t.startswith("kn-")),
+                "matTargets": sorted(t for t in targets if not t.startswith("kn-"))}
+
+    def cases_for_graph(self):
+        with self._lock:
+            return [self._graph_case(r, json.loads(r["data"]))
+                    for r in self._conn.execute("SELECT * FROM cases").fetchall()]
+
+    def case_for_graph(self, cid):
+        with self._lock:
+            r = self._row(cid)
+            return self._graph_case(r, json.loads(r["data"])) if r else None
+
+    @staticmethod
+    def _graph_mat(m):
+        return {"id": m["id"], "title": m["title"], "kind": m["kind"],
+                "grade": m["grade"], "status": m["status"], "level": m["level"],
+                "summary": (m["summary"] or "")[:200], "citedCount": m["citedCount"],
+                "tags": m["tags"], "excerpt": (m["excerpt"] or "")[:400]}
+
+    def material_for_graph(self, mid):
+        with self._lock:
+            r = self._mat_row(mid)
+            return self._graph_mat(self._mat_obj(r)) if r else None
+
+    def materials_for_graph(self):
+        with self._lock:
+            return [self._graph_mat(self._mat_obj(r)) for r in
+                    self._conn.execute("SELECT * FROM materials").fetchall()]
 
     # ============================================================ 盯源（WP5）
     def seed_watch_sources(self, sources):

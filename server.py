@@ -42,8 +42,16 @@
    的 DocEditor 配置（key=caseId-docxVer，内容变化即变）；callback 接收 DS 保存（status 2/6 下载落盘
    并回写 blocks、bump docxVer）；insert 端点把 Copilot 采纳内容以 track-changes（w:ins/w:del）写入；
    版本快照复制 docx 到 files/cases/versions/，回滚重建 docx 强制 DS 重载。
+18. /api/graph/*    —— Neo4j 知识图谱（WP7，docker-compose neo4j 服务，graph_store.py）：
+   节点 Chapter/Knowledge/Case/Material/Tag，边 CITES/MENTIONS/BELONGS/HAS_TAG；
+   启动时从 SQLite 全量灌库（LLM 实体增强后台补 MENTIONS 边，AI 不可用则跳过），
+   db.py 写路径钩子增量同步，/api/admin/reseed 后自动重建；
+   overview（全库轻量图）/ego（两跳子图）/reverse（知识点/标签反查）/qa（全局问答，
+   AI 不可用时降级返回子图统计）+ POST /api/admin/graph/rebuild；
+   Neo4j 不可达时以上接口返回 degraded 提示，其他功能不受影响。
 
-仅依赖标准库 + python-docx。运行：python3 server.py [port]
+仅依赖标准库 + python-docx（图谱需 .venv 的 neo4j 驱动）。
+运行：.venv/bin/python server.py [port]（/usr/bin/python3 运行时图谱功能关闭）
 """
 import base64
 import difflib
@@ -68,6 +76,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from db import CaseDB
+import db
+from graph_store import Graph as GraphStore
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(ROOT, "app")
@@ -84,6 +94,9 @@ def load_env(path):
                 continue
             k, v = line.split("=", 1)
             cfg[k.strip()] = v.strip().strip('"').strip("'")
+    for k in list(cfg):  # 环境变量优先于 .env（临时开关/降级演练用）
+        if k in os.environ:
+            cfg[k] = os.environ[k]
     return cfg
 
 
@@ -101,6 +114,10 @@ MOA_MODEL_LIBRARIAN = ENV.get("MOA_MODEL_LIBRARIAN", "") or "qwen-plus"
 MOA_MODEL_WRITER_ALT = ENV.get("MOA_MODEL_WRITER_ALT", "") or "qwen-plus"
 # 注意：模型网关对大小写敏感，R1 的可用名是小写 "deepseek-r1"（大写会被 400 拒绝）
 MOA_MODEL_REVIEWER = ENV.get("MOA_MODEL_REVIEWER", "") or "deepseek-r1"
+
+# Neo4j 图谱库（WP7）；未配置或缺 neo4j 驱动（用 .venv/bin/python 运行）时图谱功能关闭
+GRAPH = GraphStore(ENV.get("NEO4J_URI", ""), ENV.get("NEO4J_USER", "neo4j"),
+                   ENV.get("NEO4J_PASSWORD", ""))
 
 UA = "CaseLibrary/1.0 (+shanghai-university-sizheng-case-library)"
 
@@ -857,6 +874,250 @@ def api_search(user, payload):
                         terms=terms, user=user)
     return {"ok": True, "q": q, "knowledge": res["knowledge"],
             "materials": res["materials"], "cases": res["cases"]}, 200
+
+
+# ------------------------------------------------------------ Neo4j 图谱库（WP7）
+def _graph_snapshot():
+    """灌库数据集：教材骨架（章/节，kn 前缀与检索索引一致）+ SQLite 案例/素材全量。"""
+    chapters, sections = [], []
+    try:
+        with open(BOOK_MD, encoding="utf-8") as f:
+            book = f.read()
+        chs, secs = parse_knowledge_markdown("kn", book)
+        fsecs = assign_file_secs(book, secs)
+        chapters = [{"id": c["id"], "title": c["title"], "index": c["index"]} for c in chs]
+        sections = [{"id": s["id"], "title": s["title"], "chapter": s["chapter"],
+                     "chapterId": s["chapterId"], "index": s["index"],
+                     "fileSec": fsecs.get(s["id"], ""),
+                     "snippet": re.sub(r"\s+", " ", s.get("text") or "")[:200]}
+                    for s in secs]
+    except OSError:
+        pass
+    return {"chapters": chapters, "sections": sections,
+            "cases": CASEDB.cases_for_graph() if CASEDB else [],
+            "materials": CASEDB.materials_for_graph() if CASEDB else []}
+
+
+def _graph_enrich(gen):
+    """LLM 实体增强（后台线程，可整体跳过）：逐素材从 摘要+内容副本 抽 3-6 个主题词、
+    挂 0-3 个教材节（MENTIONS/HAS_TAG src=llm）。AI 未配置时跳过，图谱基础结构照样可用。"""
+    if not (AI_BASE_URL and AI_API_KEY):
+        return
+    kn_menu = "\n".join("%s %s" % (s["id"], s["title"]) for s in _graph_snapshot()["sections"])
+    if not kn_menu:
+        return
+    kn_ids = {ln.split(" ", 1)[0] for ln in kn_menu.splitlines()}
+    for m in CASEDB.materials_for_graph():
+        if gen != GRAPH.gen:
+            return
+        text = (m["title"] + "\n" + (m.get("summary") or "") + "\n"
+                + (m.get("excerpt") or ""))[:800].strip()
+        if not text:
+            continue
+        content, err = llm_call(AI_DEFAULT_MODEL, [
+            {"role": "system", "content":
+             "你是思政教学资源知识标引员。只输出 JSON：{\"kn\":[教材节id],\"topics\":[主题词]}。"
+             "kn 从给定教材节目录选 0-3 个最相关的节 id；topics 提取 3-6 个关键知识点/主题词"
+             "（2-8 字名词短语，不要「材料」「政策」这类泛词）。"},
+            {"role": "user", "content":
+             "教材节目录：\n%s\n\n素材：\n%s" % (kn_menu, text)}],
+            temperature=0.2, max_tokens=300)
+        obj = _extract_json(content) if not err else None
+        if not isinstance(obj, dict):
+            continue
+        topics = [str(t).strip() for t in (obj.get("topics") or [])
+                  if isinstance(t, str) and 2 <= len(t.strip()) <= 12][:6]
+        GRAPH.add_mentions(m["id"], [k for k in (obj.get("kn") or []) if k in kn_ids][:3],
+                           topics, gen=gen)
+
+
+_GRAPH_REBUILD = {"busy": False, "again": False}
+
+
+def graph_rebuild():
+    """全量重建图谱（后台线程；进行中再次触发则结束后补一轮）。返回是否已启动。"""
+    if not GRAPH.configured or CASEDB is None:
+        return False
+    if _GRAPH_REBUILD["busy"]:
+        _GRAPH_REBUILD["again"] = True
+        return True
+
+    def job():
+        _GRAPH_REBUILD["busy"] = True
+        try:
+            while True:
+                _GRAPH_REBUILD["again"] = False
+                counts = GRAPH.rebuild(_graph_snapshot())
+                if counts is not None:
+                    sys.stderr.write("[graph] 图谱重建完成：%s\n"
+                                     % json.dumps(counts, ensure_ascii=False))
+                    threading.Thread(target=_graph_enrich, args=(GRAPH.gen,), daemon=True).start()
+                if not _GRAPH_REBUILD["again"]:
+                    break
+        finally:
+            _GRAPH_REBUILD["busy"] = False
+
+    threading.Thread(target=job, daemon=True).start()
+    return True
+
+
+def _graph_changed(kind, nid=None):
+    """db.py 写路径钩子（db.GRAPH_HOOK）：案例/素材增删改同步图谱，reseed 后全量重建。"""
+    if not GRAPH.configured or CASEDB is None:
+        return
+    try:
+        if kind == "rebuild":
+            graph_rebuild()
+        elif kind == "case":
+            c = CASEDB.case_for_graph(nid)
+            if c:
+                GRAPH.sync_case(c)
+        elif kind == "case_deleted":
+            GRAPH.delete_case(nid)
+        elif kind == "material":
+            m = CASEDB.material_for_graph(nid)
+            if m:
+                GRAPH.sync_material(m)
+        elif kind == "material_deleted":
+            GRAPH.delete_material(nid)
+    except Exception as e:
+        sys.stderr.write("[graph] 增量同步失败（%s %s）：%s\n" % (kind, nid, e))
+
+
+def _graph_unavailable():
+    return {"ok": False, "degraded": True,
+            "error": "图谱服务不可用（Neo4j 未连接），检索等其他功能不受影响"}, 503
+
+
+def _graph_filter_visible(sub, user):
+    """可见性与列表/检索同口径：案例 published 全员可见（其余限作者与 admin）；
+    素材按用户密级过滤。"""
+    max_level = req_max_level(user)
+    keep = set()
+    for n in sub["nodes"]:
+        if n["type"] == "case" and not (
+                n.get("status") == "published"
+                or (user and (user.get("admin") or n.get("ownerId") == user["id"]))):
+            continue
+        if n["type"] == "material" and (n.get("level") or 0) > max_level:
+            continue
+        keep.add(n["id"])
+    sub["nodes"] = [n for n in sub["nodes"] if n["id"] in keep]
+    sub["links"] = [l for l in sub["links"] if l["source"] in keep and l["target"] in keep]
+    if "props" in sub:
+        sub["props"] = {k: v for k, v in sub["props"].items() if k in keep}
+    return sub
+
+
+def api_graph_overview(user):
+    """全库轻量图：教材骨架（章/节）+ 案例 + 节级引用边（素材经 ego 按需展开）。"""
+    if not GRAPH.available():
+        return _graph_unavailable()
+    sub = GRAPH.overview()
+    if sub is None:
+        return _graph_unavailable()
+    sub = _graph_filter_visible(sub, user)
+    return {"ok": True, "nodes": sub["nodes"], "links": sub["links"],
+            "stats": GRAPH.counts()}, 200
+
+
+def api_graph_ego(user, query):
+    """以某节点为中心的两跳子图（graph.js 渲染数据源）。"""
+    ntype = (query.get("type") or [""])[0]
+    nid = (query.get("id") or [""])[0]
+    if not ntype or not nid:
+        return {"ok": False, "error": "缺少参数 type/id"}, 400
+    if not GRAPH.available():
+        return _graph_unavailable()
+    sub = GRAPH.ego(ntype, nid)
+    if sub is None or not sub["nodes"]:
+        return {"ok": False, "error": "节点不存在或图谱不可用"}, 404
+    sub = _graph_filter_visible(sub, user)
+    return {"ok": True, "center": nid, "nodes": sub["nodes"], "links": sub["links"]}, 200
+
+
+def api_graph_reverse(user, query):
+    """知识点/标签反查：直接关联的案例与素材 + 两跳路径（知识点→案例→素材）。"""
+    kn = (query.get("kn") or [""])[0]
+    tag = (query.get("tag") or [""])[0]
+    if not kn and not tag:
+        return {"ok": False, "error": "缺少参数 kn 或 tag"}, 400
+    if not GRAPH.available():
+        return _graph_unavailable()
+    res = GRAPH.reverse(kn=kn or None, tag=tag or None)
+    if res is None:
+        return {"ok": False, "error": "节点不存在或图谱不可用"}, 404
+    res = _graph_filter_visible(res, user)
+    res["cases"] = [n for n in res["cases"] if n["id"] in {x["id"] for x in res["nodes"]}]
+    res["ok"] = True
+    return res, 200
+
+
+_GRAPH_TYPE_NAMES = {"chapter": "教材章", "section": "教材节", "case": "案例",
+                     "material": "素材", "tag": "标签"}
+
+
+def api_graph_qa(user, payload):
+    """全局图谱问答：BM25 种子 → 图谱一跳子图召回证据 → LLM 综合（引用=节点 id）。
+    AI 不可用/失败时降级返回召回子图统计（degraded=true，answer=null）。"""
+    q = (payload.get("q") or "").strip()
+    if not q:
+        return {"ok": False, "error": "缺少问题 q"}, 400
+    if not GRAPH.available():
+        return _graph_unavailable()
+    res = search_corpus(q, max_level=req_max_level(user), limit=5, user=user)
+    seeds = [h["id"] for h in res["knowledge"] + res["materials"] + res["cases"]]
+    sub = GRAPH.neighborhood(seeds) if seeds else {"nodes": [], "links": [], "props": {}}
+    if sub is None:
+        return _graph_unavailable()
+    sub = _graph_filter_visible(sub, user)
+    stats = {}
+    for n in sub["nodes"]:
+        stats[_GRAPH_TYPE_NAMES.get(n["type"], n["type"])] = \
+            stats.get(_GRAPH_TYPE_NAMES.get(n["type"], n["type"]), 0) + 1
+    base = {"ok": True, "q": q, "refs": sub["nodes"][:12], "stats": stats,
+            "graph": {"nodes": sub["nodes"], "links": sub["links"]}}
+    if not (AI_BASE_URL and AI_API_KEY):
+        base.update({"degraded": True, "answer": None, "note": "AI 未配置，返回召回子图统计"})
+        return base, 200
+    lines = []
+    for n in sub["nodes"][:40]:
+        p = sub["props"].get(n["id"], {})
+        body = re.sub(r"\s+", " ", (p.get("summary") or p.get("snippet") or ""))[:120]
+        lines.append("〔%s〕%s｜%s｜%s"
+                     % (n["id"], _GRAPH_TYPE_NAMES.get(n["type"], n["type"]), n["label"], body))
+    by_id = {n["id"]: n["label"] for n in sub["nodes"]}
+    edges = ["%s —%s→ %s" % (by_id.get(l["source"], l["source"]), l["rel"],
+                             by_id.get(l["target"], l["target"]))
+             for l in sub["links"][:60]]
+    content, err = llm_call(AI_DEFAULT_MODEL, [
+        {"role": "system", "content":
+         "你是高校思政教学案例库的图谱问答助手，回答关于整个库的全局性问题"
+         "（共同主题、思政元素分布、政策关联等）。基于召回的知识图谱子图"
+         "（节点=案例/素材/教材知识/标签，边=引用/涉及/包含/标签）："
+         "1. 结论先行，再分点展开；2. 引用具体节点在句末标注〔节点id〕；"
+         "3. 只用子图证据，未覆盖的部分明说；4. 中文简练。"},
+        {"role": "user", "content": "用户问题：%s\n\n召回子图节点（〔id〕类型｜标题｜摘要）：\n%s\n\n子图关系：\n%s"
+         % (q, "\n".join(lines) or "（无）", "\n".join(edges) or "（无）")}],
+        temperature=0.3, max_tokens=1200)
+    if err:
+        base.update({"degraded": True, "answer": None,
+                     "note": "AI 调用失败（%s），返回召回子图统计" % err})
+        return base, 200
+    cited = set(re.findall(r"〔([^〕]+)〕", content))
+    base.update({"answer": content,
+                 "refs": [n for n in sub["nodes"] if n["id"] in cited] or base["refs"]})
+    return base, 200
+
+
+def api_admin_graph_rebuild(user):
+    err = _need_admin(user)
+    if err:
+        return err
+    if not GRAPH.configured:
+        return {"ok": False, "error": "未配置 NEO4J_* 或缺少 neo4j 驱动"}, 503
+    graph_rebuild()
+    return {"ok": True, "started": True}, 200
 
 
 # ------------------------------------------------------------ 案例业务 API（SQLite 持久层，db.py）
@@ -2991,6 +3252,7 @@ class Handler(BaseHTTPRequestHandler):
                 "reviewEnabled": AI_REVIEW_ENABLED,
                 "webSearch": bool(TAVILY_API_KEY),
                 "filesAuth": bool(APP_SECRET),
+                "graph": GRAPH.configured,
             })
         if path == "/api/files":
             return self._send_json(api_files_list(auth_user(self)))
@@ -3028,6 +3290,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/my/prefs":
             res, status = api_my_prefs_get(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/graph/overview":
+            res, status = api_graph_overview(auth_user(self))
+            return self._send_json(res, status)
+        if path == "/api/graph/ego":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_graph_ego(auth_user(self), qs)
+            return self._send_json(res, status)
+        if path == "/api/graph/reverse":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res, status = api_graph_reverse(auth_user(self), qs)
             return self._send_json(res, status)
         m = re.match(r"^/api/onlyoffice/config/([^/]+?)/?$", path)
         if m:
@@ -3150,6 +3423,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/web-search":
             return self._send_json(web_search(payload))
+        if path == "/api/graph/qa":
+            res, status = api_graph_qa(auth_user(self), payload)
+            return self._send_json(res, status)
+        if path == "/api/admin/graph/rebuild":
+            res, status = api_admin_graph_rebuild(auth_user(self))
+            return self._send_json(res, status)
         if path == "/api/fetch-url":
             return self._send_json(fetch_url(payload))
         if path == "/api/admin/watch/sources":
@@ -3302,6 +3581,12 @@ def main():
     backfilled = CASEDB.migrate_citation_evidence(_evidence_for_target)
     if backfilled:
         sys.stderr.write("[cite] 老引用证据回填 %d 条\n" % backfilled)
+    if GRAPH.configured:
+        db.GRAPH_HOOK = _graph_changed  # 案例/素材写路径增量同步图谱
+        graph_rebuild()
+    else:
+        sys.stderr.write("[graph] 未配置 NEO4J_* 或缺少 neo4j 驱动"
+                         "（图谱需 .venv/bin/python 运行），图谱功能关闭\n")
     if oo_configured():
         migrated = migrate_cases_docx()
         if migrated:

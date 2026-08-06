@@ -19,3 +19,19 @@ services:
     network_mode: host
     command: TCP-LISTEN:8080,fork,bind=172.17.0.1,reuseaddr TCP:127.0.0.1:8080
     restart: unless-stopped
+
+  # Neo4j 图谱库（WP7）：server.py 经 bolt 灌库/查询；browser 7474 仅供调试
+  neo4j:
+    image: neo4j:5-community
+    container_name: case-library-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:

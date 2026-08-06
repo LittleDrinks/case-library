@@ -1,5 +1,6 @@
-// 知识图谱：全库轻量模式（教材骨架+案例，素材按需展开）+ 局部 ego 引用图（Canvas/SVG，无第三方依赖）
-// 依据 docs/adr/0004：单击浮卡、双击打开；素材不单独成点，点开案例后展开其引用。
+// 知识图谱：Canvas 力导向渲染（无第三方依赖）；数据源 = 服务端 Neo4j 图谱（WP7，/api/graph/*）。
+// 交互（ADR 0004）：单击浮卡、双击直达详情；全库轻量图 = 教材骨架+案例（overview），
+// 案例展开/详情页引用图 = 两跳 ego 子图。
 window.Pages = window.Pages || {};
 (function () {
   const G = {};
@@ -10,53 +11,42 @@ window.Pages = window.Pages || {};
     section: "#7aa7d9",   // 知识·节
     case: "#9e2b25",      // 案例
     material: "#1e7d4f",  // 素材
+    tag: "#b07d2b",       // 标签
   };
-  const NAMES = { chapter: "知识 · 章", section: "知识 · 节", case: "案例", material: "素材" };
+  const NAMES = { chapter: "知识 · 章", section: "知识 · 节", case: "案例", material: "素材", tag: "标签" };
 
   // 跨渲染保留节点位置，展开素材时布局不跳动
   const posCache = {};
 
-  // opts.includeMaterials：素材也成点（默认 false）
-  // opts.expanded：Set<caseId>，这些案例的素材引用临时展开
-  // opts.data：直接给定 {nodes, links}（如详情页 ego 图），跳过 buildData
-  // opts.noCache：不读不写全局 posCache（局部图避免与全库图串位置）
-  G.buildData = (opts) => {
-    opts = opts || {};
-    const expanded = opts.expanded || new Set();
-    const nodes = {}, links = [];
-    const addNode = (id, label, type, ref) => {
-      if (!nodes[id]) nodes[id] = { id, label, type, ref };
-      return nodes[id];
-    };
-    Store.visibleCases().forEach((c) => {
-      addNode(c.id, c.title, "case", { kind: "case", id: c.id });
-      (c.citations || []).forEach((r) => {
-        const kn = Store.knowledgeById(r.target);
-        if (kn) {
-          addNode(kn.id, kn.title, "section", { kind: "knowledge", id: kn.id });
-          const ch = Store.db.chapters.find((x) => x.id === kn.chapterId);
-          if (ch) {
-            addNode(ch.id, ch.title, "chapter", { kind: "chapter", id: ch.id });
-            links.push({ source: ch.id, target: kn.id, rel: "包含" });
-          }
-          links.push({ source: c.id, target: kn.id, rel: "引用理论" });
-          return;
-        }
-        if (!opts.includeMaterials && !expanded.has(c.id)) return;
-        const m = Store.materialById(r.target);
-        if (m) {
-          addNode(m.id, m.title, "material", { kind: "material", id: m.id });
-          links.push({ source: c.id, target: m.id, rel: "引用素材" });
-        }
-      });
+  // ---------------- 服务端图谱数据（WP7：Neo4j，降级时返回 {ok:false, degraded:true}） ----------------
+  const get = (path) => Store.apiFetch(path).then((r) => r.json()).catch(() => null);
+  G.fetchOverview = () => get("/api/graph/overview");
+  G.fetchEgo = (type, id) => get("/api/graph/ego?type=" + encodeURIComponent(type)
+    + "&id=" + encodeURIComponent(id));
+  G.qa = (q) => Store.apiFetch("/api/graph/qa", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q }),
+  }).then((r) => r.json()).catch(() => null);
+
+  // 子图并入基图（案例展开素材引用时布局不跳动）：按节点 id / 边三元组去重
+  G.mergeData = (base, sub) => {
+    const nodes = {};
+    base.nodes.forEach((n) => { nodes[n.id] = n; });
+    (sub.nodes || []).forEach((n) => { if (!nodes[n.id]) nodes[n.id] = n; });
+    const seen = new Set(base.links.map((l) => l.source + "|" + l.target + "|" + l.rel));
+    const links = base.links.slice();
+    (sub.links || []).forEach((l) => {
+      const k = l.source + "|" + l.target + "|" + l.rel;
+      if (!seen.has(k)) { seen.add(k); links.push(l); }
     });
     return { nodes: Object.values(nodes), links };
   };
 
+  // opts.data：{nodes, links}（必填，来自 fetchOverview/fetchEgo/mergeData）
+  // opts.noCache：不读不写全局 posCache（局部图避免与全库图串位置）
   G.render = (canvas, opts) => {
     opts = opts || {};
     G.stop();
-    const { nodes, links } = opts.data || G.buildData(opts);
+    const { nodes, links } = opts.data || { nodes: [], links: [] };
     const highlight = opts.highlight || new Set();
     const cache = opts.noCache ? {} : posCache;
     const ctx = canvas.getContext("2d");
@@ -244,35 +234,6 @@ window.Pages = window.Pages || {};
   G.stop = () => { if (raf) cancelAnimationFrame(raf); raf = null; };
   G.COLORS = COLORS;
   G.NAMES = NAMES;
-
-  // ----------------------------------------------------------
-  // 两跳 ego 数据装配（ADR 0008）：案例 → 引用的知识节/素材 → 同样引用该目标的其他案例（≤6）
-  // citationsOverride：详情页传发布快照的引用，默认用案例当前引用
-  G.egoData = (caseId, citationsOverride) => {
-    const c = Store.db.cases.find((x) => x.id === caseId);
-    if (!c) return { nodes: [], links: [] };
-    const cites = citationsOverride || c.citations || [];
-    const nodes = {}, links = [];
-    const add = (id, label, type, ref) => nodes[id] || (nodes[id] = { id, label, type, ref });
-    add(c.id, c.title, "case", { kind: "self", id: c.id });
-    cites.forEach((r) => {
-      const target = typeof r === "string" ? r : r.target;
-      const kn = Store.knowledgeById(target);
-      const m = kn ? null : Store.materialById(target); // 不可见素材不进图
-      if (!kn && !m) return;
-      const t = kn
-        ? { id: kn.id, label: kn.title, type: "section", ref: { kind: "knowledge", id: kn.id } }
-        : { id: m.id, label: m.title, type: "material", ref: { kind: "material", id: m.id } };
-      add(t.id, t.label, t.type, t.ref);
-      links.push({ source: c.id, target: t.id, rel: "引用" });
-      Store.casesCiting(t.id).filter((oc) => oc.id !== c.id && Store.canSeeCase(oc)).slice(0, 6)
-        .forEach((oc) => {
-          add(oc.id, oc.title, "case", { kind: "case", id: oc.id });
-          links.push({ source: oc.id, target: t.id, rel: "引用" });
-        });
-    });
-    return { nodes: Object.values(nodes), links };
-  };
 
   window.Graph = G;
 })();

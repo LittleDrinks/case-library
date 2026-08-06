@@ -1,4 +1,4 @@
-// 页面：资源检索（列表/图谱双视图）、案例详情、素材详情、知识详情
+// 页面：资源检索（列表/图谱/图谱问答三视图）、案例详情、素材详情、知识详情
 // 依据 docs/adr/0004（检索与图谱）、0005（引用体系与详情页）、0007（检索页去凌乱：百度式混合结果流）
 window.Pages = window.Pages || {};
 (function () {
@@ -20,15 +20,16 @@ window.Pages = window.Pages || {};
   P.search = (params) => {
     const state = {
       q: params.q || "", kindTab: "all", page: 1, sort: "smart",
-      view: params.view === "graph" ? "graph" : "list",
+      view: params.view === "graph" || params.view === "qa" ? params.view : "list",
       fTypes: new Set(), fAud: new Set(), fGrade: new Set(), fKind: new Set(), fTags: new Set(),
       fTime: "", ddOpen: null,
       ran: !!params.q, aiLoading: false, aiHtml: "", aiCount: 0, aiSeq: 0, aiSkipped: false,
       aiStreaming: false, aiText: "", aiSources: [], aiStream: null,
       aiFold: localStorage.getItem("sizheng-ai-fold") === "1",
       terms: null, expanded: [], base: null, loading: false,
+      qa: { q: "", seq: 0, loading: false, answer: "", refs: [], stats: null, note: "", error: "", degraded: false },
     };
-    const graphState = { expanded: new Set() };
+    const graphState = { expanded: new Set(), data: null }; // data = overview 缓存（展开案例后并入 ego）
 
     // 时间口径：案例/素材取自身时间，知识取所属教材来源的更新日（ADR 0007）
     const knDate = () => {
@@ -347,7 +348,7 @@ window.Pages = window.Pages || {};
       ${body}`;
     };
 
-    // ---------------- 图谱视图（ADR 0004：骨架+案例，素材按需展开） ----------------
+    // ---------------- 图谱视图（ADR 0004：骨架+案例，素材按需展开；数据 = 服务端 Neo4j 图谱） ----------------
     const graphHTML = () => `
       <div id="graph-wrap">
         <canvas id="graph-canvas"></canvas>
@@ -359,7 +360,7 @@ window.Pages = window.Pages || {};
         <div id="graph-card" class="graph-card" hidden></div>
       </div>`;
 
-    function renderGraph(el) {
+    async function renderGraph(el) {
       const canvas = U.$("#graph-canvas", el);
       if (!canvas) return;
       const card = U.$("#graph-card", el);
@@ -370,11 +371,26 @@ window.Pages = window.Pages || {};
         r.knowledge.forEach((x) => hl.add(x.item.id));
         r.materials.forEach((x) => hl.add(x.item.id));
       }
+      if (!graphState.data) {
+        const d = await Graph.fetchOverview();
+        if (!U.$("#graph-canvas", el)) return; // 已切走视图
+        if (!d || !d.ok) {
+          U.$("#s-results", el).innerHTML = `<div class="card"><div class="card-pad small muted">
+            图谱服务不可用（Neo4j 未连接），检索列表等其他功能不受影响。</div></div>`;
+          return;
+        }
+        graphState.data = { nodes: d.nodes, links: d.links };
+        for (const cid of graphState.expanded) { // 重挂载时恢复已展开的案例
+          const sub = await Graph.fetchEgo("case", cid);
+          if (sub && sub.ok) graphState.data = Graph.mergeData(graphState.data, sub);
+        }
+      }
       const hideCard = () => { card.hidden = true; };
       const openNode = (n) => {
         if (n.ref.kind === "case") location.hash = "#/case/" + n.ref.id;
         else if (n.ref.kind === "knowledge") location.hash = "#/knowledge/" + n.ref.id;
         else if (n.ref.kind === "material") location.hash = "#/material/" + n.ref.id;
+        else if (n.ref.kind === "tag") location.hash = "#/search?q=" + encodeURIComponent(n.ref.id);
         else if (n.ref.kind === "chapter") {
           const ch = Store.db.chapters.find((x) => x.id === n.ref.id);
           const first = ch && ch.sections[0] && Store.knowledgeById(ch.sections[0]);
@@ -382,18 +398,17 @@ window.Pages = window.Pages || {};
         }
       };
       Graph.render(canvas, {
+        data: graphState.data,
         tip: U.$("#graph-tip", el),
-        expanded: graphState.expanded,
         highlight: hl,
         onOpen: openNode,
         onCard(n, pos) {
-          const t = H.citeName(n.ref.id);
+          const t = n.ref.kind === "tag" ? { src: "" } : H.citeName(n.ref.id);
           const snippet = n.ref.kind === "case"
             ? (Store.caseById(n.ref.id) || {}).summary || ""
             : n.ref.kind === "knowledge" ? (Store.knowledgeById(n.ref.id) || {}).text || ""
             : n.ref.kind === "material" ? ((Store.materialById(n.ref.id) || {}).summary || "") : "";
-          const canExpand = n.ref.kind === "case" && !graphState.expanded.has(n.ref.id) &&
-            ((Store.caseById(n.ref.id) || {}).citations || []).some((r) => Store.materialById(r.target));
+          const canExpand = n.ref.kind === "case" && !graphState.expanded.has(n.ref.id);
           card.innerHTML = `
             <div class="row spread"><b>${U.esc(n.label)}</b><button class="modal-close" id="gc-close">×</button></div>
             <div class="small muted" style="margin:4px 0">${Graph.NAMES[n.type]}${t.src ? " · " + U.esc(t.src) : ""}</div>
@@ -408,14 +423,60 @@ window.Pages = window.Pages || {};
           U.$("#gc-close", card).addEventListener("click", hideCard);
           U.$("#gc-open", card).addEventListener("click", () => openNode(n));
           const ex = U.$("#gc-expand", card);
-          if (ex) ex.addEventListener("click", () => {
+          if (ex) ex.addEventListener("click", async () => {
             graphState.expanded.add(n.ref.id);
             hideCard();
+            const sub = await Graph.fetchEgo("case", n.ref.id);
+            if (sub && sub.ok) graphState.data = Graph.mergeData(graphState.data, sub);
             renderGraph(el);
           });
         },
       });
     }
+
+    // ---------------- 图谱问答（WP7：子图召回 + AI 综合，引用节点可点开） ----------------
+    const REF_KIND_NAMES = { case: "案例", knowledge: "知识", material: "素材", chapter: "知识 · 章", tag: "标签" };
+    const openRef = (kind, id) => {
+      if (kind === "case") location.hash = "#/case/" + id;
+      else if (kind === "knowledge") location.hash = "#/knowledge/" + id;
+      else if (kind === "material") location.hash = "#/material/" + id;
+      else if (kind === "chapter") {
+        const ch = Store.db.chapters.find((x) => x.id === id);
+        const first = ch && ch.sections[0] && Store.knowledgeById(ch.sections[0]);
+        if (first) location.hash = "#/knowledge/" + first.id;
+      } else location.hash = "#/search?q=" + encodeURIComponent(id);
+    };
+    const refCardHTML = (r) => `
+      <div class="kn-item" data-ref-kind="${U.esc(r.ref.kind)}" data-ref-id="${U.esc(r.ref.id)}" style="cursor:pointer">
+        <div class="row" style="gap:6px"><span class="tag">${REF_KIND_NAMES[r.ref.kind] || r.ref.kind}</span>
+        <b class="small">${U.esc(r.label)}</b></div>
+      </div>`;
+    const qaHTML = () => {
+      const qa = state.qa;
+      let body = `<div class="small muted">就整个案例库提问：共同主题、思政元素分布、政策关联等。
+        回答基于知识图谱子图召回 + AI 综合，引用节点可点开查看详情。</div>`;
+      if (qa.loading) {
+        body += `<div class="small muted" style="margin-top:12px">图谱召回与 AI 综合中<span class="loading-dots">…</span></div>`;
+      } else if (qa.error) {
+        body += `<div class="small" style="color:var(--red);margin-top:12px">${U.esc(qa.error)}</div>`;
+      } else if (qa.answer || qa.degraded) {
+        if (qa.answer) body += `<div class="snapshot-box" style="margin-top:12px">${U.md(qa.answer)}</div>`;
+        if (qa.degraded) body += `<div class="small muted" style="margin-top:8px">${U.esc(qa.note || "AI 不可用，以下为召回子图统计")}</div>`;
+        if (qa.stats && Object.keys(qa.stats).length) {
+          body += `<div class="row wrap" style="margin-top:8px;gap:6px">
+            ${Object.entries(qa.stats).map(([k, v]) => `<span class="tag">${U.esc(k)} ${v}</span>`).join("")}</div>`;
+        }
+        if (qa.refs.length) {
+          body += `<div class="small muted" style="margin:10px 0 4px">引用节点（${qa.refs.length}）</div>`
+            + qa.refs.map(refCardHTML).join("");
+        }
+      }
+      return `<div class="card"><div class="card-pad">
+        <div class="search-bar" style="margin-bottom:10px">
+          <input id="qa-q" placeholder="例如：库里的案例主要涉及哪些思政主题？" value="${U.esc(qa.q)}">
+          <button class="btn" id="qa-go">提问</button>
+        </div>${body}</div></div>`;
+    };
 
     return {
       html: `
@@ -425,13 +486,32 @@ window.Pages = window.Pages || {};
         <div class="view-toggle">
           <button data-view="list" class="${state.view === "list" ? "on" : ""}">列表</button>
           <button data-view="graph" class="${state.view === "graph" ? "on" : ""}">图谱</button>
+          <button data-view="qa" class="${state.view === "qa" ? "on" : ""}">图谱问答</button>
         </div>
       </div>
-      <div id="s-results">${state.view === "list" ? mainHTML() : graphHTML()}</div>`,
+      <div id="s-results">${state.view === "list" ? mainHTML() : state.view === "graph" ? graphHTML() : qaHTML()}</div>`,
       mount(el) {
         const redraw = () => {
           if (state.view === "graph") { renderGraph(el); return; }
+          if (state.view === "qa") { U.$("#s-results", el).innerHTML = qaHTML(); return; }
           U.$("#s-results", el).innerHTML = mainHTML();
+        };
+        const runQa = async () => {
+          const inp = U.$("#qa-q", el);
+          const q = (inp ? inp.value : state.qa.q).trim();
+          if (!q) return;
+          const seq = state.qa.seq + 1;
+          state.qa = { q, seq, loading: true, answer: "", refs: [], stats: null, note: "", error: "", degraded: false };
+          redraw();
+          const d = await Graph.qa(q);
+          if (state.qa.seq !== seq) return;
+          if (!d || !d.ok) {
+            state.qa = Object.assign(state.qa, { loading: false, error: (d && d.error) || "图谱问答服务不可用，请稍后重试" });
+          } else {
+            state.qa = { q, seq, loading: false, answer: d.answer || "", refs: d.refs || [],
+                         stats: d.stats || null, note: d.note || "", error: "", degraded: !!d.degraded };
+          }
+          redraw();
         };
         // AI 回答消息组装：与 Copilot.answerQuery 同口径（资源池编号 〔n〕），改为走流式
         const buildAnswerPrompt = (q, results) => {
@@ -536,6 +616,7 @@ window.Pages = window.Pages || {};
         };
         el.addEventListener("keydown", (e) => {
           if (e.target.id === "pg-jump" && e.key === "Enter") { e.preventDefault(); jumpPage(); }
+          if (e.target.id === "qa-q" && e.key === "Enter") { e.preventDefault(); runQa(); }
         });
         el.addEventListener("change", (e) => {
           if (e.target.id === "sf-sort") { state.sort = e.target.value; state.page = 1; redraw(); }
@@ -562,6 +643,9 @@ window.Pages = window.Pages || {};
             return;
           }
           if (e.target.id === "ai-force") { state.aiSkipped = false; runAi(true); return; }
+          if (e.target.id === "qa-go") { runQa(); return; }
+          const rf = e.target.closest("[data-ref-kind]");
+          if (rf) { openRef(rf.dataset.refKind, rf.dataset.refId); return; }
           if (e.target.id === "ai-fold") {
             state.aiFold = !state.aiFold;
             localStorage.setItem("sizheng-ai-fold", state.aiFold ? "1" : "0");
@@ -605,6 +689,7 @@ window.Pages = window.Pages || {};
           if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
         };
         if (state.view === "graph") { refresh().then(() => renderGraph(el)); }
+        else if (state.view === "qa") { /* 问答视图无需预取检索结果 */ }
         else if (state.ran && state.q) {
           refresh().then(() => {
             redraw();
@@ -764,18 +849,26 @@ window.Pages = window.Pages || {};
             .catch(() => U.toast(url, 4000));
         });
         U.$("#cd-export").addEventListener("click", () => exportDetail(c, v));
-        // 引用区图谱视图：两跳力导向图，单击节点直达详情（ADR 0008）
-        const renderCiteBody = () => {
+        // 引用区图谱视图：两跳力导向图（服务端 Neo4j ego 子图，WP7），单击节点直达详情（ADR 0008）
+        const renderCiteBody = async () => {
           const body = U.$("#cite-body", el);
           if (!body) return;
           Graph.stop();
           if (citeView === "list" || !cites.length) { body.innerHTML = citeListHTML(); return; }
           body.innerHTML = `<div class="ego-force"><canvas id="ego-canvas"></canvas><div class="graph-tip" id="ego-tip"></div></div>`;
-          Graph.render(U.$("#ego-canvas", body), {
-            data: Graph.egoData(c.id, v.citations), noCache: true,
+          const d = await Graph.fetchEgo("case", c.id);
+          const canvas = U.$("#ego-canvas", body);
+          if (!canvas) return; // 已切回列表视图
+          if (!d || !d.ok) {
+            body.innerHTML = `<div class="small muted card-pad">图谱服务不可用（Neo4j 未连接），请用列表视图查看引用。</div>`;
+            return;
+          }
+          Graph.render(canvas, {
+            data: d, noCache: true,
             tip: U.$("#ego-tip", body),
             onCard: (n) => {
               if (n.ref.kind === "self") return;
+              if (n.ref.kind === "tag") { location.hash = "#/search?q=" + encodeURIComponent(n.ref.id); return; }
               location.hash = n.ref.kind === "case" ? "#/case/" + n.ref.id : citeHref(n.ref);
             },
           });
