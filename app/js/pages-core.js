@@ -7,14 +7,14 @@ window.Pages = window.Pages || {};
   P.H = H;
 
   const STATUS = {
-    draft: ["草稿", ""], checking: ["机审中", "amber"], pending: ["待审", "amber"],
+    draft: ["草稿", ""], pending: ["待审", "amber"],
     reviewing: ["审核中", "blue"], published: ["已发布", "green"], hidden: ["已隐藏", "red"],
   };
   H.statusTag = (s) => {
     const t = STATUS[s] || [s, ""];
     return `<span class="tag ${t[1]}">${t[0]}</span>`;
   };
-  H.levelTag = (lv) => ["<span class='tag green'>公开</span>", "<span class='tag blue'>校内</span>", "<span class='tag red'>受限</span>"][lv] || "";
+  H.levelTag = (lv) => ["<span class='tag green'>公开</span>", "<span class='tag blue'>校内</span>", "<span class='tag red'>私密</span>"][lv] || "";
   H.credTag = (c) => c === "high" ? "<span class='tag green'>权威来源</span>"
     : c === "low" ? "<span class='tag amber'>待核实</span>" : "<span class='tag'>一般来源</span>";
   // 信源等级（ADR 0005 三档可信度之上的治理定级）：S/A/B/C 四色 + 未定级灰
@@ -30,7 +30,8 @@ window.Pages = window.Pages || {};
     const kn = Store.knowledgeById(target);
     if (kn) return { kind: "knowledge", id: kn.id, name: kn.chapter + " · " + kn.title, src: Store.db.book.title };
     const m = Store.db.materials.find((x) => x.id === target);
-    if (m) return { kind: "material", id: m.id, name: m.title, src: m.source, level: m.level, visible: !!Store.materialById(target) };
+    if (m) return { kind: "material", id: m.id, name: m.title, src: m.source,
+      level: m.level, visible: Store.canReadMaterial(m) };
     return { kind: "unknown", id: target, name: target, src: "" };
   };
 
@@ -50,7 +51,7 @@ window.Pages = window.Pages || {};
     <a class="case-item" href="${href}">
       <div class="row spread"><h4>${U.esc(m.title)}</h4>${H.levelTag(m.level)}</div>
       <div class="row wrap small muted" style="margin-top:4px">
-        ${H.credTag(m.credibility)}<span>${U.esc(m.source)}</span><span>${U.esc(U.plainDate(m.publishedAt))}</span>
+        ${Store.canReadMaterial(m) ? H.credTag(m.credibility) : ""}${m.source ? `<span>${U.esc(m.source)}</span>` : ""}${m.publishedAt ? `<span>${U.esc(U.plainDate(m.publishedAt))}</span>` : ""}
       </div>
     </a>`;
 
@@ -138,10 +139,6 @@ window.Pages = window.Pages || {};
   // ------------------------------------------------------------ 我的案例（分组 + 分页 + 待办 + 备课材料）
   const MINE_PAGE = 5;
   const minePages = { doing: 1, reviewing: 1, published: 1 };
-  // 影响力与贡献（WP5）：按账号缓存，切换账号后重拉
-  let impactData = null, contribData = null;
-  // 我的生成偏好（WP4b，服务端 user_prefs）：按账号缓存
-  let genPrefsData = null;
 
   P.myCases = () => {
     const me = Store.me();
@@ -205,45 +202,6 @@ window.Pages = window.Pages || {};
 
     const PREP_NAME = { "kit-design": "教学设计", "kit-discussion": "讨论题", "kit-ppt": "PPT 提纲" };
 
-    // 我的生成偏好（WP4b）：教师亲手填写、可见、可改、可清空；AI 起草/改写时注入
-    const gp = genPrefsData && genPrefsData.uid === me.id ? genPrefsData.prefs : null;
-    const genPrefsCard = `
-      <div class="card" style="margin-bottom:18px">
-        <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
-          <span>我的生成偏好</span><span class="small muted">AI 起草/改写时生效${gp && gp.updatedAt ? " · 更新于 " + U.esc(gp.updatedAt) : ""}</span>
-        </div>
-        <div class="card-pad">
-          ${!gp ? `<div class="small muted">加载中…</div>` : `
-          <div class="row wrap" style="gap:8px;align-items:flex-end">
-            <label class="field" style="flex:1;min-width:150px"><span>篇幅偏好</span>
-              <input class="text" id="gp-length" value="${U.esc(gp.length || "")}" placeholder="如：800字以内"></label>
-            <label class="field" style="flex:1;min-width:150px"><span>语言风格</span>
-              <select class="text" id="gp-style">
-                ${["", "朴实课堂型", "理论阐释型", "故事叙事型"].map((s) =>
-                  `<option value="${s}" ${gp.style === s ? "selected" : ""}>${s || "（不限）"}</option>`).join("")}
-              </select></label>
-            <label class="field" style="flex:1;min-width:180px"><span>禁用词</span>
-              <input class="text" id="gp-banned" value="${U.esc(gp.bannedWords || "")}" placeholder="逗号分隔，如：赋能，抓手"></label>
-            <label class="field" style="flex:1;min-width:180px"><span>常用思政主题</span>
-              <input class="text" id="gp-themes" value="${U.esc(gp.themes || "")}" placeholder="如：科学家精神，科技自立自强"></label>
-            <button class="btn sm" id="gp-save">保存</button>
-            <button class="btn sm plain" id="gp-clear">清空</button>
-          </div>`}
-        </div>
-      </div>`;
-
-    // 我的影响力（被引用/被改编，从简统计卡）与众筹贡献列表
-    const impact = impactData && impactData.uid === me.id ? impactData.data : null;
-    const contribs = contribData && contribData.uid === me.id ? contribData.list : null;
-    const CONTRIB_KIND = { link: "素材链接", kn_link: "知识点关联" };
-    const CONTRIB_CLS = { 待审: "amber", 通过: "green", 驳回: "red" };
-    const contribBrief = (c) => {
-      if (c.kind === "link") return c.payload.title || c.payload.url || "";
-      const kn = Store.knowledgeById(c.payload.knId);
-      const m = Store.db.materials.find((x) => x.id === c.payload.materialId);
-      return (kn ? kn.chapter + " · " + kn.title : c.payload.knId) + " ↔ " + (m ? m.title : c.payload.materialId);
-    };
-
     return {
       html: `
       <div class="row spread" style="margin-bottom:14px">
@@ -253,56 +211,6 @@ window.Pages = window.Pages || {};
       <div class="card" style="margin-bottom:18px">
         <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>待办</span></div>
         <div>${todoRows.join("") || `<div class="card-pad muted small">没有待处理的事项</div>`}</div>
-      </div>
-      ${genPrefsCard}
-      <div class="card" style="margin-bottom:18px">
-        <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>我的影响力</span></div>
-        ${impact ? `<div class="card-pad dyn-nums">
-          <div><b>${impact.materialsCited}</b><span>素材贡献被引次数</span></div>
-          <div><b>${impact.contributedMaterials}</b><span>已入库贡献素材</span></div>
-          <div><b>${impact.caseFavorites}</b><span>案例被收藏</span></div>
-          <div><b>${impact.caseLikes}</b><span>案例被点赞</span></div>
-        </div>` : `<div class="card-pad small muted">加载中…</div>`}
-      </div>
-      <div class="card" style="margin-bottom:18px">
-        <div class="card-pad section-title" style="border-bottom:1px solid var(--line)">
-          <span>贡献素材与知识关联</span><span class="small muted">先审后发，管理员确认后生效</span>
-        </div>
-        <div class="card-pad">
-          <div class="row wrap" style="gap:8px;align-items:flex-end">
-            <label class="field" style="flex:2;min-width:200px"><span>素材链接</span><input class="text" id="cb-url" placeholder="http(s):// 原文链接"></label>
-            <label class="field" style="flex:2;min-width:160px"><span>标题</span><input class="text" id="cb-title" placeholder="素材标题"></label>
-            <label class="field"><span>等级建议</span><select class="text" id="cb-grade">
-              <option selected>B</option><option>S</option><option>A</option><option>C</option>
-            </select></label>
-          </div>
-          <div class="row wrap" style="gap:8px;align-items:flex-end">
-            <label class="field" style="flex:1;min-width:260px"><span>摘要</span><input class="text" id="cb-summary" placeholder="一句话说明内容与教学价值"></label>
-            <button class="btn sm" id="cb-link-submit">提交素材链接</button>
-          </div>
-          <hr class="hr">
-          <div class="row wrap" style="gap:8px;align-items:flex-end">
-            <label class="field" style="flex:2;min-width:220px"><span>知识点（教材节）</span><select class="text" id="cb-kn">
-              ${Store.db.knowledge.map((k) => `<option value="${k.id}">${U.esc(k.chapter)} · ${U.esc(k.title)}</option>`).join("")}
-            </select></label>
-            <label class="field" style="flex:2;min-width:220px"><span>关联素材</span><select class="text" id="cb-mat">
-              ${Store.visibleMaterials().map((m) => `<option value="${m.id}">${U.esc(m.title)}</option>`).join("")}
-            </select></label>
-            <button class="btn sm" id="cb-kn-submit">提交知识点关联</button>
-          </div>
-          <div class="small muted" style="margin-top:10px">提交完整案例：打开草稿点「提交审核」即可（<a href="#/new">新建案例</a>），无需在此重复提交。</div>
-        </div>
-        <div class="card-pad" style="border-top:1px solid var(--line)">
-          ${!contribs ? `<div class="small muted">加载中…</div>` : contribs.length ? `<table class="data">
-            <tr><th>类型</th><th>内容</th><th>提交时间</th><th>状态</th></tr>
-            ${contribs.map((c) => `<tr>
-              <td>${CONTRIB_KIND[c.kind] || c.kind}</td>
-              <td class="small" style="max-width:320px">${U.esc(contribBrief(c))}</td>
-              <td class="small">${U.esc(c.at)}</td>
-              <td><span class="tag ${CONTRIB_CLS[c.status] || ""}">${c.status}</span>${c.payload.reviewNote ? ` <span class="small muted">${U.esc(c.payload.reviewNote)}</span>` : ""}</td>
-            </tr>`).join("")}
-          </table>` : `<div class="small muted">还没有贡献记录</div>`}
-        </div>
       </div>
       <div class="home-grid">
         <div>
@@ -329,56 +237,6 @@ window.Pages = window.Pages || {};
         </div>
       </div>`,
       mount(el) {
-        // 影响力与贡献列表：按账号缓存，切换账号后重拉
-        if (!impactData || impactData.uid !== me.id) {
-          Store.fetchMyImpact().then((d) => { impactData = { uid: me.id, data: d }; P.rerender(); });
-        }
-        if (!contribData || contribData.uid !== me.id) {
-          Store.fetchContributions().then((list) => { contribData = { uid: me.id, list: list || [] }; P.rerender(); });
-        }
-        if (!genPrefsData || genPrefsData.uid !== me.id) {
-          Store.fetchMyPrefs().then((p) => { genPrefsData = { uid: me.id, prefs: p || {} }; P.rerender(); });
-        }
-        const saveGp = async (prefs, verb) => {
-          const saved = await Store.saveMyPrefs(prefs);
-          if (!saved) return;
-          genPrefsData = { uid: me.id, prefs: saved };
-          U.toast(verb);
-          P.rerender();
-        };
-        const gpSave = U.$("#gp-save", el);
-        if (gpSave) gpSave.addEventListener("click", () => saveGp({
-          length: U.$("#gp-length", el).value.trim(),
-          style: U.$("#gp-style", el).value,
-          bannedWords: U.$("#gp-banned", el).value.trim(),
-          themes: U.$("#gp-themes", el).value.trim(),
-        }, "生成偏好已保存"));
-        const gpClear = U.$("#gp-clear", el);
-        if (gpClear) gpClear.addEventListener("click", () => saveGp({}, "生成偏好已清空"));
-        const refreshContribs = async () => {
-          contribData = { uid: me.id, list: await Store.fetchContributions() || [] };
-          P.rerender();
-        };
-        const linkBtn = U.$("#cb-link-submit", el);
-        if (linkBtn) linkBtn.addEventListener("click", async () => {
-          const res = await Store.addContribution("link", {
-            url: U.$("#cb-url", el).value.trim(),
-            title: U.$("#cb-title", el).value.trim(),
-            summary: U.$("#cb-summary", el).value.trim(),
-            grade: U.$("#cb-grade", el).value,
-          });
-          if (res && res.ok) { U.toast("已提交，待管理员审核"); refreshContribs(); }
-          else U.toast((res && res.error) || "提交失败", 3000);
-        });
-        const knBtn = U.$("#cb-kn-submit", el);
-        if (knBtn) knBtn.addEventListener("click", async () => {
-          const res = await Store.addContribution("kn_link", {
-            knId: U.$("#cb-kn", el).value,
-            materialId: U.$("#cb-mat", el).value,
-          });
-          if (res && res.ok) { U.toast("已提交，待管理员审核"); refreshContribs(); }
-          else U.toast((res && res.error) || "提交失败", 3000);
-        });
         el.addEventListener("click", async (e) => {
           const pg = e.target.closest("[data-mine-page]");
           if (pg && !pg.disabled) {

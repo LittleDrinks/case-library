@@ -423,7 +423,7 @@ def write_index(seed_entries):
 
 
 def write_users():
-    """从 app/seed.js 抽取演示账号（id/name/maxLevel/admin），供服务端鉴权。"""
+    """从 app/seed.js 抽取演示账号（id/name/admin），供服务端鉴权。"""
     with open(SEED_JS, encoding="utf-8") as f:
         src = f.read()
     block = src.split("users: [", 1)[1].split("audienceNames", 1)[0]
@@ -432,7 +432,6 @@ def write_users():
         users.append({
             "id": chunk.split('"', 1)[0],
             "name": re.search(r'name: "([^"]*)"', chunk).group(1),
-            "maxLevel": int(re.search(r"maxLevel: (\d)", chunk).group(1)),
             "admin": bool(re.search(r"admin:\s*true", chunk)),
         })
     os.makedirs(FILES_DIR, exist_ok=True)

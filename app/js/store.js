@@ -102,7 +102,7 @@
   // 上传素材的全文缓存在 uploadTexts，用于补内容副本摘录
   function mergeMaterialExcerpts() {
     S.db.materials.forEach((m) => {
-      if (m.excerpt) return;
+      if (m.excerpt || m.contentAvailable === false) return;
       const up = uploadTexts[m.id];
       if (up) m.excerpt = up.text.slice(0, 2000);
     });
@@ -127,7 +127,7 @@
     const next = {};
     let fetched = false;
     const jobs = (S.db.materials || []).map(async (m) => {
-      if (!m.uploaded || !m.fileId) return;
+      if (!m.uploaded || !m.fileId || m.contentAvailable === false) return;
       const fi = (S.db.fileIndex || {})[m.fileId] || {};
       if ("textPath" in fi && !fi.textPath) return; // 索引明确标记无可抽取文本
       const key = m.fileId + "|" + (fi.textPath || "") + "|" + (fi.size || 0);
@@ -209,7 +209,8 @@
   };
 
   S.canSeeMaterial = (m) => S.me().admin ||
-    (m.level <= S.me().maxLevel && m.status !== "停用" && m.status !== "候选");
+    (m.status !== "停用" && m.status !== "候选");
+  S.canReadMaterial = (m) => !!m && m.contentAvailable !== false;
   S.canSeeCase = (c) => c.status === "published" || c.ownerId === S.userId || S.me().admin;
   S.visibleMaterials = () => S.db.materials.filter(S.canSeeMaterial);
   S.visibleCases = () => S.db.cases.filter(S.canSeeCase);
@@ -225,7 +226,10 @@
   S.typeById = (id) => S.db.caseTypes.find((t) => t.id === id);
   S.typeName = (id) => { const t = S.typeById(id); return t ? t.name : "通用案例"; };
   S.audienceName = (a) => S.db.audienceNames ? S.db.audienceNames[a] : (window.SEED.audienceNames[a] || a);
-  S.citeTarget = (id) => S.knowledgeById(id) || S.materialById(id);
+  S.citeTarget = (id) => {
+    const knowledge = S.knowledgeById(id), material = S.materialById(id);
+    return knowledge || (S.canReadMaterial(material) ? material : null);
+  };
 
   // ------------------------------------------------------------ 服务端业务数据（案例闭环）
   async function apiJSON(path, opts) {
@@ -314,6 +318,38 @@
       S.db.cases = S.db.cases.filter((c) => c.id !== id);
       return true;
     } catch (e) { apiFail(null, "删除案例"); return false; }
+  };
+
+  S.saveCaseNow = async (c, patch) => {
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id), {
+        method: "PATCH", body: JSON.stringify(patch || c),
+      });
+      if (!d || !d.ok) return apiFail(d, "保存");
+      return replaceCase(d.case);
+    } catch (e) { return apiFail(null, "保存"); }
+  };
+
+  S.addCaseAttachment = async (c, payload) => {
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) + "/attachments", {
+        method: "POST", body: JSON.stringify(payload || {}),
+      });
+      if (!d || !d.ok) return apiFail(d, "添加附件");
+      replaceCase(d.case);
+      if (d.duplicate) d.attachment.duplicate = true;
+      return d.attachment;
+    } catch (e) { return apiFail(null, "添加附件"); }
+  };
+
+  S.deleteCaseAttachment = async (c, aid) => {
+    try {
+      const d = await apiJSON("/api/cases/" + encodeURIComponent(c.id) +
+        "/attachments/" + encodeURIComponent(aid), { method: "DELETE" });
+      if (!d || !d.ok) { apiFail(d, "删除附件"); return false; }
+      replaceCase(d.case);
+      return true;
+    } catch (e) { apiFail(null, "删除附件"); return false; }
   };
 
   // 提交轮次 = 已生成的「提交版」数量
@@ -413,6 +449,7 @@
       if (!d || !d.ok) { apiFail(d, "更新批注"); return false; }
       const a = c.annotations.find((x) => x.id === annoId);
       if (a) Object.assign(a, d.annotation);
+      if (d.docxVer) c.docxVer = d.docxVer; // 「解决」会移除 docx 批注并 bump：工作台据此重建 OO 编辑器
       return true;
     } catch (e) { apiFail(null, "更新批注"); return false; }
   };
@@ -424,6 +461,7 @@
       });
       if (!d || !d.ok) { apiFail(d, "保存批注"); return null; }
       c.annotations = d.annotations;
+      if (d.docxVer) c.docxVer = d.docxVer; // 批注已注入 docx：工作台据此重建 OO 编辑器
       return d.annotation;
     } catch (e) { apiFail(null, "保存批注"); return null; }
   };
@@ -436,6 +474,7 @@
       if (!d || !d.ok) { apiFail(d, "回复批注"); return false; }
       const a = c.annotations.find((x) => x.id === annoId);
       if (a) Object.assign(a, d.annotation);
+      if (d.docxVer) c.docxVer = d.docxVer;
       return true;
     } catch (e) { apiFail(null, "回复批注"); return false; }
   };
@@ -801,6 +840,7 @@
   S.cite = (c, targetId, opts) => {
     c.citations = c.citations || [];
     if (c.citations.some((r) => r.target === targetId)) return;
+    if (!targetId.startsWith("kn-") && !S.citeTarget(targetId)) return false;
     opts = opts || {};
     const ref = { target: targetId, at: U.now() };
     if (opts.note) ref.note = opts.note;
@@ -811,6 +851,7 @@
     c.citations.push(ref);
     syncCaseSoon(c);
     if (!targetId.startsWith("kn-")) syncMaterialsSoon();
+    return true;
   };
   S.uncite = (c, targetId) => {
     c.citations = (c.citations || []).filter((r) => r.target !== targetId);
@@ -923,7 +964,7 @@
   };
 
   // ------------------------------------------------------------ 提交前自检
-  // 未过项的「系统自检」批注由服务端在每次写入后同步（所有客户端看到同一份）
+  // 教师提交前主动运行；未过项只显示在自检面板，不自动写入批注。
   S.selfChecks = (c) => {
     const blocks = S.blocksOf(c);
     const paras = blocks.filter((b) => b.kind === "p" && b.text.trim());
@@ -939,7 +980,9 @@
       { id: "ck-title", name: "标题已填写（非默认标题）", ok: !!c.title.trim() && c.title !== "未命名案例" },
       { id: "ck-paras", name: "正文段落不少于 3 段", ok: paras.length >= 3 },
       { id: "ck-emptyh2", name: "没有空标题（每个标题下都有正文）", ok: !emptyH2 },
-      { id: "ck-cite", name: "至少 1 处引用（理论或素材有着落）", ok: (c.citations || []).length >= 1 },
+      { id: "ck-cite", name: "至少 1 个引用案例或附件标记",
+        ok: !!(c.caseRefs || []).length || (c.attachments || []).some((a) =>
+          blocks.some((b) => b.text.includes(`](attachment:${a.id})`))) },
       { id: "ck-len", name: "正文不少于 600 字", ok: chars >= 600 },
       { id: "ck-risk", name: "无待处理的风险提示批注", ok: !c.annotations.some((a) => a.kind === "risk" && a.status === "pending") },
     ];
@@ -979,7 +1022,7 @@
     };
   };
 
-  // 引用该受限/失效素材的案例（风险处理）
+  // 引用该私密/失效素材的案例（风险处理）
   S.affectedByMaterial = (mid) => S.db.cases.filter((c) =>
     (c.citations || []).some((r) => r.target === mid));
 
@@ -1020,7 +1063,8 @@
       const item = S.materialById(h.materialId || h.id) || {
         id: h.materialId || h.id, title: h.title, source: h.source,
         level: h.level, credibility: h.credibility, summary: h.snippet,
-        kind: "文档", status: "正常", tags: [],
+        kind: h.kind || "文档", status: "正常", tags: [],
+        contentAvailable: h.contentAvailable !== false,
       };
       if (filters.credibility && item.credibility !== filters.credibility) return;
       if (filters.level !== undefined && filters.level !== "" && item.level !== Number(filters.level)) return;

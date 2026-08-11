@@ -2,35 +2,34 @@
 window.SEED = {
 
   // ---------------------------------------------------------- 账号
-  // level: 0 公开 / 1 校内 / 2 受限
   users: [
     {
       id: "u-chen", name: "陈静", role: "硕博公共思政教师", audience: "grad",
       courses: ["自然辩证法概论", "习近平新时代中国特色社会主义思想概论"],
-      maxLevel: 2, org: "马克思主义学院",
+      org: "马克思主义学院",
       prefs: { authorityFirst: true, style: "简练", classForm: "小班研讨", defaultStage: "grad" },
     },
     {
       id: "u-wang", name: "王磊", role: "本科思政教师", audience: "ug",
       courses: ["思想道德与法治", "中国近现代史纲要"],
-      maxLevel: 1, org: "马克思主义学院",
+      org: "马克思主义学院",
       prefs: { authorityFirst: true, style: "通俗", classForm: "大班讲授", defaultStage: "ug" },
     },
     {
       id: "u-zhao", name: "赵敏", role: "专业课程思政教师", audience: "embed",
       courses: ["计算机科学与技术"],
-      maxLevel: 0, org: "计算机工程与科学学院",
+      org: "计算机工程与科学学院",
       prefs: { authorityFirst: false, style: "简练", classForm: "课堂嵌入", defaultStage: "embed" },
     },
     {
       id: "u-admin", name: "周正", role: "案例管理员", audience: "grad",
-      courses: [], maxLevel: 2, admin: true, org: "教务部",
+      courses: [], admin: true, org: "教务部",
       prefs: { authorityFirst: true, style: "规范", classForm: "", defaultStage: "grad" },
     },
   ],
 
   audienceNames: { grad: "硕博公共思政", ug: "本科思政", embed: "专业课程思政" },
-  levelNames: ["公开", "校内", "受限"],
+  levelNames: ["公开", "校内", "私密"],
   credNames: { high: "权威来源", normal: "一般来源", low: "待核实" },
 
   // ---------------------------------------------------------- 案例类型与模板

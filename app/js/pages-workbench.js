@@ -233,12 +233,15 @@ window.Pages = window.Pages || {};
       </div>`;
 
     const docHTML = () => `
-    <div class="doc-page">
+    <div class="doc-page${ooMode() ? " oo-page" : ""}">
       <div id="wb-doc-head-box">${docHeadHTML()}</div>
       ${ooMode() ? `
-      <div class="small muted" style="margin:4px 0 8px">OnlyOffice 编辑中（自动保存）：AI 采纳内容以「修订」形式进入文档，在编辑器内接受或拒绝；提交/导出前请确认编辑器已保存（💾）。</div>
-      <div id="oo-holder" style="height:72vh;border:1px solid var(--line);border-radius:6px"></div>
-      <div id="doc-refs-box">${refsHTML()}</div>` : `
+      <div class="oo-hint small muted">OnlyOffice 编辑中（自动保存）：AI 采纳内容以「修订」形式进入文档，在编辑器内接受或拒绝；提交/导出前请确认已保存（💾）。</div>
+      <div id="oo-holder"></div>
+      <details class="oo-refs">
+        <summary id="doc-refs-summary">参考文献（${(c.citations || []).length}）</summary>
+        <div id="doc-refs-box">${refsHTML()}</div>
+      </details>` : `
       ${editable() ? `
       <div class="doc-tools">
         <button data-fmt="bold" title="加粗选中文字"><b>B</b></button>
@@ -366,6 +369,21 @@ window.Pages = window.Pages || {};
       await initOO();
     }
 
+    // 读取 OO 编辑器当前选区文本（Automation API；失败/无选区回 ""，调用方降级为手填锚定文本）
+    function ooGetSelection(cb) {
+      if (!ooEditor) { cb(""); return; }
+      try {
+        ooEditor.createConnector().callCommand(function () {
+          var t = "";
+          try {
+            var r = Api.GetDocument().GetRangeBySelect();
+            if (r) t = r.GetText();
+          } catch (e) { /* 旧版 DS 无 GetRangeBySelect */ }
+          return t;
+        }, function (res) { cb(String(res || "").trim()); });
+      } catch (e) { cb(""); }
+    }
+
     // 按文本在文档中定位（批注/大纲/引用卡共用）：Automation API 搜索并选中；
     // 无浏览器环境未实测，失败或不可用时提示手动 Ctrl+F
     function ooSearchJump(text) {
@@ -441,15 +459,19 @@ window.Pages = window.Pages || {};
       saveTimer = setTimeout(() => serializeDoc(), 900);
     }
 
-    // ---------------- 大纲（浮动目录，两种模式都有；作者可编辑时带逐节生成入口） ----------------
-    const outlineHTML = () => {
+    // ---------------- 大纲（兼容模式：浮动目录；OO 模式：主列左侧窄轨，可折叠） ----------------
+    const outlineItemsHTML = () => {
       const hs = blocksOf().map((b, i) => ({ b, i })).filter((x) => x.b.kind === "h2" && x.b.text.trim());
-      return `<div id="wb-outline" hidden>
-        <div class="small muted" style="margin-bottom:6px">大纲</div>
-        ${hs.map((x) => `<div class="wb-outline-row"><a href="javascript:void 0" data-outline="${x.i}">${U.esc(x.b.text)}</a>${editable() ? `<button class="wb-sec-gen" data-sec-gen="${x.i}" title="AI 生成本节">✦</button>` : ""}</div>`).join("") ||
-        `<div class="small muted">正文还没有标题</div>`}
-      </div>`;
+      return hs.map((x) => `<div class="wb-outline-row"><a href="javascript:void 0" data-outline="${x.i}">${U.esc(x.b.text)}</a>${editable() ? `<button class="wb-sec-gen" data-sec-gen="${x.i}" title="AI 生成本节">✦</button>` : ""}</div>`).join("") ||
+        `<div class="small muted">正文还没有标题</div>`;
     };
+    const outlineHTML = () => `<div id="wb-outline" hidden>
+        <div class="small muted" style="margin-bottom:6px">大纲</div>
+        ${outlineItemsHTML()}
+      </div>`;
+    const outlineRailHTML = () => `
+      <div class="small muted" style="margin-bottom:6px">大纲</div>
+      ${outlineItemsHTML()}`;
 
     // ---------------- 头部 ----------------
     const headHTML = () => {
@@ -1258,8 +1280,11 @@ window.Pages = window.Pages || {};
         ${Object.keys(KINDS).map((k) => `<button data-afk="${k}" class="${annoFilter.kind.has(k) ? "on" : ""}">${KINDS[k]}</button>`).join("")}
       </div>
       <div class="row spread" style="margin-bottom:8px">
-        <span class="small muted">${c.annotations.filter((a) => a.status === "pending").length} 条待处理 · 在正文选中文字可添加批注</span>
-        ${editable() ? `<button class="btn sm plain" id="anno-batch">批量采纳低风险</button>` : ""}
+        <span class="small muted">${c.annotations.filter((a) => a.status === "pending").length} 条待处理 · ${ooMode() ? "与编辑器原生批注互通（编辑器里直接添加也会同步到这里）" : "在正文选中文字可添加批注"}</span>
+        <span class="row" style="gap:6px">
+          ${ooMode() ? `<button class="btn sm" id="anno-add-oo">+ 批注</button>` : ""}
+          ${editable() ? `<button class="btn sm plain" id="anno-batch">批量采纳低风险</button>` : ""}
+        </span>
       </div>`;
       const list = c.annotations.filter((a) =>
         (annoFilter.status.size === 0 || annoFilter.status.has(a.status)) &&
@@ -1376,7 +1401,9 @@ window.Pages = window.Pages || {};
       const close = U.modal(`
       <div class="modal-head"><b>添加批注</b><button class="modal-close" data-close>×</button></div>
       <div class="modal-body">
-        <div class="anno-quote" style="margin-bottom:10px">${U.esc(quote.slice(0, 120))}</div>
+        ${quote
+          ? `<div class="anno-quote" style="margin-bottom:10px">${U.esc(quote.slice(0, 120))}</div>`
+          : `<input class="text" id="sa-quote" style="margin-bottom:10px" placeholder="锚定文本：从正文复制一小段，用于在编辑器中高亮定位（可留空锚到文末）">`}
         <textarea class="text" id="sa-text" style="height:120px" placeholder="批注内容"></textarea>
       </div>
       <div class="modal-foot">
@@ -1387,9 +1414,10 @@ window.Pages = window.Pages || {};
       U.$("#sa-go").addEventListener("click", async () => {
         const text = U.$("#sa-text").value.trim();
         if (!text) { U.toast("请填写批注内容"); return; }
+        const q = quote || (U.$("#sa-quote") ? U.$("#sa-quote").value.trim() : "");
         const saved = await Store.addAnnotation(c, {
           kind: reviewer ? "admin" : "author",
-          status: "pending", section: blockIdx, quote: quote.slice(0, 60),
+          status: "pending", section: blockIdx, quote: q.slice(0, 60),
           text, author: me.name, lowRisk: false,
         });
         if (!saved) return;
@@ -1487,6 +1515,7 @@ window.Pages = window.Pages || {};
     }
 
     function cite(target, silent) {
+      if (!Store.citeTarget(target)) return U.toast("当前账号无权读取该素材内容");
       const already = Store.isCited(c, target);
       // 用户选中了正文句子时挂引用：quote=选中文本（句内锚点/文本指纹），blockId 作次级锚
       const anchor = (!already && citeAnchor && citeAnchor.text) ? citeAnchor : null;
@@ -1549,10 +1578,10 @@ window.Pages = window.Pages || {};
           ${Store.isCited(c, x.item.id) ? `<span class="tag green">已引用</span>` : `<div style="margin-top:6px"><button class="btn sm plain" data-cite-kn="${x.item.id}">引用</button></div>`}
         </div>`).join("") +
         ms.map((x) => `<div class="res-item">
-          <div class="row spread"><h5><a href="#/material/${x.item.id}">${U.esc(x.item.title)}</a></h5>${H.gradeTag(x.item.grade)}</div>
+          <div class="row spread"><h5><a href="#/material/${x.item.id}">${U.esc(x.item.title)}</a></h5>${Store.canReadMaterial(x.item) ? H.gradeTag(x.item.grade) : H.levelTag(x.item.level)}</div>
           <div class="small muted">${U.esc(x.item.source || "")} · 被引 ${x.item.citedCount || 0} · ${U.esc((x.item.excerpt || x.item.summary || "").slice(0, 60))}</div>
           <div class="small muted">${U.esc((x.reasons || []).slice(0, 3).join(" · "))}</div>
-          ${Store.isCited(c, x.item.id) ? `<span class="tag green">已引用</span>` : `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${x.item.id}">引用</button></div>`}
+          ${Store.isCited(c, x.item.id) ? `<span class="tag green">已引用</span>` : Store.canReadMaterial(x.item) ? `<div style="margin-top:6px"><button class="btn sm plain" data-cite-m="${x.item.id}">引用</button></div>` : ""}
         </div>`).join("");
     }
 
@@ -1706,7 +1735,7 @@ window.Pages = window.Pages || {};
         U.$("#ex-warn").innerHTML = external && restricted.length ? `
           <div class="card-pad" style="background:var(--red-soft);border-radius:6px;margin-bottom:12px">
             <b class="small" style="color:var(--red)">以下内容不允许外发，导出时将自动移除：</b>
-            ${restricted.map((x) => `<div class="small">〔${x.i + 1}〕${U.esc(x.t.name)}（${x.t.level === 2 ? "受限" : "校内"}）</div>`).join("")}
+            ${restricted.map((x) => `<div class="small">〔${x.i + 1}〕${U.esc(x.t.name)}（${x.t.level === 2 ? "私密" : "校内"}）</div>`).join("")}
             <label class="row small" style="gap:6px;margin-top:8px"><input type="checkbox" id="ex-confirm" style="width:auto"> 已确认脱敏处理</label>
           </div>` : "";
       };
@@ -1922,9 +1951,9 @@ window.Pages = window.Pages || {};
     function drawPanel() {
       const box = U.$("#wb-panel");
       if (!box) return;
-      // Copilot 是工作台主力功能：激活时右栏加宽加高，批注/资料时恢复窄栏
+      // Copilot 是工作台主力功能：兼容模式激活时右栏加宽加高；OO 模式编辑器是绝对主角，右栏保持窄栏
       const grid = U.$(".wb-grid");
-      if (grid) grid.classList.toggle("cp-main", tab === "copilot");
+      if (grid) grid.classList.toggle("cp-main", tab === "copilot" && !ooMode());
       U.$$("#wb-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
       if (tab === "copilot") box.innerHTML = chatHTML();
       else if (tab === "anno") box.innerHTML = annoHTML();
@@ -1946,9 +1975,17 @@ window.Pages = window.Pages || {};
     function drawAll() {
       renumberCitations();
       U.$("#wb-head-box").innerHTML = headHTML();
+      const grid = U.$(".wb-grid");
+      if (grid) grid.classList.toggle("oo", ooMode() && !showDiff);
+      const rail = U.$("#wb-outline-rail");
       if (ooMode() && !showDiff) {
+        // 批注增删/解决会写 docx 并 bump docxVer：版本错配时重建编辑器强制 DS 重载（批注即显）
+        if (ooEditor && ooCfg && c.docxVer && c.docxVer !== ooCfg.docxVer) {
+          reloadOO();
+          return;
+        }
         // OO 编辑器 iframe 不能随每次重绘销毁：只在未建编辑器时整区渲染，
-        // 其余时候只刷新文档头与参考文献区
+        // 其余时候只刷新文档头、大纲轨与参考文献区
         if (!ooEditor) {
           U.$("#wb-secs").innerHTML = docHTML();
           initOOEditor();
@@ -1957,12 +1994,17 @@ window.Pages = window.Pages || {};
           if (dh) dh.innerHTML = docHeadHTML();
           const rb = U.$("#doc-refs-box");
           if (rb) rb.innerHTML = refsHTML();
+          const rs = U.$("#doc-refs-summary");
+          if (rs) rs.textContent = "参考文献（" + (c.citations || []).length + "）";
         }
+        if (rail) rail.innerHTML = outlineRailHTML();
+        U.$("#wb-outline-box").innerHTML = ""; // OO 模式大纲进左轨，不用浮动目录
       } else {
         if (ooEditor) destroyOO(); // 审核员的版本对比视图覆盖编辑区
         U.$("#wb-secs").innerHTML = showDiff ? diffHTML() : docHTML();
+        if (rail) rail.innerHTML = "";
+        U.$("#wb-outline-box").innerHTML = outlineHTML();
       }
-      U.$("#wb-outline-box").innerHTML = outlineHTML();
       drawPanel();
     }
 
@@ -1976,6 +2018,7 @@ window.Pages = window.Pages || {};
       <div id="wb-head-box">${headHTML()}</div>
       <div id="wb-outline-box">${outlineHTML()}</div>
       <div class="wb-grid">
+        <div id="wb-outline-rail" hidden></div>
         <div id="wb-secs">${docHTML()}</div>
         <div class="wb-side">
           ${reviewer ? `<div id="rv-box">${reviewBoxHTML()}${reviewHistHTML()}</div>` : ""}
@@ -2228,6 +2271,11 @@ window.Pages = window.Pages || {};
             sendFromInput(U.$("#chat-text"));
             return;
           }
+          if (e.target.id === "anno-add-oo") {
+            // OO 模式侧栏入口：读编辑器选区作锚定文本（读不到则弹窗手填），服务端注入 docx 原生批注
+            ooGetSelection((text) => addAnnotationFromSelection(text.slice(0, 200), focusBlock || 0));
+            return;
+          }
           if (e.target.id === "anno-batch") {
             let n = 0;
             for (const a of c.annotations) {
@@ -2322,6 +2370,11 @@ window.Pages = window.Pages || {};
             return;
           }
           if (e.target.id === "wb-outline-btn") {
+            if (ooMode()) {
+              const grid = U.$(".wb-grid");
+              if (grid) grid.classList.toggle("rail-off");
+              return;
+            }
             const o = U.$("#wb-outline");
             if (o) o.hidden = !o.hidden;
             return;

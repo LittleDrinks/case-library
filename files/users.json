@@ -2,25 +2,21 @@
  {
   "id": "u-chen",
   "name": "陈静",
-  "maxLevel": 2,
   "admin": false
  },
  {
   "id": "u-wang",
   "name": "王磊",
-  "maxLevel": 1,
   "admin": false
  },
  {
   "id": "u-zhao",
   "name": "赵敏",
-  "maxLevel": 0,
   "admin": false
  },
  {
   "id": "u-admin",
   "name": "周正",
-  "maxLevel": 2,
   "admin": true
  }
 ]

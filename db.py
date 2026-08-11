@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cases(
@@ -97,6 +98,12 @@ CREATE TABLE IF NOT EXISTS mat_favorites(
   userId TEXT NOT NULL, materialId TEXT NOT NULL, at TEXT,
   PRIMARY KEY(userId, materialId)
 );
+CREATE TABLE IF NOT EXISTS material_mounts(
+  materialId TEXT NOT NULL, caseId TEXT NOT NULL, versionId TEXT NOT NULL,
+  attachmentId TEXT NOT NULL, at TEXT,
+  PRIMARY KEY(materialId, caseId, versionId, attachmentId)
+);
+CREATE INDEX IF NOT EXISTS ix_material_mounts_case ON material_mounts(caseId);
 CREATE TABLE IF NOT EXISTS watch_sources(
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL DEFAULT '',
@@ -163,24 +170,15 @@ def _graph_notify(kind, nid=None):
         pass
 
 
-# 状态机：draft → checking（机审，提交后自动进入）→ pending → reviewing → published/hidden；
-# 退回/要求补充回 draft。机审（词库规则 + LLM 反例审校）由服务端在 submit 后异步执行，
-# 结果以 kind=risk 批注呈现，reviews 留痕 action=checking。
+# 状态机：draft → pending → reviewing → published/hidden；退回/要求补充回 draft。
 # 结构化退回理由（reject/supplement 必选）：
 REASON_TYPES = ("fact_error", "citation_unsupported", "forced_mapping",
                 "over_praise", "wording", "other")
-SNAP_KEYS = ["title", "summary", "theoryPoints", "blocks", "citations", "kit",
+ANNO_STATUSES = ("pending", "accepted", "rejected", "resolved", "outdated")
+SNAP_KEYS = ["title", "summary", "theoryPoints", "blocks", "citations", "caseRefs",
+             "attachments", "kit",
              "typeId", "audience", "course", "author", "org", "stageText", "applyCourses"]
-
-SELFCHECK_NAMES = [
-    ("ck-title", "标题已填写（非默认标题）"),
-    ("ck-paras", "正文段落不少于 3 段"),
-    ("ck-emptyh2", "没有空标题（每个标题下都有正文）"),
-    ("ck-cite", "至少 1 处引用（理论或素材有着落）"),
-    ("ck-len", "正文不少于 600 字"),
-    ("ck-risk", "无待处理的风险提示批注"),
-]
-
+_RAW_VIEW = object()
 
 def _now():
     return time.strftime("%Y-%m-%d %H:%M")
@@ -190,8 +188,51 @@ def _uid(prefix):
     return "%s-%s" % (prefix, uuid.uuid4().hex[:10])
 
 
+def _access_level(value):
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        level = 2
+    return level if level in (0, 1, 2) else 2
+
+
+def _level_readable(level, user, owner_ids=()):
+    level = _access_level(level)
+    if level == 0:
+        return True
+    if level == 1:
+        return bool(user)
+    return bool(user and (user.get("admin") or user.get("id") in owner_ids))
+
+
+def _clean_attachment(a):
+    item = {k: v for k, v in dict(a).items()
+            if k not in ("used", "publish", "contentAvailable")}
+    item["level"] = _access_level(item.get("level"))
+    return item
+
+
+def _attachment_view(a, user, owner_id):
+    item = _clean_attachment(a)
+    if _level_readable(item["level"], user, (owner_id,)):
+        item["contentAvailable"] = True
+        return item
+    return {"id": item.get("id", ""), "title": item.get("title", ""),
+            "kind": item.get("kind", "文件"), "level": item["level"],
+            "contentAvailable": False}
+
+
+def _holder_view(holder, user, owner_id):
+    view = dict(holder or {})
+    view["attachments"] = [_attachment_view(a, user, owner_id)
+                           for a in view.get("attachments") or []]
+    return view
+
+
 def snapshot_of(c):
-    return {k: c[k] for k in SNAP_KEYS if k in c}
+    snap = {k: c[k] for k in SNAP_KEYS if k in c}
+    snap["attachments"] = [_clean_attachment(a) for a in c.get("attachments") or []]
+    return snap
 
 
 class CaseDB:
@@ -267,7 +308,7 @@ class CaseDB:
                  v.get("at", ""), json.dumps(v, ensure_ascii=False)))
 
     # ------------------------------------------------------------ 组装
-    def _case_obj(self, row):
+    def _case_obj(self, row, user=_RAW_VIEW):
         c = json.loads(row["data"])
         for k in ("id", "ownerId", "status", "title", "likes",
                   "createdAt", "updatedAt", "submittedAt", "publishedAt"):
@@ -280,7 +321,20 @@ class CaseDB:
             "SELECT data FROM annotations WHERE caseId=? ORDER BY rowid", (cid,))]
         c["versions"] = [json.loads(r["data"]) for r in self._conn.execute(
             "SELECT data FROM versions WHERE caseId=? ORDER BY rowid", (cid,))]
+        if user is not _RAW_VIEW:
+            c = self._case_view(c, row, user)
         return c
+
+    @staticmethod
+    def _case_view(c, row, user):
+        owner_id = row["ownerId"]
+        view = _holder_view(c, user, owner_id)
+        if isinstance(view.get("publishedSnapshot"), dict):
+            view["publishedSnapshot"] = _holder_view(view["publishedSnapshot"], user, owner_id)
+        for version in view.get("versions") or []:
+            if isinstance(version.get("snapshot"), dict):
+                version["snapshot"] = _holder_view(version["snapshot"], user, owner_id)
+        return view
 
     @staticmethod
     def _visible(row, user):
@@ -299,7 +353,7 @@ class CaseDB:
                     continue
                 if owner_id and r["ownerId"] != owner_id:
                     continue
-                out.append(self._case_obj(r))
+                out.append(self._case_obj(r, user))
             return out
 
     def get_case(self, cid, user):
@@ -307,7 +361,7 @@ class CaseDB:
             r = self._conn.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
             if not r or not self._visible(r, user):
                 return None
-            return self._case_obj(r)
+            return self._case_obj(r, user)
 
     def _row(self, cid):
         return self._conn.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
@@ -328,7 +382,6 @@ class CaseDB:
             c["updatedAt"] = _now()
             c.setdefault("docxVer", 1)  # OnlyOffice document.key 版本号（内容变化即 bump）
             self._insert_case(c)
-            self._sync_selfchecks(c["id"])
             self._sync_material_usage()
             self._conn.commit()
             _graph_notify("case", c["id"])
@@ -349,17 +402,16 @@ class CaseDB:
                          "versions", "publishedSnapshot", "createdAt", "submittedAt",
                          "publishedAt", "docxVer", "_ooManaged"):
                     continue
-                data[k] = v
+                data[k] = [_clean_attachment(a) for a in v] if k == "attachments" else v
             data["updatedAt"] = _now()
             self._conn.execute(
                 "UPDATE cases SET title=?, updatedAt=?, data=? WHERE id=?",
                 (data.get("title", ""), data["updatedAt"],
                  json.dumps(data, ensure_ascii=False), cid))
-            self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
             _graph_notify("case", cid)
-            return self._case_obj(r), None
+            return self._case_obj(self._row(cid)), None
 
     def delete_case(self, user, cid):
         with self._lock:
@@ -368,6 +420,7 @@ class CaseDB:
                 return "案例不存在"
             if not (user.get("admin") or r["ownerId"] == user["id"]):
                 return "仅作者本人或管理员可删除"
+            self._remove_case_mounts(cid)
             for t in ("cases", "reviews", "annotations", "versions", "favorites", "likes"):
                 self._conn.execute("DELETE FROM %s WHERE %s=?" % (
                     t, "id" if t == "cases" else "caseId"), (cid,))
@@ -391,7 +444,6 @@ class CaseDB:
             self._conn.execute(
                 "UPDATE cases SET updatedAt=?, data=? WHERE id=?",
                 (data["updatedAt"], json.dumps(data, ensure_ascii=False), cid))
-            self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
             _graph_notify("case", cid)
@@ -420,6 +472,7 @@ class CaseDB:
         self._conn.execute(
             "INSERT INTO versions(id,caseId,actorId,label,at,data) VALUES(?,?,?,?,?,?)",
             (v["id"], cid, actor_id, label, v["at"], json.dumps(v, ensure_ascii=False)))
+        return v
 
     @staticmethod
     def _block_lines(blocks):
@@ -458,6 +511,66 @@ class CaseDB:
         return {"vs": prev.get("id", ""), "added": added,
                 "removed": removed, "changed": changed, "blocks": ids}
 
+    def _latest_public_version(self, cid):
+        row = self._conn.execute(
+            "SELECT id FROM versions WHERE caseId=? AND label LIKE '公开版%' ORDER BY rowid DESC LIMIT 1",
+            (cid,)).fetchone()
+        return row["id"] if row else ""
+
+    @staticmethod
+    def _normalized_url(url):
+        try:
+            p = urlsplit((url or "").strip())
+            query = urlencode(sorted((k, v) for k, v in parse_qsl(p.query)
+                                     if not k.lower().startswith("utm_")))
+            return urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip("/"), query, ""))
+        except ValueError:
+            return (url or "").strip().rstrip("/")
+
+    def _material_id_for_attachment(self, a):
+        origin = a.get("originMaterialId") or ""
+        if origin and self._mat_row(origin):
+            return origin
+        key = self._normalized_url(a.get("sourceUrl"))
+        if key:
+            rows = self._conn.execute(
+                "SELECT id,sourceUrl FROM materials WHERE sourceUrl<>''").fetchall()
+            matched = next((r["id"] for r in rows
+                            if self._normalized_url(r["sourceUrl"]) == key), "")
+            if matched:
+                return matched
+        key = key or a.get("contentHash") or (a.get("title") or "")
+        return "m-pub-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+
+    def _material_payload_for_attachment(self, a, mid):
+        now = _now()
+        return {"id": mid, "title": a.get("title") or a.get("fileName") or "案例附件",
+                "kind": a.get("kind") or "文档", "tags": ["案例附件"],
+                "source": a.get("source") or "案例附件", "sourceUrl": a.get("sourceUrl") or "",
+                "level": _access_level(a.get("level")), "credibility": a.get("credibility") or "normal",
+                "publishedAt": now[:10], "collectedAt": now[:10], "status": "正常",
+                "summary": a.get("summary") or "", "excerpt": a.get("excerpt") or "",
+                "scope": "案例发布", "createdAt": now, "updatedAt": now}
+
+    def _project_case_attachments(self, cid, vid, snap):
+        for a in snap.get("attachments") or []:
+            mid = self._material_id_for_attachment(a)
+            if not self._mat_row(mid):
+                self._insert_material(self._material_payload_for_attachment(a, mid))
+            self._conn.execute(
+                "INSERT OR IGNORE INTO material_mounts(materialId,caseId,versionId,attachmentId,at) VALUES(?,?,?,?,?)",
+                (mid, cid, vid, a.get("id") or "", _now()))
+
+    def _remove_case_mounts(self, cid):
+        mids = [r["materialId"] for r in self._conn.execute(
+            "SELECT DISTINCT materialId FROM material_mounts WHERE caseId=?", (cid,))]
+        self._conn.execute("DELETE FROM material_mounts WHERE caseId=?", (cid,))
+        for mid in mids:
+            n = self._conn.execute(
+                "SELECT COUNT(*) c FROM material_mounts WHERE materialId=?", (mid,)).fetchone()["c"]
+            if not n:
+                self._conn.execute("DELETE FROM materials WHERE id=? AND scope='案例发布'", (mid,))
+
     def transition(self, user, cid, action, reason="", reason_type="", offline_from=""):
         """submit/withdraw 限作者本人；start/approve/reject/supplement/hide/unhide 限 admin。"""
         with self._lock:
@@ -478,8 +591,7 @@ class CaseDB:
                     return None, "仅草稿可提交审核", 409
                 n = self._submit_round(cid) + 1
                 self._add_version(cid, user["id"], "提交版 v%d" % n, "提交审核", snapshot_of(c))
-                # 先进 checking：服务端异步机审完成后转 pending（见 machine_check_apply）
-                self._conn.execute("UPDATE cases SET status='checking', submittedAt=?, updatedAt=? WHERE id=?",
+                self._conn.execute("UPDATE cases SET status='pending', submittedAt=?, updatedAt=? WHERE id=?",
                                    (now, now, cid))
                 self._add_review(cid, user["id"], "submit", rnd=n)
             elif action == "withdraw":
@@ -498,9 +610,11 @@ class CaseDB:
                     return None, "案例不在审核流程中", 409
                 pub_day = now[:10]
                 snap = snapshot_of(c)
-                self._add_version(cid, user["id"],
-                                  "公开版 v%d" % max(1, self._submit_round(cid)),
-                                  "审核通过并发布" + (reason and "：" + reason or ""), snap)
+                pv = self._add_version(cid, user["id"],
+                                       "公开版 v%d" % max(1, self._submit_round(cid)),
+                                       "审核通过并发布" + (reason and "：" + reason or ""), snap)
+                self._remove_case_mounts(cid)
+                self._project_case_attachments(cid, pv["id"], snap)
                 data = json.loads(r["data"])
                 data["publishedSnapshot"] = snap
                 meta = data.setdefault("meta", {})
@@ -522,16 +636,18 @@ class CaseDB:
                                  self._submit_round(cid))
             elif action == "hide":
                 self._conn.execute("UPDATE cases SET status='hidden', updatedAt=? WHERE id=?", (now, cid))
+                self._remove_case_mounts(cid)
                 self._add_review(cid, user["id"], "hide", reason, reason_type, offline_from,
                                  self._submit_round(cid))
             elif action == "unhide":
                 if st != "hidden":
                     return None, "案例当前不是隐藏状态", 409
                 self._conn.execute("UPDATE cases SET status='published', updatedAt=? WHERE id=?", (now, cid))
+                snap = c.get("publishedSnapshot") or snapshot_of(c)
+                self._project_case_attachments(cid, self._latest_public_version(cid), snap)
                 self._add_review(cid, user["id"], "unhide", reason)
             else:
                 return None, "未知操作: " + action, 400
-            self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
             _graph_notify("case", cid)
@@ -555,50 +671,12 @@ class CaseDB:
                 "offlineFrom": r["offlineFrom"], "by": r["actorId"],
                 "at": r["at"], "round": r["round"]}
 
-    # ------------------------------------------------------------ 机审（WP4）
+    # ------------------------------------------------------------ 内部案例读取
     def get_case_data(self, cid):
-        """机审等后台流程用的原始读取（不做可见性过滤）。"""
+        """OnlyOffice 等后台流程用的原始读取（不做可见性过滤）。"""
         with self._lock:
             r = self._row(cid)
             return json.loads(r["data"]) if r else None
-
-    def machine_check_apply(self, cid, annotations, note, model=""):
-        """机审落库（submit 后由服务端异步调用）：命中项写 kind=risk 批注、
-        reviews 留痕 action=checking，状态 checking → pending；
-        机审用过的模型记入 meta.modelVersions。"""
-        with self._lock:
-            r = self._row(cid)
-            if not r or r["status"] != "checking":
-                return None, "案例不在机审中"
-            data = json.loads(r["data"])
-            if model:
-                mv = data.setdefault("meta", {}).setdefault("modelVersions", [])
-                if model not in mv:
-                    mv.append(model)
-            now = _now()
-            for a in annotations:
-                a = dict(a)
-                a.setdefault("id", _uid("an"))
-                a.setdefault("kind", "risk")
-                a.setdefault("status", "pending")
-                a.setdefault("section", 0)
-                a.setdefault("quote", "")
-                a.setdefault("lowRisk", False)
-                a.setdefault("createdAt", now)
-                a.setdefault("replies", [])
-                self._conn.execute(
-                    "INSERT INTO annotations(id,caseId,kind,status,authorId,at,data)"
-                    " VALUES(?,?,?,?,?,?,?)",
-                    (a["id"], cid, "risk", "pending", "", a["createdAt"],
-                     json.dumps(a, ensure_ascii=False)))
-            self._conn.execute(
-                "UPDATE cases SET status='pending', updatedAt=?, data=? WHERE id=?",
-                (now, json.dumps(data, ensure_ascii=False), cid))
-            self._add_review(cid, "system", "checking", note, rnd=self._submit_round(cid))
-            self._sync_selfchecks(cid)
-            self._conn.commit()
-            _graph_notify("case", cid)
-            return self._case_obj(self._row(cid)), None
 
     def review_ledger(self, limit=200):
         """被退回表达台账（组织资产）：reject/supplement 留痕按 reasonType 聚合，附关联批注。"""
@@ -625,14 +703,23 @@ class CaseDB:
             return {"items": items, "byType": by_type}
 
     # ------------------------------------------------------------ 批注
+    @staticmethod
+    def _can_comment(row, user):
+        return bool(user and (user.get("admin") or row["ownerId"] == user.get("id")))
+
     def add_annotation(self, user, cid, anno):
         with self._lock:
-            if not self._row(cid):
+            row = self._row(cid)
+            if not row:
                 return None, "案例不存在"
+            if not self._can_comment(row, user):
+                return None, "无权操作批注"
             a = dict(anno)
             a.setdefault("id", _uid("an"))
             a.setdefault("kind", "admin" if user.get("admin") else "author")
             a.setdefault("status", "pending")
+            if a["status"] not in ANNO_STATUSES:
+                return None, "批注状态无效"
             a.setdefault("createdAt", _now())
             a.setdefault("replies", [])
             a["authorId"] = user["id"]
@@ -641,7 +728,6 @@ class CaseDB:
                 "INSERT INTO annotations(id,caseId,kind,status,authorId,at,data) VALUES(?,?,?,?,?,?,?)",
                 (a["id"], cid, a.get("kind", ""), a["status"], user["id"], a["createdAt"],
                  json.dumps(a, ensure_ascii=False)))
-            self._sync_selfchecks(cid)
             self._conn.commit()
             return a, None
 
@@ -651,8 +737,13 @@ class CaseDB:
             r = self._conn.execute("SELECT * FROM annotations WHERE id=?", (aid,)).fetchone()
             if not r:
                 return None, "批注不存在"
+            case = self._row(r["caseId"])
+            if not case or not self._can_comment(case, user):
+                return None, "无权操作批注"
             a = json.loads(r["data"])
             if patch.get("status"):
+                if patch["status"] not in ANNO_STATUSES:
+                    return None, "批注状态无效"
                 a["status"] = patch["status"]
             if patch.get("section") is not None:
                 a["section"] = patch["section"]
@@ -667,9 +758,124 @@ class CaseDB:
             a["resolved"] = a.get("status") == "resolved"
             self._conn.execute("UPDATE annotations SET status=?, data=? WHERE id=?",
                                (a.get("status", "pending"), json.dumps(a, ensure_ascii=False), aid))
-            self._sync_selfchecks(r["caseId"])
             self._conn.commit()
             return a, None
+
+    def annotation_case_id(self, aid):
+        with self._lock:
+            r = self._conn.execute("SELECT caseId FROM annotations WHERE id=?", (aid,)).fetchone()
+            return r["caseId"] if r else ""
+
+    def set_annotation_ooid(self, aid, ooid):
+        """记录批注在 docx comments.xml 中的 w:id（OO 原生批注镜像关联键）。"""
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM annotations WHERE id=?", (aid,)).fetchone()
+            if not r:
+                return
+            a = json.loads(r["data"])
+            a["ooId"] = str(ooid)
+            self._conn.execute("UPDATE annotations SET data=? WHERE id=?",
+                               (json.dumps(a, ensure_ascii=False), aid))
+            self._conn.commit()
+
+    def bump_docx_ver(self, cid):
+        """仅 bump docxVer（批注写 docx 后 document.key 变化 → DS 下次重载）；不动 blocks/updatedAt。"""
+        with self._lock:
+            r = self._row(cid)
+            if not r:
+                return
+            data = json.loads(r["data"])
+            data["docxVer"] = int(data.get("docxVer") or 1) + 1
+            self._conn.execute("UPDATE cases SET data=? WHERE id=?",
+                               (json.dumps(data, ensure_ascii=False), cid))
+            self._conn.commit()
+
+    def mirror_oo_comments(self, cid, comments, admin_names=()):
+        """DS 保存回调后：docx comments.xml → annotations 表镜像（OO 原生批注为唯一载体）。
+        - ooId 匹配（或 author+text 兜底匹配）→ 更新 text/quote（空才填）/回复（增量）/日期
+        - 无匹配 → 新建（kind=admin 若作者为管理员，否则 author）
+        - 带 ooId 但 docx 中已消失（OO 里删除）→ status=resolved
+        不带 ooId 的批注（selfcheck 等 DB-only）不动。返回变化条数。"""
+        with self._lock:
+            if not self._row(cid):
+                return 0
+            annos = [json.loads(r["data"]) for r in self._conn.execute(
+                "SELECT data FROM annotations WHERE caseId=? ORDER BY rowid", (cid,))]
+            changed = 0
+            seen = set()
+            now = _now()
+
+            def save(a):
+                self._conn.execute("UPDATE annotations SET status=?, data=? WHERE id=?",
+                                   (a.get("status", "pending"), json.dumps(a, ensure_ascii=False),
+                                    a["id"]))
+
+            for cm in comments:
+                a = next((x for x in annos if x.get("ooId") == cm["ooId"]), None)
+                adopted = False
+                if a is None:  # ooId 重分配兜底：author+text 匹配后收养新 ooId
+                    a = next((x for x in annos if not x.get("ooId")
+                              and (x.get("author") or "") == cm["author"]
+                              and (x.get("text") or "") == cm["text"]), None)
+                    if a is not None:
+                        a["ooId"] = cm["ooId"]
+                        adopted = True
+                if a is not None:
+                    seen.add(a["id"])
+                    dirty = adopted
+                    for k, src in (("text", cm["text"]), ("author", cm["author"])):
+                        if src and a.get(k) != src:
+                            a[k] = src
+                            dirty = True
+                    if not a.get("quote") and cm.get("quote"):
+                        a["quote"] = cm["quote"]
+                        dirty = True
+                    if cm.get("date") and not a.get("createdAt"):
+                        a["createdAt"] = cm["date"]
+                        dirty = True
+                    replies = a.setdefault("replies", [])
+                    have = {(r.get("byName"), r.get("text")) for r in replies}
+                    for r in cm.get("replies") or []:
+                        if (r.get("byName"), r.get("text")) not in have:
+                            replies.append({"id": _uid("rp"), "by": "",
+                                            "byName": r.get("byName") or "批注",
+                                            "text": r.get("text") or "",
+                                            "at": r.get("at") or now})
+                            dirty = True
+                    if dirty:
+                        save(a)
+                        changed += 1
+                    continue
+                a = {"id": _uid("an"),
+                     "kind": "admin" if cm["author"] in admin_names else "author",
+                     "status": "pending", "section": 0,
+                     "quote": cm.get("quote") or "", "text": cm["text"],
+                     "author": cm["author"], "authorId": "", "lowRisk": False,
+                     "createdAt": cm.get("date") or now,
+                     "replies": [{"id": _uid("rp"), "by": "",
+                                  "byName": r.get("byName") or "批注",
+                                  "text": r.get("text") or "",
+                                  "at": r.get("at") or now}
+                                 for r in cm.get("replies") or []],
+                     "ooId": cm["ooId"], "resolved": False}
+                self._conn.execute(
+                    "INSERT INTO annotations(id,caseId,kind,status,authorId,at,data)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (a["id"], cid, a["kind"], "pending", "", a["createdAt"],
+                     json.dumps(a, ensure_ascii=False)))
+                annos.append(a)
+                seen.add(a["id"])
+                changed += 1
+            for a in annos:
+                if a.get("ooId") and a["id"] not in seen and a.get("status") == "pending":
+                    a["status"] = "resolved"
+                    a["resolved"] = True
+                    save(a)
+                    changed += 1
+            if changed:
+                self._conn.commit()
+                _graph_notify("case", cid)
+            return changed
 
     # ------------------------------------------------------------ 版本
     def save_version(self, user, cid, label):
@@ -710,7 +916,6 @@ class CaseDB:
             self._conn.execute("UPDATE cases SET title=?, updatedAt=?, data=? WHERE id=?",
                                (data.get("title", ""), data["updatedAt"],
                                 json.dumps(data, ensure_ascii=False), cid))
-            self._sync_selfchecks(cid)
             self._sync_material_usage()
             self._conn.commit()
             _graph_notify("case", cid)
@@ -757,51 +962,6 @@ class CaseDB:
             return {"likes": row["likes"],
                     "likedBy": [x["userId"] for x in self._conn.execute(
                         "SELECT userId FROM likes WHERE caseId=?", (cid,))]}, None
-
-    # ------------------------------------------------------------ 提交前自检（未过项即批注）
-    def _sync_selfchecks(self, cid):
-        c = json.loads(self._row(cid)["data"])
-        blocks = c.get("blocks") or []
-        paras = [b for b in blocks if b.get("kind") == "p" and (b.get("text") or "").strip()]
-        chars = sum(len(b["text"]) for b in paras)
-        empty_h2 = False
-        for i, b in enumerate(blocks):
-            if b.get("kind") == "h2" and (b.get("text") or "").strip():
-                nxt = next((x for x in blocks[i + 1:]
-                            if x.get("kind") == "h2" or (x.get("text") or "").strip()), None)
-                if nxt is None or nxt.get("kind") == "h2":
-                    empty_h2 = True
-                    break
-        annos = [json.loads(r["data"]) for r in self._conn.execute(
-            "SELECT data FROM annotations WHERE caseId=?", (cid,))]
-        results = {
-            "ck-title": bool((c.get("title") or "").strip()) and c.get("title") != "未命名案例",
-            "ck-paras": len(paras) >= 3,
-            "ck-emptyh2": not empty_h2,
-            "ck-cite": len(c.get("citations") or []) >= 1,
-            "ck-len": chars >= 600,
-            "ck-risk": not any(a.get("kind") == "risk" and a.get("status") == "pending"
-                               for a in annos),
-        }
-        names = dict(SELFCHECK_NAMES)
-        for ck_id, ok in results.items():
-            existing = next((a for a in annos
-                             if a.get("kind") == "selfcheck" and a.get("checkId") == ck_id), None)
-            if not ok and not existing:
-                a = {"id": _uid("an"), "kind": "selfcheck", "checkId": ck_id,
-                     "status": "pending", "section": 0, "quote": "",
-                     "text": "提交前自检未通过：" + names[ck_id],
-                     "author": "系统自检", "lowRisk": False,
-                     "createdAt": _now(), "replies": []}
-                self._conn.execute(
-                    "INSERT INTO annotations(id,caseId,kind,status,authorId,at,data)"
-                    " VALUES(?,?,?,?,?,?,?)",
-                    (a["id"], cid, "selfcheck", "pending", "", a["createdAt"],
-                     json.dumps(a, ensure_ascii=False)))
-            elif ok and existing and existing.get("status") == "pending":
-                existing["status"] = "resolved"
-                self._conn.execute("UPDATE annotations SET status='resolved', data=? WHERE id=?",
-                                   (json.dumps(existing, ensure_ascii=False), existing["id"]))
 
     # ------------------------------------------------------------ 检索语料
     def cases_for_index(self):
@@ -859,17 +1019,63 @@ class CaseDB:
         m["tags"] = json.loads(row["tags"] or "[]")
         m["dormant"] = self._dormant(m)
         m["uploaded"] = m["fileId"].startswith("f-up-")
+        mounts = self._conn.execute(
+            "SELECT mm.caseId,mm.versionId,mm.attachmentId,c.title caseTitle,v.label versionLabel "
+            "FROM material_mounts mm LEFT JOIN cases c ON c.id=mm.caseId "
+            "LEFT JOIN versions v ON v.id=mm.versionId AND v.caseId=mm.caseId "
+            "WHERE mm.materialId=? ORDER BY mm.at DESC",
+            (row["id"],)).fetchall()
+        m["mounts"] = [dict(x) for x in mounts]
+        m["mountCount"] = len({x["caseId"] for x in mounts})
         return m
 
     def _mat_row(self, mid):
         return self._conn.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
 
-    def _mat_visible(self, row, user):
+    def _material_mounted(self, mid):
+        return bool(self._conn.execute(
+            "SELECT 1 FROM material_mounts WHERE materialId=? LIMIT 1", (mid,)).fetchone())
+
+    def _mat_content_visible(self, row, user):
+        if _access_level(row["level"]) < 2:
+            return _level_readable(row["level"], user)
+        owners = [x["ownerId"] for x in self._conn.execute(
+            "SELECT DISTINCT c.ownerId FROM material_mounts mm "
+            "JOIN cases c ON c.id=mm.caseId WHERE mm.materialId=?", (row["id"],))]
+        return _level_readable(row["level"], user, owners)
+
+    def _mat_listed(self, row, user):
         if user and user.get("admin"):
             return True
         if row["status"] in ("候选", "停用"):
             return False
-        return row["level"] <= (user["maxLevel"] if user else 0)
+        return self._mat_content_visible(row, user) or self._material_mounted(row["id"])
+
+    def _mat_view(self, row, user):
+        m = self._mat_obj(row)
+        m["contentAvailable"] = self._mat_content_visible(row, user)
+        if m["contentAvailable"]:
+            return m
+        for key in ("source", "sourceUrl", "summary", "excerpt", "fileId", "scope",
+                    "grade", "gradeReason", "credibility", "publishedAt", "collectedAt"):
+            m[key] = ""
+        m["tags"], m["uploaded"] = [], False
+        return m
+
+    def can_read_material(self, mid, user):
+        with self._lock:
+            row = self._mat_row(mid)
+            return bool(row and self._mat_content_visible(row, user))
+
+    def material_name_public(self, mid):
+        with self._lock:
+            return self._material_mounted(mid)
+
+    def material_id_for_file(self, file_id):
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM materials WHERE fileId=? LIMIT 1", (file_id,)).fetchone()
+            return row["id"] if row else ""
 
     def list_materials(self, user, status=None, kind=None, grade=None, q=None):
         """status 取 候选/正常/停用/来源失效/待淘汰（派生）；grade 支持 S/A/B/C 与「未定级」。"""
@@ -877,9 +1083,9 @@ class CaseDB:
             rows = self._conn.execute("SELECT * FROM materials ORDER BY collectedAt DESC, rowid").fetchall()
             out = []
             for r in rows:
-                if not self._mat_visible(r, user):
+                if not self._mat_listed(r, user):
                     continue
-                m = self._mat_obj(r)
+                m = self._mat_view(r, user)
                 if status:
                     if status == "待淘汰":
                         if not m["dormant"]:
@@ -902,9 +1108,9 @@ class CaseDB:
     def get_material(self, mid, user):
         with self._lock:
             r = self._mat_row(mid)
-            if not r or not self._mat_visible(r, user):
+            if not r or not self._mat_listed(r, user):
                 return None
-            return self._mat_obj(r)
+            return self._mat_view(r, user)
 
     def get_material_raw(self, mid):
         """不做可见性过滤的素材读取（服务端内部：引用证据迁移/兜底回填用）。"""
@@ -1144,7 +1350,7 @@ class CaseDB:
             rows = self._conn.execute("SELECT * FROM materials").fetchall()
             out = []
             for r in rows:
-                if r["id"] in cited or not self._mat_visible(r, user) or r["status"] != "正常":
+                if r["id"] in cited or not self._mat_content_visible(r, user) or r["status"] != "正常":
                     continue
                 m = self._mat_obj(r)
                 s = score.get(r["id"], 0)
@@ -1179,7 +1385,7 @@ class CaseDB:
                     if not t or t.startswith("kn-") or t in seen:
                         continue
                     mr = self._mat_row(t)
-                    if not mr or not self._mat_visible(mr, user):
+                    if not mr or not self._mat_content_visible(mr, user):
                         continue
                     seen.add(t)
                     order.append(self._mat_obj(mr))

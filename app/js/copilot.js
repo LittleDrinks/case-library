@@ -244,7 +244,7 @@
       try {
         resp = await fetch("/api/ai/agent", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: Object.assign({ "Content-Type": "application/json" }, Store.authHeaders()),
           body: JSON.stringify({
             text: opts.text || "",
             intentHint: opts.intentHint || undefined,
@@ -350,14 +350,15 @@
     if (!retrieved) {
       const q = [query, c.title, (c.theoryPoints || []).join(" ")].filter(Boolean).join(" ");
       const r = await Store.search(q, {});
-      retrieved = { knowledge: r.knowledge.slice(0, 3), materials: r.materials.slice(0, 3) };
+      retrieved = { knowledge: r.knowledge.slice(0, 3),
+        materials: r.materials.filter((x) => Store.canReadMaterial(x.item)).slice(0, 3) };
       sessionCache[cacheKey] = retrieved;
     }
     // 检索命中不足时，用素材库中权威度最高、最近的素材兜底，保证模型总能看到真实列表
     let materials = retrieved.materials.map((r) => r.item);
     if (materials.length < 3) {
       fallbackUsed = true;
-      const pool = Store.visibleMaterials().slice()
+      const pool = Store.visibleMaterials().filter(Store.canReadMaterial)
         .sort((a, b) => (b.credibility === "high") - (a.credibility === "high") ||
           String(b.collectedAt).localeCompare(String(a.collectedAt)));
       for (const m of pool) {

@@ -22,10 +22,12 @@
     if (page === "home") view = P.home();
     else if (page === "mine") view = P.myCases();
     else if (page === "new") view = P.newCase(params);
+    else if (page === "workbench" && parts[1] && params.prototype === "canvas") view = P.workbenchPrototype(parts[1], params);
     else if (page === "workbench" && parts[1]) view = P.workbench(parts[1]);
     else if (page === "search") view = P.search(params);
     else if (page === "graph") { location.hash = "#/search?view=graph"; return; }
     else if (page === "case" && parts[1]) view = P.caseDetail(parts[1]);
+    else if (page === "attachment" && parts[1] && parts[2]) view = P.caseAttachment(parts[1], parts[2]);
     else if (page === "material" && parts[1]) view = P.materialDetail(parts[1], params);
     else if (page === "book") view = P.bookPage(params);
     else if (page === "knowledge" && parts[1]) view = P.knowledgeDetail(parts[1]);

@@ -1,4 +1,4 @@
-// 页面：管理后台（审核、发布、素材、类型模板、账号权限、公告）
+// 页面：管理后台（审核、发布、素材、类型模板、账号、公告）
 // 审核详情页 = 工作台只读模式（见 pages-workbench.js P.workbenchView）
 window.Pages = window.Pages || {};
 (function () {
@@ -8,7 +8,7 @@ window.Pages = window.Pages || {};
   const TABS = [
     ["audit", "案例审核"], ["publish", "发布管理"], ["materials", "素材管理"],
     ["watch", "盯源"], ["knowledge", "知识管理"], ["types", "类型与模板"],
-    ["assets", "组织资产"], ["accounts", "账号权限"], ["ann", "公告管理"],
+    ["assets", "组织资产"], ["accounts", "账号"], ["ann", "公告管理"],
   ];
 
   P.admin = (tab, params) => {
@@ -46,7 +46,7 @@ window.Pages = window.Pages || {};
   let auditQ = "", auditAuthor = "", auditSort = "newest", auditQApplied = null;
   function auditTab() {
     let queue = Store.db.cases.filter((c) =>
-      c.status === "checking" || c.status === "pending" || c.status === "reviewing");
+      c.status === "pending" || c.status === "reviewing");
     const authors = Array.from(new Set(queue.map((c) => c.ownerId)));
     if (auditQ) queue = queue.filter((c) =>
       c.title.includes(auditQ) || (Store.userById(c.ownerId) || {}).name.includes(auditQ));
@@ -96,7 +96,7 @@ window.Pages = window.Pages || {};
         ${done.map((r) => {
           const c = Store.db.cases.find((x) => x.id === r.caseId);
           return `<tr><td>${U.esc(r.at)}</td><td>${U.esc(c ? c.title : "（已删除）")}</td>
-            <td>${{ approve: "通过", reject: "退回", return: "退回", supplement: "要求补充", hide: "隐藏", submit: "提交", withdraw: "撤回", start: "开始审核", unhide: "恢复公开", checking: "机审" }[r.action] || r.action}${r.reasonType ? ` <span class="tag amber">${U.esc(Store.reasonTypeNames[r.reasonType] || r.reasonType)}</span>` : ""}</td>
+            <td>${{ approve: "通过", reject: "退回", return: "退回", supplement: "要求补充", hide: "隐藏", submit: "提交", withdraw: "撤回", start: "开始审核", unhide: "恢复公开" }[r.action] || r.action}${r.reasonType ? ` <span class="tag amber">${U.esc(Store.reasonTypeNames[r.reasonType] || r.reasonType)}</span>` : ""}</td>
             <td>${U.esc(r.opinion || "—")}</td><td>${U.esc(r.offlineFrom || "—")}</td></tr>`;
         }).join("")}
       </table>
@@ -184,7 +184,7 @@ window.Pages = window.Pages || {};
           <select class="text" id="up-level" style="max-width:110px">
             <option value="0">公开</option>
             <option value="1" selected>校内</option>
-            <option value="2">受限</option>
+            <option value="2">私密</option>
           </select>
           <input class="text" type="file" id="up-file" style="max-width:300px">
         </div>
@@ -227,7 +227,7 @@ window.Pages = window.Pages || {};
         <button class="btn sm plain" data-mat-batch="exempt" title="清除待淘汰标（豁免 30 天未引淘汰规则）">豁免淘汰</button>
         <span class="row" style="gap:4px">
           <select id="mat-batch-level" class="text" style="max-width:90px">
-            <option value="0">公开</option><option value="1">校内</option><option value="2">受限</option>
+            <option value="0">公开</option><option value="1">校内</option><option value="2">私密</option>
           </select>
           <button class="btn sm plain" data-mat-batch="level">调密级</button>
         </span>
@@ -242,10 +242,11 @@ window.Pages = window.Pages || {};
           <td style="max-width:260px"><a href="#/material/${m.id}">${U.esc(m.title)}</a>
             ${m.fileId ? `<span class="tag green" title="已挂真实文件，可在线预览/下载">文件</span>` : ""}
             ${m.uploaded ? `<span class="tag blue" title="演示期间上传，记录存于服务端">上传</span>` : ""}
+            ${m.mountCount ? `<span class="tag green" title="来自 ${m.mountCount} 个正式案例">${m.mountCount} 案例</span>` : ""}
             ${m.dormant ? `<span class="tag amber" title="入库超过 30 天且从未被引用">待淘汰</span>` : ""}</td>
           <td>${U.esc(m.source)}</td>
           <td><select data-m-level="${m.id}">
-            ${["公开", "校内", "受限"].map((n, i) => `<option value="${i}" ${m.level === i ? "selected" : ""}>${n}</option>`).join("")}
+            ${["公开", "校内", "私密"].map((n, i) => `<option value="${i}" ${m.level === i ? "selected" : ""}>${n}</option>`).join("")}
           </select></td>
           <td><select data-m-grade="${m.id}">
             ${["", "S", "A", "B", "C"].map((g) => `<option value="${g}" ${m.grade === g ? "selected" : ""}>${g || "未定级"}</option>`).join("")}
@@ -566,22 +567,18 @@ window.Pages = window.Pages || {};
     </div>`;
   }
 
-  // ---------------------------------------------------------- 账号权限
+  // ---------------------------------------------------------- 账号
   function accountsTab() {
     return `
     <div class="card">
-      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>账号与素材使用范围</span></div>
+      <div class="card-pad section-title" style="border-bottom:1px solid var(--line)"><span>账号</span></div>
       <table class="data">
-        <tr><th>姓名</th><th>角色</th><th>单位</th><th>任课课程</th><th>素材范围上限</th><th></th></tr>
+        <tr><th>姓名</th><th>角色</th><th>单位</th><th>任课课程</th></tr>
         ${Store.db.users.map((u) => `<tr>
           <td>${U.esc(u.name)}${u.admin ? " <span class='tag amber'>管理员</span>" : ""}</td>
           <td>${U.esc(u.role)}</td>
           <td>${U.esc(u.org)}</td>
           <td class="small">${(u.courses || []).map(U.esc).join("、") || "—"}</td>
-          <td><select data-u-level="${u.id}">
-            ${["公开", "校内", "受限"].map((n, i) => `<option value="${i}" ${u.maxLevel === i ? "selected" : ""}>${n}</option>`).join("")}
-          </select></td>
-          <td><button class="btn sm" data-u-save="${u.id}">保存</button></td>
         </tr>`).join("")}
       </table>
     </div>
@@ -956,13 +953,6 @@ window.Pages = window.Pages || {};
       });
     },
     accounts(el) {
-      U.$$("[data-u-save]", el).forEach((b) => b.addEventListener("click", () => {
-        const u = Store.userById(b.dataset.uSave);
-        if (u) {
-          u.maxLevel = Number(U.$(`[data-u-level="${u.id}"]`, el).value);
-          Store.saveCase(); U.toast("已保存");
-        }
-      }));
       U.$("#reset-all", el).addEventListener("click", async () => {
         if (await U.confirmModal("重置后将清空本机浏览器中的全部改动，恢复初始数据。确认？", { danger: true })) {
           await Store.resetAll();

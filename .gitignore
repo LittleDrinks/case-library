@@ -1,6 +1,11 @@
 # 密钥与本地配置
 .env
 AGENTS.md
+.agents/
+.kimi/
+.codex/
+.claude/
+files/case-attachments/
 
 # Python
 __pycache__/

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// WP4 审核与反馈沉淀冒烟：checking 状态机 + 词库机审批注 + checking 留痕、
-// reasonType 强制（无则 400）、退回台账聚合、版本 diffSummary、
-// AI 生成标识（markAiAssist 持久化 + 审核通过 reviewedBy）、AI_REVIEW_ENABLED 开关一致性。
+// 审核与反馈沉淀冒烟：显式提交前自检、pending 状态、reasonType 强制、
+// 退回台账聚合、版本 diffSummary、AI 生成标识与 reviewedBy。
 // 用法：node tools/smoke_review.js [baseUrl]（默认 http://127.0.0.1:18077，需服务已启动）
 "use strict";
 const fs = require("fs");
@@ -42,28 +41,17 @@ async function getCase(cid) {
   return d && d.ok ? d.case : null;
 }
 
-async function waitStatus(cid, want, timeoutMs) {
-  const t0 = Date.now();
-  let c = null;
-  while (Date.now() - t0 < timeoutMs) {
-    c = await getCase(cid);
-    if (c && c.status === want) return c;
-    await sleep(1000);
-  }
-  return c;
-}
-
 async function main() {
   const constants = await fetch(BASE + "/api/constants").then((r) => r.json()).catch(() => null);
   ok(constants && constants.ok, "服务可达 " + BASE);
   if (!constants || !constants.ok) process.exit(1);
 
-  // 1. 提交 → checking → 机审（词库命中）→ pending
+  // 1. 编辑期间不生成自检批注；教师显式自检后提交 → pending
   await Store.login("u-chen");
   Store.setUser("u-chen");
   await Store.syncCases();
   const created = await Store.addCase({
-    title: "机审冒烟案例（含术语与职务误写）",
+    title: "主动自检冒烟案例",
     typeId: "ct-general", audience: "ug",
     theoryPoints: ["自然辩证法"],
     blocks: [
@@ -79,29 +67,39 @@ async function main() {
   const cid = created.id;
   ok(created.meta && created.meta.origin === "human" && Array.isArray(created.meta.modelVersions),
     "新案例 meta 默认 origin=human", JSON.stringify(created.meta));
+  ok(!(created.annotations || []).some((a) => a.kind === "selfcheck"),
+    "编辑期间不自动生成自检批注");
+  const checks = Store.selfChecks(created);
+  ok(checks.length === 6, "教师显式运行六项提交前自检", String(checks.length));
+
+  const ownerAnno = await Store.addAnnotation(created, {
+    kind: "author", status: "pending", section: 1,
+    quote: "自然辨证法", text: "请核对课程术语。",
+  });
+  ok(ownerAnno && ownerAnno.id, "案例作者可创建正文批注", ownerAnno && ownerAnno.id);
+
+  await Store.login("u-wang");
+  Store.setUser("u-wang");
+  const deniedAdd = await fetch(BASE + "/api/cases/" + encodeURIComponent(cid) + "/annotations", {
+    method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, Store.authHeaders()),
+    body: JSON.stringify({ section: 1, quote: "自然辨证法", text: "越权批注" }),
+  });
+  ok(deniedAdd.status === 403, "无关用户新增批注 -> 403", String(deniedAdd.status));
+  const deniedPatch = await fetch(BASE + "/api/annotations/" + encodeURIComponent(ownerAnno.id), {
+    method: "PATCH", headers: Object.assign({ "Content-Type": "application/json" }, Store.authHeaders()),
+    body: JSON.stringify({ status: "resolved" }),
+  });
+  ok(deniedPatch.status === 403, "无关用户修改批注 -> 403", String(deniedPatch.status));
+
+  await Store.login("u-chen");
+  Store.setUser("u-chen");
 
   const submitted = await Store.submitCase(created);
-  ok(submitted && created.status === "checking", "提交后状态 = checking", created.status);
-  const pending = await waitStatus(cid, "pending", 120000);
-  ok(pending && pending.status === "pending", "机审完成后转 pending", pending && pending.status);
-  const ruleAnnos = (pending.annotations || []).filter((a) => a.author === "机审·词库");
-  const ruleText = ruleAnnos.map((a) => a.text).join("\n");
-  ok(ruleAnnos.length >= 3 && ruleAnnos.every((a) => a.kind === "risk"),
-    "词库机审命中 ≥3 条 risk 批注", JSON.stringify(ruleAnnos.map((a) => a.quote)));
-  ok(ruleText.includes("自然辨证法") && ruleText.includes("李强总书记") && ruleText.includes("布署"),
-    "教材术语/职务/易错词三类词库均命中", ruleText.slice(0, 200));
-  const aiAnnos = (pending.annotations || []).filter((a) => a.author === "机审·审校");
-  ok(constants.reviewEnabled ? true : aiAnnos.length === 0,
-    "AI_REVIEW_ENABLED 关闭时无 LLM 审校批注（当前 reviewEnabled=" + constants.reviewEnabled + "）");
+  ok(submitted && created.status === "pending", "提交后状态 = pending", created.status);
 
-  // checking 留痕（admin 视角；setUser 同步前端身份，syncCases 才会拉 /api/reviews）
   await Store.login("u-admin");
   Store.setUser("u-admin");
   await Store.syncCases();
-  const revs = Store.db.reviews.filter((r) => r.caseId === cid);
-  const checkingRec = revs.find((r) => r.action === "checking");
-  ok(checkingRec && /词库规则命中/.test(checkingRec.opinion || ""),
-    "reviews 留痕 action=checking 含机审结果", checkingRec && checkingRec.opinion);
 
   // 2. 退回必须带 reasonType：无 → 400；forced_mapping → 成功并留痕
   const c4 = await getCase(cid);
@@ -155,7 +153,6 @@ async function main() {
     "markAiAssist 持久化 origin=ai_assisted + modelVersions", JSON.stringify(marked.meta));
   const resub = Store.db.cases.find((c) => c.id === cid);
   await Store.submitCase(resub);
-  await waitStatus(cid, "pending", 120000);
   await Store.login("u-admin");
   Store.setUser("u-admin");
   const c6 = await getCase(cid);

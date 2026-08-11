@@ -38,9 +38,13 @@
   `files/materials_seed.json` 等，保留已有上传条目；提取 `app/seed.js` 种子案例需要本机有 node）。
 - **冒烟测试**：`node tools/smoke_materials.js [baseUrl]`（加载真实 store.js 打真实服务端，
   覆盖素材同步/收藏/推荐/候选确认/查重/批量操作/被引计数）；`node tools/smoke_evidence.js`
-  （引用证据链）；`node tools/smoke_review.js`（审核闭环：checking 机审/词库命中/reasonType/
+  （引用证据链）；`node tools/smoke_review.js`（审核闭环：提交前自检/reasonType/
   退回台账/diffSummary/AI 生成标识）；`node tools/smoke_graph.js`（图谱：灌库计数/ego/reverse/
-  全局问答/增量同步/AI 降级，需 Neo4j 在线）。
+  全局问答/增量同步/AI 降级，需 Neo4j 在线）；`node tools/smoke_material_demo.js`（证据包、
+  权威性分维度、自动入库边界、万级数据分页和闭环指标产品不变量，无需启动服务）。
+- **素材闭环组件原型**：服务启动后访问 `/material-workspace.html`（教师证据包）、
+  `/material-explorer.html`（万级素材掌控台）、`/material-intake.html`（候选审核）和
+  `/material-metrics.html`（闭环测试）。四页共享模型和交互状态，可连续试用完整流程。
 - **记忆 bench**：`python3 tools/bench_memory.py [--rejudge]`（用户级记忆三臂对照评测，
   需先以临时 `SQLITE_DB_PATH` 启动服务，报告见 `docs/memory-bench.md`）。
 

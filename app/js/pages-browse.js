@@ -196,7 +196,8 @@ window.Pages = window.Pages || {};
     const materialMeta = (x) => {
       const m = x.item;
       const bits = [
-        H.gradeTag(m.grade), H.credTag(m.credibility),
+        H.levelTag(m.level), Store.canReadMaterial(m) ? H.gradeTag(m.grade) : "",
+        Store.canReadMaterial(m) ? H.credTag(m.credibility) : "",
         `<span>${U.esc(m.source || "")}</span>`,
         m.publishedAt ? `<span>${U.esc(U.plainDate(m.publishedAt))}</span>` : "",
         m.status && m.status !== "正常" ? `<span class="tag red">${U.esc(m.status)}</span>` : "",
@@ -1141,10 +1142,17 @@ window.Pages = window.Pages || {};
     }));
   }
 
+  function lockedMaterialDetail(m) {
+    return { html: `<div class="card card-pad"><div class="row spread">
+      <h2 style="font-size:19px">${U.esc(m.title)}</h2>${H.levelTag(m.level)}
+    </div></div>` };
+  }
+
   // ------------------------------------------------------------ 素材详情
   P.materialDetail = (id, params) => {
     const m = Store.materialById(id);
     if (!m) return P.notFound("素材不存在，或超出你的授权范围");
+    if (!Store.canReadMaterial(m)) return lockedMaterialDetail(m);
     const me = Store.me();
     const citing = Store.casesCiting(id);
     const usage = Store.materialUsage(id);
@@ -1212,7 +1220,7 @@ window.Pages = window.Pages || {};
               <select class="text" id="md-level">
                 <option value="0" ${m.level === 0 ? "selected" : ""}>公开</option>
                 <option value="1" ${m.level === 1 ? "selected" : ""}>校内</option>
-                <option value="2" ${m.level === 2 ? "selected" : ""}>受限</option>
+                <option value="2" ${m.level === 2 ? "selected" : ""}>私密</option>
               </select></label>
             <label class="field"><span>信源等级</span>
               <select class="text" id="md-grade">

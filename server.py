@@ -6,7 +6,7 @@
 职责：
 1. 托管 app/ 下的前端；
 2. /api/ai/chat      —— OpenAI 兼容 Chat 接口服务端代理（API Key 只存在服务端，支持 SSE 流式）；
-3. /api/web-search   —— Tavily 联网检索（密钥只存在服务端）；
+3. /api/web-search   —— AnySearch/Tavily 联网检索（密钥只存在服务端）；
 4. /api/fetch-url    —— 公开 URL 采集（生成可引用的内容副本，原始 URL 保留）；
 5. /api/export-docx  —— 将案例及成套教学材料导出为 .docx（页脚注入追踪元数据）；
 6. /api/auth/login   —— 演示登录：账号 ID 换 HMAC token（12h，无密码，ADR 0009）；
@@ -20,9 +20,7 @@
 11. /api/ai/agent    —— 统一 AI 入口（MoA 多智能体编排：主Agent/资料管理员/写作手/内容审校员，SSE）；
 12. /api/cases 等    —— 案例业务闭环（SQLite 持久层 db.py）：案例 CRUD、提交/撤回/审核流转留痕、
    批注与回复线程、版本快照（含与上一版 diffSummary）/回滚、收藏、点赞；
-   提交自动进 checking 机审（词库规则 files/review_lexicon.json 始终执行 +
-   反例库 few-shot LLM 审校 files/review_counterexamples.json，AI_REVIEW_ENABLED 控制），
-   命中写 risk 批注并留痕 action=checking；退回/要求补充必须带 reasonType；
+   教师提交前主动调用 AI 自检；退回/要求补充必须带 reasonType；
    /api/admin/review-ledger 输出被退回表达台账；首启自动灌入 files/cases_seed.json；
 13. /api/materials 等 —— 素材登记闭环（SQLite materials 表，ADR 0003/0011）：列表/详情/采集入库闸
    （URL 查重 + 相似度查重 + 必填校验，新素材一律先落候选）、admin 治理 PATCH 与批量 PATCH、
@@ -108,6 +106,7 @@ AI_DEFAULT_MODEL = ENV.get("AI_DEFAULT_MODEL", "qwen-plus")
 AI_TIMEOUT = int(ENV.get("AI_TIMEOUT_SECONDS", "60") or 60)
 AI_REVIEW_ENABLED = ENV.get("AI_REVIEW_ENABLED", "").lower() in ("1", "true", "yes")
 TAVILY_API_KEY = ENV.get("TAVILY_API_KEY", "")
+ANYSEARCH_API_KEY = ENV.get("ANYSEARCH_API_KEY", "")
 # MoA 多智能体编排模型（.env 可选覆盖；未配置时用以下默认值。写作手主候选 = AI_DEFAULT_MODEL）
 MOA_MODEL_ORCHESTRATOR = ENV.get("MOA_MODEL_ORCHESTRATOR", "") or "qwen-plus"
 MOA_MODEL_LIBRARIAN = ENV.get("MOA_MODEL_LIBRARIAN", "") or "qwen-plus"
@@ -129,13 +128,14 @@ USERS_FILE = os.path.join(FILES_DIR, "users.json")
 KNOWLEDGE_FILE = os.path.join(FILES_DIR, "knowledge.json")
 CASES_SEED_FILE = os.path.join(FILES_DIR, "cases_seed.json")
 MATERIALS_SEED_FILE = os.path.join(FILES_DIR, "materials_seed.json")
+CASE_ATTACHMENTS_DIR = os.path.join(FILES_DIR, "case-attachments")
 LEXICON_FILE = os.path.join(FILES_DIR, "review_lexicon.json")
 COUNTEREXAMPLES_FILE = os.path.join(FILES_DIR, "review_counterexamples.json")
 SQLITE_DB_PATH = os.path.join(ROOT, ENV.get("SQLITE_DB_PATH", "./data/cases.db"))
 CASEDB = None  # main() 启动时初始化（SQLite 业务库）
 TOKEN_TTL_SECONDS = 12 * 3600
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-LEVEL_NAMES = ["公开", "校内", "受限"]
+LEVEL_NAMES = ["公开", "校内", "私密"]
 _INDEX_LOCK = threading.Lock()
 
 
@@ -189,10 +189,6 @@ def auth_user(handler):
     return load_users().get(uid) if uid else None
 
 
-def req_max_level(user):
-    return user["maxLevel"] if user else 0
-
-
 def load_index():
     try:
         with open(INDEX_FILE, encoding="utf-8") as f:
@@ -209,8 +205,7 @@ def save_index(entries):
 
 
 def api_files_list(user):
-    ml = req_max_level(user)
-    entries = [e for e in load_index() if e.get("level", 0) <= ml]
+    entries = [e for e in load_index() if _file_content_visible(e, user)]
     # 素材登记权威在 SQLite materials 表（/api/materials），这里只回文件索引
     return {
         "ok": True,
@@ -316,6 +311,23 @@ def find_entry(fid):
     return None
 
 
+def _file_content_visible(entry, user):
+    mid = CASEDB.material_id_for_file(entry.get("id")) if CASEDB else ""
+    if mid:
+        return CASEDB.can_read_material(mid, user)
+    return _level_content_visible(entry.get("level"), user)
+
+
+def _level_content_visible(value, user):
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        level = 2
+    if level == 0:
+        return True
+    return bool(user) if level == 1 else bool(user and user.get("admin"))
+
+
 FILE_CTYPES = {
     ".md": "text/markdown; charset=utf-8", ".markdown": "text/markdown; charset=utf-8",
     ".txt": "text/plain; charset=utf-8", ".pdf": "application/pdf",
@@ -334,8 +346,8 @@ def api_file_download(user, fid):
     e = find_entry(fid)
     if not e:
         return None, {"ok": False, "error": "文件不存在"}, 404
-    level = e.get("level", 0)
-    if level > req_max_level(user):
+    level = int(e.get("level", 0))
+    if not _file_content_visible(e, user):
         return None, {"ok": False, "error":
                       "该文件密级为「%s」，超出你的授权范围" % LEVEL_NAMES[level]}, 403
     full = os.path.join(FILES_DIR, e["path"])
@@ -353,8 +365,8 @@ def api_file_text(user, fid):
     e = find_entry(fid)
     if not e:
         return {"ok": False, "error": "文件不存在"}, 404
-    level = e.get("level", 0)
-    if level > req_max_level(user):
+    level = int(e.get("level", 0))
+    if not _file_content_visible(e, user):
         return {"ok": False, "error":
                 "该文件密级为「%s」，超出你的授权范围" % LEVEL_NAMES[level]}, 403
     tp = e.get("textPath")
@@ -656,7 +668,7 @@ def _build_search_index():
                 "\n".join([m["title"], m["summary"], m["excerpt"]]),
                 source=m["source"], level=m["level"], credibility=m["credibility"],
                 materialId=m["id"], grade=m["grade"], kind=m["kind"],
-                publishedAt=m["publishedAt"])
+                publishedAt=m["publishedAt"], namePublic=bool(m.get("mountCount")))
             e = entries_by_fid.get(m["fileId"]) if m["fileId"] else None
             tp = e.get("textPath") if e else None
             if not tp:
@@ -671,7 +683,8 @@ def _build_search_index():
                     ((ck["h"] + "\n") if ck["h"] else "") + ck["text"],
                     source=m["source"], level=m["level"], credibility=m["credibility"],
                     materialId=m["id"], grade=m["grade"], kind=m["kind"],
-                    publishedAt=m["publishedAt"], sec=ck["path"], secTitle=ck["h"])
+                    publishedAt=m["publishedAt"], sec=ck["path"], secTitle=ck["h"],
+                    namePublic=bool(m.get("mountCount")))
 
     # 3) 运行时导入的知识条目（无 knowledge.json 时跳过）
     for src in load_knowledge():
@@ -721,7 +734,7 @@ def _make_snippet(text, q_tokens, width=60):
     return flat[max(0, pos - width):pos + width + 2].strip()
 
 
-def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
+def search_corpus(q, kinds=None, limit=8, terms=None, user=None):
     """BM25 统一打分，分 knowledge / materials / cases 三类返回；
     materials 按用户密级过滤，cases 仅 published 对所有人可见（草稿/待审限作者与管理员）。
     terms 为前端扩展后的查询词（缺省对 q 做 bigram 分词）。"""
@@ -738,16 +751,24 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
                 mapped.add(k)
         kinds = mapped or None
     avgdl = idx["avgdl"] or 1.0
-    scored = []
+    scored, material_access = [], {}
     for i, d in enumerate(idx["docs"]):
         if kinds and d["cls"] not in kinds:
             continue
-        if d["cls"] == "material" and d["level"] > max_level:
-            continue
+        readable = True
+        if d["cls"] == "material":
+            mid = d.get("materialId") or d["id"]
+            if mid not in material_access:
+                material_access[mid] = (CASEDB.can_read_material(mid, user) if CASEDB
+                                        else _level_content_visible(d["level"], user))
+            readable = material_access[mid]
+            if not readable and not d.get("namePublic"):
+                continue
         if d["cls"] == "case" and d.get("status") != "published":
             if not user or (not user.get("admin") and d.get("ownerId") != user["id"]):
                 continue
-        c, dl = idx["tf"][i], idx["dl"][i] or 1
+        c = idx["tf"][i] if readable else Counter(_tokenize(d["title"]))
+        dl = sum(c.values()) or 1
         score = 0.0
         for t in q_tokens:
             n = idx["df"].get(t, 0)
@@ -757,11 +778,11 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
             idf = math.log(1 + (idx["n"] - n + 0.5) / (n + 0.5))
             score += idf * (f * (BM25_K1 + 1)) / (f + BM25_K1 * (1 - BM25_B + BM25_B * dl / avgdl))
         if score > 0:
-            scored.append((score, i))
+            scored.append((score, i, readable))
     scored.sort(key=lambda x: -x[0])
     knowledge, materials, cases = [], [], []
     seen_materials = set()
-    for score, i in scored:
+    for score, i, readable in scored:
         d = idx["docs"][i]
         if d["cls"] == "knowledge" and len(knowledge) < limit:
             hit = {
@@ -776,14 +797,18 @@ def search_corpus(q, max_level=0, kinds=None, limit=8, terms=None, user=None):
                 continue
             seen_materials.add(d["id"])
             hit = {
-                "id": d["id"], "title": d["title"], "source": d["source"],
-                "snippet": _make_snippet(d["text"], q_tokens), "score": round(score, 3),
-                "level": d["level"], "credibility": d["credibility"],
-                "grade": d.get("grade", ""), "kind": d.get("kind", ""),
-                "publishedAt": d.get("publishedAt", ""),
+                "id": d["id"], "title": d["title"],
+                "source": d["source"] if readable else "",
+                "snippet": _make_snippet(d["text"], q_tokens) if readable else "",
+                "score": round(score, 3), "level": d["level"],
+                "credibility": d["credibility"] if readable else "",
+                "grade": d.get("grade", "") if readable else "",
+                "kind": d.get("kind", ""),
+                "publishedAt": d.get("publishedAt", "") if readable else "",
                 "materialId": d.get("materialId") or d["id"],
+                "contentAvailable": readable,
             }
-            if d.get("sec"):
+            if readable and d.get("sec"):
                 hit["sec"] = d["sec"]
                 hit["secTitle"] = d.get("secTitle", "")
             materials.append(hit)
@@ -870,8 +895,7 @@ def api_search(user, payload):
     terms = payload.get("terms")
     if not (isinstance(terms, list) and any(isinstance(t, str) and t.strip() for t in terms)):
         terms = None
-    res = search_corpus(q, max_level=req_max_level(user), kinds=kinds, limit=limit,
-                        terms=terms, user=user)
+    res = search_corpus(q, kinds=kinds, limit=limit, terms=terms, user=user)
     return {"ok": True, "q": q, "knowledge": res["knowledge"],
             "materials": res["materials"], "cases": res["cases"]}, 200
 
@@ -990,22 +1014,24 @@ def _graph_unavailable():
 
 
 def _graph_filter_visible(sub, user):
-    """可见性与列表/检索同口径：案例 published 全员可见（其余限作者与 admin）；
-    素材按用户密级过滤。"""
-    max_level = req_max_level(user)
-    keep = set()
+    """案例按发布状态过滤；素材名称与内容权限分离。"""
+    keep, locked = set(), set()
     for n in sub["nodes"]:
         if n["type"] == "case" and not (
                 n.get("status") == "published"
                 or (user and (user.get("admin") or n.get("ownerId") == user["id"]))):
             continue
-        if n["type"] == "material" and (n.get("level") or 0) > max_level:
-            continue
+        if n["type"] == "material" and not CASEDB.can_read_material(n["id"], user):
+            if not CASEDB.material_name_public(n["id"]):
+                continue
+            n["contentAvailable"] = False
+            locked.add(n["id"])
         keep.add(n["id"])
     sub["nodes"] = [n for n in sub["nodes"] if n["id"] in keep]
-    sub["links"] = [l for l in sub["links"] if l["source"] in keep and l["target"] in keep]
+    sub["links"] = [l for l in sub["links"] if l["source"] in keep and l["target"] in keep
+                    and l["source"] not in locked and l["target"] not in locked]
     if "props" in sub:
-        sub["props"] = {k: v for k, v in sub["props"].items() if k in keep}
+        sub["props"] = {k: v for k, v in sub["props"].items() if k in keep and k not in locked}
     return sub
 
 
@@ -1065,7 +1091,7 @@ def api_graph_qa(user, payload):
         return {"ok": False, "error": "缺少问题 q"}, 400
     if not GRAPH.available():
         return _graph_unavailable()
-    res = search_corpus(q, max_level=req_max_level(user), limit=5, user=user)
+    res = search_corpus(q, limit=5, user=user)
     seeds = [h["id"] for h in res["knowledge"] + res["materials"] + res["cases"]]
     sub = GRAPH.neighborhood(seeds) if seeds else {"nodes": [], "links": [], "props": {}}
     if sub is None:
@@ -1147,7 +1173,7 @@ def _load_json(path, default):
         return default
 
 
-# 机审词库 v0 与反例库 v0（WP4，构建期产物，直接在仓库维护）
+# 教师主动自检的反例库与规范词库
 REVIEW_LEXICON = _load_json(LEXICON_FILE, {})
 REVIEW_COUNTEREXAMPLES = _load_json(COUNTEREXAMPLES_FILE, [])
 
@@ -1199,6 +1225,148 @@ def api_case_patch(user, cid, payload):
     return {"ok": True, "case": c}, 200
 
 
+def _owned_case(user, cid):
+    if not user:
+        return None, ({"ok": False, "error": "未登录或登录已过期"}, 401)
+    c = CASEDB.get_case(cid, user)
+    if not c:
+        return None, ({"ok": False, "error": "案例不存在"}, 404)
+    if c.get("ownerId") != user["id"]:
+        return None, ({"ok": False, "error": "仅作者本人可修改附件"}, 403)
+    return c, None
+
+
+def _attachment_raw(payload):
+    data = payload.get("data") or ""
+    if not data:
+        return b"", None
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except Exception:
+        return b"", "文件内容不是有效 base64"
+    return (raw, None) if len(raw) <= MAX_UPLOAD_BYTES else (b"", "文件超过 20MB")
+
+
+def _store_case_attachment(cid, aid, name, raw):
+    if not raw:
+        return ""
+    ext = os.path.splitext(name)[1].lower()[:10]
+    folder = os.path.join(CASE_ATTACHMENTS_DIR, cid)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, aid + ext)
+    with open(path, "wb") as f:
+        f.write(raw)
+    return os.path.relpath(path, CASE_ATTACHMENTS_DIR)
+
+
+def _attachment_obj(payload, cid, raw):
+    aid = "att-" + uuid.uuid4().hex[:12]
+    name = (payload.get("fileName") or payload.get("title") or "附件").strip()[:180]
+    text = (payload.get("text") or payload.get("excerpt")
+            or payload.get("sourceUrl") or "")[:100000]
+    path = _store_case_attachment(cid, aid, name, raw)
+    return {"id": aid, "title": (payload.get("title") or name).strip()[:180],
+            "kind": payload.get("kind") or ("网页" if payload.get("sourceUrl") else "文件"),
+            "source": (payload.get("source") or "").strip()[:120],
+            "sourceUrl": (payload.get("sourceUrl") or "").strip(), "fileName": name,
+            "mime": payload.get("mime") or "application/octet-stream", "size": len(raw),
+            "storedPath": path, "excerpt": (payload.get("excerpt") or text)[:1200],
+            "contentHash": hashlib.sha256(raw or text.encode("utf-8")).hexdigest(),
+            "originMaterialId": payload.get("originMaterialId") or "",
+            "level": int(payload.get("level", 2)), "at": time.strftime("%Y-%m-%d %H:%M")}
+
+
+def _attachment_content(payload, raw):
+    if raw or not payload.get("text"):
+        return payload, raw
+    payload = dict(payload)
+    payload["fileName"] = payload.get("fileName") or "网页原文.txt"
+    payload["mime"] = "text/plain; charset=utf-8"
+    return payload, payload["text"].encode("utf-8")[:MAX_UPLOAD_BYTES]
+
+
+def _attachment_duplicate(c, a):
+    return next((x for x in c.get("attachments") or []
+                 if x.get("contentHash") == a["contentHash"]), None)
+
+
+def api_case_attachment_add(user, cid, payload):
+    c, err = _owned_case(user, cid)
+    if err:
+        return err
+    payload = payload or {}
+    try:
+        level = int(payload.get("level", 2))
+    except (TypeError, ValueError):
+        level = -1
+    if level not in (0, 1, 2):
+        return {"ok": False, "error": "内容访问级别无效"}, 400
+    payload["level"] = level
+    raw, raw_err = _attachment_raw(payload)
+    if raw_err:
+        return {"ok": False, "error": raw_err}, 400
+    payload, raw = _attachment_content(payload, raw)
+    a = _attachment_obj(payload, cid, raw)
+    duplicate = _attachment_duplicate(c, a)
+    if duplicate:
+        _remove_attachment_file(a)
+        return {"ok": True, "attachment": duplicate, "case": c, "duplicate": True}, 200
+    items = list(c.get("attachments") or []) + [a]
+    fresh, e = CASEDB.update_case(user, cid, {"attachments": items})
+    if e:
+        return {"ok": False, "error": e}, 403
+    mark_search_dirty()
+    return {"ok": True, "attachment": a, "case": fresh}, 200
+
+
+def _remove_attachment_file(a):
+    path = a.get("storedPath") or ""
+    full = os.path.abspath(os.path.join(CASE_ATTACHMENTS_DIR, path))
+    root = os.path.abspath(CASE_ATTACHMENTS_DIR) + os.sep
+    if path and full.startswith(root):
+        try:
+            os.remove(full)
+        except OSError:
+            pass
+
+
+def api_case_attachment_delete(user, cid, aid):
+    c, err = _owned_case(user, cid)
+    if err:
+        return err
+    a = next((x for x in c.get("attachments") or [] if x.get("id") == aid), None)
+    if not a:
+        return {"ok": False, "error": "附件不存在"}, 404
+    _remove_attachment_file(a)
+    items = [x for x in c.get("attachments") or [] if x.get("id") != aid]
+    fresh, e = CASEDB.update_case(user, cid, {"attachments": items})
+    return ({"ok": True, "case": fresh}, 200) if not e else ({"ok": False, "error": e}, 403)
+
+
+def _visible_case_attachment(user, cid, aid):
+    c = CASEDB.get_case(cid, user)
+    if not c:
+        return None, None
+    pools = [c.get("attachments") or []]
+    if c.get("status") == "published":
+        pools.append((c.get("publishedSnapshot") or {}).get("attachments") or [])
+    return c, next((a for pool in pools for a in pool if a.get("id") == aid), None)
+
+
+def api_case_attachment_file(user, cid, aid):
+    _case, a = _visible_case_attachment(user, cid, aid)
+    if a and a.get("contentAvailable") is False:
+        return None, {"ok": False, "error": "无权访问附件内容"}, 403
+    path = a and a.get("storedPath")
+    full = os.path.abspath(os.path.join(CASE_ATTACHMENTS_DIR, path or ""))
+    root = os.path.abspath(CASE_ATTACHMENTS_DIR) + os.sep
+    if not a or not path or not full.startswith(root) or not os.path.isfile(full):
+        return None, {"ok": False, "error": "附件文件不存在"}, 404
+    with open(full, "rb") as f:
+        data = f.read()
+    return (data, a.get("mime") or "application/octet-stream", a.get("fileName") or "附件"), None, 200
+
+
 def api_case_delete(user, cid):
     err = _need_login(user)
     if err:
@@ -1224,9 +1392,6 @@ def api_case_transition(user, cid, action, payload):
         offline_from=(payload.get("offlineFrom") or "").strip())
     if e:
         return {"ok": False, "error": e}, code
-    if action == "submit":
-        # 提交后自动机审（checking → pending），词库规则 + LLM 反例审校异步执行
-        threading.Thread(target=run_machine_check, args=(cid,), daemon=True).start()
     mark_search_dirty()
     return {"ok": True, "case": c, "reviews": CASEDB.list_reviews(50, cid)}, 200
 
@@ -1237,10 +1402,24 @@ def api_annotation_add(user, cid, payload):
         return err
     a, e = CASEDB.add_annotation(user, cid, payload or {})
     if e:
-        return {"ok": False, "error": e}, 404
+        code = 403 if e == "无权操作批注" else 404 if e == "案例不存在" else 400
+        return {"ok": False, "error": e}, code
+    # OO 原生批注为唯一载体：docx 已存在时注入 comment 并 bump docxVer（前端据此重建编辑器）；
+    # docx 未生成（兼容模式纯块编辑）时只入侧栏，首开 OO 后由镜像兜底
+    if oo_configured() and os.path.isfile(case_docx_path(cid)):
+        cmid, _anchored, cerr = oo_inject_comment(
+            cid, a.get("quote") or "", a.get("text") or "",
+            a.get("author") or user.get("name") or user["id"])
+        if cmid is not None:
+            CASEDB.set_annotation_ooid(a["id"], cmid)
+            CASEDB.bump_docx_ver(cid)
+            a["ooId"] = str(cmid)
+        else:
+            sys.stderr.write("[oo] 批注注入失败 %s: %s\n" % (cid, cerr))
     c = CASEDB.get_case(cid, user)
     return {"ok": True, "annotation": a,
-            "annotations": c["annotations"] if c else [a]}, 200
+            "annotations": c["annotations"] if c else [a],
+            "docxVer": _oo_doc_ver(cid)}, 200
 
 
 def api_annotation_patch(user, aid, payload):
@@ -1249,8 +1428,15 @@ def api_annotation_patch(user, aid, payload):
         return err
     a, e = CASEDB.patch_annotation(user, aid, payload or {})
     if e:
-        return {"ok": False, "error": e}, 404
-    return {"ok": True, "annotation": a}, 200
+        code = 403 if e == "无权操作批注" else 404 if e == "批注不存在" else 400
+        return {"ok": False, "error": e}, code
+    # 「解决」同步移除 docx 中的 OO 原生批注（OO 里删除则回调镜像置 resolved，两个方向都通）
+    cid = CASEDB.annotation_case_id(aid)
+    if cid and oo_configured() and a.get("ooId") and a.get("status") == "resolved":
+        if oo_remove_comment(cid, a["ooId"]):
+            CASEDB.bump_docx_ver(cid)
+    return {"ok": True, "annotation": a,
+            "docxVer": _oo_doc_ver(cid) if cid else None}, 200
 
 
 def api_version_add(user, cid, payload):
@@ -1396,7 +1582,7 @@ def api_material_create(user, payload):
                 "dup": {"id": dup["id"], "title": dup["title"]}}, 409
     if not p.get("force"):
         res = search_corpus(p["title"] + " " + str(p.get("summary") or "")[:200],
-                            max_level=2, kinds=["material"], limit=3, user=user)
+                            kinds=["material"], limit=3, user=user)
         # BM25 实测：真重复 ≥70，跨主题噪声 ≤12；阈值之下视为不相似，避免逢采必拦
         similar = [{"id": h["materialId"], "title": h["title"], "source": h["source"]}
                    for h in res["materials"] if h["score"] >= 25][:3]
@@ -1563,30 +1749,18 @@ def _is_public_host(host):
     return True
 
 
-def fetch_url(payload):
-    url = (payload.get("url") or "").strip()
-    if not re.match(r"^https?://", url):
-        return {"ok": False, "error": "仅支持 http/https 链接"}
-    host = urllib.parse.urlparse(url).hostname or ""
-    if not _is_public_host(host):
-        return {"ok": False, "error": "该地址不允许抓取（非公网地址）"}
+def _download_url(url):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
-            final_url = resp.geturl()
-            ctype = resp.headers.get("Content-Type", "")
-            raw = resp.read(1024 * 1024)  # 最多 1MB
-    except Exception as e:
-        # 链接进入来源台账，但状态为失败
-        return {"ok": False, "error": "抓取失败: %s" % e, "url": url}
-    if "text" not in ctype and "html" not in ctype and "json" not in ctype:
-        return {"ok": False, "error": "非文本页面（%s），请上传资料包补充内容" % ctype,
-                "url": url, "finalUrl": final_url, "contentType": ctype}
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+        raw = resp.read(MAX_UPLOAD_BYTES + 1)
+        return resp.geturl(), resp.headers.get("Content-Type", ""), raw
+
+
+def _snapshot_text(raw):
     html = raw.decode("utf-8", "ignore")
     m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
     title = re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
-    # 粗提取正文：去脚本/样式/标签
     text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", "\n", text)
@@ -1595,46 +1769,96 @@ def fetch_url(payload):
     text = re.sub(r"&lt;|&gt;|&quot;|&#39;", " ", text)
     lines = [ln.strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if len(ln) >= 8]
-    text = "\n".join(lines)[:8000]
+    return title, "\n".join(lines)[:100000]
+
+
+def fetch_url(payload):
+    url = (payload.get("url") or "").strip()
+    host = urllib.parse.urlparse(url).hostname or ""
+    if not re.match(r"^https?://", url) or not _is_public_host(host):
+        return {"ok": False, "error": "仅支持公网 http/https 链接"}
+    try:
+        final_url, ctype, raw = _download_url(url)
+    except Exception as e:
+        return {"ok": False, "error": "抓取失败: %s" % e, "url": url}
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return {"ok": False, "error": "来源文件超过 20MB", "url": url}
+    if not any(x in ctype for x in ("text", "html", "json")):
+        name = os.path.basename(urllib.parse.urlparse(final_url).path) or "来源文件"
+        return {"ok": True, "url": url, "finalUrl": final_url, "title": name,
+                "data": base64.b64encode(raw).decode("ascii"), "fileName": name,
+                "contentType": ctype or "application/octet-stream"}
+    title, text = _snapshot_text(raw)
     return {"ok": True, "url": url, "finalUrl": final_url, "title": title,
             "text": text, "contentType": ctype}
 
 
 # --------------------------------------------------------------- 联网检索
-def web_search(payload):
-    """Tavily 检索公开网络资源，供素材采集选用。密钥不离开服务端。"""
-    if not TAVILY_API_KEY:
-        return {"ok": False, "error": "服务端未配置 TAVILY_API_KEY"}
-    query = (payload.get("query") or "").strip()
-    if not query:
-        return {"ok": False, "error": "缺少检索词"}
+def _search_request(url, body, headers):
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                 headers=headers, method="POST")
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _anysearch_results(text):
+    blocks = re.split(r"(?m)^### \d+\. ", text or "")[1:]
+    results = []
+    for rank, block in enumerate(blocks, 1):
+        title, _, body = block.partition("\n")
+        match = re.search(r"(?m)^- \*\*URL\*\*: (\S+)", body)
+        if not match:
+            continue
+        content = re.sub(r"(?m)^- \*\*URL\*\*: \S+\s*", "", body).strip()
+        results.append({"title": title.strip(), "url": match.group(1),
+                        "content": content[:1200], "score": 1 / rank})
+    return results
+
+
+def _anysearch(query, limit):
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "search", "arguments": {
+                "query": query, "max_results": limit}}}
+    headers = {"Content-Type": "application/json"}
+    if ANYSEARCH_API_KEY:
+        headers["Authorization"] = "Bearer " + ANYSEARCH_API_KEY
+    data = _search_request("https://api.anysearch.com/mcp", body, headers)
+    content = ((data.get("result") or {}).get("content") or [])
+    text = next((x.get("text", "") for x in content if x.get("type") == "text"), "")
+    return _anysearch_results(text)
+
+
+def _tavily(query, limit):
     body = {
         "api_key": TAVILY_API_KEY,
         "query": query,
-        "max_results": min(int(payload.get("max_results") or 6), 10),
+        "max_results": limit,
         "include_answer": False,
         "include_raw_content": False,
     }
-    req = urllib.request.Request(
-        "https://api.tavily.com/search",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    data = _search_request("https://api.tavily.com/search", body,
+                           {"Content-Type": "application/json"})
+    return [{"title": r.get("title", ""), "url": r.get("url", ""),
+             "content": (r.get("content") or "")[:1200], "score": r.get("score", 0)}
+            for r in data.get("results") or []]
+
+
+def web_search(payload):
+    """检索公开网络资源，供教师选择并采集为案例附件。"""
+    query = (payload.get("query") or "").strip()
+    if not query:
+        return {"ok": False, "error": "缺少检索词"}
+    limit = min(int(payload.get("max_results") or 6), 10)
+    if not (ANYSEARCH_API_KEY or TAVILY_API_KEY):
+        return {"ok": False, "error": "服务端未配置联网检索"}
     try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        results = _anysearch(query, limit) if ANYSEARCH_API_KEY else _tavily(query, limit)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:300]
         return {"ok": False, "error": "检索服务 HTTP %s: %s" % (e.code, detail)}
     except Exception as e:
         return {"ok": False, "error": "检索失败: %s" % e}
-    results = [{
-        "title": r.get("title", ""), "url": r.get("url", ""),
-        "content": (r.get("content") or "")[:1200],
-        "score": r.get("score", 0),
-    } for r in (data.get("results") or [])]
     return {"ok": True, "query": query, "results": results}
 
 
@@ -2022,13 +2246,15 @@ ORCHESTRATOR_PROMPT = (
 
 LIBRARIAN_PROMPT = (
     "你是思政教学案例平台的「资料管理员」，擅长素材关联和来源整理。"
-    "你可以使用两个工具：search_corpus（检索本地语料：教材《自然辩证法概论》、学习资料、"
-    "知识条目、教师上传素材）和 fetch_url（抓取公开网页）。"
+    "你可以使用三个工具：search_corpus（检索平台案例、知识和案例附件）、"
+    "web_search（检索互联网公开资源）和 fetch_url（抓取指定公开网页）。"
     "每一轮只输出一个严格 JSON，不要输出任何其他文字：\n"
     "{\"action\":\"search_corpus\",\"args\":{\"q\":\"检索词\"}}\n"
+    "或 {\"action\":\"web_search\",\"args\":{\"q\":\"检索词\"}}\n"
     "或 {\"action\":\"fetch_url\",\"args\":{\"url\":\"https://...\"}}\n"
     "或 {\"action\":\"final\",\"content\":\"最终答复\"}\n"
-    "规则：需要资料时先用 search_corpus（可换检索词多次检索）；信息足够后立即输出 final。"
+    "规则：平台资料用 search_corpus；用户明确要求联网时用 web_search；给出具体 URL 时用 fetch_url；"
+    "可换检索词多次检索，信息足够后立即输出 final。"
     "final 的 content 用中文，分条列出推荐内容（标题/章节/来源），引用教材或素材用〔n〕编号标注，"
     "不要编造语料中不存在的条目。"
 )
@@ -2162,32 +2388,69 @@ def _chunk_text(text, size=24):
         yield text[i:i + size]
 
 
-def _moa_tool_search(q, max_level):
-    """资料管理员工具：本地 BM25 检索（按请求用户密级过滤素材）。"""
-    res = search_corpus(q, max_level=max_level, limit=6)
-    lines = []
-    for i, it in enumerate(res["knowledge"], 1):
-        lines.append("〔k%d〕%s / %s：%s"
-                     % (i, it["chapter"] or "知识条目", it["title"], it["snippet"]))
-    for i, it in enumerate(res["materials"], 1):
-        lv = LEVEL_NAMES[it["level"]] if 0 <= it["level"] < len(LEVEL_NAMES) else str(it["level"])
-        lines.append("〔m%d〕素材《%s》（%s，密级：%s，可信度：%s）：%s"
-                     % (i, it["title"], it["source"], lv, it["credibility"], it["snippet"]))
-    total = len(res["knowledge"]) + len(res["materials"])
-    text = "\n".join(lines) if lines else "未检索到相关内容"
-    return text[:4000], "命中 %d 条" % total
+def _moa_search_lines(res):
+    lines = ["〔c%d〕案例《%s》：%s" % (i, x["title"], x["snippet"])
+             for i, x in enumerate(res["cases"], 1)]
+    lines += ["〔k%d〕%s / %s：%s" % (i, x["chapter"] or "知识条目", x["title"], x["snippet"])
+              for i, x in enumerate(res["knowledge"], 1)]
+    lines += ["〔m%d〕素材《%s》（%s）：%s" % (i, x["title"], x["source"], x["snippet"])
+              for i, x in enumerate(res["materials"], 1)]
+    return lines
+
+
+def _moa_search_items(res):
+    items = [{"kind": "case", "id": x["id"], "title": x["title"],
+              "excerpt": x["snippet"], "source": "已发布案例"} for x in res["cases"]]
+    items += [{"kind": "knowledge", "id": x["id"], "title": x["title"],
+               "excerpt": x["snippet"], "source": x["chapter"]} for x in res["knowledge"]]
+    items += [{"kind": "material", "id": x.get("materialId") or x["id"],
+               "title": x["title"], "excerpt": x["snippet"], "source": x["source"],
+               "locked": not x.get("contentAvailable", True), "level": x["level"]}
+              for x in res["materials"]]
+    return items
+
+
+def _moa_tool_search(q, user):
+    """资料管理员工具：平台案例、知识和案例附件统一检索。"""
+    res = search_corpus(q, limit=6, user=user)
+    items = _moa_search_items(res)
+    text = "\n".join(_moa_search_lines(res)) or "未检索到相关内容"
+    return text[:4000], "命中 %d 条" % len(items), items
 
 
 def _moa_tool_fetch(url):
     """资料管理员工具：复用 /api/fetch-url 的网页抓取。"""
     if not url:
-        return "缺少 url", "缺少 url"
+        return "缺少 url", "缺少 url", []
     r = fetch_url({"url": url})
     if not r.get("ok"):
-        return "抓取失败：" + (r.get("error") or ""), "抓取失败"
+        return "抓取失败：" + (r.get("error") or ""), "抓取失败", []
     text = "网页《%s》（%s）内容摘录：\n%s" % (
         r.get("title") or "", r.get("finalUrl") or url, (r.get("text") or "")[:3000])
-    return text, "抓取成功：%s" % (r.get("title") or url)[:40]
+    item = {"kind": "web", "url": r.get("finalUrl") or url,
+            "title": r.get("title") or url, "excerpt": (r.get("text") or "")[:500],
+            "source": urllib.parse.urlsplit(r.get("finalUrl") or url).netloc}
+    return text, "抓取成功：%s" % (r.get("title") or url)[:40], [item]
+
+
+def _moa_tool_web_search(q):
+    result = web_search({"query": q, "max_results": 6})
+    if not result.get("ok"):
+        return "联网检索失败：" + (result.get("error") or ""), "联网检索失败", []
+    items = [{"kind": "web", "url": x["url"], "title": x["title"],
+              "excerpt": x.get("content") or "",
+              "source": urllib.parse.urlsplit(x["url"]).netloc} for x in result["results"]]
+    lines = ["〔w%d〕%s（%s）：%s" % (i, x["title"], x["url"], x["excerpt"][:500])
+             for i, x in enumerate(items, 1)]
+    return "\n".join(lines) or "未检索到互联网资源", "互联网命中 %d 条" % len(items), items
+
+
+def _moa_run_tool(action, args, user):
+    if action == "search_corpus":
+        return _moa_tool_search((args.get("q") or "").strip(), user)
+    if action == "web_search":
+        return _moa_tool_web_search((args.get("q") or args.get("query") or "").strip())
+    return _moa_tool_fetch((args.get("url") or "").strip())
 
 
 def _moa_history(payload):
@@ -2246,7 +2509,7 @@ def _moa_classify(user_text):
     return "writer", "分类失败，按写作处理"
 
 
-def _moa_evidence_chunks(payload, max_level, limit=6):
+def _moa_evidence_chunks(payload, user, limit=6):
     """写作/审校前的资料检索（资料管理员同套检索）：统一编号的 chunk 列表，
     = 案例已关联引用（保持原编号）+ 本次新检索命中（跳过已关联目标，续号）。
     chunk: {n, kind(knowledge|material), materialId, sec, title, source, publishedAt, grade, snippet}"""
@@ -2266,7 +2529,7 @@ def _moa_evidence_chunks(payload, max_level, limit=6):
         })
     q = " ".join(x for x in [(payload.get("text") or "")[:200],
                              ctx.get("title") or "", ctx.get("sectionTitle") or ""] if x).strip()
-    res = search_corpus(q or "课程思政", max_level=max_level, limit=limit)
+    res = search_corpus(q or "课程思政", limit=limit, user=user)
     for it in res["knowledge"]:
         if it["id"] in cited:
             continue
@@ -2326,38 +2589,6 @@ def _moa_check_citations(text, chunks):
     return out, risks
 
 
-# ------------------------------------------------------------ 机审第一层（WP4）
-# provider 接口位：机审 = 多个 provider 并联，各自返回统一形状的批注 dict 列表
-# （quote/text/author/lowRisk）。当前 provider：
-#   review_lexicon_rules  —— 思政垂直词库规则（始终执行，不依赖 LLM）
-#   review_llm_check      —— 反例库 few-shot LLM 审校（AI_REVIEW_ENABLED 开关控制）
-# 后续接入黑马/蜜度等内容安全 API 时，在此新增 provider 函数并加入
-# run_machine_check 的调用序列即可，批注形状保持一致。
-
-def review_lexicon_rules(text):
-    """词库规则 provider：wrong 写法精确匹配，命中即产出 risk 批注。"""
-    hits, seen = [], set()
-
-    def add(quote, msg):
-        if quote in seen:
-            return
-        seen.add(quote)
-        hits.append({"quote": quote, "text": msg, "author": "机审·词库"})
-
-    for key, label in (("officials", "职务错误"), ("party", "规范表述"), ("typos", "易错词")):
-        for e in REVIEW_LEXICON.get(key) or []:
-            wrong = e.get("wrong") or ""
-            if wrong and wrong in text:
-                add(wrong, "【%s】疑似误写「%s」，应为「%s」。%s"
-                    % (label, wrong, e.get("right", ""), e.get("note", "")))
-    for e in REVIEW_LEXICON.get("bookTerms") or []:
-        for w in e.get("wrongs") or []:
-            if w and w in text:
-                add(w, "【教材固定表述】疑似误写「%s」，教材规范表述为「%s」。"
-                    % (w, e.get("term", "")))
-    return hits
-
-
 def _fewshot_block():
     """反例库注入 prompt 的 few-shot 段：每类风险取 1 条（控制 token）。"""
     lines, seen = [], set()
@@ -2375,59 +2606,9 @@ def _reviewer_prompt():
     return REVIEWER_PROMPT + _fewshot_block()
 
 
-def review_llm_check(text):
-    """LLM 反例审校 provider：反例库 few-shot 注入审校员 prompt，risk/confirm 项产批注。
-    返回 (批注列表, 说明, 是否真正调用了模型)。AI_REVIEW_ENABLED 关闭时直接跳过。"""
-    if not AI_REVIEW_ENABLED:
-        return [], "LLM 反例审校未启用（AI_REVIEW_ENABLED）", False
-    if not (AI_BASE_URL and AI_API_KEY):
-        return [], "LLM 反例审校跳过（未配置模型）", False
-    content, err = llm_call(MOA_MODEL_REVIEWER, [
-        {"role": "system", "content": _reviewer_prompt()},
-        {"role": "user", "content": "请审校以下思政教学案例正文：\n" + text[:6000]},
-    ], temperature=0.2)
-    if err:
-        return [], "LLM 反例审校调用失败：" + err, True
-    arr = _extract_json(content, want_array=True)
-    annos = []
-    if isinstance(arr, list):
-        for it in arr:
-            if not isinstance(it, dict) or it.get("status") not in ("risk", "confirm"):
-                continue
-            annos.append({
-                "quote": str(it.get("ref") or "")[:60],
-                "text": "【%s】%s" % (it.get("standard") or "审校", it.get("note") or ""),
-                "author": "机审·审校", "lowRisk": it.get("status") == "confirm",
-            })
-    return annos, "LLM 反例审校命中 %d 条" % len(annos), True
-
-
-def _case_body_text(data):
-    parts = [data.get("title", ""), data.get("summary", "")]
-    parts += [str(b.get("text") or "") for b in (data.get("blocks") or [])]
-    return "\n".join(parts)
-
-
-def run_machine_check(cid):
-    """submit 后异步机审：词库规则（始终）+ LLM 反例审校（开关控制），
-    结果落库（risk 批注 + reviews 留痕 action=checking）后状态 checking → pending。"""
-    try:
-        data = CASEDB.get_case_data(cid)
-        if data is None:
-            return
-        text = _case_body_text(data)
-        rule_hits = review_lexicon_rules(text)
-        llm_annos, llm_note, llm_ran = review_llm_check(text)
-        note = "词库规则命中 %d 条；%s" % (len(rule_hits), llm_note)
-        CASEDB.machine_check_apply(cid, rule_hits + llm_annos, note,
-                                   MOA_MODEL_REVIEWER if llm_ran else "")
-        sys.stderr.write("[review] 机审完成 %s：%s\n" % (cid, note))
-    except Exception as e:
-        sys.stderr.write("[review] 机审异常 %s: %s\n" % (cid, e))
-        try:
-            CASEDB.machine_check_apply(cid, [], "机审执行异常，直接转入人工审核")
-        except Exception:
-            pass
+def _admin_names():
+    """管理员姓名集合：OO 原生批注镜像时据作者名判定 kind=admin。"""
+    return {u.get("name") or uid for uid, u in load_users().items() if u.get("admin")}
 
 
 # --------------------------------------------------------------- docx 导出
@@ -2652,6 +2833,286 @@ def ensure_case_docx(cid, blocks):
         return False
     blocks_to_docx(blocks, path)
     return True
+
+
+# ------------------------------------------------------------ OO 原生批注（comments.xml）
+# 批注统一载体（OO 为唯一真源）：侧栏/AI 审校批注注入 docx comment，
+# DS 保存回调时解析 comments.xml 镜像回 annotations 表（ooId 关联，docx 中删失即 resolved）。
+# OO 9.x 保存后会多写一套私有批注流（schemas.onlyoffice.com/commentsDocument 等 parts），
+# 再次加载时与标准流按 w:id 去重合并——注入必须双写且 id 跨流唯一，否则注入的批注会被吃掉。
+OO_PRIVATE_COMMENTS = "word/commentsDocument.xml"
+
+
+def _zip_read_member(path, member):
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            return z.read(member)
+    except Exception:
+        return None
+
+
+def _zip_replace_member(path, member, data):
+    """重写 zip 中指定成员（OO 私有批注流 python-docx 不管，需 zip 级手术）。"""
+    import zipfile
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            zout.writestr(item, data if item.filename == member
+                          else zin.read(item.filename))
+    os.replace(tmp, path)
+
+
+def _oo_private_comment_ids(path):
+    """OO 私有批注流中的 w:id 集合（无该 part 返回空集）。"""
+    raw = _zip_read_member(path, OO_PRIVATE_COMMENTS)
+    if not raw:
+        return set()
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+    try:
+        root = parse_xml(raw)
+        return {int(el.get(qn("w:id"))) for el in root.iter(qn("w:comment"))
+                if el.get(qn("w:id")) is not None}
+    except Exception:
+        return set()
+
+
+def _oo_private_add_comment(path, comment_el, new_id):
+    """把新批注元素复制进 OO 私有批注流（id 与标准流一致；无该 part 跳过）。"""
+    import copy
+    from docx.oxml.ns import qn
+    raw = _zip_read_member(path, OO_PRIVATE_COMMENTS)
+    if not raw:
+        return False
+    from docx.oxml import parse_xml
+    try:
+        root = parse_xml(raw)
+        el = copy.deepcopy(comment_el)
+        el.set(qn("w:id"), str(new_id))
+        root.append(el)
+        from lxml import etree
+        _zip_replace_member(path, OO_PRIVATE_COMMENTS, etree.tostring(
+            root, xml_declaration=True, encoding="UTF-8", standalone=True))
+        return True
+    except Exception as e:
+        sys.stderr.write("[oo] 私有批注流写入失败：%s\n" % e)
+        return False
+
+
+def _oo_private_remove_comment(path, oo_id):
+    """从 OO 私有批注流移除指定 id 的批注；返回是否有该 part。"""
+    from docx.oxml.ns import qn
+    raw = _zip_read_member(path, OO_PRIVATE_COMMENTS)
+    if not raw:
+        return False
+    from docx.oxml import parse_xml
+    try:
+        root = parse_xml(raw)
+        hit = False
+        for el in list(root.iter(qn("w:comment"))):
+            if el.get(qn("w:id")) == str(oo_id):
+                el.getparent().remove(el)
+                hit = True
+        if hit:
+            from lxml import etree
+            _zip_replace_member(path, OO_PRIVATE_COMMENTS, etree.tostring(
+                root, xml_declaration=True, encoding="UTF-8", standalone=True))
+        return True
+    except Exception:
+        return True
+
+def _oo_run_split(run, offset):
+    """在 run 文本 offset 处拆成两个 run（深拷贝保留 rPr），返回后半 run。"""
+    import copy
+    from docx.text.run import Run
+    text = run.text
+    if offset <= 0 or offset >= len(text):
+        return None
+    new_r = copy.deepcopy(run._r)
+    run.text = text[:offset]
+    run._r.addnext(new_r)
+    nr = Run(new_r, run._parent)
+    nr.text = text[offset:]
+    return nr
+
+
+def _oo_split_at(p, offset):
+    """让段落 p 的拼接文本 offset 处落在 run 边界（必要时拆 run）；
+    返回从 offset 开始的 run；offset 超出段末返回 None。"""
+    pos = 0
+    for r in p.runs:
+        t = r.text
+        if offset == pos:
+            return r
+        if pos < offset < pos + len(t):
+            return _oo_run_split(r, offset - pos)
+        pos += len(t)
+    return None
+
+
+def _oo_span(p_start, off_start, p_end, off_end):
+    """构造锚定区间（按段拼接文本偏移）：先拆终点再拆起点（同段时保持偏移有效），
+    返回 (first_run, last_run)；退化情况锚到 start_run 本身。"""
+    from docx.text.run import Run
+    from docx.oxml.ns import qn
+    end_next = _oo_split_at(p_end, off_end)
+    start_run = _oo_split_at(p_start, off_start) or (p_start.runs[0] if p_start.runs else None)
+    if start_run is None:
+        return None
+    if end_next is not None:
+        prev = end_next._r.getprevious()
+        while prev is not None and prev.tag != qn("w:r"):
+            prev = prev.getprevious()
+        if prev is not None:
+            return (start_run, Run(prev, end_next._parent))
+        return (start_run, start_run)
+    runs = p_end.runs
+    return (start_run, runs[-1] if runs else start_run)
+
+
+def _oo_anchor_runs(doc, quote):
+    """按 quote 定位锚定 run 区间（先段内精确匹配，再全文空白归一化匹配，支持跨段）；
+    找不到返回 None。"""
+    quote = (quote or "").strip()
+    if not quote:
+        return None
+    paras = [p for p in doc.paragraphs if p.runs]
+    texts = ["".join(r.text for r in p.runs) for p in paras]
+    for i, full in enumerate(texts):
+        idx = full.find(quote)
+        if idx >= 0:
+            return _oo_span(paras[i], idx, paras[i], idx + len(quote))
+    norm, pmap = "", []  # 归一化串 + 下标→(段, 段内字符) 映射
+    for i, full in enumerate(texts):
+        for j, ch in enumerate(full):
+            if not ch.isspace():
+                norm += ch
+                pmap.append((i, j))
+    nq = "".join(ch for ch in quote if not ch.isspace())
+    if not nq:
+        return None
+    k = norm.find(nq)
+    if k < 0:
+        return None
+    (i1, j1), (i2, j2) = pmap[k], pmap[k + len(nq) - 1]
+    return _oo_span(paras[i1], j1, paras[i2], j2 + 1)
+
+
+def oo_inject_comment(cid, quote, text, author):
+    """把一条批注作为 OO 原生批注注入 docx：锚定 quote 文本区间（找不到锚到末段）。
+    id 跨标准/私有批注流唯一，并双写私有流（OO 9.x 合并去重语义，否则注入批注加载时被吃）。
+    返回 (comment_id, 是否精确锚定, error)。"""
+    from docx import Document
+    from docx.oxml.ns import qn
+    path = case_docx_path(cid)
+    if not os.path.isfile(path):
+        return None, False, "案例 docx 不存在"
+    with OO_LOCK:
+        try:
+            doc = Document(path)
+            span = _oo_anchor_runs(doc, quote or "")
+            anchored = bool(span)
+            if not span:
+                paras = [p for p in doc.paragraphs if p.runs]
+                if not paras:
+                    return None, False, "docx 为空，无法锚定批注"
+                span = (paras[-1].runs[0], paras[-1].runs[-1])
+            comment = doc.add_comment(span, text=text, author=author or "批注", initials=None)
+            old_id = comment.comment_id
+            new_id = max([old_id] + list(_oo_private_comment_ids(path))) + 1 \
+                if old_id in _oo_private_comment_ids(path) else old_id
+            if new_id != old_id:
+                comment._comment_elm.set(qn("w:id"), str(new_id))
+                for el in doc.element.body.iter():
+                    if el.tag in (qn("w:commentRangeStart"), qn("w:commentRangeEnd"),
+                                  qn("w:commentReference")) \
+                            and el.get(qn("w:id")) == str(old_id):
+                        el.set(qn("w:id"), str(new_id))
+            doc.save(path)
+            _oo_private_add_comment(path, comment._comment_elm, new_id)
+            return new_id, anchored, None
+        except Exception as e:
+            return None, False, "批注注入 docx 失败：%s" % e
+
+
+def oo_remove_comment(cid, oo_id):
+    """从 docx 移除 id=oo_id 的批注（range 起止标记 + reference run + comments.xml 条目）。
+    返回是否找到并移除。"""
+    from docx import Document
+    from docx.oxml.ns import qn
+    path = case_docx_path(cid)
+    if not os.path.isfile(path):
+        return False
+    with OO_LOCK:
+        try:
+            doc = Document(path)
+            sid = str(oo_id)
+            found = False
+            for el in list(doc.element.body.iter()):
+                if el.tag in (qn("w:commentRangeStart"), qn("w:commentRangeEnd")) \
+                        and el.get(qn("w:id")) == sid:
+                    el.getparent().remove(el)
+                    found = True
+                elif el.tag == qn("w:commentReference") and el.get(qn("w:id")) == sid:
+                    r = el.getparent()
+                    if r is not None and r.tag == qn("w:r"):
+                        r.getparent().remove(r)
+                    found = True
+            try:
+                cel = doc.comments._comments_elm.get_comment_by_id(int(oo_id))
+            except Exception:
+                cel = None
+            if cel is not None:
+                cel.getparent().remove(cel)
+                found = True
+            if found:
+                doc.save(path)
+            return found
+        except Exception as e:
+            sys.stderr.write("[oo] 批注移除失败 %s #%s: %s\n" % (cid, oo_id, e))
+            return False
+
+
+def oo_parse_comments(path):
+    """解析 docx 全部 OO 批注：comments.xml（首段=正文，其余段=回复）
+    + document.xml range 提取 quote。返回 [{ooId, author, date, text, quote, replies}]。"""
+    from docx import Document
+    from docx.oxml.ns import qn
+    if not os.path.isfile(path):
+        return []
+    try:
+        doc = Document(path)
+    except Exception:
+        return []
+    quotes, active = {}, set()
+    for el in doc.element.body.iter():
+        if el.tag == qn("w:commentRangeStart"):
+            active.add(el.get(qn("w:id")))
+        elif el.tag == qn("w:commentRangeEnd"):
+            active.discard(el.get(qn("w:id")))
+        elif el.tag == qn("w:t") and active:
+            for k in active:
+                quotes.setdefault(k, []).append(el.text or "")
+    quotes = {k: "".join(v) for k, v in quotes.items()}
+    out = []
+    try:
+        comments = list(doc.comments)
+    except Exception:
+        return out
+    for cm in comments:
+        oid = str(cm.comment_id)
+        paras = [p.text for p in cm.paragraphs]
+        text = paras[0] if paras else ""
+        replies = [{"byName": cm.author or "批注", "text": t, "at": ""}
+                   for t in paras[1:] if t.strip()]
+        ts = cm.timestamp
+        out.append({"ooId": oid, "author": cm.author or "",
+                    "date": ts.strftime("%Y-%m-%d %H:%M") if ts else "",
+                    "text": text, "quote": quotes.get(oid, "")[:200],
+                    "replies": replies})
+    return out
 
 
 def migrate_cases_docx():
@@ -2883,9 +3344,10 @@ def api_oo_callback(handler, query, payload):
         if e:
             sys.stderr.write("[oo] callback 回写失败 %s: %s\n" % (cid, e))
         else:
+            n = CASEDB.mirror_oo_comments(cid, oo_parse_comments(path), _admin_names())
             mark_search_dirty()
-            sys.stderr.write("[oo] 已保存 %s（blocks %d 块，docxVer %d）\n"
-                             % (cid, len(blocks), _oo_doc_ver(cid)))
+            sys.stderr.write("[oo] 已保存 %s（blocks %d 块，docxVer %d，批注镜像 %d 条）\n"
+                             % (cid, len(blocks), _oo_doc_ver(cid), n))
     return {"error": 0}, 200
 
 
@@ -3023,7 +3485,6 @@ class Handler(BaseHTTPRequestHandler):
                 or payload.get("selection") or ctx.get("sectionText")):
             return self._send_json({"ok": False, "error": "缺少请求内容 text"}, 400)
         user = auth_user(self)
-        max_level = req_max_level(user)
         prefs = CASEDB.get_prefs(user["id"]) if (user and CASEDB is not None) else {}
         self._sse_begin()
         try:
@@ -3035,11 +3496,11 @@ class Handler(BaseHTTPRequestHandler):
                 route, _reason = _moa_classify(user_text)
             history = _moa_history(payload)
             if route == "librarian":
-                self._agent_librarian(user_text, history, max_level)
+                self._agent_librarian(user_text, history, user)
             elif route == "reviewer":
-                self._agent_reviewer(user_text, history, payload, max_level)
+                self._agent_reviewer(user_text, history, payload, user)
             else:
-                self._agent_writer(user_text, history, payload, max_level, prefs)
+                self._agent_writer(user_text, history, payload, user, prefs)
             self._sse_frame({"type": "done"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -3051,13 +3512,13 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self._sse_end()
 
-    def _agent_librarian(self, user_text, history, max_level):
+    def _agent_librarian(self, user_text, history, user):
         """资料管理员：内部 JSON contract 工具循环（≤3 次工具调用后强制 final）。"""
         model = MOA_MODEL_LIBRARIAN
         self._sse_role("librarian", model)
         msgs = ([{"role": "system", "content": LIBRARIAN_PROMPT}] + history
                 + [{"role": "user", "content": user_text}])
-        final_text, last_content, tool_calls = None, "", 0
+        final_text, last_content, last_summary, tool_calls = None, "", "", 0
         for _round in range(4):
             content, err = llm_call(model, msgs, temperature=0.3)
             if err:
@@ -3066,17 +3527,14 @@ class Handler(BaseHTTPRequestHandler):
             last_content = content or last_content
             obj = _extract_json(content)
             action = obj.get("action") if isinstance(obj, dict) else None
-            if action in ("search_corpus", "fetch_url") and tool_calls < 3:
+            if action in ("search_corpus", "web_search", "fetch_url") and tool_calls < 3:
                 tool_calls += 1
                 args = obj.get("args") or {}
-                if action == "search_corpus":
-                    q = (args.get("q") or "").strip()
-                    tool_text, summary = (_moa_tool_search(q, max_level) if q
-                                          else ("检索词为空", "检索词为空"))
-                else:
-                    tool_text, summary = _moa_tool_fetch((args.get("url") or "").strip())
+                tool_text, summary, items = _moa_run_tool(action, args, user)
                 self._sse_frame({"type": "tool", "agent": "librarian",
-                                 "tool": action, "args": args, "summary": summary})
+                                 "tool": action, "args": args, "summary": summary,
+                                 "items": items})
+                last_summary = summary
                 msgs.append({"role": "assistant", "content": content})
                 msgs.append({"role": "user",
                              "content": "工具结果：\n" + tool_text + "\n\n请继续（输出下一个 JSON）。"})
@@ -3084,23 +3542,28 @@ class Handler(BaseHTTPRequestHandler):
             if action == "final":
                 final_text = str(obj.get("content") or "").strip() or (content or "")
                 break
-            nudge = ("工具调用已达上限，" if action in ("search_corpus", "fetch_url")
+            nudge = ("工具调用已达上限，" if action in ("search_corpus", "web_search", "fetch_url")
                      else "输出无法解析，") + "请立即输出最终答复 JSON：{\"action\":\"final\",\"content\":\"...\"}"
             msgs.append({"role": "assistant", "content": content or ""})
             msgs.append({"role": "user", "content": nudge})
         if final_text is None:
-            final_text = last_content or "（资料管理员未能形成结论，请换个问法重试）"
+            obj = _extract_json(last_content)
+            final_text = str(obj.get("content") or "").strip() \
+                if isinstance(obj, dict) and obj.get("action") == "final" else ""
+        if not final_text:
+            final_text = (last_summary + "。请从检索结果中选择需要引用的内容。") \
+                if last_summary else "没有形成可用结果，请调整检索词后重试。"
         for piece in _chunk_text(final_text):
             self._sse_frame({"type": "token", "agent": "librarian",
                              "which": "main", "text": piece})
         self._sse_frame({"type": "result", "kind": "text", "text": final_text})
 
-    def _agent_writer(self, user_text, history, payload, max_level, prefs=None):
+    def _agent_writer(self, user_text, history, payload, user, prefs=None):
         """写作手：先做资料检索（chunk 编号表注入 prompt），ThreadPoolExecutor 并行双候选，
         成稿经引用后处理校验（对不上 chunk 的〔n〕降级「待核实」+ risk 记录）。
         教师有生成偏好（WP4b）时注入偏好段；禁用词命中在候选 risks 里加警示（前端转 risk 批注）。"""
         self._sse_role("librarian", MOA_MODEL_LIBRARIAN)
-        chunks = _moa_evidence_chunks(payload, max_level)
+        chunks = _moa_evidence_chunks(payload, user)
         self._sse_frame({"type": "tool", "agent": "librarian", "tool": "search_corpus",
                          "args": {"q": (payload.get("text") or "")[:60]},
                          "summary": "可用资料 chunk %d 条（含已关联引用）" % len(chunks)})
@@ -3149,10 +3612,10 @@ class Handler(BaseHTTPRequestHandler):
                          "alt": results.get("alt") or fallback,
                          "chunks": chunks})
 
-    def _agent_reviewer(self, user_text, history, payload, max_level):
+    def _agent_reviewer(self, user_text, history, payload, user):
         """内容审校员：检索 chunk 表作为引用蕴含判断依据；按标准清单输出严格 JSON 数组。"""
         self._sse_role("reviewer", MOA_MODEL_REVIEWER)
-        chunks = _moa_evidence_chunks(payload, max_level)
+        chunks = _moa_evidence_chunks(payload, user)
         if chunks:
             user_text += ("\n\n【引用 chunk 表（文中〔n〕对应的资料原文，做引用蕴含判断的依据）】\n"
                           + _moa_chunks_brief(chunks))
@@ -3250,7 +3713,7 @@ class Handler(BaseHTTPRequestHandler):
                 "models": AI_MODELS,
                 "defaultModel": AI_DEFAULT_MODEL,
                 "reviewEnabled": AI_REVIEW_ENABLED,
-                "webSearch": bool(TAVILY_API_KEY),
+                "webSearch": bool(ANYSEARCH_API_KEY or TAVILY_API_KEY),
                 "filesAuth": bool(APP_SECRET),
                 "graph": GRAPH.configured,
             })
@@ -3324,6 +3787,20 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             res, status = api_material_get(auth_user(self), urllib.parse.unquote(m.group(1)))
             return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+)/attachments/([^/]+)/file/?$", path)
+        if m:
+            cid, aid = (urllib.parse.unquote(x) for x in m.groups())
+            found, err, status = api_case_attachment_file(auth_user(self), cid, aid)
+            if err:
+                return self._send_json(err, status)
+            data, ctype, name = found
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Disposition", "inline; filename*=UTF-8''" + urllib.parse.quote(name))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         m = re.match(r"^/api/cases/([^/]+?)(?:/(annotations|versions))?/?$", path)
         if m:
             cid = urllib.parse.unquote(m.group(1))
@@ -3382,6 +3859,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(res, status)
         if path == "/api/materials":
             res, status = api_material_create(auth_user(self), payload)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+)/attachments/?$", path)
+        if m:
+            res, status = api_case_attachment_add(
+                auth_user(self), urllib.parse.unquote(m.group(1)), payload)
             return self._send_json(res, status)
         m = re.match(r"^/api/materials/([^/]+?)/favorite/?$", path)
         if m:
@@ -3490,6 +3972,11 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/api/materials/([^/]+?)/favorite/?$", path)
         if m:
             res, status = api_mat_favorite(auth_user(self), urllib.parse.unquote(m.group(1)), False)
+            return self._send_json(res, status)
+        m = re.match(r"^/api/cases/([^/]+)/attachments/([^/]+)/?$", path)
+        if m:
+            cid, aid = (urllib.parse.unquote(x) for x in m.groups())
+            res, status = api_case_attachment_delete(auth_user(self), cid, aid)
             return self._send_json(res, status)
         m = re.match(r"^/api/cases/([^/]+?)(?:/(favorite|like))?/?$", path)
         if m:
