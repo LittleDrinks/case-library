@@ -1,0 +1,6 @@
+id,username,password,name,role,status,must_change_password
+u-admin-demo,admin,admin123,演示管理员,admin,active,false
+u-user-demo,user,user123,演示用户,user,active,false
+u-roster-yang,10000001,Demo-10000001-2026!,小杨,user,active,true
+u-roster-li,10000002,Demo-10000002-2026!,小李,admin,active,true
+u-roster-zhao,10000003,Demo-10000003-2026!,小赵,admin,disabled,true

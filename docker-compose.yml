@@ -1,37 +1,813 @@
+name: case-library-v2
+
 services:
-  onlyoffice-ds:
-    image: onlyoffice/documentserver:latest
-    container_name: case-library-onlyoffice
-    ports:
-      - "8081:80"
+  production-config-check:
+    image: case-library-v2-production-config-check
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: production-config-check
     environment:
-      JWT_ENABLED: "true"
-      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+      APP_ENV: ${APP_ENV:-demo}
+      APP_SECRET_FILE: /run/secrets/app_secret
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT}
+      BACKUP_AGE_IDENTITY_FILE: /run/secrets/backup_age_identity
+    secrets:
+      - app_secret
+      - minio_root_user
+      - minio_root_password
+      - backup_age_identity
+    network_mode: none
+    entrypoint: ["sh", "-eu", "-c"]
+    command:
+      - |
+        app_environment="$(printf '%s' "${APP_ENV:-demo}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        test "$${app_environment}" != production || {
+          echo "Single-host Compose does not support APP_ENV=production" >&2
+          exit 1
+        }
+        exec python /app/scripts/validate_production_config.py
+    restart: "no"
 
-  # DS（容器内）→ server.py（宿主 127.0.0.1）的桥接：监听 docker0 网关地址转发到宿主回环。
-  # 要求 server.py 跑在 ONLYOFFICE_SERVER_URL 指向的端口（默认 8080）。
-  app-forward:
-    image: alpine/socat:latest
-    container_name: case-library-app-forward
-    network_mode: host
-    command: TCP-LISTEN:8080,fork,bind=172.17.0.1,reuseaddr TCP:127.0.0.1:8080
-    restart: unless-stopped
-
-  # Neo4j 图谱库（WP7）：server.py 经 bolt 灌库/查询；browser 7474 仅供调试
-  neo4j:
-    image: neo4j:5-community
-    container_name: case-library-neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+  mongo1:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
     volumes:
-      - neo4j_data:/data
+      - mongo1_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
     restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo2:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo3:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo-init:
+    build:
+      context: .
+      dockerfile: deploy/mongo-init.Dockerfile
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    networks:
+      - database
+    restart: "on-failure:5"
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "9000"
+    volumes:
+      - minio_data:/data
+    networks:
+      - database
+      - restore_test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  meilisearch:
+    image: case-library-v2-meilisearch
+    build:
+      context: .
+      dockerfile: deploy/meilisearch.Dockerfile
+    command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "7700"
+    secrets:
+      - meili_master_key
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  search-init:
+    image: case-library-v2-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      APP_ENV: ${APP_ENV:-demo}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-true}
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_v3?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_v3
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    networks:
+      - database
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      meilisearch:
+        condition: service_healthy
+    command: ["python", "-m", "app.modules.search.rebuild"]
+    restart: "no"
+
+  search-worker:
+    image: case-library-v2-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_v3?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_v3
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    networks:
+      - database
+    depends_on:
+      search-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "app.modules.search.worker"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  app:
+    image: case-library-v2-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    init: true
+    ports:
+      - "127.0.0.1:${API_PORT:-8001}:8001"
+    environment:
+      APP_ENV: ${APP_ENV:-demo}
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_v3?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_v3
+      MONGODB_MAX_POOL_SIZE: ${MONGODB_MAX_POOL_SIZE:-100}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-true}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      APP_SECRET_FILE: /run/secrets/app_secret
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY_FILE: /run/secrets/ai_api_key
+      AI_MODELS: ${AI_MODELS:-}
+      AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-60}
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+    secrets:
+      - app_secret
+      - ai_api_key
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    networks:
+      - edge
+      - database
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      search-init:
+        condition: service_completed_successfully
+      search-worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  frontend:
+    image: case-library-v2-frontend
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: runtime
+    init: true
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-18080}:80"
+    networks:
+      - edge
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  backend-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: test
+    network_mode: none
+    command: ["sh", "-c", "ruff check --no-cache app tests && python -m pytest -q -c tests/pytest.ini -m 'not e2e'"]
+
+  frontend-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: test
+    network_mode: none
+    command: ["npm", "test"]
+
+  e2e:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e
+    build:
+      context: .
+      dockerfile: deploy/e2e.Dockerfile
+    environment:
+      PLAYWRIGHT_BASE_URL: http://frontend
+    depends_on:
+      e2e-frontend:
+        condition: service_healthy
+    networks:
+      - e2e_test
+    command: ["npm", "run", "test:e2e"]
+
+  e2e-ai-provider:
+    profiles: ["e2e"]
+    build:
+      context: .
+      dockerfile: deploy/fake-openai.Dockerfile
+    networks:
+      e2e_test:
+        aliases: ["ai-provider"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: "no"
+
+  backend-e2e:
+    profiles: ["e2e"]
+    image: case-library-v2-backend-test
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: test
+    environment:
+      CASE_LIBRARY_E2E_URL: http://e2e-app:8001
+      AUTH_QUERY_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
+      SEARCH_CURSOR_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
+      MEILI_CONTRACT_URL: http://e2e-meilisearch:7700
+      MEILI_CONTRACT_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: case-library-e2e
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+    secrets:
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      e2e-app:
+        condition: service_healthy
+    networks:
+      - database
+      - e2e_test
+    entrypoint: []
+    command: ["python", "-m", "pytest", "-q", "-c", "tests/pytest.ini", "-m", "e2e", "tests"]
+
+  e2e-meilisearch:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e-meilisearch
+    build:
+      context: .
+      dockerfile: deploy/meilisearch.Dockerfile
+    command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
+    secrets:
+      - meili_master_key
+    volumes:
+      - e2e_meili_data:/meili_data
+    networks:
+      - e2e_test
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    restart: "no"
+
+  e2e-search-init:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      APP_ENV: test
+      ENABLE_DEMO_SEED: "true"
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_e2e
+      SEARCH_URL: http://e2e-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_e2e
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      e2e-meilisearch:
+        condition: service_healthy
+    networks:
+      - database
+      - e2e_test
+    command: ["python", "-m", "app.modules.search.rebuild"]
+    restart: "no"
+
+  e2e-search-worker:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_e2e
+      SEARCH_URL: http://e2e-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_e2e
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      e2e-search-init:
+        condition: service_completed_successfully
+    networks:
+      - database
+      - e2e_test
+    command: ["python", "-m", "app.modules.search.worker"]
+    restart: "no"
+
+  e2e-app:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      APP_ENV: test
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=e2e-app
+      MONGODB_DB_NAME: case_library_e2e
+      MONGODB_MAX_POOL_SIZE: 50
+      ENABLE_DEMO_SEED: "true"
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_TTL_SECONDS: 3600
+      APP_SECRET_FILE: /run/secrets/app_secret
+      AI_MODELS: e2e-model-a,e2e-model-b
+      AI_DEFAULT_MODEL: e2e-model-a
+      SEARCH_URL: http://e2e-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_e2e
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: case-library-e2e
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: 2
+    secrets:
+      - app_secret
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      e2e-ai-provider:
+        condition: service_healthy
+      e2e-search-init:
+        condition: service_completed_successfully
+      e2e-search-worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 18
+      start_period: 10s
+    networks:
+      database:
+      e2e_test:
+        aliases: ["app"]
+
+  e2e-frontend:
+    profiles: ["e2e"]
+    image: case-library-v2-e2e-frontend
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: runtime
+    depends_on:
+      e2e-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+    networks:
+      e2e_test:
+        aliases: ["frontend"]
+
+  load:
+    profiles: ["load"]
+    image: case-library-v2-load
+    build:
+      context: .
+      dockerfile: deploy/k6.Dockerfile
+    environment:
+      BASE_URL: http://frontend
+      BACKEND_URL: http://app:8001
+      LOAD_PROFILE: ${LOAD_PROFILE:-smoke}
+      LOAD_USERNAME: ${LOAD_USERNAME:-user}
+      LOAD_PASSWORD: ${LOAD_PASSWORD:-user123}
+      LOAD_ADMIN_USERNAME: ${LOAD_ADMIN_USERNAME:-admin}
+      LOAD_ADMIN_PASSWORD: ${LOAD_ADMIN_PASSWORD:-admin123}
+      MEILI_URL: http://load-meilisearch:7700
+      MEILI_KEY_FILE: /run/secrets/meili_master_key
+      WRITE_PERCENT: ${WRITE_PERCENT:-5}
+      SEARCH_PERCENT: ${SEARCH_PERCENT:-20}
+      MATERIAL_PERCENT: ${MATERIAL_PERCENT:-10}
+      CURSOR_PERCENT: ${CURSOR_PERCENT:-50}
+      THINK_TIME_SECONDS: ${THINK_TIME_SECONDS:-2}
+      PEAK_VUS: ${PEAK_VUS:-200}
+      PEAK_DURATION: ${PEAK_DURATION:-2m}
+      RAMP_DURATION: ${RAMP_DURATION:-30s}
+      RESILIENCE_VUS: ${RESILIENCE_VUS:-1000}
+      RESILIENCE_DURATION: ${RESILIENCE_DURATION:-3m}
+      RESILIENCE_RAMP_DURATION: ${RESILIENCE_RAMP_DURATION:-2m}
+      LOAD_RATE: ${LOAD_RATE:-450}
+      RATE_DURATION: ${RATE_DURATION:-2m}
+      RATE_VUS: ${RATE_VUS:-200}
+      RATE_MAX_VUS: ${RATE_MAX_VUS:-1000}
+      STEADY_VUS: ${STEADY_VUS:-1000}
+      STEADY_RAMP_DURATION: ${STEADY_RAMP_DURATION:-2m}
+      STEADY_DURATION: ${STEADY_DURATION:-15m}
+      STEADY_SETUP_TIMEOUT: ${STEADY_SETUP_TIMEOUT:-5m}
+      STEADY_THINK_TIME_SECONDS: ${STEADY_THINK_TIME_SECONDS:-2}
+      STEADY_WRITE_PERCENT: ${STEADY_WRITE_PERCENT:-5}
+    depends_on:
+      load-frontend:
+        condition: service_healthy
+    secrets:
+      - meili_master_key
+    networks:
+      - load_test
+    command: ["run", "/tests/high-frequency.js"]
+
+  load-meilisearch:
+    profiles: ["load"]
+    image: case-library-v2-load-meilisearch
+    build:
+      context: .
+      dockerfile: deploy/meilisearch.Dockerfile
+    command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
+    secrets:
+      - meili_master_key
+    volumes:
+      - load_meili_data:/meili_data
+    networks:
+      - load_test
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    restart: "no"
+
+  load-search-init:
+    profiles: ["load"]
+    image: case-library-v2-load-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      APP_ENV: demo
+      ENABLE_DEMO_SEED: "false"
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_load?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_load
+      SEARCH_URL: http://load-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_load
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      load-meilisearch:
+        condition: service_healthy
+    networks:
+      - database
+      - load_test
+    command: ["python", "-m", "app.modules.search.rebuild"]
+    restart: "no"
+
+  load-search-worker:
+    profiles: ["load"]
+    image: case-library-v2-load-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_load?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_load
+      SEARCH_URL: http://load-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_load
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      load-meilisearch:
+        condition: service_healthy
+    networks:
+      - database
+      - load_test
+    command: ["python", "-m", "app.modules.search.worker"]
+    restart: "no"
+
+  load-app:
+    profiles: ["load"]
+    image: case-library-v2-load-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    deploy:
+      replicas: 4
+    environment:
+      APP_ENV: demo
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_load?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_load
+      MONGODB_MAX_POOL_SIZE: 10
+      ENABLE_DEMO_SEED: "false"
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_TTL_SECONDS: 7200
+      APP_SECRET_FILE: /run/secrets/app_secret
+      SEARCH_URL: http://load-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_load
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: case-library-load
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: 4
+    secrets:
+      - app_secret
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      load-search-worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 18
+      start_period: 10s
+    networks:
+      database:
+      load_test:
+        aliases: ["app"]
+
+  load-frontend:
+    profiles: ["load"]
+    image: case-library-v2-load-frontend
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: runtime
+    depends_on:
+      load-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+    networks:
+      load_test:
+        aliases: ["frontend"]
+
+  backup-tools:
+    profiles: ["ops"]
+    image: case-library-v2-backup-tools
+    build:
+      context: .
+      dockerfile: deploy/backup-tools.Dockerfile
+    environment:
+      MONGODB_ADMIN_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: case_library_v3
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT}
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    networks:
+      - database
+
+  restore-tools:
+    profiles: ["restore"]
+    image: case-library-v2-backup-tools
+    build:
+      context: .
+      dockerfile: deploy/backup-tools.Dockerfile
+    environment:
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT}
+      BACKUP_AGE_IDENTITY_FILE: /run/secrets/backup_age_identity
+      RESTORE_MONGODB_URI: mongodb://restore-mongo:27017
+    secrets:
+      - minio_root_user
+      - minio_root_password
+      - backup_age_identity
+    networks:
+      - restore_test
+
+  git-tools:
+    profiles: ["ops"]
+    image: alpine/git:2.49.1
+    network_mode: none
+
+  restore-mongo:
+    profiles: ["restore"]
+    image: mongo:7
+    command: ["mongod", "--bind_ip_all", "--setParameter", "ttlMonitorEnabled=false"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+    networks:
+      - restore_test
 
 volumes:
-  neo4j_data:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  minio_data:
+  meili_data:
+  e2e_meili_data:
+  load_meili_data:
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-10.254.240.0/24}
+  database:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${DATABASE_SUBNET:-10.254.241.0/24}
+  load_test:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${LOAD_TEST_SUBNET:-10.254.250.0/24}
+  e2e_test:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${E2E_TEST_SUBNET:-10.254.251.0/24}
+  restore_test:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${RESTORE_TEST_SUBNET:-10.254.252.0/24}
+
+secrets:
+  app_secret:
+    environment: APP_SECRET
+  meili_master_key:
+    environment: MEILI_MASTER_KEY
+  ai_api_key:
+    environment: AI_API_KEY
+  minio_root_user:
+    environment: MINIO_ROOT_USER
+  minio_root_password:
+    environment: MINIO_ROOT_PASSWORD
+  backup_age_identity:
+    environment: BACKUP_AGE_IDENTITY

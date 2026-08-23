@@ -1,0 +1,2 @@
+# ADR 0019：Meilisearch 检索目录
+MongoDB 是业务真源，Meilisearch 是案例、知识和素材的唯一检索实现。业务事务以 outbox 记录投影变更，检索 worker 幂等更新目录；收紧权限先写撤销记录，sink 成功后的 `indexEpoch` CAS、outbox ack 与撤销清理在同一事务提交。每次全量重建写入新的不可变物理索引并发布 `indexUid`、`generation` 与 Meilisearch `updatedAt`；请求和就绪检查要求实际 `updatedAt` 等于 `indexEpoch`，旧 worker 的同代际迟到写入触发 503，待 pending 事件重放后恢复。检索故障、代际不一致或增量积压返回 503，不回查 MongoDB。选择该结构是因为 12,480 条目标数据在 1000 VU 下已使 MongoDB 聚合检索超过延迟预算，而独立检索引擎能保持中文检索、权限过滤、排序和分面能力。

@@ -1,0 +1,42 @@
+.settings-page { min-height: 100vh; background: var(--bg); color: var(--ink); }
+.settings-main { width: min(920px, 100%); margin: 0 auto; padding: 34px 20px 64px; }
+.settings-heading { display: flex; min-height: 92px; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+.settings-heading span { color: var(--brand); font-size: 12px; font-weight: 650; }
+.settings-heading h1 { margin: 6px 0 0; font: 650 27px/1.35 var(--serif); }
+.settings-heading a { margin-top: 9px; color: var(--brand); font-size: 13px; text-decoration: none; }
+.settings-form { display: grid; gap: 18px; padding-top: 22px; }
+.settings-section { display: grid; gap: 18px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); }
+.settings-section > header { display: flex; align-items: flex-start; gap: 10px; }
+.settings-section > header svg { flex: none; margin-top: 2px; color: var(--brand); }
+.settings-section h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.settings-section header p { margin: 3px 0 0; color: var(--ink-3); font-size: 12px; }
+.settings-section > label { display: grid; gap: 7px; color: var(--ink-2); font-size: 13px; }
+.settings-section input:not([type="radio"]), .settings-section select { width: 100%; height: 42px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); }
+.settings-section input:focus, .settings-section select:focus { border-color: var(--brand); outline: 0; box-shadow: 0 0 0 3px var(--brand-soft); }
+.mode-control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mode-control label { display: flex; min-height: 70px; align-items: center; gap: 11px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; }
+.mode-control label:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.mode-control span { display: grid; gap: 2px; }
+.mode-control b { font-size: 13px; }
+.mode-control small { color: var(--ink-3); font-size: 11px; }
+.secret-input { position: relative; }
+.secret-input svg { position: absolute; top: 13px; left: 11px; color: var(--ink-3); }
+.secret-input input { padding-left: 36px !important; }
+.discover-row { display: flex; align-items: center; gap: 12px; }
+.discover-row span, .settings-hint { margin: 0; color: var(--ink-3); font-size: 11px; }
+.primary-button, .secondary-button { display: inline-flex; height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border-radius: 6px; font-weight: 600; }
+.primary-button { border: 1px solid var(--brand); background: var(--brand); color: #fff; }
+.secondary-button { border: 1px solid var(--line-strong); background: #fff; color: var(--ink-2); }
+.settings-form footer { display: flex; justify-content: flex-end; }
+.settings-message { margin: 0; padding: 9px 12px; border-radius: 6px; font-size: 12px; }
+.settings-message.error { background: var(--brand-soft); color: var(--red); }
+.settings-message.success { background: var(--green-soft); color: var(--green); }
+.settings-state { display: flex; min-height: 240px; align-items: center; justify-content: center; gap: 8px; color: var(--ink-3); }
+@media (max-width: 620px) {
+  .settings-main { padding: 24px 14px 48px; }
+  .settings-heading { min-height: 82px; }
+  .settings-heading h1 { font-size: 23px; }
+  .settings-section { padding: 18px 16px; }
+  .mode-control { grid-template-columns: 1fr; }
+  .discover-row { align-items: flex-start; flex-direction: column; }
+}

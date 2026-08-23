@@ -1,0 +1,118 @@
+services:
+  frontend:
+    image: case-library-v2-failover-frontend
+    ports: !reset []
+
+  app:
+    image: case-library-v2-failover-app
+    ports: !reset []
+    environment:
+      APP_ENV: test
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
+      ENABLE_DEMO_SEED: "false"
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET}
+      SEARCH_URL: http://failover-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_failover
+    depends_on: !override
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      failover-search-init:
+        condition: service_completed_successfully
+      failover-search-worker:
+        condition: service_started
+
+  failover-meilisearch:
+    image: case-library-v2-failover-meilisearch
+    build:
+      context: .
+      dockerfile: deploy/meilisearch.Dockerfile
+    command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
+    secrets:
+      - meili_master_key
+    volumes:
+      - failover_meili_data:/meili_data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    restart: "no"
+
+  failover-search-init:
+    image: case-library-v2-failover-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      APP_ENV: test
+      ENABLE_DEMO_SEED: "false"
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
+      SEARCH_URL: http://failover-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_failover
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      failover-meilisearch:
+        condition: service_healthy
+    networks:
+      - database
+    command: ["python", "-m", "app.modules.search.rebuild"]
+    restart: "no"
+
+  failover-search-worker:
+    image: case-library-v2-failover-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
+      SEARCH_URL: http://failover-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_failover
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    depends_on:
+      failover-search-init:
+        condition: service_completed_successfully
+    networks:
+      - database
+    command: ["python", "-m", "app.modules.search.worker"]
+    restart: "no"
+
+  backup-tools:
+    environment:
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET}
+
+  restore-tools:
+    environment:
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET}
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 10.254.246.0/24
+  database:
+    ipam:
+      config:
+        - subnet: 10.254.247.0/24
+  restore_test:
+    ipam:
+      config:
+        - subnet: 10.254.248.0/24
+
+volumes:
+  failover_meili_data:

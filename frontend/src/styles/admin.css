@@ -1,0 +1,29 @@
+.admin-main { width: min(1120px, 100%); margin: 0 auto; padding: 34px 28px 64px; }
+.admin-heading { display: flex; min-height: 92px; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+.admin-heading span, .admin-queue header span { color: var(--brand); font-size: 12px; font-weight: 650; }
+.admin-heading h1 { margin: 5px 0 0; font: 650 26px/1.4 var(--serif); }
+.admin-heading nav { display: flex; gap: 8px; }
+.admin-heading a, .admin-queue article a { display: inline-flex; height: 38px; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink-2); text-decoration: none; }
+.admin-heading a:hover, .admin-queue article a:hover { border-color: var(--brand); color: var(--brand); }
+.admin-state { display: flex; min-height: 280px; align-items: center; justify-content: center; gap: 8px; color: var(--ink-3); }
+.admin-state button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--brand); }
+.admin-queue { margin-top: 28px; border-top: 2px solid var(--brand); background: #fff; box-shadow: var(--shadow); }
+.admin-queue > header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 10px 18px; border: 1px solid var(--line); border-top: 0; }
+.admin-queue h2 { margin: 2px 0 0; font: 650 17px/1.4 var(--serif); }
+.admin-queue header b { display: grid; min-width: 26px; height: 26px; place-items: center; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 12px; }
+.admin-queue article { display: grid; min-height: 70px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 12px 18px; border: 1px solid var(--line); border-top: 0; }
+.admin-queue article > span { min-width: 54px; padding: 2px 7px; border-radius: 4px; background: var(--amber-soft); color: var(--amber); font-size: 12px; text-align: center; }
+.admin-queue article > span[data-status="reviewing"] { background: var(--brand-soft); color: var(--brand); }
+.admin-queue article > svg { color: var(--green); }
+.admin-queue h3 { margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 650; }
+.admin-queue p { margin: 3px 0 0; color: var(--ink-3); font-size: 12px; }
+.admin-empty { margin: 0; padding: 28px 18px; border: 1px solid var(--line); border-top: 0; color: var(--ink-3); }
+
+@media (max-width: 680px) {
+  .admin-main { padding: 22px 14px 48px; }
+  .admin-heading { min-height: 128px; flex-direction: column; }
+  .admin-heading nav { width: 100%; }
+  .admin-heading a { flex: 1; justify-content: center; }
+  .admin-queue article { grid-template-columns: auto minmax(0, 1fr); }
+  .admin-queue article a { grid-column: 1 / -1; justify-content: center; }
+}

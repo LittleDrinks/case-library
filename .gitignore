@@ -11,11 +11,18 @@ files/case-attachments/
 __pycache__/
 *.pyc
 
+# Frontend and browser tests
+frontend/node_modules/
+frontend/dist/
+test-results/
+playwright-report/
+
 # 运行时数据
 data/
 files/up/*
 !files/up/.gitkeep
 files/cases/
+backups/
 
 # 系统与编辑器
 .DS_Store

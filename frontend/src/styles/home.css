@@ -1,0 +1,97 @@
+.home-page {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+}
+.home-page h1, .home-page h2, .home-page h3 { font-family: var(--serif); }
+.home-page a { color: var(--brand); }
+.home-main { width: min(1200px, 100%); margin: 0 auto; padding: 24px 20px 40px; }
+.recommendation-main { padding-top: 24px; }
+.dynamic-grid { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr; gap: 14px; margin-bottom: 18px; }
+.home-card { border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+.home-card-padded { padding: 18px 20px; }
+.home-section-title, .home-card-title { display: flex; align-items: center; justify-content: space-between; }
+.home-section-title { margin-bottom: 10px; font-size: 14px; font-weight: 600; }
+.home-section-title h2, .home-card-title h2 { margin: 0; font: inherit; }
+.home-section-title a, .home-card-title a { font-size: 12px; text-decoration: none; }
+.dynamic-metrics { display: flex; gap: 18px; margin-top: 8px; }
+.dynamic-metrics div { display: flex; min-width: 0; flex-direction: column; }
+.dynamic-metrics b { color: var(--brand); font-size: 22px; line-height: 1.4; }
+.dynamic-metrics span { color: var(--ink-3); font-size: 12px; }
+.platform-total { margin: 8px 0 0; color: var(--ink-3); font-size: 12px; }
+.dynamic-empty { margin: 0; color: var(--ink-3); font-size: 12px; }
+.home-recommendation-grid { display: grid; grid-template-columns: 2fr 1fr; align-items: start; gap: 18px; }
+.home-card-title { min-height: 55px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
+.home-card-title h2 { color: var(--ink); font-size: 14px; font-weight: 600; }
+.home-card-title span { color: var(--ink-3); font-size: 12px; }
+.home-case-item { display: block; padding: 14px 20px; border-bottom: 1px solid var(--line-soft); color: inherit !important; text-decoration: none; transition: background .15s; }
+.home-case-item:last-child { border-bottom: 0; }
+.home-case-item:hover { background: var(--paper); text-decoration: none; }
+.home-case-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-case-title-row h3 { margin: 0 0 4px; overflow-wrap: anywhere; color: var(--ink); font: 600 14.5px/1.4 var(--sans, sans-serif); }
+.home-case-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+.home-tag { display: inline-block; padding: 1px 9px; border: 1px solid transparent; border-radius: 999px; background: #f1eee8; color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.home-tag.primary { background: var(--brand-soft); color: var(--brand); }
+.home-tag.green { background: var(--green-soft); color: var(--green); }
+.home-empty { margin: 0; padding: 30px; color: var(--ink-3); font-size: 12px; text-align: center; }
+.home-material-item { display: grid; gap: 3px; padding: 12px 20px; border-bottom: 1px solid var(--line-soft); color: var(--ink) !important; text-decoration: none; }
+.home-material-item:last-child { border-bottom: 0; }
+.home-material-item:hover { background: var(--paper); }
+.home-material-item b { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.home-material-item span { color: var(--ink-3); font-size: 11px; }
+.catalog-heading { min-height: 92px; border-bottom: 1px solid var(--line); }
+.catalog-heading h1 { margin: 6px 0 0; font-size: 26px; font-weight: 650; }
+.home-eyebrow { color: var(--brand); font-size: 12px; font-weight: 650; }
+.case-discovery { display: grid; grid-template-columns: 20px minmax(0, 1fr) 180px auto; align-items: center; gap: 10px; margin: 24px 0 30px; padding: 0 0 16px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.case-discovery input, .case-discovery select { height: 42px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+.case-discovery input { width: 100%; padding: 0 13px; }
+.case-discovery select { padding: 0 10px; }
+.case-discovery input:focus, .case-discovery select:focus { border-color: var(--brand); outline: 0; box-shadow: 0 0 0 3px var(--brand-soft); }
+.case-discovery button { height: 42px; padding: 0 17px; border: 1px solid var(--brand); border-radius: 8px; background: var(--brand); color: #fff; font-weight: 600; }
+.case-catalog > header, .my-case-group > header { display: flex; min-height: 44px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.case-catalog > header div { display: flex; align-items: center; gap: 9px; }
+.case-catalog h2, .my-case-group h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.case-catalog > header > span, .my-case-group > header span { color: var(--ink-3); font-size: 12px; }
+.case-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.case-card { display: flex; min-height: 254px; flex-direction: column; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+.case-card-meta { display: flex; min-height: 25px; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-3); font-size: 11px; }
+.case-card-meta span, .case-card-meta strong { padding: 3px 7px; border-radius: 4px; background: var(--paper); font-weight: 600; }
+.case-card-meta span:first-child { background: var(--brand-soft); color: var(--brand); }
+.case-card-meta strong { margin-left: auto; color: var(--ink-2); }
+.case-card-meta strong[data-status="pending"], .case-card-meta strong[data-status="reviewing"] { background: var(--amber-soft); color: var(--amber); }
+.case-card-meta strong[data-status="published"] { background: var(--green-soft); color: var(--green); }
+.case-card h2 { margin: 14px 0 10px; overflow-wrap: anywhere; font-size: 18px; line-height: 1.55; }
+.case-card h2 a { color: var(--ink); text-decoration: none; }
+.case-card h2 a:hover { color: var(--brand); }
+.case-card > p { display: -webkit-box; min-height: 66px; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.case-card-theory { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
+.case-card-theory li { max-width: 100%; padding: 3px 7px; overflow-wrap: anywhere; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--ink-2); font-size: 11px; }
+.case-card footer { display: flex; flex-wrap: wrap; gap: 13px; margin-top: auto; padding-top: 17px; color: var(--ink-3); font-size: 11px; }
+.case-card footer span { display: inline-flex; align-items: center; gap: 5px; }
+.case-card-action { display: inline-flex; align-self: flex-end; align-items: center; gap: 5px; margin-top: 14px; color: var(--brand); font-size: 12px; font-weight: 600; text-decoration: none; }
+.case-card-action:hover { color: var(--brand-strong); }
+.catalog-state, .catalog-empty { display: flex; min-height: 220px; align-items: center; justify-content: center; gap: 9px; color: var(--ink-3); font-size: 13px; }
+.catalog-state button { display: inline-flex; height: 34px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.catalog-state.error-state { color: var(--red); }
+.catalog-empty { min-height: 110px; border-top: 1px solid var(--line-soft); }
+.my-cases-main { padding-top: 34px; }
+.my-cases-heading { display: flex; min-height: 90px; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+.my-cases-heading h1 { margin: 6px 0 0; font-size: 28px; font-weight: 650; }
+.my-cases-heading button { display: inline-flex; height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid var(--brand); border-radius: 8px; background: var(--brand); color: #fff; font-weight: 600; }
+.my-case-groups { display: grid; gap: 34px; padding-top: 22px; }
+.my-case-group > header { border-bottom: 1px solid var(--line); }
+
+@media (max-width: 980px) {
+  .dynamic-grid, .home-recommendation-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .case-discovery { grid-template-columns: 20px minmax(0, 1fr); margin-top: 18px; }
+  .case-discovery select, .case-discovery button { grid-column: 2; }
+  .case-discovery button { width: 100%; }
+  .case-grid { grid-template-columns: 1fr; }
+  .case-card { min-height: 236px; padding: 18px; }
+  .my-cases-heading { min-height: 78px; align-items: flex-start; }
+  .my-cases-heading h1 { font-size: 23px; }
+  .my-cases-heading button { flex: none; }
+}

@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+from http.cookies import SimpleCookie
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, build_opener
+
+COOKIE_NAME = "case_library_session"
+
+
+class SmokeError(Exception):
+    pass
+
+
+def request_json(
+    opener,
+    base_url: str,
+    path: str,
+    body: dict | None = None,
+    cookie: str = "",
+) -> tuple[dict, str | None]:
+    data = json.dumps(body, ensure_ascii=False).encode() if body else None
+    headers = {"Content-Type": "application/json"} if data else {}
+    if cookie:
+        headers["Cookie"] = cookie
+    request = Request(base_url + path, data=data, headers=headers)
+    try:
+        with opener.open(request, timeout=30) as response:
+            payload = json.load(response)
+            set_cookie = response.headers.get("Set-Cookie")
+    except (HTTPError, URLError, OSError, ValueError) as error:
+        raise SmokeError("request") from error
+    if not isinstance(payload, dict):
+        raise SmokeError("response")
+    return payload, set_cookie
+
+
+def session_cookie(header: str | None) -> str:
+    parsed = SimpleCookie()
+    parsed.load(header or "")
+    value = parsed.get(COOKIE_NAME)
+    if value is None:
+        raise SmokeError("login")
+    return f"{COOKIE_NAME}={value.value}"
+
+
+def open_chat(opener, base_url: str, csrf_token: str, cookie: str):
+    body = {"messages": [{"role": "user", "content": "只回复OK"}]}
+    data = json.dumps(body, ensure_ascii=False).encode()
+    request = Request(
+        base_url + "/api/ai/chat",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf_token,
+            "Cookie": cookie,
+        },
+    )
+    try:
+        return opener.open(request, timeout=120)
+    except (HTTPError, URLError, OSError) as error:
+        raise SmokeError("chat request") from error
+
+
+def consume_chat(response) -> None:
+    event = ""
+    try:
+        for raw_line in response:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            if not line and event == "done":
+                return
+            if not line and event == "error":
+                raise SmokeError("chat stream")
+            if not line:
+                event = ""
+    except OSError as error:
+        raise SmokeError("chat stream") from error
+    raise SmokeError("chat stream")
+
+
+def credentials() -> tuple[str, str]:
+    username = os.environ.get("AI_SMOKE_USERNAME", "").strip()
+    password = sys.stdin.readline().rstrip("\r\n")
+    if not username or not password:
+        raise SmokeError("credentials are required")
+    return username, password
+
+
+def login(opener, base_url: str, username: str, password: str) -> tuple[str, str]:
+    print("AI smoke: login", flush=True)
+    payload, cookie_header = request_json(
+        opener,
+        base_url,
+        "/api/auth/login",
+        {
+            "username": username,
+            "password": password,
+        },
+    )
+    csrf_token = payload.get("csrfToken")
+    if not isinstance(csrf_token, str) or not csrf_token:
+        raise SmokeError("login")
+    return csrf_token, session_cookie(cookie_header)
+
+
+def require_settings(opener, base_url: str, cookie: str) -> None:
+    print("AI smoke: settings", flush=True)
+    settings, _header = request_json(
+        opener,
+        base_url,
+        "/api/ai/settings",
+        cookie=cookie,
+    )
+    if settings.get("configured") is not True:
+        raise SmokeError("AI is not configured")
+
+
+def run() -> None:
+    base_url = os.environ.get("AI_SMOKE_APP_URL", "http://frontend").rstrip("/")
+    username, password = credentials()
+    opener = build_opener()
+    csrf_token, cookie = login(opener, base_url, username, password)
+    require_settings(opener, base_url, cookie)
+    print("AI smoke: chat", flush=True)
+    with open_chat(opener, base_url, csrf_token, cookie) as response:
+        consume_chat(response)
+    print("AI smoke: passed", flush=True)
+
+
+def main() -> int:
+    try:
+        run()
+    except SmokeError as error:
+        print(f"AI smoke failed: {error}", file=sys.stderr)
+        return 1
+    except Exception:
+        print("AI smoke failed: unexpected error", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
