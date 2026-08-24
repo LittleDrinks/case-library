@@ -15,7 +15,11 @@ function change(cursor) {
 </script>
 
 <template>
-  <nav class="catalog-pagination" aria-label="分页">
+  <nav
+    v-if="previousCursor || nextCursor"
+    class="catalog-pagination"
+    aria-label="分页"
+  >
     <p>第 {{ page }} 页 · 共 {{ total }} 条</p>
     <div>
       <button type="button" aria-label="上一页" :disabled="!previousCursor" @click="change(previousCursor)">

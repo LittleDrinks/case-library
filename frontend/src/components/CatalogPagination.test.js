@@ -2,6 +2,19 @@ import { mount } from "@vue/test-utils";
 import { expect, test } from "vitest";
 import CatalogPagination from "./CatalogPagination.vue";
 
+test("单页结果不展示无效翻页控件", () => {
+  const wrapper = mount(CatalogPagination, {
+    props: {
+      page: 1,
+      total: 9,
+      nextCursor: null,
+      previousCursor: null,
+    },
+  });
+
+  expect(wrapper.find("nav").exists()).toBe(false);
+});
+
 test("大目录只按游标前进和返回，不生成深页链接", async () => {
   const wrapper = mount(CatalogPagination, {
     props: {
