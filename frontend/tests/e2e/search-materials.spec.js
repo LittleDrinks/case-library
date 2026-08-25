@@ -31,8 +31,18 @@ function watchRequests(page, path) {
 }
 
 async function search(page, query) {
+  await waitForSearchReady(page, query);
   await page.getByLabel("搜索公开案例").fill(query);
   await page.getByRole("button", { name: "检索", exact: true }).click();
+}
+
+async function waitForSearchReady(page, query) {
+  await expect.poll(async () => {
+    const response = await page.context().request.get("/api/search", {
+      params: { q: query, kind: "all", pageSize: 20 },
+    });
+    return response.ok();
+  }, { timeout: 45_000 }).toBe(true);
 }
 
 function queryRequests(requests, query) {
@@ -44,7 +54,7 @@ async function assertOneSearchRequest(page, requests) {
   requests.length = 0;
   const response = page.waitForResponse(/\/api\/search\?q=%E6%80%9D%E6%94%BF/);
   await search(page, "思政");
-  await response;
+  expect((await response).ok()).toBe(true);
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
@@ -70,9 +80,11 @@ async function assertGraph(page) {
 }
 
 test("公共检索保留 AI 摘要、高级筛选和两种视图", async ({ page }) => {
+  test.setTimeout(60_000);
   const searchRequests = watchRequests(page, "/api/search");
   const chatRequests = watchRequests(page, "/api/ai/chat");
   const settingsRequests = watchRequests(page, "/api/ai/settings");
+  await waitForSearchReady(page, "");
   await page.goto("/#/search");
   await assertOneSearchRequest(page, searchRequests);
   await assertAnonymousAI(page, chatRequests);
