@@ -121,24 +121,68 @@ async function waitForSearchMaterial(request, title) {
     });
     if (!response.ok()) return false;
     return (await response.json()).items.some((item) => item.title === title);
-  }, { timeout: 45_000 }).toBe(true);
+  }, { timeout: 15_000 }).toBe(true);
+}
+
+function isMaterialSearch(request, title) {
+  const url = new URL(request.url());
+  return url.pathname === "/api/search"
+    && url.searchParams.get("q") === title
+    && url.searchParams.get("kind") === "material";
+}
+
+function materialSearchResponse(title) {
+  return response => isMaterialSearch(response.request(), title);
+}
+
+async function submitMaterialSearch(page, title) {
+  const response = page.waitForResponse(materialSearchResponse(title), { timeout: 5_000 });
+  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  return response;
+}
+
+async function searchApprovedMaterial(page, title) {
+  const response = await submitMaterialSearch(page, title);
+  if (response.ok()) return;
+  await waitForSearchMaterial(page.context().request, title);
+  const retry = page.waitForResponse(materialSearchResponse(title), { timeout: 5_000 });
+  await page.reload();
+  await readOkJson(await retry);
+}
+
+async function rejectFirstMaterialSearch(page, title) {
+  let rejected = false;
+  await page.route("**/api/search*", async (route) => {
+    if (!rejected && isMaterialSearch(route.request(), title)) {
+      rejected = true;
+      await route.fulfill({ status: 503, body: '{"detail":"检索目录正在同步"}' });
+      return;
+    }
+    await route.continue();
+  });
+}
+
+async function mountAfterCatalogRetry(page, caseId, title) {
+  await rejectFirstMaterialSearch(page, title);
+  await mountApprovedMaterial(page, caseId, title);
+}
+
+async function openApprovedMaterialSearch(page, caseId, title) {
+  await page.goto(`/#/materials?caseId=${caseId}`);
+  await page.getByLabel("搜索素材").fill(title);
+  await waitForSearchMaterial(page.context().request, title);
+  await searchApprovedMaterial(page, title);
 }
 
 async function mountApprovedMaterial(page, caseId, title) {
-  await waitForSearchMaterial(page.context().request, title);
-  await page.goto(`/#/materials?caseId=${caseId}`);
-  await page.getByLabel("搜索素材").fill(title);
-  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  await openApprovedMaterialSearch(page, caseId, title);
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
   await expect(page.getByRole("status")).toHaveText("已加入 1 条素材");
 }
 
 async function downloadApprovedMaterial(page, caseId, title, filename, content) {
-  await waitForSearchMaterial(page.context().request, title);
-  await page.goto(`/#/materials?caseId=${caseId}`);
-  await page.getByLabel("搜索素材").fill(title);
-  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  await openApprovedMaterialSearch(page, caseId, title);
   const pending = page.waitForEvent("download");
   await page.getByRole("link", { name: `下载${title}` }).click();
   const download = await pending;
@@ -266,7 +310,7 @@ test("管理员审核导入候选后教师可检索并挂入草稿", async ({ pa
 });
 
 test("发布案例公开文件可匿名下载且校内文件保持受限", async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(60_000);
   const marker = `${Date.now()}-${test.info().parallelIndex}`;
   const publicTitle = `公开原文件-${marker}`;
   const campusTitle = `校内原文件-${marker}`;
@@ -276,7 +320,7 @@ test("发布案例公开文件可匿名下载且校内文件保持受限", async
   await loginTeacher(page);
   const draft = await createDraft(page.context().request, `素材公开页-${marker}`);
   await mountApprovedMaterial(page, draft.id, publicTitle);
-  await mountApprovedMaterial(page, draft.id, campusTitle);
+  await mountAfterCatalogRetry(page, draft.id, campusTitle);
   await publishDraft(page, draft.id);
   await page.goto(`/#/cases/${draft.id}`);
   await expectPublicDownload(page, publicTitle, `public-bytes-${marker}`);
