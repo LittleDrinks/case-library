@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 CARD_FIELDS = {
@@ -108,3 +109,18 @@ def test_public_detail_does_not_expose_internal_metadata(client: TestClient) -> 
     assert "kit" not in payload
     assert "ownerId" not in payload
     assert "submittedVersionId" not in payload
+
+
+@pytest.mark.parametrize("publication_status", ["none", "hidden", None])
+def test_non_owner_cannot_distinguish_inaccessible_case_from_missing(
+    client: TestClient, publication_status: str | None
+) -> None:
+    if publication_status:
+        client.app.state.database.cases.update_one(
+            {"id": "c-02"}, {"$set": {"publicationStatus": publication_status}}
+        )
+    login(client)
+
+    response = client.get("/api/cases/c-02" if publication_status else "/api/cases/missing")
+
+    assert response.status_code == 404

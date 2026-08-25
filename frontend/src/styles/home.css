@@ -71,6 +71,7 @@
 .case-card-action { display: inline-flex; align-self: flex-end; align-items: center; gap: 5px; margin-top: 14px; color: var(--brand); font-size: 12px; font-weight: 600; text-decoration: none; }
 .case-card-action:hover { color: var(--brand-strong); }
 .catalog-state, .catalog-empty { display: flex; min-height: 220px; align-items: center; justify-content: center; gap: 9px; color: var(--ink-3); font-size: 13px; }
+.catalog-notice { margin: 14px 0 0; color: var(--red); font-size: 13px; }
 .catalog-state button { display: inline-flex; height: 34px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .catalog-state.error-state { color: var(--red); }
 .catalog-empty { min-height: 110px; border-top: 1px solid var(--line-soft); }

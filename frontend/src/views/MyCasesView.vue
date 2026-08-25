@@ -12,6 +12,7 @@ const cases = ref([]);
 const loading = ref(true);
 const creating = ref(false);
 const error = ref("");
+const accessNotice = ref("");
 const groups = [
   { title: "进行中", statuses: ["draft"] },
   { title: "审核中", statuses: ["pending", "reviewing"] },
@@ -59,7 +60,15 @@ async function createCase() {
   }
 }
 
-onMounted(loadCases);
+function loadAccessNotice() {
+  accessNotice.value = sessionStorage.getItem("case-library:access-notice") || "";
+  sessionStorage.removeItem("case-library:access-notice");
+}
+
+onMounted(() => {
+  loadAccessNotice();
+  loadCases();
+});
 </script>
 
 <template>
@@ -74,6 +83,7 @@ onMounted(loadCases);
           {{ creating ? "正在创建" : "新建案例" }}
         </button>
       </header>
+      <p v-if="accessNotice" class="catalog-notice" role="alert">{{ accessNotice }}</p>
 
       <div v-if="loading" class="catalog-state"><LoaderCircle class="spin" :size="22" /><span>正在加载案例</span></div>
       <div v-else-if="error" class="catalog-state error-state" role="alert">

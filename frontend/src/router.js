@@ -1,4 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import { api } from "./api.js";
+import { caseUnavailableMessage, resolveWorkbenchAccess } from "./lib/workbenchAccess.js";
 import { restoreSession, session } from "./session.js";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
@@ -81,6 +83,12 @@ export const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 });
 
+async function guardWorkbench(to) {
+  const target = await resolveWorkbenchAccess(String(to.params.id), session.user, api.getCase);
+  if (target?.name === "my-cases") sessionStorage.setItem("case-library:access-notice", caseUnavailableMessage);
+  return target || true;
+}
+
 router.beforeEach(async (to) => {
   await restoreSession();
   if (session.user?.mustChangePassword && to.name !== "password-change") {
@@ -89,12 +97,11 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !session.user) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
+  if (to.name === "workbench") return guardWorkbench(to);
   if (to.meta.requiresAdmin && session.user?.role !== "admin") {
     return { name: "home" };
   }
-  if (to.name === "password-change" && !session.user?.mustChangePassword) {
-    return { name: "home" };
-  }
+  if (to.name === "password-change" && !session.user?.mustChangePassword) return { name: "home" };
   if (to.name === "login" && session.user) {
     return { name: "home" };
   }
