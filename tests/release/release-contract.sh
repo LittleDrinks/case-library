@@ -29,7 +29,8 @@ printf '%s\n' "$config" | grep -q 'source: minio_data'
 printf '%s\n' "$config" | grep -q 'source: meili_data'
 grep -Fq 'workflow_call:' "$project_dir/.github/workflows/ci.yml"
 grep -Fq 'make config' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'make test' "$project_dir/.github/workflows/ci.yml"
+grep -Fq 'backend-test' "$project_dir/.github/workflows/ci.yml"
+grep -Fq 'frontend-test' "$project_dir/.github/workflows/ci.yml"
 grep -Fq 'make e2e' "$project_dir/.github/workflows/ci.yml"
 grep -Fq 'packages: write' "$project_dir/.github/workflows/release.yml"
 grep -Fq 'uses: ./.github/workflows/ci.yml' "$project_dir/.github/workflows/release.yml"
