@@ -105,6 +105,38 @@ async function pageEmptyDirectory(page) {
   await nextPage;
 }
 
+async function directoryTotal(request) {
+  const response = await request.get("/api/search", { params: { q: "", kind: "all", pageSize: 20 } });
+  expect(response.ok()).toBe(true);
+  return (await response.json()).total;
+}
+
+async function importPublicDirectoryMaterial(request, csrfToken, index) {
+  const title = `目录分页素材-${Date.now()}-${index}`;
+  const imported = await request.post("/api/admin/material-imports", {
+    headers: { "X-CSRF-Token": csrfToken },
+    multipart: { accessLevel: "public", files: { name: `${title}.txt`, mimeType: "text/plain", buffer: Buffer.from(title) } },
+  });
+  expect(imported.ok()).toBe(true);
+  const candidateId = (await imported.json()).items[0].candidateId;
+  const approved = await request.post(`/api/admin/material-candidates/${candidateId}/decision`, {
+    headers: { "X-CSRF-Token": csrfToken }, data: { decision: "approve", title },
+  });
+  expect(approved.ok()).toBe(true);
+}
+
+async function ensureDirectoryPagination(page) {
+  const request = page.context().request;
+  const missing = Math.max(0, 21 - await directoryTotal(request));
+  const login = await request.post("/api/auth/login", { data: { username: "admin", password: "admin123" } });
+  expect(login.ok()).toBe(true);
+  const { csrfToken } = await login.json();
+  for (let index = 0; index < missing; index += 1) await importPublicDirectoryMaterial(request, csrfToken, index);
+  const logout = await request.post("/api/auth/logout", { headers: { "X-CSRF-Token": csrfToken } });
+  expect(logout.status()).toBe(204);
+  await expect.poll(() => directoryTotal(request), { timeout: 30_000 }).toBeGreaterThanOrEqual(21);
+}
+
 async function assertGraph(page) {
   await page.getByRole("button", { name: "图谱", exact: true }).click();
   await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
@@ -115,18 +147,20 @@ async function assertGraph(page) {
 }
 
 test("空查询只浏览目录，不触发 AI", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   const chatRequests = watchRequests(page, "/api/ai/chat");
   const settingsRequests = watchRequests(page, "/api/ai/settings");
+  await ensureDirectoryPagination(page);
   await waitForSearchReady(page, "");
-  await page.goto("/#/search");
+  await page.goto("/#/search?q=%20%20");
+  await expect(page).toHaveURL(/#\/search$/);
   await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
   await assertNoSearchAI(page, settingsRequests, chatRequests);
   await submitBlankDirectorySearch(page);
+  await pageEmptyDirectory(page);
   await browseEmptyDirectory(page);
   await expect(page.getByRole("tab", { name: /知识/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toBeVisible();
-  await pageEmptyDirectory(page);
   await assertNoSearchAI(page, settingsRequests, chatRequests);
 });
 

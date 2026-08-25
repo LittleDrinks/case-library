@@ -1,10 +1,14 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { defineComponent, h, reactive } from "vue";
 import SearchView from "./SearchView.vue";
 import { api } from "../api.js";
 
 const replace = vi.fn();
-const route = { query: { q: "游标目录", kind: "material" } };
+const route = reactive({ query: { q: "游标目录", kind: "material" } });
+const answerClear = vi.fn();
+const answerMounts = vi.fn();
+const wrappers = [];
 
 vi.mock("vue-router", () => ({
   useRoute: () => route,
@@ -25,17 +29,36 @@ const second = {
   metadataIncluded: false, nextCursor: null, previousCursor: "previous-token",
 };
 
+const SearchAIAnswerStub = defineComponent({
+  setup(_props, { expose }) {
+    answerMounts();
+    expose({ clear: answerClear });
+    return () => h("div");
+  },
+});
+
 function render() {
-  return mount(SearchView, {
+  const wrapper = mount(SearchView, {
     global: { stubs: {
-      SiteHeader: true, SearchAIAnswer: true, SearchGraph: true,
+      SiteHeader: true, SearchAIAnswer: SearchAIAnswerStub, SearchGraph: true,
       SearchFilters: true, RouterLink: true,
     } },
   });
+  wrappers.push(wrapper);
+  return wrapper;
 }
+
+afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  route.query = { q: "游标目录", kind: "material" };
+  replace.mockImplementation(({ query }) => {
+    route.query = query;
+    return Promise.resolve();
+  });
+  answerClear.mockClear();
+  answerMounts.mockClear();
   api.search.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
 });
 
@@ -60,6 +83,33 @@ test("空白查询保持目录浏览且不挂载 AI 回答", async () => {
   await flushPromises();
 
   expect(api.search).toHaveBeenCalledWith("", "all", null, 20, {});
-  expect(wrapper.find("search-ai-answer-stub").exists()).toBe(false);
-  route.query = { q: "游标目录", kind: "material" };
+  expect(replace).toHaveBeenCalledWith({ name: "search", query: {} });
+  expect(answerMounts).not.toHaveBeenCalled();
+});
+
+test("新请求开始时立即清除旧 AI 回答", async () => {
+  let resolvePage;
+  api.search.mockReset();
+  api.search.mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise((resolve) => {
+    resolvePage = resolve;
+  }));
+  const wrapper = render();
+  await flushPromises();
+  answerClear.mockClear();
+  await wrapper.get("[aria-label='下一页']").trigger("click");
+
+  expect(answerClear).toHaveBeenCalledTimes(1);
+  expect(wrapper.findComponent(SearchAIAnswerStub).exists()).toBe(false);
+  resolvePage(second);
+  await flushPromises();
+});
+
+test("切换图谱不会重新挂载当前 AI 回答", async () => {
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+
+  expect(answerMounts).toHaveBeenCalledTimes(1);
+  expect(api.search).toHaveBeenCalledTimes(1);
 });

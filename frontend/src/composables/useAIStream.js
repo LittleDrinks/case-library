@@ -35,13 +35,14 @@ class AIStreamController {
     this.error.value = message || "AI 服务暂不可用";
   }
 
-  async configured() {
+  async configured(current) {
     try {
       const settings = await api.aiSettings();
+      if (current !== this.generation) return false;
       if (!settings.configured) this.clear("unconfigured");
       return settings.configured;
     } catch (reason) {
-      this.fail(reason.message);
+      if (current === this.generation) this.fail(reason.message);
       return false;
     }
   }
@@ -49,7 +50,7 @@ class AIStreamController {
   async run(messages) {
     this.clear(session.user ? "checking" : "login");
     const current = this.generation;
-    if (!session.user || !await this.configured()) return;
+    if (!session.user || !await this.configured(current)) return;
     if (current !== this.generation) return;
     this.controller = new AbortController();
     this.state.value = "streaming";

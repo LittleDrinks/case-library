@@ -202,7 +202,11 @@ async function configureCandidateProvider(page) {
 }
 
 async function expectSearchAnswer(page) {
-  await page.goto("/#/search?q=如何弘扬科学家精神");
+  await page.goto("/#/search?q=%E6%80%9D%E6%94%BF%EF%BC%9F");
+  await expectFinishedSearchAnswer(page);
+}
+
+async function expectFinishedSearchAnswer(page) {
   const answer = page.getByRole("region", { name: "AI 回答" });
   await expect(answer).toContainText(E2E_ANSWER);
   await expect(answer.locator(".stream-caret")).toHaveCount(0);
@@ -214,6 +218,54 @@ function watchRequests(page, path) {
     if (request.url().includes(path)) requests.push(request.url());
   });
   return requests;
+}
+
+async function expectCurrentSearchSources(page) {
+  const results = page.getByRole("region", { name: "检索结果" });
+  const titles = await results.getByRole("heading").allTextContents();
+  const sources = await page.getByRole("list", { name: "AI 回答引用来源" }).getByRole("listitem").allTextContents();
+  expect(sources).toEqual(titles.slice(0, 15).map((title, index) => `〔${index + 1}〕${title}`));
+}
+
+async function expectSearchRequestCount(chats, settings, count) {
+  await expect.poll(() => chats.length).toBe(count);
+  await expect.poll(() => settings.length).toBe(count);
+}
+
+async function settlePage(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function preserveSearchAnswerAcrossViews(page, chats, settings) {
+  await page.getByRole("button", { name: "图谱", exact: true }).click();
+  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expectFinishedSearchAnswer(page);
+  await settlePage(page);
+  expect(chats).toHaveLength(1);
+  expect(settings).toHaveLength(1);
+}
+
+async function changeSearchPage(page, chats, settings) {
+  const response = page.waitForResponse((candidate) => new URL(candidate.url()).searchParams.has("cursor"));
+  await page.getByRole("button", { name: "下一页" }).click();
+  await response;
+  await expectSearchRequestCount(chats, settings, 2);
+  await expectFinishedSearchAnswer(page);
+  await expectCurrentSearchSources(page);
+}
+
+async function changeSearchResult(page, chats, settings) {
+  const response = page.waitForResponse((candidate) => (
+    new URL(candidate.url()).searchParams.get("kind") === "case"
+  ));
+  await page.getByRole("tab", { name: /案例/ }).click();
+  await response;
+  await expectSearchRequestCount(chats, settings, 3);
+  await expectFinishedSearchAnswer(page);
+  await expectCurrentSearchSources(page);
 }
 
 async function expectWorkbenchAnswer(page) {
@@ -386,8 +438,11 @@ test("教师自定义模型后可完成两处真实 AI 对话", async ({ page })
     const chatRequests = watchRequests(page, "/api/ai/chat");
     const settingsRequests = watchRequests(page, "/api/ai/settings");
     await expectSearchAnswer(page);
-    expect(chatRequests).toHaveLength(1);
-    expect(settingsRequests).toHaveLength(1);
+    await expectSearchRequestCount(chatRequests, settingsRequests, 1);
+    await expectCurrentSearchSources(page);
+    await preserveSearchAnswerAcrossViews(page, chatRequests, settingsRequests);
+    await changeSearchPage(page, chatRequests, settingsRequests);
+    await changeSearchResult(page, chatRequests, settingsRequests);
     await expectWorkbenchAnswer(page);
   } finally {
     await saveUserSettings(page, { mode: "automatic" });

@@ -27,6 +27,9 @@ const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
 const items = computed(() => payload.value.items);
 const hasSubmittedQuery = computed(() => submitted.value.trim() !== "");
+const aiAnswer = ref(null);
+const aiResultVersion = ref(0);
+const showAIAnswer = computed(() => hasSubmittedQuery.value && aiResultVersion.value > 0);
 let searchGeneration = 0;
 
 function tabLabel(kind, label) {
@@ -72,22 +75,33 @@ function selectView(mode) {
   router.replace({ name: "search", query: routeQuery({ mode }) });
 }
 
+function invalidateAI() {
+  aiAnswer.value?.clear();
+  aiResultVersion.value = 0;
+}
+
 async function requestSearch(term, kind, activeCursor, searchFilters) {
+  invalidateAI();
   const current = ++searchGeneration;
   loading.value = true;
   error.value = "";
   try {
     const result = await api.search(term, kind, activeCursor, 20, filterQuery(searchFilters, kind));
     if (current === searchGeneration) {
-      payload.value = mergeMetadata(result);
-      submitted.value = term;
-      page.value = result.page;
+      commitSearchResult(term, result);
     }
   } catch (caught) {
     if (current === searchGeneration) error.value = caught.message || "检索失败";
   } finally {
     if (current === searchGeneration) loading.value = false;
   }
+}
+
+function commitSearchResult(term, result) {
+  payload.value = mergeMetadata(result);
+  submitted.value = term;
+  page.value = result.page;
+  if (term && view.value === "list") aiResultVersion.value += 1;
 }
 
 function mergeMetadata(result) {
@@ -105,6 +119,7 @@ async function submitSearch() {
     cursor.value = "";
     return requestSearch(term, activeKind.value, null, filters.value);
   }
+  invalidateAI();
   await router.replace({ name: "search", query: routeQuery({ term }) });
 }
 
@@ -116,10 +131,16 @@ function syncSearchRoute(values) {
   activeKind.value = kind;
   cursor.value = "";
   filters.value = filtersFromQuery(route.query, kind);
+  invalidateAI();
+  if (rawTerm != null && !term) {
+    requestSearch(term, kind, null, filters.value);
+    return router.replace({ name: "search", query: routeQuery({ term }) });
+  }
   requestSearch(term, kind, null, filters.value);
 }
 
 function selectKind(kind) {
+  invalidateAI();
   router.replace({
     name: "search", query: routeQuery({ kind, filters: emptyFilters() }),
   });
@@ -131,16 +152,22 @@ function selectPage(nextCursor) {
 }
 
 function selectFilters(next) {
+  invalidateAI();
   filters.value = next;
   router.replace({ name: "search", query: routeQuery({ filters: next }) });
 }
 
-function searchRouteState() {
-  const names = ["typeName", "audience", "authority", "materialType", "tag", "publishedWithin"];
-  return [route.query.q, route.query.kind, ...names.map(name => route.query[name])];
+const searchRouteKeys = ["q", "kind", "typeName", "audience", "authority", "materialType", "tag", "publishedWithin"];
+function searchRouteValue(key) {
+  const value = route.query[key];
+  return key === "q" ? String(value || "").trim() : JSON.stringify(value ?? null);
 }
 
-watch(searchRouteState, syncSearchRoute, { immediate: true });
+watch(
+  searchRouteKeys.map((key) => () => searchRouteValue(key)),
+  () => syncSearchRoute([route.query.q, route.query.kind]),
+  { immediate: true },
+);
 watch(() => route.query.view, (value) => {
   view.value = value === "graph" ? "graph" : "list";
 });
@@ -163,29 +190,31 @@ watch(() => route.query.view, (value) => {
 
       <div v-if="loading && !payload.pageSize" class="search-state"><LoaderCircle class="spin" :size="20" />检索中</div>
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
-      <template v-else-if="view === 'list'">
-        <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
-        <SearchAIAnswer v-if="hasSubmittedQuery" :query="submitted" :items="items" />
-        <div class="result-toolbar">
-          <div class="result-tabs" role="tablist" aria-label="资源类型">
-            <button v-for="tab in [['all','全部'],['case','案例'],['knowledge','知识'],['material','素材']]" :key="tab[0]" type="button" role="tab" :aria-selected="activeKind === tab[0]" @click="selectKind(tab[0])">
-              {{ tabLabel(tab[0], tab[1]) }}
-            </button>
+      <template v-else>
+        <SearchAIAnswer v-if="showAIAnswer" ref="aiAnswer" v-show="view === 'list'" :query="submitted" :items="items" :result-version="aiResultVersion" />
+        <template v-if="view === 'list'">
+          <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
+          <div class="result-toolbar">
+            <div class="result-tabs" role="tablist" aria-label="资源类型">
+              <button v-for="tab in [['all','全部'],['case','案例'],['knowledge','知识'],['material','素材']]" :key="tab[0]" type="button" role="tab" :aria-selected="activeKind === tab[0]" @click="selectKind(tab[0])">
+                {{ tabLabel(tab[0], tab[1]) }}
+              </button>
+            </div>
+            <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
           </div>
-          <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
-        </div>
-        <section class="mixed-results" aria-label="检索结果">
-          <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">
-            <span>{{ kindLabel(item) }}</span>
-            <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><a v-else-if="item.kind === 'material' && destination(item)" :href="destination(item)" target="_blank" rel="noopener noreferrer">{{ item.title }}</a><span v-else>{{ item.title }}</span></h2>
-            <p>{{ item.summary || "暂无摘要" }}</p>
-            <small>{{ metaLine(item) }}</small>
-          </article>
-          <p v-if="!items.length" class="search-empty">{{ submitted ? "平台内没有命中结果，可换个关键词" : "平台内暂无资源" }}</p>
-        </section>
-        <CatalogPagination v-if="payload.total" :page="page" :total="payload.total" :next-cursor="payload.nextCursor" :previous-cursor="payload.previousCursor" @change="selectPage" />
+          <section class="mixed-results" aria-label="检索结果">
+            <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">
+              <span>{{ kindLabel(item) }}</span>
+              <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><a v-else-if="item.kind === 'material' && destination(item)" :href="destination(item)" target="_blank" rel="noopener noreferrer">{{ item.title }}</a><span v-else>{{ item.title }}</span></h2>
+              <p>{{ item.summary || "暂无摘要" }}</p>
+              <small>{{ metaLine(item) }}</small>
+            </article>
+            <p v-if="!items.length" class="search-empty">{{ submitted ? "平台内没有命中结果，可换个关键词" : "平台内暂无资源" }}</p>
+          </section>
+          <CatalogPagination v-if="payload.total" :page="page" :total="payload.total" :next-cursor="payload.nextCursor" :previous-cursor="payload.previousCursor" @change="selectPage" />
+        </template>
+        <SearchGraph v-else :query="submitted" :items="items" />
       </template>
-      <SearchGraph v-else :query="submitted" :items="items" />
     </main>
   </div>
 </template>

@@ -4,7 +4,11 @@ import { LoaderCircle, RotateCcw } from "@lucide/vue";
 import { useAIStream } from "../composables/useAIStream.js";
 import { publicUrl } from "../lib/publicUrl.js";
 
-const props = defineProps({ query: String, items: { type: Array, required: true } });
+const props = defineProps({
+  query: String,
+  items: { type: Array, required: true },
+  resultVersion: { type: Number, default: 0 },
+});
 const { state, text, error, run, clear } = useAIStream();
 const normalizedQuery = computed(() => String(props.query || "").trim());
 const contextItems = computed(() => props.items.slice(0, 15));
@@ -55,7 +59,8 @@ async function generate(force = false) {
   await run([{ role: "user", content: prompt() }]);
 }
 
-watch(() => [normalizedQuery.value, props.items], () => generate(), { immediate: true });
+watch(() => props.resultVersion, () => generate(), { immediate: true });
+defineExpose({ clear });
 </script>
 
 <template>

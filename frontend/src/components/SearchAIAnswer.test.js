@@ -30,10 +30,13 @@ test("空白查询不启动 AI 流", async () => {
   expect(clear).toHaveBeenCalledWith("idle");
 });
 
-test("每个新结果集只重新判定一次", async () => {
+test("仅新结果版本重新判定 AI", async () => {
   const wrapper = render("如何开展思政课");
   await flushPromises();
   await wrapper.setProps({ items: [{ id: "two", kind: "case", title: "资源二" }] });
+  await flushPromises();
+  expect(run).toHaveBeenCalledTimes(1);
+  await wrapper.setProps({ resultVersion: 1 });
   await flushPromises();
 
   expect(run).toHaveBeenCalledTimes(2);
