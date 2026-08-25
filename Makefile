@@ -6,7 +6,7 @@ export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 
 COMPOSE := docker compose
 
-.PHONY: up down logs config config-contract test check-function-lines e2e ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up down logs config config-contract release-contract test check-function-lines e2e ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
@@ -27,7 +27,11 @@ config-contract:
 	tests/failover/compose-contract.sh
 	sh tests/e2e/run-e2e-contract.sh
 	sh tests/ai/ai-smoke-contract.sh
+	sh tests/release/release-contract.sh
 	sh tests/failover/isolation-contract.sh
+
+release-contract:
+	sh tests/release/release-contract.sh
 
 test: check-function-lines
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm backend-test

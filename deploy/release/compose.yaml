@@ -1,0 +1,287 @@
+name: case-library-v2
+
+services:
+  production-config-check:
+    image: ${CASE_LIBRARY_APP_IMAGE:?CASE_LIBRARY_APP_IMAGE is required}
+    environment:
+      APP_ENV: ${APP_ENV:-demo}
+    network_mode: none
+    entrypoint: ["sh", "-eu", "-c"]
+    command:
+      - |
+        app_environment="$$(printf '%s' "$${APP_ENV:-demo}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//')"
+        test "$$app_environment" != production || {
+          echo "Single-host Compose does not support APP_ENV=production" >&2
+          exit 1
+        }
+    restart: "no"
+
+  mongo1:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo2:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo3:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "27017"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  mongo-init:
+    image: ${CASE_LIBRARY_MONGO_INIT_IMAGE:?CASE_LIBRARY_MONGO_INIT_IMAGE is required}
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    networks:
+      - database
+    restart: "on-failure:5"
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "9000"
+    volumes:
+      - minio_data:/data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  meilisearch:
+    image: ${CASE_LIBRARY_MEILISEARCH_IMAGE:?CASE_LIBRARY_MEILISEARCH_IMAGE is required}
+    command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "7700"
+    secrets:
+      - meili_master_key
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  search-init:
+    image: ${CASE_LIBRARY_APP_IMAGE:?CASE_LIBRARY_APP_IMAGE is required}
+    environment:
+      APP_ENV: ${APP_ENV:-demo}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-true}
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME:-case_library_v3}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-case_library_v3}
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    networks:
+      - database
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      meilisearch:
+        condition: service_healthy
+    command: ["python", "-m", "app.modules.search.rebuild"]
+    restart: "no"
+
+  search-worker:
+    image: ${CASE_LIBRARY_APP_IMAGE:?CASE_LIBRARY_APP_IMAGE is required}
+    environment:
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME:-case_library_v3}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-case_library_v3}
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+    secrets:
+      - meili_master_key
+    networks:
+      - database
+    depends_on:
+      search-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "app.modules.search.worker"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  app:
+    image: ${CASE_LIBRARY_APP_IMAGE:?CASE_LIBRARY_APP_IMAGE is required}
+    init: true
+    ports:
+      - "127.0.0.1:${API_PORT:-8001}:8001"
+    environment:
+      APP_ENV: ${APP_ENV:-demo}
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/${MONGODB_DB_NAME:-case_library_v3}?replicaSet=rs0&retryWrites=true&w=majority
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-case_library_v3}
+      MONGODB_MAX_POOL_SIZE: ${MONGODB_MAX_POOL_SIZE:-100}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-true}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      APP_SECRET_FILE: /run/secrets/app_secret
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY_FILE: /run/secrets/ai_api_key
+      AI_MODELS: ${AI_MODELS:-}
+      AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-60}
+      SEARCH_URL: http://meilisearch:7700
+      SEARCH_INDEX_UID: catalog
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+    secrets:
+      - app_secret
+      - ai_api_key
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    networks:
+      - edge
+      - database
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      search-init:
+        condition: service_completed_successfully
+      search-worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  frontend:
+    image: ${CASE_LIBRARY_FRONTEND_IMAGE:?CASE_LIBRARY_FRONTEND_IMAGE is required}
+    init: true
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-18080}:80"
+    networks:
+      - edge
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  minio_data:
+  meili_data:
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-10.254.240.0/24}
+  database:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${DATABASE_SUBNET:-10.254.241.0/24}
+
+secrets:
+  app_secret:
+    environment: APP_SECRET
+  meili_master_key:
+    environment: MEILI_MASTER_KEY
+  ai_api_key:
+    environment: AI_API_KEY
+  minio_root_user:
+    environment: MINIO_ROOT_USER
+  minio_root_password:
+    environment: MINIO_ROOT_PASSWORD

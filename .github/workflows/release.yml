@@ -1,0 +1,143 @@
+name: Pre-Alpha Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ghcr-pre-alpha-latest
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - id: version
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-pre-alpha\.[0-9]+$'
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [validate-tag, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: images
+        run: |
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "app=ghcr.io/$repository-app" >> "$GITHUB_OUTPUT"
+          echo "frontend=ghcr.io/$repository-frontend" >> "$GITHUB_OUTPUT"
+          echo "mongo_init=ghcr.io/$repository-mongo-init" >> "$GITHUB_OUTPUT"
+          echo "meilisearch=ghcr.io/$repository-meilisearch" >> "$GITHUB_OUTPUT"
+      - id: app
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend.Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.app }}:${{ needs.validate-tag.outputs.version }}
+            ${{ steps.images.outputs.app }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - id: frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.frontend }}:${{ needs.validate-tag.outputs.version }}
+            ${{ steps.images.outputs.frontend }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+      - id: mongo_init
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/mongo-init.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
+            ${{ steps.images.outputs.mongo_init }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
+          cache-from: type=gha,scope=mongo-init
+          cache-to: type=gha,mode=max,scope=mongo-init
+      - id: meilisearch
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/meilisearch.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
+            ${{ steps.images.outputs.meilisearch }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
+          cache-from: type=gha,scope=meilisearch
+          cache-to: type=gha,mode=max,scope=meilisearch
+      - name: Move latest tags
+        run: |
+          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.app }}:latest' '${{ steps.images.outputs.app }}@${{ steps.app.outputs.digest }}'
+          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.frontend }}:latest' '${{ steps.images.outputs.frontend }}@${{ steps.frontend.outputs.digest }}'
+          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.mongo_init }}:latest' '${{ steps.images.outputs.mongo_init }}@${{ steps.mongo_init.outputs.digest }}'
+          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.meilisearch }}:latest' '${{ steps.images.outputs.meilisearch }}@${{ steps.meilisearch.outputs.digest }}'
+      - name: Package deployment bundle
+        env:
+          CASE_LIBRARY_APP_IMAGE: ${{ steps.images.outputs.app }}@${{ steps.app.outputs.digest }}
+          CASE_LIBRARY_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}@${{ steps.frontend.outputs.digest }}
+          CASE_LIBRARY_MONGO_INIT_IMAGE: ${{ steps.images.outputs.mongo_init }}@${{ steps.mongo_init.outputs.digest }}
+          CASE_LIBRARY_MEILISEARCH_IMAGE: ${{ steps.images.outputs.meilisearch }}@${{ steps.meilisearch.outputs.digest }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: scripts/package-release.sh "$VERSION" "$RUNNER_TEMP/release"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "$RELEASE_DIR"/* --clobber
+          else
+            gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
+              --title "Case Library $VERSION" \
+              --notes "Run ./update.sh to install or update this release."
+          fi
+          gh release edit "$VERSION" --latest
