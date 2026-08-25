@@ -199,9 +199,27 @@ class ReadyReader:
 def _configured_database():
     database = mongomock.MongoClient()["configured_search"]
     database.client.admin.command = lambda _name: {"isWritablePrimary": True}
-    database.search_catalog_generation.insert_one({"_id": "catalog", "generation": "test-generation", "indexUid": "catalog-generation-test", "indexEpoch": "test-epoch", "retiredIndexUids": []})
-    database.search_worker_state.insert_one({"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)})
+    database.search_catalog_generation.insert_one(_catalog_generation())
+    database.search_worker_state.insert_one(_worker_state())
     return database
+
+
+def _catalog_generation() -> dict:
+    return {
+        "_id": "catalog",
+        "generation": "test-generation",
+        "indexUid": "catalog-generation-test",
+        "indexEpoch": "test-epoch",
+        "retiredIndexUids": [],
+    }
+
+
+def _worker_state() -> dict:
+    return {
+        "_id": "catalog",
+        "worker": "test-worker",
+        "updatedAt": datetime.now(UTC),
+    }
 
 
 def configured_search_app(tmp_path, monkeypatch):

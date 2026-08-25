@@ -65,8 +65,20 @@ def _outbox_row(client: TestClient, logical_key: str) -> dict:
 
 
 def _assert_approved_material(row: dict, item: dict, title: str) -> None:
-    fields = ("id", "title", "filename", "mediaType", "size", "accessLevel")
-    assert [row[field] for field in fields] == [item["candidateId"], title, "待审文件.txt", "text/plain", 14, "public"]
+    expected = _approved_material_expectation(item, title)
+    actual = {field: row[field] for field in expected}
+    assert actual == expected
+
+
+def _approved_material_expectation(item: dict, title: str) -> dict:
+    return {
+        "id": item["candidateId"],
+        "title": title,
+        "filename": "待审文件.txt",
+        "mediaType": "text/plain",
+        "size": 14,
+        "accessLevel": "public",
+    }
 
 
 def test_admin_approves_candidate_and_records_catalog_change(
