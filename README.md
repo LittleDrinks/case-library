@@ -1,4 +1,19 @@
-# 上海大学思政教学案例平台
+<div align="center">
+
+<img src="frontend/public/shanghai-university-horizontal-logo.png" alt="上海大学" width="360" />
+
+# 思政教学案例平台
+
+<a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue-3.5-4FC08D.svg" alt="Vue 3.5" /></a>
+<a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.138-009688.svg" alt="FastAPI 0.138" /></a>
+<a href="https://www.mongodb.com/"><img src="https://img.shields.io/badge/MongoDB-7-47A248.svg" alt="MongoDB 7" /></a>
+<a href="https://www.meilisearch.com/"><img src="https://img.shields.io/badge/Meilisearch-1.45-FF5CAA.svg" alt="Meilisearch 1.45" /></a>
+<a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker_Compose-Ready-2496ED.svg" alt="Docker Compose" /></a>
+
+**面向高校教师的思政教学案例创作、审核、发布与检索平台**
+
+</div>
+
 Vue 3、Tiptap/ProseMirror、FastAPI、MongoDB 副本集、Meilisearch 与 S3 兼容对象存储组成的案例创作平台。
 ## 功能
 公共首页展示公开案例与推荐素材。资源检索提供统一搜索、AI 摘要、案例/知识/素材列表和关系图谱；搜索结果与 AI 上下文遵循资源访问权限。
