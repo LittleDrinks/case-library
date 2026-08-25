@@ -85,7 +85,9 @@ def _claim_update(token: str, now: datetime) -> dict:
 def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
     try:
         row = database.ai_usage.find_one_and_update(
-            _claim_query(quota_id, now), _claim_update(token, now), upsert=True,
+            _claim_query(quota_id, now),
+            _claim_update(token, now),
+            upsert=True,
             return_document=ReturnDocument.AFTER,
         )
         return row is not None

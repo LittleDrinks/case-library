@@ -75,8 +75,26 @@ def unmount(client: TestClient, auth: dict, material_id: str) -> None:
 
 
 def seed_private_material(client, material_id, title, source, authority, owner) -> None:
-    record = {"id": material_id, "title": title, "summary": "", "source": source, "materialType": "文档", "authority": authority, "accessLevel": "private", "status": "active", "createdBy": owner}
-    client.app.state.database.materials.update_one({"id": material_id}, {"$set": record}, upsert=True)
+    record = _private_material(material_id, title, source, authority, owner)
+    client.app.state.database.materials.update_one(
+        {"id": material_id},
+        {"$set": record},
+        upsert=True,
+    )
+
+
+def _private_material(material_id, title, source, authority, owner) -> dict:
+    return {
+        "id": material_id,
+        "title": title,
+        "summary": "",
+        "source": source,
+        "materialType": "文档",
+        "authority": authority,
+        "accessLevel": "private",
+        "status": "active",
+        "createdBy": owner,
+    }
 
 
 def test_author_mounts_material_and_submission_freezes_it(client: TestClient) -> None:
@@ -88,12 +106,32 @@ def test_author_mounts_material_and_submission_freezes_it(client: TestClient) ->
     assert transition(client, auth, "submit")["version"]["materials"] == [mounted]
 
 
-def test_file_material_projection_is_downloadable_without_leaking_blob_id(client: TestClient) -> None:
-    client.app.state.database.materials.insert_one({"id": "m-file", "title": "课堂文件", "filename": "课堂文件.txt", "mediaType": "text/plain", "size": 12, "blobId": "private-storage-key", "accessLevel": "public", "status": "active", "createdBy": "u-admin-demo"})
+def test_file_material_projection_is_downloadable_without_leaking_blob_id(
+    client: TestClient,
+) -> None:
+    client.app.state.database.materials.insert_one(_file_material())
     auth = login(client)
     mounted = mount(client, auth, "m-file")
     frozen = transition(client, auth, "submit")["version"]["materials"][0]
 
+    _assert_file_projection(client, mounted, frozen)
+
+
+def _file_material() -> dict:
+    return {
+        "id": "m-file",
+        "title": "课堂文件",
+        "filename": "课堂文件.txt",
+        "mediaType": "text/plain",
+        "size": 12,
+        "blobId": "private-storage-key",
+        "accessLevel": "public",
+        "status": "active",
+        "createdBy": "u-admin-demo",
+    }
+
+
+def _assert_file_projection(client, mounted: dict, frozen: dict) -> None:
     assert mounted["filename"] == "课堂文件.txt"
     assert mounted["hasFile"] is True
     assert frozen == mounted
@@ -104,7 +142,14 @@ def test_file_material_projection_is_downloadable_without_leaking_blob_id(client
 def test_private_material_cannot_be_mounted_by_another_author(client: TestClient) -> None:
     auth = login(client)
     seed_private_material(client, "m-private-other", "他人私密素材", "校内", "original", "other")
-    response = client.post("/api/cases/c-draft-1/materials", headers=headers(auth), json={"materialId": "m-private-other", "revision": current_revision(client)})
+    response = client.post(
+        "/api/cases/c-draft-1/materials",
+        headers=headers(auth),
+        json={
+            "materialId": "m-private-other",
+            "revision": current_revision(client),
+        },
+    )
     assert response.status_code == 404
 
 
@@ -122,7 +167,14 @@ def test_unmount_records_material_catalog_change(client: TestClient) -> None:
 
 def test_author_can_list_an_owned_private_material(client: TestClient) -> None:
     auth = login(client)
-    seed_private_material(client, "m-private-owned", "作者私密素材", "个人", "secondary", auth["user"]["id"])
+    seed_private_material(
+        client,
+        "m-private-owned",
+        "作者私密素材",
+        "个人",
+        "secondary",
+        auth["user"]["id"],
+    )
     mounted = mount(client, auth, "m-private-owned")
     assert mounted in client.get("/api/cases/c-draft-1/materials").json()
 
@@ -152,7 +204,13 @@ def publish_case_with_material(client: TestClient) -> tuple[dict, dict]:
     submitted = transition(client, author, "submit")
     admin = admin_login(client)
     started = transition_with_case(client, admin, "start", submitted["case"])
-    approved = transition_with_case(client, admin, "approve", started["case"], submittedVersionId=submitted["version"]["id"])
+    approved = transition_with_case(
+        client,
+        admin,
+        "approve",
+        started["case"],
+        submittedVersionId=submitted["version"]["id"],
+    )
     client.post("/api/auth/logout", headers=headers(admin))
     return mounted, approved
 
@@ -275,7 +333,8 @@ def test_shared_material_remains_public_until_last_case_is_hidden(client: TestCl
     first = create_submission(client, author, "公开引用一")
     second = create_submission(client, author, "公开引用二")
     admin = admin_login(client)
-    first, second = approve_submission(client, admin, first), approve_submission(client, admin, second)
+    first = approve_submission(client, admin, first)
+    second = approve_submission(client, admin, second)
     approved_sequence = assert_reference_state(client, 2)
     first = change_publication(client, first["case"], "hide")
     first_hidden = assert_reference_state(client, 1)

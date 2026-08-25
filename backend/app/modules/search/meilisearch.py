@@ -148,7 +148,8 @@ class CatalogRequest:
 def _validate_request_target(request: CatalogRequest) -> None:
     if request.kind not in {"all", *KINDS}:
         raise ValueError("invalid catalog kind")
-    if not all((request.generation.strip(), request.index_uid.strip(), request.index_epoch.strip())):
+    target = (request.generation, request.index_uid, request.index_epoch)
+    if not all(value.strip() for value in target):
         raise ValueError("catalog target is required")
 
 
@@ -158,7 +159,15 @@ def _validate_request_page(request: CatalogRequest) -> None:
 
 
 def _validate_request_filters(filters: Mapping[str, object]) -> None:
-    allowed = {"typeName", "audience", "authority", "materialType", "tag", "publishedWithin", "accessLevel"}
+    allowed = {
+        "typeName",
+        "audience",
+        "authority",
+        "materialType",
+        "tag",
+        "publishedWithin",
+        "accessLevel",
+    }
     if set(filters) - allowed:
         raise ValueError("invalid catalog filter")
 
@@ -365,21 +374,26 @@ def _payload(index_uid: str, query: str, filter_value: str, limit: int = 0) -> d
 
 
 def _count_plans(request: CatalogRequest, index_uid: str) -> list[_Plan]:
-    return [_full_count_plan(request, index_uid), _restricted_count_plan(request, index_uid)]
+    full = _full_count_plan(request, index_uid)
+    restricted = _restricted_count_plan(request, index_uid)
+    return [full, restricted]
 
 
 def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
-    full_filter = _or(_count_case_branch(request), _count_material_branch(request), _knowledge_level(request))
+    full_filter = _or(
+        _count_case_branch(request),
+        _count_material_branch(request),
+        _knowledge_level(request),
+    )
     payload = _payload(index_uid, request.q, full_filter)
     payload["facets"] = ["kind"]
     return _Plan("count-full", payload)
 
 
 def _count_case_branch(request: CatalogRequest) -> str:
-    case = _and(
+    return _and(
         'kind = "case"', _case_access(request.principal), _excluded(request, "case")
     )
-    return case
 
 
 def _count_material_branch(request: CatalogRequest) -> str:

@@ -144,7 +144,11 @@ def _target_query(target: CatalogTarget) -> dict:
 
 
 def _rebuild_lease_query(owner: str, timestamp: datetime) -> dict:
-    return {"_id": "catalog", "leaseOwner": owner, "leaseExpiresAt": {"$gt": timestamp}}
+    return {
+        "_id": "catalog",
+        "leaseOwner": owner,
+        "leaseExpiresAt": {"$gt": timestamp},
+    }
 
 
 def _renew_lease(timestamp: datetime) -> dict:
@@ -152,23 +156,43 @@ def _renew_lease(timestamp: datetime) -> dict:
 
 
 def _pause_query(owner: str, timestamp: datetime) -> dict:
-    return {"_id": "catalog", "$or": [{"leaseExpiresAt": {"$lte": timestamp}}, {"leaseOwner": owner}]}
+    reusable = {"leaseExpiresAt": {"$lte": timestamp}}
+    return {"_id": "catalog", "$or": [reusable, {"leaseOwner": owner}]}
 
 
 def _pause_update(owner: str, timestamp: datetime) -> dict:
-    return {"$set": {"leaseOwner": owner, "leaseExpiresAt": timestamp + REBUILD_LEASE_DURATION}}
+    return {
+        "$set": {
+            "leaseOwner": owner,
+            "leaseExpiresAt": timestamp + REBUILD_LEASE_DURATION,
+        }
+    }
 
 
 def _requeue_query(logical_key: str) -> dict:
-    return {"_id": logical_key, "$expr": {"$lte": ["$sequence", "$appliedSequence"]}}
+    return {
+        "_id": logical_key,
+        "$expr": {"$lte": ["$sequence", "$appliedSequence"]},
+    }
 
 
 def _requeue_update(timestamp: datetime) -> list[dict]:
-    return [{"$set": {"appliedSequence": {"$subtract": ["$sequence", 1]}, "pendingSince": timestamp, "updatedAt": timestamp}}]
+    values = {
+        "appliedSequence": {"$subtract": ["$sequence", 1]},
+        "pendingSince": timestamp,
+        "updatedAt": timestamp,
+    }
+    return [{"$set": values}]
 
 
 def _requeue_record(logical_key: str, sequence: int, timestamp: datetime) -> dict:
-    return {"_id": logical_key, "sequence": sequence, "appliedSequence": sequence - 1, "pendingSince": timestamp, "updatedAt": timestamp}
+    return {
+        "_id": logical_key,
+        "sequence": sequence,
+        "appliedSequence": sequence - 1,
+        "pendingSince": timestamp,
+        "updatedAt": timestamp,
+    }
 
 
 def _enqueue_update(sequence: int, timestamp: datetime) -> list[dict]:
@@ -176,7 +200,13 @@ def _enqueue_update(sequence: int, timestamp: datetime) -> list[dict]:
     applied = {"$ifNull": ["$appliedSequence", -1]}
     next_sequence = {"$max": [current, sequence]}
     pending_since = _pending_since(current, applied, next_sequence, timestamp)
-    return [{"$set": {"sequence": next_sequence, "appliedSequence": applied, "pendingSince": pending_since, "updatedAt": timestamp}}]
+    values = {
+        "sequence": next_sequence,
+        "appliedSequence": applied,
+        "pendingSince": pending_since,
+        "updatedAt": timestamp,
+    }
+    return [{"$set": values}]
 
 
 def _pending_since(current, applied, next_sequence, timestamp) -> dict:
@@ -253,7 +283,11 @@ class SearchOutbox:
     def pause(self, owner: str) -> bool:
         timestamp = self._clock()
         try:
-            self._state.find_one_and_update(_pause_query(owner, timestamp), _pause_update(owner, timestamp), upsert=True)
+            self._state.find_one_and_update(
+                _pause_query(owner, timestamp),
+                _pause_update(owner, timestamp),
+                upsert=True,
+            )
         except DuplicateKeyError as error:
             raise RuntimeError("检索目录正在重建") from error
         return True
@@ -275,7 +309,12 @@ class SearchOutbox:
     def _publish(self, owner: str, marker: dict, session) -> bool:
         timestamp = self._clock()
         options = _session_options(session)
-        if self._state.update_one(_rebuild_lease_query(owner, timestamp), _renew_lease(timestamp), **options).matched_count != 1:
+        renewed = self._state.update_one(
+            _rebuild_lease_query(owner, timestamp),
+            _renew_lease(timestamp),
+            **options,
+        )
+        if renewed.matched_count != 1:
             return False
         self._generation.replace_one(
             {"_id": "catalog"},
@@ -393,7 +432,11 @@ class SearchOutbox:
     def _requeue(self, logical_key: str, session, sequence=None) -> None:
         timestamp = self._clock()
         options = _session_options(session)
-        result = self._collection.update_one(_requeue_query(logical_key), _requeue_update(timestamp), **options)
+        result = self._collection.update_one(
+            _requeue_query(logical_key),
+            _requeue_update(timestamp),
+            **options,
+        )
         if sequence is None or result.matched_count == 1:
             return
         record = _requeue_record(logical_key, sequence, timestamp)
@@ -430,7 +473,11 @@ class SearchOutbox:
         return True
 
     def _update_epoch(self, target, index_epoch, session) -> bool:
-        result = self._generation.update_one(_target_query(target), {"$set": {"indexEpoch": index_epoch}}, **_session_options(session))
+        result = self._generation.update_one(
+            _target_query(target),
+            {"$set": {"indexEpoch": index_epoch}},
+            **_session_options(session),
+        )
         return result.matched_count == 1
 
     def _clear_revocations(self, claim, session) -> None:

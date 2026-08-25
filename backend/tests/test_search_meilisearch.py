@@ -122,6 +122,22 @@ def _page_request() -> CatalogRequest:
     )
 
 
+def _anonymous_request(**changes) -> CatalogRequest:
+    values = {
+        "q": "",
+        "kind": "all",
+        "generation": "test-generation",
+        "index_uid": "catalog-generation-test",
+        "index_epoch": "2026-08-14T00:00:00Z",
+        "page_size": 20,
+        "offset": 0,
+        "filters": {},
+        "principal": Principal(None, "anonymous"),
+        "include_metadata": False,
+    }
+    return CatalogRequest(**{**values, **changes})
+
+
 def test_concurrent_searches_reach_the_catalog_together() -> None:
     state = {"active": 0, "maximum": 0, "lock": Lock(), "release": Event()}
     catalog = MeilisearchCatalog(OverlapReader(state))
@@ -133,13 +149,28 @@ def test_concurrent_searches_reach_the_catalog_together() -> None:
 
 
 def _assert_full_page(page) -> None:
-    expected = [{"id": "m-1", "kind": "material", "title": "科学家精神", "summary": "素材摘要", "accessLevel": "campus", "authority": "original", "materialType": "文档", "tags": ["思政"], "hasFile": True, "contentAvailable": True, "score": 12}]
-    assert page.items == expected
+    assert page.items == [_expected_full_item()]
     metadata = page.metadata
     assert metadata is not None
     assert metadata.counts == {"all": 1, "case": 0, "knowledge": 0, "material": 1}
     assert (metadata.total, page.has_next, page.has_previous) == (1, False, False)
     assert metadata.facets["authority"] == [{"value": "original", "count": 1}]
+
+
+def _expected_full_item() -> dict:
+    return {
+        "id": "m-1",
+        "kind": "material",
+        "title": "科学家精神",
+        "summary": "素材摘要",
+        "accessLevel": "campus",
+        "authority": "original",
+        "materialType": "文档",
+        "tags": ["思政"],
+        "hasFile": True,
+        "contentAvailable": True,
+        "score": 12,
+    }
 
 
 def _restricted_hit() -> dict:
@@ -277,7 +308,9 @@ def test_health_rejects_an_unconfirmed_index_epoch() -> None:
 
 def test_revocation_excludes_only_the_matching_catalog_kind() -> None:
     client = FakeReader(_result(), [])
-    request = CatalogRequest(q="", kind="all", generation="test-generation", index_uid="catalog-generation-test", index_epoch="2026-08-14T00:00:00Z", page_size=20, offset=0, filters={}, principal=Principal(None, "anonymous"), include_metadata=False, excluded_keys=(CatalogKey("case", "shared-id"),))
+    request = _anonymous_request(
+        excluded_keys=(CatalogKey("case", "shared-id"),),
+    )
 
     MeilisearchCatalog(client).search(request)
 
@@ -320,7 +353,7 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
 )
 def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
     client = FakeReader(_result(), [])
-    request = CatalogRequest(q="附件", kind="case", generation="test-generation", index_uid="catalog-generation-test", index_epoch="2026-08-14T00:00:00Z", page_size=20, offset=0, filters={}, principal=principal, include_metadata=False)
+    request = _anonymous_request(q="附件", kind="case", principal=principal)
 
     MeilisearchCatalog(client).search(request)
 

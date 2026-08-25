@@ -16,10 +16,26 @@ from app.modules.search.models import SearchQuery
 from app.modules.search.service import search_catalog
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+DatabaseDependency = Annotated[object, Depends(get_database)]
+CatalogDependency = Annotated[object, Depends(get_search_catalog)]
+CatalogStateDependency = Annotated[object, Depends(get_catalog_state)]
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
+UserDependency = Annotated[dict | None, Depends(optional_user)]
 
 
 @router.get("")
-def search(query: Annotated[SearchQuery, Query()], database=Depends(get_database), catalog=Depends(get_search_catalog), catalog_state=Depends(get_catalog_state), settings: Settings = Depends(get_settings), user: dict | None = Depends(optional_user)):
+def search(
+    query: Annotated[SearchQuery, Query()],
+    database: DatabaseDependency,
+    catalog: CatalogDependency,
+    catalog_state: CatalogStateDependency,
+    settings: SettingsDependency,
+    user: UserDependency,
+):
+    return _search_response(query, database, catalog, catalog_state, settings, user)
+
+
+def _search_response(query, database, catalog, catalog_state, settings, user):
     return search_catalog(
         database,
         catalog,

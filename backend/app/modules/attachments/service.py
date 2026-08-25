@@ -85,7 +85,11 @@ def snapshot_attachments(database: Database, case_id: str, session) -> list[dict
 
 def _new_attachment(case_id, upload, access_level) -> dict:
     return _attachment_record(
-        case_id, upload, access_level, _require_file_size(upload), _search_text(upload)
+        case_id,
+        upload,
+        access_level,
+        _require_file_size(upload),
+        _search_text(upload),
     )
 
 

@@ -95,18 +95,33 @@ def test_client_reads_api_key_only_from_secret_file(tmp_path, monkeypatch) -> No
     )
 
 
-def test_reader_search_uses_one_pool_and_checks_the_post_search_epoch(tmp_path, monkeypatch) -> None:
+def test_reader_search_uses_one_pool_and_checks_the_post_search_epoch(
+    tmp_path,
+    monkeypatch,
+) -> None:
     pool = FakePool([{"results": [{"hits": []}]}, {"updatedAt": "epoch-1"}])
     reader, options = _reader(tmp_path, monkeypatch, pool)
     snapshot = reader.search("catalog/current", [{"q": "思政"}])
     assert snapshot.response == {"results": [{"hits": []}]}
     assert snapshot.index_epoch == "epoch-1"
-    calls = [(method, url) for method, url, _options in pool.calls]
-    assert calls == [("POST", "http://meilisearch:7700/multi-search"), ("GET", "http://meilisearch:7700/indexes/catalog%2Fcurrent")]
+    _assert_search_calls(pool)
     _assert_request_headers(pool)
+    _assert_pool_options(options)
+
+
+def _assert_search_calls(pool: FakePool) -> None:
+    calls = [(method, url) for method, url, _options in pool.calls]
+    assert calls == [
+        ("POST", "http://meilisearch:7700/multi-search"),
+        ("GET", "http://meilisearch:7700/indexes/catalog%2Fcurrent"),
+    ]
+
+
+def _assert_pool_options(options: dict) -> None:
     assert (options["maxsize"], options["block"]) == (40, True)
     assert options["retries"] is False
-    assert (options["timeout"].connect_timeout, options["timeout"].read_timeout) == (2, 5)
+    timeout = options["timeout"]
+    assert (timeout.connect_timeout, timeout.read_timeout) == (2, 5)
 
 
 def test_reader_pool_allows_concurrent_searches(tmp_path, monkeypatch) -> None:

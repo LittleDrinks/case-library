@@ -98,9 +98,22 @@ def _first_cursor(client: TestClient, **params) -> str:
 
 def test_cursor_is_bound_to_query_and_filters(client: TestClient) -> None:
     cursor = _first_cursor(client, authority="original")
-    changed_query = client.get("/api/search", params={"q": "另一个查询", "kind": "material", "pageSize": 10, "authority": "original", "cursor": cursor})
-    changed_filter = client.get("/api/search", params={"q": "素材", "kind": "material", "pageSize": 10, "authority": "secondary", "cursor": cursor})
+    changed_query = _cursor_request(client, cursor, "另一个查询", "original")
+    changed_filter = _cursor_request(client, cursor, "素材", "secondary")
     assert (changed_query.status_code, changed_filter.status_code) == (422, 422)
+
+
+def _cursor_request(client: TestClient, cursor: str, query: str, authority: str):
+    return client.get(
+        "/api/search",
+        params={
+            "q": query,
+            "kind": "material",
+            "pageSize": 10,
+            "authority": authority,
+            "cursor": cursor,
+        },
+    )
 
 
 def test_cursor_normalizes_whitespace_in_query_scope(client: TestClient) -> None:

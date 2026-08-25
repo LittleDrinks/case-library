@@ -22,9 +22,27 @@ DEMO_ACCOUNT_IDS = (
 def _database():
     database = mongomock.MongoClient()["production_startup_test"]
     database.client.admin.command = lambda _name: {"ok": 1, "isWritablePrimary": True}
-    database.search_catalog_generation.insert_one({"_id": "catalog", "generation": "test-generation", "indexUid": "catalog-generation-test", "indexEpoch": "test-epoch", "retiredIndexUids": []})
-    database.search_worker_state.insert_one({"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)})
+    _seed_catalog_state(database)
     return database
+
+
+def _seed_catalog_state(database) -> None:
+    database.search_catalog_generation.insert_one(_catalog_generation())
+    database.search_worker_state.insert_one(_worker_state())
+
+
+def _catalog_generation() -> dict:
+    return {
+        "_id": "catalog",
+        "generation": "test-generation",
+        "indexUid": "catalog-generation-test",
+        "indexEpoch": "test-epoch",
+        "retiredIndexUids": [],
+    }
+
+
+def _worker_state() -> dict:
+    return {"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)}
 
 
 def _settings() -> Settings:

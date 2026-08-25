@@ -123,11 +123,25 @@ def _test_database():
 
 
 def _seed_catalog_generation(database) -> None:
-    database.search_catalog_generation.insert_one({"_id": "catalog", "generation": "test-generation", "indexUid": "catalog-generation-test", "indexEpoch": "test-epoch", "retiredIndexUids": []})
+    database.search_catalog_generation.insert_one(
+        {
+            "_id": "catalog",
+            "generation": "test-generation",
+            "indexUid": "catalog-generation-test",
+            "indexEpoch": "test-epoch",
+            "retiredIndexUids": [],
+        }
+    )
 
 
 def _seed_worker_state(database) -> None:
-    database.search_worker_state.insert_one({"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)})
+    database.search_worker_state.insert_one(
+        {
+            "_id": "catalog",
+            "worker": "test-worker",
+            "updatedAt": datetime.now(UTC),
+        }
+    )
 
 
 @pytest.fixture(autouse=True)

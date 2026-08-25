@@ -65,7 +65,10 @@ def _login(client: TestClient, username: str = "user") -> None:
 def test_search_route_preserves_envelope_and_compiles_user_scope(client: TestClient) -> None:
     catalog = _use(client, RecordingCatalog())
     _login(client)
-    response = client.get("/api/search", params={"q": "科学家精神", "kind": "case", "typeName": "校本实践类"})
+    response = client.get(
+        "/api/search",
+        params={"q": "科学家精神", "kind": "case", "typeName": "校本实践类"},
+    )
     assert response.status_code == 200
     assert response.json()["counts"]["case"] == 1
     request = catalog.requests[0]
@@ -90,7 +93,32 @@ def _public_case(client: TestClient) -> str:
 
 
 def _replace_generation(database) -> None:
-    database.search_catalog_generation.update_one({"_id": "catalog"}, {"$set": {"generation": "next-generation", "indexUid": "catalog-generation-next"}})
+    database.search_catalog_generation.update_one(
+        {"_id": "catalog"},
+        {
+            "$set": {
+                "generation": "next-generation",
+                "indexUid": "catalog-generation-next",
+            }
+        },
+    )
+
+
+def _insert_revocation(collection, logical_key: str, item_id: str) -> None:
+    collection.insert_one(
+        {"_id": logical_key, "logicalKey": logical_key, "id": item_id}
+    )
+
+
+def _insert_revocation_backlog(collection) -> None:
+    collection.insert_many(
+        {
+            "_id": f"material:m-{index}",
+            "logicalKey": f"material:m-{index}",
+            "id": f"m-{index}",
+        }
+        for index in range(101)
+    )
 
 
 def test_mounted_public_case_uses_published_version_for_non_owner(
@@ -111,18 +139,12 @@ def test_mounted_public_case_uses_published_version_for_non_owner(
 
 
 def test_revocations_are_passed_to_catalog_and_backlog_fails_closed(client: TestClient) -> None:
-    catalog, collection = _use(client, RecordingCatalog()), client.app.state.database.search_revocations
-    collection.insert_one({"_id": "case:c-02", "logicalKey": "case:c-02", "id": "c-02"})
+    catalog = _use(client, RecordingCatalog())
+    collection = client.app.state.database.search_revocations
+    _insert_revocation(collection, "case:c-02", "c-02")
     assert client.get("/api/search").status_code == 200
     assert catalog.requests[0].excluded_keys == (CatalogKey("case", "c-02"),)
-    collection.insert_many(
-        {
-            "_id": f"material:m-{index}",
-            "logicalKey": f"material:m-{index}",
-            "id": f"m-{index}",
-        }
-        for index in range(101)
-    )
+    _insert_revocation_backlog(collection)
     response = client.get("/api/search")
     assert (response.status_code, response.json()["detail"]) == (503, "检索目录正在同步")
 

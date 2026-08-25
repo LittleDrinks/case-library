@@ -328,7 +328,7 @@ def test_archive_budget_is_shared_across_the_request(client: TestClient) -> None
 
 def test_multiple_archives_keep_distinct_entry_contents(client: TestClient) -> None:
     auth = login(client, "admin", "admin123")
-    files = [("files", ("first.zip", zip_bytes([("first.txt", b"alpha")]), "application/zip")), ("files", ("second.zip", zip_bytes([("second.txt", b"bravo")]), "application/zip"))]
+    files = _distinct_archives()
     response = submit_import(client, auth, files)
 
     items = response.json()["items"]
@@ -336,6 +336,12 @@ def test_multiple_archives_keep_distinct_entry_contents(client: TestClient) -> N
     assert [item["filename"] for item in items] == ["first.txt", "second.txt"]
     assert [item["status"] for item in items] == ["candidate", "candidate"]
     assert items[0]["sha256"] != items[1]["sha256"]
+
+
+def _distinct_archives() -> list[tuple[str, tuple[str, bytes, str]]]:
+    first = ("first.zip", zip_bytes([("first.txt", b"alpha")]), "application/zip")
+    second = ("second.zip", zip_bytes([("second.txt", b"bravo")]), "application/zip")
+    return [("files", first), ("files", second)]
 
 
 def test_archive_rejects_compression_ratio_over_100(client: TestClient) -> None:

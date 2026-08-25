@@ -71,6 +71,12 @@ def publish_seed_case(client: TestClient) -> tuple[dict, dict]:
     return admin, approved
 
 
+def reopen_hidden_case(client: TestClient, admin: dict, approved: dict):
+    case = approved["case"]
+    hidden = _transition_json(client, case["id"], admin["csrfToken"], "hide", case)
+    return _transition(client, case["id"], admin["csrfToken"], "reopen", hidden["case"])
+
+
 def test_user_can_login_and_restore_session(client: TestClient) -> None:
     response = login(client)
 
@@ -219,17 +225,18 @@ def test_admin_reopens_a_hidden_case_without_exposing_the_working_copy(
     client: TestClient,
 ) -> None:
     admin, approved = publish_seed_case(client)
-    hidden = _transition_json(
-        client, approved["case"]["id"], admin["csrfToken"], "hide", approved["case"]
-    )
-    reopened = _transition(
-        client, approved["case"]["id"], admin["csrfToken"], "reopen", hidden["case"]
-    )
+    reopened = reopen_hidden_case(client, admin, approved)
     assert reopened.status_code == 200
     assert reopened.json()["case"]["workflowStatus"] == "draft"
     assert reopened.json()["case"]["publicationStatus"] == "hidden"
     assert reopened.json()["case"]["submittedVersionId"] is None
-    retry = _transition(client, approved["case"]["id"], admin["csrfToken"], "restore", reopened.json()["case"])
+    retry = _transition(
+        client,
+        approved["case"]["id"],
+        admin["csrfToken"],
+        "restore",
+        reopened.json()["case"],
+    )
     assert retry.status_code == 409
 
 

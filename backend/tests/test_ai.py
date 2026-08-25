@@ -205,25 +205,37 @@ def configure_custom_environment(client, tmp_path) -> None:
     configure_app_secret(client, tmp_path)
 
 
-def test_custom_chat_uses_custom_model_and_blank_key_keeps_secret(client: TestClient, tmp_path) -> None:
+def _saved_custom_record(client: TestClient, auth: dict) -> dict:
+    response = save_custom(client, auth["csrfToken"])
+    assert response.status_code == 200
+    return client.app.state.database.ai_user_settings.find_one()
+
+
+def test_custom_chat_uses_custom_model_and_blank_key_keeps_secret(
+    client: TestClient,
+    tmp_path,
+) -> None:
     configure_custom_environment(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
     response = save_custom(
         client,
         auth["csrfToken"],
         "",
         " https://custom.invalid/v1/ ",
     )
-    provider = FakeProvider()
-    client.app.state.ai_provider = provider
-    chat_response = post_chat(client, auth)
+    provider, chat_response = _custom_chat(client, auth)
     assert response.status_code == 200
     after = client.app.state.database.ai_user_settings.find_one()
     assert_preserved_key(before, after)
     assert chat_response.status_code == 200
     assert provider.models == ["custom-model"]
+
+
+def _custom_chat(client: TestClient, auth: dict) -> tuple[FakeProvider, object]:
+    provider = FakeProvider()
+    client.app.state.ai_provider = provider
+    return provider, post_chat(client, auth)
 
 
 def test_custom_url_change_requires_new_key_and_keeps_record(
@@ -232,8 +244,7 @@ def test_custom_url_change_requires_new_key_and_keeps_record(
 ) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
 
     response = save_custom(
         client,
@@ -247,11 +258,13 @@ def test_custom_url_change_requires_new_key_and_keeps_record(
     assert client.app.state.database.ai_user_settings.find_one() == before
 
 
-def test_custom_url_change_with_new_key_replaces_encrypted_key(client: TestClient, tmp_path) -> None:
+def test_custom_url_change_with_new_key_replaces_encrypted_key(
+    client: TestClient,
+    tmp_path,
+) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
 
     response = save_custom(
         client,
