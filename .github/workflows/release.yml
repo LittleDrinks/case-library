@@ -29,7 +29,7 @@ jobs:
   verify:
     needs: validate-tag
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
       - name: Require successful CI for v2
@@ -40,8 +40,19 @@ jobs:
         run: |
           git fetch origin v2:refs/remotes/origin/v2 --depth=1
           test "$RELEASE_SHA" = "$(git rev-parse origin/v2)"
-          ci_runs="$(gh api "repos/$RELEASE_REPOSITORY/actions/runs?event=push&head_sha=$RELEASE_SHA&status=completed&per_page=100" --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "v2" and .conclusion == "success")] | length')"
-          test "$ci_runs" -gt 0
+          for attempt in $(seq 1 200); do
+            result="$(gh api "repos/$RELEASE_REPOSITORY/actions/runs?event=push&head_sha=$RELEASE_SHA&per_page=100" --jq '
+              [.workflow_runs[] | select(.name == "CI" and .head_branch == "v2")]
+              | if any(.conclusion == "success") then "success"
+                elif any(.conclusion != null) then "failure"
+                else "waiting"
+                end
+            ')"
+            test "$result" = success && exit 0
+            test "$result" = failure && exit 1
+            sleep 15
+          done
+          exit 1
 
   publish:
     needs: [validate-tag, verify]
