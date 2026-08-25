@@ -61,6 +61,104 @@ async function expectPrivateRouteBrand(page) {
   await expectBrand(page);
 }
 
+async function expectNoOverflow(page, width) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+}
+
+async function expectDesktopLoginVisual(page) {
+  await expectLoginBrand(page);
+  await expectStyles(page.locator(".login-panel"), {
+    backgroundColor: DEMO.card, borderRadius: "7px",
+  });
+  await expect(page.locator(".login-submit")).toHaveCSS("background-color", DEMO.brand);
+}
+
+async function expectMobileLoginVisual(page) {
+  await expectLoginBrand(page);
+  await expectStyles(page.locator(".login-page"), {
+    backgroundColor: DEMO.card, padding: "64px 18px 18px",
+  });
+  await expect(page.locator(".login-panel")).toHaveCSS("border-left-width", "0px");
+  await expectNoOverflow(page, 390);
+}
+
+async function openCaseDetail(page) {
+  await page.goto("/#/cases/c-02");
+  await expect(page.locator(".case-detail-paper")).toBeVisible();
+  await expectBrand(page);
+}
+
+async function expectDesktopCaseDetail(page) {
+  await openCaseDetail(page);
+  await expectDesktopHeader(page);
+  await expect(page.locator(".case-detail-outline")).toBeVisible();
+  await expectStyles(page.locator(".case-detail-layout"), {
+    columnGap: "22px", display: "grid",
+  });
+  await expectStyles(page.locator(".case-detail-paper"), {
+    backgroundColor: DEMO.card, borderRadius: "8px", padding: "56px 66px 80px",
+  });
+}
+
+async function expectMobileCaseDetail(page) {
+  await openCaseDetail(page);
+  await expectMobileHeader(page);
+  await expect(page.locator(".case-detail-outline")).toBeHidden();
+  await expectStyles(page.locator(".case-detail-paper"), {
+    padding: "42px 24px 60px",
+  });
+  await expectNoOverflow(page, 390);
+}
+
+async function openWorkbench(page) {
+  await page.goto("/#/workbench/c-02");
+  await expect(page.locator(".document-paper")).toBeVisible();
+  await expectBrand(page);
+}
+
+async function expectDesktopWorkbench(page) {
+  await openWorkbench(page);
+  await expectDesktopHeader(page);
+  await expect(page.locator(".outline-wrap")).toBeVisible();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
+  await expectStyles(page.locator(".document-paper"), {
+    borderRadius: "6px", padding: "70px 78px 92px",
+  });
+}
+
+async function expectMobileWorkbench(page) {
+  await openWorkbench(page);
+  await expectMobileHeader(page);
+  await expect(page.locator(".outline-wrap")).toBeHidden();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "block" });
+  await expectStyles(page.locator(".assistant-rail"), { position: "fixed" });
+  await expectNoOverflow(page, 390);
+}
+
+async function openAdminDashboard(page) {
+  await page.goto("/#/admin");
+  await expect(page.getByRole("heading", { name: "管理后台" })).toBeVisible();
+  await expect(page.locator(".admin-queue").first()).toBeVisible();
+  await expectBrand(page);
+}
+
+async function expectDesktopAdminDashboard(page) {
+  await openAdminDashboard(page);
+  await expectDesktopHeader(page);
+  await expectStyles(page.locator(".admin-heading"), { flexDirection: "row" });
+  await expectStyles(page.locator(".admin-queue").first(), {
+    backgroundColor: DEMO.card, borderTopWidth: "2px",
+  });
+}
+
+async function expectMobileAdminDashboard(page) {
+  await openAdminDashboard(page);
+  await expectMobileHeader(page);
+  await expectStyles(page.locator(".admin-heading"), { flexDirection: "column" });
+  await expectStyles(page.getByRole("navigation", { name: "管理工具" }), { width: "362px" });
+  await expectNoOverflow(page, 390);
+}
+
 async function boxOf(locator) {
   await expect(locator).toBeVisible();
   const box = await locator.boundingBox();
@@ -122,7 +220,7 @@ async function expectDynamicSurfaces(cards) {
 }
 
 async function expectDesktopHeader(page) {
-  const header = page.getByRole("banner");
+  const header = page.locator(".site-header");
   expectNear((await boxOf(header)).height, 58);
   expectNear((await boxOf(header.getByRole("img", { name: "上海大学" }))).height, 32);
   await expectStyles(header, {
@@ -179,7 +277,7 @@ async function expectDesktopRecommendations(page) {
 }
 
 async function expectMobileHeader(page) {
-  const header = page.getByRole("banner");
+  const header = page.locator(".site-header");
   const brand = page.getByRole("link", { name: `${BRAND}首页` });
   const navigation = page.getByRole("navigation", { name: "主导航" });
   const [headerBox, brandBox, navigationBox] = await Promise.all([
@@ -268,6 +366,30 @@ test("首页、登录、详情、工作台和管理后台使用统一品牌", as
   await expectHomeBrand(page);
   await expectCaseDetailBrand(page);
   await expectPrivateRouteBrand(page);
+});
+
+test("登录页在桌面和 390px 保持品牌与表单布局", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expectDesktopLoginVisual(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectMobileLoginVisual(page);
+});
+
+test("公开案例详情在桌面和 390px 保持阅读布局", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await expectDesktopCaseDetail(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectMobileCaseDetail(page);
+});
+
+test("管理员工作台和后台在桌面和 390px 保持品牌布局", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await loginAsAdmin(page);
+  await expectDesktopWorkbench(page);
+  await expectDesktopAdminDashboard(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectMobileWorkbench(page);
+  await expectMobileAdminDashboard(page);
 });
 
 test("工作台和管理导入页共享暖纸红全局主题", async ({ page }) => {
