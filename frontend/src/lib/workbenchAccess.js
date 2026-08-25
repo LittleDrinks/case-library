@@ -1,4 +1,5 @@
 export const caseUnavailableMessage = "案例不可访问";
+export const caseUnavailableNotice = "case-unavailable";
 
 export async function resolveWorkbenchAccess(caseId, user, getCase) {
   try {
@@ -20,5 +21,7 @@ function reviewRoute(caseId) {
 }
 
 function unavailableRoute() {
-  return { name: "my-cases", replace: true };
+  return {
+    name: "my-cases", query: { notice: caseUnavailableNotice }, replace: true,
+  };
 }

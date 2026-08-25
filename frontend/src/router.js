@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import { api } from "./api.js";
-import { caseUnavailableMessage, resolveWorkbenchAccess } from "./lib/workbenchAccess.js";
+import { resolveWorkbenchAccess } from "./lib/workbenchAccess.js";
 import { restoreSession, session } from "./session.js";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
@@ -85,7 +85,6 @@ export const router = createRouter({
 
 async function guardWorkbench(to) {
   const target = await resolveWorkbenchAccess(String(to.params.id), session.user, api.getCase);
-  if (target?.name === "my-cases") sessionStorage.setItem("case-library:access-notice", caseUnavailableMessage);
   return target || true;
 }
 

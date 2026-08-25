@@ -1,18 +1,22 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { AlertTriangle, FilePlus2, LoaderCircle, RefreshCw } from "@lucide/vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
 import CaseCard from "../components/CaseCard.vue";
+import { caseUnavailableMessage, caseUnavailableNotice } from "../lib/workbenchAccess.js";
 import SiteHeader from "../components/SiteHeader.vue";
 import { session } from "../session.js";
 
+const route = useRoute();
 const router = useRouter();
 const cases = ref([]);
 const loading = ref(true);
 const creating = ref(false);
 const error = ref("");
-const accessNotice = ref("");
+const accessNotice = computed(() => (
+  route.query.notice === caseUnavailableNotice ? caseUnavailableMessage : ""
+));
 const groups = [
   { title: "进行中", statuses: ["draft"] },
   { title: "审核中", statuses: ["pending", "reviewing"] },
@@ -23,7 +27,7 @@ const actionLabels = {
   draft: "继续编辑",
   pending: "查看提交",
   reviewing: "查看审核",
-  published: "查看公开页",
+  published: "打开工作台",
 };
 const groupedCases = computed(() => groups.map((group) => ({
   ...group,
@@ -31,8 +35,7 @@ const groupedCases = computed(() => groups.map((group) => ({
 })));
 
 function caseDestination(item) {
-  const name = item.workflowStatus === "published" ? "case-public" : "workbench";
-  return { name, params: { id: item.id } };
+  return { name: "workbench", params: { id: item.id } };
 }
 
 async function loadCases() {
@@ -60,15 +63,7 @@ async function createCase() {
   }
 }
 
-function loadAccessNotice() {
-  accessNotice.value = sessionStorage.getItem("case-library:access-notice") || "";
-  sessionStorage.removeItem("case-library:access-notice");
-}
-
-onMounted(() => {
-  loadAccessNotice();
-  loadCases();
-});
+onMounted(loadCases);
 </script>
 
 <template>

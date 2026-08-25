@@ -1,13 +1,21 @@
 import { expect, it } from "vitest";
 import { ApiError } from "../api.js";
-import { resolveWorkbenchAccess } from "./workbenchAccess.js";
+import { caseUnavailableNotice, resolveWorkbenchAccess } from "./workbenchAccess.js";
 
 const author = { id: "author", role: "user" };
 const administrator = { id: "admin", role: "admin" };
 const publicCase = { id: "case-1", publicationStatus: "public" };
+const authorCases = [
+  ["草稿", { workflowStatus: "draft", publicationStatus: "none" }],
+  ["待审", { workflowStatus: "pending", publicationStatus: "none" }],
+  ["审核中", { workflowStatus: "reviewing", publicationStatus: "none" }],
+  ["已隐藏", { workflowStatus: "published", publicationStatus: "hidden" }],
+];
 
-it("作者可在路由挂载前进入自己的工作台", async () => {
-  const target = await resolveWorkbenchAccess("case-1", author, async () => ({ ownerId: "author" }));
+it.each(authorCases)("作者可进入%s案例的工作台", async (_, caseRecord) => {
+  const target = await resolveWorkbenchAccess("case-1", author, async () => ({
+    ownerId: "author", ...caseRecord,
+  }));
 
   expect(target).toBeNull();
 });
@@ -23,7 +31,9 @@ it("普通非作者访问不可见案例时替换为我的案例", async () => {
     throw new ApiError(new Response("", { status: 404 }), { detail: "案例不存在" });
   });
 
-  expect(target).toEqual({ name: "my-cases", replace: true });
+  expect(target).toEqual({
+    name: "my-cases", query: { notice: caseUnavailableNotice }, replace: true,
+  });
 });
 
 it("非作者管理员进入同一案例的审核路由", async () => {

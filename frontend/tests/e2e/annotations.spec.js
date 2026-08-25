@@ -8,7 +8,11 @@ async function login(page, username = "user", password = "user123") {
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
-  await expect(page).toHaveURL(/#\/workbench\/c-[^/]+$/);
+  await expect(page).toHaveURL(workbenchRoute(username));
+}
+
+function workbenchRoute(username) {
+  return username === "admin" ? /#\/admin\/review\/c-draft-1$/ : /#\/workbench\/c-draft-1$/;
 }
 
 async function logoutAndWait(page) {
