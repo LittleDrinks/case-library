@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const BRAND = "“强国有我”思政案例库";
+
 const DEMO = {
   background: "rgb(246, 244, 239)",
   brand: "rgb(186, 28, 34)",
@@ -22,6 +24,41 @@ async function loginAsAdmin(page) {
   await page.getByLabel("密码").fill("admin123");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page).toHaveURL(/#\/$/);
+}
+
+async function expectBrand(page) {
+  await expect(page).toHaveTitle(BRAND);
+  const brand = page.getByRole("link", { name: `${BRAND}首页` });
+  await expect(brand).toBeVisible();
+  await expect(brand).toHaveText(BRAND);
+}
+
+async function expectLoginBrand(page) {
+  await page.goto("/#/login");
+  await expect(page).toHaveTitle(BRAND);
+  await expect(page.getByRole("heading", { name: BRAND })).toBeVisible();
+}
+
+async function expectHomeBrand(page) {
+  await openHome(page, 1024, 1000);
+  await expectBrand(page);
+  await expect(page.getByRole("heading", { name: `${BRAND}首页` })).toBeVisible();
+}
+
+async function expectCaseDetailBrand(page) {
+  await page.goto("/#/cases/c-02");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expectBrand(page);
+}
+
+async function expectPrivateRouteBrand(page) {
+  await loginAsAdmin(page);
+  await page.goto("/#/workbench/c-02");
+  await expect(page.locator(".workbench-page")).toBeVisible();
+  await expectBrand(page);
+  await page.goto("/#/admin");
+  await expect(page.getByRole("heading", { name: "管理后台" })).toBeVisible();
+  await expectBrand(page);
 }
 
 async function boxOf(locator) {
@@ -143,7 +180,7 @@ async function expectDesktopRecommendations(page) {
 
 async function expectMobileHeader(page) {
   const header = page.getByRole("banner");
-  const brand = page.getByRole("link", { name: "思政教学案例平台首页" });
+  const brand = page.getByRole("link", { name: `${BRAND}首页` });
   const navigation = page.getByRole("navigation", { name: "主导航" });
   const [headerBox, brandBox, navigationBox] = await Promise.all([
     boxOf(header), boxOf(brand), boxOf(navigation),
@@ -224,6 +261,13 @@ test("390px 首页按旧 demo 折为两行头部和单列内容", async ({ page 
   await expectMobileMain(page);
   await expectMobileDynamics(page);
   await expectMobileRecommendations(page);
+});
+
+test("首页、登录、详情、工作台和管理后台使用统一品牌", async ({ page }) => {
+  await expectLoginBrand(page);
+  await expectHomeBrand(page);
+  await expectCaseDetailBrand(page);
+  await expectPrivateRouteBrand(page);
 });
 
 test("工作台和管理导入页共享暖纸红全局主题", async ({ page }) => {
