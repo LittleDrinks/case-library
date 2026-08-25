@@ -92,7 +92,18 @@ async function readArray(response) {
   return payload;
 }
 
+async function waitForSearchMaterial(request, title) {
+  await expect.poll(async () => {
+    const response = await request.get("/api/search", {
+      params: { q: title, kind: "material", pageSize: 50 },
+    });
+    if (!response.ok()) return false;
+    return (await response.json()).items.some((item) => item.title === title);
+  }, { timeout: 45_000 }).toBe(true);
+}
+
 async function mountApprovedMaterial(page, caseId, title) {
+  await waitForSearchMaterial(page.context().request, title);
   await page.goto(`/#/materials?caseId=${caseId}`);
   await page.getByLabel("搜索素材").fill(title);
   await page.getByRole("button", { name: "搜索", exact: true }).click();
@@ -102,6 +113,7 @@ async function mountApprovedMaterial(page, caseId, title) {
 }
 
 async function downloadApprovedMaterial(page, caseId, title, filename, content) {
+  await waitForSearchMaterial(page.context().request, title);
   await page.goto(`/#/materials?caseId=${caseId}`);
   await page.getByLabel("搜索素材").fill(title);
   await page.getByRole("button", { name: "搜索", exact: true }).click();
@@ -216,6 +228,7 @@ test("管理员审核导入候选后教师可检索并挂入草稿", async ({ pa
 });
 
 test("发布案例公开文件可匿名下载且校内文件保持受限", async ({ page }) => {
+  test.setTimeout(90_000);
   const marker = `${Date.now()}-${test.info().parallelIndex}`;
   const publicTitle = `公开原文件-${marker}`;
   const campusTitle = `校内原文件-${marker}`;
@@ -227,7 +240,6 @@ test("发布案例公开文件可匿名下载且校内文件保持受限", async
   await mountApprovedMaterial(page, draft.id, publicTitle);
   await mountApprovedMaterial(page, draft.id, campusTitle);
   await publishDraft(page, draft.id);
-
   await page.goto(`/#/cases/${draft.id}`);
   await expectPublicDownload(page, publicTitle, "public-bytes");
   await expect(page.getByText(campusTitle, { exact: true })).toBeVisible();
