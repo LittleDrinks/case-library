@@ -11,7 +11,7 @@ AI 默认使用平台配置。教师可切换个人配置，填写 OpenAI 兼容
 test -f .env || cp .env.example .env
 make up
 ```
-访问 `http://127.0.0.1:18080`；API 就绪检查为 `http://127.0.0.1:8001/health/ready`。再次执行 `make up` 会构建并替换前后端容器，MongoDB 与对象存储命名卷保持不变；`make down` 停止服务并保留命名卷。
+访问 `http://127.0.0.1:8080`；API 就绪检查为 `http://127.0.0.1:8001/health/ready`。再次执行 `make up` 会构建并替换前后端容器，MongoDB 与对象存储命名卷保持不变；`make down` 停止服务并保留命名卷。
 `make` 先加载 `.env.example` 的非敏感演示默认值，再用 `.env` 覆盖同名项。平台 AI 由 `.env` 中的 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODELS`、`AI_DEFAULT_MODEL` 和 `AI_TIMEOUT_SECONDS` 配置；`APP_SECRET` 用于个人 API Key 加密。Compose 将 `APP_SECRET`、`AI_API_KEY` 注入 Docker secrets，值不得写入源码或提交到版本库。
 默认 Compose 仅用于单机演示，设置 `APP_ENV=production` 会拒绝启动。生产拓扑未提供，部署门槛见 `docs/operations.md`。
 ## 演示账号

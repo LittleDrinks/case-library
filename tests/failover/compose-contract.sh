@@ -99,7 +99,7 @@ fi
 echo "$app_config" | grep -q 'host_ip: 127.0.0.1'
 echo "$app_config" | grep -q 'published: "8001"'
 echo "$frontend_config" | grep -q 'host_ip: 127.0.0.1'
-echo "$frontend_config" | grep -q 'published: "18080"'
+echo "$frontend_config" | grep -q 'published: "8080"'
 echo "$frontend_config" | grep -q 'edge:'
 echo "$minio_config" | grep -q 'minio/minio:RELEASE.2025-09-07T16-13-09Z'
 echo "$minio_config" | grep -q '/minio/health/live'
