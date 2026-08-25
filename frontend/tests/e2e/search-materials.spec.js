@@ -70,6 +70,41 @@ async function assertAnonymousAI(page, chatRequests) {
   await expect(page.getByRole("list", { name: "AI 回答引用来源" })).toHaveCount(0);
 }
 
+async function assertNoSearchAI(page, settingsRequests, chatRequests) {
+  await expect(page.getByRole("region", { name: "AI 回答" })).toHaveCount(0);
+  expect(settingsRequests).toEqual([]);
+  expect(chatRequests).toEqual([]);
+}
+
+async function submitBlankDirectorySearch(page) {
+  const blankSearch = expectSearchPageRequest(page, "all", false);
+  await page.getByLabel("搜索公开案例").fill("   ");
+  await page.getByRole("button", { name: "检索", exact: true }).click();
+  await blankSearch;
+  await expect(page).toHaveURL(/#\/search$/);
+}
+
+async function browseEmptyDirectory(page) {
+  const caseTab = expectSearchPageRequest(page, "case", false);
+  await page.getByRole("tab", { name: /案例/ }).click();
+  await caseTab;
+  await page.getByRole("button", { name: "高级筛选" }).click();
+  const filtered = page.waitForResponse((response) => (
+    new URL(response.url()).searchParams.getAll("typeName").length === 1
+  ));
+  await page.getByRole("group", { name: "案例类型" }).getByLabel(/校本实践类/).check();
+  await filtered;
+  const allTab = expectSearchPageRequest(page, "all", false);
+  await page.getByRole("tab", { name: /全部/ }).click();
+  await allTab;
+}
+
+async function pageEmptyDirectory(page) {
+  const nextPage = expectSearchPageRequest(page, "all", true);
+  await page.getByRole("button", { name: "下一页" }).click();
+  await nextPage;
+}
+
 async function assertGraph(page) {
   await page.getByRole("button", { name: "图谱", exact: true }).click();
   await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
@@ -79,29 +114,43 @@ async function assertGraph(page) {
   );
 }
 
-test("公共检索保留 AI 摘要、高级筛选和两种视图", async ({ page }) => {
+test("空查询只浏览目录，不触发 AI", async ({ page }) => {
   test.setTimeout(60_000);
-  const searchRequests = watchRequests(page, "/api/search");
   const chatRequests = watchRequests(page, "/api/ai/chat");
   const settingsRequests = watchRequests(page, "/api/ai/settings");
   await waitForSearchReady(page, "");
   await page.goto("/#/search");
-  await assertOneSearchRequest(page, searchRequests);
-  await assertAnonymousAI(page, chatRequests);
+  await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
+  await assertNoSearchAI(page, settingsRequests, chatRequests);
+  await submitBlankDirectorySearch(page);
+  await browseEmptyDirectory(page);
   await expect(page.getByRole("tab", { name: /知识/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toBeVisible();
+  await pageEmptyDirectory(page);
+  await assertNoSearchAI(page, settingsRequests, chatRequests);
+});
+
+test("普通关键词保留省流提示和手动生成入口", async ({ page }) => {
+  const searchRequests = watchRequests(page, "/api/search");
+  const chatRequests = watchRequests(page, "/api/ai/chat");
+  const settingsRequests = watchRequests(page, "/api/ai/settings");
+  await page.goto("/#/search");
+  await assertOneSearchRequest(page, searchRequests);
+  await assertAnonymousAI(page, chatRequests);
   await assertGraph(page);
   expect(settingsRequests).toEqual([]);
 });
 
 test("问题式检索自动进入 AI 解读流程", async ({ page }) => {
   const chatRequests = watchRequests(page, "/api/ai/chat");
+  const settingsRequests = watchRequests(page, "/api/ai/settings");
   await page.goto("/#/search");
   await search(page, "如何");
   await expect(page.getByRole("link", { name: "登录后生成 AI 回答" })).toBeVisible();
   await expect(page.getByRole("button", { name: "生成 AI 解读" })).toHaveCount(0);
   await expect(page.getByRole("list", { name: "AI 回答引用来源" })).toHaveCount(0);
   expect(chatRequests).toEqual([]);
+  expect(settingsRequests).toEqual([]);
 });
 
 async function assertCaseFacets(page) {
@@ -163,8 +212,7 @@ async function expectCursorAbsentFromUrl(page) {
   expect(new URLSearchParams(hash.split("?")[1] || "").has("cursor")).toBe(false);
 }
 
-test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
-  await page.goto("/#/search?q=马克思");
+async function browseKeywordPages(page) {
   const firstPage = expectSearchPageRequest(page, "knowledge", false);
   await page.getByRole("tab", { name: /知识/ }).click();
   await firstPage;
@@ -174,10 +222,23 @@ test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
   await secondPage;
   await expect(page.getByText(/第 2 页 · 共/)).toBeVisible();
   await expectCursorAbsentFromUrl(page);
+}
+
+async function browseKeywordKind(page) {
   const changedScope = expectSearchPageRequest(page, "case", false);
   await page.getByRole("tab", { name: /案例/ }).click();
   const changedPayload = await (await changedScope).json();
   expect(changedPayload).toMatchObject({ page: 1, metadataIncluded: true });
+}
+
+test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
+  const chatRequests = watchRequests(page, "/api/ai/chat");
+  const settingsRequests = watchRequests(page, "/api/ai/settings");
+  await page.goto("/#/search?q=马克思");
+  await browseKeywordPages(page);
+  await browseKeywordKind(page);
+  expect(chatRequests).toEqual([]);
+  expect(settingsRequests).toEqual([]);
 });
 
 test("登录但未配置 AI 时检索提供设置入口", async ({ page }) => {

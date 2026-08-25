@@ -208,6 +208,14 @@ async function expectSearchAnswer(page) {
   await expect(answer.locator(".stream-caret")).toHaveCount(0);
 }
 
+function watchRequests(page, path) {
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.url().includes(path)) requests.push(request.url());
+  });
+  return requests;
+}
+
 async function expectWorkbenchAnswer(page) {
   await page.goto("/#/workbench/c-draft-1");
   await expect(page.locator(".ai-status")).toContainText("e2e-model-a");
@@ -375,7 +383,11 @@ test("教师自定义模型后可完成两处真实 AI 对话", async ({ page })
   await login(page);
   try {
     await configureE2EProvider(page);
+    const chatRequests = watchRequests(page, "/api/ai/chat");
+    const settingsRequests = watchRequests(page, "/api/ai/settings");
     await expectSearchAnswer(page);
+    expect(chatRequests).toHaveLength(1);
+    expect(settingsRequests).toHaveLength(1);
     await expectWorkbenchAnswer(page);
   } finally {
     await saveUserSettings(page, { mode: "automatic" });

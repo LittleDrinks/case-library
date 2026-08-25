@@ -26,6 +26,7 @@ const loading = ref(false);
 const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
 const items = computed(() => payload.value.items);
+const hasSubmittedQuery = computed(() => submitted.value.trim() !== "");
 let searchGeneration = 0;
 
 function tabLabel(kind, label) {
@@ -164,7 +165,7 @@ watch(() => route.query.view, (value) => {
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
       <template v-else-if="view === 'list'">
         <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
-        <SearchAIAnswer v-if="submitted" :query="submitted" :items="items" />
+        <SearchAIAnswer v-if="hasSubmittedQuery" :query="submitted" :items="items" />
         <div class="result-toolbar">
           <div class="result-tabs" role="tablist" aria-label="资源类型">
             <button v-for="tab in [['all','全部'],['case','案例'],['knowledge','知识'],['material','素材']]" :key="tab[0]" type="button" role="tab" :aria-selected="activeKind === tab[0]" @click="selectKind(tab[0])">

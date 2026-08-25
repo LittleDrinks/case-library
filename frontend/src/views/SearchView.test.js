@@ -53,3 +53,13 @@ test("翻页将游标保存在内存并保留首屏检索元数据", async () =>
   expect(wrapper.text()).toContain("第 2 页 · 共 21 条");
   expect(wrapper.text()).toContain("第二页");
 });
+
+test("空白查询保持目录浏览且不挂载 AI 回答", async () => {
+  route.query = { q: "   " };
+  const wrapper = render();
+  await flushPromises();
+
+  expect(api.search).toHaveBeenCalledWith("", "all", null, 20, {});
+  expect(wrapper.find("search-ai-answer-stub").exists()).toBe(false);
+  route.query = { q: "游标目录", kind: "material" };
+});
