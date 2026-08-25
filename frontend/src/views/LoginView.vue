@@ -42,7 +42,7 @@ async function submit() {
     <section class="login-panel" aria-labelledby="login-title">
       <img class="login-logo" src="/shanghai-university-horizontal-logo.png" alt="上海大学" />
       <div class="login-heading">
-        <h1 id="login-title">思政教学案例平台</h1>
+        <h1 id="login-title">“强国有我”思政案例库</h1>
         <p>账号登录</p>
       </div>
       <form class="login-form" @submit.prevent="submit">

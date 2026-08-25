@@ -70,7 +70,7 @@ onMounted(loadCases);
         <button type="button" @click="loadCases"><RefreshCw :size="15" />重试</button>
       </div>
       <template v-else>
-        <h1 class="visually-hidden">思政教学案例首页</h1>
+        <h1 class="visually-hidden">“强国有我”思政案例库首页</h1>
         <section class="dynamic-grid" aria-label="平台动态">
           <article class="home-card home-card-padded dynamic-card">
             <header class="home-section-title">

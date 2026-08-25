@@ -2,7 +2,7 @@
 
 <img src="frontend/public/shanghai-university-horizontal-logo.png" alt="上海大学" width="360" />
 
-# 思政教学案例平台
+# “强国有我”思政案例库
 
 <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue-3.5-4FC08D.svg" alt="Vue 3.5" /></a>
 <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.138-009688.svg" alt="FastAPI 0.138" /></a>

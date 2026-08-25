@@ -20,9 +20,9 @@ async function leave() {
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
   <header class="site-header">
-    <RouterLink class="site-brand" to="/" aria-label="思政教学案例平台首页">
+    <RouterLink class="site-brand" to="/" aria-label="“强国有我”思政案例库首页">
       <img src="/shanghai-university-horizontal-logo.png" alt="上海大学" />
-      <span>思政教学案例智能平台</span>
+      <span>“强国有我”思政案例库</span>
     </RouterLink>
     <nav class="site-nav" aria-label="主导航">
       <RouterLink to="/" aria-label="首页"><House :size="16" aria-hidden="true" /><span>首页</span></RouterLink>
