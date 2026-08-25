@@ -74,45 +74,22 @@ def unmount(client: TestClient, auth: dict, material_id: str) -> None:
     assert response.status_code == 204
 
 
+def seed_private_material(client, material_id, title, source, authority, owner) -> None:
+    record = {"id": material_id, "title": title, "summary": "", "source": source, "materialType": "文档", "authority": authority, "accessLevel": "private", "status": "active", "createdBy": owner}
+    client.app.state.database.materials.update_one({"id": material_id}, {"$set": record}, upsert=True)
+
+
 def test_author_mounts_material_and_submission_freezes_it(client: TestClient) -> None:
     auth = login(client)
-    request_headers = headers(auth)
-    mounted = client.post(
-        "/api/cases/c-draft-1/materials",
-        headers=request_headers,
-        json={"materialId": "m-kcsz", "revision": current_revision(client)},
-    )
-
-    assert mounted.status_code == 201
-    assert mounted.json()["title"].startswith("高等学校课程思政")
+    mounted = mount(client, auth, "m-kcsz")
+    assert mounted["title"].startswith("高等学校课程思政")
     assert outbox_sequence(client, "material:m-kcsz") == 1
-    assert client.get("/api/cases/c-draft-1/materials").json() == [mounted.json()]
-
-    submitted = client.post(
-        "/api/cases/c-draft-1/lifecycle",
-        headers=request_headers,
-        json={"command": "submit", "revision": current_revision(client)},
-    )
-    assert submitted.status_code == 200
-    assert submitted.json()["version"]["materials"] == [mounted.json()]
+    assert client.get("/api/cases/c-draft-1/materials").json() == [mounted]
+    assert transition(client, auth, "submit")["version"]["materials"] == [mounted]
 
 
-def test_file_material_projection_is_downloadable_without_leaking_blob_id(
-    client: TestClient,
-) -> None:
-    client.app.state.database.materials.insert_one(
-        {
-            "id": "m-file",
-            "title": "课堂文件",
-            "filename": "课堂文件.txt",
-            "mediaType": "text/plain",
-            "size": 12,
-            "blobId": "private-storage-key",
-            "accessLevel": "public",
-            "status": "active",
-            "createdBy": "u-admin-demo",
-        }
-    )
+def test_file_material_projection_is_downloadable_without_leaking_blob_id(client: TestClient) -> None:
+    client.app.state.database.materials.insert_one({"id": "m-file", "title": "课堂文件", "filename": "课堂文件.txt", "mediaType": "text/plain", "size": 12, "blobId": "private-storage-key", "accessLevel": "public", "status": "active", "createdBy": "u-admin-demo"})
     auth = login(client)
     mounted = mount(client, auth, "m-file")
     frozen = transition(client, auth, "submit")["version"]["materials"][0]
@@ -124,32 +101,10 @@ def test_file_material_projection_is_downloadable_without_leaking_blob_id(
     assert "blobId" not in client.get("/api/cases/c-draft-1/materials").text
 
 
-def test_private_material_cannot_be_mounted_by_another_author(
-    client: TestClient,
-) -> None:
+def test_private_material_cannot_be_mounted_by_another_author(client: TestClient) -> None:
     auth = login(client)
-    client.app.state.database.materials.update_one(
-        {"id": "m-private-other"},
-        {
-            "$set": {
-                "id": "m-private-other",
-                "title": "他人私密素材",
-                "summary": "",
-                "source": "校内",
-                "materialType": "文档",
-                "authority": "original",
-                "accessLevel": "private",
-                "status": "active",
-                "createdBy": "other",
-            }
-        },
-        upsert=True,
-    )
-    response = client.post(
-        "/api/cases/c-draft-1/materials",
-        headers=headers(auth),
-        json={"materialId": "m-private-other", "revision": current_revision(client)},
-    )
+    seed_private_material(client, "m-private-other", "他人私密素材", "校内", "original", "other")
+    response = client.post("/api/cases/c-draft-1/materials", headers=headers(auth), json={"materialId": "m-private-other", "revision": current_revision(client)})
     assert response.status_code == 404
 
 
@@ -167,23 +122,7 @@ def test_unmount_records_material_catalog_change(client: TestClient) -> None:
 
 def test_author_can_list_an_owned_private_material(client: TestClient) -> None:
     auth = login(client)
-    client.app.state.database.materials.update_one(
-        {"id": "m-private-owned"},
-        {
-            "$set": {
-                "id": "m-private-owned",
-                "title": "作者私密素材",
-                "summary": "",
-                "source": "个人",
-                "materialType": "文档",
-                "authority": "secondary",
-                "accessLevel": "private",
-                "status": "active",
-                "createdBy": auth["user"]["id"],
-            }
-        },
-        upsert=True,
-    )
+    seed_private_material(client, "m-private-owned", "作者私密素材", "个人", "secondary", auth["user"]["id"])
     mounted = mount(client, auth, "m-private-owned")
     assert mounted in client.get("/api/cases/c-draft-1/materials").json()
 
@@ -211,18 +150,9 @@ def publish_case_with_material(client: TestClient) -> tuple[dict, dict]:
     )
     mounted = mount(client, author, "m-zrjs")
     submitted = transition(client, author, "submit")
-    admin = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "admin123"},
-    ).json()
+    admin = admin_login(client)
     started = transition_with_case(client, admin, "start", submitted["case"])
-    approved = transition_with_case(
-        client,
-        admin,
-        "approve",
-        started["case"],
-        submittedVersionId=submitted["version"]["id"],
-    )
+    approved = transition_with_case(client, admin, "approve", started["case"], submittedVersionId=submitted["version"]["id"])
     client.post("/api/auth/logout", headers=headers(admin))
     return mounted, approved
 
@@ -245,28 +175,17 @@ def test_public_case_exposes_restricted_name_but_not_content(
     assert approved["case"]["publicationStatus"] == "public"
 
 
-def test_publication_transitions_maintain_material_reference_count(
-    client: TestClient,
-) -> None:
+def test_publication_transitions_maintain_material_reference_count(client: TestClient) -> None:
     mounted, approved = publish_case_with_material(client)
     database = client.app.state.database
-    assert (
-        database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 1
-    )
+    assert database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 1
     approved_sequence = assert_published_events(client, mounted["id"])
-    admin = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "admin123"},
-    ).json()
+    admin = admin_login(client)
     hidden = transition_with_case(client, admin, "hide", approved["case"])
-    assert (
-        database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 0
-    )
+    assert database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 0
     hidden_sequence = assert_hidden_events(client, mounted["id"], approved_sequence)
     transition_with_case(client, admin, "restore", hidden["case"])
-    assert (
-        database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 1
-    )
+    assert database.materials.find_one({"id": mounted["id"]})["publicReferenceCount"] == 1
     restored_sequence = outbox_sequence(client, "case:c-draft-1")
     assert restored_sequence > hidden_sequence
     assert outbox_sequence(client, f"material:{mounted['id']}") == restored_sequence
@@ -351,17 +270,12 @@ def assert_reference_state(client, count: int) -> int:
     return outbox_sequence(client, "material:m-zrjs")
 
 
-def test_shared_material_remains_public_until_last_case_is_hidden(
-    client: TestClient,
-) -> None:
+def test_shared_material_remains_public_until_last_case_is_hidden(client: TestClient) -> None:
     author = login(client)
     first = create_submission(client, author, "公开引用一")
     second = create_submission(client, author, "公开引用二")
     admin = admin_login(client)
-    first, second = (
-        approve_submission(client, admin, first),
-        approve_submission(client, admin, second),
-    )
+    first, second = approve_submission(client, admin, first), approve_submission(client, admin, second)
     approved_sequence = assert_reference_state(client, 2)
     first = change_publication(client, first["case"], "hide")
     first_hidden = assert_reference_state(client, 1)

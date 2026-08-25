@@ -62,19 +62,10 @@ def _login(client: TestClient, username: str = "user") -> None:
     assert response.status_code == 200
 
 
-def test_search_route_preserves_envelope_and_compiles_user_scope(
-    client: TestClient,
-) -> None:
+def test_search_route_preserves_envelope_and_compiles_user_scope(client: TestClient) -> None:
     catalog = _use(client, RecordingCatalog())
     _login(client)
-    response = client.get(
-        "/api/search",
-        params={
-            "q": "科学家精神",
-            "kind": "case",
-            "typeName": "校本实践类",
-        },
-    )
+    response = client.get("/api/search", params={"q": "科学家精神", "kind": "case", "typeName": "校本实践类"})
     assert response.status_code == 200
     assert response.json()["counts"]["case"] == 1
     request = catalog.requests[0]
@@ -98,6 +89,10 @@ def _public_case(client: TestClient) -> str:
     return "c-mounted-public"
 
 
+def _replace_generation(database) -> None:
+    database.search_catalog_generation.update_one({"_id": "catalog"}, {"$set": {"generation": "next-generation", "indexUid": "catalog-generation-next"}})
+
+
 def test_mounted_public_case_uses_published_version_for_non_owner(
     client: TestClient,
 ) -> None:
@@ -115,20 +110,9 @@ def test_mounted_public_case_uses_published_version_for_non_owner(
     assert (mounted.field, mounted.value) == ("publishedVersionIds", "v-mounted-public")
 
 
-def test_revocations_are_passed_to_catalog_and_backlog_fails_closed(
-    client: TestClient,
-) -> None:
-    catalog, collection = (
-        _use(client, RecordingCatalog()),
-        client.app.state.database.search_revocations,
-    )
-    collection.insert_one(
-        {
-            "_id": "case:c-02",
-            "logicalKey": "case:c-02",
-            "id": "c-02",
-        }
-    )
+def test_revocations_are_passed_to_catalog_and_backlog_fails_closed(client: TestClient) -> None:
+    catalog, collection = _use(client, RecordingCatalog()), client.app.state.database.search_revocations
+    collection.insert_one({"_id": "case:c-02", "logicalKey": "case:c-02", "id": "c-02"})
     assert client.get("/api/search").status_code == 200
     assert catalog.requests[0].excluded_keys == (CatalogKey("case", "c-02"),)
     collection.insert_many(
@@ -140,10 +124,7 @@ def test_revocations_are_passed_to_catalog_and_backlog_fails_closed(
         for index in range(101)
     )
     response = client.get("/api/search")
-    assert (response.status_code, response.json()["detail"]) == (
-        503,
-        "检索目录正在同步",
-    )
+    assert (response.status_code, response.json()["detail"]) == (503, "检索目录正在同步")
 
 
 def test_search_unavailability_is_a_public_503(client: TestClient) -> None:
@@ -280,22 +261,8 @@ def test_search_fails_closed_when_generation_changes_during_query(
 ) -> None:
     database = client.app.state.database
 
-    def replace_generation() -> None:
-        database.search_catalog_generation.update_one(
-            {"_id": "catalog"},
-            {
-                "$set": {
-                    "generation": "next-generation",
-                    "indexUid": "catalog-generation-next",
-                }
-            },
-        )
-
-    _use(client, RecordingCatalog(callback=replace_generation))
+    _use(client, RecordingCatalog(callback=lambda: _replace_generation(database)))
 
     response = client.get("/api/search")
 
-    assert (response.status_code, response.json()["detail"]) == (
-        503,
-        "检索目录正在同步",
-    )
+    assert (response.status_code, response.json()["detail"]) == (503, "检索目录正在同步")

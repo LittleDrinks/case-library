@@ -196,28 +196,19 @@ class ReadyReader:
         return CatalogHealth(True, "catalogId", "test-generation", "test-epoch")
 
 
+def _configured_database():
+    database = mongomock.MongoClient()["configured_search"]
+    database.client.admin.command = lambda _name: {"isWritablePrimary": True}
+    database.search_catalog_generation.insert_one({"_id": "catalog", "generation": "test-generation", "indexUid": "catalog-generation-test", "indexEpoch": "test-epoch", "retiredIndexUids": []})
+    database.search_worker_state.insert_one({"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)})
+    return database
+
+
 def configured_search_app(tmp_path, monkeypatch):
     key_file = tmp_path / "meili-key"
     key_file.write_text("test-key", encoding="utf-8")
     monkeypatch.setattr("app.main.create_reader", lambda _url, _file: ReadyReader())
-    database = mongomock.MongoClient()["configured_search"]
-    database.client.admin.command = lambda _name: {"isWritablePrimary": True}
-    database.search_catalog_generation.insert_one(
-        {
-            "_id": "catalog",
-            "generation": "test-generation",
-            "indexUid": "catalog-generation-test",
-            "indexEpoch": "test-epoch",
-            "retiredIndexUids": [],
-        }
-    )
-    database.search_worker_state.insert_one(
-        {
-            "_id": "catalog",
-            "worker": "test-worker",
-            "updatedAt": datetime.now(UTC),
-        }
-    )
+    database = _configured_database()
     settings = Settings(
         app_environment="test",
         session_cookie_secure=False,

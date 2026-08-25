@@ -181,10 +181,7 @@ def test_user_can_persist_automatic_mode(client: TestClient, tmp_path) -> None:
     assert client.get("/api/ai/settings").json() == response.json()
 
 
-def test_custom_settings_encrypt_key_and_never_return_it(
-    client: TestClient,
-    tmp_path,
-) -> None:
+def test_custom_settings_encrypt_key_and_never_return_it(client: TestClient, tmp_path) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
 
@@ -203,12 +200,13 @@ def test_custom_settings_encrypt_key_and_never_return_it(
     assert_custom_record(client)
 
 
-def test_custom_chat_uses_custom_model_and_blank_key_keeps_secret(
-    client: TestClient,
-    tmp_path,
-) -> None:
+def configure_custom_environment(client, tmp_path) -> None:
     configure_platform(client, tmp_path)
     configure_app_secret(client, tmp_path)
+
+
+def test_custom_chat_uses_custom_model_and_blank_key_keeps_secret(client: TestClient, tmp_path) -> None:
+    configure_custom_environment(client, tmp_path)
     auth = login(client)
     assert save_custom(client, auth["csrfToken"]).status_code == 200
     before = client.app.state.database.ai_user_settings.find_one()
@@ -249,10 +247,7 @@ def test_custom_url_change_requires_new_key_and_keeps_record(
     assert client.app.state.database.ai_user_settings.find_one() == before
 
 
-def test_custom_url_change_with_new_key_replaces_encrypted_key(
-    client: TestClient,
-    tmp_path,
-) -> None:
+def test_custom_url_change_with_new_key_replaces_encrypted_key(client: TestClient, tmp_path) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
     assert save_custom(client, auth["csrfToken"]).status_code == 200

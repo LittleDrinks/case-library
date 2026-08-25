@@ -98,20 +98,21 @@ def _load(client, uid: str) -> None:
         wait_task(client, index.add_documents(rows[start : start + 500]))
 
 
+def _meili_client():
+    import meilisearch
+    key_file = os.environ["MEILI_CONTRACT_KEY_FILE"]
+    key = Path(key_file).read_text(encoding="utf-8").strip()
+    return meilisearch.Client(os.environ["MEILI_CONTRACT_URL"], key), key_file
+
+
 @pytest.fixture(scope="module")
 def catalog():
-    import meilisearch
-
+    client, key_file = _meili_client()
     url = os.environ["MEILI_CONTRACT_URL"]
-    key = (
-        Path(os.environ["MEILI_CONTRACT_KEY_FILE"]).read_text(encoding="utf-8").strip()
-    )
-    client = meilisearch.Client(url, key)
     uid = f"catalog_contract_{uuid.uuid4().hex}"
     _load(client, uid)
 
     try:
-        key_file = os.environ["MEILI_CONTRACT_KEY_FILE"]
         yield (
             MeilisearchCatalog(create_reader(url, key_file)),
             uid,
@@ -140,76 +141,30 @@ def test_real_catalog_walks_12480_acl_results_in_global_date_order(catalog) -> N
     catalog, uid, epoch = catalog
     ids, offset = [], 0
     while True:
-        page = catalog.search(
-            _request(
-                uid,
-                epoch,
-                offset=offset,
-                include_metadata=offset == 0,
-            )
-        )
+        page = catalog.search(_request(uid, epoch, offset=offset, include_metadata=offset == 0))
         ids.extend(item["id"] for item in page.items)
         if not page.has_next:
             break
         offset += 100
-    assert (len(ids), len(set(ids)), ids[:3]) == (
-        12_480,
-        12_480,
-        ["shared-id", "m-00001", "m-00002"],
-    )
+    assert (len(ids), len(set(ids)), ids[:3]) == (12_480, 12_480, ["shared-id", "m-00001", "m-00002"])
 
 
 def test_real_catalog_redacts_denied_material_and_self_excludes_facets(catalog) -> None:
     catalog, uid, epoch = catalog
     page = catalog.search(_request(uid, epoch, page_size=3))
     assert page.items[0]["contentAvailable"] is True
-    assert page.items[1] == {
-        "id": "m-00001",
-        "kind": "material",
-        "title": "科学家精神思政素材 00001",
-        "accessLevel": "campus",
-        "contentAvailable": False,
-        "hasFile": False,
-        "score": 1,
-    }
-    filtered = catalog.search(
-        _request(
-            uid,
-            epoch,
-            filters={"accessLevel": ("public",)},
-        )
-    )
-    levels = {
-        row["value"]: row["count"] for row in filtered.metadata.facets["accessLevel"]
-    }
-    assert (filtered.metadata.total, levels) == (
-        4_160,
-        {"public": 4_160, "campus": 4_160, "private": 4_160},
-    )
+    assert page.items[1] == {"id": "m-00001", "kind": "material", "title": "科学家精神思政素材 00001", "accessLevel": "campus", "contentAvailable": False, "hasFile": False, "score": 1}
+    filtered = catalog.search(_request(uid, epoch, filters={"accessLevel": ("public",)}))
+    levels = {row["value"]: row["count"] for row in filtered.metadata.facets["accessLevel"]}
+    assert (filtered.metadata.total, levels) == (4_160, {"public": 4_160, "campus": 4_160, "private": 4_160})
 
 
 def test_real_catalog_handles_natural_questions_and_knowledge_levels(catalog) -> None:
     catalog, uid, epoch = catalog
-    question = catalog.search(
-        _request(
-            uid,
-            epoch,
-            q="如何将科学家精神融入思政课堂",
-            kind="all",
-            page_size=20,
-        )
-    )
+    question = catalog.search(_request(uid, epoch, q="如何将科学家精神融入思政课堂", kind="all", page_size=20))
     assert "spirit-case" in {item["id"] for item in question.items}
     sources = catalog.search(_request(uid, epoch, kind="knowledge", page_size=20))
-    sections = catalog.search(
-        _request(
-            uid,
-            epoch,
-            q="生成式人工智能",
-            kind="knowledge",
-            page_size=20,
-        )
-    )
+    sections = catalog.search(_request(uid, epoch, q="生成式人工智能", kind="knowledge", page_size=20))
     assert [item["id"] for item in sources.items] == ["source-1"]
     assert [item["id"] for item in sections.items] == ["section-1"]
 

@@ -115,25 +115,19 @@ class PassthroughSession:
 
 def _test_database():
     database = mongomock.MongoClient()["case_library_test"]
-    database.search_catalog_generation.insert_one(
-        {
-            "_id": "catalog",
-            "generation": "test-generation",
-            "indexUid": "catalog-generation-test",
-            "indexEpoch": "test-epoch",
-            "retiredIndexUids": [],
-        }
-    )
-    database.search_worker_state.insert_one(
-        {
-            "_id": "catalog",
-            "worker": "test-worker",
-            "updatedAt": datetime.now(UTC),
-        }
-    )
+    _seed_catalog_generation(database)
+    _seed_worker_state(database)
     database.client.admin.command = lambda _name: {"ok": 1, "isWritablePrimary": True}
     database.client.start_session = lambda: PassthroughSession()
     return database
+
+
+def _seed_catalog_generation(database) -> None:
+    database.search_catalog_generation.insert_one({"_id": "catalog", "generation": "test-generation", "indexUid": "catalog-generation-test", "indexEpoch": "test-epoch", "retiredIndexUids": []})
+
+
+def _seed_worker_state(database) -> None:
+    database.search_worker_state.insert_one({"_id": "catalog", "worker": "test-worker", "updatedAt": datetime.now(UTC)})
 
 
 @pytest.fixture(autouse=True)

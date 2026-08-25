@@ -60,45 +60,24 @@ def transition(opener, csrf: str, case: dict, command: str, **extra) -> dict:
 
 def create_reviewing_case(owner, csrf: str) -> dict:
     marker = f"annotation-e2e-{uuid.uuid4().hex}"
-    document = {
-        "type": "doc",
-        "content": [
-            {
-                "type": "heading",
-                "attrs": {"level": 1},
-                "content": [{"type": "text", "text": "一、教学说明"}],
-            },
-            {"type": "paragraph", "content": [{"type": "text", "text": marker}]},
-        ],
-    }
-    status, case = request(
-        owner,
-        "POST",
-        "/api/cases",
-        {
-            "title": marker,
-            "document": document,
-        },
-        csrf,
-    )
+    status, case = request(owner, "POST", "/api/cases", {"title": marker, "document": _document(marker)}, csrf)
     assert status == 200
     return transition(owner, csrf, case, "submit")
 
 
+def _document(marker: str) -> dict:
+    heading = {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "一、教学说明"}]}
+    paragraph = {"type": "paragraph", "content": [{"type": "text", "text": marker}]}
+    return {"type": "doc", "content": [heading, paragraph]}
+
+
+def _annotation_body(submitted: dict) -> dict:
+    return {"quote": submitted["case"]["title"], "section": "一、教学说明", "content": "请补充可观察的评价标准。", "source": "admin"}
+
+
 def annotate_and_reject(admin, csrf: str, submitted: dict) -> dict:
     case = transition(admin, csrf, submitted["case"], "start")["case"]
-    status, annotation = request(
-        admin,
-        "POST",
-        f"/api/cases/{case['id']}/annotations",
-        {
-            "quote": submitted["case"]["title"],
-            "section": "一、教学说明",
-            "content": "请补充可观察的评价标准。",
-            "source": "admin",
-        },
-        csrf,
-    )
+    status, annotation = request(admin, "POST", f"/api/cases/{case['id']}/annotations", _annotation_body(submitted), csrf)
     assert status == 201
     returned = transition(
         admin,

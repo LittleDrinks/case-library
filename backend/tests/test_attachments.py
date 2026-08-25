@@ -85,26 +85,15 @@ def test_author_can_upload_and_list_a_public_attachment(client: TestClient) -> N
     assert client.get("/api/cases/c-draft-1/attachments").json() == [attachment]
 
 
-def test_submission_freezes_extracted_attachment_text_without_exposing_it(
-    client: TestClient,
-) -> None:
+def test_submission_freezes_extracted_attachment_text_without_exposing_it(client: TestClient) -> None:
     auth = _login(client, "user", "user123")
     headers = {"X-CSRF-Token": auth["csrfToken"]}
-    attachment = _upload_attachment(
-        client,
-        headers,
-        "检索附件.txt",
-        "附件唯一雪松词".encode(),
-    )
+    attachment = _upload_attachment(client, headers, "检索附件.txt", "附件唯一雪松词".encode())
     assert "searchText" not in attachment
     database = client.app.state.database
     stored = database.attachments.find_one({"id": attachment["id"]})
     assert stored["searchText"] == "附件唯一雪松词"
-    submitted = client.post(
-        "/api/cases/c-draft-1/lifecycle",
-        headers=headers,
-        json={"command": "submit", "revision": _revision(client)},
-    ).json()
+    submitted = client.post("/api/cases/c-draft-1/lifecycle", headers=headers, json={"command": "submit", "revision": _revision(client)}).json()
     version = database.case_versions.find_one({"id": submitted["version"]["id"]})
     assert version["attachments"][0]["searchText"] == "附件唯一雪松词"
 
@@ -223,30 +212,13 @@ def test_delete_commits_when_orphan_blob_cleanup_is_temporarily_unavailable(
 
 def test_admin_can_read_but_cannot_mutate_an_author_draft(client: TestClient) -> None:
     author = _login(client, "user", "user123")
-    created = client.post(
-        "/api/cases/c-draft-1/attachments",
-        headers={"X-CSRF-Token": author["csrfToken"]},
-        data={"accessLevel": "private", "revision": _revision(client)},
-        files={"file": ("review.txt", b"review", "text/plain")},
-    ).json()
+    created = _upload_attachment(client, {"X-CSRF-Token": author["csrfToken"]}, "review.txt", b"review")
     admin = _login(client, "admin", "admin123")
     headers = {"X-CSRF-Token": admin["csrfToken"]}
 
     assert client.get("/api/cases/c-draft-1/attachments").status_code == 200
-    assert (
-        client.get(
-            f"/api/cases/c-draft-1/attachments/{created['id']}/content"
-        ).status_code
-        == 200
-    )
-    assert (
-        client.delete(
-            f"/api/cases/c-draft-1/attachments/{created['id']}",
-            headers=headers,
-            params={"revision": _revision(client)},
-        ).status_code
-        == 403
-    )
+    assert client.get(f"/api/cases/c-draft-1/attachments/{created['id']}/content").status_code == 200
+    assert client.delete(f"/api/cases/c-draft-1/attachments/{created['id']}", headers=headers, params={"revision": _revision(client)}).status_code == 403
 
 
 def test_upload_rejects_a_file_above_128_mib(

@@ -121,8 +121,14 @@ def _case_documents(version: dict, publication: dict) -> list[dict]:
 
 
 def _knowledge_document(record: dict, level: str) -> dict:
+    document = _knowledge_fields(record, level)
+    document["searchableText"] = _knowledge_searchable(document, record, level)
+    return document
+
+
+def _knowledge_fields(record: dict, level: str) -> dict:
     fields = SOURCE_FIELDS if level == "source" else SECTION_FIELDS
-    document = {
+    return {
         "catalogId": f"knowledge-{level}-{record['id']}",
         "id": record["id"],
         "kind": "knowledge",
@@ -131,15 +137,17 @@ def _knowledge_document(record: dict, level: str) -> dict:
         "title": record["title"],
         **{field: record.get(field) for field in fields},
     }
+
+
+def _knowledge_searchable(document, record, level) -> str:
     content = record.get("content") if level == "section" else record.get("edition")
-    document["searchableText"] = _text(
+    return _text(
         document["title"],
         document.get("summary"),
         document.get("chapter"),
         document.get("unit"),
         content,
     )
-    return document
 
 
 def _material_document(record: dict) -> dict:

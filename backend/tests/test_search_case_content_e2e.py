@@ -113,32 +113,11 @@ def _hidden_version() -> dict:
 
 
 def _users() -> list[dict]:
-    return [
-        {
-            "id": "u-owner",
-            "username": "owner",
-            "role": "user",
-            "status": "active",
-            "token_version": 0,
-            "must_change_password": False,
-        },
-        {
-            "id": "u-other",
-            "username": "other",
-            "role": "user",
-            "status": "active",
-            "token_version": 0,
-            "must_change_password": False,
-        },
-        {
-            "id": "u-admin",
-            "username": "admin",
-            "role": "admin",
-            "status": "active",
-            "token_version": 0,
-            "must_change_password": False,
-        },
-    ]
+    return [_user("owner", "owner", "user"), _user("other", "other", "user"), _user("admin", "admin", "admin")]
+
+
+def _user(user_id: str, username: str, role: str) -> dict:
+    return {"id": f"u-{user_id}", "username": username, "role": role, "status": "active", "token_version": 0, "must_change_password": False}
 
 
 def _meili():
@@ -150,19 +129,19 @@ def _meili():
     return meilisearch.Client(os.environ["MEILI_CONTRACT_URL"], key)
 
 
+def _search_setup():
+    return _seed_database(), _meili(), f"case_content_{uuid.uuid4().hex}"
+
+
 @pytest.fixture(scope="module")
 def case_search(tmp_path_factory):
-    database, client = _seed_database(), _meili()
-    uid = f"case_content_{uuid.uuid4().hex}"
+    database, client, uid = _search_setup()
     secret = tmp_path_factory.mktemp("case-search") / "app-secret"
     secret.write_text("case-search-secret", encoding="utf-8")
     settings = Settings(
         app_environment="test", session_cookie_secure=False, app_secret_file=str(secret)
     )
-    reader = create_reader(
-        os.environ["MEILI_CONTRACT_URL"],
-        os.environ["MEILI_CONTRACT_KEY_FILE"],
-    )
+    reader = create_reader(os.environ["MEILI_CONTRACT_URL"], os.environ["MEILI_CONTRACT_KEY_FILE"])
     catalog = MeilisearchCatalog(reader)
     state = ReadyCatalogState(database)
     app = create_app(database, settings, MemoryBlobStore(), catalog, state)

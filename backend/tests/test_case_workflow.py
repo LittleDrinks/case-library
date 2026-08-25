@@ -229,13 +229,7 @@ def test_admin_reopens_a_hidden_case_without_exposing_the_working_copy(
     assert reopened.json()["case"]["workflowStatus"] == "draft"
     assert reopened.json()["case"]["publicationStatus"] == "hidden"
     assert reopened.json()["case"]["submittedVersionId"] is None
-    retry = _transition(
-        client,
-        approved["case"]["id"],
-        admin["csrfToken"],
-        "restore",
-        reopened.json()["case"],
-    )
+    retry = _transition(client, approved["case"]["id"], admin["csrfToken"], "restore", reopened.json()["case"])
     assert retry.status_code == 409
 
 

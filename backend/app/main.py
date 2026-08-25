@@ -72,6 +72,10 @@ def _lifespan(database, settings, mongo_client, blob_store, catalog):
     return lifespan
 
 
+def _database_and_client(database, settings):
+    return (None, database) if database is not None else connect(settings)
+
+
 def create_app(
     database: Database | None = None,
     settings: Settings | None = None,
@@ -80,9 +84,7 @@ def create_app(
     catalog_state=None,
 ) -> FastAPI:
     active_settings = settings or Settings.from_environment()
-    client, active_database = (
-        (None, database) if database is not None else connect(active_settings)
-    )
+    client, active_database = _database_and_client(database, active_settings)
     lifespan = _lifespan(
         active_database,
         active_settings,

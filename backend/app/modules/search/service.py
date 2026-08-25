@@ -92,40 +92,30 @@ def _response(query, kind, page_size, state, page, scope, secret_path) -> dict:
         "kind": kind,
         "page": state.page,
         "pageSize": page_size,
-        "total": metadata.total if metadata else None,
-        "counts": metadata.counts if metadata else None,
-        "facets": metadata.facets if metadata else None,
-        "metadataIncluded": metadata is not None,
         "items": page.items,
-        "nextCursor": _cursor(
-            page.has_next,
-            state.page + 1,
-            state.offset + page_size,
-            scope,
-            secret_path,
-        ),
-        "previousCursor": _cursor(
-            page.has_previous,
-            state.page - 1,
-            max(0, state.offset - page_size),
-            scope,
-            secret_path,
-        ),
+        **_metadata_response(metadata),
+        **_cursor_response(page, state, page_size, scope, secret_path),
     }
 
 
-def search_catalog(
-    database,
-    catalog,
-    catalog_state,
-    user,
-    query,
-    kind,
-    cursor,
-    page_size,
-    filters,
-    secret_path,
-) -> dict:
+def _metadata_response(metadata) -> dict:
+    return {"total": metadata.total if metadata else None, "counts": metadata.counts if metadata else None, "facets": metadata.facets if metadata else None, "metadataIncluded": metadata is not None}
+
+
+def _cursor_response(page, state, page_size, scope, secret_path) -> dict:
+    return {
+        "nextCursor": _cursor(page.has_next, state.page + 1, state.offset + page_size, scope, secret_path),
+        "previousCursor": _cursor(page.has_previous, state.page - 1, max(0, state.offset - page_size), scope, secret_path),
+    }
+
+
+def _request_factory(query, kind, target, page_size, state, filters, user, mounted):
+    def create_request(revoked):
+        return _request(query, kind, target, page_size, state, filters, user, mounted, revoked)
+    return create_request
+
+
+def search_catalog(database, catalog, catalog_state, user, query, kind, cursor, page_size, filters, secret_path) -> dict:
     before = catalog_state.read()
     active, target = _clean_filters(filters or {}), before.target
     scope_filters = {**active, "mountedInCaseId": filters.get("mountedInCaseId")}
@@ -133,18 +123,6 @@ def search_catalog(
     cursor_state = decode_cursor(cursor, scope, secret_path)
     mounted = _mount_filter(database, user, filters.get("mountedInCaseId"))
 
-    def create_request(revoked):
-        return _request(
-            query,
-            kind,
-            target,
-            page_size,
-            cursor_state,
-            active,
-            user,
-            mounted,
-            revoked,
-        )
-
+    create_request = _request_factory(query, kind, target, page_size, cursor_state, active, user, mounted)
     page = _stable_search(catalog_state, catalog, create_request, before)
     return _response(query, kind, page_size, cursor_state, page, scope, secret_path)

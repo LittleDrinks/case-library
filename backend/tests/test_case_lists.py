@@ -66,13 +66,10 @@ def test_admin_scope_lists_all_cases_for_admin_only(client: TestClient) -> None:
     login(client)
     assert client.get("/api/cases?scope=admin").status_code == 403
     client.cookies.clear()
-    response = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "admin123"}
-    )
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
     assert response.status_code == 200
 
     rows = client.get("/api/cases?scope=admin")
-
     assert rows.status_code == 200
     assert {row["id"] for row in rows.json()} == {
         "c-02",

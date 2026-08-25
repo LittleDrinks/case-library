@@ -64,6 +64,11 @@ def _outbox_row(client: TestClient, logical_key: str) -> dict:
     return client.app.state.database.search_outbox.find_one({"_id": logical_key})
 
 
+def _assert_approved_material(row: dict, item: dict, title: str) -> None:
+    fields = ("id", "title", "filename", "mediaType", "size", "accessLevel")
+    assert [row[field] for field in fields] == [item["candidateId"], title, "待审文件.txt", "text/plain", 14, "public"]
+
+
 def test_admin_approves_candidate_and_records_catalog_change(
     client: TestClient,
 ) -> None:
@@ -77,24 +82,7 @@ def test_admin_approves_candidate_and_records_catalog_change(
     assert response.json()["status"] == "approved"
     assert response.json()["materialId"] == item["candidateId"]
     row = client.app.state.database.materials.find_one({"id": item["candidateId"]})
-    assert [
-        row[field]
-        for field in (
-            "id",
-            "title",
-            "filename",
-            "mediaType",
-            "size",
-            "accessLevel",
-        )
-    ] == [
-        item["candidateId"],
-        body["title"],
-        "待审文件.txt",
-        "text/plain",
-        14,
-        "public",
-    ]
+    _assert_approved_material(row, item, body["title"])
     event = _outbox_row(client, f"material:{item['candidateId']}")
     assert event["sequence"] > event["appliedSequence"]
 

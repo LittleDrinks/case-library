@@ -66,27 +66,29 @@ def _consume_rate(database, scope: str, user_id: str, limit: int, detail: str) -
         raise AIQuotaError(detail)
 
 
-def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
-    query = {
+def _claim_query(quota_id: str, now: datetime) -> dict:
+    return {
         "_id": quota_id,
         "$or": [{"expiresAt": {"$lte": now}}, {"token": {"$exists": False}}],
     }
-    update = {
+
+
+def _claim_update(token: str, now: datetime) -> dict:
+    return {
         "$set": {
             "token": token,
             "expiresAt": now + timedelta(seconds=LEASE_SECONDS),
         }
     }
+
+
+def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
     try:
-        return (
-            database.ai_usage.find_one_and_update(
-                query,
-                update,
-                upsert=True,
-                return_document=ReturnDocument.AFTER,
-            )
-            is not None
+        row = database.ai_usage.find_one_and_update(
+            _claim_query(quota_id, now), _claim_update(token, now), upsert=True,
+            return_document=ReturnDocument.AFTER,
         )
+        return row is not None
     except DuplicateKeyError:
         return False
 

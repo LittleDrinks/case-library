@@ -21,28 +21,16 @@ def lifecycle(client: TestClient, csrf: str, case_id: str, body: dict) -> dict:
     return response.json()
 
 
+def command(case: dict, name: str, **extra) -> dict:
+    return {"command": name, "revision": case["revision"], **extra}
+
+
 def reviewing_case(client: TestClient) -> tuple[dict, dict, dict]:
     author = login(client, "user", "user123")
     case = client.get("/api/cases/c-draft-1").json()
-    submitted = lifecycle(
-        client,
-        author["csrfToken"],
-        case["id"],
-        {
-            "command": "submit",
-            "revision": case["revision"],
-        },
-    )
+    submitted = lifecycle(client, author["csrfToken"], case["id"], command(case, "submit"))
     admin = login(client, "admin", "admin123")
-    started = lifecycle(
-        client,
-        admin["csrfToken"],
-        case["id"],
-        {
-            "command": "start",
-            "revision": submitted["case"]["revision"],
-        },
-    )
+    started = lifecycle(client, admin["csrfToken"], case["id"], command(submitted["case"], "start"))
     return author, admin, started
 
 
@@ -209,58 +197,17 @@ def test_admin_cannot_reject_without_current_version_annotation(
 def publish_then_reopen(client: TestClient) -> tuple[dict, dict, dict, dict]:
     author, admin, first_review = reviewing_case(client)
     case = first_review["case"]
-    approved = lifecycle(
-        client,
-        admin["csrfToken"],
-        case["id"],
-        {
-            "command": "approve",
-            "revision": case["revision"],
-            "submittedVersionId": case["submittedVersionId"],
-        },
-    )
-    hidden = lifecycle(
-        client,
-        admin["csrfToken"],
-        case["id"],
-        {
-            "command": "hide",
-            "revision": approved["case"]["revision"],
-        },
-    )
-    reopened = lifecycle(
-        client,
-        admin["csrfToken"],
-        case["id"],
-        {
-            "command": "reopen",
-            "revision": hidden["case"]["revision"],
-        },
-    )
+    approved = lifecycle(client, admin["csrfToken"], case["id"], command(case, "approve", submittedVersionId=case["submittedVersionId"]))
+    hidden = lifecycle(client, admin["csrfToken"], case["id"], command(approved["case"], "hide"))
+    reopened = lifecycle(client, admin["csrfToken"], case["id"], command(hidden["case"], "reopen"))
     return author, admin, approved, reopened
 
 
 def start_second_review(client: TestClient, case: dict) -> tuple[dict, dict]:
     author = login(client, "user", "user123")
-    submitted = lifecycle(
-        client,
-        author["csrfToken"],
-        case["id"],
-        {
-            "command": "submit",
-            "revision": case["revision"],
-        },
-    )
+    submitted = lifecycle(client, author["csrfToken"], case["id"], command(case, "submit"))
     admin = login(client, "admin", "admin123")
-    started = lifecycle(
-        client,
-        admin["csrfToken"],
-        case["id"],
-        {
-            "command": "start",
-            "revision": submitted["case"]["revision"],
-        },
-    )
+    started = lifecycle(client, admin["csrfToken"], case["id"], command(submitted["case"], "start"))
     return admin, started
 
 

@@ -328,17 +328,7 @@ def test_archive_budget_is_shared_across_the_request(client: TestClient) -> None
 
 def test_multiple_archives_keep_distinct_entry_contents(client: TestClient) -> None:
     auth = login(client, "admin", "admin123")
-    files = [
-        (
-            "files",
-            ("first.zip", zip_bytes([("first.txt", b"alpha")]), "application/zip"),
-        ),
-        (
-            "files",
-            ("second.zip", zip_bytes([("second.txt", b"bravo")]), "application/zip"),
-        ),
-    ]
-
+    files = [("files", ("first.zip", zip_bytes([("first.txt", b"alpha")]), "application/zip")), ("files", ("second.zip", zip_bytes([("second.txt", b"bravo")]), "application/zip"))]
     response = submit_import(client, auth, files)
 
     items = response.json()["items"]

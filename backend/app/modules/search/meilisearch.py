@@ -140,27 +140,27 @@ class CatalogRequest:
     include_metadata: bool = True
 
     def __post_init__(self) -> None:
-        allowed = {
-            "typeName",
-            "audience",
-            "authority",
-            "materialType",
-            "tag",
-            "publishedWithin",
-            "accessLevel",
-        }
-        if self.kind not in {"all", *KINDS}:
-            raise ValueError("invalid catalog kind")
-        if (
-            not self.generation.strip()
-            or not self.index_uid.strip()
-            or not self.index_epoch.strip()
-        ):
-            raise ValueError("catalog target is required")
-        if not 1 <= self.page_size <= 100 or self.offset < 0:
-            raise ValueError("invalid catalog pagination")
-        if set(self.filters) - allowed:
-            raise ValueError("invalid catalog filter")
+        _validate_request_target(self)
+        _validate_request_page(self)
+        _validate_request_filters(self.filters)
+
+
+def _validate_request_target(request: CatalogRequest) -> None:
+    if request.kind not in {"all", *KINDS}:
+        raise ValueError("invalid catalog kind")
+    if not all((request.generation.strip(), request.index_uid.strip(), request.index_epoch.strip())):
+        raise ValueError("catalog target is required")
+
+
+def _validate_request_page(request: CatalogRequest) -> None:
+    if not 1 <= request.page_size <= 100 or request.offset < 0:
+        raise ValueError("invalid catalog pagination")
+
+
+def _validate_request_filters(filters: Mapping[str, object]) -> None:
+    allowed = {"typeName", "audience", "authority", "materialType", "tag", "publishedWithin", "accessLevel"}
+    if set(filters) - allowed:
+        raise ValueError("invalid catalog filter")
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,27 +365,41 @@ def _payload(index_uid: str, query: str, filter_value: str, limit: int = 0) -> d
 
 
 def _count_plans(request: CatalogRequest, index_uid: str) -> list[_Plan]:
-    knowledge = _knowledge_level(request)
+    return [_full_count_plan(request, index_uid), _restricted_count_plan(request, index_uid)]
+
+
+def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
+    full_filter = _or(_count_case_branch(request), _count_material_branch(request), _knowledge_level(request))
+    payload = _payload(index_uid, request.q, full_filter)
+    payload["facets"] = ["kind"]
+    return _Plan("count-full", payload)
+
+
+def _count_case_branch(request: CatalogRequest) -> str:
     case = _and(
         'kind = "case"', _case_access(request.principal), _excluded(request, "case")
     )
-    material = _and(
+    return case
+
+
+def _count_material_branch(request: CatalogRequest) -> str:
+    return _and(
         'docClass = "material-full"',
         _allowed(request.principal),
         _excluded(request, "material"),
     )
-    full_filter = _or(case, material, knowledge)
-    full = _payload(index_uid, request.q, full_filter)
-    full["facets"] = ["kind"]
+
+
+def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
     denied = _and(
         'docClass = "material-restricted"',
         _denied(request.principal),
         "publicReferenceCount > 0",
         _excluded(request, "material"),
     )
-    restricted = _payload(index_uid, request.q, denied)
-    restricted["attributesToSearchOn"] = ["title"]
-    return [_Plan("count-full", full), _Plan("count-restricted", restricted)]
+    payload = _payload(index_uid, request.q, denied)
+    payload["attributesToSearchOn"] = ["title"]
+    return _Plan("count-restricted", payload)
 
 
 def _facet_payload(

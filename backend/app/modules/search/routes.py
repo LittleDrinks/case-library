@@ -19,14 +19,7 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("")
-def search(
-    query: Annotated[SearchQuery, Query()],
-    database=Depends(get_database),
-    catalog=Depends(get_search_catalog),
-    catalog_state=Depends(get_catalog_state),
-    settings: Settings = Depends(get_settings),
-    user: dict | None = Depends(optional_user),
-):
+def search(query: Annotated[SearchQuery, Query()], database=Depends(get_database), catalog=Depends(get_search_catalog), catalog_state=Depends(get_catalog_state), settings: Settings = Depends(get_settings), user: dict | None = Depends(optional_user)):
     return search_catalog(
         database,
         catalog,

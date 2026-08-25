@@ -133,21 +133,7 @@ def test_concurrent_searches_reach_the_catalog_together() -> None:
 
 
 def _assert_full_page(page) -> None:
-    expected = [
-        {
-            "id": "m-1",
-            "kind": "material",
-            "title": "科学家精神",
-            "summary": "素材摘要",
-            "accessLevel": "campus",
-            "authority": "original",
-            "materialType": "文档",
-            "tags": ["思政"],
-            "hasFile": True,
-            "contentAvailable": True,
-            "score": 12,
-        }
-    ]
+    expected = [{"id": "m-1", "kind": "material", "title": "科学家精神", "summary": "素材摘要", "accessLevel": "campus", "authority": "original", "materialType": "文档", "tags": ["思政"], "hasFile": True, "contentAvailable": True, "score": 12}]
     assert page.items == expected
     metadata = page.metadata
     assert metadata is not None
@@ -291,19 +277,7 @@ def test_health_rejects_an_unconfirmed_index_epoch() -> None:
 
 def test_revocation_excludes_only_the_matching_catalog_kind() -> None:
     client = FakeReader(_result(), [])
-    request = CatalogRequest(
-        q="",
-        kind="all",
-        generation="test-generation",
-        index_uid="catalog-generation-test",
-        index_epoch="2026-08-14T00:00:00Z",
-        page_size=20,
-        offset=0,
-        filters={},
-        principal=Principal(None, "anonymous"),
-        include_metadata=False,
-        excluded_keys=(CatalogKey("case", "shared-id"),),
-    )
+    request = CatalogRequest(q="", kind="all", generation="test-generation", index_uid="catalog-generation-test", index_epoch="2026-08-14T00:00:00Z", page_size=20, offset=0, filters={}, principal=Principal(None, "anonymous"), include_metadata=False, excluded_keys=(CatalogKey("case", "shared-id"),))
 
     MeilisearchCatalog(client).search(request)
 
@@ -346,18 +320,7 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
 )
 def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
     client = FakeReader(_result(), [])
-    request = CatalogRequest(
-        q="附件",
-        kind="case",
-        generation="test-generation",
-        index_uid="catalog-generation-test",
-        index_epoch="2026-08-14T00:00:00Z",
-        page_size=20,
-        offset=0,
-        filters={},
-        principal=principal,
-        include_metadata=False,
-    )
+    request = CatalogRequest(q="附件", kind="case", generation="test-generation", index_uid="catalog-generation-test", index_epoch="2026-08-14T00:00:00Z", page_size=20, offset=0, filters={}, principal=principal, include_metadata=False)
 
     MeilisearchCatalog(client).search(request)
 

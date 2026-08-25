@@ -27,21 +27,7 @@ def login(username: str, password: str) -> tuple[httpx.Client, str]:
 def create_material(database) -> dict:
     token = uuid.uuid4().hex
     now = datetime.now(UTC).isoformat()
-    material = {
-        "id": f"m-reference-{token}",
-        "title": f"公开引用计数-{token}",
-        "summary": "校内素材引用计数端到端验证",
-        "source": "上海大学",
-        "tags": ["引用计数"],
-        "materialType": "政策文件",
-        "authority": "original",
-        "accessLevel": "campus",
-        "status": "active",
-        "createdBy": "u-admin-demo",
-        "createdAt": now,
-        "publishedAt": now,
-        "publicReferenceCount": 0,
-    }
+    material = {"id": f"m-reference-{token}", "title": f"公开引用计数-{token}", "summary": "校内素材引用计数端到端验证", "source": "上海大学", "tags": ["引用计数"], "materialType": "政策文件", "authority": "original", "accessLevel": "campus", "status": "active", "createdBy": "u-admin-demo", "createdAt": now, "publishedAt": now, "publicReferenceCount": 0}
     database.materials.insert_one(material)
     return material
 
