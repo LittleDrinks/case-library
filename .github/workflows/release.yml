@@ -5,6 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: read
   contents: write
   packages: write
 
@@ -27,7 +28,20 @@ jobs:
 
   verify:
     needs: validate-tag
-    uses: ./.github/workflows/ci.yml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require successful CI for v2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin v2:refs/remotes/origin/v2 --depth=1
+          test "$RELEASE_SHA" = "$(git rev-parse origin/v2)"
+          ci_runs="$(gh api "repos/$RELEASE_REPOSITORY/actions/runs?event=push&head_sha=$RELEASE_SHA&status=completed&per_page=100" --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "v2" and .conclusion == "success")] | length')"
+          test "$ci_runs" -gt 0
 
   publish:
     needs: [validate-tag, verify]
@@ -44,10 +58,12 @@ jobs:
       - id: images
         run: |
           repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          echo "app=ghcr.io/$repository-app" >> "$GITHUB_OUTPUT"
-          echo "frontend=ghcr.io/$repository-frontend" >> "$GITHUB_OUTPUT"
-          echo "mongo_init=ghcr.io/$repository-mongo-init" >> "$GITHUB_OUTPUT"
-          echo "meilisearch=ghcr.io/$repository-meilisearch" >> "$GITHUB_OUTPUT"
+          {
+            echo "app=ghcr.io/$repository-app"
+            echo "frontend=ghcr.io/$repository-frontend"
+            echo "mongo_init=ghcr.io/$repository-mongo-init"
+            echo "meilisearch=ghcr.io/$repository-meilisearch"
+          } >> "$GITHUB_OUTPUT"
       - id: app
         uses: docker/build-push-action@v7
         with:

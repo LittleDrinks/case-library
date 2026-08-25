@@ -17,8 +17,30 @@ function upload(name, content) {
 }
 
 async function submitFiles(page, files) {
+  const response = page.waitForResponse(importResponse);
   await page.getByLabel("选择资料").setInputFiles(files);
   await page.getByRole("button", { name: "开始导入" }).click();
+  expect((await response).ok()).toBe(true);
+}
+
+function importResponse(response) {
+  const url = new URL(response.url());
+  return url.pathname === "/api/admin/material-imports"
+    && response.request().method() === "POST";
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((ready) => { resolve = ready; });
+  return { promise, resolve };
+}
+
+async function pauseImport(page, path, started, release) {
+  await page.route(path, async (route) => {
+    started.resolve();
+    await release.promise;
+    await route.continue();
+  });
 }
 
 async function openAdminImport(page) {
@@ -151,7 +173,6 @@ async function reviewImportedCandidates(page, marker, filename, rejected, title)
     upload(filename, `真实审核与挂载-${marker}`),
     upload(rejected, `真实拒绝-${marker}`),
   ]);
-  await page.reload();
   await approveCandidate(page, filename, title);
   await rejectCandidate(page, rejected);
 }
@@ -210,6 +231,23 @@ test("普通用户不能进入资料批量导入", async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/);
 });
 
+test("导入完成后再加载审核候选", async ({ page }) => {
+  const filename = `等待导入-${Date.now()}.txt`;
+  const path = "**/api/admin/material-imports";
+  const started = deferred();
+  const release = deferred();
+  await openAdminImport(page);
+  await pauseImport(page, path, started, release);
+  try {
+    const submitted = submitFiles(page, upload(filename, `wait-${filename}`));
+    await started.promise;
+    release.resolve();
+    await submitted;
+    await page.reload();
+    await expect(page.getByRole("article", { name: `待审核：${filename}` })).toBeVisible();
+  } finally { await page.unroute(path); }
+});
+
 test("管理员审核导入候选后教师可检索并挂入草稿", async ({ page }) => {
   const marker = `${Date.now()}-${test.info().parallelIndex}`;
   const filename = `审核闭环-${marker}.txt`;
@@ -233,15 +271,15 @@ test("发布案例公开文件可匿名下载且校内文件保持受限", async
   const publicTitle = `公开原文件-${marker}`;
   const campusTitle = `校内原文件-${marker}`;
   await openAdminImport(page);
-  await importApprovedFile(page, "public", `${publicTitle}.txt`, publicTitle, "public-bytes");
-  await importApprovedFile(page, "campus", `${campusTitle}.txt`, campusTitle, "campus-bytes");
+  await importApprovedFile(page, "public", `${publicTitle}.txt`, publicTitle, `public-bytes-${marker}`);
+  await importApprovedFile(page, "campus", `${campusTitle}.txt`, campusTitle, `campus-bytes-${marker}`);
   await loginTeacher(page);
   const draft = await createDraft(page.context().request, `素材公开页-${marker}`);
   await mountApprovedMaterial(page, draft.id, publicTitle);
   await mountApprovedMaterial(page, draft.id, campusTitle);
   await publishDraft(page, draft.id);
   await page.goto(`/#/cases/${draft.id}`);
-  await expectPublicDownload(page, publicTitle, "public-bytes");
+  await expectPublicDownload(page, publicTitle, `public-bytes-${marker}`);
   await expect(page.getByText(campusTitle, { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: `下载${campusTitle}` })).toHaveCount(0);
   await expect(page.getByRole("button", { name: `${campusTitle}内容受限` })).toBeDisabled();
