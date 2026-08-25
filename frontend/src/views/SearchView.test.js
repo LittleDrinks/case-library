@@ -113,3 +113,38 @@ test("切换图谱不会重新挂载当前 AI 回答", async () => {
   expect(answerMounts).toHaveBeenCalledTimes(1);
   expect(api.search).toHaveBeenCalledTimes(1);
 });
+
+test("图谱直达结果回到列表仅激活一次 AI", async () => {
+  route.query = { q: "游标目录", kind: "material", view: "graph" };
+  const wrapper = render();
+  await flushPromises();
+  expect(answerMounts).not.toHaveBeenCalled();
+
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  await flushPromises();
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+
+  expect(answerMounts).toHaveBeenCalledTimes(1);
+  expect(api.search).toHaveBeenCalledTimes(1);
+});
+
+test("图谱中的新结果回到列表仅激活一次 AI", async () => {
+  let resolveSearch;
+  api.search.mockReset();
+  api.search.mockImplementationOnce(() => new Promise((resolve) => { resolveSearch = resolve; }));
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  resolveSearch(first);
+  await flushPromises();
+  expect(answerMounts).not.toHaveBeenCalled();
+
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  await flushPromises();
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+  await wrapper.get("button[aria-pressed='false']").trigger("click");
+
+  expect(answerMounts).toHaveBeenCalledTimes(1);
+  expect(api.search).toHaveBeenCalledTimes(1);
+});

@@ -215,16 +215,65 @@ async function expectFinishedSearchAnswer(page) {
 function watchRequests(page, path) {
   const requests = [];
   page.on("request", (request) => {
-    if (request.url().includes(path)) requests.push(request.url());
+    if (request.url().includes(path)) requests.push(request);
   });
   return requests;
 }
 
-async function expectCurrentSearchSources(page) {
+async function currentSearchResults(page) {
   const results = page.getByRole("region", { name: "检索结果" });
-  const titles = await results.getByRole("heading").allTextContents();
+  return results.getByRole("article").evaluateAll((rows) => rows.slice(0, 15).map((row) => ({
+    kind: row.querySelector("span").textContent,
+    title: row.querySelector("h2").textContent,
+  })));
+}
+
+async function expectCurrentSearchSources(page) {
+  const results = await currentSearchResults(page);
   const sources = await page.getByRole("list", { name: "AI 回答引用来源" }).getByRole("listitem").allTextContents();
-  expect(sources).toEqual(titles.slice(0, 15).map((title, index) => `〔${index + 1}〕${title}`));
+  expect(sources).toEqual(results.map(({ title }, index) => `〔${index + 1}〕${title}`));
+  return results;
+}
+
+function expectPromptSources(payload, results, stale = []) {
+  const prompt = payload.messages.map(({ content }) => content).join("\n");
+  results.forEach(({ kind, title }, index) => expect(prompt).toContain(`〔${index + 1}〕${kind}｜${title}`));
+  stale.forEach(({ title }) => expect(prompt).not.toContain(title));
+}
+
+function staleResults(previous, current) {
+  return previous.filter(({ title }) => !current.some((item) => item.title === title));
+}
+
+async function expectProviderContext(page, result) {
+  await expect(page.locator(".ai-answer-text")).toContainText(result.title);
+}
+
+async function slowFirstSearchChat(page) {
+  let slow = true;
+  const handler = async (route) => {
+    if (!slow) return route.continue();
+    slow = false;
+    const payload = route.request().postDataJSON();
+    payload.messages[0].content += "\n慢速测试";
+    await route.continue({ postData: JSON.stringify(payload) });
+  };
+  await page.route("**/api/ai/chat", handler);
+  return handler;
+}
+
+async function holdNextSearchPage(page) {
+  const started = deferred();
+  const release = deferred();
+  const handler = async (route) => {
+    if (!new URL(route.request().url()).searchParams.has("cursor")) return route.continue();
+    const response = await route.fetch();
+    started.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  };
+  await page.route("**/api/search?*", handler);
+  return { started: started.promise, release: release.resolve, handler };
 }
 
 async function expectSearchRequestCount(chats, settings, count) {
@@ -248,16 +297,33 @@ async function preserveSearchAnswerAcrossViews(page, chats, settings) {
   expect(settings).toHaveLength(1);
 }
 
-async function changeSearchPage(page, chats, settings) {
+async function activateGraphSearch(page, chats, settings) {
+  await page.goto("/#/search?q=%E6%80%9D%E6%94%BF%EF%BC%9F&view=graph");
+  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
+  await settlePage(page);
+  expect(chats).toHaveLength(0);
+  expect(settings).toHaveLength(0);
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expectSearchRequestCount(chats, settings, 1);
+  await expectFinishedSearchAnswer(page);
+  await preserveSearchAnswerAcrossViews(page, chats, settings);
+}
+
+async function changeSearchPage(page, chats, settings, previous) {
   const response = page.waitForResponse((candidate) => new URL(candidate.url()).searchParams.has("cursor"));
   await page.getByRole("button", { name: "下一页" }).click();
   await response;
   await expectSearchRequestCount(chats, settings, 2);
   await expectFinishedSearchAnswer(page);
-  await expectCurrentSearchSources(page);
+  const current = await expectCurrentSearchSources(page);
+  const stale = staleResults(previous, current);
+  expect(stale).not.toHaveLength(0);
+  expectPromptSources(chats.at(-1).postDataJSON(), current, stale);
+  await expectProviderContext(page, current[0]);
+  return current;
 }
 
-async function changeSearchResult(page, chats, settings) {
+async function changeSearchResult(page, chats, settings, previous) {
   const response = page.waitForResponse((candidate) => (
     new URL(candidate.url()).searchParams.get("kind") === "case"
   ));
@@ -265,7 +331,87 @@ async function changeSearchResult(page, chats, settings) {
   await response;
   await expectSearchRequestCount(chats, settings, 3);
   await expectFinishedSearchAnswer(page);
-  await expectCurrentSearchSources(page);
+  const current = await expectCurrentSearchSources(page);
+  const stale = staleResults(previous, current);
+  expect(stale).not.toHaveLength(0);
+  expectPromptSources(chats.at(-1).postDataJSON(), current, stale);
+  await expectProviderContext(page, current[0]);
+  return current;
+}
+
+async function withSearchProvider(page, scenario) {
+  await login(page);
+  try {
+    await configureE2EProvider(page);
+    await scenario(page);
+  } finally {
+    await saveUserSettings(page, { mode: "automatic" });
+  }
+}
+
+async function graphSearchScenario(page) {
+  const chats = watchRequests(page, "/api/ai/chat");
+  const settings = watchRequests(page, "/api/ai/settings");
+  await activateGraphSearch(page, chats, settings);
+}
+
+async function beginSlowPageChange(page, held, chats) {
+  await page.goto("/#/search?q=%E6%80%9D%E6%94%BF%EF%BC%9F");
+  await expect(page.locator(".ai-answer-text")).toContainText("过期回答");
+  const previous = await currentSearchResults(page);
+  expectPromptSources(chats[0].postDataJSON(), previous);
+  const response = page.waitForResponse((candidate) => new URL(candidate.url()).searchParams.has("cursor"));
+  await page.getByRole("button", { name: "下一页" }).click();
+  await held.started;
+  await page.getByRole("button", { name: "图谱", exact: true }).click();
+  held.release();
+  await response;
+  return previous;
+}
+
+async function confirmRepeatedViewToggle(page, chats, settings) {
+  await page.getByRole("button", { name: "图谱", exact: true }).click();
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await settlePage(page);
+  expect(chats).toHaveLength(2);
+  expect(settings).toHaveLength(2);
+}
+
+async function assertCurrentPageAfterRace(page, chats, settings, previous) {
+  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
+  await settlePage(page);
+  expect(chats).toHaveLength(1);
+  expect(settings).toHaveLength(1);
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expectSearchRequestCount(chats, settings, 2);
+  await expectFinishedSearchAnswer(page);
+  const current = await expectCurrentSearchSources(page);
+  const stale = staleResults(previous, current);
+  expect(stale).not.toHaveLength(0);
+  expectPromptSources(chats.at(-1).postDataJSON(), current, stale);
+  await expectProviderContext(page, current[0]);
+  await confirmRepeatedViewToggle(page, chats, settings);
+  return { current, stale };
+}
+
+async function rapidPageChangeScenario(page) {
+  const chats = watchRequests(page, "/api/ai/chat");
+  const settings = watchRequests(page, "/api/ai/settings");
+  const slowChat = await slowFirstSearchChat(page);
+  const held = await holdNextSearchPage(page);
+  try {
+    const previous = await beginSlowPageChange(page, held, chats);
+    const { current, stale } = await assertCurrentPageAfterRace(page, chats, settings, previous);
+    await settlePage(page);
+    await expect(page.locator(".ai-answer-text")).toContainText(current[0].title);
+    await expect(page.locator(".ai-answer-text")).not.toContainText("过期回答");
+    await expect(page.locator(".ai-answer-text")).not.toContainText(stale[0].title);
+    await expectSearchRequestCount(chats, settings, 2);
+  } finally {
+    held.release();
+    await page.unroute("**/api/search?*", held.handler);
+    await page.unroute("**/api/ai/chat", slowChat);
+  }
 }
 
 async function expectWorkbenchAnswer(page) {
@@ -439,15 +585,25 @@ test("教师自定义模型后可完成两处真实 AI 对话", async ({ page })
     const settingsRequests = watchRequests(page, "/api/ai/settings");
     await expectSearchAnswer(page);
     await expectSearchRequestCount(chatRequests, settingsRequests, 1);
-    await expectCurrentSearchSources(page);
+    const firstResults = await expectCurrentSearchSources(page);
+    expectPromptSources(chatRequests[0].postDataJSON(), firstResults);
+    await expectProviderContext(page, firstResults[0]);
     await preserveSearchAnswerAcrossViews(page, chatRequests, settingsRequests);
-    await changeSearchPage(page, chatRequests, settingsRequests);
-    await changeSearchResult(page, chatRequests, settingsRequests);
+    const secondResults = await changeSearchPage(page, chatRequests, settingsRequests, firstResults);
+    await changeSearchResult(page, chatRequests, settingsRequests, secondResults);
     await expectWorkbenchAnswer(page);
   } finally {
     await saveUserSettings(page, { mode: "automatic" });
   }
 });
+
+test("图谱直达的当前结果回列表后只生成一次", async ({ page }) => (
+  withSearchProvider(page, graphSearchScenario)
+));
+
+test("快速翻页不会让旧 AI 回答覆盖当前结果", async ({ page }) => (
+  withSearchProvider(page, rapidPageChangeScenario)
+));
 
 test("AI 选区候选被拒绝后不修改正文", async ({ page }) => (
   withCandidateProvider(page, rejectCandidateScenario)

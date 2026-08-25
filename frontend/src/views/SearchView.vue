@@ -28,9 +28,11 @@ const filters = ref(filtersFromQuery(route.query, activeKind.value));
 const items = computed(() => payload.value.items);
 const hasSubmittedQuery = computed(() => submitted.value.trim() !== "");
 const aiAnswer = ref(null);
-const aiResultVersion = ref(0);
-const showAIAnswer = computed(() => hasSubmittedQuery.value && aiResultVersion.value > 0);
+const aiAnswerVersion = ref(0);
+const showAIAnswer = computed(() => hasSubmittedQuery.value && aiAnswerVersion.value > 0);
 let searchGeneration = 0;
+let aiResultVersion = 0;
+let activatedAIResult = 0;
 
 function tabLabel(kind, label) {
   return `${label} ${payload.value.counts[kind] || 0}`;
@@ -71,13 +73,26 @@ function routeQuery(overrides = {}) {
 }
 
 function selectView(mode) {
-  view.value = mode;
+  setView(mode);
   router.replace({ name: "search", query: routeQuery({ mode }) });
 }
 
 function invalidateAI() {
   aiAnswer.value?.clear();
-  aiResultVersion.value = 0;
+  aiResultVersion = 0;
+  activatedAIResult = 0;
+  aiAnswerVersion.value = 0;
+}
+
+function activateAI() {
+  if (view.value !== "list" || !aiResultVersion || activatedAIResult === aiResultVersion) return;
+  activatedAIResult = aiResultVersion;
+  aiAnswerVersion.value += 1;
+}
+
+function setView(value) {
+  view.value = value === "graph" ? "graph" : "list";
+  activateAI();
 }
 
 async function requestSearch(term, kind, activeCursor, searchFilters) {
@@ -101,7 +116,10 @@ function commitSearchResult(term, result) {
   payload.value = mergeMetadata(result);
   submitted.value = term;
   page.value = result.page;
-  if (term && view.value === "list") aiResultVersion.value += 1;
+  if (term) {
+    aiResultVersion += 1;
+    activateAI();
+  }
 }
 
 function mergeMetadata(result) {
@@ -169,7 +187,7 @@ watch(
   { immediate: true },
 );
 watch(() => route.query.view, (value) => {
-  view.value = value === "graph" ? "graph" : "list";
+  setView(value);
 });
 </script>
 
@@ -191,7 +209,7 @@ watch(() => route.query.view, (value) => {
       <div v-if="loading && !payload.pageSize" class="search-state"><LoaderCircle class="spin" :size="20" />检索中</div>
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
       <template v-else>
-        <SearchAIAnswer v-if="showAIAnswer" ref="aiAnswer" v-show="view === 'list'" :query="submitted" :items="items" :result-version="aiResultVersion" />
+        <SearchAIAnswer v-if="showAIAnswer" ref="aiAnswer" v-show="view === 'list'" :query="submitted" :items="items" :result-version="aiAnswerVersion" />
         <template v-if="view === 'list'">
           <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
           <div class="result-toolbar">

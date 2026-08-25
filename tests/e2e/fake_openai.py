@@ -40,20 +40,31 @@ def _event(text: str) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
+def _prompt(payload: dict) -> str:
+    return "\n".join(message.get("content", "") for message in payload.get("messages", []))
+
+
+def _context_line(prompt: str) -> str:
+    return next((line for line in prompt.splitlines() if line.startswith("〔")), "")
+
+
+def _answer(prompt: str) -> str:
+    if "writing_candidate" in prompt:
+        candidate = CANDIDATE_SECOND if "第二条" in prompt else CANDIDATE
+        return json.dumps(candidate, ensure_ascii=False)
+    context = _context_line(prompt)
+    answer = f"{ANSWER}\n检索上下文：{context}" if context else ANSWER
+    return f"过期回答：{answer}" if "慢速测试" in prompt else answer
+
+
 def _pieces(payload: dict) -> tuple[list[str], float]:
-    prompt = json.dumps(payload, ensure_ascii=False)
+    prompt = _prompt(payload)
     slow = "慢速测试" in prompt
-    candidate = CANDIDATE_SECOND if "第二条" in prompt else CANDIDATE
-    answer = (
-        json.dumps(candidate, ensure_ascii=False)
-        if "writing_candidate" in prompt
-        else ANSWER
-    )
-    return list(answer), 0.12 if slow else 0.005
+    return list(_answer(prompt)), 0.12 if slow else 0.005
 
 
 def _interrupted(payload: dict) -> bool:
-    return "上游中断测试" in json.dumps(payload, ensure_ascii=False)
+    return "上游中断测试" in _prompt(payload)
 
 
 def _send_pieces(handler, payload: dict) -> bool:

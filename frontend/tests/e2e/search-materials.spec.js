@@ -111,6 +111,11 @@ async function directoryTotal(request) {
   return (await response.json()).total;
 }
 
+async function readyDirectoryTotal(request) {
+  const response = await request.get("/api/search", { params: { q: "", kind: "all", pageSize: 20 } });
+  return response.ok() ? (await response.json()).total : 0;
+}
+
 async function importPublicDirectoryMaterial(request, csrfToken, index) {
   const title = `目录分页素材-${Date.now()}-${index}`;
   const imported = await request.post("/api/admin/material-imports", {
@@ -134,7 +139,7 @@ async function ensureDirectoryPagination(page) {
   for (let index = 0; index < missing; index += 1) await importPublicDirectoryMaterial(request, csrfToken, index);
   const logout = await request.post("/api/auth/logout", { headers: { "X-CSRF-Token": csrfToken } });
   expect(logout.status()).toBe(204);
-  await expect.poll(() => directoryTotal(request), { timeout: 30_000 }).toBeGreaterThanOrEqual(21);
+  await expect.poll(() => readyDirectoryTotal(request), { timeout: 30_000 }).toBeGreaterThanOrEqual(21);
 }
 
 async function assertGraph(page) {
@@ -150,8 +155,8 @@ test("空查询只浏览目录，不触发 AI", async ({ page }) => {
   test.setTimeout(120_000);
   const chatRequests = watchRequests(page, "/api/ai/chat");
   const settingsRequests = watchRequests(page, "/api/ai/settings");
-  await ensureDirectoryPagination(page);
   await waitForSearchReady(page, "");
+  await ensureDirectoryPagination(page);
   await page.goto("/#/search?q=%20%20");
   await expect(page).toHaveURL(/#\/search$/);
   await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
@@ -214,6 +219,7 @@ async function assertMaterialFacets(page) {
 }
 
 test("高级筛选支持页签分面、多选 chips 和清空", async ({ page }) => {
+  await waitForSearchReady(page, "思政");
   await page.goto("/#/search?q=思政");
   await assertCaseFacets(page);
   await assertMaterialFacets(page);
