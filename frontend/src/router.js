@@ -88,6 +88,13 @@ async function guardWorkbench(to) {
   return target || true;
 }
 
+function passwordChangeRedirect(to) {
+  if (to.name !== "password-change" || session.user?.mustChangePassword) {
+    return null;
+  }
+  return { name: "home" };
+}
+
 router.beforeEach(async (to) => {
   await restoreSession();
   if (session.user?.mustChangePassword && to.name !== "password-change") {
@@ -100,7 +107,8 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAdmin && session.user?.role !== "admin") {
     return { name: "home" };
   }
-  if (to.name === "password-change" && !session.user?.mustChangePassword) return { name: "home" };
+  const passwordRedirect = passwordChangeRedirect(to);
+  if (passwordRedirect) return passwordRedirect;
   if (to.name === "login" && session.user) {
     return { name: "home" };
   }

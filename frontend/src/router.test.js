@@ -38,6 +38,14 @@ it("匿名访问工作台时保留登录后的 redirect", async () => {
   expect(state.api.getCase).not.toHaveBeenCalled();
 });
 
+it("已完成改密的用户访问改密页时回到首页", async () => {
+  state.session.user = { id: "author", role: "user", mustChangePassword: false };
+
+  await router.push("/change-password");
+
+  expect(router.currentRoute.value).toMatchObject({ name: "home" });
+});
+
 it("登录后重新评估工作台访问", async () => {
   await router.push("/workbench/case-1");
   state.session.user = { id: "reader", role: "user" };
