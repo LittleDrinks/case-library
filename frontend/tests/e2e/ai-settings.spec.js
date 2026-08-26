@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createGeneralFigureCase, saveCaseChanges } from "./case-creation.js";
 
 const E2E_PROVIDER = "http://ai-provider:8080/v1";
 const E2E_API_KEY = "e2e-api-key";
@@ -43,12 +44,12 @@ function candidateDocument(marker) {
 }
 
 async function createCandidateCase(page, marker) {
-  const response = await page.context().request.post("/api/cases", {
-    headers: { "X-CSRF-Token": await csrf(page) },
-    data: { title: `候选修订 ${Date.now()}`, document: candidateDocument(marker) },
+  const token = await csrf(page);
+  const caseRecord = await createGeneralFigureCase(page.context().request, token);
+  return saveCaseChanges(page.context().request, token, caseRecord, {
+    title: `候选修订 ${Date.now()}`,
+    document: candidateDocument(marker),
   });
-  expect(response.ok()).toBe(true);
-  return response.json();
 }
 
 function documentText(node) {

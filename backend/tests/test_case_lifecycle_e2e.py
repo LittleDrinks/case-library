@@ -38,11 +38,25 @@ def login(username: str, password: str):
 
 def create_case(opener, csrf: str, title: str):
     document = {"type": "doc", "content": [{"type": "paragraph"}]}
-    status, case = request(
-        opener, "POST", "/api/cases", {"title": title, "document": document}, csrf
+    status, case = request(opener, "POST", "/api/cases", _selection(), csrf)
+    assert status == 200
+    status, saved = request(
+        opener,
+        "PATCH",
+        f"/api/cases/{case['id']}",
+        _changes(case, title, document),
+        csrf,
     )
     assert status == 200
-    return case
+    return saved
+
+
+def _selection() -> dict:
+    return {"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"}
+
+
+def _changes(case: dict, title: str, document: dict) -> dict:
+    return {"title": title, "document": document, "revision": case["revision"]}
 
 
 def _command(command: str, revision: int, **extra) -> dict:
@@ -204,14 +218,14 @@ def test_anonymous_detail_reads_only_the_published_snapshot() -> None:
     status, public = request(build_opener(), "GET", f"/api/cases/{case['id']}")
     assert status == 200
     assert public["document"] == submitted["version"]["document"]
-    assert public["revision"] == submitted["version"]["sourceRevision"] == 1
+    assert public["revision"] == submitted["version"]["sourceRevision"] == case["revision"]
     assert public["workflowStatus"] == "published"
     assert public["publicationStatus"] == "public"
     assert "ownerId" not in public and "submittedVersionId" not in public
     assert (
         request(owner, "GET", f"/api/cases/{case['id']}")[1]["revision"]
         == approved["case"]["revision"]
-        == 4
+        == case["revision"] + 3
     )
 
 

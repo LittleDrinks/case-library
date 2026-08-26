@@ -165,37 +165,63 @@ def ttf_table(data: bytes, name: bytes) -> bytes:
 
 
 def create_rich_case(client: TestClient) -> tuple[Response, bytes]:
-    auth = login(client)
-    response = client.post(
-        "/api/cases",
-        headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": "版式测试案例", "document": rich_document()},
-    )
-    case = response.json()
+    case = create_case(client, login(client), "版式测试案例", rich_document())
     export = client.get(f"/api/cases/{case['id']}/export.docx")
     return export, export.content
 
 
 def create_default_case(client: TestClient) -> bytes:
-    auth = login(client)
-    response = client.post(
-        "/api/cases",
-        headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": "结构测试案例"},
+    case = create_case(
+        client,
+        login(client),
+        "结构测试案例",
+        template_id="tpl-teaching-standard-v1",
     )
-    case = response.json()
     return client.get(f"/api/cases/{case['id']}/export.docx").content
 
 
 def export_document(client: TestClient, title: str, document: dict) -> bytes:
-    auth = login(client)
+    case = create_case(client, login(client), title, document)
+    return client.get(f"/api/cases/{case['id']}/export.docx").content
+
+
+def create_case(
+    client: TestClient,
+    auth: dict,
+    title: str,
+    document: dict | None = None,
+    template_id: str = "tpl-general-v1",
+) -> dict:
     response = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": title, "document": document},
+        json=_selection(template_id),
     )
-    case_id = response.json()["id"]
-    return client.get(f"/api/cases/{case_id}/export.docx").content
+    assert response.status_code == 200
+    return _save_case(client, auth, response.json(), title, document)
+
+
+def _save_case(
+    client: TestClient, auth: dict, case: dict, title: str, document: dict | None
+) -> dict:
+    changes = {"title": title, "revision": case["revision"]}
+    if document is not None:
+        changes["document"] = document
+    saved = client.patch(
+        f"/api/cases/{case['id']}",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json=changes,
+    )
+    assert saved.status_code == 200
+    return saved.json()
+
+
+def _selection(template_id: str) -> dict:
+    return {
+        "stageId": "ug",
+        "typeId": "ct-figure",
+        "templateId": template_id,
+    }
 
 
 def assert_typography(root: Element) -> None:

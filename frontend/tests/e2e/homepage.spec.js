@@ -1,9 +1,26 @@
 import { expect, test } from "@playwright/test";
+import { createGeneralFigureCase, saveCaseChanges } from "./case-creation.js";
 
 const PUBLIC_CASE = "钱伟长图书馆——科学家精神的大思政课堂";
 const OTHER_PUBLIC_CASE = "《智能控制》：高挑战项目牵引新工科育人";
 const PRIVATE_CASE = "供应链中断情境下的抉择：科技自立自强思想实验";
 const PENDING_CASE = "生成式人工智能进课堂：使用边界与课堂治理研讨";
+const GENERAL_HEADINGS = [
+  "（一）建设目标",
+  "（二）主要内容设计",
+  "（三）方法与策略",
+  "（四）评价与成效",
+  "（五）特色与创新",
+];
+const GENERAL_METADATA = {
+  audience: "ug",
+  stageText: "本科思政",
+  typeId: "ct-figure",
+  typeName: "人物传记类",
+  templateId: "tpl-general-v1",
+  templateVersion: 1,
+  templateName: "通用案例结构",
+};
 
 async function login(page, username, password) {
   await page.goto("/#/login");
@@ -37,11 +54,33 @@ async function lifecycle(request, caseId, command) {
 
 async function createCase(request, title) {
   const auth = await authSession(request);
-  const response = await request.post("/api/cases", {
-    headers: { "X-CSRF-Token": auth.csrfToken }, data: { title },
-  });
+  const caseRecord = await createGeneralFigureCase(request, auth.csrfToken);
+  return saveCaseChanges(request, auth.csrfToken, caseRecord, { title });
+}
+
+async function chooseGeneralFigureTemplate(page) {
+  await page.getByRole("radio", { name: "本科思政" }).click();
+  await page.getByRole("button", { name: /人物传记类/ }).click();
+  await page.getByRole("button", { name: /通用案例结构/ }).click();
+  await expect(page.getByRole("button", { name: "创建案例" })).toBeEnabled();
+}
+
+function workbenchCaseId(page) {
+  const match = page.url().match(/#\/workbench\/(c-[a-f0-9]{12})$/);
+  expect(match).not.toBeNull();
+  return match[1];
+}
+
+async function templateCaseMetadata(request, caseId) {
+  const response = await request.get(`/api/cases/${caseId}`);
   expect(response.ok()).toBe(true);
-  return response.json();
+  const caseRecord = await response.json();
+  expect(caseRecord).toMatchObject({ revision: 1, ...GENERAL_METADATA });
+  return caseRecord;
+}
+
+async function expectGeneralTemplateHeadings(page) {
+  await expect(page.locator(".canvas-editor h2")).toHaveText(GENERAL_HEADINGS);
 }
 
 async function expectInsideViewport(locator, width) {
@@ -94,15 +133,23 @@ test("管理员从管理后台发现待审案例并进入审核工作台", async
   await expect(page.locator(".workspace-crumb")).toContainText("审核管理");
 });
 
-test("教师从我的案例新建默认案例并进入作者工作台", async ({ page }) => {
+test("教师从我的案例选择通用人物模板并进入作者工作台", async ({ page }) => {
   await login(page, "user", "user123");
   await page.getByRole("link", { name: "我的案例", exact: true }).click();
-
   await page.getByRole("button", { name: "新建案例", exact: true }).click();
-
+  await expect(page).toHaveURL(/#\/new-case$/);
+  await chooseGeneralFigureTemplate(page);
+  await page.getByRole("button", { name: "创建案例" }).click();
   await expect(page).toHaveURL(/#\/workbench\/c-[a-f0-9]{12}$/);
+  const caseId = workbenchCaseId(page);
+  const initial = await templateCaseMetadata(page.context().request, caseId);
   await expect(page.getByLabel("案例标题")).toHaveValue("未命名案例");
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+  await expectGeneralTemplateHeadings(page);
+  await page.reload();
+  await expectGeneralTemplateHeadings(page);
+  const refreshed = await templateCaseMetadata(page.context().request, caseId);
+  expect(refreshed.revision).toBe(initial.revision);
 });
 
 test("教师按案例状态看到明确入口", async ({ page }) => {

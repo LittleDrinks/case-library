@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -24,7 +23,7 @@ def create_case(client, csrf: str) -> dict:
     response = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": csrf},
-        json={"title": f"素材关系 {uuid.uuid4().hex}"},
+        json={"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"},
     )
     assert response.status_code == 200
     return response.json()

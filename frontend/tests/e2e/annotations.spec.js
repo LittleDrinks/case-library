@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createGeneralFigureCase, saveCaseChanges } from "./case-creation.js";
 
 async function login(page, username = "user", password = "user123") {
   await expect.poll(async () => (
@@ -18,15 +19,18 @@ async function logoutAndWait(page) {
 
 async function createCase(request, marker) {
   const auth = await (await request.get("/api/auth/session")).json();
-  const document = { type: "doc", content: [
+  const caseRecord = await createGeneralFigureCase(request, auth.csrfToken);
+  return saveCaseChanges(request, auth.csrfToken, caseRecord, {
+    title: marker,
+    document: annotationDocument(marker),
+  });
+}
+
+function annotationDocument(marker) {
+  return { type: "doc", content: [
     { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
     { type: "paragraph", content: [{ type: "text", text: marker }] },
   ] };
-  const response = await request.post("/api/cases", {
-    headers: { "X-CSRF-Token": auth.csrfToken }, data: { title: marker, document },
-  });
-  expect(response.ok()).toBe(true);
-  return response.json();
 }
 
 async function lifecycle(request, caseId, command, extra = {}) {

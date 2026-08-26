@@ -68,7 +68,7 @@ def create_mounted_case(client, csrf: str, material: dict) -> dict:
     created = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": csrf},
-        json={"title": f"引用 {material['title']}"},
+        json={"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"},
     )
     assert created.status_code == 200
     case = created.json()

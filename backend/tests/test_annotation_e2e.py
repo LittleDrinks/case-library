@@ -65,10 +65,25 @@ def create_reviewing_case(owner, csrf: str) -> dict:
 
 
 def _create_case(owner, csrf: str, marker: str) -> dict:
-    body = {"title": marker, "document": _document(marker)}
-    status, case = request(owner, "POST", "/api/cases", body, csrf)
+    status, case = request(owner, "POST", "/api/cases", _selection(), csrf)
     assert status == 200
-    return case
+    status, saved = request(
+        owner,
+        "PATCH",
+        f"/api/cases/{case['id']}",
+        _changes(case, marker),
+        csrf,
+    )
+    assert status == 200
+    return saved
+
+
+def _selection() -> dict:
+    return {"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"}
+
+
+def _changes(case: dict, marker: str) -> dict:
+    return {"title": marker, "document": _document(marker), "revision": case["revision"]}
 
 
 def _document(marker: str) -> dict:

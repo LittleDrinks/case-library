@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { createGeneralFigureCase, saveCaseChanges } from "./case-creation.js";
 
 async function signIn(page, username, password) {
   await page.goto("/#/login");
@@ -47,12 +48,11 @@ function lifecycleDocument(marker) {
 
 async function createCase(request, marker) {
   const auth = await (await request.get("/api/auth/session")).json();
-  const response = await request.post("/api/cases", {
-    headers: { "X-CSRF-Token": auth.csrfToken },
-    data: { title: marker, document: lifecycleDocument(marker) },
+  const caseRecord = await createGeneralFigureCase(request, auth.csrfToken);
+  return saveCaseChanges(request, auth.csrfToken, caseRecord, {
+    title: marker,
+    document: lifecycleDocument(marker),
   });
-  expect(response.ok()).toBe(true);
-  return response.json();
 }
 
 async function uploadAttachment(request, caseId, level, name, content) {

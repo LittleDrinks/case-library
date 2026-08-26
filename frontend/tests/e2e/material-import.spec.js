@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { createGeneralFigureCase, saveCaseChanges } from "./case-creation.js";
 
 async function login(page, username, password) {
   await expect.poll(async () => (
@@ -83,9 +84,8 @@ async function logoutAndWait(page) {
 
 async function createDraft(request, title) {
   const auth = await readOkJson(await request.get("/api/auth/session"));
-  return readOkJson(await request.post("/api/cases", {
-    headers: { "X-CSRF-Token": auth.csrfToken }, data: { title },
-  }));
+  const caseRecord = await createGeneralFigureCase(request, auth.csrfToken);
+  return saveCaseChanges(request, auth.csrfToken, caseRecord, { title });
 }
 
 async function clearCaseMaterials(request, caseId) {

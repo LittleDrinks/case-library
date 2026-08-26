@@ -47,9 +47,22 @@ def _login_headers(client: TestClient) -> dict[str, str]:
 
 
 def _create(client: TestClient, headers: dict[str, str], document: dict):
-    return client.post(
-        "/api/cases", headers=headers, json={"title": "Schema", "document": document}
+    created = client.post(
+        "/api/cases",
+        headers=headers,
+        json=_selection(),
     )
+    assert created.status_code == 200
+    case = created.json()
+    return client.patch(
+        f"/api/cases/{case['id']}",
+        headers=headers,
+        json={"document": document, "revision": case["revision"]},
+    )
+
+
+def _selection() -> dict:
+    return {"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"}
 
 
 INVALID_DOCUMENTS = (

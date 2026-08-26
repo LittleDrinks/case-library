@@ -61,7 +61,9 @@ def _author_and_admin():
 
 def _create_case(client: httpx.Client, csrf: str) -> dict:
     response = client.post(
-        "/api/cases", headers={"X-CSRF-Token": csrf}, json={"title": "附件 E2E"}
+        "/api/cases",
+        headers={"X-CSRF-Token": csrf},
+        json={"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"},
     )
     assert response.status_code == 200
     return response.json()

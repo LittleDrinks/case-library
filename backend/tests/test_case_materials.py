@@ -263,11 +263,7 @@ def transition_with_case(
 
 
 def create_submission(client: TestClient, auth: dict, title: str) -> dict:
-    created = client.post(
-        "/api/cases",
-        headers=headers(auth),
-        json={"title": title},
-    ).json()
+    created = create_case(client, auth, title)
     mounted = client.post(
         f"/api/cases/{created['id']}/materials",
         headers=headers(auth),
@@ -276,6 +272,27 @@ def create_submission(client: TestClient, auth: dict, title: str) -> dict:
     assert mounted.status_code == 201
     case = client.get(f"/api/cases/{created['id']}").json()
     return transition_for(client, auth, created["id"], "submit", case)
+
+
+def create_case(client: TestClient, auth: dict, title: str) -> dict:
+    created = client.post(
+        "/api/cases",
+        headers=headers(auth),
+        json=_selection(),
+    )
+    assert created.status_code == 200
+    case = created.json()
+    saved = client.patch(
+        f"/api/cases/{case['id']}",
+        headers=headers(auth),
+        json={"title": title, "revision": case["revision"]},
+    )
+    assert saved.status_code == 200
+    return saved.json()
+
+
+def _selection() -> dict:
+    return {"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"}
 
 
 def transition_for(client, auth, case_id, command, case, **extra) -> dict:
