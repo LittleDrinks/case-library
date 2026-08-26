@@ -352,7 +352,7 @@ async function changeSearchResult(page, chats, settings, previous) {
 async function withSearchProvider(page, scenario) {
   await login(page);
   try {
-    await configureE2EProvider(page);
+    await configureCandidateProvider(page);
     await scenario(page);
   } finally {
     await saveUserSettings(page, { mode: "automatic" });
