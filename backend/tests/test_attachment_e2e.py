@@ -160,6 +160,26 @@ def _assert_published_permissions(case_id: str, rows: list[dict], admin) -> None
     _assert_downloads(admin, case_id, rows, [200, 200, 200])
 
 
+def _assert_published_attachment_snapshots(
+    author,
+    case: dict,
+    first_attachment: dict,
+    first: dict,
+    second_attachment: dict,
+) -> None:
+    case_id = case["id"]
+    delete_path = f"/api/cases/{case_id}/attachments/{first_attachment['id']}"
+    history = author.get(f"/api/cases/{case_id}/history").json()
+    attachments = history["versions"][0]["attachments"]
+    assert [row["name"] for row in attachments] == ["public.txt"]
+    anonymous = httpx.Client(base_url=BASE_URL)
+    current = anonymous.get(f"/api/cases/{case_id}/attachments").json()
+    assert current == [second_attachment]
+    version_path = f"{delete_path}/content?versionId={first['version']['id']}"
+    assert author.get(version_path).content == b"public"
+    assert anonymous.get(version_path).status_code == 404
+
+
 def _assert_campus_permissions(author, admin, admin_csrf: str) -> None:
     case = _create_case(admin, admin_csrf)
     rows = [
@@ -222,18 +242,17 @@ def test_versions_keep_their_attachment_snapshots() -> None:
     first_attachment = _upload(author, csrf, case["id"], "public")
     first = _submit(author, csrf, case)
     withdrawn = _withdraw(author, csrf, case["id"], first)
-    delete_path = f"/api/cases/{case['id']}/attachments/{first_attachment['id']}"
     _delete(author, csrf, case["id"], first_attachment["id"])
     second_attachment = _upload(author, csrf, case["id"], "public")
     second = _submit(author, csrf, withdrawn["case"])
     _approve(admin, admin_csrf, case["id"], second)
-    history = author.get(f"/api/cases/{case['id']}/history").json()
-    assert [row["name"] for row in history["versions"][0]["attachments"]] == ["public.txt"]
-    anonymous = httpx.Client(base_url=BASE_URL)
-    assert anonymous.get(f"/api/cases/{case['id']}/attachments").json() == [second_attachment]
-    version_path = f"{delete_path}/content?versionId={first['version']['id']}"
-    assert author.get(version_path).content == b"public"
-    assert anonymous.get(version_path).status_code == 404
+    _assert_published_attachment_snapshots(
+        author,
+        case,
+        first_attachment,
+        first,
+        second_attachment,
+    )
 
 
 def test_rollback_restores_the_snapshot_attachment_and_blob() -> None:

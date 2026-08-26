@@ -31,6 +31,14 @@ def login(client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def login_as_admin(client: TestClient) -> None:
+    client.cookies.clear()
+    response = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin123"}
+    )
+    assert response.status_code == 200
+
+
 def test_anonymous_public_list_returns_published_card_summaries(
     client: TestClient,
 ) -> None:
@@ -65,9 +73,7 @@ def test_case_list_requires_an_explicit_scope(client: TestClient) -> None:
 def test_admin_scope_lists_all_cases_for_admin_only(client: TestClient) -> None:
     login(client)
     assert client.get("/api/cases?scope=admin").status_code == 403
-    client.cookies.clear()
-    response = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
-    assert response.status_code == 200
+    login_as_admin(client)
 
     rows = client.get("/api/cases?scope=admin")
     assert rows.status_code == 200

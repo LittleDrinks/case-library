@@ -54,6 +54,14 @@ def _use(client: TestClient, catalog: RecordingCatalog) -> RecordingCatalog:
     return catalog
 
 
+def _assert_user_catalog_request(request) -> None:
+    assert request.principal.user_id == "u-user-demo"
+    assert request.generation == "test-generation"
+    assert request.index_uid == "catalog-generation-test"
+    assert request.index_epoch == "test-epoch"
+    assert request.filters == {"typeName": ("校本实践类",)}
+
+
 def _login(client: TestClient, username: str = "user") -> None:
     response = client.post(
         "/api/auth/login",
@@ -71,12 +79,7 @@ def test_search_route_preserves_envelope_and_compiles_user_scope(client: TestCli
     )
     assert response.status_code == 200
     assert response.json()["counts"]["case"] == 1
-    request = catalog.requests[0]
-    assert request.principal.user_id == "u-user-demo"
-    assert request.generation == "test-generation"
-    assert request.index_uid == "catalog-generation-test"
-    assert request.index_epoch == "test-epoch"
-    assert request.filters == {"typeName": ("校本实践类",)}
+    _assert_user_catalog_request(catalog.requests[0])
 
 
 def _public_case(client: TestClient) -> str:

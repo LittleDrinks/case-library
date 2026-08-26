@@ -10,6 +10,15 @@ DISCOVERY_BODY = {
     "baseUrl": "https://custom.invalid/v1",
     "apiKey": "discovery-only-key",
 }
+CUSTOM_SETTINGS_RESPONSE = {
+    "mode": "custom",
+    "baseUrl": "https://custom.invalid/v1",
+    "model": "custom-model",
+    "hasApiKey": True,
+    "configured": True,
+    "effectiveSource": "custom",
+    "effectiveModel": "custom-model",
+}
 
 
 class FakeProvider:
@@ -104,6 +113,11 @@ def assert_custom_record(client: TestClient) -> None:
     assert "apiKey" not in record
 
 
+def assert_custom_settings_response(response) -> None:
+    assert response.status_code == 200
+    assert response.json() == CUSTOM_SETTINGS_RESPONSE
+
+
 def assert_preserved_key(before: dict, after: dict) -> None:
     assert before["encryptedApiKey"] == after["encryptedApiKey"]
 
@@ -187,16 +201,7 @@ def test_custom_settings_encrypt_key_and_never_return_it(client: TestClient, tmp
 
     response = save_custom(client, auth["csrfToken"])
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "mode": "custom",
-        "baseUrl": "https://custom.invalid/v1",
-        "model": "custom-model",
-        "hasApiKey": True,
-        "configured": True,
-        "effectiveSource": "custom",
-        "effectiveModel": "custom-model",
-    }
+    assert_custom_settings_response(response)
     assert_custom_record(client)
 
 

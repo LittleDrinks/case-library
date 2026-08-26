@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pymongo import MongoClient
 from pymongo.database import Database
 
 from app.api.router import router
@@ -17,6 +19,25 @@ from app.modules.materials.errors import MaterialImportError
 from app.modules.search.client import create_reader
 from app.modules.search.meilisearch import MeilisearchCatalog, SearchUnavailable
 from app.modules.search.state import MongoCatalogState
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationDatabase:
+    database: Database
+    client: MongoClient | None
+
+    @classmethod
+    def open(
+        cls, database: Database | None, settings: Settings
+    ) -> ApplicationDatabase:
+        if database is not None:
+            return cls(database, None)
+        client, active_database = connect(settings)
+        return cls(active_database, client)
+
+    def close(self) -> None:
+        if self.client is not None:
+            self.client.close()
 
 
 def _case_error(_request: Request, error: CaseError) -> JSONResponse:
@@ -57,23 +78,18 @@ def _catalog(settings: Settings):
     return MeilisearchCatalog(reader)
 
 
-def _lifespan(database, settings, mongo_client, blob_store, catalog):
+def _lifespan(connection: ApplicationDatabase, settings, blob_store, catalog):
     @asynccontextmanager
     async def lifespan(api: FastAPI):
         try:
             api.state.blob_store = blob_store or minio_blob_store(settings)
             api.state.search_catalog = catalog or _catalog(settings)
-            bootstrap(database, settings)
+            bootstrap(connection.database, settings)
             yield
         finally:
-            if mongo_client is not None:
-                mongo_client.close()
+            connection.close()
 
     return lifespan
-
-
-def _database_and_client(database, settings):
-    return (None, database) if database is not None else connect(settings)
 
 
 def create_app(
@@ -84,16 +100,12 @@ def create_app(
     catalog_state=None,
 ) -> FastAPI:
     active_settings = settings or Settings.from_environment()
-    client, active_database = _database_and_client(database, active_settings)
-    lifespan = _lifespan(
-        active_database,
-        active_settings,
-        client,
-        blob_store,
-        search_catalog,
+    connection = ApplicationDatabase.open(database, active_settings)
+    lifespan = _lifespan(connection, active_settings, blob_store, search_catalog)
+    state = catalog_state or MongoCatalogState(connection.database)
+    return _build_app(
+        connection.database, active_settings, lifespan, search_catalog, state
     )
-    state = catalog_state or MongoCatalogState(active_database)
-    return _build_app(active_database, active_settings, lifespan, search_catalog, state)
 
 
 app = create_app()

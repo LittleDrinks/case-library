@@ -294,17 +294,11 @@ class SearchOutbox:
 
     def renew_pause(self, owner: str) -> bool:
         timestamp = self._clock()
-        query = {
-            "_id": "catalog",
-            "leaseOwner": owner,
-            "leaseExpiresAt": {"$gt": timestamp},
-        }
-        update = {
-            "$set": {
-                "leaseExpiresAt": timestamp + REBUILD_LEASE_DURATION,
-            }
-        }
-        return self._state.update_one(query, update).matched_count == 1
+        renewed = self._state.update_one(
+            _rebuild_lease_query(owner, timestamp),
+            _renew_lease(timestamp),
+        )
+        return renewed.matched_count == 1
 
     def _publish(self, owner: str, marker: dict, session) -> bool:
         timestamp = self._clock()

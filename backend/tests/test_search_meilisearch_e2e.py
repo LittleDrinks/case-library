@@ -167,6 +167,15 @@ def _level_counts(page) -> dict[str, int]:
     return {row["value"]: row["count"] for row in page.metadata.facets["accessLevel"]}
 
 
+def _assert_acl_facet_counts(page) -> None:
+    assert page.metadata.total == 4_160
+    assert _level_counts(page) == {
+        "public": 4_160,
+        "campus": 4_160,
+        "private": 4_160,
+    }
+
+
 def test_real_catalog_walks_12480_acl_results_in_global_date_order(catalog) -> None:
     catalog, uid, epoch = catalog
     ids = _walk_material_ids(catalog, uid, epoch)
@@ -182,12 +191,7 @@ def test_real_catalog_redacts_denied_material_and_self_excludes_facets(catalog) 
     filtered = catalog.search(
         _request(uid, epoch, filters={"accessLevel": ("public",)})
     )
-    assert filtered.metadata.total == 4_160
-    assert _level_counts(filtered) == {
-        "public": 4_160,
-        "campus": 4_160,
-        "private": 4_160,
-    }
+    _assert_acl_facet_counts(filtered)
 
 
 def test_real_catalog_handles_natural_questions_and_knowledge_levels(catalog) -> None:

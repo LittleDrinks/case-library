@@ -496,6 +496,15 @@ def _old_catalog_marker() -> dict:
     }
 
 
+def _old_catalog_documents() -> dict:
+    return {
+        "catalog-meta": {
+            "catalogId": "catalog-meta",
+            "generation": "old-generation",
+        }
+    }
+
+
 def _inactive_material_documents() -> dict:
     return {
         "material-m-off-full": {"catalogId": "material-m-off-full"},
@@ -516,6 +525,12 @@ def _catalog_with_old_document():
     return client, db
 
 
+def _catalog_with_published_generation():
+    client, db = FakeMeiliClient(), database()
+    _rebuilder(db, client, "catalog-build").rebuild()
+    return client, db
+
+
 def _consumer_context():
     client, db, clock = FakeMeiliClient(), database(), Clock()
     _set_catalog(db, client)
@@ -524,8 +539,7 @@ def _consumer_context():
 
 def test_rebuild_atomically_replaces_catalog_from_business_truth() -> None:
     client, db = _catalog_with_old_document()
-    rebuilder = CatalogRebuilder(db, client, "catalog", build_uid=lambda: "catalog-build")
-    count = rebuilder.rebuild()
+    count = _rebuilder(db, client, "catalog-build").rebuild()
 
     assert count == 7
     _assert_rebuilt(db, client)
@@ -540,9 +554,7 @@ def test_rebuild_atomically_replaces_catalog_from_business_truth() -> None:
 
 
 def test_rebuild_publishes_one_generation_to_mongo_and_catalog() -> None:
-    client, db = FakeMeiliClient(), database()
-    rebuilder = CatalogRebuilder(db, client, "catalog", build_uid=lambda: "catalog-build")
-    rebuilder.rebuild()
+    client, db = _catalog_with_published_generation()
 
     marker = db.search_catalog_generation.find_one({"_id": "catalog"})
     document = client.documents[marker["indexUid"]]["catalog-meta"]
@@ -669,9 +681,7 @@ def test_rebuild_failure_keeps_stable_catalog_untouched() -> None:
     stable = {"old": {"catalogId": "old", "title": "仍可检索"}}
     _set_catalog(db, client, documents=stable.copy())
     client.fail_uid = "catalog-build"
-    rebuilder = CatalogRebuilder(
-        db, client, "catalog", build_uid=lambda: "catalog-build"
-    )
+    rebuilder = _rebuilder(db, client, "catalog-build")
 
     with pytest.raises(RuntimeError, match="indexing failed"):
         rebuilder.rebuild()
@@ -683,13 +693,12 @@ def test_rebuild_failure_keeps_stable_catalog_untouched() -> None:
 
 def test_generation_write_failure_keeps_published_catalog() -> None:
     client, db = FakeMeiliClient(), database()
-    old = {
-        "catalog-meta": {
-            "catalogId": "catalog-meta",
-            "generation": "old-generation",
-        }
-    }
-    _set_catalog(db, client, generation="old-generation", documents=old)
+    _set_catalog(
+        db,
+        client,
+        generation="old-generation",
+        documents=_old_catalog_documents(),
+    )
     wrapped = FailedGenerationDatabase(db)
     rebuilder = _rebuilder(wrapped, client, "catalog-build")
 
@@ -706,7 +715,7 @@ def test_retired_cleanup_failure_does_not_negate_publication_and_is_retried() ->
     client, db = FakeMeiliClient(), database()
     _set_catalog(db, client, documents={"old": {"catalogId": "old"}})
     client.fail_delete_uid = "catalog-old"
-    rebuilder = CatalogRebuilder(db, client, "catalog", build_uid=lambda: "catalog-build")
+    rebuilder = _rebuilder(db, client, "catalog-build")
     assert rebuilder.rebuild() == 7
 
     _assert_rebuilt(db, client)
