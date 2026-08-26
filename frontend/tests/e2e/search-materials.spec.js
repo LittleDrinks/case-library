@@ -163,6 +163,22 @@ async function expectCursorAbsentFromUrl(page) {
   expect(new URLSearchParams(hash.split("?")[1] || "").has("cursor")).toBe(false);
 }
 
+async function inspectMaterialDetail(page) {
+  const title = await page.locator("tbody tr a").first().textContent();
+  await page.locator("tbody tr a").first().click();
+  await expect(page).toHaveURL(/#\/materials\/[^?]+\?caseId=c-draft-1&from=materials/);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  return title;
+}
+
+async function returnToMaterialPage(page, title) {
+  await page.getByRole("link", { name: "返回素材掌控台" }).click();
+  await expect(page).toHaveURL(/#\/materials\?caseId=c-draft-1$/);
+  await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
+  await expect(page.getByText(title, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "加入当前案例" })).toBeVisible();
+}
+
 test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
   await page.goto("/#/search?q=马克思");
   const firstPage = expectSearchPageRequest(page, "knowledge", false);
@@ -260,16 +276,30 @@ test("素材掌控台在手机端无横向溢出", async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("素材掌控台按 50 条分页并保持手机端无溢出", async ({ page }) => {
+test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto("/#/materials?caseId=c-draft-1");
-  await expect(page.getByText(/第 1 页 · 共/)).toBeVisible();
+  await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
+  const firstPageItems = await page.locator("tbody tr").count();
+  expect(firstPageItems).toBeLessThanOrEqual(20);
+  await expect(page.locator(".catalog-pagination")).toHaveCount(2);
   const secondPage = expectSearchPageRequest(page, "material", true);
-  await page.getByRole("button", { name: "下一页" }).click();
+  await page.getByRole("button", { name: "下一页" }).first().click();
   await secondPage;
-  await expect(page.getByText(/第 2 页 · 共/)).toBeVisible();
+  await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
   await expectCursorAbsentFromUrl(page);
+  const secondTitle = await inspectMaterialDetail(page);
+  await returnToMaterialPage(page, secondTitle);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("受限素材详情与下载统一返回 404", async ({ page }) => {
+  await login(page);
+  await page.goto("/#/materials/m-kc4");
+  await expect(page.getByRole("alert")).toContainText("素材不存在");
+
+  const response = await page.context().request.get("/api/materials/m-kc4/content");
+  expect(response.status()).toBe(404);
 });

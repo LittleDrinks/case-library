@@ -29,7 +29,7 @@ function render() {
   return mount(SearchView, {
     global: { stubs: {
       SiteHeader: true, SearchAIAnswer: true, SearchGraph: true,
-      SearchFilters: true, RouterLink: true,
+      SearchFilters: true, RouterLink: { template: "<a><slot /></a>" },
     } },
   });
 }
