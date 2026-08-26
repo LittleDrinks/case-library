@@ -163,6 +163,34 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
 
+  searxng:
+    image: case-library-v2-searxng
+    build:
+      context: .
+      dockerfile: deploy/searxng.Dockerfile
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-case-library-demo-searxng-secret}
+      SEARXNG_PORT: "8080"
+      SEARXNG_BIND_ADDRESS: 0.0.0.0
+    volumes:
+      - searxng_data:/var/cache/searxng
+    depends_on:
+      production-config-check:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+    networks:
+      - web_search
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
   search-init:
     image: case-library-v2-app
     build:
@@ -238,6 +266,9 @@ services:
       SEARCH_URL: http://meilisearch:7700
       SEARCH_INDEX_UID: catalog
       SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+      SEARXNG_TIMEOUT_SECONDS: ${SEARXNG_TIMEOUT_SECONDS:-5}
+      SEARXNG_MAX_RESULTS: ${SEARXNG_MAX_RESULTS:-10}
       OBJECT_STORE_ENDPOINT: minio:9000
       OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
       OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
@@ -253,6 +284,7 @@ services:
     networks:
       - edge
       - database
+      - web_search
     depends_on:
       mongo-init:
         condition: service_completed_successfully
@@ -261,6 +293,8 @@ services:
       search-init:
         condition: service_completed_successfully
       search-worker:
+        condition: service_started
+      searxng:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
@@ -769,6 +803,7 @@ volumes:
   mongo3_data:
   minio_data:
   meili_data:
+  searxng_data:
   e2e_meili_data:
   load_meili_data:
 
@@ -782,6 +817,10 @@ networks:
     ipam:
       config:
         - subnet: ${DATABASE_SUBNET:-10.254.241.0/24}
+  web_search:
+    ipam:
+      config:
+        - subnet: ${WEB_SEARCH_SUBNET:-10.254.253.0/24}
   load_test:
     internal: true
     ipam:

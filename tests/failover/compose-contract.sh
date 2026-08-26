@@ -28,6 +28,7 @@ app_config="$(service_config app)"
 frontend_config="$(service_config frontend)"
 minio_config="$(service_config minio)"
 meili_config="$(service_config meilisearch)"
+searxng_config="$(service_config searxng)"
 mongo1_config="$(service_config mongo1)"
 mongo2_config="$(service_config mongo2)"
 mongo3_config="$(service_config mongo3)"
@@ -47,7 +48,7 @@ load_worker_config="$(config="$load_config" service_config load-search-worker)"
 restore_tools_config="$(config="$restore_config" service_config restore-tools)"
 backup_tools_config="$(config="$ops_config" service_config backup-tools)"
 
-for service in app frontend meilisearch search-init search-worker minio mongo1 mongo2 mongo3 mongo-init production-config-check; do
+for service in app frontend meilisearch searxng search-init search-worker minio mongo1 mongo2 mongo3 mongo-init production-config-check; do
   echo "$services" | grep -qx "$service"
 done
 
@@ -114,9 +115,13 @@ echo "$app_config" | grep -q '/run/secrets/minio_root_password'
 echo "$app_config" | grep -q 'SEARCH_URL: http://meilisearch:7700'
 echo "$app_config" | grep -q 'SEARCH_INDEX_UID: catalog'
 echo "$app_config" | grep -q 'SEARCH_API_KEY_FILE: /run/secrets/meili_master_key'
+echo "$app_config" | grep -q 'SEARXNG_BASE_URL: http://searxng:8080'
+echo "$app_config" | grep -q 'SEARXNG_TIMEOUT_SECONDS: "5"'
+echo "$app_config" | grep -q 'SEARXNG_MAX_RESULTS: "10"'
 echo "$app_config" | grep -q 'source: meili_master_key'
 echo "$app_config" | grep -B2 -A2 'search-init:' | grep -q 'service_completed_successfully'
 echo "$app_config" | grep -B2 -A2 'search-worker:' | grep -q 'service_started'
+echo "$app_config" | grep -B2 -A2 'searxng:' | grep -q 'service_started'
 echo "$meili_config" | grep -q 'image: case-library-v2-meilisearch'
 echo "$meili_config" | grep -q 'dockerfile: deploy/meilisearch.Dockerfile'
 echo "$meili_config" | grep -q 'source: meili_data'
@@ -126,6 +131,19 @@ if echo "$meili_config" | grep -q 'MEILI_MASTER_KEY:'; then
   echo "Meilisearch must receive its key through a secret file" >&2
   exit 1
 fi
+echo "$searxng_config" | grep -q 'image: case-library-v2-searxng'
+echo "$searxng_config" | grep -q 'dockerfile: deploy/searxng.Dockerfile'
+echo "$searxng_config" | grep -q 'source: searxng_data'
+echo "$searxng_config" | grep -q 'target: /var/cache/searxng'
+echo "$searxng_config" | grep -q '/healthz'
+if echo "$searxng_config" | grep -q 'published:'; then
+  echo "SearXNG must not publish a host port" >&2
+  exit 1
+fi
+grep -q 'FROM searxng/searxng:latest' deploy/searxng.Dockerfile
+grep -q '^    - json$' deploy/searxng/settings.yml
+grep -q 'max_page: 1' deploy/searxng/settings.yml
+grep -q 'request_timeout: 5.0' deploy/searxng/settings.yml
 echo "$search_init_config" | grep -q 'app.modules.search.rebuild'
 echo "$search_init_config" | grep -q 'APP_ENV: demo'
 echo "$search_init_config" | grep -q 'ENABLE_DEMO_SEED: "true"'
