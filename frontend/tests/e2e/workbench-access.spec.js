@@ -22,6 +22,14 @@ async function createCase(request, title) {
   return response.json();
 }
 
+async function openAdminCase(page, rowName, linkName, caseId) {
+  const row = page.getByRole("article", { name: rowName });
+  const link = row.getByRole("link", { name: linkName, exact: true });
+  await expect(row).toHaveCount(1);
+  await expect(link).toHaveAttribute("href", `#/admin/review/${caseId}`);
+  await link.click();
+}
+
 test("普通非作者不会挂载画布，且返回历史不会回到工作台", async ({ page }) => {
   await login(page, "user", "user123");
   await page.goto("/#/");
@@ -57,10 +65,10 @@ test("作者已发布案例仍可进入工作台，非作者管理员改入审�
 test("管理员从管理后台进入审核和发布管理", async ({ page }) => {
   await login(page, "admin", "admin123");
   await page.goto("/#/admin");
-  await page.getByRole("link", { name: "审核", exact: true }).first().click();
+  await openAdminCase(page, /待审核：生成式人工智能进课堂/, "审核", "c-pending-1");
   await expect(page).toHaveURL(/#\/admin\/review\/c-pending-1$/);
   await page.goto("/#/admin");
-  await page.getByRole("link", { name: "发布管理", exact: true }).first().click();
+  await openAdminCase(page, /已发布：钱伟长图书馆/, "发布管理", "c-02");
 
   await expect(page).toHaveURL(/#\/admin\/review\/c-02$/);
 });
