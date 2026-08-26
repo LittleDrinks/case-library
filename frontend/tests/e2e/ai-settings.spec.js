@@ -376,6 +376,20 @@ async function zeroResultSearchScenario(page) {
   expect(settings).toHaveLength(0);
 }
 
+async function reselectActiveTabScenario(page) {
+  const searches = watchRequests(page, "/api/search");
+  const chats = watchRequests(page, "/api/ai/chat");
+  const settings = watchRequests(page, "/api/ai/settings");
+  await expectSearchAnswer(page);
+  await expectSearchRequestCount(chats, settings, 1);
+  await page.getByRole("tab", { name: /全部/ }).click();
+  await expectFinishedSearchAnswer(page);
+  await settlePage(page);
+  expect(searches).toHaveLength(1);
+  expect(chats).toHaveLength(1);
+  expect(settings).toHaveLength(1);
+}
+
 async function beginSlowPageChange(page, held, chats) {
   await page.goto("/#/search?q=%E6%80%9D%E6%94%BF%EF%BC%9F");
   await expect(page.locator(".ai-answer-text")).toContainText("过期回答");
@@ -624,6 +638,10 @@ test("图谱直达的当前结果回列表后只生成一次", async ({ page }) 
 
 test("零结果检索不请求 AI", async ({ page }) => (
   withSearchProvider(page, zeroResultSearchScenario)
+));
+
+test("重选当前页签保留 AI 回答且不重发请求", async ({ page }) => (
+  withSearchProvider(page, reselectActiveTabScenario)
 ));
 
 test("快速翻页不会让旧 AI 回答覆盖当前结果", async ({ page }) => (

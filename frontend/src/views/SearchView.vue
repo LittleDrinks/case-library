@@ -31,6 +31,7 @@ const aiAnswer = ref(null);
 const aiAnswerVersion = ref(0);
 const showAIAnswer = computed(() => hasSubmittedQuery.value && aiAnswerVersion.value > 0);
 let searchGeneration = 0;
+let pendingSearchGeneration;
 let aiResultVersion = 0;
 let activatedAIResult = 0;
 
@@ -72,6 +73,17 @@ function routeQuery(overrides = {}) {
   };
 }
 
+function matchesCurrentQuery(next) {
+  const keys = new Set([...Object.keys(route.query), ...Object.keys(next)]);
+  return [...keys].every(key => JSON.stringify(route.query[key] ?? null) === JSON.stringify(next[key] ?? null));
+}
+
+function replaceSearch(next, current) {
+  if (matchesCurrentQuery(next)) return Promise.resolve();
+  if (current === undefined) pendingSearchGeneration = beginSearch();
+  return router.replace({ name: "search", query: next });
+}
+
 function selectView(mode) {
   setView(mode);
   router.replace({ name: "search", query: routeQuery({ mode }) });
@@ -82,6 +94,11 @@ function invalidateAI() {
   aiResultVersion = 0;
   activatedAIResult = 0;
   aiAnswerVersion.value = 0;
+}
+
+function beginSearch() {
+  invalidateAI();
+  return ++searchGeneration;
 }
 
 function activateAI() {
@@ -95,9 +112,7 @@ function setView(value) {
   activateAI();
 }
 
-async function requestSearch(term, kind, activeCursor, searchFilters) {
-  invalidateAI();
-  const current = ++searchGeneration;
+async function requestSearch(term, kind, activeCursor, searchFilters, current = beginSearch()) {
   loading.value = true;
   error.value = "";
   try {
@@ -137,31 +152,28 @@ async function submitSearch() {
     cursor.value = "";
     return requestSearch(term, activeKind.value, null, filters.value);
   }
-  invalidateAI();
-  await router.replace({ name: "search", query: routeQuery({ term }) });
+  await replaceSearch(routeQuery({ term }));
 }
 
 function syncSearchRoute(values) {
   const [rawTerm, rawKind] = values;
   const term = String(rawTerm || "").trim();
   const kind = searchKind(rawKind);
+  const current = pendingSearchGeneration ?? beginSearch();
+  pendingSearchGeneration = undefined;
   query.value = term;
   activeKind.value = kind;
   cursor.value = "";
   filters.value = filtersFromQuery(route.query, kind);
-  invalidateAI();
   if (rawTerm != null && !term) {
-    requestSearch(term, kind, null, filters.value);
-    return router.replace({ name: "search", query: routeQuery({ term }) });
+    requestSearch(term, kind, null, filters.value, current);
+    return replaceSearch(routeQuery({ term }), current);
   }
-  requestSearch(term, kind, null, filters.value);
+  requestSearch(term, kind, null, filters.value, current);
 }
 
 function selectKind(kind) {
-  invalidateAI();
-  router.replace({
-    name: "search", query: routeQuery({ kind, filters: emptyFilters() }),
-  });
+  replaceSearch(routeQuery({ kind, filters: emptyFilters() }));
 }
 
 function selectPage(nextCursor) {
@@ -170,9 +182,7 @@ function selectPage(nextCursor) {
 }
 
 function selectFilters(next) {
-  invalidateAI();
-  filters.value = next;
-  router.replace({ name: "search", query: routeQuery({ filters: next }) });
+  replaceSearch(routeQuery({ filters: next }));
 }
 
 const searchRouteKeys = ["q", "kind", "typeName", "audience", "authority", "materialType", "tag", "publishedWithin"];
