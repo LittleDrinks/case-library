@@ -10,6 +10,15 @@ DISCOVERY_BODY = {
     "baseUrl": "https://custom.invalid/v1",
     "apiKey": "discovery-only-key",
 }
+CUSTOM_SETTINGS_RESPONSE = {
+    "mode": "custom",
+    "baseUrl": "https://custom.invalid/v1",
+    "model": "custom-model",
+    "hasApiKey": True,
+    "configured": True,
+    "effectiveSource": "custom",
+    "effectiveModel": "custom-model",
+}
 
 
 class FakeProvider:
@@ -104,6 +113,11 @@ def assert_custom_record(client: TestClient) -> None:
     assert "apiKey" not in record
 
 
+def assert_custom_settings_response(response) -> None:
+    assert response.status_code == 200
+    assert response.json() == CUSTOM_SETTINGS_RESPONSE
+
+
 def assert_preserved_key(before: dict, after: dict) -> None:
     assert before["encryptedApiKey"] == after["encryptedApiKey"]
 
@@ -181,51 +195,52 @@ def test_user_can_persist_automatic_mode(client: TestClient, tmp_path) -> None:
     assert client.get("/api/ai/settings").json() == response.json()
 
 
-def test_custom_settings_encrypt_key_and_never_return_it(
-    client: TestClient,
-    tmp_path,
-) -> None:
+def test_custom_settings_encrypt_key_and_never_return_it(client: TestClient, tmp_path) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
 
     response = save_custom(client, auth["csrfToken"])
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "mode": "custom",
-        "baseUrl": "https://custom.invalid/v1",
-        "model": "custom-model",
-        "hasApiKey": True,
-        "configured": True,
-        "effectiveSource": "custom",
-        "effectiveModel": "custom-model",
-    }
+    assert_custom_settings_response(response)
     assert_custom_record(client)
+
+
+def configure_custom_environment(client, tmp_path) -> None:
+    configure_platform(client, tmp_path)
+    configure_app_secret(client, tmp_path)
+
+
+def _saved_custom_record(client: TestClient, auth: dict) -> dict:
+    response = save_custom(client, auth["csrfToken"])
+    assert response.status_code == 200
+    return client.app.state.database.ai_user_settings.find_one()
 
 
 def test_custom_chat_uses_custom_model_and_blank_key_keeps_secret(
     client: TestClient,
     tmp_path,
 ) -> None:
-    configure_platform(client, tmp_path)
-    configure_app_secret(client, tmp_path)
+    configure_custom_environment(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
     response = save_custom(
         client,
         auth["csrfToken"],
         "",
         " https://custom.invalid/v1/ ",
     )
-    provider = FakeProvider()
-    client.app.state.ai_provider = provider
-    chat_response = post_chat(client, auth)
+    provider, chat_response = _custom_chat(client, auth)
     assert response.status_code == 200
     after = client.app.state.database.ai_user_settings.find_one()
     assert_preserved_key(before, after)
     assert chat_response.status_code == 200
     assert provider.models == ["custom-model"]
+
+
+def _custom_chat(client: TestClient, auth: dict) -> tuple[FakeProvider, object]:
+    provider = FakeProvider()
+    client.app.state.ai_provider = provider
+    return provider, post_chat(client, auth)
 
 
 def test_custom_url_change_requires_new_key_and_keeps_record(
@@ -234,8 +249,7 @@ def test_custom_url_change_requires_new_key_and_keeps_record(
 ) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
 
     response = save_custom(
         client,
@@ -255,8 +269,7 @@ def test_custom_url_change_with_new_key_replaces_encrypted_key(
 ) -> None:
     configure_app_secret(client, tmp_path)
     auth = login(client)
-    assert save_custom(client, auth["csrfToken"]).status_code == 200
-    before = client.app.state.database.ai_user_settings.find_one()
+    before = _saved_custom_record(client, auth)
 
     response = save_custom(
         client,

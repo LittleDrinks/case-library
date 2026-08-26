@@ -60,47 +60,53 @@ def transition(opener, csrf: str, case: dict, command: str, **extra) -> dict:
 
 def create_reviewing_case(owner, csrf: str) -> dict:
     marker = f"annotation-e2e-{uuid.uuid4().hex}"
-    document = {
-        "type": "doc",
-        "content": [
-            {
-                "type": "heading",
-                "attrs": {"level": 1},
-                "content": [{"type": "text", "text": "一、教学说明"}],
-            },
-            {"type": "paragraph", "content": [{"type": "text", "text": marker}]},
-        ],
-    }
-    status, case = request(
-        owner,
-        "POST",
-        "/api/cases",
-        {
-            "title": marker,
-            "document": document,
-        },
-        csrf,
-    )
-    assert status == 200
+    case = _create_case(owner, csrf, marker)
     return transition(owner, csrf, case, "submit")
+
+
+def _create_case(owner, csrf: str, marker: str) -> dict:
+    body = {"title": marker, "document": _document(marker)}
+    status, case = request(owner, "POST", "/api/cases", body, csrf)
+    assert status == 200
+    return case
+
+
+def _document(marker: str) -> dict:
+    heading = {
+        "type": "heading",
+        "attrs": {"level": 1},
+        "content": [{"type": "text", "text": "一、教学说明"}],
+    }
+    paragraph = {"type": "paragraph", "content": [{"type": "text", "text": marker}]}
+    return {"type": "doc", "content": [heading, paragraph]}
+
+
+def _annotation_body(submitted: dict) -> dict:
+    return {
+        "quote": submitted["case"]["title"],
+        "section": "一、教学说明",
+        "content": "请补充可观察的评价标准。",
+        "source": "admin",
+    }
 
 
 def annotate_and_reject(admin, csrf: str, submitted: dict) -> dict:
     case = transition(admin, csrf, submitted["case"], "start")["case"]
-    status, annotation = request(
-        admin,
-        "POST",
-        f"/api/cases/{case['id']}/annotations",
-        {
-            "quote": submitted["case"]["title"],
-            "section": "一、教学说明",
-            "content": "请补充可观察的评价标准。",
-            "source": "admin",
-        },
-        csrf,
-    )
+    annotation = _create_annotation(admin, csrf, case, submitted)
+    returned = _reject_case(admin, csrf, case)
+    assert returned["event"]["annotationIds"] == [annotation["id"]]
+    return annotation
+
+
+def _create_annotation(admin, csrf: str, case: dict, submitted: dict) -> dict:
+    path = f"/api/cases/{case['id']}/annotations"
+    status, annotation = request(admin, "POST", path, _annotation_body(submitted), csrf)
     assert status == 201
-    returned = transition(
+    return annotation
+
+
+def _reject_case(admin, csrf: str, case: dict) -> dict:
+    return transition(
         admin,
         csrf,
         case,
@@ -108,8 +114,6 @@ def annotate_and_reject(admin, csrf: str, submitted: dict) -> dict:
         submittedVersionId=case["submittedVersionId"],
         reasonType="教学目标不清晰",
     )
-    assert returned["event"]["annotationIds"] == [annotation["id"]]
-    return annotation
 
 
 def resolve_as_owner(owner, csrf: str, case_id: str, annotation: dict) -> None:

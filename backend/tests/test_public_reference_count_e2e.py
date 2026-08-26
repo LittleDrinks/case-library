@@ -27,7 +27,13 @@ def login(username: str, password: str) -> tuple[httpx.Client, str]:
 def create_material(database) -> dict:
     token = uuid.uuid4().hex
     now = datetime.now(UTC).isoformat()
-    material = {
+    material = _material_record(token, now)
+    database.materials.insert_one(material)
+    return material
+
+
+def _material_record(token: str, timestamp: str) -> dict:
+    return {
         "id": f"m-reference-{token}",
         "title": f"公开引用计数-{token}",
         "summary": "校内素材引用计数端到端验证",
@@ -38,12 +44,10 @@ def create_material(database) -> dict:
         "accessLevel": "campus",
         "status": "active",
         "createdBy": "u-admin-demo",
-        "createdAt": now,
-        "publishedAt": now,
+        "createdAt": timestamp,
+        "publishedAt": timestamp,
         "publicReferenceCount": 0,
     }
-    database.materials.insert_one(material)
-    return material
 
 
 def transition(client, csrf: str, case: dict, command: str, **extra) -> httpx.Response:

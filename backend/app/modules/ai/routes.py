@@ -158,6 +158,23 @@ def discover_models(
         lease.release()
 
 
+def _chat_provider(database, settings, user_id):
+    try:
+        selected = resolve_provider(database, settings, user_id)
+    except AIConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not selected:
+        raise HTTPException(status_code=503, detail="AI 服务未配置")
+    return selected
+
+
+def _chat_lease(database, user_id, base_url):
+    try:
+        return acquire_chat_lease(database, user_id, base_url)
+    except AIQuotaError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+
+
 @router.post("/chat")
 def chat(
     body: ChatRequest,
@@ -167,16 +184,8 @@ def chat(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
-    try:
-        selected = resolve_provider(database, settings, user["id"])
-    except AIConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    if not selected:
-        raise HTTPException(status_code=503, detail="AI 服务未配置")
-    try:
-        lease = acquire_chat_lease(database, user["id"], selected.base_url)
-    except AIQuotaError as error:
-        raise HTTPException(status_code=429, detail=str(error)) from error
+    selected = _chat_provider(database, settings, user["id"])
+    lease = _chat_lease(database, user["id"], selected.base_url)
     messages = [message.model_dump() for message in body.messages]
     chunks = _provider(request, selected).chat(messages, selected.model)
     return StreamingResponse(_events(chunks, lease), media_type="text/event-stream")
