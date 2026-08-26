@@ -13,6 +13,7 @@ from app.modules.materials.models import (
     CandidateDecision,
     MaterialCandidatePage,
     MaterialCandidateView,
+    MaterialDetailView,
     MaterialImportJobView,
 )
 from app.modules.materials.service import (
@@ -20,6 +21,7 @@ from app.modules.materials.service import (
     decide_candidate,
     download_material,
     get_import,
+    get_material_detail,
     list_candidates,
     material_filename,
 )
@@ -105,3 +107,16 @@ def content(
         media_type=material["mediaType"],
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+@content_router.get(
+    "/{material_id}",
+    response_model=MaterialDetailView,
+    response_model_exclude_none=True,
+)
+def detail(
+    material_id: str,
+    database=Depends(get_database),
+    user: dict | None = Depends(optional_user),
+):
+    return get_material_detail(database, material_id, user)

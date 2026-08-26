@@ -2,7 +2,6 @@
 import { computed, watch } from "vue";
 import { LoaderCircle, RotateCcw } from "@lucide/vue";
 import { useAIStream } from "../composables/useAIStream.js";
-import { publicUrl } from "../lib/publicUrl.js";
 
 const props = defineProps({ query: String, items: { type: Array, required: true } });
 const { state, text, error, run, clear } = useAIStream();
@@ -41,7 +40,7 @@ function prompt() {
 
 function destination(item) {
   if (item.kind === "case") return { name: "case-public", params: { id: item.id } };
-  return item.kind === "material" ? publicUrl(item.sourceUrl) : "";
+  return item.kind === "material" ? { name: "material-detail", params: { id: item.id }, query: { from: "search" } } : "";
 }
 
 function shouldGenerate() {
@@ -86,7 +85,7 @@ watch(() => [props.query, signature.value], () => generate(), { immediate: true 
     <ol v-if="text" class="ai-answer-sources" aria-label="AI 回答引用来源">
       <li v-for="(item, index) in contextItems" :key="`${item.kind}-${item.id}`">
         <RouterLink v-if="item.kind === 'case'" :to="destination(item)">〔{{ index + 1 }}〕{{ item.title }}</RouterLink>
-        <a v-else-if="destination(item)" :href="destination(item)" target="_blank" rel="noopener noreferrer">〔{{ index + 1 }}〕{{ item.title }}</a>
+        <RouterLink v-else-if="item.kind === 'material'" :to="destination(item)">〔{{ index + 1 }}〕{{ item.title }}</RouterLink>
         <span v-else>〔{{ index + 1 }}〕{{ item.title }}</span>
       </li>
     </ol>
