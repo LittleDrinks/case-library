@@ -279,34 +279,25 @@ def test_expired_owner_cannot_publish_after_a_new_owner_takes_over() -> None:
     clock.advance(30)
     queue.pause("new-rebuild")
 
-    assert (
-        queue.publish(
-            "new-rebuild",
-            {
-                "_id": "catalog",
-                "generation": "new",
-                "indexUid": "catalog-new",
-                "indexEpoch": "epoch-new",
-                "retiredIndexUids": ["catalog-old"],
-            },
-        )
-        is True
-    )
-    assert (
-        queue.publish(
-            "old-rebuild",
-            {
-                "_id": "catalog",
-                "generation": "old",
-                "indexUid": "catalog-old",
-                "indexEpoch": "epoch-old",
-                "retiredIndexUids": [],
-            },
-        )
-        is False
-    )
-
+    assert queue.publish(
+        "new-rebuild",
+        _marker("new", "catalog-new", "epoch-new", ["catalog-old"]),
+    ) is True
+    assert queue.publish(
+        "old-rebuild",
+        _marker("old", "catalog-old", "epoch-old", []),
+    ) is False
     assert queue.target().generation == "new"
+
+
+def _marker(generation, index_uid, epoch, retired) -> dict:
+    return {
+        "_id": "catalog",
+        "generation": generation,
+        "indexUid": index_uid,
+        "indexEpoch": epoch,
+        "retiredIndexUids": retired,
+    }
 
 
 def test_complete_rolls_back_ack_and_revocation_on_transaction_failure() -> None:

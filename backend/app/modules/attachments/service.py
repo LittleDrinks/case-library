@@ -83,6 +83,16 @@ def snapshot_attachments(database: Database, case_id: str, session) -> list[dict
     return [{field: row[field] for field in SNAPSHOT_FIELDS} for row in rows]
 
 
+def _new_attachment(case_id, upload, access_level) -> dict:
+    return _attachment_record(
+        case_id,
+        upload,
+        access_level,
+        _require_file_size(upload),
+        _search_text(upload),
+    )
+
+
 def create_attachment(
     database: Database,
     store: BlobStore,
@@ -94,14 +104,7 @@ def create_attachment(
 ) -> dict:
     case = _case(database, case_id)
     _require_author_draft(case, user)
-    size = _require_file_size(upload)
-    attachment = _attachment_record(
-        case_id,
-        upload,
-        access_level,
-        size,
-        _search_text(upload),
-    )
+    attachment = _new_attachment(case_id, upload, access_level)
     _persist_attachment(database, store, attachment, upload, user, revision)
     return attachment_view(attachment)
 

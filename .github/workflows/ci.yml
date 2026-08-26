@@ -20,7 +20,6 @@ jobs:
         run: |
           status=0
           make config || status=1
-          docker compose --env-file .env.example --profile test run --build --rm backend-test || status=1
-          docker compose --env-file .env.example --profile test run --build --rm frontend-test || status=1
+          make test || status=1
           make e2e || status=1
           exit "$status"

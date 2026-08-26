@@ -15,8 +15,9 @@ from app.modules.search.meilisearch import (
     CatalogPage,
     SearchUnavailable,
 )
+from app.modules.search.models import SearchQuery
 from app.modules.search.outbox import SearchOutbox
-from app.modules.search.service import search_catalog
+from app.modules.search.service import CatalogSearch, search_catalog
 from app.modules.search.worker import CatalogConsumer, WorkerHeartbeat
 from conftest import ReadyCatalogState
 
@@ -148,86 +149,101 @@ class VisibleMaterialCatalog:
 
 
 def _seed_cases(db) -> None:
-    db.cases.insert_many(
-        [
-            {
-                "id": "c-public",
-                "publicationStatus": "public",
-                "publishedVersionId": "v-public",
-                "publishedAt": "2026-08-13",
-                "ownerId": "u-owner",
-            },
-            {"id": "c-draft", "publicationStatus": "none"},
-        ]
-    )
-    db.case_versions.insert_many(
-        [
-            {
-                "id": "v-public",
-                "caseId": "c-public",
-                "title": "公开案例",
-                "summary": "摘要",
-                "document": {"type": "doc", "content": []},
-                "attachments": [],
-                "metadata": {},
-                "materials": [{"id": "m-1"}],
-            },
-            {"id": "v-draft", "caseId": "c-draft", "title": "草稿", "metadata": {}},
-        ]
-    )
+    db.cases.insert_many([_public_case(), _draft_case()])
+    db.case_versions.insert_many([_published_version(), _draft_version()])
 
 
 def _seed_knowledge(db) -> None:
-    db.knowledge_sources.insert_many(
-        [
-            {"id": "ks-1", "title": "教材", "status": "active"},
-            {"id": "ks-off", "title": "停用教材", "status": "disabled"},
-        ]
-    )
-    db.knowledge_sections.insert_many(
-        [
-            {
-                "id": "kn-1",
-                "sourceId": "ks-1",
-                "chapterId": "kc-1",
-                "chapter": "第一章",
-                "index": 1,
-                "title": "科学精神",
-            },
-            {
-                "id": "kn-off",
-                "sourceId": "ks-off",
-                "chapterId": "kc-off",
-                "chapter": "停用章",
-                "index": 1,
-                "title": "停用节",
-            },
-        ]
-    )
+    db.knowledge_sources.insert_many([_active_source(), _disabled_source()])
+    db.knowledge_sections.insert_many([_active_section(), _disabled_section()])
 
 
 def _seed_materials(db) -> None:
-    db.materials.insert_many(
-        [
-            {
-                "id": "m-1",
-                "title": "素材",
-                "status": "active",
-                "accessLevel": "public",
-                "createdBy": "u-1",
-                "publicReferenceCount": 1,
-            },
-            {
-                "id": "m-off",
-                "title": "停用素材",
-                "status": "disabled",
-                "accessLevel": "public",
-                "createdBy": "u-1",
-                "publicReferenceCount": 0,
-            },
-        ]
-    )
+    db.materials.insert_many([_active_material(), _disabled_material()])
     db.case_materials.insert_one({"caseId": "c-draft", "materialId": "m-1"})
+
+
+def _public_case() -> dict:
+    return {
+        "id": "c-public",
+        "publicationStatus": "public",
+        "publishedVersionId": "v-public",
+        "publishedAt": "2026-08-13",
+        "ownerId": "u-owner",
+    }
+
+
+def _draft_case() -> dict:
+    return {"id": "c-draft", "publicationStatus": "none"}
+
+
+def _published_version() -> dict:
+    return {
+        "id": "v-public",
+        "caseId": "c-public",
+        "title": "公开案例",
+        "summary": "摘要",
+        "document": {"type": "doc", "content": []},
+        "attachments": [],
+        "metadata": {},
+        "materials": [{"id": "m-1"}],
+    }
+
+
+def _draft_version() -> dict:
+    return {"id": "v-draft", "caseId": "c-draft", "title": "草稿", "metadata": {}}
+
+
+def _active_source() -> dict:
+    return {"id": "ks-1", "title": "教材", "status": "active"}
+
+
+def _disabled_source() -> dict:
+    return {"id": "ks-off", "title": "停用教材", "status": "disabled"}
+
+
+def _active_section() -> dict:
+    return {
+        "id": "kn-1",
+        "sourceId": "ks-1",
+        "chapterId": "kc-1",
+        "chapter": "第一章",
+        "index": 1,
+        "title": "科学精神",
+    }
+
+
+def _disabled_section() -> dict:
+    return {
+        "id": "kn-off",
+        "sourceId": "ks-off",
+        "chapterId": "kc-off",
+        "chapter": "停用章",
+        "index": 1,
+        "title": "停用节",
+    }
+
+
+def _active_material() -> dict:
+    return {
+        "id": "m-1",
+        "title": "素材",
+        "status": "active",
+        "accessLevel": "public",
+        "createdBy": "u-1",
+        "publicReferenceCount": 1,
+    }
+
+
+def _disabled_material() -> dict:
+    return {
+        "id": "m-off",
+        "title": "停用素材",
+        "status": "disabled",
+        "accessLevel": "public",
+        "createdBy": "u-1",
+        "publicReferenceCount": 0,
+    }
 
 
 def database():
@@ -388,14 +404,13 @@ def _search_materials(db, client, secret_path) -> dict:
         db,
         VisibleMaterialCatalog(db, client),
         ReadyCatalogState(db),
-        None,
-        "",
-        "material",
-        None,
-        20,
-        {},
-        str(secret_path),
+        _material_search(secret_path),
     )
+
+
+def _material_search(secret_path) -> CatalogSearch:
+    query = SearchQuery(kind="material", page_size=20)
+    return CatalogSearch(query, None, str(secret_path))
 
 
 def _pending_material(db, client) -> SearchOutbox:
@@ -451,20 +466,85 @@ def _interleaved_session(db, queue):
     return BeforeTransactionSession(before)
 
 
-def test_rebuild_atomically_replaces_catalog_from_business_truth() -> None:
-    client, db = FakeMeiliClient(), database()
-    _set_catalog(db, client, documents={"old": {"catalogId": "old"}})
-    rebuilder = CatalogRebuilder(
-        db, client, "catalog", build_uid=lambda: "catalog-build"
+def _update_material_truth(db, queue) -> None:
+    db.materials.update_one({"id": "m-1"}, {"$set": {"title": "最新素材"}})
+    queue.update_one({"_id": "material:m-1"}, {"$set": {"sequence": 4}})
+
+
+def _pending_outbox_row(key: str, sequence: int, timestamp) -> dict:
+    return {
+        "_id": key,
+        "sequence": sequence,
+        "appliedSequence": -1,
+        "pendingSince": timestamp,
+        "updatedAt": timestamp,
+    }
+
+
+def _material_timestamp(db, material_id="m-1"):
+    material = db.materials.find_one({"id": material_id})
+    return material["_id"].generation_time
+
+
+def _old_catalog_marker() -> dict:
+    return {
+        "_id": "catalog",
+        "generation": "old-generation",
+        "indexUid": "catalog-old",
+        "indexEpoch": "epoch-0",
+        "retiredIndexUids": [],
+    }
+
+
+def _old_catalog_documents() -> dict:
+    return {
+        "catalog-meta": {
+            "catalogId": "catalog-meta",
+            "generation": "old-generation",
+        }
+    }
+
+
+def _inactive_material_documents() -> dict:
+    return {
+        "material-m-off-full": {"catalogId": "material-m-off-full"},
+        "material-m-off-restricted": {"catalogId": "material-m-off-restricted"},
+    }
+
+
+def _retire_index(db, uid: str) -> None:
+    db.search_catalog_generation.update_one(
+        {"_id": "catalog"},
+        {"$set": {"retiredIndexUids": [uid]}},
     )
 
-    count = rebuilder.rebuild()
+
+def _catalog_with_old_document():
+    client, db = FakeMeiliClient(), database()
+    _set_catalog(db, client, documents={"old": {"catalogId": "old"}})
+    return client, db
+
+
+def _catalog_with_published_generation():
+    client, db = FakeMeiliClient(), database()
+    _rebuilder(db, client, "catalog-build").rebuild()
+    return client, db
+
+
+def _consumer_context():
+    client, db, clock = FakeMeiliClient(), database(), Clock()
+    _set_catalog(db, client)
+    return client, db, clock
+
+
+def test_rebuild_atomically_replaces_catalog_from_business_truth() -> None:
+    client, db = _catalog_with_old_document()
+    count = _rebuilder(db, client, "catalog-build").rebuild()
 
     assert count == 7
     _assert_rebuilt(db, client)
     settings = client.settings["catalog-build"]
-    assert "accessLevel" in settings["filterableAttributes"]
-    assert "id" in settings["filterableAttributes"]
+    assert {"accessLevel", "id"} <= set(settings["filterableAttributes"])
     assert settings["searchableAttributes"] == ["title", "searchableText"]
     assert settings["pagination"] == {"maxTotalHits": 25_000}
     assert "searchableText" not in settings["displayedAttributes"]
@@ -474,22 +554,11 @@ def test_rebuild_atomically_replaces_catalog_from_business_truth() -> None:
 
 
 def test_rebuild_publishes_one_generation_to_mongo_and_catalog() -> None:
-    client, db = FakeMeiliClient(), database()
-    rebuilder = CatalogRebuilder(
-        db, client, "catalog", build_uid=lambda: "catalog-build"
-    )
-
-    rebuilder.rebuild()
+    client, db = _catalog_with_published_generation()
 
     marker = db.search_catalog_generation.find_one({"_id": "catalog"})
     document = client.documents[marker["indexUid"]]["catalog-meta"]
-    assert set(marker) == {
-        "_id",
-        "generation",
-        "indexUid",
-        "indexEpoch",
-        "retiredIndexUids",
-    }
+    assert set(marker) == {"_id", "generation", "indexUid", "indexEpoch", "retiredIndexUids"}
     assert marker["generation"] == document["generation"]
     assert marker["indexUid"] == "catalog-build"
     assert marker["generation"]
@@ -612,9 +681,7 @@ def test_rebuild_failure_keeps_stable_catalog_untouched() -> None:
     stable = {"old": {"catalogId": "old", "title": "仍可检索"}}
     _set_catalog(db, client, documents=stable.copy())
     client.fail_uid = "catalog-build"
-    rebuilder = CatalogRebuilder(
-        db, client, "catalog", build_uid=lambda: "catalog-build"
-    )
+    rebuilder = _rebuilder(db, client, "catalog-build")
 
     with pytest.raises(RuntimeError, match="indexing failed"):
         rebuilder.rebuild()
@@ -626,27 +693,20 @@ def test_rebuild_failure_keeps_stable_catalog_untouched() -> None:
 
 def test_generation_write_failure_keeps_published_catalog() -> None:
     client, db = FakeMeiliClient(), database()
-    old = {
-        "catalog-meta": {
-            "catalogId": "catalog-meta",
-            "generation": "old-generation",
-        }
-    }
-    _set_catalog(db, client, generation="old-generation", documents=old)
+    _set_catalog(
+        db,
+        client,
+        generation="old-generation",
+        documents=_old_catalog_documents(),
+    )
     wrapped = FailedGenerationDatabase(db)
-    rebuilder = CatalogRebuilder(wrapped, client, "catalog", lambda: "catalog-build")
+    rebuilder = _rebuilder(wrapped, client, "catalog-build")
 
     with pytest.raises(RuntimeError, match="generation write failed"):
         rebuilder.rebuild()
 
     marker = db.search_catalog_generation.find_one({"_id": "catalog"})
-    assert marker == {
-        "_id": "catalog",
-        "generation": "old-generation",
-        "indexUid": "catalog-old",
-        "indexEpoch": "epoch-0",
-        "retiredIndexUids": [],
-    }
+    assert marker == _old_catalog_marker()
     assert "catalog-build" not in client.documents
     assert db.search_catalog_state.count_documents({}) == 0
 
@@ -655,10 +715,7 @@ def test_retired_cleanup_failure_does_not_negate_publication_and_is_retried() ->
     client, db = FakeMeiliClient(), database()
     _set_catalog(db, client, documents={"old": {"catalogId": "old"}})
     client.fail_delete_uid = "catalog-old"
-    rebuilder = CatalogRebuilder(
-        db, client, "catalog", build_uid=lambda: "catalog-build"
-    )
-
+    rebuilder = _rebuilder(db, client, "catalog-build")
     assert rebuilder.rebuild() == 7
 
     _assert_rebuilt(db, client)
@@ -677,21 +734,10 @@ def test_retired_cleanup_failure_does_not_negate_publication_and_is_retried() ->
 def test_consumer_reloads_truth_then_upserts_and_removes_caught_up_row() -> None:
     client, db = FakeMeiliClient(), database()
     _set_catalog(db, client)
-    db.search_outbox.insert_one(
-        {
-            "_id": "material:m-1",
-            "sequence": 3,
-            "appliedSequence": -1,
-            "pendingSince": db.materials.find_one({"id": "m-1"})["_id"].generation_time,
-            "updatedAt": db.materials.find_one({"id": "m-1"})["_id"].generation_time,
-        }
-    )
+    timestamp = _material_timestamp(db)
+    db.search_outbox.insert_one(_pending_outbox_row("material:m-1", 3, timestamp))
     db.search_revocations.insert_one(
-        {
-            "_id": "material:m-1",
-            "logicalKey": "material:m-1",
-            "sequence": 3,
-        }
+        {"_id": "material:m-1", "logicalKey": "material:m-1", "sequence": 3}
     )
 
     assert CatalogConsumer(db, client).process_one("worker-1") is True
@@ -705,25 +751,9 @@ def test_consumer_reloads_truth_then_upserts_and_removes_caught_up_row() -> None
 
 def test_consumer_deletes_projection_when_source_is_no_longer_active() -> None:
     client, db = FakeMeiliClient(), database()
-    _set_catalog(
-        db,
-        client,
-        documents={
-            "material-m-off-full": {"catalogId": "material-m-off-full"},
-            "material-m-off-restricted": {"catalogId": "material-m-off-restricted"},
-        },
-    )
-    db.search_outbox.insert_one(
-        {
-            "_id": "material:m-off",
-            "sequence": 2,
-            "appliedSequence": -1,
-            "pendingSince": db.materials.find_one({"id": "m-off"})[
-                "_id"
-            ].generation_time,
-            "updatedAt": db.materials.find_one({"id": "m-off"})["_id"].generation_time,
-        }
-    )
+    _set_catalog(db, client, documents=_inactive_material_documents())
+    timestamp = _material_timestamp(db, "m-off")
+    db.search_outbox.insert_one(_pending_outbox_row("material:m-off", 2, timestamp))
 
     assert CatalogConsumer(db, client).process_one("worker-1") is True
 
@@ -753,21 +783,9 @@ def test_consumer_repairs_projection_when_new_sequence_arrives_during_write() ->
     client, db = FakeMeiliClient(), database()
     _set_catalog(db, client)
     queue = db.search_outbox
-    queue.insert_one(
-        {
-            "_id": "material:m-1",
-            "sequence": 3,
-            "appliedSequence": -1,
-            "pendingSince": db.materials.find_one()["_id"].generation_time,
-            "updatedAt": db.materials.find_one()["_id"].generation_time,
-        }
-    )
-
-    def update_truth() -> None:
-        db.materials.update_one({"id": "m-1"}, {"$set": {"title": "最新素材"}})
-        queue.update_one({"_id": "material:m-1"}, {"$set": {"sequence": 4}})
-
-    client.after_add = update_truth
+    timestamp = _material_timestamp(db)
+    queue.insert_one(_pending_outbox_row("material:m-1", 3, timestamp))
+    client.after_add = lambda: _update_material_truth(db, queue)
     consumer = CatalogConsumer(db, client)
     assert consumer.process_one("worker-1") is True
     assert consumer.process_one("worker-1") is True
@@ -933,12 +951,8 @@ def test_delayed_old_worker_write_cannot_pollute_rebuilt_generation() -> None:
 
 
 def test_retired_cleanup_is_rate_limited_between_idle_worker_polls() -> None:
-    client, db, clock = FakeMeiliClient(), database(), Clock()
-    _set_catalog(db, client)
-    db.search_catalog_generation.update_one(
-        {"_id": "catalog"},
-        {"$set": {"retiredIndexUids": ["retired"]}},
-    )
+    client, db, clock = _consumer_context()
+    _retire_index(db, "retired")
     client.documents["retired"] = {}
     queue = SearchOutbox(db, clock)
     queue.pause("active-rebuild")

@@ -55,6 +55,10 @@ def _login(username: str, password: str) -> tuple[httpx.Client, str]:
     return client, response.json()["csrfToken"]
 
 
+def _author_and_admin():
+    return _login("user", "user123"), _login("admin", "admin123")
+
+
 def _create_case(client: httpx.Client, csrf: str) -> dict:
     response = client.post(
         "/api/cases", headers={"X-CSRF-Token": csrf}, json={"title": "附件 E2E"}
@@ -79,27 +83,8 @@ def _upload(client: httpx.Client, csrf: str, case_id: str, level: str) -> dict:
 
 
 def _publish(author, author_csrf: str, admin, admin_csrf: str, case: dict) -> None:
-    revision = _revision(author, case["id"])
-    submitted = author.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers={"X-CSRF-Token": author_csrf},
-        json={"command": "submit", "revision": revision},
-    ).json()
-    started = admin.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers={"X-CSRF-Token": admin_csrf},
-        json={"command": "start", "revision": submitted["case"]["revision"]},
-    ).json()
-    response = admin.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers={"X-CSRF-Token": admin_csrf},
-        json={
-            "command": "approve",
-            "revision": started["case"]["revision"],
-            "submittedVersionId": submitted["version"]["id"],
-        },
-    )
-    assert response.status_code == 200
+    submitted = _submit(author, author_csrf, case)
+    _approve(admin, admin_csrf, case["id"], submitted)
 
 
 def _transition(client, csrf: str, case_id: str, body: dict) -> dict:
@@ -175,6 +160,26 @@ def _assert_published_permissions(case_id: str, rows: list[dict], admin) -> None
     _assert_downloads(admin, case_id, rows, [200, 200, 200])
 
 
+def _assert_published_attachment_snapshots(
+    author,
+    case: dict,
+    first_attachment: dict,
+    first: dict,
+    second_attachment: dict,
+) -> None:
+    case_id = case["id"]
+    delete_path = f"/api/cases/{case_id}/attachments/{first_attachment['id']}"
+    history = author.get(f"/api/cases/{case_id}/history").json()
+    attachments = history["versions"][0]["attachments"]
+    assert [row["name"] for row in attachments] == ["public.txt"]
+    anonymous = httpx.Client(base_url=BASE_URL)
+    current = anonymous.get(f"/api/cases/{case_id}/attachments").json()
+    assert current == [second_attachment]
+    version_path = f"{delete_path}/content?versionId={first['version']['id']}"
+    assert author.get(version_path).content == b"public"
+    assert anonymous.get(version_path).status_code == 404
+
+
 def _assert_campus_permissions(author, admin, admin_csrf: str) -> None:
     case = _create_case(admin, admin_csrf)
     rows = [
@@ -232,28 +237,22 @@ def test_real_minio_attachment_permissions() -> None:
 
 
 def test_versions_keep_their_attachment_snapshots() -> None:
-    author, csrf = _login("user", "user123")
-    admin, admin_csrf = _login("admin", "admin123")
+    (author, csrf), (admin, admin_csrf) = _author_and_admin()
     case = _create_case(author, csrf)
     first_attachment = _upload(author, csrf, case["id"], "public")
     first = _submit(author, csrf, case)
     withdrawn = _withdraw(author, csrf, case["id"], first)
-    delete_path = f"/api/cases/{case['id']}/attachments/{first_attachment['id']}"
     _delete(author, csrf, case["id"], first_attachment["id"])
     second_attachment = _upload(author, csrf, case["id"], "public")
     second = _submit(author, csrf, withdrawn["case"])
     _approve(admin, admin_csrf, case["id"], second)
-    history = author.get(f"/api/cases/{case['id']}/history").json()
-    assert [row["name"] for row in history["versions"][0]["attachments"]] == [
-        "public.txt"
-    ]
-    anonymous = httpx.Client(base_url=BASE_URL)
-    assert anonymous.get(f"/api/cases/{case['id']}/attachments").json() == [
-        second_attachment
-    ]
-    version_path = f"{delete_path}/content?versionId={first['version']['id']}"
-    assert author.get(version_path).content == b"public"
-    assert anonymous.get(version_path).status_code == 404
+    _assert_published_attachment_snapshots(
+        author,
+        case,
+        first_attachment,
+        first,
+        second_attachment,
+    )
 
 
 def test_rollback_restores_the_snapshot_attachment_and_blob() -> None:

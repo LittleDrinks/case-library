@@ -8,6 +8,20 @@ from pymongo.database import Database
 SEED_PATH = Path(__file__).resolve().parents[4] / "files" / "materials_seed.json"
 ACCESS_LEVELS = {0: "public", 1: "campus", 2: "private"}
 KNOWN_TYPES = ("政策文件", "统计数据", "视频影像", "图片", "学术论文")
+MATERIAL_FIELDS = (
+    "id",
+    "title",
+    "summary",
+    "excerpt",
+    "source",
+    "sourceUrl",
+    "tags",
+    "publishedAt",
+    "collectedAt",
+    "citedCount",
+    "createdAt",
+    "updatedAt",
+)
 
 
 def _material_type(row: dict) -> str:
@@ -21,22 +35,8 @@ def _authority(row: dict) -> str:
 
 
 def _material(row: dict) -> dict:
-    fields = (
-        "id",
-        "title",
-        "summary",
-        "excerpt",
-        "source",
-        "sourceUrl",
-        "tags",
-        "publishedAt",
-        "collectedAt",
-        "citedCount",
-        "createdAt",
-        "updatedAt",
-    )
     return {
-        **{field: row.get(field) for field in fields},
+        **{field: row.get(field) for field in MATERIAL_FIELDS},
         "materialType": _material_type(row),
         "authority": _authority(row),
         "accessLevel": ACCESS_LEVELS[row["level"]],

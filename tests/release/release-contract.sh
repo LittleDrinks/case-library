@@ -6,7 +6,10 @@ release_dir="$project_dir/deploy/release"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-for workflow in "$project_dir/.github/workflows/ci.yml" "$project_dir/.github/workflows/release.yml"; do
+for workflow in \
+  "$project_dir/.github/workflows/ci.yml" \
+  "$project_dir/.github/workflows/release.yml"
+do
   ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$workflow"
 done
 sh -n "$release_dir/update.sh"
@@ -16,8 +19,16 @@ if grep -Eq '^[[:space:]]*build:' "$release_dir/compose.yaml"; then
   exit 1
 fi
 
-config="$(docker compose --env-file "$project_dir/.env.example" --env-file "$release_dir/images.env.example" -f "$release_dir/compose.yaml" config)"
-for service in mongo1 mongo2 mongo3 mongo-init minio meilisearch search-init search-worker app frontend; do
+config="$(
+  docker compose \
+    --env-file "$project_dir/.env.example" \
+    --env-file "$release_dir/images.env.example" \
+    -f "$release_dir/compose.yaml" \
+    config
+)"
+for service in \
+  mongo1 mongo2 mongo3 mongo-init minio meilisearch search-init search-worker app frontend
+do
   printf '%s\n' "$config" | grep -qx "  $service:"
 done
 for image in app frontend mongo-init meilisearch; do
@@ -27,21 +38,29 @@ printf '%s\n' "$config" | grep -q 'service_completed_successfully'
 printf '%s\n' "$config" | grep -q 'source: mongo1_data'
 printf '%s\n' "$config" | grep -q 'source: minio_data'
 printf '%s\n' "$config" | grep -q 'source: meili_data'
-grep -Fq 'workflow_call:' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'make config' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'backend-test' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'frontend-test' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'make e2e' "$project_dir/.github/workflows/ci.yml"
-grep -Fq 'actions: read' "$project_dir/.github/workflows/release.yml"
-grep -Fq 'packages: write' "$project_dir/.github/workflows/release.yml"
-grep -Fq 'git fetch origin v2:refs/remotes/origin/v2 --depth=1' "$project_dir/.github/workflows/release.yml"
-grep -Fq 'head_sha=$RELEASE_SHA' "$project_dir/.github/workflows/release.yml"
-grep -Fq '.head_branch == "v2"' "$project_dir/.github/workflows/release.yml"
-grep -Fq '.conclusion == "success"' "$project_dir/.github/workflows/release.yml"
-grep -Fq 'pre-alpha' "$project_dir/.github/workflows/release.yml"
-grep -Fq 'org.opencontainers.image.source' "$project_dir/.github/workflows/release.yml"
+ci="$project_dir/.github/workflows/ci.yml"
+release_workflow="$project_dir/.github/workflows/release.yml"
+grep -Fq 'workflow_call:' "$ci"
+grep -Fq 'make config' "$ci"
+if test "$(grep -Fxc '          make test || status=1' "$ci" || true)" -ne 1; then
+  echo "CI must run the exact make test gate once" >&2
+  exit 1
+fi
+if grep -Eq 'backend-test|frontend-test' "$ci"; then
+  echo "CI must not invoke stale test containers directly" >&2
+  exit 1
+fi
+grep -Fq 'make e2e' "$ci"
+grep -Fq 'actions: read' "$release_workflow"
+grep -Fq 'packages: write' "$release_workflow"
+grep -Fq 'git fetch origin v2:refs/remotes/origin/v2 --depth=1' "$release_workflow"
+grep -Fq 'head_sha=$RELEASE_SHA' "$release_workflow"
+grep -Fq '.head_branch == "v2"' "$release_workflow"
+grep -Fq '.conclusion == "success"' "$release_workflow"
+grep -Fq 'pre-alpha' "$release_workflow"
+grep -Fq 'org.opencontainers.image.source' "$release_workflow"
 for image in app frontend mongo_init meilisearch; do
-  grep -Fq "steps.images.outputs.$image" "$project_dir/.github/workflows/release.yml"
+  grep -Fq "steps.images.outputs.$image" "$release_workflow"
 done
 
 digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -90,4 +109,6 @@ grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$temporary/server/.env"
 grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v0.1.0-pre-alpha.1" "$temporary/server/images.env"
 grep -Fq 'config --quiet' "$temporary/docker.log"
 grep -Fq 'pull' "$temporary/docker.log"
-grep -Fq 'up -d --wait --force-recreate production-config-check mongo-init meilisearch search-init search-worker app frontend' "$temporary/docker.log"
+startup_command='up -d --wait --force-recreate production-config-check mongo-init'
+startup_command="$startup_command meilisearch search-init search-worker app frontend"
+grep -Fq "$startup_command" "$temporary/docker.log"
