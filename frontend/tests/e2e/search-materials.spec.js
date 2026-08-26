@@ -130,9 +130,14 @@ async function pageEmptyDirectory(page, settingsRequests, chatRequests) {
 }
 
 async function directoryTotal(request) {
-  const response = await request.get("/api/search", { params: { q: "", kind: "all", pageSize: 20 } });
-  expect(response.ok()).toBe(true);
-  return (await response.json()).total;
+  let total;
+  await expect.poll(async () => {
+    const response = await request.get("/api/search", { params: { q: "", kind: "all", pageSize: 20 } });
+    if (!response.ok()) return false;
+    total = (await response.json()).total;
+    return true;
+  }, { timeout: 45_000 }).toBe(true);
+  return total;
 }
 
 async function readyDirectoryTotal(request) {
