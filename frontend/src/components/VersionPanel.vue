@@ -7,13 +7,16 @@ const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, required: true },
   editable: { type: Boolean, required: true },
+  mutationBusy: { type: Boolean, default: false },
   beforeMutation: { type: Function, required: true },
 });
-const emit = defineEmits(["case-refreshed", "case-restored", "mutation-state"]);
+const emit = defineEmits(["case-refreshed", "case-restored", "version-mutation-state"]);
 const history = ref({ versions: [], snapshots: [] });
 const loading = ref(true);
 const error = ref("");
 const busy = ref("");
+const running = computed(() => Boolean(busy.value || props.mutationBusy));
+const snapshotLabel = computed(() => (running.value ? "处理中" : "创建快照"));
 const entries = computed(() => orderedEntries());
 
 function label(entry) {
@@ -43,9 +46,9 @@ async function loadHistory() {
 }
 
 async function run(command, targetId) {
-  if (busy.value) return;
+  if (running.value) return;
   busy.value = command;
-  emit("mutation-state", true);
+  emit("version-mutation-state", true);
   error.value = "";
   try {
     const revision = await props.beforeMutation();
@@ -58,7 +61,7 @@ async function run(command, targetId) {
     error.value = caught.message || "版本操作失败";
   } finally {
     busy.value = "";
-    emit("mutation-state", false);
+    emit("version-mutation-state", false);
   }
 }
 
@@ -74,8 +77,8 @@ onMounted(loadHistory);
   <section class="assistant-panel version-panel">
     <div class="panel-head version-head">
       <b>版本历史</b>
-      <button v-if="editable || busy" type="button" :disabled="Boolean(busy)" @click="run('snapshot')">
-        <Save :size="14" />创建快照
+      <button v-show="editable || running" type="button" :disabled="!editable || running" @click="run('snapshot')">
+        <Save :size="14" />{{ snapshotLabel }}
       </button>
     </div>
     <div class="panel-scroll">
@@ -88,11 +91,11 @@ onMounted(loadHistory);
         <li v-for="entry in entries" :key="entry.id">
           <div><b>{{ label(entry) }}</b><span>{{ time(entry.createdAt) }}</span></div>
           <button
-            v-if="editable || busy"
+            v-show="editable || running"
             type="button"
             :aria-label="`回滚到${label(entry)}`"
             :title="`回滚到${label(entry)}`"
-            :disabled="Boolean(busy)"
+            :disabled="!editable || running"
             @click="rollback(entry)"
           ><RotateCcw :size="15" /></button>
         </li>

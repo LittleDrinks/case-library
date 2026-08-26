@@ -30,6 +30,7 @@ const drawerOpen = ref(false);
 const actionNotice = ref("");
 const busyAction = ref("");
 const contentMutationBusy = ref(false);
+const versionMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
@@ -56,7 +57,7 @@ const publicCaseId = computed(() => (
 ));
 const editable = computed(() => (
   isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
-  && !busyAction.value && !contentMutationBusy.value
+  && !busyAction.value && !contentMutationBusy.value && !versionMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
   session.user && (
@@ -64,7 +65,9 @@ const annotatable = computed(() => Boolean(
     || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
   ),
 ));
-const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
+const headerBusyAction = computed(() => busyAction.value
+  || (contentMutationBusy.value ? "content" : "")
+  || (versionMutationBusy.value ? "version" : ""));
 const statusLabel = computed(() => {
   if (publicationStatus.value === "hidden") return "已隐藏";
   return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
@@ -219,6 +222,10 @@ function locateHeading(order) {
 function selectTool(tool) {
   activeTool.value = tool;
   drawerOpen.value = true;
+}
+
+function setVersionMutationBusy(value) {
+  versionMutationBusy.value = Boolean(value);
 }
 
 function reviewActions() {
@@ -521,6 +528,7 @@ onBeforeUnmount(() => {
           :case-document="document"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
           :editable="editable"
+          :version-mutation-busy="versionMutationBusy"
           :selection="annotationSelection"
           :writing-context="writingContext"
           :apply-candidate="applyWritingCandidate"
@@ -533,6 +541,7 @@ onBeforeUnmount(() => {
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
           @mutation-state="contentMutationBusy = $event"
+          @version-mutation-state="setVersionMutationBusy"
           @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"
         />

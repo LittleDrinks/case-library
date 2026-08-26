@@ -111,6 +111,21 @@ async function holdLifecycle(page, caseId, command) {
   return { started: started.promise, release: release.resolve };
 }
 
+async function failSnapshots(page, caseId, failures) {
+  let attempt = 0;
+  await page.route(`**/api/cases/${caseId}/lifecycle`, async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST" || request.postDataJSON()?.command !== "snapshot") {
+      return route.continue();
+    }
+    const failure = failures[attempt++];
+    await route.fulfill({
+      status: failure.status, contentType: "application/json",
+      body: JSON.stringify({ detail: failure.detail }),
+    });
+  });
+}
+
 async function holdAttachmentUpload(page, caseId) {
   const started = deferred();
   const release = deferred();
@@ -133,8 +148,21 @@ async function expectMutationLocked(page, button, label) {
 
 async function createManualSnapshot(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
+  await expect(page.getByRole("button", { name: "创建快照" })).toBeVisible();
   await page.getByRole("button", { name: "创建快照" }).click();
   await expect(page.getByText("手动快照")).toBeVisible();
+}
+
+async function openVersionHistory(page) {
+  await page.getByRole("button", { name: "版本历史" }).click();
+  await expect(page.getByRole("button", { name: "创建快照" })).toBeVisible();
+}
+
+async function assertSnapshotFailure(page, button, detail) {
+  await button.click();
+  await expect(page.getByRole("alert")).toContainText(detail);
+  await expect(button).toBeEnabled();
+  await expect(page.getByText("手动快照")).toHaveCount(0);
 }
 
 async function crashDraftValue(page, caseId) {
@@ -607,9 +635,7 @@ test("作者创建工作快照并回滚正文", async ({ page }) => {
   const marker = `版本快照 ${Date.now()}`;
   const created = await createCase(page.context().request, marker);
   await page.goto(`/#/workbench/${created.id}`);
-  await page.getByRole("button", { name: "版本历史" }).click();
-  await page.getByRole("button", { name: "创建快照" }).click();
-  await expect(page.getByText("手动快照")).toBeVisible();
+  await createManualSnapshot(page);
 
   await page.getByLabel("案例标题").fill("回滚前修改");
   await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
@@ -618,6 +644,38 @@ test("作者创建工作快照并回滚正文", async ({ page }) => {
 
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await expect(page.getByText("回滚前快照")).toBeVisible();
+});
+
+test("版本历史创建快照请求在途时保持协调状态", async ({ page }) => {
+  await login(page);
+  const created = await createCase(page.context().request, `快照在途 ${Date.now()}`);
+  await page.goto(`/#/workbench/${created.id}`);
+  await openVersionHistory(page);
+  const held = await holdLifecycle(page, created.id, "snapshot");
+  const snapshot = page.locator(".version-head button");
+  await snapshot.evaluate((button) => { window.__snapshotButton = button; });
+  await snapshot.click();
+  try {
+    await expectMutationLocked(page, snapshot, "处理中");
+    expect(await snapshot.evaluate((button) => button === window.__snapshotButton)).toBe(true);
+    await held.started;
+  } finally { held.release(); }
+  await expect(page.getByText("手动快照")).toBeVisible();
+});
+
+test("版本历史快照失败和冲突后可以恢复创建", async ({ page }) => {
+  await login(page);
+  const created = await createCase(page.context().request, `快照恢复 ${Date.now()}`);
+  await page.goto(`/#/workbench/${created.id}`);
+  await openVersionHistory(page);
+  await failSnapshots(page, created.id, [
+    { status: 503, detail: "服务暂不可用" }, { status: 409, detail: "版本已变化" },
+  ]);
+  const snapshot = page.locator(".version-head button");
+  for (const detail of ["服务暂不可用", "版本已变化"]) await assertSnapshotFailure(page, snapshot, detail);
+  await page.unroute(`**/api/cases/${created.id}/lifecycle`);
+  await snapshot.click();
+  await expect(page.getByText("手动快照")).toBeVisible();
 });
 
 test("回滚请求在途锁定编辑器且按钮立即进入 busy", async ({ page }) => {
