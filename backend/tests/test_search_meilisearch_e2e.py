@@ -176,6 +176,44 @@ def _assert_acl_facet_counts(page) -> None:
     }
 
 
+def _assert_natural_question_finds_case(catalog, uid: str, epoch: str) -> None:
+    question = catalog.search(
+        _request(
+            uid,
+            epoch,
+            q="如何将科学家精神融入思政课堂",
+            kind="all",
+            page_size=20,
+        )
+    )
+    assert "spirit-case" in {item["id"] for item in question.items}
+
+
+def _assert_knowledge_source_search(catalog, uid: str, epoch: str) -> None:
+    sources = catalog.search(
+        _request(
+            uid,
+            epoch,
+            kind="knowledge",
+            page_size=20,
+        )
+    )
+    assert [item["id"] for item in sources.items] == ["source-1"]
+
+
+def _assert_knowledge_section_search(catalog, uid: str, epoch: str) -> None:
+    sections = catalog.search(
+        _request(
+            uid,
+            epoch,
+            q="生成式人工智能",
+            kind="knowledge",
+            page_size=20,
+        )
+    )
+    assert [item["id"] for item in sections.items] == ["section-1"]
+
+
 def test_real_catalog_walks_12480_acl_results_in_global_date_order(catalog) -> None:
     catalog, uid, epoch = catalog
     ids = _walk_material_ids(catalog, uid, epoch)
@@ -196,16 +234,9 @@ def test_real_catalog_redacts_denied_material_and_self_excludes_facets(catalog) 
 
 def test_real_catalog_handles_natural_questions_and_knowledge_levels(catalog) -> None:
     catalog, uid, epoch = catalog
-    question = catalog.search(
-        _request(uid, epoch, q="如何将科学家精神融入思政课堂", kind="all", page_size=20)
-    )
-    assert "spirit-case" in {item["id"] for item in question.items}
-    sources = catalog.search(_request(uid, epoch, kind="knowledge", page_size=20))
-    sections = catalog.search(
-        _request(uid, epoch, q="生成式人工智能", kind="knowledge", page_size=20)
-    )
-    assert [item["id"] for item in sources.items] == ["source-1"]
-    assert [item["id"] for item in sections.items] == ["section-1"]
+    _assert_natural_question_finds_case(catalog, uid, epoch)
+    _assert_knowledge_source_search(catalog, uid, epoch)
+    _assert_knowledge_section_search(catalog, uid, epoch)
 
 
 def test_real_catalog_revocation_does_not_cross_catalog_kinds(catalog) -> None:
