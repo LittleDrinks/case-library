@@ -82,6 +82,22 @@ def _stream(handler, payload: dict) -> None:
         return
 
 
+def _structured(handler, payload: dict) -> None:
+    schema = json.dumps(payload.get("response_format", {}), ensure_ascii=False)
+    if "annotation_candidates" in schema:
+        content = {"kind": "annotation_candidates", "items": [{
+            "quote": "原文", "section": "小节", "content": "建议", "category": "theory"
+        }]}
+    else:
+        candidate = CANDIDATE_SECOND if "第二条" in json.dumps(payload, ensure_ascii=False) else CANDIDATE
+        content = {"kind": "writing_candidate", **candidate}
+    _json(handler, 200, {"id": "structured-id", "object": "chat.completion", "created": 1,
+        "model": payload.get("model", ""), "choices": [{"index": 0, "message": {
+            "role": "assistant", "content": json.dumps(content, ensure_ascii=False), "refusal": None
+        }, "logprobs": None, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -102,7 +118,11 @@ class Handler(BaseHTTPRequestHandler):
             payload = _body(self)
         except (ValueError, json.JSONDecodeError):
             return _json(self, 400, {"error": "invalid request"})
-        if payload.get("model") not in MODELS or payload.get("stream") is not True:
+        if payload.get("model") not in MODELS:
+            return _json(self, 422, {"error": "invalid request"})
+        if payload.get("response_format"):
+            return _structured(self, payload)
+        if payload.get("stream") is not True:
             return _json(self, 422, {"error": "invalid request"})
         _stream(self, payload)
 
