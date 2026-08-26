@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 const E2E_PROVIDER = "http://ai-provider:8080/v1";
 const E2E_API_KEY = "e2e-api-key";
 const E2E_ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
+const NO_RESULTS_QUERY = "qzjxe2ezeroresulttokena9d71c";
 const CANDIDATE_TEXT = "候选修订正文：教学目标、课堂任务与评价依据保持一致。";
 const SECOND_CANDIDATE_TEXT = "第二条候选正文：课堂任务、评价量规与教学目标逐项对应。";
 
@@ -212,6 +213,15 @@ async function expectFinishedSearchAnswer(page) {
   await expect(answer.locator(".stream-caret")).toHaveCount(0);
 }
 
+async function waitForNoSearchResults(page) {
+  await expect.poll(async () => {
+    const response = await page.context().request.get("/api/search", {
+      params: { q: NO_RESULTS_QUERY, kind: "all", pageSize: 20 },
+    });
+    return response.ok() && !(await response.json()).items.length;
+  }, { timeout: 45_000 }).toBe(true);
+}
+
 function watchRequests(page, path) {
   const requests = [];
   page.on("request", (request) => {
@@ -353,6 +363,17 @@ async function graphSearchScenario(page) {
   const chats = watchRequests(page, "/api/ai/chat");
   const settings = watchRequests(page, "/api/ai/settings");
   await activateGraphSearch(page, chats, settings);
+}
+
+async function zeroResultSearchScenario(page) {
+  const chats = watchRequests(page, "/api/ai/chat");
+  const settings = watchRequests(page, "/api/ai/settings");
+  await waitForNoSearchResults(page);
+  await page.goto(`/#/search?q=${NO_RESULTS_QUERY}`);
+  await expect(page.getByText("平台内没有命中结果，可换个关键词")).toBeVisible();
+  await settlePage(page);
+  expect(chats).toHaveLength(0);
+  expect(settings).toHaveLength(0);
 }
 
 async function beginSlowPageChange(page, held, chats) {
@@ -599,6 +620,10 @@ test("教师自定义模型后可完成两处真实 AI 对话", async ({ page })
 
 test("图谱直达的当前结果回列表后只生成一次", async ({ page }) => (
   withSearchProvider(page, graphSearchScenario)
+));
+
+test("零结果检索不请求 AI", async ({ page }) => (
+  withSearchProvider(page, zeroResultSearchScenario)
 ));
 
 test("快速翻页不会让旧 AI 回答覆盖当前结果", async ({ page }) => (

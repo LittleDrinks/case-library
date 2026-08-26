@@ -72,6 +72,10 @@ async function assertAnonymousAI(page, chatRequests) {
 
 async function assertNoSearchAI(page, settingsRequests, chatRequests) {
   await expect(page.getByRole("region", { name: "AI 回答" })).toHaveCount(0);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+}
+
+function expectNoSearchAIRequests(settingsRequests, chatRequests) {
   expect(settingsRequests).toEqual([]);
   expect(chatRequests).toEqual([]);
 }
@@ -84,25 +88,45 @@ async function submitBlankDirectorySearch(page) {
   await expect(page).toHaveURL(/#\/search$/);
 }
 
-async function browseEmptyDirectory(page) {
-  const caseTab = expectSearchPageRequest(page, "case", false);
-  await page.getByRole("tab", { name: /案例/ }).click();
-  await caseTab;
+async function selectDirectoryTab(page, kind, name) {
+  const response = expectSearchPageRequest(page, kind, false);
+  await page.getByRole("tab", { name }).click();
+  await response;
+}
+
+async function filterEmptyDirectoryCases(page) {
   await page.getByRole("button", { name: "高级筛选" }).click();
   const filtered = page.waitForResponse((response) => (
     new URL(response.url()).searchParams.getAll("typeName").length === 1
   ));
   await page.getByRole("group", { name: "案例类型" }).getByLabel(/校本实践类/).check();
   await filtered;
-  const allTab = expectSearchPageRequest(page, "all", false);
-  await page.getByRole("tab", { name: /全部/ }).click();
-  await allTab;
 }
 
-async function pageEmptyDirectory(page) {
+async function browseEmptyDirectory(page, settingsRequests, chatRequests) {
+  await selectDirectoryTab(page, "case", /案例/);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  await filterEmptyDirectoryCases(page);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  await selectDirectoryTab(page, "knowledge", /知识/);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  await selectDirectoryTab(page, "material", /素材/);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  await selectDirectoryTab(page, "all", /全部/);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+}
+
+async function pageEmptyDirectory(page, settingsRequests, chatRequests) {
   const nextPage = expectSearchPageRequest(page, "all", true);
   await page.getByRole("button", { name: "下一页" }).click();
   await nextPage;
+  await expect(page.getByText(/第 2 页 · 共/)).toBeVisible();
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  const previousPage = expectSearchPageRequest(page, "all", true);
+  await page.getByRole("button", { name: "上一页" }).click();
+  await previousPage;
+  await expect(page.getByText(/第 1 页 · 共/)).toBeVisible();
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
 }
 
 async function directoryTotal(request) {
@@ -162,8 +186,9 @@ test("空查询只浏览目录，不触发 AI", async ({ page }) => {
   await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
   await assertNoSearchAI(page, settingsRequests, chatRequests);
   await submitBlankDirectorySearch(page);
-  await pageEmptyDirectory(page);
-  await browseEmptyDirectory(page);
+  expectNoSearchAIRequests(settingsRequests, chatRequests);
+  await pageEmptyDirectory(page, settingsRequests, chatRequests);
+  await browseEmptyDirectory(page, settingsRequests, chatRequests);
   await expect(page.getByRole("tab", { name: /知识/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toBeVisible();
   await assertNoSearchAI(page, settingsRequests, chatRequests);

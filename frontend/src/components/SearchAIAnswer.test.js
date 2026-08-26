@@ -30,6 +30,15 @@ test("空白查询不启动 AI 流", async () => {
   expect(clear).toHaveBeenCalledWith("idle");
 });
 
+test("零结果显示不可生成状态且不启动 AI 流", async () => {
+  const wrapper = render("如何开展思政课", []);
+  await flushPromises();
+
+  expect(wrapper.text()).toContain("当前结果不足以生成摘要。");
+  expect(run).not.toHaveBeenCalled();
+  expect(clear).toHaveBeenCalledWith("idle");
+});
+
 test("仅新结果版本重新判定 AI", async () => {
   const wrapper = render("如何开展思政课");
   await flushPromises();

@@ -28,6 +28,10 @@ const second = {
   facets: null, counts: null, total: null, page: 2, pageSize: 20,
   metadataIncluded: false, nextCursor: null, previousCursor: "previous-token",
 };
+const noResults = {
+  ...first, items: [], counts: { all: 0, case: 0, knowledge: 0, material: 0 },
+  total: 0, nextCursor: null, previousCursor: null,
+};
 
 const SearchAIAnswerStub = defineComponent({
   setup(_props, { expose }) {
@@ -85,6 +89,16 @@ test("空白查询保持目录浏览且不挂载 AI 回答", async () => {
   expect(api.search).toHaveBeenCalledWith("", "all", null, 20, {});
   expect(replace).toHaveBeenCalledWith({ name: "search", query: {} });
   expect(answerMounts).not.toHaveBeenCalled();
+});
+
+test("非空零结果保留无命中提示", async () => {
+  route.query = { q: "无匹配检索" };
+  api.search.mockReset();
+  api.search.mockResolvedValue(noResults);
+  const wrapper = render();
+  await flushPromises();
+
+  expect(wrapper.get(".search-empty").text()).toBe("平台内没有命中结果，可换个关键词");
 });
 
 test("新请求开始时立即清除旧 AI 回答", async () => {
