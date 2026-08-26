@@ -20,6 +20,7 @@ const props = defineProps({
   caseDocument: { type: Object, required: true },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
+  versionMutationBusy: { type: Boolean, default: false },
   beforeAttachmentMutation: { type: Function, required: true },
   beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
@@ -30,7 +31,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "candidate-previews", "annotations",
+  "version-mutation-state", "candidate-previews", "annotations",
 ]);
 
 const tabs = [
@@ -405,10 +406,11 @@ watch(() => props.selection, (value) => {
       :case-record="caseRecord"
       :user="user"
       :editable="editable"
+      :mutation-busy="versionMutationBusy"
       :before-mutation="beforeVersionMutation"
       @case-refreshed="emit('case-refreshed', $event)"
       @case-restored="emit('case-restored', $event)"
-      @mutation-state="emit('mutation-state', $event)"
+      @version-mutation-state="emit('version-mutation-state', $event)"
     />
   </aside>
 </template>
