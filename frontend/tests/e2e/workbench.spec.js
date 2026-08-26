@@ -481,6 +481,7 @@ test("手机端自动保存失败时显示明确警示", async ({ page }) => {
   await login(page);
   const created = await createCase(page.context().request, `保存失败 ${Date.now()}`);
   await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
   await page.route(`**/api/cases/${created.id}`, async (route) => {
     if (route.request().method() !== "PATCH") return route.continue();
     await route.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"服务暂不可用"}' });
