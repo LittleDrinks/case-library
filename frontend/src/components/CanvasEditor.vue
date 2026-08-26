@@ -1,21 +1,26 @@
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
+import { hashQuote } from "../lib/annotationAnchor.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
 const props = defineProps({
   document: { type: Object, required: true },
+  revision: { type: Number, default: 0 },
   editable: { type: Boolean, default: true },
   annotatable: { type: Boolean, default: false },
   candidatePreviews: { type: Array, default: () => [] },
+  annotations: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
 const selection = ref(null);
 const triggerPosition = ref({ top: "0", left: "0" });
+let selectionBlocked = false;
+let selectionRequest = 0;
 
 function isSectionHeading(node) {
   return node.type.name === "heading" && [1, 2].includes(node.attrs.level);
@@ -47,22 +52,78 @@ function writingContext(activeEditor, from, to) {
   return { ...section, quote, from, to, sectionText };
 }
 
-function positionTrigger() {
-  const range = window.getSelection()?.rangeCount && window.getSelection().getRangeAt(0);
+function positionTrigger(context) {
   const paper = window.document.querySelector(".document-paper")?.getBoundingClientRect();
-  if (!range || !paper) return;
-  const box = range.getBoundingClientRect();
+  let box;
+  try { box = editor.value?.view.coordsAtPos(context.to); }
+  catch { return; }
+  if (!box || !paper) return;
   triggerPosition.value = { top: `${box.bottom - paper.top + 6}px`, left: `${box.left - paper.left}px` };
 }
 
-function captureSelection({ editor: activeEditor }) {
+function clearSelection() {
+  selectionRequest += 1;
+  selection.value = null;
+  emit("selection", null);
+}
+
+function validSelection(activeEditor) {
+  const { from, to } = activeEditor.state.selection;
+  const { $from, $to } = activeEditor.state.selection;
+  return from < to && $from.sameParent($to) && $from.parent.isTextblock;
+}
+
+async function captureSelection({ editor: activeEditor }) {
   const { from, to } = activeEditor.state.selection;
   const context = writingContext(activeEditor, from, to);
-  const quote = context.quote.trim();
-  selection.value = props.annotatable && quote ? { quote, section: context.section } : null;
-  emit("selection", selection.value);
-  emit("writing-context", context);
-  if (selection.value) window.requestAnimationFrame(positionTrigger);
+  if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()) {
+    clearSelection();
+    emit("writing-context", context);
+    return;
+  }
+  selectionBlocked = false;
+  const request = ++selectionRequest;
+  const quoteHash = await hashQuote(context.quote);
+  if (request !== selectionRequest || selectionBlocked) return;
+  const captured = { ...context, revision: props.revision, quoteHash };
+  selection.value = captured;
+  emit("selection", captured);
+  emit("writing-context", captured);
+  positionTrigger(context);
+}
+
+function editorHasDomSelection() {
+  const browserSelection = window.getSelection();
+  const anchor = browserSelection?.anchorNode;
+  const focus = browserSelection?.focusNode;
+  return Boolean(
+    browserSelection?.rangeCount && !browserSelection.isCollapsed
+    && anchor && focus && editor.value?.view.dom.contains(anchor)
+    && editor.value.view.dom.contains(focus),
+  );
+}
+
+async function recaptureSelection() {
+  if (!editor.value) return;
+  selectionBlocked = false;
+  await captureSelection({ editor: editor.value });
+}
+
+function handleSelectionChange() {
+  if (!editorHasDomSelection()) return;
+  void recaptureSelection();
+}
+
+function currentContext(activeEditor) {
+  const { from, to } = activeEditor.state.selection;
+  return writingContext(activeEditor, from, to);
+}
+
+function updateEditor({ editor: activeEditor }) {
+  selectionBlocked = true;
+  clearSelection();
+  emit("change", activeEditor.getJSON());
+  emit("writing-context", currentContext(activeEditor));
 }
 
 function previewRange(candidate) {
@@ -123,9 +184,44 @@ const candidateExtension = Extension.create({
   },
 });
 
-function updateEditor({ editor: activeEditor }) {
-  emit("change", activeEditor.getJSON());
-  captureSelection({ editor: activeEditor });
+const annotationKey = new PluginKey("annotationAnchors");
+
+function annotationAnchor(annotation, document) {
+  if (annotation.revision !== props.revision) return null;
+  const { from, to } = annotation;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
+  return document.textBetween(from, to, " ") === annotation.quote
+    ? { from, to } : null;
+}
+
+function annotationDecorations(document, annotations) {
+  return DecorationSet.create(document, annotations.flatMap((annotation) => {
+    const range = annotationAnchor(annotation, document);
+    return range ? [Decoration.inline(range.from, range.to, { class: "annotation-anchor" })] : [];
+  }));
+}
+
+function applyAnnotationAnchors(transaction, previous) {
+  const annotations = transaction.getMeta(annotationKey);
+  if (annotations !== undefined) return annotationDecorations(transaction.doc, annotations);
+  return previous.map(transaction.mapping, transaction.doc);
+}
+
+const annotationExtension = Extension.create({
+  name: "annotationAnchors",
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: annotationKey,
+      state: { init: () => DecorationSet.empty, apply: applyAnnotationAnchors },
+      props: { decorations: (state) => annotationKey.getState(state) },
+    })];
+  },
+});
+
+function refreshAnnotationAnchors() {
+  if (!editor.value) return;
+  const transaction = editor.value.state.tr.setMeta(annotationKey, props.annotations);
+  editor.value.view.dispatch(transaction);
 }
 
 const editor = useEditor({
@@ -136,7 +232,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), candidateExtension],
+  }), candidateExtension, annotationExtension],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: captureSelection,
@@ -190,7 +286,10 @@ function applyCandidate(candidate) {
 function replaceDocument(document) {
   if (!editor.value) return;
   const current = JSON.stringify(editor.value.getJSON());
-  if (current !== JSON.stringify(document)) editor.value.commands.setContent(document, false);
+  if (current === JSON.stringify(document)) return;
+  selectionBlocked = true;
+  clearSelection();
+  editor.value.commands.setContent(document, false);
 }
 
 watch(() => props.document, replaceDocument, { deep: true });
@@ -202,17 +301,25 @@ function refreshCandidatePreviews() {
 }
 
 watch(() => props.candidatePreviews, refreshCandidatePreviews, { deep: true });
+watch(() => props.annotations, refreshAnnotationAnchors, { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;
-  selection.value = null;
-  emit("selection", null);
+  selectionBlocked = true;
+  clearSelection();
+});
+watch(() => props.revision, () => {
+  selectionBlocked = true;
+  clearSelection();
 });
 onMounted(() => {
   if (!editor.value) return;
+  window.document.addEventListener("selectionchange", handleSelectionChange);
   captureSelection({ editor: editor.value });
   refreshCandidatePreviews();
+  refreshAnnotationAnchors();
 });
-defineExpose({ applyCandidate });
+onBeforeUnmount(() => window.document.removeEventListener("selectionchange", handleSelectionChange));
+defineExpose({ applyCandidate, recaptureSelection });
 </script>
 
 <template>

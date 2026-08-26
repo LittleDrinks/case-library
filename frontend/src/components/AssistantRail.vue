@@ -30,7 +30,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "candidate-previews",
+  "candidate-previews", "annotations",
 ]);
 
 const tabs = [
@@ -63,6 +63,11 @@ const pendingCandidates = computed(() => messages.value.filter(
 ));
 const candidateLimitReached = computed(() => pendingCandidates.value.length >= 3);
 const candidateBlocked = computed(() => candidateLimitReached.value && !generationOverride.value);
+const canSend = computed(() => {
+  if (!draft.value.trim() || !aiConfigured.value || candidateBlocked.value) return false;
+  return writingTarget.value !== "selection"
+    || Boolean(props.selection?.quote && props.selection?.quoteHash);
+});
 
 function select(tab) {
   emit("select", tab);
@@ -89,11 +94,13 @@ function caseContext() {
   return `当前案例标题：${props.caseTitle}\n当前案例正文：${text}`;
 }
 
-function requestMessages() {
+function requestMessages(request) {
   const history = messages.value.filter((item) => item.content)
-    .map((item) => ({ role: item.role, content: item.requestContent || item.content })).slice(-99);
+    .map((item) => ({ role: item.role, content: item.content })).slice(-99);
   const latest = history.at(-1);
-  latest.content = `${latest.content}\n\n${caseContext()}`;
+  latest.content = request.context
+    ? `${request.requestContent}\n\n当前正文修订号：${request.context.revision}`
+    : `${latest.content}\n\n${caseContext()}`;
   return history;
 }
 
@@ -108,13 +115,18 @@ function selectWritingTarget(target) {
   writingTarget.value = target;
 }
 
+function candidateSourceContext() {
+  return writingTarget.value === "selection" ? props.selection : props.writingContext;
+}
+
 function candidateContext() {
-  if (!props.writingContext) return null;
+  const source = candidateSourceContext();
+  if (!source) return null;
   const fields = [
     "quote", "section", "sectionText", "from", "to", "headingFrom",
-    "sectionFrom", "sectionTo",
+    "sectionFrom", "sectionTo", "quoteHash", "revision",
   ];
-  return Object.fromEntries(fields.map((field) => [field, props.writingContext[field]]));
+  return Object.fromEntries(fields.map((field) => [field, source[field]]));
 }
 
 function candidateStatus(generation) {
@@ -169,7 +181,7 @@ async function streamAnswer(answer, request) {
   controller = new AbortController();
   try {
     await api.streamAI(
-      requestMessages(), props.user.csrfToken,
+      requestMessages(request), props.user.csrfToken,
       streamHandlers(answer, request.context, request.generation), controller.signal,
     );
   } catch (reason) {
@@ -288,6 +300,9 @@ function cancel() {
 onMounted(loadAISettings);
 onBeforeUnmount(() => controller?.abort());
 watch(() => props.candidateInvalidation, expireCandidates);
+watch(() => props.selection, (value) => {
+  if (!value && writingTarget.value === "selection") writingTarget.value = "";
+});
 </script>
 
 <template>
@@ -339,7 +354,7 @@ watch(() => props.candidateInvalidation, expireCandidates);
           type="button"
           aria-label="改写选区"
           :class="{ active: writingTarget === 'selection' }"
-          :disabled="!editable || !writingContext?.quote || sending || candidateBlocked"
+          :disabled="!editable || !selection?.quote || !selection?.quoteHash || sending || candidateBlocked"
           @click="selectWritingTarget('selection')"
         >改写选区</button>
         <button
@@ -350,6 +365,7 @@ watch(() => props.candidateInvalidation, expireCandidates);
           @click="selectWritingTarget('section')"
         >改写本节</button>
         <span v-if="writingTarget">{{ writingTarget === 'selection' ? '候选将作用于所选文字' : `候选将作用于「${writingContext.section}」` }}</span>
+        <span v-else-if="!selection?.quote || !selection?.quoteHash">请先在正文中重新选择一段文字</span>
       </div>
       <p v-if="candidateLimitReached" class="candidate-blocked" role="status">
         <span>{{ generationOverride ? "已放行一次生成" : "3 条修订待确认，请先接受或拒绝" }}</span>
@@ -363,7 +379,7 @@ watch(() => props.candidateInvalidation, expireCandidates);
       <div class="assistant-composer">
         <textarea v-model="draft" aria-label="向 AI 提问" :placeholder="aiConfigured ? '输入问题' : '请先配置 AI 模型'" :disabled="!aiConfigured || sending || candidateBlocked" @keydown.enter.exact.prevent="send" />
         <button v-if="sending" type="button" title="停止生成" aria-label="停止生成" @click="cancel"><Square :size="15" /></button>
-        <button v-else type="button" title="发送" aria-label="发送" :disabled="!draft.trim() || !aiConfigured || candidateBlocked" @click="send"><Send :size="16" /></button>
+        <button v-else type="button" title="发送" aria-label="发送" :disabled="!canSend" @click="send"><Send :size="16" /></button>
       </div>
     </section>
 
@@ -372,6 +388,7 @@ watch(() => props.candidateInvalidation, expireCandidates);
       :case-record="caseRecord"
       :user="user"
       :selection="selection"
+      @annotations="emit('annotations', $event)"
     />
 
     <AttachmentPanel

@@ -221,3 +221,40 @@ it("接受修订后正文变化会让整批回滚过期", async () => {
   expect(candidate.text()).toContain("回滚已过期");
   expect(candidate.find('[aria-label="回滚本批"]').exists()).toBe(false);
 });
+
+let sentSelectionMessages;
+
+async function selectionStream(messages, _csrf, handlers) {
+  sentSelectionMessages = messages;
+  handlers.onToken('回复选区');
+  handlers.onDone();
+}
+
+function selectionProps() {
+  return { ...props, selection: { ...props.writingContext, quoteHash: "hash", revision: 8 } };
+}
+
+async function sendSelectionRequest() {
+  api.streamAI.mockImplementation(selectionStream);
+  const wrapper = mount(AssistantRail, {
+    props: selectionProps(), global: { stubs: { RouterLink: true } },
+    attachTo: globalThis.document.body,
+  });
+  await flushPromises();
+  await wrapper.get('[aria-label="改写选区"]').trigger("click");
+  const input = wrapper.get('[aria-label="向 AI 提问"]');
+  input.element.focus();
+  expect(globalThis.document.activeElement).toBe(input.element);
+  await input.setValue("压缩选区");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  return sentSelectionMessages.at(-1).content;
+}
+
+it("打开选区写作并聚焦输入后仍只发送一次捕获选区", async () => {
+  const request = await sendSelectionRequest();
+  expect(request.match(/原文：案例原文/g)).toHaveLength(1);
+  expect(request).toContain("当前正文修订号：8");
+  expect(request).toContain("revision=8; from=1; to=5; hash=hash");
+  expect(request).not.toContain("当前案例正文：");
+});
