@@ -32,6 +32,7 @@ const busyAction = ref("");
 const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
+const annotations = ref([]);
 const candidatePreviews = ref([]);
 const candidateInvalidation = ref(0);
 const candidateBatchSnapshotId = ref("");
@@ -58,7 +59,10 @@ const editable = computed(() => (
   && !busyAction.value && !contentMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
-  reviewMode.value && workflowStatus.value === "reviewing" && session.user?.role === "admin",
+  session.user && (
+    (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
+    || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
+  ),
 ));
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
@@ -72,7 +76,7 @@ const lifecycleActions = computed(() => availableActions());
 const autosave = createAutosave({
   save: persist,
   getSnapshot: snapshot,
-  onConflict: (error) => { conflict.value = error; },
+  onConflict: handleSaveConflict,
 });
 const crashDraft = createCrashDraft({
   userId: session.user?.id || "anonymous",
@@ -100,15 +104,26 @@ function cloneContentSnapshot() {
 
 async function persist(payload) {
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
+  invalidateSelection();
   revision.value = saved.revision;
   crashDraft.saved(payload);
   return saved;
 }
 
 function expireCandidates() {
+  invalidateSelection();
   candidateInvalidation.value += 1;
   candidateBatchSnapshotId.value = "";
   candidateBatchLastRevision.value = 0;
+}
+
+function invalidateSelection() {
+  annotationSelection.value = null;
+}
+
+function handleSaveConflict(error) {
+  conflict.value = error;
+  expireCandidates();
 }
 
 function applyCase(value, invalidate = true) {
@@ -120,6 +135,15 @@ function applyCase(value, invalidate = true) {
   conflict.value = null;
   if (editable.value) crashDraft.load(value);
   void nextTick(resizeTitle);
+}
+
+async function loadAnnotations() {
+  if (!session.user) {
+    annotations.value = [];
+    return;
+  }
+  try { annotations.value = await api.listAnnotations(caseId()); }
+  catch { annotations.value = []; }
 }
 
 function applyAttachmentCase(value) {
@@ -152,6 +176,7 @@ async function loadCase() {
       autosave.reconcile(current.revision);
     }
     applyCase(current, !initial);
+    await loadAnnotations();
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -174,6 +199,7 @@ function resizeTitle() {
 }
 
 function changeDocument(value) {
+  invalidateSelection();
   if (!applyingCandidate.value) expireCandidates();
   document.value = value;
   crashDraft.queue();
@@ -475,9 +501,11 @@ onBeforeUnmount(() => {
             <CanvasEditor
               ref="canvasEditor"
               :document="document"
+              :revision="revision"
               :editable="editable"
               :annotatable="annotatable"
               :candidate-previews="candidatePreviews"
+              :annotations="annotations"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"
@@ -506,6 +534,7 @@ onBeforeUnmount(() => {
           @case-restored="applyCase"
           @mutation-state="contentMutationBusy = $event"
           @candidate-previews="candidatePreviews = $event"
+          @annotations="annotations = $event"
         />
       </div>
     </template>

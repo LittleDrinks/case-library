@@ -177,6 +177,14 @@ export const api = {
   createAnnotation: (id, annotation, csrfToken) => request(
     annotationRoot(id), jsonOptions("POST", annotation, csrfToken),
   ),
+  updateAnnotation: (id, annotationId, annotation, csrfToken) => request(
+    `${annotationRoot(id)}/${encodeURIComponent(annotationId)}`,
+    jsonOptions("PATCH", annotation, csrfToken),
+  ),
+  deleteAnnotation: (id, annotationId, csrfToken) => request(
+    `${annotationRoot(id)}/${encodeURIComponent(annotationId)}`,
+    { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
+  ),
   replyAnnotation: (id, annotationId, reply, csrfToken) => request(
     `${annotationRoot(id)}/${encodeURIComponent(annotationId)}/replies`,
     jsonOptions("POST", reply, csrfToken),

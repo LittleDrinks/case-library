@@ -92,10 +92,80 @@ async function resolveAsAuthor(page, created, marker) {
   await expect(page.getByText("已解决", { exact: true })).toBeVisible();
 }
 
+async function openDraft(page, marker) {
+  await login(page);
+  const created = await createCase(page.context().request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  return created;
+}
+
+async function selectManualAnnotation(page, marker) {
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await expect(page.getByRole("button", { name: "添加选区批注" })).toBeEnabled();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+}
+
+async function addManualAnnotation(page, marker, content) {
+  await selectManualAnnotation(page, marker);
+  await page.getByLabel("批注内容").fill(content);
+  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  await expect(page.locator(".comment-card blockquote")).toHaveText(marker);
+  await expect(page.locator(".annotation-anchor")).toHaveCount(1);
+}
+
+async function editManualAnnotation(page, content) {
+  const card = page.locator(".comment-card").first();
+  await card.getByRole("button", { name: "编辑批注" }).click();
+  await page.getByLabel("编辑批注").fill(content);
+  await page.getByRole("button", { name: "保存批注" }).click();
+  await expect(card).toContainText(content);
+}
+
+async function deleteManualAnnotation(page) {
+  await page.locator(".comment-card").first().getByRole("button", { name: "删除批注" }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+}
+
+async function seedManualAnnotation(page, marker) {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openDraft(page, marker);
+  await addManualAnnotation(page, marker, "请补充课堂活动与评价依据。");
+}
+
+async function manualAnnotationScenario(page) {
+  let chatRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/ai/chat")) chatRequests += 1;
+  });
+  const marker = `手工批注正文 ${Date.now()}`;
+  await seedManualAnnotation(page, marker);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expect(page.locator(".comment-card blockquote")).toHaveText(marker);
+  const panel = await page.locator(".comment-panel").boundingBox();
+  expect(panel.y + panel.height).toBeLessThanOrEqual(844);
+  await editManualAnnotation(page, "已补充课堂活动与评价依据。");
+  await deleteManualAnnotation(page);
+  expect(chatRequests).toBe(0);
+}
+
 test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => {
   const marker = `批注选区 ${Date.now()}`;
   const created = await openReview(page, marker);
   await addReviewAnnotation(page);
   await rejectCase(page);
   await resolveAsAuthor(page, created, marker);
+});
+
+test("教师可在桌面创建并在移动端刷新编辑删除手工批注", async ({ page }) => {
+  await manualAnnotationScenario(page);
+});
+
+test("匿名用户不能读取案例批注", async ({ page }) => {
+  const created = await openDraft(page, `匿名批注权限 ${Date.now()}`);
+  await logoutAndWait(page);
+  const response = await page.context().request.get(`/api/cases/${created.id}/annotations`);
+  expect(response.status()).toBe(401);
 });

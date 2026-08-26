@@ -257,6 +257,22 @@ async function rejectCandidateScenario(page) {
   await expectPersistedText(page, created.id, marker);
 }
 
+async function selectionRequestScenario(page) {
+  const { marker, created } = await openCandidateCase(page, "选区请求原文");
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/ai/chat")) {
+      requests.push(request.postDataJSON());
+    }
+  });
+  await selectParagraph(page, marker);
+  await requestCandidate(page, "改写选区", "压缩这段表述");
+  const content = requests.at(-1).messages.at(-1).content;
+  expect(content.split(marker)).toHaveLength(2);
+  expect(content).toContain(`当前正文修订号：${created.revision}`);
+  expect(content).toMatch(/选区锚点：revision=\d+; from=\d+; to=\d+; hash=[0-9a-f]{64}/);
+}
+
 async function rollbackCandidateScenario(page) {
   const { marker, created } = await openCandidateCase(page, "批前正文");
   const { candidate, held } = await acceptFirstCandidate(page, created.id);
@@ -384,6 +400,10 @@ test("教师自定义模型后可完成两处真实 AI 对话", async ({ page })
 
 test("AI 选区候选被拒绝后不修改正文", async ({ page }) => (
   withCandidateProvider(page, rejectCandidateScenario)
+));
+
+test("AI 选区请求携带精确锚点且不重复正文", async ({ page }) => (
+  withCandidateProvider(page, selectionRequestScenario)
 ));
 
 test("连续接受 AI 候选只建一个批前快照、持久化并可整批回滚", async ({ page }) => (
