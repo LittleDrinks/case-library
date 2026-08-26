@@ -42,6 +42,10 @@ grep -q 'BACKEND_URL' tests/load/catalog-gate.js
 grep -q 'BACKEND_URL: http://app:8001' docker-compose.yml
 grep -Fq 'http_reqs{operation:${operation}}' tests/load/catalog-gate.js
 grep -Fq '"X-Load-Probe": "catalog-gate"' tests/load/catalog-gate.js
+grep -Fq 'stageId: "ug", typeId: "ct-figure", templateId: "tpl-general-v1"' tests/load/catalog-gate.js
+grep -Fq 'const saved = saveTitle(created, title, csrf);' tests/load/catalog-gate.js
+grep -Fq 'const submitted = transition(saved, csrf, "submit");' tests/load/catalog-gate.js
+! grep -Fq '"/api/cases", { title }' tests/load/catalog-gate.js
 grep -Fq 'load_marker=$http_x_load_probe' deploy/nginx.conf
 test "$(grep -Fc 'load_marker=catalog-gate' tests/load/upstream-balance.sh)" -eq 2
 
@@ -105,6 +109,8 @@ if sed -n '/^export default function/,/^}/p' tests/load/preauthenticated.js | gr
 fi
 
 for script in tests/load/high-frequency.js tests/load/preauthenticated.js; do
+  grep -Fq 'stageId: "ug", typeId: "ct-figure", templateId: "tpl-general-v1"' "$script"
+  ! grep -Fq 'document: { type: "doc"' "$script"
   grep -q 'nextCursor' "$script"
   grep -q '"catalog-cursor"' "$script"
   grep -q '"material-cursor"' "$script"

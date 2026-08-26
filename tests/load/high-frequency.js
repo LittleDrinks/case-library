@@ -95,6 +95,7 @@ const materialPercent = Number(__ENV.MATERIAL_PERCENT || 10);
 const cursorPercent = Number(__ENV.CURSOR_PERCENT || 50);
 const thinkTime = Number(__ENV.THINK_TIME_SECONDS || 2);
 const catalogQuery = encodeURIComponent("思政");
+const caseSelection = { stageId: "ug", typeId: "ct-figure", templateId: "tpl-general-v1" };
 let signedIn = false;
 let csrfToken = "";
 let ownedCase = null;
@@ -179,10 +180,7 @@ function login(phase = currentPhase()) {
 function createOwnedCase(phase) {
   const response = http.post(
     `${baseUrl}/api/cases`,
-    JSON.stringify({
-      title: `Load test VU ${__VU}`,
-      document: { type: "doc", content: [{ type: "paragraph" }] },
-    }),
+    JSON.stringify(caseSelection),
     { headers: jsonHeaders(), responseType: "text", tags: { operation: "case-create", phase } },
   );
   const created = check(response, {

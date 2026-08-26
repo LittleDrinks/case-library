@@ -14,6 +14,7 @@ const searchPercent = Number(__ENV.SEARCH_PERCENT || 20);
 const materialPercent = Number(__ENV.MATERIAL_PERCENT || 10);
 const cursorPercent = Number(__ENV.CURSOR_PERCENT || 50);
 const catalogQuery = encodeURIComponent("思政");
+const caseSelection = { stageId: "ug", typeId: "ct-figure", templateId: "tpl-general-v1" };
 const operations = 2 + (writePercent + searchPercent + materialPercent) / 100;
 const targetRps = Math.round((steadyVus * operations) / thinkTime);
 let ownedCase = null;
@@ -112,11 +113,8 @@ function loginRequest() {
   }];
 }
 
-function caseBody(title) {
-  return JSON.stringify({
-    title,
-    document: { type: "doc", content: [{ type: "paragraph" }] },
-  });
+function caseBody() {
+  return JSON.stringify(caseSelection);
 }
 
 function requestOptions(session, csrf, operation, phase) {
@@ -144,7 +142,7 @@ function caseRequest(context) {
   return [
     "POST",
     `${baseUrl}/api/cases`,
-    caseBody(`Steady VU ${context.index + 1}`),
+    caseBody(),
     requestOptions(context.session, context.csrf, "setup-case-create", "setup"),
   ];
 }

@@ -13,9 +13,10 @@ const targetMaterials = 12_480;
 const outboxLagSeconds = 11;
 const token = __ENV.CATALOG_GATE_TOKEN || "catalog-gate";
 const probeHeader = { "X-Load-Probe": "catalog-gate" };
+const caseSelection = { stageId: "ug", typeId: "ct-figure", templateId: "tpl-general-v1" };
 const operations = [
   "gate-catalog-index", "gate-catalog-meta", "gate-material-count",
-  "gate-user-login", "gate-case-create",
+  "gate-user-login", "gate-case-create", "gate-case-save",
   "case-submit", "gate-admin-login", "case-start", "case-approve",
   "gate-catalog-search", "gate-lag-health",
 ];
@@ -61,6 +62,13 @@ function transition(caseView, csrf, command, extra = {}) {
     `case ${command} succeeds`);
 }
 
+function saveTitle(caseView, title, csrf) {
+  const path = `/api/cases/${caseView.id}`;
+  const body = { title, revision: caseView.revision };
+  return requireResponse(jsonRequest("PATCH", path, body, "gate-case-save", csrf), 200,
+    "gate case title saves");
+}
+
 function assertCatalogBaseline() {
   if (!indexUid || !expectedGeneration || !expectedEpoch) fail("catalog target is required");
   const headers = { Authorization: `Bearer ${meiliKey}` };
@@ -86,14 +94,15 @@ function assertCatalogBaseline() {
 function createPublishedCase() {
   const csrf = login(__ENV.LOAD_USERNAME || "user", __ENV.LOAD_PASSWORD || "user123", "gate-user-login");
   const title = `CapacityGate ${token}`;
-  const created = requireResponse(jsonRequest("POST", "/api/cases", { title },
+  const created = requireResponse(jsonRequest("POST", "/api/cases", caseSelection,
     "gate-case-create", csrf), 200, "gate case creation succeeds");
-  const submitted = transition(created, csrf, "submit");
+  const saved = saveTitle(created, title, csrf);
+  const submitted = transition(saved, csrf, "submit");
   const adminCsrf = login(__ENV.LOAD_ADMIN_USERNAME || "admin",
     __ENV.LOAD_ADMIN_PASSWORD || "admin123", "gate-admin-login");
   const started = transition(submitted.case, adminCsrf, "start");
   transition(started.case, adminCsrf, "approve", { submittedVersionId: submitted.version.id });
-  return { id: created.id, title };
+  return { id: saved.id, title };
 }
 
 function searchItems(title) {
