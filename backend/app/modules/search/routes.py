@@ -13,7 +13,7 @@ from app.core.dependencies import (
 )
 from app.modules.auth.dependencies import optional_user
 from app.modules.search.models import SearchQuery
-from app.modules.search.service import search_catalog
+from app.modules.search.service import CatalogSearch, search_catalog
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 DatabaseDependency = Annotated[object, Depends(get_database)]
@@ -32,19 +32,10 @@ def search(
     settings: SettingsDependency,
     user: UserDependency,
 ):
-    return _search_response(query, database, catalog, catalog_state, settings, user)
-
-
-def _search_response(query, database, catalog, catalog_state, settings, user):
+    catalog_search = CatalogSearch(query, user, settings.app_secret_file)
     return search_catalog(
         database,
         catalog,
         catalog_state,
-        user,
-        query.q,
-        query.kind,
-        query.cursor,
-        query.page_size,
-        query.filters(),
-        settings.app_secret_file,
+        catalog_search,
     )

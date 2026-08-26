@@ -15,8 +15,9 @@ from app.modules.search.meilisearch import (
     CatalogPage,
     SearchUnavailable,
 )
+from app.modules.search.models import SearchQuery
 from app.modules.search.outbox import SearchOutbox
-from app.modules.search.service import search_catalog
+from app.modules.search.service import CatalogSearch, search_catalog
 from app.modules.search.worker import CatalogConsumer, WorkerHeartbeat
 from conftest import ReadyCatalogState
 
@@ -403,14 +404,13 @@ def _search_materials(db, client, secret_path) -> dict:
         db,
         VisibleMaterialCatalog(db, client),
         ReadyCatalogState(db),
-        None,
-        "",
-        "material",
-        None,
-        20,
-        {},
-        str(secret_path),
+        _material_search(secret_path),
     )
+
+
+def _material_search(secret_path) -> CatalogSearch:
+    query = SearchQuery(kind="material", page_size=20)
+    return CatalogSearch(query, None, str(secret_path))
 
 
 def _pending_material(db, client) -> SearchOutbox:
