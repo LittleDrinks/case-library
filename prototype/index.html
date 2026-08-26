@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>案例工作台 - 交互原型</title>
+  <style>
+    :root { --ink:#25211d; --muted:#756e65; --line:#e7e1d9; --paper:#fff; --canvas:#f6f4f0; --brand:#bd1c25; --soft:#fceded; }
+    * { box-sizing:border-box; }
+    body { min-height:100vh; margin:0; background:var(--canvas); color:var(--ink); font-family:"Noto Sans SC","Microsoft YaHei",sans-serif; }
+    header { display:flex; align-items:center; min-height:64px; padding:0 44px; border-bottom:1px solid var(--line); background:#fff; }
+    .seal { display:grid; width:32px; height:32px; place-items:center; border:2px solid var(--brand); border-radius:50%; color:var(--brand); font-weight:700; font-size:12px; }
+    header b { margin-left:12px; font-family:Georgia,"Noto Serif SC",serif; font-size:18px; letter-spacing:1px; }
+    main { width:min(1040px,calc(100% - 40px)); margin:58px auto; }
+    .eyebrow { margin:0 0 10px; color:var(--brand); font-size:12px; font-weight:700; letter-spacing:1px; }
+    h1 { margin:0; font:700 34px/1.25 Georgia,"Noto Serif SC",serif; letter-spacing:0; }
+    .lead { max-width:700px; margin:16px 0 34px; color:var(--muted); line-height:1.8; }
+    .stories { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    article { display:flex; min-height:210px; flex-direction:column; padding:23px; border:1px solid var(--line); border-radius:7px; background:var(--paper); box-shadow:0 10px 25px rgba(39,31,23,.05); }
+    .number { color:var(--brand); font-family:Georgia,serif; font-size:28px; }
+    h2 { margin:18px 0 8px; font-size:18px; }
+    article p { margin:0; color:var(--muted); font-size:13px; line-height:1.75; }
+    a { display:inline-flex; width:max-content; min-height:34px; align-items:center; margin-top:auto; padding:0 13px; border:1px solid var(--brand); border-radius:5px; background:var(--brand); color:#fff; font-size:13px; text-decoration:none; }
+    a:hover { background:#9f151c; }
+    footer { margin-top:20px; color:var(--muted); font-size:12px; }
+    @media (max-width:760px) { header { padding:0 20px; } main { width:min(100% - 28px,1040px); margin:32px auto; } h1 { font-size:27px; } .stories { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header><span class="seal">上大</span><b>思政教学案例智能平台</b></header>
+  <main>
+    <p class="eyebrow">PROTOTYPE / 可直接打开</p>
+    <h1>AI 工作台的十二段用户故事</h1>
+    <p class="lead">每段动画既可自动播放，也可暂停、重播和逐步点击。按真实教师路径拆成十二个短场景，便于逐条修改交互规则。</p>
+    <section class="stories">
+      <article><span class="number">01</span><h2>选择模板新建</h2><p>按学段、类型和教学用途创建一份有章节脚手架的案例。</p><a href="story-writing.html?scene=template">播放故事</a></article>
+      <article><span class="number">02</span><h2>从零写下粗稿</h2><p>教师在空白小节留下笔记，再请求改写本节。</p><a href="story-writing.html?scene=draft">播放故事</a></article>
+      <article><span class="number">03</span><h2>选区润色</h2><p>选中一段文字，给出明确修改要求并得到候选。</p><a href="story-writing.html?scene=polish">播放故事</a></article>
+      <article><span class="number">04</span><h2>处置写作候选</h2><p>带依据和轻量建议的候选可以接受、重试或拒绝。</p><a href="story-writing.html?scene=candidate">播放故事</a></article>
+      <article><span class="number">05</span><h2>限定资料范围</h2><p>教师勾选本次允许 AI 使用的资料工具。</p><a href="story-sources.html?scene=scope">播放故事</a></article>
+      <article><span class="number">06</span><h2>检索结果分流</h2><p>案例被引用，素材进入附件，知识用于理论上下文。</p><a href="story-sources.html?scene=search">播放故事</a></article>
+      <article><span class="number">07</span><h2>网页采集入附件</h2><p>勾选网页采集并提交 URL，得到可追溯的网页副本。</p><a href="story-sources.html?scene=web">播放故事</a></article>
+      <article><span class="number">08</span><h2>素材掌控台挂载</h2><p>筛选可信素材并挂载到当前案例的附件区。</p><a href="story-sources.html?scene=materials">播放故事</a></article>
+      <article><span class="number">09</span><h2>提交前检查</h2><p>四类审核 Agent 输出可定位的建议批注。</p><a href="story-review.html?scene=check">播放故事</a></article>
+      <article><span class="number">10</span><h2>带建议提交</h2><p>教学建议未处理也不阻塞教师提交审核。</p><a href="story-review.html?scene=submit">播放故事</a></article>
+      <article><span class="number">11</span><h2>处理管理员批注</h2><p>AI 生成待确认修订和回应草稿，教师决定是否解决。</p><a href="story-review.html?scene=comment">播放故事</a></article>
+      <article><span class="number">12</span><h2>发布、检索与导出</h2><p>发布后在资源检索找到固定版本，导出 DOCX。</p><a href="story-review.html?scene=publish">播放故事</a></article>
+    </section>
+    <footer>打开后点击“播放故事”；也可用每一步的按钮手动确认交互。</footer>
+  </main>
+</body>
+</html>

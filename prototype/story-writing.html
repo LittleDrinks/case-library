@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>原型：写作候选流程</title>
+  <style>
+    :root { --bg:#f6f4ef; --paper:#fff; --ink:#26221f; --muted:#777068; --line:#e9e3da; --soft:#f8eeed; --brand:#ba1c22; --brand-strong:#961519; --green:#20744a; --green-soft:#e8f3ec; --amber:#9c6508; --amber-soft:#faf0dc; --shadow:0 1px 2px rgba(64,48,32,.05),0 4px 16px rgba(64,48,32,.06); --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",serif; }
+    * { box-sizing:border-box; }
+    body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 var(--sans); }
+    button { font:inherit; cursor:pointer; }
+    button:focus-visible { outline:2px solid rgba(186,28,34,.36); outline-offset:2px; }
+    .site-header { height:58px; display:flex; align-items:center; gap:28px; padding:0 24px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); }
+    .brand { display:flex; align-items:center; gap:12px; font:700 17px/1.4 var(--serif); letter-spacing:1px; white-space:nowrap; }
+    .brand-mark { width:28px; height:28px; display:grid; place-items:center; border:2px solid var(--brand); color:var(--brand); font:700 13px/1 var(--serif); }
+    .brand small { padding-left:12px; border-left:1px solid var(--line); color:var(--ink); font:700 16px/1 var(--serif); letter-spacing:1px; }
+    .site-nav { display:flex; gap:4px; margin-right:auto; }
+    .site-nav span { padding:6px 14px; border-radius:999px; color:#59524c; }
+    .site-nav .active { background:var(--soft); color:var(--brand); }
+    .account { padding:5px 10px; border:1px solid var(--line); border-radius:7px; background:#fff; color:#59524c; font-size:13px; }
+    .workspace-header { min-height:56px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; padding:8px 22px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.97); }
+    .crumb { color:#98907f; font-size:13px; } .crumb b { color:var(--ink); } .crumb i { margin:0 7px; font-style:normal; }
+    .save { color:#98907f; font-size:12px; } .save strong { margin-right:9px; padding:3px 8px; border-radius:5px; background:var(--green-soft); color:var(--green); font-weight:600; }
+    .status { display:flex; justify-content:flex-end; align-items:center; gap:8px; color:#777068; font-size:12px; }
+    .status-dot { width:7px; height:7px; border-radius:50%; background:var(--green); }
+    .story-banner { display:flex; align-items:center; gap:12px; min-height:48px; padding:8px 24px; border-bottom:1px solid #ead1d2; background:var(--soft); color:#7c2024; }
+    .story-index { padding:2px 7px; border:1px solid #e1b8ba; border-radius:4px; background:#fff; font-size:11px; font-weight:700; }
+    .story-banner b { font-size:13px; } .story-banner span { color:#8e595b; font-size:12px; }
+    .canvas { display:grid; grid-template-columns:204px minmax(470px,820px) 370px; justify-content:center; align-items:start; min-height:calc(100vh - 162px); }
+    .outline { position:sticky; top:0; margin:28px 12px; padding:13px; border:1px solid var(--line); border-radius:7px; background:#fff; box-shadow:var(--shadow); }
+    .outline h2 { margin:0 0 9px; padding:0 10px 10px; border-bottom:1px solid #f0ebe2; color:#98907f; font-size:11px; font-weight:600; }
+    .outline button { width:100%; display:flex; align-items:center; gap:8px; margin:2px 0; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:#59524c; text-align:left; }
+    .outline button.active { background:var(--soft); color:var(--brand); } .outline button:hover { background:#f6f4ef; }
+    .outline .indent { padding-left:22px; font-size:13px; } .template-dot { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.55; }
+    .paper-wrap { min-width:0; padding:28px 28px 130px; }
+    .paper { position:relative; min-height:760px; padding:66px 72px 80px; border:1px solid var(--line); border-radius:6px; background:#fff; box-shadow:var(--shadow); }
+    .editor-tools { position:absolute; top:18px; left:24px; display:flex; gap:2px; opacity:.55; }
+    .editor-tools span { display:grid; width:30px; height:28px; place-items:center; border:1px solid transparent; border-radius:5px; color:#59524c; font:700 14px/1 var(--serif); }
+    .editor-tools span:nth-child(3) { padding:0 5px; width:auto; font:12px/1 var(--sans); }
+    .doc-title { margin:0 0 8px; font:700 29px/1.35 var(--serif); text-align:center; }
+    .byline { display:flex; justify-content:center; gap:18px; margin-bottom:40px; color:#98907f; font-size:12px; }
+    .document { font:16px/2 var(--serif); } .document h2 { margin:29px 0 13px; font-size:21px; } .document p { margin:0 0 15px; text-align:justify; }
+    .empty-section { min-height:154px; padding:17px 18px; border:1px dashed #d5cec4; border-radius:5px; background:#fdfcfa; }
+    .empty-section.active { border-color:var(--brand); box-shadow:0 0 0 3px rgba(186,28,34,.08); }
+    .empty-hint { display:flex; align-items:center; gap:7px; color:#98907f; font:13px/1.6 var(--sans); } .empty-hint i { width:7px; height:7px; border-radius:50%; background:#d2cbc2; }
+    .notes { display:grid; gap:8px; margin-top:13px; } .note { padding:7px 9px; border-left:2px solid #d8ad69; background:#fffaf0; color:#59524c; font:13px/1.45 var(--sans); }
+    .cursor { display:inline-block; width:1px; height:16px; margin-left:3px; background:var(--brand); vertical-align:-3px; animation:blink .7s step-end infinite; } @keyframes blink { 50% { opacity:0; } }
+    .selection { padding:1px 2px; background:#fde3a7; box-shadow:inset 0 -1px #d2a63c; }
+    .applied { padding:1px 2px; background:var(--green-soft); box-shadow:inset 0 -1px #79b78e; }
+    .rail { position:sticky; top:0; height:calc(100vh - 114px); min-height:650px; display:flex; flex-direction:column; overflow:auto; border-left:1px solid var(--line); background:#fff; }
+    .rail-tabs { display:flex; gap:2px; min-height:50px; padding:6px 10px 0; border-bottom:1px solid var(--line); } .rail-tabs span { flex:1; display:flex; justify-content:center; align-items:center; border-bottom:2px solid transparent; color:#777068; font-size:13px; } .rail-tabs .active { border-bottom-color:var(--brand); color:var(--brand); }
+    .rail-head { padding:14px 14px 10px; border-bottom:1px solid #f0ebe2; } .rail-head b { display:block; font-size:14px; } .rail-head small { color:#98907f; font-size:11px; }
+    .candidate-rule { margin:11px 12px 0; padding:8px 9px; border-left:2px solid var(--amber); background:var(--amber-soft); color:#805716; font-size:11px; line-height:1.55; }
+    .context-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; padding:12px; border-bottom:1px solid var(--line); }
+    .context-actions button { min-height:52px; padding:6px 3px; border:1px solid transparent; border-radius:5px; background:transparent; color:#777068; font-size:11px; } .context-actions button:hover, .context-actions button.active { background:var(--soft); color:var(--brand); }
+    .context-actions b { display:block; margin-bottom:2px; font-size:17px; line-height:1; font-weight:400; }
+    .tool-divider { padding:10px 14px 4px; color:#98907f; font-size:10px; letter-spacing:.4px; }
+    .resource-tools { display:flex; gap:5px; padding:0 12px 12px; border-bottom:1px solid var(--line); } .resource-tools span { flex:1; padding:6px 0; border:1px solid var(--line); border-radius:4px; color:#777068; text-align:center; font-size:10px; }
+    .conversation { display:grid; gap:10px; padding:13px 12px 8px; }
+    .message { max-width:94%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fdfcfa; font-size:12px; line-height:1.65; } .message.user { justify-self:end; border-color:#ead1d2; background:var(--soft); } .message b { display:block; margin-bottom:3px; color:#98907f; font-size:10px; } .message p { margin:0; }
+    .candidate { display:grid; gap:9px; margin:0 12px 18px; padding:10px; border:1px solid #ead1d2; border-radius:5px; background:#fff; } .candidate.hidden { display:none; }
+    .candidate header { display:flex; justify-content:space-between; gap:8px; } .candidate header b { color:var(--brand); font-size:12px; } .candidate header small { color:#98907f; font-size:10px; }
+    .target { display:flex; gap:5px; } .target span { padding:4px 7px; border:1px solid var(--brand); border-radius:4px; color:var(--brand); font-size:10px; }
+    .candidate-text { margin:0; padding:8px; border-radius:4px; background:#fdfcfa; color:#403a35; font:12px/1.65 var(--serif); } .candidate-text del { background:#fde7e9; color:#8e1b22; text-decoration-color:#ba1c22; } .candidate-text ins { background:#e2f3e8; color:#17633d; text-decoration:none; }
+    .evidence { display:grid; gap:4px; padding:8px; border-left:2px solid #d8ad69; background:#fffaf0; color:#715519; font-size:11px; } .evidence b { color:#9c6508; font-size:10px; }
+    .review { display:flex; gap:5px; padding:8px; border-left:2px solid #20744a; background:#f7fbf8; color:#386b4d; font-size:11px; }
+    .candidate-actions { display:flex; justify-content:flex-end; gap:6px; } .candidate-actions button { min-height:29px; padding:0 9px; border:1px solid var(--line); border-radius:4px; background:#fff; color:#59524c; font-size:11px; } .candidate-actions .accept { border-color:var(--brand); background:var(--brand); color:#fff; }
+    .accepted { margin:0 12px 18px; padding:8px 9px; border-left:2px solid var(--green); background:#f7fbf8; color:var(--green); font-size:11px; }
+    .scene-picker { position:fixed; z-index:20; left:50%; bottom:73px; width:min(780px,calc(100vw - 32px)); transform:translateX(-50%); display:flex; align-items:center; gap:5px; padding:7px 8px; border:1px solid #d5cec4; border-radius:7px; background:rgba(255,255,255,.97); box-shadow:var(--shadow); } .scene-picker b { padding:0 5px; color:#777068; font-size:11px; white-space:nowrap; } .scene-picker button { flex:1; min-width:0; height:29px; padding:0 7px; overflow:hidden; border:1px solid transparent; border-radius:4px; background:transparent; color:#59524c; font-size:11px; text-overflow:ellipsis; white-space:nowrap; } .scene-picker button:hover { background:#f6f4ef; } .scene-picker button.active { border-color:#e1b8ba; background:var(--soft); color:var(--brand); }
+    .controlbar { position:fixed; z-index:20; left:50%; bottom:18px; width:min(780px,calc(100vw - 32px)); transform:translateX(-50%); display:grid; grid-template-columns:auto auto auto auto minmax(120px,1fr) auto; align-items:center; gap:8px; padding:9px 10px; border:1px solid #d5cec4; border-radius:7px; background:rgba(38,34,31,.96); box-shadow:0 12px 28px rgba(35,30,26,.22); color:#fff; }
+    .controlbar button { min-width:30px; height:30px; padding:0 9px; border:1px solid #5e5751; border-radius:4px; background:transparent; color:#fff; font-size:12px; } .controlbar button:hover { border-color:#c7b9aa; background:#49423c; } .controlbar .play { min-width:56px; border-color:#c9494e; background:var(--brand); }
+    .progress { position:relative; height:6px; border-radius:4px; background:#5e5751; cursor:pointer; } .progress i { position:absolute; top:0; left:0; height:100%; border-radius:4px; background:#ef8a8e; pointer-events:none; }
+    .time { min-width:80px; color:#d9d3cc; font:11px/1 var(--sans); text-align:center; }
+    .story-jumps { display:flex; gap:4px; } .story-jumps button.active { border-color:#ef8a8e; color:#fff; }
+    @media (max-width:1120px) { .canvas { grid-template-columns:minmax(0,1fr) 350px; } .outline { display:none; } .paper { padding:62px 54px 80px; } }
+    @media (max-width:760px) { .site-header { height:auto; min-height:56px; flex-wrap:wrap; gap:8px; padding:9px 12px; } .site-nav { order:3; width:100%; overflow:auto; } .site-nav span { padding:4px 10px; white-space:nowrap; } .account { margin-left:auto; } .workspace-header { grid-template-columns:1fr auto; padding:8px 12px; } .save { display:none; } .canvas { display:block; } .paper-wrap { padding:14px 12px 145px; } .paper { min-height:650px; padding:54px 25px 60px; } .doc-title { font-size:24px; } .rail { position:static; height:auto; min-height:0; border-top:1px solid var(--line); border-left:0; } .story-banner { padding:8px 12px; } .story-banner span { display:none; } .scene-picker { bottom:62px; overflow:auto; } .scene-picker button { flex:0 0 116px; } .controlbar { grid-template-columns:auto auto auto auto 1fr auto; gap:5px; bottom:10px; } .story-jumps { display:none; } .controlbar button { min-width:28px; padding:0 7px; } .time { min-width:58px; } }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand"><span class="brand-mark">上</span>上海大学<small>思政教学案例平台</small></div>
+    <nav class="site-nav"><span>首页</span><span>案例库</span><span>资源检索</span><span class="active">我的案例</span></nav>
+    <div class="account">杨老师</div>
+  </header>
+  <section class="workspace-header">
+    <div class="crumb">我的案例<i>/</i><b>从讲台到课堂的选择</b></div>
+    <div class="save"><strong>草稿</strong><span id="save-copy">已保存</span></div>
+    <div class="status"><i class="status-dot"></i>AI 助手就绪</div>
+  </section>
+  <section class="story-banner"><span class="story-index" id="story-index">故事 1 / 2</span><b id="scene-title">从模板落到“关键选择”</b><span id="scene-copy">人物传记与课堂讲授模板已就绪，杨老师开始补写她真正想讨论的选择。</span></section>
+  <main class="canvas">
+    <aside class="outline">
+      <h2>写作模板</h2>
+      <button id="template-bio"><i class="template-dot"></i>人物传记</button>
+      <button id="template-teach"><i class="template-dot"></i>课堂讲授</button>
+      <button class="indent"><i class="template-dot"></i>人物经历</button>
+      <button class="indent active" id="choice-outline"><i class="template-dot"></i>关键选择</button>
+      <button class="indent"><i class="template-dot"></i>讨论问题</button>
+    </aside>
+    <section class="paper-wrap">
+      <article class="paper">
+        <div class="editor-tools"><span>B</span><span>I</span><span>正文</span></div>
+        <h1 class="doc-title" id="doc-title">新建案例</h1>
+        <div class="byline" id="byline"><span>杨老师</span><span>未选择模板</span><span>未发布</span></div>
+        <div class="document" id="document-content">
+          <h2>人物经历</h2>
+          <p>2012 年，周明放弃沿海城市的企业职位，回到家乡中学任教。十年间，他把每周一次的课后答疑改成面向全校的学习互助小组。</p>
+          <h2>关键选择</h2>
+          <div class="empty-section" id="choice-section"><div id="choice-content" class="empty-hint"><i></i><span>从人物经历中记录决定性时刻，先写粗略笔记。</span></div></div>
+          <h2>课堂讲授</h2>
+          <p>教师可请学生辨析：个人职业选择如何与对他人的责任建立联系？<span id="polish-text">讨论不应停在“奉献最光荣”的结论上。</span></p>
+        </div>
+      </article>
+    </section>
+    <aside class="rail">
+      <div class="rail-tabs"><span class="active">AI</span><span>批注</span><span>附件</span></div>
+      <div class="rail-head"><b>写作助手</b><small>当前上下文：<span id="context-label">关键选择</span></small></div>
+      <div class="candidate-rule">AI 只提供候选。接受前，正文保持不变。</div>
+      <div class="context-actions">
+        <button id="rewrite-section"><b>↻</b>改写本节</button>
+        <button id="rewrite-selection"><b>⌁</b>改写选区</button>
+        <button id="polish"><b>✦</b>润色</button>
+      </div>
+      <div class="tool-divider">资料工具</div>
+      <div class="resource-tools"><span>检索资料</span><span>引用素材</span><span>核验来源</span></div>
+      <div class="conversation" id="conversation"></div>
+      <section class="candidate hidden" id="candidate" aria-live="polite">
+        <header><b>待确认修订</b><small id="candidate-target">关键选择</small></header>
+        <div class="target"><span id="target-chip">替换本节</span></div>
+        <p class="candidate-text" id="candidate-text"></p>
+        <div class="evidence" id="evidence"><b>依据</b><span></span></div>
+        <div class="review" id="review"><span></span></div>
+        <div class="candidate-actions"><button id="reject">拒绝</button><button id="retry">重试</button><button class="accept" id="accept">接受</button></div>
+      </section>
+      <div class="accepted" id="accepted" hidden>已接受：正文已替换，并保留本次修订记录。</div>
+    </aside>
+  </main>
+  <div class="scene-picker" role="tablist" aria-label="动画场景">
+    <b>独立场景</b><button id="scene-1" class="active" role="tab">1 新建</button><button id="scene-2" role="tab">2 笔记改写</button><button id="scene-3" role="tab">3 选区润色</button><button id="scene-4" role="tab">4 三种决定</button>
+  </div>
+  <div class="controlbar" role="group" aria-label="演示控制">
+    <button id="previous" title="上一幕">上一步</button><button class="play" id="play">暂停</button><button id="replay" title="从头重播">重播</button><button id="next" title="下一幕">下一步</button>
+    <div class="progress" id="progress" aria-label="演示进度"><i id="progress-fill"></i></div><span class="time" id="time">00:00 / 00:14</span>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const notes = ["他没有接受企业职位，先问：谁最需要一位稳定的老师？", "把答疑改成互助小组，学生不再只是接受帮助。", "课堂不要替他下结论，要让学生判断代价与责任。"];
+    const scenes = [
+      { key:"template", title:"选择模板后新建", copy:"杨老师依次选择“本科思政 → 人物传记 → 课堂讲授”，再新建案例。", duration:14, steps:[0,3,6,9,12,14] },
+      { key:"draft", title:"从粗略笔记改写本节", copy:"空白小节先容纳不完整想法；请求改写只生成候选，不改正文。", duration:16, steps:[0,2,4,6,9,12,16] },
+      { key:"polish", title:"选区润色先写清要求", copy:"润色是选区的上下文动作；要求明确后，下一场景才检查候选。", duration:15, steps:[0,2,5,8,11,15] },
+      { key:"candidate", title:"候选的三种决定", copy:"同一候选依次演示接受、重试和拒绝；每次决定都可追溯。", duration:18, steps:[0,3,6,9,12,15,18] },
+    ];
+    let sceneIndex = Math.max(0, scenes.findIndex((item) => item.key === new URLSearchParams(location.search).get("scene")));
+    let elapsed = 0; let playing = false; let startedAt = 0; let frameId = 0;
+    const message = (role, text) => `<div class="message ${role}"><b>${role === "user" ? "杨老师" : "AI 助手"}</b><p>${text}</p></div>`;
+    function setText(id, text) { $(id).textContent = text; }
+    function setActive(id, active) { $(id).classList.toggle("active", active); }
+    function documentView(title, template, content) { setText("doc-title", title); $("byline").innerHTML = `<span>杨老师</span><span>${template}</span><span>未发布</span>`; $("document-content").innerHTML = content; }
+    function resetRail() {
+      ["rewrite-section", "rewrite-selection", "polish"].forEach((id) => setActive(id, false));
+      $("candidate").classList.add("hidden"); $("accepted").hidden = true; $("retry").hidden = false;
+      $("accept").disabled = false; $("reject").disabled = false; $("accept").textContent = "接受";
+    }
+    function setCandidate(data, state) {
+      $("candidate").classList.remove("hidden"); setText("candidate-target", data.target); setText("target-chip", data.chip);
+      $("candidate-text").innerHTML = data.text; $("evidence").lastElementChild.textContent = data.evidence; $("review").firstElementChild.textContent = data.review;
+      $("retry").hidden = !data.retry; $("accept").disabled = state === "accepted"; $("reject").disabled = state === "rejected";
+    }
+    function noteMarkup(time) {
+      const count = Math.max(0, Math.min(3, Math.floor((time - 1) / 1.7) + 1));
+      if (!count) return '<div class="empty-hint"><i></i><span>从人物经历中记录决定性时刻，先写粗略笔记。</span></div>';
+      return `<div class="notes">${notes.slice(0, count).map((note) => `<div class="note">${note}</div>`).join("")}</div>${count < 3 ? '<span class="cursor"></span>' : ""}`;
+    }
+    function candidateOne(retry) {
+      return { target:"课堂讲授", chip:"替换选区", retry:true, text:retry ? "<del>讨论不应停在“奉献最光荣”的结论上。</del><ins>请学生比对周明的两种选择：留下与离开各会带来什么后果？</ins>" : "<del>讨论不应停在“奉献最光荣”的结论上。</del><ins>讨论应回到周明的选择：他放弃了什么，又让哪些学生获得了继续学习的机会？</ins>", evidence:"依据：保留“选择”的叙事线，把价值判断落回前文事实。", review:"审核建议：保留可核验的时间和活动；不要把学生受益写成确定结果。" };
+    }
+    function renderTemplate(time) {
+      const selected = time < 3 ? "本科思政" : time < 6 ? "本科思政 → 人物传记" : "本科思政 → 人物传记 → 课堂讲授";
+      setText("context-label", "新建案例 / 模板选择"); setActive("template-bio", time >= 3); setActive("template-teach", time >= 6);
+      if (time < 12) documentView("新建案例", selected, `<h2>选择写作模板</h2><p>教学层级：<b>${time >= 3 ? "本科思政" : "请选择"}</b></p><p>案例结构：<b>${time >= 6 ? "人物传记" : "请选择"}</b></p><p>使用方式：<b>${time >= 9 ? "课堂讲授" : "请选择"}</b></p>`);
+      else documentView("从讲台到课堂的选择", "本科思政 / 人物传记 / 课堂讲授", "<h2>人物经历</h2><p>2012 年，周明放弃沿海城市的企业职位，回到家乡中学任教。</p><h2>关键选择</h2><div class=\"empty-section\"><div class=\"empty-hint\"><i></i><span>模板已新建，等待记录关键选择。</span></div></div>");
+      $("conversation").innerHTML = message("assistant", time < 12 ? `已选择：${selected}。` : "案例已按模板新建，可以从“关键选择”开始写。");
+    }
+    function renderDraft(time) {
+      setText("context-label", "关键选择"); setActive("choice-outline", true);
+      documentView("从讲台到课堂的选择", "人物传记 / 课堂讲授", `<h2>人物经历</h2><p>2012 年，周明放弃沿海城市的企业职位，回到家乡中学任教。</p><h2>关键选择</h2><div class=\"empty-section ${time >= 1 ? "active" : ""}\">${noteMarkup(time)}</div><h2>课堂讲授</h2><p>让学生辨析：个人职业选择如何与对他人的责任建立联系？</p>`);
+      if (time < 9) $("conversation").innerHTML = message("user", "先记三条粗略笔记，不急着写成完整段落。");
+      else { setActive("rewrite-section", true); $("conversation").innerHTML = message("user", "请根据三条笔记改写本节，保留人物权衡的过程。") + message("assistant", "已生成候选。接受前，正文不会改变。"); setCandidate({ target:"关键选择", chip:"替换本节", retry:false, text:"<ins>周明没有把回乡任教说成牺牲。他先算清父母的照料、自己的收入和学生的需要，再决定留下。</ins>", evidence:"依据：三条笔记共同指向权衡后承担责任。", review:"审核建议：补充互助小组首次组织时间，再确认“全校”是否有材料支撑。" }); }
+    }
+    function renderPolish(time) {
+      const selected = time >= 2; setText("context-label", selected ? "课堂讲授 / 已选中一句" : "课堂讲授");
+      documentView("从讲台到课堂的选择", "人物传记 / 课堂讲授", `<h2>课堂讲授</h2><p>教师可请学生辨析：个人职业选择如何与对他人的责任建立联系？<span class=\"${selected ? "selection" : ""}\">讨论不应停在“奉献最光荣”的结论上。</span></p>`);
+      if (time < 2) $("conversation").innerHTML = message("assistant", "请先选中需要润色的句子，候选只会作用在该选区。");
+      if (time >= 2 && time < 5) $("conversation").innerHTML = message("assistant", "已识别选区。点击“润色”后再说明边界。");
+      if (time >= 5) { setActive("polish", true); const prompt = "保留叙事语气，删掉口号"; const typed = prompt.slice(0, Math.min(prompt.length, Math.floor((time - 5) * 5))); $("conversation").innerHTML = message("user", typed + (typed.length < prompt.length ? "|" : "")) + message("assistant", time >= 11 ? "要求已明确，正在生成候选；原文保持不变。" : "润色只生成候选，不直接修改正文。"); }
+    }
+    function renderCandidate(time) {
+      const applied = time >= 3; const original = "讨论不应停在“奉献最光荣”的结论上。";
+      setText("context-label", "课堂讲授 / 已选中一句"); setActive("polish", true);
+      documentView("从讲台到课堂的选择", "人物传记 / 课堂讲授", `<h2>课堂讲授</h2><p>教师可请学生辨析：个人职业选择如何与对他人的责任建立联系？<span class=\"${applied ? "applied" : "selection"}\">${applied ? "讨论应回到周明的选择：他放弃了什么，又让哪些学生获得了继续学习的机会？" : original}</span></p>`);
+      if (time < 3) { $("conversation").innerHTML = message("assistant", "候选附带依据和审核建议。接受前，原文不变。"); setCandidate(candidateOne(false)); }
+      if (time >= 3 && time < 6) { $("conversation").innerHTML = message("assistant", "已接受候选，正文替换完成并保留修订记录。"); $("accepted").hidden = false; $("accepted").textContent = "已接受候选 1：正文已替换。"; }
+      if (time >= 6 && time < 9) { $("conversation").innerHTML = message("user", "重试：保留叙事语气，再给一个课堂提问版本。") + message("assistant", "已请求新的候选；当前正文仍是刚才接受的版本。"); }
+      if (time >= 9 && time < 12) { $("conversation").innerHTML = message("assistant", "候选 2 已生成。检查后可以接受或拒绝。"); setCandidate(candidateOne(true)); }
+      if (time >= 12) { $("conversation").innerHTML = message("assistant", "已拒绝候选 2。正文保持已接受的候选 1，不会被覆盖。"); $("accepted").hidden = false; $("accepted").textContent = "已拒绝候选 2：正文未变化。"; }
+    }
+    function render(time) {
+      const scene = scenes[sceneIndex]; resetRail(); setText("story-index", `场景 ${sceneIndex + 1} / 4`); setText("scene-title", scene.title); setText("scene-copy", scene.copy);
+      setActive("template-bio", false); setActive("template-teach", false); setActive("choice-outline", false); ["template", "draft", "polish", "candidate"].forEach((key, index) => setActive(`scene-${index + 1}`, index === sceneIndex));
+      [renderTemplate, renderDraft, renderPolish, renderCandidate][sceneIndex](time); $("progress-fill").style.width = `${time / scene.duration * 100}%`; setText("time", `00:${String(Math.floor(time)).padStart(2, "0")} / 00:${String(scene.duration).padStart(2, "0")}`); setText("save-copy", sceneIndex === 3 && time >= 3 ? "已保存修订" : "已保存");
+    }
+    function stop() { playing = false; cancelAnimationFrame(frameId); setText("play", "播放"); }
+    function play() { playing = true; startedAt = performance.now() - elapsed * 1000; setText("play", "暂停"); frameId = requestAnimationFrame(tick); }
+    function tick(now) { if (!playing) return; elapsed = Math.min(scenes[sceneIndex].duration, (now - startedAt) / 1000); render(elapsed); if (elapsed >= scenes[sceneIndex].duration) return stop(); frameId = requestAnimationFrame(tick); }
+    function seek(time) { elapsed = Math.max(0, Math.min(scenes[sceneIndex].duration, time)); render(elapsed); if (playing) startedAt = performance.now() - elapsed * 1000; }
+    function step(delta) { const steps = scenes[sceneIndex].steps; const current = steps.reduce((value, item) => item <= elapsed + .2 ? item : value, 0); seek(steps[Math.max(0, Math.min(steps.length - 1, steps.indexOf(current) + delta))]); stop(); }
+    function selectScene(index) { sceneIndex = index; elapsed = 0; history.replaceState(null, "", `?scene=${scenes[index].key}`); render(0); play(); }
+    $("play").onclick = () => playing ? stop() : play(); $("replay").onclick = () => { seek(0); play(); }; $("previous").onclick = () => step(-1); $("next").onclick = () => step(1);
+    $("progress").onclick = (event) => { const rect = event.currentTarget.getBoundingClientRect(); seek((event.clientX - rect.left) / rect.width * scenes[sceneIndex].duration); stop(); };
+    ["template-bio", "template-teach"].forEach((id) => $(id).onclick = () => selectScene(0)); $("rewrite-section").onclick = () => selectScene(1); $("rewrite-selection").onclick = () => selectScene(2); $("polish").onclick = () => selectScene(2); $("accept").onclick = () => { selectScene(3); seek(3); stop(); }; $("retry").onclick = () => { selectScene(3); seek(6); stop(); }; $("reject").onclick = () => { selectScene(3); seek(12); stop(); };
+    scenes.forEach((scene, index) => { $(`scene-${index + 1}`).onclick = () => selectScene(index); }); render(0); play();
+  </script>
+</body>
+</html>
