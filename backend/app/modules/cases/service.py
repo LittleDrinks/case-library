@@ -6,6 +6,12 @@ from datetime import UTC, datetime
 from pymongo import DESCENDING, ReturnDocument
 from pymongo.database import Database
 
+from app.modules.cases.template import (
+    creation_metadata,
+    new_case_document,
+    resolve_case_creation,
+)
+
 CASE_METADATA_FIELDS = (
     "typeId",
     "typeName",
@@ -14,6 +20,9 @@ CASE_METADATA_FIELDS = (
     "organization",
     "stageText",
     "audience",
+    "templateId",
+    "templateVersion",
+    "templateName",
     "purpose",
     "theoryPoints",
     "citations",
@@ -157,12 +166,23 @@ def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
 
 
 def create_case(database: Database, body: dict, user: dict) -> dict:
+    creation = resolve_case_creation(
+        body["stageId"], body["typeId"], body["templateId"]
+    )
+    if not creation:
+        raise CaseError(422, "模板不可用")
+    case = _new_case(creation, user)
+    database.cases.insert_one(case)
+    return case_view(case)
+
+
+def _new_case(creation, user: dict) -> dict:
     now = _now()
     case = {
         "id": f"c-{secrets.token_hex(6)}",
-        "title": body["title"],
+        "title": "未命名案例",
         "summary": "",
-        "document": body["document"],
+        "document": new_case_document(creation.template),
         "revision": 1,
         "workflowStatus": "draft",
         "publicationStatus": "none",
@@ -170,9 +190,9 @@ def create_case(database: Database, body: dict, user: dict) -> dict:
         "ownerId": user["id"],
         "createdAt": now,
         "updatedAt": now,
+        **creation_metadata(creation),
     }
-    database.cases.insert_one(case)
-    return case_view(case)
+    return case
 
 
 def update_case(database: Database, case_id: str, body: dict, user: dict) -> dict:

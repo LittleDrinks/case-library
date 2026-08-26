@@ -5,12 +5,10 @@ import { useRouter } from "vue-router";
 import { api } from "../api.js";
 import CaseCard from "../components/CaseCard.vue";
 import SiteHeader from "../components/SiteHeader.vue";
-import { session } from "../session.js";
 
 const router = useRouter();
 const cases = ref([]);
 const loading = ref(true);
-const creating = ref(false);
 const error = ref("");
 const groups = [
   { title: "进行中", statuses: ["draft"] },
@@ -46,19 +44,6 @@ async function loadCases() {
   }
 }
 
-async function createCase() {
-  creating.value = true;
-  error.value = "";
-  try {
-    const created = await api.createCase({ title: "未命名案例" }, session.csrfToken);
-    await router.push({ name: "workbench", params: { id: created.id } });
-  } catch (reason) {
-    error.value = reason.message || "新建案例失败";
-  } finally {
-    creating.value = false;
-  }
-}
-
 onMounted(loadCases);
 </script>
 
@@ -68,10 +53,9 @@ onMounted(loadCases);
     <main id="main-content" class="home-main my-cases-main">
       <header class="my-cases-heading">
         <div><span class="home-eyebrow">教学工作</span><h1>我的案例</h1></div>
-        <button type="button" :disabled="creating" @click="createCase">
-          <LoaderCircle v-if="creating" class="spin" :size="17" aria-hidden="true" />
-          <FilePlus2 v-else :size="17" aria-hidden="true" />
-          {{ creating ? "正在创建" : "新建案例" }}
+        <button type="button" @click="router.push({ name: 'new-case' })">
+          <FilePlus2 :size="17" aria-hidden="true" />
+          新建案例
         </button>
       </header>
 

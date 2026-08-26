@@ -4,20 +4,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.modules.cases.document_schema import (
-    validate_optional_document,
-    validate_prosemirror_document,
-)
-from app.modules.cases.template import new_case_document
+from app.modules.cases.document_schema import validate_optional_document
 
 
 class CaseCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_default=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    title: str = Field(min_length=1, max_length=200)
-    document: dict[str, Any] = Field(default_factory=new_case_document)
-
-    validate_document = field_validator("document")(validate_prosemirror_document)
+    stageId: str = Field(min_length=1, max_length=80)
+    typeId: str = Field(min_length=1, max_length=80)
+    templateId: str = Field(min_length=1, max_length=80)
 
 
 class CasePatch(BaseModel):

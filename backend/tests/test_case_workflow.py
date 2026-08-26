@@ -150,7 +150,7 @@ def test_admin_cannot_edit_an_authors_working_version(client: TestClient) -> Non
 
 def test_case_creation_requires_csrf(client: TestClient) -> None:
     auth = login(client, "user", "user123").json()
-    body = {"title": "新案例", "document": paragraph_document("正文")}
+    body = {"stageId": "ug", "typeId": "ct-figure", "templateId": "tpl-general-v1"}
 
     assert client.post("/api/cases", json=body).status_code == 403
     created = client.post(
@@ -170,7 +170,11 @@ def test_new_case_uses_the_required_teaching_template(client: TestClient) -> Non
     created = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": "空白案例"},
+        json={
+            "stageId": "ug",
+            "typeId": "ct-figure",
+            "templateId": "tpl-teaching-standard-v1",
+        },
     )
     text = document_text(created.json()["document"])
 

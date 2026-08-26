@@ -6,6 +6,7 @@ import "./styles/ai-settings.css";
 import "./styles/admin.css";
 import "./styles/case-detail.css";
 import "./styles/home.css";
+import "./styles/new-case.css";
 import "./styles/material-import.css";
 import "./styles/search-materials.css";
 import "./styles/workbench.css";

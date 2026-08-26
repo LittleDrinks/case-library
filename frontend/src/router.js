@@ -10,6 +10,7 @@ import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
 import MaterialExplorerView from "./views/MaterialExplorerView.vue";
 import MyCasesView from "./views/MyCasesView.vue";
+import NewCaseView from "./views/NewCaseView.vue";
 import SearchView from "./views/SearchView.vue";
 import WorkbenchView from "./views/WorkbenchView.vue";
 
@@ -27,6 +28,12 @@ const routes = [
     path: "/my-cases",
     name: "my-cases",
     component: MyCasesView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/new-case",
+    name: "new-case",
+    component: NewCaseView,
     meta: { requiresAuth: true },
   },
   {

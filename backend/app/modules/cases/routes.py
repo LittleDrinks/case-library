@@ -15,9 +15,16 @@ from app.modules.cases.service import (
     list_cases,
     update_case,
 )
+from app.modules.cases.template import case_creation_catalog
 from app.modules.documents import build_case_docx
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
+catalog_router = APIRouter(tags=["case-creation"])
+
+
+@catalog_router.get("/api/case-creation-catalog")
+def creation_catalog(_user: dict = Depends(require_user)):
+    return case_creation_catalog()
 
 
 @router.get("")

@@ -133,6 +133,7 @@ export const api = {
     headers: { "X-CSRF-Token": csrfToken },
   }),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
+  caseCreationCatalog: () => request("/api/case-creation-catalog"),
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
