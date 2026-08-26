@@ -3,6 +3,8 @@ set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 runner="$project_dir/scripts/run-e2e.sh"
+makefile="$project_dir/Makefile"
+playwright_config="$project_dir/frontend/playwright.config.js"
 compose_file="$project_dir/docker-compose.yml"
 pytest_config="$project_dir/backend/tests/pytest.ini"
 meili_test="$project_dir/backend/tests/test_search_meilisearch_e2e.py"
@@ -36,12 +38,31 @@ require_line '  compose --profile e2e up -d --force-recreate --no-deps e2e-searc
 require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app'
 require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend'
 require_line 'preclean_e2e_resources'
+require_line 'run_browser_tests() {'
+require_line '  set -- compose --profile e2e run --rm --no-deps \'
+require_line '    -v "$artifact_dir:/app/test-results" e2e'
+require_line '  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"'
+require_line 'test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e'
 require_line '  original_status=$?'
 require_line '  test "$original_status" -ne 0 && exit "$original_status"'
 require_line '  exit "$cleanup_status"'
 require_line 'trap cleanup EXIT'
 require_line "trap 'exit 130' INT"
 require_line "trap 'exit 143' TERM"
+grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
+grep -q '^test-backend:' "$makefile"
+grep -q '^test-frontend:' "$makefile"
+grep -q '^e2e-spec:' "$makefile"
+make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
+make -C "$project_dir" -n e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js | \
+  grep -Fx 'scripts/run-e2e.sh "frontend/tests/e2e/homepage.spec.js"'
+grep -Fq 'artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"' "$runner"
+grep -Fq 'frontend/tests/e2e/*.spec.js' "$runner"
+grep -Fq 'tests/e2e/*.spec.js' "$runner"
+grep -Fq 'outputDir: "test-results"' "$playwright_config"
+grep -Fq '["json", { outputFile: "test-results/report.json" }]' "$playwright_config"
+grep -Fq 'trace: "retain-on-failure"' "$playwright_config"
+grep -Fq 'screenshot: "only-on-failure"' "$playwright_config"
 e2e_config="$(
   docker compose --env-file "$project_dir/.env.example" --profile e2e config --format json
 )"
@@ -92,14 +113,15 @@ if grep -q 'playwright install' "$project_dir/deploy/e2e.Dockerfile"; then
 fi
 
 clear_line="$(exact_line "$runner" 'clear_e2e_bucket')"
-tests_line="$(exact_line "$runner" "$backend_e2e_command")"
+tests_line="$(grep -nFx 'test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e' \
+  "$runner" | cut -d: -f1)"
 test "$clear_line" -lt "$tests_line" || {
   echo "E2E bucket must be cleared before tests run" >&2
   exit 1
 }
 
 reset_line="$(exact_line "$runner" 'reset_browser_state')"
-browser_line="$(exact_line "$runner" 'compose --profile e2e run --rm --no-deps e2e')"
+browser_line="$(exact_line "$runner" 'run_browser_tests')"
 test "$tests_line" -lt "$reset_line" && test "$reset_line" -lt "$browser_line" || {
   echo "E2E app state must reset between backend and browser suites" >&2
   exit 1
