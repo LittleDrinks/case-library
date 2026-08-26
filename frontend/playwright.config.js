@@ -13,7 +13,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: "line",
+  outputDir: "test-results",
+  reporter: [["line"], ["json", { outputFile: "test-results/report.json" }]],
   use: {
     baseURL: isolatedBaseUrl(),
     trace: "retain-on-failure",

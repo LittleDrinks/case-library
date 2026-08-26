@@ -10,6 +10,31 @@ e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-wo
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
+test "$#" -le 1 || {
+  echo "Usage: scripts/run-e2e.sh [frontend/tests/e2e/<name>.spec.js]" >&2
+  exit 2
+}
+requested_spec="${1:-}"
+artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"
+mkdir -p "$artifact_dir"
+
+resolve_spec() {
+  case "$1" in
+    frontend/tests/e2e/*.spec.js) spec="${1#frontend/}" ;;
+    tests/e2e/*.spec.js) spec="$1" ;;
+    *.spec.js) spec="tests/e2e/$1" ;;
+    *) echo "E2E spec must be a Playwright .spec.js file" >&2; return 2 ;;
+  esac
+  test -f "$project_dir/frontend/$spec" || {
+    echo "E2E spec not found: $1" >&2
+    return 2
+  }
+  printf '%s\n' "$spec"
+}
+
+browser_spec=""
+test -z "$requested_spec" || browser_spec="$(resolve_spec "$requested_spec")"
+
 compose() {
   docker compose --project-name "$compose_project" \
     --env-file "$project_dir/.env.example" "$@"
@@ -80,6 +105,13 @@ reset_browser_state() {
   compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend
 }
 
+run_browser_tests() {
+  set -- compose --profile e2e run --rm --no-deps \
+    -v "$artifact_dir:/app/test-results" e2e
+  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  "$@"
+}
+
 cleanup() {
   original_status=$?
   trap - EXIT INT TERM
@@ -105,6 +137,6 @@ compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch
 docker build -f deploy/e2e.Dockerfile -t case-library-v2-e2e:latest .
 compose --profile e2e up -d --wait e2e-frontend
 clear_e2e_bucket
-compose --profile e2e run --rm --no-deps backend-e2e
+test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e
 reset_browser_state
-compose --profile e2e run --rm --no-deps e2e
+run_browser_tests

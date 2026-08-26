@@ -5,8 +5,9 @@ COMPOSE_DISABLE_ENV_FILE := 1
 export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 
 COMPOSE := docker compose
+E2E_SPEC ?= $(SPEC)
 
-.PHONY: up down logs config config-contract release-contract test check-function-lines e2e ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up down logs config config-contract release-contract test test-backend test-frontend check-function-lines check-backend-function-lines check-frontend-function-lines e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
@@ -37,12 +38,26 @@ test: check-function-lines
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm backend-test
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm frontend-test
 
-check-function-lines:
+test-backend: check-backend-function-lines
+	$(COMPOSE) --env-file .env.example --profile test run --build --rm backend-test
+
+test-frontend: check-frontend-function-lines
+	$(COMPOSE) --env-file .env.example --profile test run --build --rm frontend-test
+
+check-function-lines: check-backend-function-lines check-frontend-function-lines
+
+check-backend-function-lines:
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm backend-test python -c 'import ast,pathlib,sys; fs=sorted(f for p in (pathlib.Path("app"),pathlib.Path("tests")) for f in p.rglob("*.py")); bad=[f"{f}:{n.lineno} {n.name} ({n.end_lineno-n.lineno+1} lines)" for f in fs for n in ast.walk(ast.parse(f.read_text(),str(f))) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.end_lineno-n.lineno+1>=20]; print("Functions must be shorter than 20 lines:\\n"+"\\n".join(bad),file=sys.stderr) if bad else print("Function line check passed (maximum 19 lines)."); sys.exit(bool(bad))'
+
+check-frontend-function-lines:
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm frontend-test npm run check:function-lines
 
 e2e:
-	scripts/run-e2e.sh
+	scripts/run-e2e.sh $(if $(strip $(E2E_SPEC)),"$(E2E_SPEC)")
+
+e2e-spec:
+	test -n "$(E2E_SPEC)" || { echo "Usage: make e2e-spec SPEC=frontend/tests/e2e/<name>.spec.js" >&2; exit 2; }
+	scripts/run-e2e.sh "$(E2E_SPEC)"
 
 ai-smoke:
 	scripts/run-ai-smoke.sh
