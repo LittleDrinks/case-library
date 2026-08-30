@@ -1,13 +1,51 @@
 <script setup>
-import { ExternalLink, FileSearch, Paperclip, Send, Sparkles } from "@lucide/vue";
-defineProps({ prompt: { type: String, required: true }, selected: { type: String, required: true } });
-const emit = defineEmits(["prompt", "queue"]);
+import {
+  Check, ChevronDown, CircleAlert, ExternalLink, Plus,
+  RotateCcw, Search, Send, Square, X,
+} from "@lucide/vue";
+
+defineProps({
+  activeThread: { type: String, required: true },
+  prompt: { type: String, required: true },
+  scenario: { type: String, required: true },
+  selected: { type: String, required: true },
+  threads: { type: Array, required: true },
+});
+const emit = defineEmits(["accept", "new-thread", "prompt", "reject", "retry", "select-thread", "send", "stop"]);
 </script>
+
 <template>
-  <section class="prototype-ai-panel ai-panel-c">
-    <div class="ai-panel-status"><i></i>qwen-plus <span>引用资料后生成</span></div>
-    <div class="source-context"><header><FileSearch :size="16" /><b>当前上下文</b></header><p>选区：{{ selected.slice(0, 22) }}...</p><article><span>平台资料</span><b>人工智能赋能教育的伦理边界</b><button type="button" aria-label="查看资料"><ExternalLink :size="14" /></button></article><article><span>已附资料</span><b>课堂教学设计规范（节选）</b><button type="button" aria-label="查看资料"><ExternalLink :size="14" /></button></article></div>
-    <div class="source-empty"><Sparkles :size="22" /><p>资料将作为参考，不直接改写正文</p></div>
-    <form class="rounded-composer source-composer" @submit.prevent="emit('queue')"><textarea :value="prompt" aria-label="结合资料提问" placeholder="结合资料提问或修改选区" rows="2" @input="emit('prompt', $event.target.value)"></textarea><footer><button type="button" aria-label="添加资料"><Paperclip :size="16" /></button><span>2 份资料</span><button class="composer-send" type="submit" aria-label="发送"><Send :size="16" /></button></footer></form>
+  <section class="agent-proto-panel agent-proto-c">
+    <aside class="persistent-thread-list">
+      <header><b>对话</b><button type="button" aria-label="新建对话" title="新建对话" @click="emit('new-thread')"><Plus :size="15" /></button></header>
+      <button v-for="thread in threads" :key="thread.id" type="button" :class="{ active: thread.id === activeThread }" @click="emit('select-thread', thread.id)">
+        <span>{{ thread.short }}</span><small>{{ thread.time }}</small>
+      </button>
+    </aside>
+
+    <div class="split-conversation">
+      <header><span><small>当前对话</small><b>{{ threads.find((item) => item.id === activeThread)?.title }}</b></span><button type="button" aria-label="对话操作" title="对话操作"><ChevronDown :size="15" /></button></header>
+      <div class="compact-messages">
+        <p class="compact-user">把选中的教学目标改得更可操作。</p>
+        <article class="compact-assistant">
+          <p>建议将抽象的“形成判断”改为可观察的学习任务。</p>
+          <details class="compact-tool"><summary><Search :size="13" />平台检索 · 3 条来源</summary><span>课堂治理、学术诚信、教学目标</span></details>
+          <button class="compact-source" type="button">[1] 教育伦理边界 <ExternalLink :size="11" /></button>
+        </article>
+
+        <article v-if="scenario === 'complete'" class="compact-artifact">
+          <small>修订候选</small><del>形成基本判断。</del><ins>辨识责任主体，并提出可执行的使用边界。</ins>
+          <footer><button type="button" aria-label="拒绝" title="拒绝" @click="emit('reject')"><X :size="14" /></button><button type="button" class="primary-command" @click="emit('accept')"><Check :size="13" />接受</button></footer>
+        </article>
+        <article v-if="scenario === 'running'" class="compact-status"><span class="activity-dot"></span><div><b>正在生成</b><small>已保存当前进度</small></div><button type="button" aria-label="停止" title="停止" @click="emit('stop')"><Square :size="12" /></button></article>
+        <article v-if="scenario === 'error'" class="compact-status compact-error"><CircleAlert :size="15" /><div><b>生成失败</b><small>对话与来源未丢失</small></div><button type="button" aria-label="重试" title="重试" @click="emit('retry')"><RotateCcw :size="12" /></button></article>
+      </div>
+
+      <form class="split-composer" @submit.prevent="emit('send')">
+        <span>选区 · {{ selected.slice(0, 11) }}...</span>
+        <textarea :value="prompt" aria-label="继续提问" placeholder="继续提问" rows="2" @input="emit('prompt', $event.target.value)"></textarea>
+        <button type="submit" class="icon-command primary-icon" aria-label="发送" title="发送"><Send :size="15" /></button>
+      </form>
+    </div>
   </section>
 </template>

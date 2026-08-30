@@ -61,6 +61,15 @@ async function streamAI(messages, csrfToken, handlers = {}, signal) {
   await readAIStream(response, handlers);
 }
 
+async function streamPrototypeAgent(payload, handlers = {}, signal) {
+  const response = await fetch("/api/prototype/agent-chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload), signal,
+  });
+  if (!response.ok) throw new ApiError(response, await readPayload(response));
+  await readAIStream(response, handlers);
+}
+
 function chat(messages, csrfToken, onEvent, signal) {
   return streamAI(messages, csrfToken, {
     onToken: (text) => onEvent({ type: "token", text }),
@@ -148,6 +157,7 @@ export const api = {
     "/api/admin/ai/settings", jsonOptions("PUT", settings, csrfToken),
   ),
   streamAI,
+  streamPrototypeAgent,
   chat,
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,
