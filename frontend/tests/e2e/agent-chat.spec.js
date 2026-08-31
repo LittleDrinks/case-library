@@ -79,6 +79,13 @@ async function expectPersistedChat(page) {
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 5000 });
 }
 
+async function reloadAndAssertChat(page, caseId, persisted) {
+  await page.reload();
+  await openChat(page, caseId);
+  await expectPersistedChat(page);
+  await expect.poll(() => chatSnapshot(page, caseId)).toMatchObject(persisted);
+}
+
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
   await login(page);
   await configureChat(page);
@@ -89,7 +96,11 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   const assistant = snapshot.messages.at(-1);
   expect(streamId).toBe(assistant.id);
   expect(assistant.id).toBe(snapshot.latestRun.assistantMessageId);
-  await page.reload();
-  await openChat(page, created.id);
-  await expectPersistedChat(page);
+  expect(snapshot.eventSeq).toBe(4);
+  const persisted = {
+    messages: snapshot.messages,
+    latestRun: snapshot.latestRun,
+    eventSeq: snapshot.eventSeq,
+  };
+  await reloadAndAssertChat(page, created.id, persisted);
 });

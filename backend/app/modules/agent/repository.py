@@ -12,8 +12,10 @@ from app.modules.agent.models import (
     AgentMessage,
     AgentRun,
     AgentSnapshot,
+    AgentThreadEvent,
     AgentThread,
     TerminalRunStatus,
+    ThreadEventType,
 )
 
 
@@ -98,6 +100,7 @@ class AgentRepository:
         return AgentSnapshot(
             id=current.id,
             case_id=current.case_id,
+            event_seq=current.event_seq,
             messages=self.messages(current.id, session),
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
@@ -110,12 +113,13 @@ class AgentRepository:
         parts: list[dict[str, object]],
         metadata: dict[str, object],
         assistant_id: str,
+        client_request_id: str | None = None,
     ) -> AgentRun:
         try:
             run = _transaction(
                 self.database,
                 lambda session: self._start_run(
-                    thread, user_id, parts, metadata, assistant_id, session
+                    thread, user_id, parts, metadata, assistant_id, client_request_id, session
                 ),
             )
         except DuplicateKeyError as error:
@@ -123,24 +127,57 @@ class AgentRepository:
         return run
 
     def _start_run(
-        self, thread: AgentThread, user_id, parts, metadata, assistant_id, session
+        self, thread, user_id, parts, metadata, assistant_id, client_request_id, session
     ) -> AgentRun:
+        self._assert_start_allowed(thread.id, client_request_id, session)
         message_seq = self._next_message_seq(thread.id, session)
         message, run = _new_run_documents(
-            thread, user_id, parts, metadata, assistant_id, message_seq
+            thread, user_id, parts, metadata, assistant_id, message_seq, client_request_id
+        )
+        self._insert_start_records(message, run, session)
+        self._mark_active(thread.id, run.id, session)
+        self._append_start_events(thread.id, run, message.id, session)
+        return run
+
+    def _insert_start_records(
+        self, message: AgentMessage, run: AgentRun, session
+    ) -> None:
+        self.database.agent_runs.insert_one(
+            run.model_dump(by_alias=True, mode="python", exclude_none=True), session=session
         )
         self.database.agent_messages.insert_one(
-            message.model_dump(by_alias=True, mode="python"), session=session
-        )
-        self.database.agent_runs.insert_one(
-            run.model_dump(by_alias=True, mode="python"), session=session
-        )
-        self.database.agent_threads.update_one(
-            {"id": thread.id},
-            {"$set": {"activeRunId": run.id, "updatedAt": _now()}},
+            message.model_dump(by_alias=True, mode="python", exclude_none=True),
             session=session,
         )
-        return run
+
+    def _assert_start_allowed(self, thread_id: str, client_request_id: str | None, session) -> None:
+        if self.database.agent_runs.find_one(
+            {"threadId": thread_id, "status": "active"}, session=session
+        ):
+            raise ActiveRunError
+        if client_request_id and self.database.agent_runs.find_one(
+            {"threadId": thread_id, "clientRequestId": client_request_id}, session=session
+        ):
+            raise ActiveRunError
+
+    def _mark_active(self, thread_id: str, run_id: str, session) -> None:
+        self.database.agent_threads.update_one(
+            {"id": thread_id},
+            {"$set": {"activeRunId": run_id, "updatedAt": _now()}},
+            session=session,
+        )
+
+    def _append_start_events(
+        self, thread_id: str, run: AgentRun, message_id: str, session
+    ) -> None:
+        self._append_event(thread_id, "message.created", run.id, {"messageId": message_id}, session)
+        self._append_event(
+            thread_id,
+            "run.started",
+            run.id,
+            {"userMessageId": message_id, "assistantMessageId": run.assistant_message_id},
+            session,
+        )
 
     def _next_message_seq(self, thread_id: str, session) -> int:
         thread = self.database.agent_threads.find_one_and_update(
@@ -168,14 +205,27 @@ class AgentRepository:
         if not run:
             return False
         assistant = self._completed_assistant(run, assistant, session)
-        self.database.agent_messages.insert_one(
-            assistant.model_dump(by_alias=True, mode="python"), session=session
-        )
-        self._finish_record(
-            run_id, "completed", {"assistantMessageId": assistant.id}, session
-        )
-        self._clear_active(run.thread_id, run_id, session)
+        self._persist_assistant(run, assistant, session)
+        self._finish_completed(run, assistant, session)
         return True
+
+    def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session) -> None:
+        self.database.agent_messages.insert_one(
+            assistant.model_dump(by_alias=True, mode="python", exclude_none=True),
+            session=session,
+        )
+        if self._append_event(
+            run.thread_id, "message.created", run.id, {"messageId": assistant.id},
+            session, require_active=True
+        ) is None:
+            raise RuntimeError("AI 运行已结束")
+
+    def _finish_completed(self, run: AgentRun, assistant: AgentMessage, session) -> None:
+        fields = {"assistantMessageId": assistant.id}
+        if not self._finish_record(run.id, "completed", fields, session):
+            raise RuntimeError("AI 运行已结束")
+        self._clear_active(run.thread_id, run.id, session)
+        self._append_event(run.thread_id, "run.completed", run.id, fields, session)
 
     def _completed_assistant(
         self, run: AgentRun, assistant: AgentMessage, session
@@ -208,6 +258,7 @@ class AgentRepository:
         if not run:
             return False
         self._clear_active(run.thread_id, run_id, session)
+        self._append_event(run.thread_id, _terminal_event(status), run_id, fields, session)
         return True
 
     def _finish_record(
@@ -220,6 +271,58 @@ class AgentRepository:
             session=session,
         )
         return _model_view(row, AgentRun)
+
+    def append_event(
+        self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict[str, object]
+    ) -> bool:
+        return _transaction(
+            self.database,
+            lambda session: self._append_active_event(
+                thread_id, event_type, run_id, payload, session
+            ),
+        )
+
+    def _append_active_event(
+        self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict, session
+    ) -> bool:
+        if not self._run_active(thread_id, run_id, session):
+            return False
+        return self._append_event(thread_id, event_type, run_id, payload, session) is not None
+
+    def _run_active(self, thread_id: str, run_id: str, session) -> bool:
+        return self.database.agent_runs.find_one(
+            {"id": run_id, "threadId": thread_id, "status": "active"}, session=session
+        ) is not None
+
+    def _append_event(
+        self,
+        thread_id: str,
+        event_type: ThreadEventType,
+        run_id: str,
+        payload: dict[str, object],
+        session,
+        require_active: bool = False,
+    ) -> AgentThreadEvent | None:
+        if require_active and not self._run_active(thread_id, run_id, session):
+            return None
+        event = _thread_event(
+            thread_id, self._next_event_seq(thread_id, session), event_type, run_id, payload
+        )
+        self.database.agent_thread_events.insert_one(
+            event.model_dump(by_alias=True, mode="python"), session=session
+        )
+        return event
+
+    def _next_event_seq(self, thread_id: str, session) -> int:
+        thread = self.database.agent_threads.find_one_and_update(
+            {"id": thread_id},
+            {"$inc": {"eventSeq": 1}, "$set": {"updatedAt": _now()}},
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        if thread is None:
+            raise ThreadNotFoundError
+        return thread["eventSeq"]
 
     def _clear_active(self, thread_id: str, run_id: str, session) -> None:
         self.database.agent_threads.update_one(
@@ -237,19 +340,22 @@ def _default_thread_update(case_id: str, owner_id: str) -> dict:
 def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
     return {
         "id": new_id("thread"), "caseId": case_id, "ownerId": owner_id,
-        "isDefault": True, "nextMessageSeq": 0, "activeRunId": None,
+        "isDefault": True, "nextMessageSeq": 0, "eventSeq": 0, "activeRunId": None,
         "lastRunId": None, "createdAt": now,
     }
 
 
 def _new_run_documents(
-    thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int
+    thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int,
+    client_request_id: str | None,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     run_id, message_id = new_id("run"), new_id("message")
     return (
         _new_user_message(thread, run_id, message_id, parts, metadata, message_seq, now),
-        _new_active_run(thread, user_id, message_id, assistant_id, run_id, now),
+        _new_active_run(
+            thread, user_id, message_id, assistant_id, run_id, now, client_request_id
+        ),
     )
 
 
@@ -262,10 +368,31 @@ def _new_user_message(
     )
 
 
-def _new_active_run(thread, user_id, message_id, assistant_id, run_id, now) -> AgentRun:
+def _new_active_run(
+    thread, user_id, message_id, assistant_id, run_id, now, client_request_id
+) -> AgentRun:
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
-        assistant_message_id=assistant_id, status="active", started_at=now,
+        assistant_message_id=assistant_id, client_request_id=client_request_id,
+        status="active", started_at=now,
+    )
+
+
+def _terminal_event(status: TerminalRunStatus) -> ThreadEventType:
+    return {
+        "completed": "run.completed",
+        "failed": "run.failed",
+        "cancelled": "run.cancelled",
+    }[status]
+
+
+def _thread_event(
+    thread_id: str, event_seq: int, event_type: ThreadEventType, run_id: str,
+    payload: dict[str, object]
+) -> AgentThreadEvent:
+    return AgentThreadEvent(
+        id=new_id("event"), thread_id=thread_id, event_seq=event_seq,
+        event_type=event_type, run_id=run_id, payload=payload, created_at=_now(),
     )
 
 

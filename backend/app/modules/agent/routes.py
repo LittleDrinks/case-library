@@ -42,7 +42,7 @@ def show_thread(
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
-    _author_case(database, case_id, user)
+    _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
     return repository.snapshot(repository.default_thread(case_id, user["id"]))
 
@@ -61,7 +61,7 @@ async def _adapter(request: Request, message_id: str):
         raise HTTPException(status_code=422, detail="AI 消息格式无效") from error
 
 
-def _prompt(adapter: VercelAIAdapter) -> tuple[list[dict], object, str]:
+def _prompt(adapter: VercelAIAdapter) -> tuple[list[dict], object, str, str]:
     messages = adapter.run_input.messages
     if adapter.run_input.trigger != "submit-message" or not messages:
         raise HTTPException(status_code=422, detail="只支持发送新消息")
@@ -74,7 +74,7 @@ def _prompt(adapter: VercelAIAdapter) -> tuple[list[dict], object, str]:
     if len(text) > MAX_MESSAGE_CHARACTERS:
         raise HTTPException(status_code=422, detail="消息内容过长")
     parts = [part.model_dump(by_alias=True, mode="json", exclude_none=True) for part in latest.parts]
-    return parts, {}, text
+    return parts, {}, text, latest.id
 
 
 def _request_size(request: Request) -> None:
@@ -112,9 +112,11 @@ async def _send_message(case_id, thread_id, request, database, user):
     thread = _thread(repository, thread_id, case_id, user["id"])
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    parts, metadata, prompt = _prompt(adapter)
+    parts, metadata, prompt, client_request_id = _prompt(adapter)
     history = load_history(repository, thread)
-    run = _start_run(repository, thread, user["id"], parts, metadata, assistant_id)
+    run = _start_run(
+        repository, thread, user["id"], parts, metadata, assistant_id, client_request_id
+    )
     context = RunContext(
         repository, run, adapter, history, prompt, case,
         request.app.state.agent,
@@ -123,12 +125,14 @@ async def _send_message(case_id, thread_id, request, database, user):
 
 
 def _start_run(
-    repository, thread: AgentThread, user_id, parts, metadata, assistant_id
+    repository, thread: AgentThread, user_id, parts, metadata, assistant_id, client_request_id
 ) -> AgentRun:
     try:
-        return repository.start_run(thread, user_id, parts, metadata, assistant_id)
+        return repository.start_run(
+            thread, user_id, parts, metadata, assistant_id, client_request_id
+        )
     except ActiveRunError as error:
-        raise HTTPException(status_code=409, detail="运行任务无法创建") from error
+        raise HTTPException(status_code=409, detail="当前对话已有运行任务") from error
 
 
 def _start_stream(context: RunContext):

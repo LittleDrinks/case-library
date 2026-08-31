@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Barrier, Event
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.models.function import FunctionModel
@@ -64,6 +68,84 @@ def _post(client: TestClient, auth: dict, text: str = "你好", history=None, me
         headers=_csrf(auth),
         json=_body(text, history, message_id),
     )
+
+
+def _post_thread(client, auth, thread_id, text, message_id):
+    return client.post(
+        f"{THREAD_PATH}/{thread_id}/stream",
+        headers=_csrf(auth),
+        json=_body(text, message_id=message_id),
+    )
+
+
+def _ordered_start(original, barrier, winner_started, loser_attempted, winner_text):
+    def start(self, *args, **kwargs):
+        text = args[2][0]["text"]
+        barrier.wait(timeout=5)
+        if text == winner_text:
+            result = original(self, *args, **kwargs)
+            winner_started.set()
+            assert loser_attempted.wait(timeout=5)
+            return result
+        winner_started.wait(timeout=5)
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            loser_attempted.set()
+
+    return start
+
+
+def _concurrent_model():
+    async def stream_function(messages, _info):
+        await asyncio.sleep(0.15 if "slow" in str(messages) else 0)
+        yield "并发回答"
+
+    return FunctionModel(stream_function=stream_function)
+
+
+def _concurrent_post(app, thread_id, text):
+    current = TestClient(app)
+    with _agent().override(model=_concurrent_model()):
+        try:
+            return _post_thread(current, _login(current), thread_id, text, f"{text}-message")
+        finally:
+            current.close()
+
+
+def _concurrent_posts(client, winner_text):
+    thread_id = client.get(THREAD_PATH).json()["id"]
+    barrier, winner_started, loser_attempted = Barrier(2), Event(), Event()
+    original = AgentRepository.start_run
+    start = _ordered_start(original, barrier, winner_started, loser_attempted, winner_text)
+
+    with patch.object(AgentRepository, "start_run", start):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            texts = (winner_text, "fast" if winner_text == "slow" else "slow")
+            futures = [pool.submit(_concurrent_post, client.app, thread_id, text) for text in texts]
+            return [future.result(timeout=10) for future in futures]
+
+
+@pytest.mark.parametrize("winner_text", ["slow", "fast"])
+def test_concurrent_http_sends_have_one_success_and_stable_conflict(
+    client: TestClient, winner_text: str
+) -> None:
+    _login(client)
+    responses = _concurrent_posts(client, winner_text)
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    conflict = next(response for response in responses if response.status_code == 409)
+    assert conflict.json() == {"detail": "当前对话已有运行任务"}
+    database = client.app.state.database
+    assert database.agent_runs.count_documents({}) == 1
+    assert database.agent_messages.count_documents({}) == 2, json.dumps(
+        {
+            "responses": [response.text for response in responses],
+            "runs": list(database.agent_runs.find({}, {"_id": 0})),
+            "events": list(database.agent_thread_events.find({}, {"_id": 0})),
+        }, ensure_ascii=False, default=str,
+    )
+    assert database.agent_thread_events.count_documents({}) == 4
 
 
 def _stream_message_id(response) -> str:
@@ -220,6 +302,22 @@ def test_terminal_failure_persists_terminal_event_without_late_runtime_event(cli
     assert database.agent_thread_events.count_documents({"eventSeq": {"$gt": events[-1]["eventSeq"]}}) == 0
 
 
+def test_terminal_run_rejects_late_event_without_advancing_snapshot(client: TestClient) -> None:
+    auth = _login(client)
+    with _agent().override(model=TestModel(custom_output_text="终态回答")):
+        assert _post(client, auth, "终态问题", message_id="terminal-message").status_code == 200
+
+    database = client.app.state.database
+    run = database.agent_runs.find_one({}, {"_id": 0})
+    before = client.get(THREAD_PATH).json()
+    assert not AgentRepository(database).append_event(
+        run["threadId"], "message.created", run["id"], {"messageId": "late-message"}
+    )
+    after = client.get(THREAD_PATH).json()
+    assert after["eventSeq"] == before["eventSeq"]
+    assert database.agent_thread_events.count_documents({}) == before["eventSeq"]
+
+
 def test_agent_route_requires_login_and_csrf(client: TestClient) -> None:
     assert client.get(THREAD_PATH).status_code == 401
     auth = _login(client)
@@ -236,6 +334,35 @@ def test_agent_route_rejects_cross_user_case_access(client: TestClient) -> None:
     client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
 
     response = client.get(THREAD_PATH)
+
+    assert response.status_code == 403
+
+
+def test_agent_route_rechecks_case_editability(client: TestClient) -> None:
+    auth = _login(client)
+    thread_id = client.get(THREAD_PATH).json()["id"]
+    client.app.state.database.cases.update_one(
+        {"id": "c-draft-1"}, {"$set": {"workflowStatus": "published"}}
+    )
+
+    assert client.get(THREAD_PATH).status_code == 409
+    response = client.post(
+        f"{THREAD_PATH}/{thread_id}/stream",
+        headers=_csrf(auth),
+        json=_body("不可编辑请求"),
+    )
+    assert response.status_code == 409
+
+
+def test_agent_route_rejects_cross_case_thread_access(client: TestClient) -> None:
+    auth = _login(client)
+    thread_id = client.get(THREAD_PATH).json()["id"]
+
+    response = client.post(
+        f"/api/cases/c-02/agent/thread/{thread_id}/stream",
+        headers=_csrf(auth),
+        json=_body("跨案例线程"),
+    )
 
     assert response.status_code == 403
 

@@ -384,6 +384,7 @@ services:
       target: test
     environment:
       CASE_LIBRARY_E2E_URL: http://e2e-app:8001
+      AGENT_CASE_LIBRARY_E2E_URL: http://agent-app:8001
       AUTH_QUERY_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
       SEARCH_CURSOR_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
       MEILI_CONTRACT_URL: http://e2e-meilisearch:7700
