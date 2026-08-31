@@ -11,7 +11,7 @@ function textParts(message) {
     .join("");
 }
 
-function protocolMessages(messages) {
+function projectMessages(messages = []) {
   return messages.map(({ id, role, metadata, parts }) => ({ id, role, metadata, parts }));
 }
 
@@ -25,21 +25,15 @@ function transport(caseId, threadId) {
     credentials: "same-origin",
     headers: () => ({ "X-CSRF-Token": session.csrfToken }),
     prepareSendMessagesRequest: ({ id, messages, body, trigger, messageId }) => ({
-      body: { ...body, id, messages: protocolMessages(messages), trigger, messageId },
+      body: { ...body, id, messages: projectMessages(messages), trigger, messageId },
     }),
   });
-}
-
-function chatMessages(snapshot) {
-  return (snapshot.messages || []).map(({ id, role, metadata, parts }) => ({
-    id, role, metadata, parts,
-  }));
 }
 
 function buildChat(caseId, snapshot) {
   return new Chat({
     id: snapshot.id,
-    messages: chatMessages(snapshot),
+    messages: projectMessages(snapshot.messages),
     transport: transport(caseId, snapshot.id),
   });
 }

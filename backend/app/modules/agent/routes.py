@@ -132,8 +132,4 @@ def _start_run(
 
 
 def _start_stream(context: RunContext):
-    try:
-        return context.adapter.streaming_response(protocol_stream(context))
-    except Exception:
-        context.repository.fail_run(context.run.id)
-        raise
+    return context.adapter.streaming_response(protocol_stream(context))

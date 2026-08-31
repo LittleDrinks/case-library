@@ -55,9 +55,24 @@ async function openChat(page, caseId) {
 }
 
 async function sendChat(page, text) {
+  const streamResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/stream")
+  ));
   await page.getByLabel("向 AI 提问").fill(text);
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
+  return streamMessageId(await (await streamResponse).body());
+}
+
+function streamMessageId(body) {
+  const line = body.toString().split("\n").find((item) => item.startsWith('data: {"type":"start"'));
+  return JSON.parse(line.slice(6)).messageId;
+}
+
+async function chatSnapshot(page, caseId) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/agent/thread`);
+  expect(response.ok()).toBe(true);
+  return response.json();
 }
 
 async function expectPersistedChat(page) {
@@ -69,7 +84,11 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "当前问题");
+  const streamId = await sendChat(page, "当前问题");
+  const snapshot = await chatSnapshot(page, created.id);
+  const assistant = snapshot.messages.at(-1);
+  expect(streamId).toBe(assistant.id);
+  expect(assistant.id).toBe(snapshot.latestRun.assistantMessageId);
   await page.reload();
   await openChat(page, created.id);
   await expectPersistedChat(page);

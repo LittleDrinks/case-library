@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TypeVar
 
+from pydantic import BaseModel
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
@@ -13,6 +15,9 @@ from app.modules.agent.models import (
     AgentThread,
     TerminalRunStatus,
 )
+
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class ActiveRunError(Exception):
@@ -33,22 +38,10 @@ def _without_id(row: dict | None) -> dict | None:
     return {key: value for key, value in row.items() if key != "_id"}
 
 
-def _thread_view(row: dict | None) -> AgentThread | None:
+def _model_view(row: dict | None, model_type: type[ModelT]) -> ModelT | None:
     if row is None:
         return None
-    return AgentThread.model_validate(_without_id(row))
-
-
-def _message_view(row: dict | None) -> AgentMessage | None:
-    if row is None:
-        return None
-    return AgentMessage.model_validate(_without_id(row))
-
-
-def _run_view(row: dict | None) -> AgentRun | None:
-    if row is None:
-        return None
-    return AgentRun.model_validate(_without_id(row))
+    return model_type.model_validate(_without_id(row))
 
 
 class AgentRepository:
@@ -62,7 +55,7 @@ class AgentRepository:
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
-        return _thread_view(row)
+        return _model_view(row, AgentThread)
 
     def thread(self, thread_id: str, case_id: str, owner_id: str) -> AgentThread:
         row = self.database.agent_threads.find_one(
@@ -70,19 +63,19 @@ class AgentRepository:
         )
         if not row:
             raise ThreadNotFoundError
-        return _thread_view(row)
+        return _model_view(row, AgentThread)
 
     def messages(self, thread_id: str, session=None) -> list[AgentMessage]:
         rows = self.database.agent_messages.find(
             {"threadId": thread_id}, session=session
         ).sort([("messageSeq", ASCENDING)])
-        return [_message_view(row) for row in rows]
+        return [_model_view(row, AgentMessage) for row in rows]
 
     def active_run(self, thread_id: str, session=None) -> AgentRun | None:
         row = self.database.agent_runs.find_one(
             {"threadId": thread_id, "status": "active"}, session=session
         )
-        return _run_view(row)
+        return _model_view(row, AgentRun)
 
     def latest_run(self, thread_id: str, session=None) -> AgentRun | None:
         row = self.database.agent_runs.find_one(
@@ -90,14 +83,15 @@ class AgentRepository:
             sort=[("startedAt", DESCENDING), ("id", DESCENDING)],
             session=session,
         )
-        return _run_view(row)
+        return _model_view(row, AgentRun)
 
     def snapshot(self, thread: AgentThread) -> AgentSnapshot:
         return _transaction(self.database, lambda session: self._snapshot(thread, session))
 
     def _snapshot(self, thread: AgentThread, session) -> AgentSnapshot:
-        current = _thread_view(
-            self.database.agent_threads.find_one({"id": thread.id}, session=session)
+        current = _model_view(
+            self.database.agent_threads.find_one({"id": thread.id}, session=session),
+            AgentThread,
         )
         if current is None:
             raise ThreadNotFoundError
@@ -165,9 +159,12 @@ class AgentRepository:
         )
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session) -> bool:
-        run = _run_view(self.database.agent_runs.find_one(
-            {"id": run_id, "status": "active"}, session=session
-        ))
+        run = _model_view(
+            self.database.agent_runs.find_one(
+                {"id": run_id, "status": "active"}, session=session
+            ),
+            AgentRun,
+        )
         if not run:
             return False
         assistant = self._completed_assistant(run, assistant, session)
@@ -222,7 +219,7 @@ class AgentRepository:
             return_document=ReturnDocument.AFTER,
             session=session,
         )
-        return _run_view(row)
+        return _model_view(row, AgentRun)
 
     def _clear_active(self, thread_id: str, run_id: str, session) -> None:
         self.database.agent_threads.update_one(

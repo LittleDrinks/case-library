@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
-from app.modules.agent.models import AgentMessage, AgentRun, AgentThread
+from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.runtime import case_instructions
 
@@ -21,6 +22,8 @@ class RunContext:
     prompt: str
     case: dict
     agent: object
+    result: object | None = None
+    cancelled: bool = False
 
 
 def _run_kwargs(context: RunContext) -> dict:
@@ -34,22 +37,16 @@ def _run_kwargs(context: RunContext) -> dict:
 
 
 async def _native_events(context: RunContext):
-    try:
-        async with context.agent.run_stream_events(**_run_kwargs(context)) as events:
-            async for event in events:
-                yield event
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        context.repository.fail_run(context.run.id)
-        raise
+    async with context.agent.run_stream_events(**_run_kwargs(context)) as events:
+        async for event in events:
+            yield event
 
 
 def _message_id(assistant_id: str, user_id: str):
     def generate(_message, role, _index):
         return assistant_id if role == "assistant" else user_id
 
-        return generate
+    return generate
 
 
 def _dump_messages(context: RunContext, result):
@@ -86,31 +83,61 @@ def _assistant_message(context: RunContext, result) -> AgentMessage:
 
 
 async def _on_complete(context: RunContext, result) -> None:
-    if not context.repository.complete_run(
-        context.run.id, _assistant_message(context, result)
-    ):
-        raise RuntimeError("AI 运行已结束")
+    context.result = result
 
 
 async def _on_cancel(context: RunContext, _cancelled) -> None:
-    context.repository.cancel_run(context.run.id)
+    context.cancelled = True
+
+
+def _finalize(context: RunContext, status: TerminalRunStatus) -> None:
+    if status == "completed":
+        if context.result is None or not context.repository.complete_run(
+            context.run.id, _assistant_message(context, context.result)
+        ):
+            raise RuntimeError("AI 运行已结束")
+    elif status == "cancelled":
+        context.repository.cancel_run(context.run.id)
+    else:
+        context.repository.fail_run(context.run.id)
+
+
+def _stream_status(context: RunContext, natural: bool, failed: bool) -> TerminalRunStatus:
+    if failed:
+        return "failed"
+    if not natural:
+        return "cancelled"
+    if context.result is not None:
+        return "completed"
+    if context.cancelled:
+        return "cancelled"
+    return "failed"
+
+
+def _adapter_stream(context: RunContext):
+    return context.adapter.transform_stream(
+        _native_events(context),
+        on_complete=lambda result: _on_complete(context, result),
+        on_cancel=lambda cancelled: _on_cancel(context, cancelled),
+    )
 
 
 async def protocol_stream(context: RunContext):
+    natural = False
+    failed = False
     try:
-        stream = context.adapter.transform_stream(
-            _native_events(context),
-            on_complete=lambda result: _on_complete(context, result),
-            on_cancel=lambda cancelled: _on_cancel(context, cancelled),
-        )
-        async for chunk in stream:
-            yield chunk
+        stream = _adapter_stream(context)
+        async with aclosing(stream):
+            async for chunk in stream:
+                yield chunk
+        natural = True
     except asyncio.CancelledError:
-        context.repository.cancel_run(context.run.id)
         raise
     except Exception:
-        context.repository.fail_run(context.run.id)
+        failed = True
         raise
+    finally:
+        _finalize(context, _stream_status(context, natural, failed))
 
 
 def load_history(repository: AgentRepository, thread: AgentThread) -> list:

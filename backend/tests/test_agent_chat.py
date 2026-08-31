@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -60,6 +61,14 @@ def _post(client: TestClient, auth: dict, text: str = "你好", history=None):
     )
 
 
+def _stream_message_id(response) -> str:
+    return next(
+        json.loads(line[6:])["messageId"]
+        for line in response.text.splitlines()
+        if line.startswith('data: {"type":"start"')
+    )
+
+
 def _assert_completed(database, answer: str) -> None:
     messages = list(database.agent_messages.find({}, {"_id": 0}).sort("messageSeq", 1))
     run = database.agent_runs.find_one({}, {"_id": 0})
@@ -100,6 +109,8 @@ def test_public_production_assembly_stream_persists_message_and_run(client: Test
     snapshot = client.get(THREAD_PATH).json()
     assert [item["role"] for item in snapshot["messages"]] == ["user", "assistant"]
     assert snapshot["latestRun"]["status"] == "completed"
+    assistant = snapshot["messages"][-1]
+    assert _stream_message_id(response) == assistant["id"] == snapshot["latestRun"]["assistantMessageId"]
 
 
 def test_public_snapshot_orders_same_timestamp_messages_by_sequence(client: TestClient) -> None:
