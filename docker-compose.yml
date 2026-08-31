@@ -358,7 +358,7 @@ services:
         condition: service_healthy
     networks:
       - e2e_test
-    command: ["npm", "run", "test:e2e"]
+    command: ["npm", "run", "test:e2e", "--", "--project=generic"]
 
   e2e-ai-provider:
     profiles: ["e2e"]
@@ -639,7 +639,7 @@ services:
         condition: service_healthy
     networks:
       - e2e_test
-    command: ["npm", "run", "test:e2e", "--", "--config=playwright.agent.config.js", "tests/e2e/agent-chat.spec.js"]
+    command: ["npm", "run", "test:e2e", "--", "--project=agent"]
 
   e2e-frontend:
     profiles: ["e2e"]

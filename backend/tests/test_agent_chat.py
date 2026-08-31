@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.models.function import FunctionModel
@@ -39,6 +42,15 @@ def _body(text: str = "你好", history: list[dict] | None = None) -> dict:
     }
 
 
+def _prompt_contents(messages) -> list[str]:
+    return [
+        part.content
+        for message in messages
+        for part in message.parts
+        if getattr(part, "part_kind", "") == "user-prompt"
+    ]
+
+
 def _post(client: TestClient, auth: dict, text: str = "你好", history=None):
     thread_id = client.get(THREAD_PATH).json()["id"]
     return client.post(
@@ -49,9 +61,10 @@ def _post(client: TestClient, auth: dict, text: str = "你好", history=None):
 
 
 def _assert_completed(database, answer: str) -> None:
-    messages = list(database.agent_messages.find({}, {"_id": 0}).sort("createdAt", 1))
+    messages = list(database.agent_messages.find({}, {"_id": 0}).sort("messageSeq", 1))
     run = database.agent_runs.find_one({}, {"_id": 0})
     assert [row["role"] for row in messages] == ["user", "assistant"]
+    assert [row["messageSeq"] for row in messages] == [1, 2]
     assert messages[-1]["parts"][0]["text"] == answer
     assert run["status"] == "completed"
     assert database.agent_threads.find_one({"id": run["threadId"]})["activeRunId"] is None
@@ -89,6 +102,20 @@ def test_public_production_assembly_stream_persists_message_and_run(client: Test
     assert snapshot["latestRun"]["status"] == "completed"
 
 
+def test_public_snapshot_orders_same_timestamp_messages_by_sequence(client: TestClient) -> None:
+    auth = _login(client)
+    fixed = datetime(2026, 1, 1, tzinfo=UTC)
+    with patch("app.modules.agent.repository._now", return_value=fixed):
+        with _agent().override(model=TestModel(custom_output_text="同一时刻回答")):
+            response = _post(client, auth, "同一时刻问题")
+
+    assert response.status_code == 200
+    messages = client.get(THREAD_PATH).json()["messages"]
+    assert len({message["createdAt"] for message in messages}) == 1
+    assert [message["messageSeq"] for message in messages] == [1, 2]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+
+
 def test_browser_history_is_ignored_and_case_context_is_server_loaded(client: TestClient) -> None:
     auth = _login(client)
     seen: dict = {}
@@ -105,6 +132,7 @@ def test_browser_history_is_ignored_and_case_context_is_server_loaded(client: Te
     assert response.status_code == 200
     assert "伪造历史" not in str(seen["messages"])
     assert "当前问题" in str(seen["messages"])
+    assert _prompt_contents(seen["messages"]).count("当前问题") == 1
     assert "当前案例正文" in seen["instructions"]
 
 

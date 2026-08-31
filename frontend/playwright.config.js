@@ -2,8 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 function isolatedBaseUrl() {
   const value = process.env.PLAYWRIGHT_BASE_URL;
-  if (!value || new URL(value).hostname !== "frontend") {
-    throw new Error("Playwright E2E 只能连接 Docker 隔离前端");
+  const host = value && new URL(value).hostname;
+  if (!value || !["frontend", "agent-gateway"].includes(host)) {
+    throw new Error("Playwright E2E 只能连接 Docker 隔离服务");
   }
   return value;
 }
@@ -15,11 +16,14 @@ export default defineConfig({
   retries: 0,
   outputDir: "test-results",
   reporter: [["line"], ["json", { outputFile: "test-results/report.json" }]],
-  testIgnore: ["**/agent-chat.spec.js"],
   use: {
     baseURL: isolatedBaseUrl(),
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     ...devices["Desktop Chrome"],
   },
+  projects: [
+    { name: "generic", testIgnore: "**/agent-chat.spec.js" },
+    { name: "agent", testMatch: "**/agent-chat.spec.js" },
+  ],
 });

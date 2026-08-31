@@ -7,7 +7,7 @@ from pydantic_ai.ui.vercel_ai.request_types import TextUIPart
 
 from app.core.dependencies import get_database
 from app.core.ids import new_id
-from app.modules.agent.coordinator import RunCoordinator
+from app.modules.agent.models import AgentRun, AgentSnapshot, AgentThread
 from app.modules.agent.repository import ActiveRunError, AgentRepository, ThreadNotFoundError
 from app.modules.agent.service import RunContext, load_history, protocol_stream
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -41,7 +41,7 @@ def show_thread(
     case_id: str,
     database=Depends(get_database),
     user: dict = Depends(require_user),
-):
+) -> AgentSnapshot:
     _author_case(database, case_id, user)
     repository = _repository(database)
     return repository.snapshot(repository.default_thread(case_id, user["id"]))
@@ -86,7 +86,7 @@ def _request_size(request: Request) -> None:
         raise HTTPException(status_code=413, detail="请求内容过大")
 
 
-def _thread(repository, thread_id: str, case_id: str, user_id: str) -> dict:
+def _thread(repository, thread_id: str, case_id: str, user_id: str) -> AgentThread:
     try:
         return repository.thread(thread_id, case_id, user_id)
     except ThreadNotFoundError as error:
@@ -113,27 +113,27 @@ async def _send_message(case_id, thread_id, request, database, user):
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     parts, metadata, prompt = _prompt(adapter)
+    history = load_history(repository, thread)
     run = _start_run(repository, thread, user["id"], parts, metadata, assistant_id)
     context = RunContext(
-        repository, run, adapter, load_history(repository, thread_id), prompt, case,
+        repository, run, adapter, history, prompt, case,
         request.app.state.agent,
     )
-    return _start_stream(request.app.state.agent_coordinator, context)
+    return _start_stream(context)
 
 
-def _start_run(repository, thread, user_id, parts, metadata, assistant_id):
+def _start_run(
+    repository, thread: AgentThread, user_id, parts, metadata, assistant_id
+) -> AgentRun:
     try:
         return repository.start_run(thread, user_id, parts, metadata, assistant_id)
     except ActiveRunError as error:
         raise HTTPException(status_code=409, detail="运行任务无法创建") from error
 
 
-def _start_stream(coordinator: RunCoordinator, context: RunContext):
+def _start_stream(context: RunContext):
     try:
-        channel = coordinator.start(
-            context.run["id"], context.adapter, lambda: protocol_stream(context)
-        )
-        return context.adapter.streaming_response(channel.stream())
+        return context.adapter.streaming_response(protocol_stream(context))
     except Exception:
-        context.repository.fail_run(context.run["id"])
+        context.repository.fail_run(context.run.id)
         raise

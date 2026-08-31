@@ -129,7 +129,7 @@ def _initialize_agent(database: Database) -> None:
     )
     database.agent_messages.create_index([("id", ASCENDING)], unique=True)
     database.agent_messages.create_index(
-        [("threadId", ASCENDING), ("createdAt", ASCENDING), ("id", ASCENDING)]
+        [("threadId", ASCENDING), ("messageSeq", ASCENDING)], unique=True
     )
     database.agent_runs.create_index([("id", ASCENDING)], unique=True)
     database.agent_runs.create_index(

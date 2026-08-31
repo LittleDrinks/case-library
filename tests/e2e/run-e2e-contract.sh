@@ -63,6 +63,9 @@ grep -Fq 'outputDir: "test-results"' "$playwright_config"
 grep -Fq '["json", { outputFile: "test-results/report.json" }]' "$playwright_config"
 grep -Fq 'trace: "retain-on-failure"' "$playwright_config"
 grep -Fq 'screenshot: "only-on-failure"' "$playwright_config"
+grep -Fq 'name: "generic"' "$playwright_config"
+grep -Fq 'name: "agent"' "$playwright_config"
+test ! -e "$project_dir/frontend/playwright.agent.config.js"
 e2e_config="$(
   docker compose --env-file "$project_dir/.env.example" --profile e2e config --format json
 )"
