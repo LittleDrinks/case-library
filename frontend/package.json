@@ -17,11 +17,13 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/vue": "3.0.272",
     "@tiptap/core": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@lucide/vue": "^1.31.0",
     "@tiptap/starter-kit": "^2.11.5",
     "@tiptap/vue-3": "^2.11.5",
+    "ai": "6.0.272",
     "d3-force": "^3.0.0",
     "diff": "^8.0.2",
     "vue": "^3.5.18",
