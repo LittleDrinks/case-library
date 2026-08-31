@@ -578,7 +578,7 @@ services:
       e2e_test:
         aliases: ["agent-app"]
     entrypoint: []
-    command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
       interval: 5s

@@ -129,13 +129,13 @@ class AgentRepository:
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id, session
     ) -> AgentRun:
-        self._assert_start_allowed(thread.id, client_request_id, session)
-        message_seq = self._next_message_seq(thread.id, session)
+        run_id, message_id = new_id("run"), new_id("message")
+        message_seq = self._reserve_start(thread, run_id, client_request_id, session)
         message, run = _new_run_documents(
-            thread, user_id, parts, metadata, assistant_id, message_seq, client_request_id
+            thread, user_id, parts, metadata, assistant_id, message_seq,
+            client_request_id, run_id, message_id,
         )
         self._insert_start_records(message, run, session)
-        self._mark_active(thread.id, run.id, session)
         self._append_start_events(thread.id, run, message.id, session)
         return run
 
@@ -150,22 +150,30 @@ class AgentRepository:
             session=session,
         )
 
-    def _assert_start_allowed(self, thread_id: str, client_request_id: str | None, session) -> None:
-        if self.database.agent_runs.find_one(
-            {"threadId": thread_id, "status": "active"}, session=session
-        ):
+    def _reserve_start(
+        self, thread: AgentThread, run_id: str, client_request_id: str | None, session
+    ) -> int:
+        if self._client_request_exists(thread.id, client_request_id, session):
             raise ActiveRunError
-        if client_request_id and self.database.agent_runs.find_one(
-            {"threadId": thread_id, "clientRequestId": client_request_id}, session=session
-        ):
-            raise ActiveRunError
-
-    def _mark_active(self, thread_id: str, run_id: str, session) -> None:
-        self.database.agent_threads.update_one(
-            {"id": thread_id},
-            {"$set": {"activeRunId": run_id, "updatedAt": _now()}},
+        current = self.database.agent_threads.find_one_and_update(
+            {
+                "id": thread.id,
+                "activeRunId": None,
+                "eventSeq": thread.event_seq,
+                "nextMessageSeq": thread.next_message_seq,
+            },
+            {"$inc": {"nextMessageSeq": 1}, "$set": {"activeRunId": run_id, "updatedAt": _now()}},
+            return_document=ReturnDocument.AFTER,
             session=session,
         )
+        if current is None:
+            raise ActiveRunError
+        return current["nextMessageSeq"]
+
+    def _client_request_exists(self, thread_id: str, client_request_id: str | None, session) -> bool:
+        return bool(client_request_id and self.database.agent_runs.find_one(
+            {"threadId": thread_id, "clientRequestId": client_request_id}, session=session
+        ))
 
     def _append_start_events(
         self, thread_id: str, run: AgentRun, message_id: str, session
@@ -347,10 +355,9 @@ def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
 
 def _new_run_documents(
     thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int,
-    client_request_id: str | None,
+    client_request_id: str | None, run_id: str, message_id: str,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
-    run_id, message_id = new_id("run"), new_id("message")
     return (
         _new_user_message(thread, run_id, message_id, parts, metadata, message_seq, now),
         _new_active_run(

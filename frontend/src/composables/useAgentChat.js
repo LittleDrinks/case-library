@@ -94,6 +94,7 @@ function computedState(state) {
       return chatStatus && chatStatus !== "ready" ? chatStatus : snapshotStatus(state.snapshot.value);
     }),
     chatError: computed(() => state.chat.value?.error?.message || snapshotError(state.snapshot.value)),
+    threadState: computed(() => state.snapshot.value),
   };
 }
 

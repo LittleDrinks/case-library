@@ -11,8 +11,9 @@ ANSWER = "隔离 FunctionModel 回答：已依据当前案例完成分析。"
 
 
 async def _stream(_messages, _info):
-    if "并发" in str(_messages):
-        await asyncio.sleep(0.25)
+    delay = 0.25 if "并发" in str(_messages) else 0
+    if delay:
+        await asyncio.sleep(delay)
     for character in ANSWER:
         yield character
 
