@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+
+from pydantic_ai.ui.vercel_ai import VercelAIAdapter
+from pydantic_ai.ui.vercel_ai.request_types import UIMessage
+
+from app.modules.agent.repository import AgentRepository
+from app.modules.agent.runtime import case_instructions
+
+
+@dataclass(slots=True)
+class RunContext:
+    repository: AgentRepository
+    run: dict
+    adapter: VercelAIAdapter
+    history: list
+    prompt: str
+    case: dict
+    agent: object
+
+
+def _run_kwargs(context: RunContext) -> dict:
+    return {
+        "message_history": context.history,
+        "conversation_id": context.run["threadId"],
+        "run_id": context.run["id"],
+        "instructions": case_instructions(context.case),
+        "user_prompt": context.prompt,
+    }
+
+
+async def _native_events(context: RunContext):
+    try:
+        async with context.agent.run_stream_events(**_run_kwargs(context)) as events:
+            async for event in events:
+                yield event
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        context.repository.fail_run(context.run["id"])
+        raise
+
+
+def _message_id(assistant_id: str, user_id: str):
+    def generate(_message, role, _index):
+        return assistant_id if role == "assistant" else user_id
+
+    return generate
+
+
+def _dump_messages(context: RunContext, result):
+    return VercelAIAdapter.dump_messages(
+        result.new_messages(),
+        generate_message_id=_message_id(
+            context.run["assistantMessageId"], context.run["userMessageId"]
+        ),
+        sdk_version=6,
+    )
+
+
+def _assistant_parts(assistant) -> list[dict]:
+    return [
+        part.model_dump(by_alias=True, mode="json", exclude_none=True)
+        for part in assistant.parts
+    ]
+
+
+def _assistant_message(context: RunContext, result) -> dict:
+    messages = _dump_messages(context, result)
+    assistant = next((item for item in messages if item.role == "assistant"), None)
+    if assistant is None:
+        raise RuntimeError("AI 响应为空")
+    return {
+        "id": assistant.id,
+        "threadId": context.run["threadId"],
+        "runId": context.run["id"],
+        "role": "assistant",
+        "metadata": assistant.metadata,
+        "parts": _assistant_parts(assistant),
+    }
+
+
+async def _on_complete(context: RunContext, result) -> None:
+    if not context.repository.complete_run(
+        context.run["id"], _assistant_message(context, result)
+    ):
+        raise RuntimeError("AI 运行已结束")
+
+
+async def _on_cancel(context: RunContext, _cancelled) -> None:
+    context.repository.cancel_run(context.run["id"])
+
+
+async def protocol_stream(context: RunContext):
+    try:
+        stream = context.adapter.transform_stream(
+            _native_events(context),
+            on_complete=lambda result: _on_complete(context, result),
+            on_cancel=lambda cancelled: _on_cancel(context, cancelled),
+        )
+        async for chunk in stream:
+            yield chunk
+    except asyncio.CancelledError:
+        context.repository.cancel_run(context.run["id"])
+        raise
+    except Exception:
+        context.repository.fail_run(context.run["id"])
+        raise
+
+
+def load_history(repository: AgentRepository, thread_id: str) -> list:
+    rows = [UIMessage.model_validate(_ui_message(row)) for row in repository.messages(thread_id)]
+    return VercelAIAdapter.load_messages(rows)
+
+
+def _ui_message(row: dict) -> dict:
+    return {key: row[key] for key in ("id", "role", "metadata", "parts") if key in row}

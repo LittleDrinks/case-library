@@ -136,6 +136,9 @@ export const api = {
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
+  agentThread: (caseId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  ),
   aiSettings: () => request("/api/ai/settings"),
   saveAISettings: (settings, csrfToken) => request(
     "/api/ai/settings", jsonOptions("PUT", settings, csrfToken),

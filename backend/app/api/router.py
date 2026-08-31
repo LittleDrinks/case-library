@@ -4,6 +4,7 @@ from app.api.operations import router as operations_router
 from app.modules.annotations.routes import router as annotations_router
 from app.modules.ai.routes import admin_router as admin_ai_router
 from app.modules.ai.routes import router as ai_router
+from app.modules.agent.routes import router as agent_router
 from app.modules.auth.routes import router as auth_router
 from app.modules.attachments.routes import router as attachments_router
 from app.modules.cases.routes import router as cases_router
@@ -17,6 +18,7 @@ from app.modules.search.routes import router as search_router
 router = APIRouter()
 router.include_router(operations_router)
 router.include_router(auth_router)
+router.include_router(agent_router)
 router.include_router(ai_router)
 router.include_router(admin_ai_router)
 router.include_router(case_ai_router)

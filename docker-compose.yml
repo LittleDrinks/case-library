@@ -531,6 +531,116 @@ services:
       e2e_test:
         aliases: ["app"]
 
+  agent-e2e-app:
+    profiles: ["e2e"]
+    image: case-library-v2-agent-e2e-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: test
+    environment:
+      APP_ENV: test
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-app
+      MONGODB_DB_NAME: case_library_e2e
+      MONGODB_MAX_POOL_SIZE: 20
+      ENABLE_DEMO_SEED: "true"
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_TTL_SECONDS: 3600
+      APP_SECRET_FILE: /run/secrets/app_secret
+      AI_MODELS: e2e-model-a
+      AI_DEFAULT_MODEL: e2e-model-a
+      SEARCH_URL: http://e2e-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_e2e
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: case-library-e2e
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: 1
+    secrets:
+      - app_secret
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      e2e-search-init:
+        condition: service_completed_successfully
+      e2e-search-worker:
+        condition: service_started
+    networks:
+      database:
+      e2e_test:
+        aliases: ["agent-app"]
+    entrypoint: []
+    command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 18
+      start_period: 10s
+    restart: "no"
+
+  agent-e2e-frontend:
+    profiles: ["e2e"]
+    image: case-library-v2-agent-e2e-frontend
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: runtime
+    depends_on:
+      agent-e2e-app:
+        condition: service_healthy
+    networks:
+      e2e_test:
+        aliases: ["agent-frontend"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+    restart: "no"
+
+  agent-e2e-gateway:
+    profiles: ["e2e"]
+    image: nginx:1.28-alpine
+    volumes:
+      - ./tests/e2e/agent-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      agent-e2e-app:
+        condition: service_healthy
+      agent-e2e-frontend:
+        condition: service_healthy
+    networks:
+      e2e_test:
+        aliases: ["agent-gateway"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+    restart: "no"
+
+  agent-e2e:
+    profiles: ["e2e"]
+    image: case-library-v2-agent-e2e
+    build:
+      context: .
+      dockerfile: deploy/e2e.Dockerfile
+    environment:
+      PLAYWRIGHT_BASE_URL: http://agent-gateway
+    depends_on:
+      agent-e2e-gateway:
+        condition: service_healthy
+    networks:
+      - e2e_test
+    command: ["npm", "run", "test:e2e", "--", "--config=playwright.agent.config.js", "tests/e2e/agent-chat.spec.js"]
+
   e2e-frontend:
     profiles: ["e2e"]
     image: case-library-v2-e2e-frontend

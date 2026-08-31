@@ -121,6 +121,22 @@ def _initialize_search_delivery(database: Database) -> None:
     )
 
 
+def _initialize_agent(database: Database) -> None:
+    database.agent_threads.create_index([("id", ASCENDING)], unique=True)
+    database.agent_threads.create_index(
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
+        unique=True,
+    )
+    database.agent_messages.create_index([("id", ASCENDING)], unique=True)
+    database.agent_messages.create_index(
+        [("threadId", ASCENDING), ("createdAt", ASCENDING), ("id", ASCENDING)]
+    )
+    database.agent_runs.create_index([("id", ASCENDING)], unique=True)
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("startedAt", DESCENDING), ("id", DESCENDING)]
+    )
+
+
 def initialize(database: Database) -> None:
     database.client.admin.command("ping")
     _initialize_auth(database)
@@ -130,3 +146,4 @@ def initialize(database: Database) -> None:
     _initialize_materials(database)
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
+    _initialize_agent(database)
