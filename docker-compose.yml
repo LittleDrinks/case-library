@@ -385,6 +385,7 @@ services:
     environment:
       CASE_LIBRARY_E2E_URL: http://e2e-app:8001
       AGENT_CASE_LIBRARY_E2E_URL: http://agent-app:8001
+      AGENT_CASE_LIBRARY_E2E_LOSER_URL: http://agent-loser:8001
       AUTH_QUERY_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
       SEARCH_CURSOR_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
       MEILI_CONTRACT_URL: http://e2e-meilisearch:7700
@@ -579,6 +580,62 @@ services:
         aliases: ["agent-app"]
     entrypoint: []
     command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 18
+      start_period: 10s
+    restart: "no"
+
+  agent-e2e-loser:
+    profiles: ["e2e"]
+    image: case-library-v2-agent-e2e-app
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: test
+    environment:
+      APP_ENV: test
+      MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-loser
+      MONGODB_DB_NAME: case_library_e2e
+      MONGODB_MAX_POOL_SIZE: 20
+      ENABLE_DEMO_SEED: "true"
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_TTL_SECONDS: 3600
+      APP_SECRET_FILE: /run/secrets/app_secret
+      AI_MODELS: e2e-model-a
+      AI_DEFAULT_MODEL: e2e-model-a
+      SEARCH_URL: http://e2e-meilisearch:7700
+      SEARCH_INDEX_UID: catalog_e2e
+      SEARCH_API_KEY_FILE: /run/secrets/meili_master_key
+      OBJECT_STORE_ENDPOINT: minio:9000
+      OBJECT_STORE_BUCKET: case-library-e2e
+      OBJECT_STORE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      OBJECT_STORE_SECURE: "false"
+      WEB_CONCURRENCY: 1
+      AGENT_E2E_TERMINAL_GATE: "true"
+    secrets:
+      - app_secret
+      - meili_master_key
+      - minio_root_user
+      - minio_root_password
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      e2e-search-init:
+        condition: service_completed_successfully
+      e2e-search-worker:
+        condition: service_started
+    networks:
+      database:
+      e2e_test:
+        aliases: ["agent-loser"]
+    entrypoint: []
+    command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
       interval: 5s
