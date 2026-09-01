@@ -8,9 +8,8 @@ const props = defineProps({
 });
 
 const draft = ref("");
-const { messages, status, chatError, loading, error, settings, textParts, send } = useAgentChat(
-  props.caseRecord.id,
-);
+const { messages, status, chatError, loading, error, settings, textParts, send, threadState } =
+  useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -31,7 +30,12 @@ async function submit() {
 </script>
 
 <template>
-  <section class="assistant-panel ai-panel agent-chat-panel">
+  <section
+    class="assistant-panel ai-panel agent-chat-panel"
+    :data-event-seq="threadState?.eventSeq ?? 0"
+    :data-run-id="threadState?.latestRun?.id || ''"
+    :data-run-status="threadState?.activeRun ? 'active' : threadState?.latestRun?.status || 'none'"
+  >
     <div class="ai-status" role="status" :aria-busy="sending">
       <LoaderCircle v-if="loading || sending" class="spin" :size="14" />
       <span>{{ statusText() }}</span>

@@ -121,20 +121,52 @@ def _initialize_search_delivery(database: Database) -> None:
     )
 
 
-def _initialize_agent(database: Database) -> None:
+def _initialize_agent_threads(database: Database) -> None:
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     database.agent_threads.create_index(
         [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
         unique=True,
     )
+
+
+def _initialize_agent_messages(database: Database) -> None:
     database.agent_messages.create_index([("id", ASCENDING)], unique=True)
     database.agent_messages.create_index(
         [("threadId", ASCENDING), ("messageSeq", ASCENDING)], unique=True
     )
+
+
+def _initialize_agent_runs(database: Database) -> None:
     database.agent_runs.create_index([("id", ASCENDING)], unique=True)
     database.agent_runs.create_index(
         [("threadId", ASCENDING), ("startedAt", DESCENDING), ("id", DESCENDING)]
     )
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("status", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"status": "active"},
+        name="agent_one_active_run_per_thread",
+    )
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("clientRequestId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"clientRequestId": {"$type": "string"}},
+        name="agent_one_run_per_client_request",
+    )
+
+
+def _initialize_agent_events(database: Database) -> None:
+    database.agent_thread_events.create_index([("id", ASCENDING)], unique=True)
+    database.agent_thread_events.create_index(
+        [("threadId", ASCENDING), ("eventSeq", ASCENDING)], unique=True
+    )
+
+
+def _initialize_agent(database: Database) -> None:
+    _initialize_agent_threads(database)
+    _initialize_agent_messages(database)
+    _initialize_agent_runs(database)
+    _initialize_agent_events(database)
 
 
 def initialize(database: Database) -> None:

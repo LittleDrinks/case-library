@@ -6,7 +6,7 @@ compose_project="case-library-v2"
 e2e_meili_volume="${compose_project}_e2e_meili_data"
 e2e_network="${compose_project}_e2e_test"
 database="case_library_e2e"
-e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch"
+e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch agent-e2e agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway"
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
@@ -63,6 +63,7 @@ drop_and_verify_database() {
 
 stop_e2e_runtime() {
   compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
+  compose --profile e2e stop agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
 }
 
 remove_e2e_services() {
@@ -97,17 +98,35 @@ preclean_e2e_resources() {
 
 reset_browser_state() {
   compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
+  compose --profile e2e stop agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
   clear_e2e_bucket
   drop_test_database "$database"
   rebuild_search
   compose --profile e2e up -d --force-recreate --no-deps e2e-search-worker
   compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app
+  start_agent_app
   compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend
+}
+
+start_agent_app() {
+  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser
 }
 
 run_browser_tests() {
   set -- compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir:/app/test-results" e2e
+  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  if test "$browser_spec" = "tests/e2e/agent-chat.spec.js"; then
+    set -- compose --profile e2e run --rm \
+      -v "$artifact_dir:/app/test-results" agent-e2e
+    test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  fi
+  "$@"
+}
+
+run_agent_browser_tests() {
+  set -- compose --profile e2e run --rm \
+    -v "$artifact_dir:/app/test-results" agent-e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   "$@"
 }
@@ -134,9 +153,12 @@ preclean_e2e_resources
 compose up -d --wait mongo-init
 drop_and_verify_database
 compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch
+compose build agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e
 docker build -f deploy/e2e.Dockerfile -t case-library-v2-e2e:latest .
 compose --profile e2e up -d --wait e2e-frontend
+start_agent_app
 clear_e2e_bucket
 test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e
 reset_browser_state
 run_browser_tests
+test -n "$browser_spec" || run_agent_browser_tests

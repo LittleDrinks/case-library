@@ -79,6 +79,44 @@ async function expectPersistedChat(page) {
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 5000 });
 }
 
+async function browserChatProjection(page) {
+  const messages = await page.locator(".agent-chat-panel .ai-message").evaluateAll((items) => (
+    items.map((item) => ({
+      role: item.classList.contains("user") ? "user" : "assistant",
+      text: item.querySelector("p")?.textContent || "",
+    }))
+  ));
+  const panel = page.locator(".agent-chat-panel");
+  return {
+    messages,
+    run: {
+      eventSeq: await panel.getAttribute("data-event-seq"),
+      id: await panel.getAttribute("data-run-id"),
+      status: await panel.getAttribute("data-run-status"),
+      busy: await page.locator(".ai-status").getAttribute("aria-busy"),
+    },
+  };
+}
+
+async function reloadAndAssertChat(page, caseId, persisted) {
+  await page.reload();
+  await openChat(page, caseId);
+  await expectPersistedChat(page);
+  await expect.poll(() => browserChatProjection(page)).toEqual({
+    messages: persisted.messages.map((message) => ({
+      role: message.role,
+      text: message.parts.filter((part) => part.type === "text").map((part) => part.text).join(""),
+    })),
+    run: {
+      eventSeq: String(persisted.eventSeq),
+      id: persisted.latestRun.id,
+      status: persisted.latestRun.status,
+      busy: "false",
+    },
+  });
+  await expect.poll(() => chatSnapshot(page, caseId)).toMatchObject(persisted);
+}
+
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
   await login(page);
   await configureChat(page);
@@ -89,7 +127,11 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   const assistant = snapshot.messages.at(-1);
   expect(streamId).toBe(assistant.id);
   expect(assistant.id).toBe(snapshot.latestRun.assistantMessageId);
-  await page.reload();
-  await openChat(page, created.id);
-  await expectPersistedChat(page);
+  expect(snapshot.eventSeq).toBe(4);
+  const persisted = {
+    messages: snapshot.messages,
+    latestRun: snapshot.latestRun,
+    eventSeq: snapshot.eventSeq,
+  };
+  await reloadAndAssertChat(page, created.id, persisted);
 });
