@@ -138,49 +138,36 @@ def _adapter_stream(context: RunContext):
 
 async def protocol_stream(context: RunContext):
     monitor = asyncio.create_task(_monitor(context, asyncio.current_task()))
-    natural = False
     try:
-        stream = _adapter_stream(context)
-        async with aclosing(stream):
+        async with aclosing(_adapter_stream(context)) as stream:
             async for chunk in stream:
                 yield chunk
-        natural = True
     except (RunCancelled, asyncio.CancelledError):
+        context.cancelled = True
         raise
     except (BrokenPipeError, ConnectionResetError, GeneratorExit) as error:
-        _mark_cancelled(context)
+        context.cancelled = True
         raise asyncio.CancelledError from error
     except Exception:
         context.failed = True
         raise
     finally:
         monitor.cancel()
-        _finalize(context, _stream_status(context, natural))
+        _finalize(context)
 
 
-def _stream_status(context: RunContext, natural: bool) -> TerminalRunStatus:
+def _stream_status(context: RunContext) -> TerminalRunStatus:
     if context.failed:
         return "failed"
-    if not natural:
-        return "cancelled"
-    if context.result is not None:
-        return "completed"
     if context.cancelled:
         return "cancelled"
-    return "failed"
-
-
-def _mark_cancelled(context: RunContext) -> None:
-    context.cancelled = True
+    return "completed" if context.result is not None else "failed"
 
 
 async def _monitor(context: RunContext, owner_task) -> None:
     try:
         while True:
             await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
-            if _expire(context):
-                owner_task.cancel()
-                return
             if not _renew(context):
                 owner_task.cancel()
                 return
@@ -189,19 +176,6 @@ async def _monitor(context: RunContext, owner_task) -> None:
     except Exception:
         _monitor_failed(context)
         owner_task.cancel()
-
-
-def _expire(context: RunContext) -> bool:
-    if not context.repository.run_expired(context.run):
-        return False
-    context.failed = True
-    try:
-        context.lost = not context.repository.expire_run(
-            context.run.id, context.worker_id
-        )
-    except Exception:
-        context.lost = True
-    return True
 
 
 def _monitor_failed(context: RunContext) -> None:
@@ -229,10 +203,11 @@ def _renew(context: RunContext) -> bool:
     return True
 
 
-def _finalize(context: RunContext, status: TerminalRunStatus) -> None:
+def _finalize(context: RunContext) -> None:
     try:
         if context.lost:
             return
+        status = _stream_status(context)
         if status == "completed":
             _complete(context)
         elif status == "cancelled":

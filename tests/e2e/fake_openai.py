@@ -59,16 +59,16 @@ def _interrupted(payload: dict) -> bool:
 
 def _send_pieces(handler, payload: dict) -> bool:
     pieces, delay = _pieces(payload)
-    for index, piece in enumerate(pieces):
+    for piece in pieces:
         handler.wfile.write(_event(piece))
         handler.wfile.flush()
         time.sleep(delay)
-        if index == 2 and _interrupted(payload):
-            return False
     return True
 
 
 def _stream(handler, payload: dict) -> None:
+    if _interrupted(payload):
+        return _json(handler, 502, {"error": {"message": "upstream failed"}})
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream")
     handler.send_header("Cache-Control", "no-cache")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import socket
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import AsyncIterator
 
 import httpcore
@@ -15,9 +15,7 @@ from app.modules.ai.transport import (
     ProviderError,
     RestrictedProviderTransport,
     Target,
-    parse_provider_url,
-    provider_hostname,
-    resolve_public_addresses,
+    target_for_url,
 )
 
 
@@ -26,16 +24,9 @@ MAX_MODELS_BYTES = 1024 * 1024
 
 
 def _target(base_url: str, endpoint: str, allow_internal: bool = False) -> Target:
-    parts = parse_provider_url(base_url, allow_internal)
-    host = provider_hostname(parts.hostname)
-    secure = parts.scheme == "https"
-    port = parts.port or (443 if secure else 80)
-    try:
-        ip = socket.gethostbyname(host) if allow_internal and not secure else resolve_public_addresses(host, port)[0]
-    except (OSError, UnicodeError, ValueError) as error:
-        raise ProviderError("AI provider unavailable") from error
-    path = f"{parts.path.rstrip('/')}/{endpoint.lstrip('/')}".rstrip("/") or "/"
-    return Target(host, ip, port, path, secure)
+    target = target_for_url(base_url, allow_internal)
+    path = f"{target.path.rstrip('/')}/{endpoint.lstrip('/')}".rstrip("/") or "/"
+    return replace(target, path=path)
 
 
 class _PinnedNetworkBackend(httpcore.NetworkBackend):

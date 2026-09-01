@@ -39,8 +39,6 @@ class _ProviderHandler(BaseHTTPRequestHandler):
             chunk = _chunk(text)
             self.wfile.write(chunk)
             self.wfile.flush()
-        self.wfile.write(b"data: [DONE]\n\n")
-        self.wfile.flush()
 
 
 def _chunk(text: str) -> bytes:

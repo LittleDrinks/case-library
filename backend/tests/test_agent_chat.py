@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Barrier, Event
 from unittest.mock import patch
 
@@ -372,6 +372,21 @@ def test_legacy_generic_chat_route_is_removed(client: TestClient) -> None:
 
     assert "/api/ai/chat" not in paths
     assert "/api/cases/{case_id}/agent/thread/{thread_id}/stream" in paths
+
+
+def test_owned_run_renews_after_legacy_deadline(client: TestClient) -> None:
+    auth = _login(client)
+    repository = AgentRepository(client.app.state.database)
+    thread = repository.default_thread("c-draft-1", auth["user"]["id"])
+    run = repository.start_run(
+        thread, auth["user"]["id"], [{"type": "text", "text": "继续"}], {},
+        "assistant-message", owner_id="worker-a",
+    )
+    client.app.state.database.agent_runs.update_one(
+        {"id": run.id}, {"$set": {"deadlineAt": datetime.now(UTC) - timedelta(seconds=1)}}
+    )
+
+    assert repository.renew_run_owner(run.id, "worker-a")
 
 
 def test_active_run_uniqueness_is_database_enforced(client: TestClient) -> None:

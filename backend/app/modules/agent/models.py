@@ -61,9 +61,6 @@ class AgentRun(BaseModel):
     error: str | None = None
     owner_id: str | None = Field(default=None, alias="ownerId", exclude=True)
     owner_expires_at: datetime | None = Field(default=None, alias="ownerExpiresAt", exclude=True)
-    deadline_at: datetime | None = Field(default=None, alias="deadlineAt", exclude=True)
-    lease_token: str | None = Field(default=None, alias="leaseToken", exclude=True)
-    lease_ids: list[str] = Field(default_factory=list, alias="leaseIds", exclude=True)
 
 
 class AgentThreadEvent(BaseModel):

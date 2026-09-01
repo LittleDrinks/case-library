@@ -3,27 +3,28 @@ import { expect, it, vi } from "vitest";
 import AssistantRail from "./AssistantRail.vue";
 
 const props = {
-  active: "ai", open: true, caseRecord: { id: "case-1" }, user: null,
+  active: "ai", open: true, caseRecord: { id: "case-1", revision: 1 }, user: null,
+  caseTitle: "案例", caseDocument: { type: "doc", content: [] },
   editable: true, beforeAttachmentMutation: vi.fn(), beforeVersionMutation: vi.fn(),
-  selection: null,
+  selection: null, applyCandidate: vi.fn(), rollbackCandidateBatch: vi.fn(),
 };
 
 function render(overrides = {}) {
   return mount(AssistantRail, {
     props: { ...props, ...overrides },
     global: { stubs: {
-      AgentChatPanel: true, CommentPanel: true, AttachmentPanel: true,
+      AgentChatPanel: true, WritingCandidatePanel: true,
+      CommentPanel: true, AttachmentPanel: true,
       VersionPanel: true, RouterLink: true,
     } },
   });
 }
 
-it("uses the persistent Agent Chat panel as the only AI tab", () => {
+it("keeps product candidates separate from the persistent Chat tab", () => {
   const wrapper = render();
-  expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(true);
+  expect(wrapper.findComponent({ name: "WritingCandidatePanel" }).exists()).toBe(true);
   expect(wrapper.text()).toContain("AI");
-  expect(wrapper.text()).not.toContain("对话");
-  expect(wrapper.findComponent({ name: "WritingCandidatePanel" }).exists()).toBe(false);
+  expect(wrapper.text()).toContain("对话");
 });
 
 it("keeps comments and attachments on the same assistant rail", async () => {

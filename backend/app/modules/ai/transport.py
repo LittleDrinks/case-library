@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import json
 import socket
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit
@@ -74,7 +73,7 @@ def provider_host_header(target: Target) -> str:
     return host if target.port == default else f"{host}:{target.port}"
 
 
-def _target(base_url: str, allow_internal: bool) -> Target:
+def target_for_url(base_url: str, allow_internal: bool = False) -> Target:
     parts = parse_provider_url(base_url, allow_internal)
     host = provider_hostname(parts.hostname)
     secure = parts.scheme == "https"
@@ -151,23 +150,13 @@ def _close_response(response) -> None:
     response.release_conn()
 
 
-def _stream_mode(body: bytes) -> bool:
-    try:
-        return json.loads(body).get("stream") is True
-    except (AttributeError, TypeError, ValueError):
-        return False
-
-
 class _ProviderStream(httpx.AsyncByteStream):
-    def __init__(self, response, pool, timeout: float, limit: int, require_done: bool) -> None:
+    def __init__(self, response, pool, timeout: float, limit: int) -> None:
         self.response = response
         self.pool = pool
         self.timeout = timeout
         self.limit = limit
-        self.require_done = require_done
         self.total = 0
-        self.tail = b""
-        self.done = False
 
     async def __aiter__(self):
         try:
@@ -175,20 +164,15 @@ class _ProviderStream(httpx.AsyncByteStream):
                 part = await asyncio.wait_for(asyncio.to_thread(_read, self.response), self.timeout)
                 if not part:
                     break
-                self._check_part(part)
+                self._check_limit(part)
                 yield part
-            if self.require_done and not self.done:
-                raise ProviderError("AI provider unavailable")
         finally:
             await self.aclose()
 
-    def _check_part(self, part: bytes) -> None:
+    def _check_limit(self, part: bytes) -> None:
         self.total += len(part)
         if self.total > self.limit:
             raise ProviderError("AI provider unavailable")
-        if self.require_done:
-            self.tail = (self.tail + part)[-32:]
-            self.done = self.done or b"data: [DONE]" in self.tail
 
     async def aclose(self) -> None:
         response, pool = self.response, self.pool
@@ -201,7 +185,7 @@ class _ProviderStream(httpx.AsyncByteStream):
 
 class RestrictedProviderTransport(httpx.AsyncBaseTransport):
     def __init__(self, base_url: str, timeout: float, allow_internal: bool = False) -> None:
-        self.target = _target(base_url, allow_internal)
+        self.target = target_for_url(base_url, allow_internal)
         self.timeout = timeout
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -210,7 +194,7 @@ class RestrictedProviderTransport(httpx.AsyncBaseTransport):
             raise ProviderError("AI provider unavailable")
         target = _request_target(self.target, request)
         response, pool = await asyncio.to_thread(_open_response, target, request, body, self.timeout)
-        stream = _ProviderStream(response, pool, self.timeout, MAX_CHAT_BYTES, _stream_mode(body))
+        stream = _ProviderStream(response, pool, self.timeout, MAX_CHAT_BYTES)
         return httpx.Response(response.status, headers=dict(response.headers), stream=stream, request=request)
 
     async def aclose(self) -> None:

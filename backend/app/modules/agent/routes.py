@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-from functools import partial
-
-import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import TextUIPart
-from starlette._utils import create_collapsing_task_group
-from starlette.requests import ClientDisconnect
-from starlette.responses import StreamingResponse
 
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.models import AgentRun, AgentSnapshot, AgentThread
 from app.modules.agent.repository import ActiveRunError, AgentRepository, ThreadNotFoundError
 from app.modules.agent.service import RunContext, load_history, protocol_stream
+from app.modules.agent.streaming import ClosableStreamingResponse
 from app.modules.ai.quota import AILease, AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -178,51 +173,7 @@ def _start_run(
 def _start_stream(context: RunContext):
     stream = protocol_stream(context)
     response = context.adapter.streaming_response(stream)
-    return _ClosableStreamingResponse(response, stream)
-
-
-async def _close_iterator(iterator) -> None:
-    close = getattr(iterator, "aclose", None)
-    if close:
-        await close()
-
-
-class _ClosableStreamingResponse(StreamingResponse):
-    def __init__(self, response, source) -> None:
-        super().__init__(
-            response.body_iterator, response.status_code, dict(response.headers),
-            response.media_type, response.background,
-        )
-        self._source = source
-
-    async def stream_response(self, send) -> None:
-        try:
-            await super().stream_response(send)
-        finally:
-            with anyio.CancelScope(shield=True):
-                await _close_iterator(self._source)
-                await _close_iterator(self.body_iterator)
-
-    async def _serve_with_disconnect(self, receive, send) -> None:
-        async with create_collapsing_task_group() as task_group:
-
-            async def run_and_cancel(func) -> None:
-                await func()
-                task_group.cancel_scope.cancel()
-
-            task_group.start_soon(run_and_cancel, partial(self.stream_response, send))
-            await run_and_cancel(partial(self.listen_for_disconnect, receive))
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] == "websocket":
-            await super().__call__(scope, receive, send)
-            return
-        try:
-            await self._serve_with_disconnect(receive, send)
-        except OSError as error:
-            raise ClientDisconnect() from error
-        if self.background is not None:
-            await self.background()
+    return ClosableStreamingResponse(response, stream)
 
 
 def _create_run(
@@ -230,7 +181,7 @@ def _create_run(
 ):
     run = repository.start_run(
         thread, user_id, parts, metadata, assistant_id, client_request_id,
-        lease_data=lease.metadata() if lease else None, owner_id=worker_id,
+        owner_id=worker_id,
     )
     try:
         if lease:

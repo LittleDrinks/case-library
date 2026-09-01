@@ -527,7 +527,7 @@ def test_agent_http_renews_quota_while_long_provider_run_is_active():
         _close(client, mongo=mongo)
 
 
-def test_real_mongo_stale_worker_is_fenced_after_successful_takeover():
+def test_real_mongo_stale_worker_is_fenced_after_ownership_changes():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:
@@ -579,9 +579,11 @@ def _stale_run(repository, thread, user_id: str, database):
     )
     database.agent_runs.update_one(
         {"id": run.id},
-        {"$set": {"ownerExpiresAt": datetime.now(UTC) - timedelta(seconds=1)}},
+        {"$set": {
+            "ownerId": "worker-b",
+            "ownerExpiresAt": datetime.now(UTC) + timedelta(seconds=10),
+        }},
     )
-    assert repository.claim_run(run.id, "worker-b")
     return run
 
 

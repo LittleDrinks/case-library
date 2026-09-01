@@ -15,9 +15,9 @@ def public_dns(*_args, **_kwargs):
 
 def mock_discovery(monkeypatch, handler, base_url="https://models.example/v1", internal=False):
     if internal:
-        monkeypatch.setattr(provider.socket, "gethostbyname", lambda _host: "127.0.0.1")
+        monkeypatch.setattr(transport.socket, "gethostbyname", lambda _host: "127.0.0.1")
     else:
-        monkeypatch.setattr(provider.socket, "getaddrinfo", public_dns)
+        monkeypatch.setattr(transport.socket, "getaddrinfo", public_dns)
     monkeypatch.setattr(provider, "_transport", lambda *_args: httpx.MockTransport(handler))
     return provider.OpenAIModelDiscovery(base_url, "test-key", 1, internal)
 
@@ -35,7 +35,7 @@ def test_malformed_model_id_becomes_provider_error(monkeypatch) -> None:
 )
 def test_private_model_provider_is_rejected_before_request(monkeypatch, address: str) -> None:
     monkeypatch.setattr(
-        provider.socket, "getaddrinfo",
+        transport.socket, "getaddrinfo",
         lambda *_args, **_kwargs: [(2, 1, 6, "", (address, 443))],
     )
     with pytest.raises(provider.ProviderError):
@@ -55,7 +55,7 @@ def test_discovery_uses_openai_sdk_with_pinned_transport(monkeypatch) -> None:
 
 
 def test_internal_http_provider_defaults_to_port_80(monkeypatch) -> None:
-    monkeypatch.setattr(provider.socket, "gethostbyname", lambda _host: "127.0.0.1")
+    monkeypatch.setattr(transport.socket, "gethostbyname", lambda _host: "127.0.0.1")
     target = provider._target("http://ai-provider/v1", "models", True)
     assert target.port == 80
     assert target.secure is False

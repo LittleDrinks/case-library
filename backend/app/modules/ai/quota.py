@@ -28,15 +28,6 @@ class AILease:
     quota_ids: tuple[str, ...]
     token: str
 
-    @classmethod
-    def from_run(cls, database, run) -> AILease | None:
-        token = _run_value(run, "lease_token", "leaseToken")
-        quota_ids = tuple(_run_value(run, "lease_ids", "leaseIds") or ())
-        return cls(database, quota_ids, token) if token and quota_ids else None
-
-    def metadata(self) -> dict[str, object]:
-        return {"leaseToken": self.token, "leaseIds": list(self.quota_ids)}
-
     def release(self) -> None:
         self.database.ai_usage.delete_many(
             {
@@ -75,10 +66,6 @@ class AILease:
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _run_value(run, field: str, alias: str):
-    return getattr(run, field, None) if not isinstance(run, dict) else run.get(alias)
 
 
 def _provider_id(base_url: str) -> str:

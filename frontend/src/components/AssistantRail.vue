@@ -1,30 +1,38 @@
 <script setup>
 import {
-  ChevronDown, ChevronUp, MessageSquareText, Paperclip, Sparkles,
+  ChevronDown, ChevronUp, MessageCircle, MessageSquareText, Paperclip, Sparkles,
 } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
 import VersionPanel from "./VersionPanel.vue";
+import WritingCandidatePanel from "./WritingCandidatePanel.vue";
 
-defineProps({
+const props = defineProps({
   active: { type: String, required: true },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
+  caseTitle: { type: String, required: true },
+  caseDocument: { type: Object, required: true },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
   beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
+  writingContext: { type: Object, default: null },
+  applyCandidate: { type: Function, required: true },
+  rollbackCandidateBatch: { type: Function, required: true },
+  candidateInvalidation: { type: Number, default: 0 },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "annotations",
+  "candidate-previews", "annotations",
 ]);
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
-  { id: "comments", label: "批注", icon: MessageSquareText },
+  { id: "chat", label: "对话", icon: MessageSquareText },
+  { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
 function select(tab) {
@@ -51,8 +59,24 @@ function select(tab) {
       </button>
     </nav>
 
-    <AgentChatPanel
+    <WritingCandidatePanel
       v-if="active === 'ai'"
+      :case-title="caseTitle"
+      :case-document="caseDocument"
+      :case-id="caseRecord.id"
+      :revision="caseRecord.revision"
+      :user="user"
+      :editable="editable"
+      :selection="selection"
+      :writing-context="writingContext"
+      :apply-candidate="applyCandidate"
+      :rollback-candidate-batch="rollbackCandidateBatch"
+      :candidate-invalidation="candidateInvalidation"
+      @candidate-previews="emit('candidate-previews', $event)"
+    />
+
+    <AgentChatPanel
+      v-else-if="active === 'chat'"
       :case-record="caseRecord"
     />
 
