@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import time
 import uuid
@@ -15,12 +14,21 @@ from app.modules.agent.repository import AgentRepository
 
 
 BASE_URL = os.environ.get("AGENT_CASE_LIBRARY_E2E_URL")
+LOSER_BASE_URL = os.environ.get("AGENT_CASE_LIBRARY_E2E_LOSER_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
-pytestmark = pytest.mark.e2e("AGENT_CASE_LIBRARY_E2E_URL", "AUTH_QUERY_MONGODB_URI")
+PROFILE_APPS = ("agent-e2e-app", "agent-e2e-loser")
+AGENT_COLLECTIONS = ("agent_messages", "agent_runs", "agent_thread_events")
+pytestmark = pytest.mark.e2e(
+    "AGENT_CASE_LIBRARY_E2E_URL",
+    "AGENT_CASE_LIBRARY_E2E_LOSER_URL",
+    "AUTH_QUERY_MONGODB_URI",
+)
 
 
-def _login(username: str = "user", password: str = "user123") -> tuple[httpx.Client, str]:
-    client = httpx.Client(base_url=BASE_URL)
+def _login(
+    username: str = "user", password: str = "user123", base_url: str = BASE_URL
+) -> tuple[httpx.Client, str]:
+    client = httpx.Client(base_url=base_url)
     response = client.post(
         "/api/auth/login", json={"username": username, "password": password}
     )
@@ -84,7 +92,7 @@ def _await_active(database, thread_id: str) -> dict:
         )
         if run:
             return run
-        time.sleep(0.05)
+        Event().wait(0.02)
     pytest.fail("real MongoDB run did not become active")
 
 
@@ -92,6 +100,7 @@ def _assert_terminal(snapshot: dict, events: list[dict]) -> None:
     assert snapshot["eventSeq"] == 4
     assert [message["messageSeq"] for message in snapshot["messages"]] == [1, 2]
     assert [message["role"] for message in snapshot["messages"]] == ["user", "assistant"]
+    assert snapshot["activeRun"] is None
     assert snapshot["latestRun"]["status"] == "completed"
     assert [event["eventSeq"] for event in events] == [1, 2, 3, 4]
     assert [event["type"] for event in events] == [
@@ -112,6 +121,7 @@ def _assert_thread_counts(database, thread_id: str) -> None:
     assert database.agent_runs.count_documents({"threadId": thread_id}) == 1
     assert database.agent_messages.count_documents({"threadId": thread_id}) == 2
     assert database.agent_thread_events.count_documents({"threadId": thread_id}) == 4
+    assert database.agent_runs.count_documents({"threadId": thread_id, "status": "active"}) == 0
     assert database.agent_threads.find_one({"id": thread_id})["activeRunId"] is None
 
 
@@ -129,18 +139,6 @@ def _collection_counts(database, thread_id: str) -> tuple[int, int, int]:
     )
 
 
-def _paused_body(message_id: str, ready: Event, release: Event):
-    payload = json.dumps(_body(message_id, "完成优先"), ensure_ascii=False).encode()
-
-    def chunks():
-        ready.set()
-        if not release.wait(15):
-            raise TimeoutError("real HTTP body was not released")
-        yield payload
-
-    return chunks()
-
-
 def _hold_thread_write(database, thread_id: str):
     session = database.client.start_session()
     session.start_transaction()
@@ -150,49 +148,84 @@ def _hold_thread_write(database, thread_id: str):
     return session
 
 
-def _submit_blocked_posts(
-    pool, holder, holder_csrf, challenger, challenger_csrf, case, thread_id, release, ready
-):
-    requests = [
-        (holder, holder_csrf, "real-retry-holder"),
-        (challenger, challenger_csrf, "real-retry-challenger"),
-    ]
-    return [
-        pool.submit(
-            _send, client, csrf, case["id"], "完成优先", message_id,
-            _paused_body(message_id, event, release), thread_id=thread_id,
-        )
-        for (client, csrf, message_id), event in zip(requests, ready)
-    ]
+def _start_profile(database) -> None:
+    database.command("profile", 0, filter={})
+    database.command(
+        "profile",
+        2,
+        filter={
+            "ns": {"$regex": rf"^{database.name}[.]agent_"},
+            "appName": {"$in": PROFILE_APPS},
+        },
+    )
 
 
-def _blocked_posts(holder, holder_csrf, challenger, challenger_csrf, case, thread_id, session):
-    release = Event()
-    ready = (Event(), Event())
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = _submit_blocked_posts(
-            pool, holder, holder_csrf, challenger, challenger_csrf, case, thread_id, release, ready
-        )
-        assert all(event.wait(5) for event in ready)
-        time.sleep(0.5)
-        release.set()
-        time.sleep(0.5)
-        session.abort_transaction()
-        return [future.result(timeout=15) for future in futures]
+def _restore_profile(database) -> None:
+    database.command(
+        "profile", 0, filter={"ns": {"$regex": rf"^{database.name}[.]agent_"}}
+    )
 
 
-def _completion_first_overlap(holder, holder_csrf, challenger, challenger_csrf, case, database):
-    thread_id = _thread(holder, case["id"])["id"]
-    session = _hold_thread_write(database, thread_id)
-    try:
-        responses = _blocked_posts(
-            holder, holder_csrf, challenger, challenger_csrf, case, thread_id, session
-        )
-    finally:
-        if session.in_transaction:
-            session.abort_transaction()
-        session.end_session()
-    return thread_id, responses
+def _reservation_rows(database, thread_id: str, app_name: str) -> list[dict]:
+    query = {
+        "ns": f"{database.name}.agent_threads",
+        "appName": app_name,
+        "command.findAndModify": "agent_threads",
+        "command.query.id": thread_id,
+        "command.query.activeRunId": None,
+        "command.query.eventSeq": {"$exists": True},
+        "command.query.nextMessageSeq": {"$exists": True},
+    }
+    return list(database.system.profile.find(query, {"_id": 0}).sort("ts", 1))
+
+
+def _snapshot_rows(database, thread_id: str) -> list[dict]:
+    query = {
+        "ns": f"{database.name}.agent_runs",
+        "appName": "agent-e2e-loser",
+        "command.find": "agent_runs",
+        "command.filter.threadId": thread_id,
+    }
+    return list(database.system.profile.find(query, {"_id": 0}).sort("ts", 1))
+
+
+def _wait_for_profile(database, query: dict, check, message: str):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        rows = list(database.system.profile.find(query, {"_id": 0}).sort("ts", 1))
+        if check(rows):
+            return rows
+        Event().wait(0.02)
+    pytest.fail(message)
+
+
+def _wait_for_winner_conflict(database, thread_id: str) -> None:
+    query = {
+        "ns": f"{database.name}.agent_threads", "appName": "agent-e2e-app",
+        "command.findAndModify": "agent_threads", "command.query.id": thread_id,
+        "errCode": 112,
+    }
+    _wait_for_profile(database, query, bool, "winner reservation was not held")
+
+
+def _wait_for_loser_snapshot(database, thread_id: str) -> None:
+    query = {
+        "ns": f"{database.name}.agent_runs", "appName": "agent-e2e-loser",
+        "command.find": "agent_runs", "command.filter.threadId": thread_id,
+    }
+    _wait_for_profile(database, query, bool, "loser transaction snapshot was not observed")
+
+
+def _submit_concurrent_posts(pool, winner, winner_csrf, loser, loser_csrf, case, thread_id, database):
+    winner_future = pool.submit(
+        _send, winner, winner_csrf, case["id"], "并发完成优先", "real-winner", thread_id=thread_id
+    )
+    _wait_for_winner_conflict(database, thread_id)
+    loser_future = pool.submit(
+        _send, loser, loser_csrf, case["id"], "并发完成优先", "real-loser", thread_id=thread_id
+    )
+    _wait_for_loser_snapshot(database, thread_id)
+    return [winner_future, loser_future]
 
 
 def _change_label(change, thread_id: str):
@@ -209,46 +242,114 @@ def _change_label(change, thread_id: str):
     return None
 
 
-def _terminal_changes(stream, thread_id: str) -> list[tuple[str, str]]:
+def _change_observation(change, thread_id: str) -> dict | None:
+    label = _change_label(change, thread_id)
+    if not label:
+        return None
+    return {
+        "label": label[0],
+        "runId": label[1],
+        "wallTime": change.get("wallTime"),
+        "clusterTime": change.get("clusterTime"),
+        "transactionId": (change.get("lsid"), change.get("txnNumber")),
+    }
+
+
+def _terminal_changes(stream, thread_id: str) -> list[dict]:
     changes = []
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and len(changes) < 3:
         change = stream.try_next()
-        label = _change_label(change, thread_id) if change else None
-        if label and label[0] not in [item[0] for item in changes]:
-            changes.append(label)
+        observation = _change_observation(change, thread_id) if change else None
+        if observation and observation["label"] not in [item["label"] for item in changes]:
+            changes.append(observation)
         if not change:
-            time.sleep(0.01)
+            Event().wait(0.02)
     if len(changes) != 3:
         pytest.fail(f"Change Stream did not expose terminal order: {changes}")
     return changes
 
 
-def _assert_change_order(changes: list[tuple[str, str]]) -> None:
-    assert [label for label, _run_id in changes] == [
+def _assert_change_order(changes: list[dict]) -> None:
+    assert [item["label"] for item in changes] == [
         "assistant-message", "terminal-run", "terminal-event"
     ]
-    assert len({run_id for _label, run_id in changes}) == 1
+    assert len({item["runId"] for item in changes}) == 1
+    assert all(item["wallTime"] for item in changes)
+    assert all(item["transactionId"][0] for item in changes)
+    assert all(item["transactionId"][1] is not None for item in changes)
+    assert all(item["transactionId"] == changes[0]["transactionId"] for item in changes)
+
+
+def _assert_retry_after_terminal(database, thread_id: str, changes: list[dict]) -> None:
+    rows = _reservation_rows(database, thread_id, "agent-e2e-loser")
+    assert len(rows) == 2
+    assert rows[0]["errCode"] == 112
+    assert rows[1].get("errCode") is None
+    assert rows[0]["command"]["lsid"] == rows[1]["command"]["lsid"]
+    assert rows[0]["command"]["txnNumber"] != rows[1]["command"]["txnNumber"]
+    assert rows[1]["ts"] >= changes[-1]["wallTime"]
+
+
+def _run_posts(
+    pool, winner, winner_csrf, loser, loser_csrf, case, thread_id, stream, database, holder
+):
+    futures = _submit_concurrent_posts(
+        pool, winner, winner_csrf, loser, loser_csrf, case, thread_id, database
+    )
+    assert not any(future.done() for future in futures)
+    holder.abort_transaction()
+    changes = _terminal_changes(stream, thread_id)
+    return changes, [future.result(timeout=15) for future in futures]
+
+
+def _run_gated_overlap(winner, winner_csrf, loser, loser_csrf, case, database, thread_id):
+    pipeline = [{"$match": {"ns.coll": {"$in": AGENT_COLLECTIONS}}}]
+    with database.watch(pipeline, full_document="updateLookup", max_await_time_ms=100) as stream:
+        holder = _hold_thread_write(database, thread_id)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                return _run_posts(
+                    pool, winner, winner_csrf, loser, loser_csrf, case,
+                    thread_id, stream, database, holder,
+                )
+        finally:
+            if holder.in_transaction:
+                holder.abort_transaction()
+            holder.end_session()
+
+
+def _assert_http_results(responses) -> None:
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    conflict = next(response for response in responses if response.status_code == 409)
+    assert conflict.json() == {"detail": "当前对话已有运行任务"}
+
+
+def _assert_completion_first_state(winner, case, database, thread_id, changes) -> None:
+    snapshot = _thread(winner, case["id"])
+    _assert_terminal(snapshot, _events(database, thread_id))
+    _assert_thread_counts(database, thread_id)
+    _assert_change_order(changes)
+    _assert_retry_after_terminal(database, thread_id, changes)
 
 
 def test_agent_http_real_replica_set_rejects_completion_first_transaction_retry():
-    holder, holder_csrf = _login()
-    challenger, challenger_csrf = _login()
+    winner, winner_csrf = _login()
+    loser, loser_csrf = _login(base_url=LOSER_BASE_URL)
     mongo = MongoClient(MONGO_URI)
+    database = mongo.get_default_database()
     try:
-        case = _create_case(holder, holder_csrf)
-        database = mongo.get_default_database()
-        thread_id, responses = _completion_first_overlap(
-            holder, holder_csrf, challenger, challenger_csrf, case, database
+        case = _create_case(winner, winner_csrf)
+        thread_id = _thread(winner, case["id"])["id"]
+        _start_profile(database)
+        changes, responses = _run_gated_overlap(
+            winner, winner_csrf, loser, loser_csrf, case, database, thread_id
         )
-        assert sorted(response.status_code for response in responses) == [200, 409]
-        conflict = next(response for response in responses if response.status_code == 409)
-        assert conflict.json() == {"detail": "当前对话已有运行任务"}
-        snapshot = _thread(holder, case["id"])
-        _assert_terminal(snapshot, _events(database, thread_id))
-        _assert_thread_counts(database, thread_id)
+        _assert_http_results(responses)
+        _assert_completion_first_state(winner, case, database, thread_id, changes)
     finally:
-        _close(holder, challenger, mongo=mongo)
+        _restore_profile(database)
+        _close(winner, loser, mongo=mongo)
 
 
 def test_agent_http_change_stream_proves_terminal_write_order():

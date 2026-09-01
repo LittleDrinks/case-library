@@ -28,6 +28,13 @@ def _reservation_target(command):
     return query["id"], command["lsid"]["id"]
 
 
+def _snapshot_target(command):
+    query = command.get("filter", {})
+    if command.get("find") != "agent_runs" or "threadId" not in query:
+        return None
+    return query["threadId"]
+
+
 def _change_label(change, document):
     collection = change["ns"]["coll"]
     if collection == "agent_messages" and document.get("role") == "assistant":
@@ -44,29 +51,58 @@ class _TerminalRetryGate(CommandListener):
         self._lock = Lock()
         self._attempts = {}
         self._states = {}
+        self._snapshots = {}
         self._stop = Event()
+        self._watch_ready = Event()
         self._observer = MongoClient(uri, appName="agent-e2e-gate-observer")
         self._database = self._observer[database_name]
         self._thread = Thread(target=self._observe, daemon=True)
         self._thread.start()
+        if not self._watch_ready.wait(5):
+            raise RuntimeError("terminal Change Stream did not open")
 
     def started(self, event) -> None:
         target = _reservation_target(event.command)
-        if target is None:
-            return
-        thread_id, session_id = target
+        snapshot = _snapshot_target(event.command)
         with self._lock:
-            key = (thread_id, session_id)
-            self._attempts[key] = self._attempts.get(key, 0) + 1
-            state = self._states.setdefault(thread_id, {"labels": [], "runId": None, "gate": Event()})
-        if self._attempts[key] > 1 and not state["gate"].wait(15):
+            if target:
+                thread_id, session_id = target
+                key = (thread_id, session_id)
+                self._attempts[key] = self._attempts.get(key, 0) + 1
+                state = self._states.setdefault(thread_id, self._new_state())
+                retry = self._attempts[key] > 1
+            else:
+                retry = False
+            if snapshot and not self._states.get(snapshot, {}).get("snapshotReady"):
+                self._snapshots[event.request_id] = snapshot
+        if target and retry and not state["gate"].wait(15):
             raise RuntimeError("winner terminal Change Stream was not observed")
 
     def succeeded(self, _event) -> None:
-        return None
+        snapshot = self._pop_snapshot(_event.request_id)
+        if snapshot and self._claim_snapshot(snapshot):
+            self._await_terminal(snapshot)
 
     def failed(self, _event) -> None:
         return None
+
+    def _pop_snapshot(self, request_id):
+        with self._lock:
+            return self._snapshots.pop(request_id, None)
+
+    def _claim_snapshot(self, thread_id: str) -> bool:
+        with self._lock:
+            state = self._states.setdefault(thread_id, self._new_state())
+            if state["snapshotReady"]:
+                return False
+            state["snapshotReady"] = True
+            return True
+
+    def _await_terminal(self, thread_id: str) -> None:
+        with self._lock:
+            gate = self._states[thread_id]["gate"]
+        if not gate.wait(15):
+            raise RuntimeError("winner terminal Change Stream was not observed")
 
     def _observe(self) -> None:
         pipeline = [{"$match": {"ns.coll": {"$in": list(AGENT_COLLECTIONS)}}}]
@@ -74,12 +110,13 @@ class _TerminalRetryGate(CommandListener):
             with self._database.watch(
                 pipeline, full_document="updateLookup", max_await_time_ms=100
             ) as stream:
+                self._watch_ready.set()
                 while not self._stop.is_set():
                     change = stream.try_next()
                     if change:
                         self._record(change)
         except Exception:
-            return None
+            self._watch_ready.set()
 
     def _record(self, change) -> None:
         document = change.get("fullDocument") or {}
@@ -90,7 +127,9 @@ class _TerminalRetryGate(CommandListener):
         name, run_id = label
         with self._lock:
             state = self._states.get(thread_id)
-            if not state or name != TERMINAL_LABELS[len(state["labels"])]:
+            if not state or len(state["labels"]) >= len(TERMINAL_LABELS):
+                return
+            if name != TERMINAL_LABELS[len(state["labels"])]:
                 return
             if state["runId"] and state["runId"] != run_id:
                 return
@@ -98,6 +137,9 @@ class _TerminalRetryGate(CommandListener):
             state["labels"].append(name)
             if len(state["labels"]) == len(TERMINAL_LABELS):
                 state["gate"].set()
+
+    def _new_state(self):
+        return {"labels": [], "runId": None, "gate": Event(), "snapshotReady": False}
 
     def close(self) -> None:
         self._stop.set()
@@ -110,7 +152,14 @@ _gate_client = None
 if os.getenv("AGENT_E2E_TERMINAL_GATE") == "true":
     _gate = _TerminalRetryGate(os.environ["MONGODB_URI"], os.environ["MONGODB_DB_NAME"])
     _gate_client = MongoClient(os.environ["MONGODB_URI"], event_listeners=[_gate])
-    database_module.connect = lambda settings: (_gate_client, _gate_client[settings.mongo_database])
+
+
+def _connect_with_gate(settings):
+    return _gate_client, _gate_client[settings.mongo_database]
+
+
+if _gate_client:
+    database_module.connect = _connect_with_gate
 
 
 def _close_gate() -> None:
@@ -123,9 +172,6 @@ def _close_gate() -> None:
 atexit.register(_close_gate)
 
 
-from app.main import create_app
-
-
 async def _stream(_messages, _info):
     delay = 0.25 if "并发" in str(_messages) else 0
     if delay:
@@ -135,6 +181,8 @@ async def _stream(_messages, _info):
 
 
 def _application():
+    from app.main import create_app
+
     application = create_app()
     model = FunctionModel(stream_function=_stream, model_name="function-e2e")
     application.state.agent = Agent(
