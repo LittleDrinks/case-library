@@ -6,6 +6,7 @@ import os
 import sys
 from http.cookies import SimpleCookie
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, build_opener
 
 COOKIE_NAME = "case_library_session"
@@ -21,7 +22,7 @@ def request_json(
     path: str,
     body: dict | None = None,
     cookie: str = "",
-) -> tuple[dict, str | None]:
+) -> tuple[object, str | None]:
     data = json.dumps(body, ensure_ascii=False).encode() if body else None
     headers = {"Content-Type": "application/json"} if data else {}
     if cookie:
@@ -33,8 +34,6 @@ def request_json(
             set_cookie = response.headers.get("Set-Cookie")
     except (HTTPError, URLError, OSError, ValueError) as error:
         raise SmokeError("request") from error
-    if not isinstance(payload, dict):
-        raise SmokeError("response")
     return payload, set_cookie
 
 
@@ -47,11 +46,18 @@ def session_cookie(header: str | None) -> str:
     return f"{COOKIE_NAME}={value.value}"
 
 
-def open_chat(opener, base_url: str, csrf_token: str, cookie: str):
-    body = {"messages": [{"role": "user", "content": "只回复OK"}]}
+def open_chat(opener, base_url: str, csrf_token: str, cookie: str, case_id: str, thread_id: str):
+    body = {
+        "id": "ai-smoke",
+        "trigger": "submit-message",
+        "messages": [{
+            "id": "ai-smoke-message", "role": "user",
+            "parts": [{"type": "text", "text": "只回复OK"}],
+        }],
+    }
     data = json.dumps(body, ensure_ascii=False).encode()
     request = Request(
-        base_url + "/api/ai/chat",
+        base_url + f"/api/cases/{quote(case_id, safe='')}/agent/thread/{quote(thread_id, safe='')}/stream",
         data=data,
         headers={
             "Content-Type": "application/json",
@@ -66,21 +72,12 @@ def open_chat(opener, base_url: str, csrf_token: str, cookie: str):
 
 
 def consume_chat(response) -> None:
-    event = ""
     try:
-        for raw_line in response:
-            line = raw_line.decode("utf-8", errors="replace").strip()
-            if line.startswith("event:"):
-                event = line[6:].strip()
-            if not line and event == "done":
-                return
-            if not line and event == "error":
-                raise SmokeError("chat stream")
-            if not line:
-                event = ""
+        payload = response.read()
     except OSError as error:
         raise SmokeError("chat stream") from error
-    raise SmokeError("chat stream")
+    if b"data: [DONE]" not in payload:
+        raise SmokeError("chat stream")
 
 
 def credentials() -> tuple[str, str]:
@@ -120,14 +117,31 @@ def require_settings(opener, base_url: str, cookie: str) -> None:
         raise SmokeError("AI is not configured")
 
 
+def select_thread(opener, base_url: str, cookie: str) -> tuple[str, str]:
+    print("AI smoke: thread", flush=True)
+    cases, _header = request_json(opener, base_url, "/api/cases?scope=mine", cookie=cookie)
+    if not isinstance(cases, list):
+        raise SmokeError("draft case")
+    case = next((item for item in cases if item.get("workflowStatus") == "draft"), None)
+    if not isinstance(case, dict) or not isinstance(case.get("id"), str):
+        raise SmokeError("draft case")
+    thread, _header = request_json(
+        opener, base_url, f"/api/cases/{quote(case['id'], safe='')}/agent/thread", cookie=cookie
+    )
+    if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
+        raise SmokeError("thread")
+    return case["id"], thread["id"]
+
+
 def run() -> None:
     base_url = os.environ.get("AI_SMOKE_APP_URL", "http://frontend").rstrip("/")
     username, password = credentials()
     opener = build_opener()
     csrf_token, cookie = login(opener, base_url, username, password)
     require_settings(opener, base_url, cookie)
+    case_id, thread_id = select_thread(opener, base_url, cookie)
     print("AI smoke: chat", flush=True)
-    with open_chat(opener, base_url, csrf_token, cookie) as response:
+    with open_chat(opener, base_url, csrf_token, cookie, case_id, thread_id) as response:
         consume_chat(response)
     print("AI smoke: passed", flush=True)
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
@@ -19,7 +19,6 @@ const activeCaseId = String(route.params.id);
 const caseRecord = ref(null);
 const title = ref("");
 const titleInput = ref(null);
-const canvasEditor = ref(null);
 const document = ref(normalizeDocument());
 const revision = ref(0);
 const loading = ref(true);
@@ -31,14 +30,7 @@ const actionNotice = ref("");
 const busyAction = ref("");
 const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
-const writingContext = ref(null);
 const annotations = ref([]);
-const candidatePreviews = ref([]);
-const candidateInvalidation = ref(0);
-const candidateBatchSnapshotId = ref("");
-const candidateBatchLastRevision = ref(0);
-const applyingCandidate = ref(false);
-const candidateRecoveryBlocked = ref(false);
 const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
@@ -98,10 +90,6 @@ function contentSnapshot() {
   return { title: title.value, document: document.value };
 }
 
-function cloneContentSnapshot() {
-  return { title: title.value, document: structuredClone(toRaw(document.value)) };
-}
-
 async function persist(payload) {
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   invalidateSelection();
@@ -110,24 +98,17 @@ async function persist(payload) {
   return saved;
 }
 
-function expireCandidates() {
-  invalidateSelection();
-  candidateInvalidation.value += 1;
-  candidateBatchSnapshotId.value = "";
-  candidateBatchLastRevision.value = 0;
-}
-
 function invalidateSelection() {
   annotationSelection.value = null;
 }
 
 function handleSaveConflict(error) {
   conflict.value = error;
-  expireCandidates();
+  invalidateSelection();
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) expireCandidates();
+  if (invalidate) invalidateSelection();
   caseRecord.value = value;
   title.value = value.title;
   document.value = normalizeDocument(value.document);
@@ -147,7 +128,7 @@ async function loadAnnotations() {
 }
 
 function applyAttachmentCase(value) {
-  expireCandidates();
+  invalidateSelection();
   syncCaseRevision(value);
 }
 
@@ -170,11 +151,6 @@ async function loadCase() {
   loadError.value = "";
   try {
     const current = await api.getCase(caseId());
-    if (candidateRecoveryBlocked.value) {
-      candidateRecoveryBlocked.value = false;
-      contentMutationBusy.value = false;
-      autosave.reconcile(current.revision);
-    }
     applyCase(current, !initial);
     await loadAnnotations();
   } catch (error) {
@@ -185,7 +161,7 @@ async function loadCase() {
 }
 
 function changeTitle(event) {
-  expireCandidates();
+  invalidateSelection();
   title.value = event.target.value;
   resizeTitle();
   crashDraft.queue();
@@ -200,7 +176,6 @@ function resizeTitle() {
 
 function changeDocument(value) {
   invalidateSelection();
-  if (!applyingCandidate.value) expireCandidates();
   document.value = value;
   crashDraft.queue();
   autosave.markDirty();
@@ -321,113 +296,6 @@ async function prepareContentMutation() {
   return revision.value;
 }
 
-async function createCandidateSnapshot() {
-  const current = await prepareContentMutation();
-  const result = await api.lifecycleCase(caseId(), {
-    command: "snapshot", revision: current,
-  }, session.csrfToken);
-  syncCaseRevision(result.case);
-  return result.snapshot.id;
-}
-
-function restoreCandidateBackup(backup) {
-  title.value = backup.title;
-  document.value = normalizeDocument(backup.document);
-  crashDraft.queue();
-  crashDraft.flush();
-}
-
-function candidateMatches(caseValue, applied) {
-  return caseValue.title === applied.title
-    && JSON.stringify(caseValue.document) === JSON.stringify(applied.document);
-}
-
-function reconcileCandidateSave(caseValue) {
-  syncCaseRevision(caseValue);
-  autosave.reconcile(caseValue.revision);
-}
-
-async function recoverCandidateSave(backup, applied) {
-  restoreCandidateBackup(backup);
-  const current = await api.getCase(caseId());
-  reconcileCandidateSave(current);
-  if (candidateMatches(current, applied)) {
-    document.value = normalizeDocument(current.document);
-    crashDraft.saved(applied);
-    return;
-  }
-  if (!candidateMatches(current, backup)) {
-    candidateRecoveryBlocked.value = true;
-    throw new Error("案例已在其他页面更新，请重新载入后再生成修订。");
-  }
-  crashDraft.saved(backup);
-  crashDraft.flush();
-  throw new Error("修订保存失败，正文已恢复。");
-}
-
-async function coordinateCandidateRecovery(backup, applied) {
-  try {
-    await recoverCandidateSave(backup, applied);
-  } catch (error) {
-    if (candidateRecoveryBlocked.value || autosave.state.value === "error") {
-      candidateRecoveryBlocked.value = true;
-      conflict.value = error;
-    }
-    throw error;
-  }
-}
-
-async function saveCandidateChange(candidate) {
-  const backup = cloneContentSnapshot();
-  applyingCandidate.value = true;
-  try {
-    changeDocument(canvasEditor.value.applyCandidate(candidate));
-    const applied = cloneContentSnapshot();
-    await autosave.flush();
-    if (autosave.state.value === "saved") return;
-    await coordinateCandidateRecovery(backup, applied);
-  } catch (error) {
-    restoreCandidateBackup(backup);
-    throw error;
-  } finally { applyingCandidate.value = false; }
-}
-
-async function applyWritingCandidate(candidate) {
-  if (contentMutationBusy.value) throw new Error("正在处理其他正文操作。");
-  contentMutationBusy.value = true;
-  try {
-    const snapshotId = candidateBatchSnapshotId.value || await createCandidateSnapshot();
-    candidateBatchSnapshotId.value = snapshotId;
-    await saveCandidateChange(candidate);
-    candidateBatchLastRevision.value = revision.value;
-    return { snapshotId, acceptedRevision: revision.value };
-  } finally {
-    if (!candidateRecoveryBlocked.value) contentMutationBusy.value = false;
-  }
-}
-
-function assertCandidateBatch(snapshotId) {
-  const current = revision.value;
-  if (snapshotId !== candidateBatchSnapshotId.value
-    || current !== candidateBatchLastRevision.value) {
-    throw new Error("本批修订后正文或资料已变化，不能再回滚。");
-  }
-}
-
-async function rollbackCandidateBatch(snapshotId) {
-  if (!window.confirm("回滚本批 AI 修订？当前内容会自动保存为回滚前快照。")) return false;
-  assertCandidateBatch(snapshotId);
-  contentMutationBusy.value = true;
-  try {
-    const current = await prepareContentMutation();
-    const result = await api.lifecycleCase(caseId(), {
-      command: "rollback", revision: current, targetId: snapshotId,
-    }, session.csrfToken);
-    applyCase(result.case);
-    return true;
-  } finally { contentMutationBusy.value = false; }
-}
-
 function startDownload() {
   const link = window.document.createElement("a");
   link.href = `/api/cases/${encodeURIComponent(caseId())}/export.docx`;
@@ -499,16 +367,13 @@ onBeforeUnmount(() => {
             <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
             <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
             <CanvasEditor
-              ref="canvasEditor"
               :document="document"
               :revision="revision"
               :editable="editable"
               :annotatable="annotatable"
-              :candidate-previews="candidatePreviews"
               :annotations="annotations"
               @change="changeDocument"
               @selection="annotationSelection = $event"
-              @writing-context="writingContext = $event"
               @annotate="selectTool('comments')"
             />
           </article>
@@ -517,15 +382,9 @@ onBeforeUnmount(() => {
           :active="activeTool"
           :open="drawerOpen"
           :case-record="caseRecord"
-          :case-title="title"
-          :case-document="document"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
           :editable="editable"
           :selection="annotationSelection"
-          :writing-context="writingContext"
-          :apply-candidate="applyWritingCandidate"
-          :rollback-candidate-batch="rollbackCandidateBatch"
-          :candidate-invalidation="candidateInvalidation"
           :before-attachment-mutation="prepareContentMutation"
           :before-version-mutation="prepareContentMutation"
           @select="selectTool"
@@ -533,7 +392,6 @@ onBeforeUnmount(() => {
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
           @mutation-state="contentMutationBusy = $event"
-          @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"
         />
       </div>

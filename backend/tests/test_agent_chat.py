@@ -367,8 +367,11 @@ def test_agent_route_rejects_cross_case_thread_access(client: TestClient) -> Non
     assert response.status_code == 403
 
 
-def test_legacy_generic_chat_route_is_preserved(client: TestClient) -> None:
-    assert "/api/ai/chat" in client.app.openapi()["paths"]
+def test_legacy_generic_chat_route_is_removed(client: TestClient) -> None:
+    paths = client.app.openapi()["paths"]
+
+    assert "/api/ai/chat" not in paths
+    assert "/api/cases/{case_id}/agent/thread/{thread_id}/stream" in paths
 
 
 def test_active_run_uniqueness_is_database_enforced(client: TestClient) -> None:

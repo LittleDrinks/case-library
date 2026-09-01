@@ -43,13 +43,14 @@ def _event(text: str) -> bytes:
 def _pieces(payload: dict) -> tuple[list[str], float]:
     prompt = json.dumps(payload, ensure_ascii=False)
     slow = "慢速测试" in prompt
+    cancel = "取消测试" in prompt
     candidate = CANDIDATE_SECOND if "第二条" in prompt else CANDIDATE
     answer = (
         json.dumps(candidate, ensure_ascii=False)
         if "writing_candidate" in prompt
         else ANSWER
     )
-    return list(answer), 0.12 if slow else 0.005
+    return list(answer), 1.0 if cancel else 0.12 if slow else 0.005
 
 
 def _interrupted(payload: dict) -> bool:

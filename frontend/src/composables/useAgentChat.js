@@ -75,8 +75,11 @@ async function loadChat(caseId, state, generation) {
 
 async function sendChat(caseId, state, text, generation) {
   if (!isCurrent(state, generation) || !state.chat.value) return;
-  await state.chat.value.sendMessage({ text });
-  if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
+  try {
+    await state.chat.value.sendMessage({ text });
+  } finally {
+    if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
+  }
 }
 
 function createState() {
@@ -93,7 +96,7 @@ function computedState(state) {
       const chatStatus = state.chat.value?.status;
       return chatStatus && chatStatus !== "ready" ? chatStatus : snapshotStatus(state.snapshot.value);
     }),
-    chatError: computed(() => state.chat.value?.error?.message || snapshotError(state.snapshot.value)),
+    chatError: computed(() => snapshotError(state.snapshot.value) || state.chat.value?.error?.message || ""),
     threadState: computed(() => state.snapshot.value),
   };
 }

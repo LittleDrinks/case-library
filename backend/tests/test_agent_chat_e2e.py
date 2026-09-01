@@ -4,12 +4,14 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from threading import Event
 
 import httpx
 import pytest
 from pymongo import MongoClient
 
+from app.modules.agent.models import AgentMessage
 from app.modules.agent.repository import AgentRepository
 
 
@@ -18,6 +20,9 @@ LOSER_BASE_URL = os.environ.get("AGENT_CASE_LIBRARY_E2E_LOSER_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
 PROFILE_APPS = ("agent-e2e-app", "agent-e2e-loser")
 AGENT_COLLECTIONS = ("agent_messages", "agent_runs", "agent_thread_events")
+E2E_PROVIDER = "http://ai-provider:8080/v1"
+E2E_API_KEY = "e2e-api-key"
+E2E_ANSWER = "隔离模型回答：已依据当前可见资源完成分析。"
 pytestmark = pytest.mark.e2e(
     "AGENT_CASE_LIBRARY_E2E_URL",
     "AGENT_CASE_LIBRARY_E2E_LOSER_URL",
@@ -33,7 +38,18 @@ def _login(
         "/api/auth/login", json={"username": username, "password": password}
     )
     assert response.status_code == 200
-    return client, response.json()["csrfToken"]
+    csrf = response.json()["csrfToken"]
+    _configure_provider(client, csrf)
+    return client, csrf
+
+
+def _configure_provider(client: httpx.Client, csrf: str) -> None:
+    response = client.put(
+        "/api/ai/settings", headers={"X-CSRF-Token": csrf},
+        json={"mode": "custom", "baseUrl": E2E_PROVIDER,
+              "apiKey": E2E_API_KEY, "model": "e2e-model-a"},
+    )
+    assert response.status_code == 200
 
 
 def _create_case(client: httpx.Client, csrf: str) -> dict:
@@ -96,10 +112,24 @@ def _await_active(database, thread_id: str) -> dict:
     pytest.fail("real MongoDB run did not become active")
 
 
+def _await_status(database, run_id: str, status: str) -> dict:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        run = database.agent_runs.find_one(
+            {"id": run_id, "status": status}, {"_id": 0}
+        )
+        if run:
+            return run
+        Event().wait(0.02)
+    actual = database.agent_runs.find_one({"id": run_id}, {"_id": 0})
+    pytest.fail(f"real MongoDB run did not become {status}: {actual}")
+
+
 def _assert_terminal(snapshot: dict, events: list[dict]) -> None:
     assert snapshot["eventSeq"] == 4
     assert [message["messageSeq"] for message in snapshot["messages"]] == [1, 2]
     assert [message["role"] for message in snapshot["messages"]] == ["user", "assistant"]
+    assert snapshot["messages"][-1]["parts"][0]["text"] == E2E_ANSWER
     assert snapshot["activeRun"] is None
     assert snapshot["latestRun"]["status"] == "completed"
     assert [event["eventSeq"] for event in events] == [1, 2, 3, 4]
@@ -333,6 +363,16 @@ def _assert_completion_first_state(winner, case, database, thread_id, changes) -
     _assert_retry_after_terminal(database, thread_id, changes)
 
 
+def _send_while_observing(client, csrf, case, thread_id, stream):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _send, client, csrf, case["id"], "Change Stream 顺序", "real-order",
+            thread_id=thread_id,
+        )
+        changes = _terminal_changes(stream, thread_id)
+        return future.result(timeout=15), changes
+
+
 def test_agent_http_real_replica_set_rejects_completion_first_transaction_retry():
     winner, winner_csrf = _login()
     loser, loser_csrf = _login(base_url=LOSER_BASE_URL)
@@ -363,10 +403,9 @@ def test_agent_http_change_stream_proves_terminal_write_order():
             "agent_messages", "agent_runs", "agent_thread_events"
         ]}}}]
         with database.watch(pipeline, full_document="updateLookup", max_await_time_ms=100) as stream:
-            response = _send(
-                client, csrf, case["id"], "Change Stream 顺序", "real-order", thread_id=thread_id
+            response, changes = _send_while_observing(
+                client, csrf, case, thread_id, stream
             )
-            changes = _terminal_changes(stream, thread_id)
         assert response.status_code == 200
         _assert_change_order(changes)
     finally:
@@ -445,3 +484,120 @@ def test_agent_http_cross_user_post_does_not_create_thread_records():
         assert _thread(victim, case["id"])["eventSeq"] == 0
     finally:
         _close(victim, attacker, mongo=mongo)
+
+
+def test_agent_http_client_disconnect_cancels_run_and_releases_lease():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream"
+        with client.stream(
+            "POST", path, headers={"X-CSRF-Token": csrf},
+            json=_body("cancel-real", "取消测试"), timeout=15,
+        ) as response:
+            assert response.status_code == 200
+            run = _await_active(database, thread_id)
+            next(response.iter_bytes())
+        _assert_cancelled(database, thread_id, run["id"])
+    finally:
+        _close(client, mongo=mongo)
+
+
+def test_agent_http_renews_quota_while_long_provider_run_is_active():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream"
+        with client.stream(
+            "POST", path, headers={"X-CSRF-Token": csrf},
+            json=_body("renew-real", "慢速测试"), timeout=15,
+        ) as response:
+            assert response.status_code == 200
+            run = _await_active(database, thread_id)
+            _assert_renewed(database, run["id"])
+            response.read()
+        _assert_completed_and_released(database, run["id"])
+    finally:
+        _close(client, mongo=mongo)
+
+
+def test_real_mongo_stale_worker_is_fenced_after_successful_takeover():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        snapshot = _thread(client, case["id"])
+        repository = AgentRepository(database)
+        thread = repository.thread(snapshot["id"], case["id"], case["ownerId"])
+        run = _stale_run(repository, thread, case["ownerId"], database)
+        _assert_stale_fence(repository, thread, run, database)
+    finally:
+        _close(client, mongo=mongo)
+
+
+def _assert_cancelled(database, thread_id: str, run_id: str) -> None:
+    terminal = _await_status(database, run_id, "cancelled")
+    assert terminal["error"] == "运行已取消"
+    assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
+    _await_released(database)
+
+
+def _assert_renewed(database, run_id: str) -> None:
+    lease = database.ai_usage.find_one({"runId": run_id})
+    assert lease and lease["token"]
+    initial = lease["expiresAt"]
+    Event().wait(0.2)
+    renewed = database.ai_usage.find_one({"runId": run_id})
+    assert renewed["expiresAt"] > initial
+
+
+def _assert_completed_and_released(database, run_id: str) -> None:
+    assert _await_status(database, run_id, "completed")["status"] == "completed"
+    _await_released(database)
+
+
+def _await_released(database) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if database.ai_usage.count_documents({"token": {"$exists": True}}) == 0:
+            return
+        Event().wait(0.02)
+    pytest.fail("completed run did not release its quota lease")
+
+
+def _stale_run(repository, thread, user_id: str, database):
+    run = repository.start_run(
+        thread, user_id, [{"type": "text", "text": "stale"}], {},
+        "stale-assistant", "stale-request", owner_id="worker-a",
+    )
+    database.agent_runs.update_one(
+        {"id": run.id},
+        {"$set": {"ownerExpiresAt": datetime.now(UTC) - timedelta(seconds=1)}},
+    )
+    assert repository.claim_run(run.id, "worker-b")
+    return run
+
+
+def _assert_stale_fence(repository, thread, run, database) -> None:
+    assistant = AgentMessage(
+        id=run.assistant_message_id, thread_id=run.thread_id, run_id=run.id,
+        role="assistant", metadata={}, parts=[{"type": "text", "text": "接管回答"}],
+        created_at=datetime.now(UTC),
+    )
+    assert not repository.append_event(
+        thread.id, "message.created", run.id,
+        {"messageId": "stale-event"}, "worker-a",
+    )
+    assert not repository.complete_run(run.id, assistant, "worker-a")
+    assert repository.complete_run(run.id, assistant, "worker-b")
+    events = _events(database, thread.id)
+    assert [event["eventSeq"] for event in events] == [1, 2, 3, 4]
+    assert events[-1]["type"] == "run.completed"
+    assert database.agent_runs.find_one({"id": run.id})["status"] == "completed"

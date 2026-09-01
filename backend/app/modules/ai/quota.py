@@ -28,6 +28,15 @@ class AILease:
     quota_ids: tuple[str, ...]
     token: str
 
+    @classmethod
+    def from_run(cls, database, run) -> AILease | None:
+        token = _run_value(run, "lease_token", "leaseToken")
+        quota_ids = tuple(_run_value(run, "lease_ids", "leaseIds") or ())
+        return cls(database, quota_ids, token) if token and quota_ids else None
+
+    def metadata(self) -> dict[str, object]:
+        return {"leaseToken": self.token, "leaseIds": list(self.quota_ids)}
+
     def release(self) -> None:
         self.database.ai_usage.delete_many(
             {
@@ -36,9 +45,40 @@ class AILease:
             }
         )
 
+    def bind_run(self, run_id: str) -> None:
+        now = _now()
+        result = self.database.ai_usage.update_many(
+            {
+                "_id": {"$in": self.quota_ids},
+                "token": self.token,
+                "expiresAt": {"$gt": now},
+            },
+            {"$set": {"runId": run_id}},
+        )
+        if result.matched_count != len(self.quota_ids):
+            self.release()
+            raise AIQuotaError("AI 租约已失效")
+
+    def renew(self) -> None:
+        now = _now()
+        result = self.database.ai_usage.update_many(
+            {
+                "_id": {"$in": self.quota_ids},
+                "token": self.token,
+                "expiresAt": {"$gt": now},
+            },
+            {"$set": {"expiresAt": now + timedelta(seconds=LEASE_SECONDS)}},
+        )
+        if result.matched_count != len(self.quota_ids):
+            raise AIQuotaError("AI 租约已失效")
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _run_value(run, field: str, alias: str):
+    return getattr(run, field, None) if not isinstance(run, dict) else run.get(alias)
 
 
 def _provider_id(base_url: str) -> str:
@@ -78,12 +118,16 @@ def _claim_update(token: str, now: datetime) -> dict:
         "$set": {
             "token": token,
             "expiresAt": now + timedelta(seconds=LEASE_SECONDS),
-        }
+        },
+        "$unset": {"runId": ""},
     }
 
 
 def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
     try:
+        current = database.ai_usage.find_one({"_id": quota_id})
+        if current and not _reclaimable(database, current, now):
+            return False
         row = database.ai_usage.find_one_and_update(
             _claim_query(quota_id, now),
             _claim_update(token, now),
@@ -93,6 +137,23 @@ def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
         return row is not None
     except DuplicateKeyError:
         return False
+
+
+def _reclaimable(database, row: dict, now: datetime) -> bool:
+    if _aware(row.get("expiresAt", now)) > now:
+        return False
+    run_id = row.get("runId")
+    if not run_id:
+        return True
+    run = database.agent_runs.find_one({"id": run_id, "status": "active"})
+    if not run:
+        return True
+    owner_expires = run.get("ownerExpiresAt")
+    return not owner_expires or _aware(owner_expires) <= now
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _claim_scope(database, prefix: str, limit: int, token: str, now: datetime):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -20,6 +20,8 @@ from app.modules.agent.models import (
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+RUN_OWNER_LEASE_SECONDS = 15
+RUN_DEADLINE_SECONDS = 120
 
 
 class ActiveRunError(Exception):
@@ -87,6 +89,26 @@ class AgentRepository:
         )
         return _model_view(row, AgentRun)
 
+    def claim_run(self, run_id: str, owner_id: str) -> bool:
+        now = _now()
+        row = self.database.agent_runs.find_one_and_update(
+            _claim_query(run_id, owner_id, now), _owner_update(owner_id, now),
+            return_document=ReturnDocument.AFTER,
+        )
+        return row is not None
+
+    def renew_run_owner(self, run_id: str, owner_id: str) -> bool:
+        now = _now()
+        row = self.database.agent_runs.find_one_and_update(
+            _owned_query(run_id, owner_id, now),
+            {"$set": {"ownerExpiresAt": now + _owner_delta()}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return row is not None
+
+    def run_expired(self, run: AgentRun) -> bool:
+        return bool(run.deadline_at and _aware(run.deadline_at) <= _now())
+
     def snapshot(self, thread: AgentThread) -> AgentSnapshot:
         return _transaction(self.database, lambda session: self._snapshot(thread, session))
 
@@ -114,26 +136,36 @@ class AgentRepository:
         metadata: dict[str, object],
         assistant_id: str,
         client_request_id: str | None = None,
+        lease_data: dict[str, object] | None = None,
+        owner_id: str | None = None,
     ) -> AgentRun:
         try:
-            run = _transaction(
-                self.database,
-                lambda session: self._start_run(
-                    thread, user_id, parts, metadata, assistant_id, client_request_id, session
-                ),
-            )
+            run = _transaction(self.database, lambda session: self._start_transaction(
+                thread, user_id, parts, metadata, assistant_id, client_request_id,
+                lease_data, owner_id, session,
+            ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
         return run
 
+    def _start_transaction(
+        self, thread, user_id, parts, metadata, assistant_id, client_request_id,
+        lease_data, owner_id, session,
+    ) -> AgentRun:
+        return self._start_run(
+            thread, user_id, parts, metadata, assistant_id, client_request_id,
+            lease_data, owner_id, session,
+        )
+
     def _start_run(
-        self, thread, user_id, parts, metadata, assistant_id, client_request_id, session
+        self, thread, user_id, parts, metadata, assistant_id, client_request_id,
+        lease_data, owner_id, session
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session)
         message, run = _new_run_documents(
             thread, user_id, parts, metadata, assistant_id, message_seq,
-            client_request_id, run_id, message_id,
+            client_request_id, run_id, message_id, lease_data, owner_id,
         )
         self._insert_start_records(message, run, session)
         self._append_start_events(thread.id, run, message.id, session)
@@ -143,7 +175,7 @@ class AgentRepository:
         self, message: AgentMessage, run: AgentRun, session
     ) -> None:
         self.database.agent_runs.insert_one(
-            run.model_dump(by_alias=True, mode="python", exclude_none=True), session=session
+            _run_document(run), session=session
         )
         self.database.agent_messages.insert_one(
             message.model_dump(by_alias=True, mode="python", exclude_none=True),
@@ -198,39 +230,39 @@ class AgentRepository:
             raise ThreadNotFoundError
         return thread["nextMessageSeq"]
 
-    def complete_run(self, run_id: str, assistant: AgentMessage) -> bool:
+    def complete_run(self, run_id: str, assistant: AgentMessage, owner_id: str | None = None) -> bool:
         return _transaction(
-            self.database, lambda session: self._complete_run(run_id, assistant, session)
+            self.database, lambda session: self._complete_run(run_id, assistant, session, owner_id)
         )
 
-    def _complete_run(self, run_id: str, assistant: AgentMessage, session) -> bool:
+    def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
-                {"id": run_id, "status": "active"}, session=session
+                _active_query(run_id, owner_id), session=session
             ),
             AgentRun,
         )
         if not run:
             return False
         assistant = self._completed_assistant(run, assistant, session)
-        self._persist_assistant(run, assistant, session)
-        self._finish_completed(run, assistant, session)
+        self._persist_assistant(run, assistant, session, owner_id)
+        self._finish_completed(run, assistant, session, owner_id)
         return True
 
-    def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session) -> None:
+    def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
         self.database.agent_messages.insert_one(
             assistant.model_dump(by_alias=True, mode="python", exclude_none=True),
             session=session,
         )
         if self._append_event(
             run.thread_id, "message.created", run.id, {"messageId": assistant.id},
-            session, require_active=True
+            session, require_active=True, owner_id=owner_id
         ) is None:
             raise RuntimeError("AI 运行已结束")
 
-    def _finish_completed(self, run: AgentRun, assistant: AgentMessage, session) -> None:
+    def _finish_completed(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
         fields = {"assistantMessageId": assistant.id}
-        if not self._finish_record(run.id, "completed", fields, session):
+        if not self._finish_record(run.id, "completed", fields, session, owner_id):
             raise RuntimeError("AI 运行已结束")
         self._clear_active(run.thread_id, run.id, session)
         self._append_event(run.thread_id, "run.completed", run.id, fields, session)
@@ -247,22 +279,35 @@ class AgentRepository:
             }
         )
 
-    def fail_run(self, run_id: str) -> bool:
-        return self._finish(run_id, "failed", {"error": "AI 服务暂不可用"})
+    def fail_run(self, run_id: str, owner_id: str | None = None) -> bool:
+        return self._finish(run_id, "failed", {"error": "AI 服务暂不可用"}, owner_id)
 
-    def cancel_run(self, run_id: str) -> bool:
-        return self._finish(run_id, "cancelled", {"error": "运行已取消"})
+    def cancel_run(self, run_id: str, owner_id: str | None = None) -> bool:
+        return self._finish(run_id, "cancelled", {"error": "运行已取消"}, owner_id)
 
-    def _finish(self, run_id: str, status: TerminalRunStatus, fields: dict) -> bool:
+    def expire_run(self, run_id: str, owner_id: str | None = None) -> bool:
+        return self._finish(
+            run_id, "failed", {"error": "AI 运行超过服务时限"}, owner_id, True
+        )
+
+    def _finish(
+        self, run_id: str, status: TerminalRunStatus, fields: dict,
+        owner_id=None, allow_expired=False,
+    ) -> bool:
         return _transaction(
             self.database,
-            lambda session: self._finish_transaction(run_id, status, fields, session),
+            lambda session: self._finish_transaction(
+                run_id, status, fields, session, owner_id, allow_expired
+            ),
         )
 
     def _finish_transaction(
-        self, run_id: str, status: TerminalRunStatus, fields: dict, session
+        self, run_id: str, status: TerminalRunStatus, fields: dict, session,
+        owner_id=None, allow_expired=False,
     ) -> bool:
-        run = self._finish_record(run_id, status, fields, session)
+        run = self._finish_record(
+            run_id, status, fields, session, owner_id, allow_expired
+        )
         if not run:
             return False
         self._clear_active(run.thread_id, run_id, session)
@@ -270,36 +315,44 @@ class AgentRepository:
         return True
 
     def _finish_record(
-        self, run_id: str, status: TerminalRunStatus, fields: dict, session
+        self, run_id: str, status: TerminalRunStatus, fields: dict, session,
+        owner_id=None, allow_expired=False,
     ) -> AgentRun | None:
         row = self.database.agent_runs.find_one_and_update(
-            {"id": run_id, "status": "active"},
-            {"$set": {"status": status, "finishedAt": _now(), **fields}},
+            _active_query(run_id, owner_id, respect_deadline=not allow_expired),
+            {
+                "$set": {"status": status, "finishedAt": _now(), **fields},
+                "$unset": _terminal_unset(),
+            },
             return_document=ReturnDocument.AFTER,
             session=session,
         )
         return _model_view(row, AgentRun)
 
     def append_event(
-        self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict[str, object]
+        self, thread_id: str, event_type: ThreadEventType, run_id: str,
+        payload: dict[str, object], owner_id: str | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._append_active_event(
-                thread_id, event_type, run_id, payload, session
+                thread_id, event_type, run_id, payload, session, owner_id
             ),
         )
 
     def _append_active_event(
-        self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict, session
+        self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict,
+        session, owner_id=None
     ) -> bool:
-        if not self._run_active(thread_id, run_id, session):
+        if not self._run_active(thread_id, run_id, session, owner_id):
             return False
-        return self._append_event(thread_id, event_type, run_id, payload, session) is not None
+        return self._append_event(
+            thread_id, event_type, run_id, payload, session, owner_id=owner_id
+        ) is not None
 
-    def _run_active(self, thread_id: str, run_id: str, session) -> bool:
+    def _run_active(self, thread_id: str, run_id: str, session, owner_id=None) -> bool:
         return self.database.agent_runs.find_one(
-            {"id": run_id, "threadId": thread_id, "status": "active"}, session=session
+            _active_query(run_id, owner_id, thread_id), session=session
         ) is not None
 
     def _append_event(
@@ -310,8 +363,9 @@ class AgentRepository:
         payload: dict[str, object],
         session,
         require_active: bool = False,
+        owner_id: str | None = None,
     ) -> AgentThreadEvent | None:
-        if require_active and not self._run_active(thread_id, run_id, session):
+        if require_active and not self._run_active(thread_id, run_id, session, owner_id):
             return None
         event = _thread_event(
             thread_id, self._next_event_seq(thread_id, session), event_type, run_id, payload
@@ -356,12 +410,14 @@ def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
 def _new_run_documents(
     thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int,
     client_request_id: str | None, run_id: str, message_id: str,
+    lease_data: dict[str, object] | None, owner_id: str | None,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     return (
         _new_user_message(thread, run_id, message_id, parts, metadata, message_seq, now),
         _new_active_run(
-            thread, user_id, message_id, assistant_id, run_id, now, client_request_id
+            thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
+            lease_data, owner_id,
         ),
     )
 
@@ -376,13 +432,96 @@ def _new_user_message(
 
 
 def _new_active_run(
-    thread, user_id, message_id, assistant_id, run_id, now, client_request_id
+    thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
+    lease_data, owner_id,
 ) -> AgentRun:
+    lease_data = lease_data or {}
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
         assistant_message_id=assistant_id, client_request_id=client_request_id,
         status="active", started_at=now,
+        owner_id=owner_id,
+        owner_expires_at=now + _owner_delta() if owner_id else None,
+        deadline_at=now + _deadline_delta(),
+        lease_token=lease_data.get("leaseToken"),
+        lease_ids=lease_data.get("leaseIds") or [],
     )
+
+
+def _run_document(run: AgentRun) -> dict:
+    document = run.model_dump(by_alias=True, mode="python", exclude_none=True)
+    for field, alias in _INTERNAL_FIELDS:
+        value = getattr(run, field)
+        if value is not None and value != []:
+            document[alias] = value
+    return document
+
+
+def _active_query(
+    run_id: str, owner_id: str | None = None, thread_id: str | None = None,
+    respect_deadline: bool = True,
+) -> dict:
+    query = {"id": run_id, "status": "active"}
+    if thread_id:
+        query["threadId"] = thread_id
+    if owner_id:
+        now = _now()
+        query.update({
+            "ownerId": owner_id,
+            "ownerExpiresAt": {"$gt": now},
+        })
+        if respect_deadline:
+            query["$or"] = [
+                {"deadlineAt": {"$gt": now}},
+                {"deadlineAt": {"$exists": False}},
+            ]
+    return query
+
+
+def _claim_query(run_id: str, owner_id: str, now: datetime) -> dict:
+    return {
+        **_active_query(run_id),
+        "$or": [
+            {"ownerId": {"$exists": False}}, {"ownerId": None},
+            {"ownerExpiresAt": {"$lte": now}}, {"ownerId": owner_id},
+        ],
+        "$and": [{"$or": [{"deadlineAt": {"$gt": now}}, {"deadlineAt": {"$exists": False}}]}],
+    }
+
+
+def _owned_query(run_id: str, owner_id: str, now: datetime) -> dict:
+    return {
+        "id": run_id, "status": "active", "ownerId": owner_id,
+        "ownerExpiresAt": {"$gt": now},
+        "$or": [{"deadlineAt": {"$gt": now}}, {"deadlineAt": {"$exists": False}}],
+    }
+
+
+def _owner_update(owner_id: str, now: datetime) -> dict:
+    return {"$set": {"ownerId": owner_id, "ownerExpiresAt": now + _owner_delta()}}
+
+
+def _owner_delta():
+    return timedelta(seconds=RUN_OWNER_LEASE_SECONDS)
+
+
+def _deadline_delta():
+    return timedelta(seconds=RUN_DEADLINE_SECONDS)
+
+
+_INTERNAL_FIELDS = (
+    ("owner_id", "ownerId"), ("owner_expires_at", "ownerExpiresAt"),
+    ("deadline_at", "deadlineAt"), ("lease_token", "leaseToken"),
+    ("lease_ids", "leaseIds"),
+)
+
+
+def _terminal_unset() -> dict[str, str]:
+    return {alias: "" for _field, alias in _INTERNAL_FIELDS}
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _terminal_event(status: TerminalRunStatus) -> ThreadEventType:

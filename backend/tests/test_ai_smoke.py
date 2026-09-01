@@ -45,8 +45,12 @@ class SmokeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self.server.seen.append((self.path, self.headers, None))
-        payload = {"configured": self.server.configured, "baseUrl": "secret-base-url"}
-        payload.update({"effectiveModel": "secret-model", "apiKey": "secret-key"})
+        if self.path == "/api/ai/settings":
+            payload = {"configured": self.server.configured, "effectiveModel": "secret-model"}
+        elif self.path == "/api/cases?scope=mine":
+            payload = [{"id": "secret-case", "workflowStatus": "draft"}]
+        else:
+            payload = {"id": "secret-thread", "messages": []}
         self._json(payload)
 
     def do_POST(self) -> None:
@@ -58,12 +62,18 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self._stream()
 
     def _stream(self) -> None:
+        body = (
+            b'data: {"type":"start","messageId":"secret-message"}\n\n'
+            b'data: {"type":"text-delta","id":"text-1","delta":"secret-response"}\n\n'
+        )
+        if self.server.complete_stream:
+            body += b"data: [DONE]\n\n"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(b'event: token\ndata: {"text":"secret-response"}\n\n')
-        if self.server.complete_stream:
-            self.wfile.write(b"event: done\ndata: {}\n\n")
+        self.wfile.write(body)
 
 
 def run_smoke(configured: bool = True, complete_stream: bool = True):
@@ -102,14 +112,15 @@ def test_ai_smoke_completes_without_disclosing_sensitive_values() -> None:
     assert result.stdout.splitlines() == [
         "AI smoke: login",
         "AI smoke: settings",
+        "AI smoke: thread",
         "AI smoke: chat",
         "AI smoke: passed",
     ]
     assert not any(secret in combined_output(result) for secret in SECRETS)
     assert seen[0][2] == {"username": "smoke-admin", "password": "smoke-password"}
-    assert seen[2][2] == {"messages": [{"role": "user", "content": "只回复OK"}]}
-    assert seen[2][1]["X-CSRF-Token"] == "secret-csrf"
-    assert "case_library_session=secret-cookie" in seen[2][1]["Cookie"]
+    assert seen[4][2]["messages"][0]["parts"][0]["text"] == "只回复OK"
+    assert seen[4][1]["X-CSRF-Token"] == "secret-csrf"
+    assert "case_library_session=secret-cookie" in seen[4][1]["Cookie"]
 
 
 def test_ai_smoke_rejects_unconfigured_platform_without_disclosure() -> None:
