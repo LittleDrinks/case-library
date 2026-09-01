@@ -11,6 +11,7 @@ import httpx
 import pytest
 from pymongo import MongoClient
 
+from app.modules.ai import quota
 from app.modules.agent.models import AgentMessage
 from app.modules.agent.repository import AgentRepository
 
@@ -486,6 +487,22 @@ def test_agent_http_cross_user_post_does_not_create_thread_records():
         _close(victim, attacker, mongo=mongo)
 
 
+def test_agent_http_real_mongo_upstream_failure_is_terminal_and_fenced():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        response = _send(
+            client, csrf, case["id"], "上游中断测试", "failure-real", thread_id=thread_id
+        )
+        assert response.status_code == 200
+        _assert_failed_terminal(client, database, case["id"], thread_id)
+    finally:
+        _close(client, mongo=mongo)
+
+
 def test_agent_http_client_disconnect_cancels_run_and_releases_lease():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
@@ -520,7 +537,7 @@ def test_agent_http_renews_quota_while_long_provider_run_is_active():
         ) as response:
             assert response.status_code == 200
             run = _await_active(database, thread_id)
-            _assert_renewed(database, run["id"])
+            _assert_leases_renewed(database, run["id"])
             response.read()
         _assert_completed_and_released(database, run["id"])
     finally:
@@ -546,37 +563,97 @@ def _assert_cancelled(database, thread_id: str, run_id: str) -> None:
     terminal = _await_status(database, run_id, "cancelled")
     assert terminal["error"] == "运行已取消"
     assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
-    _await_released(database)
+    _await_released(database, run_id)
 
 
-def _assert_renewed(database, run_id: str) -> None:
+def _assert_failed_terminal(client, database, case_id: str, thread_id: str) -> None:
+    snapshot = _thread(client, case_id)
+    events = _events(database, thread_id)
+    run_id = snapshot["latestRun"]["id"]
+    assert snapshot == _thread(client, case_id)
+    assert snapshot["activeRun"] is None
+    assert snapshot["latestRun"]["status"] == "failed"
+    assert snapshot["latestRun"]["error"] == "AI 服务暂不可用"
+    assert [event["eventSeq"] for event in events] == [1, 2, 3]
+    assert [event["type"] for event in events] == [
+        "message.created", "run.started", "run.failed"
+    ]
+    assert _collection_counts(database, thread_id) == (1, 1, 3)
+    assert not AgentRepository(database).fail_run(run_id)
+    _assert_no_late_event(database, thread_id, run_id, len(events))
+    _await_released(database, run_id)
+
+
+def _assert_leases_renewed(database, run_id: str) -> None:
+    run = database.agent_runs.find_one({"id": run_id, "status": "active"})
     lease = database.ai_usage.find_one({"runId": run_id})
-    assert lease and lease["token"]
-    initial = lease["expiresAt"]
-    Event().wait(0.2)
-    renewed = database.ai_usage.find_one({"runId": run_id})
-    assert renewed["expiresAt"] > initial
+    assert run and run["ownerId"] and run["ownerExpiresAt"]
+    assert lease and lease["token"] and lease["expiresAt"]
+    initial = (run["ownerExpiresAt"], lease["expiresAt"])
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        run = database.agent_runs.find_one({"id": run_id, "status": "active"})
+        lease = database.ai_usage.find_one({"runId": run_id})
+        if (
+            run
+            and lease
+            and run["ownerExpiresAt"] > initial[0]
+            and lease["expiresAt"] > initial[1]
+        ):
+            return
+        Event().wait(0.02)
+    pytest.fail("real MongoDB owner and quota leases were not renewed")
 
 
 def _assert_completed_and_released(database, run_id: str) -> None:
     assert _await_status(database, run_id, "completed")["status"] == "completed"
-    _await_released(database)
+    _await_released(database, run_id)
 
 
-def _await_released(database) -> None:
+def _await_released(database, run_id: str | None = None) -> None:
+    query = {"token": {"$exists": True}}
+    if run_id:
+        query["runId"] = run_id
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        if database.ai_usage.count_documents({"token": {"$exists": True}}) == 0:
+        if database.ai_usage.count_documents(query) == 0:
             return
         Event().wait(0.02)
-    pytest.fail("completed run did not release its quota lease")
+    pytest.fail("run did not release its quota lease")
+
+
+def _claim_slots(database, quota_ids, token: str, now: datetime) -> list[bool]:
+    return [quota._claim(database, quota_id, token, now) for quota_id in quota_ids]
+
+
+def _set_owner_expiry(database, run_id: str, expires_at: datetime) -> None:
+    database.agent_runs.update_one(
+        {"id": run_id}, {"$set": {"ownerExpiresAt": expires_at}}
+    )
+
+
+def _assert_quota_reclaim_order(database, run_id: str, quota_ids) -> None:
+    now = datetime.now(UTC)
+    token = f"reclaimed-{run_id}"
+    database.ai_usage.update_many(
+        {"_id": {"$in": quota_ids}},
+        {"$set": {"expiresAt": now - timedelta(seconds=1)}},
+    )
+    assert _claim_slots(database, quota_ids, token, now) == [False] * len(quota_ids)
+    _set_owner_expiry(database, run_id, now - timedelta(seconds=1))
+    assert _claim_slots(database, quota_ids, token, now) == [True] * len(quota_ids)
+    _set_owner_expiry(database, run_id, now + timedelta(seconds=10))
+    database.ai_usage.delete_many({"_id": {"$in": quota_ids}, "token": token})
 
 
 def _stale_run(repository, thread, user_id: str, database):
+    lease = quota.acquire_chat_lease(database, user_id, E2E_PROVIDER)
+    assistant_id = f"stale-assistant-{uuid.uuid4().hex}"
     run = repository.start_run(
         thread, user_id, [{"type": "text", "text": "stale"}], {},
-        "stale-assistant", "stale-request", owner_id="worker-a",
+        assistant_id, f"stale-request-{uuid.uuid4().hex}", owner_id="worker-a",
     )
+    lease.bind_run(run.id)
     database.agent_runs.update_one(
         {"id": run.id},
         {"$set": {
@@ -584,6 +661,8 @@ def _stale_run(repository, thread, user_id: str, database):
             "ownerExpiresAt": datetime.now(UTC) + timedelta(seconds=10),
         }},
     )
+    _assert_quota_reclaim_order(database, run.id, lease.quota_ids)
+    lease.release()
     return run
 
 
