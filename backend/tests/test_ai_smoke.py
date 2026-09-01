@@ -50,8 +50,14 @@ class SmokeHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/cases?scope=mine":
             payload = [{"id": "secret-case", "workflowStatus": "draft"}]
         else:
-            payload = {"id": "secret-thread", "messages": []}
+            payload = self._snapshot()
         self._json(payload)
+
+    def _snapshot(self) -> dict:
+        return {
+            "id": "secret-thread", "messages": [], "activeRun": None,
+            "latestRun": {"id": "secret-run", "status": self.server.run_status},
+        }
 
     def do_POST(self) -> None:
         body = self._body()
@@ -62,12 +68,7 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self._stream()
 
     def _stream(self) -> None:
-        body = (
-            b'data: {"type":"start","messageId":"secret-message"}\n\n'
-            b'data: {"type":"text-delta","id":"text-1","delta":"secret-response"}\n\n'
-        )
-        if self.server.complete_stream:
-            body += b"data: [DONE]\n\n"
+        body = b"opaque response bytes"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Content-Length", str(len(body)))
@@ -76,10 +77,10 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def run_smoke(configured: bool = True, complete_stream: bool = True):
+def run_smoke(configured: bool = True, run_status: str = "completed"):
     server = ThreadingHTTPServer(("127.0.0.1", 0), SmokeHandler)
     server.configured = configured
-    server.complete_stream = complete_stream
+    server.run_status = run_status
     server.seen = []
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -121,6 +122,7 @@ def test_ai_smoke_completes_without_disclosing_sensitive_values() -> None:
     assert seen[4][2]["messages"][0]["parts"][0]["text"] == "只回复OK"
     assert seen[4][1]["X-CSRF-Token"] == "secret-csrf"
     assert "case_library_session=secret-cookie" in seen[4][1]["Cookie"]
+    assert seen[5][0] == "/api/cases/secret-case/agent/thread"
 
 
 def test_ai_smoke_rejects_unconfigured_platform_without_disclosure() -> None:
@@ -131,8 +133,8 @@ def test_ai_smoke_rejects_unconfigured_platform_without_disclosure() -> None:
     assert not any(secret in combined_output(result) for secret in SECRETS)
 
 
-def test_ai_smoke_requires_terminal_stream_event() -> None:
-    result, _seen = run_smoke(complete_stream=False)
+def test_ai_smoke_requires_persisted_successful_run() -> None:
+    result, _seen = run_smoke(run_status="failed")
     assert result.returncode == 1
-    assert "AI smoke failed: chat stream" in result.stderr
+    assert "AI smoke failed: chat run" in result.stderr
     assert "secret-response" not in combined_output(result)
