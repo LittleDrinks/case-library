@@ -113,6 +113,7 @@ def _claim_update(token: str, now: datetime) -> dict:
 def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
     try:
         current = database.ai_usage.find_one({"_id": quota_id})
+        run_id = current.get("runId") if current else None
         if current and not _reclaimable(database, current, now):
             return False
         row = database.ai_usage.find_one_and_update(
@@ -121,6 +122,9 @@ def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
+        if row and _active_owner(database, quota_id, run_id, now):
+            database.ai_usage.delete_one({"_id": quota_id, "token": token})
+            return False
         return row is not None
     except DuplicateKeyError:
         return False
@@ -129,14 +133,17 @@ def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
 def _reclaimable(database, row: dict, now: datetime) -> bool:
     if _aware(row.get("expiresAt", now)) > now:
         return False
-    run_id = row.get("runId")
-    if not run_id:
-        return True
-    run = database.agent_runs.find_one({"id": run_id, "status": "active"})
-    if not run:
-        return True
-    owner_expires = run.get("ownerExpiresAt")
-    return not owner_expires or _aware(owner_expires) <= now
+    return not _active_owner(database, row["_id"], row.get("runId"), now)
+
+
+def _active_owner(database, quota_id: str, run_id: str | None, now: datetime) -> bool:
+    owners = [{"quotaIds": quota_id}]
+    if run_id:
+        owners.append({"id": run_id})
+    return database.agent_runs.find_one(
+        {"status": "active", "ownerExpiresAt": {"$gt": now}, "$or": owners},
+        {"_id": 1},
+    ) is not None
 
 
 def _aware(value: datetime) -> datetime:

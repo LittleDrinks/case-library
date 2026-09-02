@@ -12,7 +12,6 @@ import pytest
 from pymongo import MongoClient
 
 from app.modules.ai import quota
-from app.modules.agent.models import AgentMessage
 from app.modules.agent.repository import AgentRepository
 
 
@@ -544,17 +543,99 @@ def test_agent_http_renews_quota_while_long_provider_run_is_active():
         _close(client, mongo=mongo)
 
 
-def test_real_mongo_stale_worker_is_fenced_after_ownership_changes():
+def _ttl_lease(database, monkeypatch):
+    for name in ("USER_CHAT_STREAMS", "PROVIDER_CHAT_STREAMS", "GLOBAL_CHAT_STREAMS"):
+        monkeypatch.setattr(quota, name, 1)
+    return quota.acquire_chat_lease(database, "ttl-owner", E2E_PROVIDER)
+
+
+def _insert_ttl_owner(database, lease):
+    run_id = f"ttl-run-{uuid.uuid4().hex}"
+    now = datetime.now(UTC)
+    database.agent_runs.insert_one({
+        "id": run_id, "status": "active", "ownerId": "worker-a",
+        "ownerExpiresAt": now + timedelta(seconds=30),
+        "quotaIds": list(lease.quota_ids),
+    })
+    lease.bind_run(run_id)
+    return run_id, now
+
+
+def _prove_ttl_fence(database, lease, run_id, now):
+    database.client.admin.command("setParameter", 1, ttlMonitorSleepSecs=1)
+    before = _ttl_deleted(database)
+    database.ai_usage.update_many(
+        {"_id": {"$in": lease.quota_ids}},
+        {"$set": {"expiresAt": now - timedelta(seconds=1)}},
+    )
+    _await_ttl_deletion(database, lease.quota_ids, before)
+    with pytest.raises(quota.AIQuotaError, match="AI 服务繁忙"):
+        quota.acquire_chat_lease(database, "ttl-owner", E2E_PROVIDER)
+    database.agent_runs.update_one(
+        {"id": run_id}, {"$set": {"ownerExpiresAt": now - timedelta(seconds=1)}}
+    )
+    reclaimed = quota.acquire_chat_lease(database, "ttl-owner", E2E_PROVIDER)
+    assert set(reclaimed.quota_ids) == set(lease.quota_ids)
+    return reclaimed
+
+
+def test_real_mongo_ttl_deletion_keeps_active_run_quota_fenced(monkeypatch):
+    mongo = MongoClient(MONGO_URI)
+    database = mongo.get_default_database()
+    run_id = None
+    lease = reclaimed = None
+    try:
+        lease = _ttl_lease(database, monkeypatch)
+        run_id, now = _insert_ttl_owner(database, lease)
+        reclaimed = _prove_ttl_fence(database, lease, run_id, now)
+    finally:
+        if lease:
+            lease.release()
+        if reclaimed:
+            reclaimed.release()
+        if run_id:
+            database.agent_runs.delete_one({"id": run_id})
+        mongo.close()
+
+
+def _takeover_owner(database, run: dict) -> None:
+    changed = database.agent_runs.update_one(
+        {"id": run["id"], "status": "active", "ownerId": run["ownerId"]},
+        {"$set": {
+            "ownerId": "worker-takeover",
+            "ownerExpiresAt": datetime.now(UTC) + timedelta(seconds=10),
+        }},
+    )
+    assert changed.matched_count == 1
+
+
+def _run_after_owner_takeover(client, csrf, case, database, thread_id):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _send, client, csrf, case["id"], "取消测试", "lost-owner", thread_id=thread_id
+        )
+        run = _await_active(database, thread_id)
+        leases = _await_run_leases(database, run["id"])
+        assert {row["_id"] for row in leases} == set(run["quotaIds"])
+        _takeover_owner(database, run)
+        try:
+            future.result(timeout=15)
+        except httpx.RemoteProtocolError as error:
+            return error, run
+    pytest.fail("the live Agent stream was not cancelled after ownership loss")
+
+
+def test_agent_http_heartbeat_loss_stops_the_live_worker():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:
         case = _create_case(client, csrf)
         database = mongo.get_default_database()
-        snapshot = _thread(client, case["id"])
-        repository = AgentRepository(database)
-        thread = repository.thread(snapshot["id"], case["id"], case["ownerId"])
-        run = _stale_run(repository, thread, case["ownerId"], database)
-        _assert_stale_fence(repository, thread, run, database)
+        thread_id = _thread(client, case["id"])["id"]
+        transport, run = _run_after_owner_takeover(client, csrf, case, database, thread_id)
+        assert isinstance(transport, httpx.RemoteProtocolError)
+        _assert_lost_worker_state(database, thread_id, run["id"])
+        _await_released(database, run["id"])
     finally:
         _close(client, mongo=mongo)
 
@@ -584,25 +665,38 @@ def _assert_failed_terminal(client, database, case_id: str, thread_id: str) -> N
     _await_released(database, run_id)
 
 
+def _all_leases_renewed(run, owner_expiry, current, initial) -> bool:
+    return (
+        run and run["ownerExpiresAt"] > owner_expiry
+        and set(current) == set(initial)
+        and all(current[key] > value for key, value in initial.items())
+    )
+
+
+def _lease_rows(database, run_id: str) -> list[dict]:
+    return list(database.ai_usage.find(
+        {"runId": run_id}, {"_id": 1, "token": 1, "expiresAt": 1}
+    ))
+
+
 def _assert_leases_renewed(database, run_id: str) -> None:
     run = database.agent_runs.find_one({"id": run_id, "status": "active"})
-    lease = database.ai_usage.find_one({"runId": run_id})
+    leases = _lease_rows(database, run_id)
     assert run and run["ownerId"] and run["ownerExpiresAt"]
-    assert lease and lease["token"] and lease["expiresAt"]
-    initial = (run["ownerExpiresAt"], lease["expiresAt"])
+    assert len(leases) == 3
+    assert set(row["_id"] for row in leases) == set(run["quotaIds"])
+    assert all(row["token"] and row["expiresAt"] for row in leases)
+    owner_expiry = run["ownerExpiresAt"]
+    initial = {row["_id"]: row["expiresAt"] for row in leases}
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         run = database.agent_runs.find_one({"id": run_id, "status": "active"})
-        lease = database.ai_usage.find_one({"runId": run_id})
-        if (
-            run
-            and lease
-            and run["ownerExpiresAt"] > initial[0]
-            and lease["expiresAt"] > initial[1]
-        ):
+        leases = _lease_rows(database, run_id)
+        current = {row["_id"]: row["expiresAt"] for row in leases}
+        if _all_leases_renewed(run, owner_expiry, current, initial):
             return
         Event().wait(0.02)
-    pytest.fail("real MongoDB owner and quota leases were not renewed")
+    pytest.fail("real MongoDB owner and all quota leases were not renewed")
 
 
 def _assert_completed_and_released(database, run_id: str) -> None:
@@ -622,63 +716,35 @@ def _await_released(database, run_id: str | None = None) -> None:
     pytest.fail("run did not release its quota lease")
 
 
-def _claim_slots(database, quota_ids, token: str, now: datetime) -> list[bool]:
-    return [quota._claim(database, quota_id, token, now) for quota_id in quota_ids]
+def _ttl_deleted(database) -> int:
+    return database.command("serverStatus")["metrics"]["ttl"]["deletedDocuments"]
 
 
-def _set_owner_expiry(database, run_id: str, expires_at: datetime) -> None:
-    database.agent_runs.update_one(
-        {"id": run_id}, {"$set": {"ownerExpiresAt": expires_at}}
-    )
+def _await_ttl_deletion(database, quota_ids, before: int) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if database.ai_usage.count_documents({"_id": {"$in": quota_ids}}) == 0:
+            if _ttl_deleted(database) > before:
+                return
+        Event().wait(0.02)
+    pytest.fail("MongoDB TTL did not physically remove the expired quota rows")
 
 
-def _assert_quota_reclaim_order(database, run_id: str, quota_ids) -> None:
-    now = datetime.now(UTC)
-    token = f"reclaimed-{run_id}"
-    database.ai_usage.update_many(
-        {"_id": {"$in": quota_ids}},
-        {"$set": {"expiresAt": now - timedelta(seconds=1)}},
-    )
-    assert _claim_slots(database, quota_ids, token, now) == [False] * len(quota_ids)
-    _set_owner_expiry(database, run_id, now - timedelta(seconds=1))
-    assert _claim_slots(database, quota_ids, token, now) == [True] * len(quota_ids)
-    _set_owner_expiry(database, run_id, now + timedelta(seconds=10))
-    database.ai_usage.delete_many({"_id": {"$in": quota_ids}, "token": token})
+def _await_run_leases(database, run_id: str) -> list[dict]:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        rows = _lease_rows(database, run_id)
+        if len(rows) == 3:
+            return rows
+        Event().wait(0.02)
+    pytest.fail("real MongoDB did not bind all quota leases to the Run")
 
 
-def _stale_run(repository, thread, user_id: str, database):
-    lease = quota.acquire_chat_lease(database, user_id, E2E_PROVIDER)
-    assistant_id = f"stale-assistant-{uuid.uuid4().hex}"
-    run = repository.start_run(
-        thread, user_id, [{"type": "text", "text": "stale"}], {},
-        assistant_id, f"stale-request-{uuid.uuid4().hex}", owner_id="worker-a",
-    )
-    lease.bind_run(run.id)
-    database.agent_runs.update_one(
-        {"id": run.id},
-        {"$set": {
-            "ownerId": "worker-b",
-            "ownerExpiresAt": datetime.now(UTC) + timedelta(seconds=10),
-        }},
-    )
-    _assert_quota_reclaim_order(database, run.id, lease.quota_ids)
-    lease.release()
-    return run
-
-
-def _assert_stale_fence(repository, thread, run, database) -> None:
-    assistant = AgentMessage(
-        id=run.assistant_message_id, thread_id=run.thread_id, run_id=run.id,
-        role="assistant", metadata={}, parts=[{"type": "text", "text": "接管回答"}],
-        created_at=datetime.now(UTC),
-    )
-    assert not repository.append_event(
-        thread.id, "message.created", run.id,
-        {"messageId": "stale-event"}, "worker-a",
-    )
-    assert not repository.complete_run(run.id, assistant, "worker-a")
-    assert repository.complete_run(run.id, assistant, "worker-b")
-    events = _events(database, thread.id)
-    assert [event["eventSeq"] for event in events] == [1, 2, 3, 4]
-    assert events[-1]["type"] == "run.completed"
-    assert database.agent_runs.find_one({"id": run.id})["status"] == "completed"
+def _assert_lost_worker_state(database, thread_id: str, run_id: str) -> None:
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        run = database.agent_runs.find_one({"id": run_id}, {"_id": 0})
+        assert run and run["status"] == "active"
+        assert run["ownerId"] == "worker-takeover"
+        assert _collection_counts(database, thread_id) == (1, 1, 2)
+        Event().wait(0.02)

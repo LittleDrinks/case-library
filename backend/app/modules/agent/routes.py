@@ -182,6 +182,7 @@ def _create_run(
     run = repository.start_run(
         thread, user_id, parts, metadata, assistant_id, client_request_id,
         owner_id=worker_id,
+        quota_ids=lease.quota_ids if lease else (),
     )
     try:
         if lease:

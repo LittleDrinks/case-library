@@ -125,11 +125,12 @@ class AgentRepository:
         assistant_id: str,
         client_request_id: str | None = None,
         owner_id: str | None = None,
+        quota_ids: tuple[str, ...] = (),
     ) -> AgentRun:
         try:
             run = _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
-                owner_id, session,
+                owner_id, quota_ids, session,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -137,13 +138,13 @@ class AgentRepository:
 
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id,
-        owner_id, session
+        owner_id, quota_ids, session
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session)
         message, run = _new_run_documents(
             thread, user_id, parts, metadata, assistant_id, message_seq,
-            client_request_id, run_id, message_id, owner_id,
+            client_request_id, run_id, message_id, owner_id, quota_ids,
         )
         self._insert_start_records(message, run, session)
         self._append_start_events(thread.id, run, message.id, session)
@@ -382,14 +383,14 @@ def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
 def _new_run_documents(
     thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int,
     client_request_id: str | None, run_id: str, message_id: str,
-    owner_id: str | None,
+    owner_id: str | None, quota_ids: tuple[str, ...],
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     return (
         _new_user_message(thread, run_id, message_id, parts, metadata, message_seq, now),
         _new_active_run(
             thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
-            owner_id,
+            owner_id, quota_ids,
         ),
     )
 
@@ -405,7 +406,7 @@ def _new_user_message(
 
 def _new_active_run(
     thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
-    owner_id,
+    owner_id, quota_ids,
 ) -> AgentRun:
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
@@ -413,14 +414,15 @@ def _new_active_run(
         status="active", started_at=now,
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
+        quota_ids=quota_ids,
     )
 
 
 def _run_document(run: AgentRun) -> dict:
     document = run.model_dump(by_alias=True, mode="python", exclude_none=True)
-    for field, alias in _OWNER_FIELDS:
+    for field, alias in _RUN_FIELDS:
         value = getattr(run, field)
-        if value is not None and value != []:
+        if value:
             document[alias] = value
     return document
 
@@ -451,11 +453,15 @@ def _owner_delta():
     return timedelta(seconds=RUN_OWNER_LEASE_SECONDS)
 
 
-_OWNER_FIELDS = (("owner_id", "ownerId"), ("owner_expires_at", "ownerExpiresAt"))
+_RUN_FIELDS = (
+    ("owner_id", "ownerId"),
+    ("owner_expires_at", "ownerExpiresAt"),
+    ("quota_ids", "quotaIds"),
+)
 
 
 def _terminal_unset() -> dict[str, str]:
-    return {alias: "" for _field, alias in _OWNER_FIELDS}
+    return {alias: "" for _field, alias in _RUN_FIELDS}
 
 
 def _terminal_event(status: TerminalRunStatus) -> ThreadEventType:
