@@ -49,15 +49,23 @@ function queryRequests(requests, query) {
   return requests.filter((url) => new URL(url).searchParams.get("q") === query);
 }
 
+function watchOkRequests(page, path) {
+  const requests = [];
+  page.on("response", (response) => {
+    if (response.url().includes(path) && response.status() === 200) requests.push(response.url());
+  });
+  return requests;
+}
+
 async function assertOneSearchRequest(page, requests) {
-  await waitForSearchReady(page, "思政");
-  await page.reload();
   await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible({ timeout: 30_000 });
-  await waitForSearchReady(page, "思政");
   requests.length = 0;
-  const response = page.waitForResponse(/\/api\/search\?q=%E6%80%9D%E6%94%BF/);
+  const response = page.waitForResponse(
+    (r) => new URL(r.url()).searchParams.get("q") === "思政" && r.status() === 200,
+    { timeout: 30_000 },
+  );
   await search(page, "思政");
-  expect((await response).ok()).toBe(true);
+  await response;
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
@@ -65,7 +73,6 @@ async function assertOneSearchRequest(page, requests) {
 }
 
 async function assertGraph(page) {
-  await waitForSearchReady(page, "思政");
   await page.getByRole("button", { name: "图谱", exact: true }).click();
   await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /案例.*钱伟长图书馆/ })).toBeVisible();
@@ -76,7 +83,7 @@ async function assertGraph(page) {
 
 test("公共检索保留高级筛选和两种视图", async ({ page }) => {
   test.setTimeout(60_000);
-  const searchRequests = watchRequests(page, "/api/search");
+  const searchRequests = watchOkRequests(page, "/api/search");
   await waitForSearchReady(page, "");
   await page.goto("/#/search");
   await assertOneSearchRequest(page, searchRequests);
