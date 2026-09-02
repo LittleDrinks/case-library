@@ -74,3 +74,9 @@ def build_workbench_messages(
 ) -> list[dict[str, str]]:
     current = {"role": "user", "content": _task_content(body, snapshot, target)}
     return _fit_history(_history(body), current)
+
+
+def build_workbench_instructions(
+    body: WorkbenchChatRequest, snapshot: dict, target: dict
+) -> str:
+    return "\n\n".join((SYSTEM_PROMPT, _task_content(body, snapshot, target)))

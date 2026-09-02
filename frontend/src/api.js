@@ -19,56 +19,6 @@ async function request(path, options = {}) {
   return payload;
 }
 
-function aiEvent(frame) {
-  const lines = frame.replaceAll("\r", "").split("\n");
-  const type = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
-  const data = lines.find((line) => line.startsWith("data:"))?.slice(5).trim();
-  if (!type || !data) return null;
-  return { type, payload: JSON.parse(data) };
-}
-
-function dispatchAIEvent(frame, handlers) {
-  const event = aiEvent(frame);
-  if (event?.type === "token") handlers.onToken?.(event.payload.text);
-  if (event?.type === "done") handlers.onDone?.();
-  if (event?.type === "error") handlers.onError?.(event.payload.message);
-  return event?.type === "done" || event?.type === "error";
-}
-
-async function readAIStream(response, handlers) {
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let terminal = false;
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const frames = buffer.split(/\r?\n\r?\n/);
-    buffer = frames.pop();
-    frames.forEach((frame) => { terminal ||= dispatchAIEvent(frame, handlers); });
-    if (done) break;
-  }
-  if (buffer.trim()) terminal ||= dispatchAIEvent(buffer, handlers);
-  if (!terminal) throw new Error("AI 响应意外中断");
-}
-
-async function streamAI(messages, csrfToken, handlers = {}, signal) {
-  const options = jsonOptions("POST", { messages }, csrfToken);
-  const response = await fetch("/api/ai/chat", {
-    credentials: "same-origin", ...options, signal,
-  });
-  if (!response.ok) throw new ApiError(response, await readPayload(response));
-  await readAIStream(response, handlers);
-}
-
-function chat(messages, csrfToken, onEvent, signal) {
-  return streamAI(messages, csrfToken, {
-    onToken: (text) => onEvent({ type: "token", text }),
-    onDone: () => onEvent({ type: "done" }),
-    onError: (message) => onEvent({ type: "error", message }),
-  }, signal);
-}
-
 function jsonOptions(method, body, csrfToken) {
   const headers = { "Content-Type": "application/json" };
   if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
@@ -150,8 +100,6 @@ export const api = {
   saveAdminAISettings: (settings, csrfToken) => request(
     "/api/admin/ai/settings", jsonOptions("PUT", settings, csrfToken),
   ),
-  streamAI,
-  chat,
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,
   ),

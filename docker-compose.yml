@@ -560,6 +560,7 @@ services:
       OBJECT_STORE_SECRET_KEY_FILE: /run/secrets/minio_root_password
       OBJECT_STORE_SECURE: "false"
       WEB_CONCURRENCY: 1
+      AGENT_RUN_HEARTBEAT_SECONDS: "0.05"
     secrets:
       - app_secret
       - meili_master_key
@@ -569,6 +570,8 @@ services:
       mongo-init:
         condition: service_completed_successfully
       minio:
+        condition: service_healthy
+      e2e-ai-provider:
         condition: service_healthy
       e2e-search-init:
         condition: service_completed_successfully
@@ -616,6 +619,7 @@ services:
       OBJECT_STORE_SECURE: "false"
       WEB_CONCURRENCY: 1
       AGENT_E2E_TERMINAL_GATE: "true"
+      AGENT_RUN_HEARTBEAT_SECONDS: "0.05"
     secrets:
       - app_secret
       - meili_master_key
@@ -625,6 +629,8 @@ services:
       mongo-init:
         condition: service_completed_successfully
       minio:
+        condition: service_healthy
+      e2e-ai-provider:
         condition: service_healthy
       e2e-search-init:
         condition: service_completed_successfully

@@ -106,6 +106,7 @@ async function persist(payload) {
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   invalidateSelection();
   revision.value = saved.revision;
+  caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
   return saved;
 }

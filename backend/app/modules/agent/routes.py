@@ -5,11 +5,14 @@ from pydantic import ValidationError
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import TextUIPart
 
-from app.core.dependencies import get_database
+from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.models import AgentRun, AgentSnapshot, AgentThread
 from app.modules.agent.repository import ActiveRunError, AgentRepository, ThreadNotFoundError
 from app.modules.agent.service import RunContext, load_history, protocol_stream
+from app.modules.agent.streaming import ClosableStreamingResponse
+from app.modules.ai.quota import AILease, AIQuotaError, acquire_chat_lease
+from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
 from app.modules.cases.service import get_case
 
@@ -99,13 +102,14 @@ async def send_message(
     thread_id: str,
     request: Request,
     database=Depends(get_database),
+    settings=Depends(get_settings),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
-    return await _send_message(case_id, thread_id, request, database, user)
+    return await _send_message(case_id, thread_id, request, database, settings, user)
 
 
-async def _send_message(case_id, thread_id, request, database, user):
+async def _send_message(case_id, thread_id, request, database, settings, user):
     _request_size(request)
     case = _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
@@ -114,26 +118,81 @@ async def _send_message(case_id, thread_id, request, database, user):
     adapter = await _adapter(request, assistant_id)
     parts, metadata, prompt, client_request_id = _prompt(adapter)
     history = load_history(repository, thread)
-    run = _start_run(
-        repository, thread, user["id"], parts, metadata, assistant_id, client_request_id
-    )
+    selection = _selection(database, settings, user["id"])
+    lease = _lease(database, user["id"], selection)
+    worker_id = request.app.state.agent_worker_id
+    run = _start_run(repository, thread, user["id"], parts, metadata, assistant_id,
+                     client_request_id, lease, worker_id)
     context = RunContext(
         repository, run, adapter, history, prompt, case,
-        request.app.state.agent,
+        request.app.state.agent, selection, settings, lease, worker_id,
     )
     return _start_stream(context)
 
 
+def _selection(database, settings, user_id: str):
+    try:
+        selection = resolve_provider(database, settings, user_id)
+    except AIConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not selection and settings.app_environment != "test":
+        raise HTTPException(status_code=503, detail="AI 服务未配置")
+    return selection
+
+
+def _lease(database, user_id: str, selection):
+    if not selection:
+        return None
+    try:
+        return acquire_chat_lease(database, user_id, selection.base_url)
+    except AIQuotaError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+
+
 def _start_run(
-    repository, thread: AgentThread, user_id, parts, metadata, assistant_id, client_request_id
+    repository, thread: AgentThread, user_id, parts, metadata, assistant_id,
+    client_request_id, lease: AILease | None, worker_id: str,
 ) -> AgentRun:
     try:
-        return repository.start_run(
-            thread, user_id, parts, metadata, assistant_id, client_request_id
+        return _create_run(
+            repository, thread, user_id, parts, metadata, assistant_id,
+            client_request_id, lease, worker_id,
         )
     except ActiveRunError as error:
+        if lease:
+            lease.release()
         raise HTTPException(status_code=409, detail="当前对话已有运行任务") from error
+    except AIQuotaError as error:
+        _abort_start(lease)
+        raise HTTPException(status_code=503, detail="AI 服务暂不可用") from error
+    except Exception:
+        _abort_start(lease)
+        raise
 
 
 def _start_stream(context: RunContext):
-    return context.adapter.streaming_response(protocol_stream(context))
+    stream = protocol_stream(context)
+    response = context.adapter.streaming_response(stream)
+    return ClosableStreamingResponse(response, stream)
+
+
+def _create_run(
+    repository, thread, user_id, parts, metadata, assistant_id, client_request_id, lease, worker_id
+):
+    run = repository.start_run(
+        thread, user_id, parts, metadata, assistant_id, client_request_id,
+        owner_id=worker_id,
+        quota_ids=lease.quota_ids if lease else (),
+    )
+    try:
+        if lease:
+            lease.bind_run(run.id)
+    except Exception:
+        repository.fail_run(run.id, worker_id)
+        raise
+    return run
+
+
+def _abort_start(lease) -> None:
+    if lease:
+        lease.release()

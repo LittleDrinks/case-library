@@ -12,6 +12,7 @@ from app.api.router import router
 from app.core.bootstrap import bootstrap
 from app.core.config import Settings
 from app.core.database import connect
+from app.core.ids import new_id
 from app.modules.attachments.service import AttachmentError
 from app.modules.attachments.storage import BlobStore, minio_blob_store
 from app.modules.agent import agent
@@ -67,6 +68,7 @@ def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api.state.search_catalog = catalog
     api.state.catalog_state = catalog_state
     api.state.agent = agent
+    api.state.agent_worker_id = new_id("agent-worker")
     api.add_exception_handler(CaseError, _case_error)
     api.add_exception_handler(AttachmentError, _attachment_error)
     api.add_exception_handler(MaterialImportError, _material_error)

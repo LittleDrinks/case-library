@@ -1,74 +1,32 @@
 from __future__ import annotations
 
-from asyncio import CancelledError
-import ipaddress
-import json
-import socket
-from dataclasses import dataclass
-from typing import Iterable
-from urllib.parse import SplitResult, urlsplit
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from typing import AsyncIterator
 
 import httpcore
 import httpx
+import httpx2
 from openai import OpenAI
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from app.modules.ai.transport import (
+    ProviderError,
+    RestrictedProviderTransport,
+    Target,
+    target_for_url,
+)
+
 
 MAX_MODELS = 200
 MAX_MODELS_BYTES = 1024 * 1024
-MAX_CHAT_BYTES = 512 * 1024
-
-
-class ProviderError(Exception):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class Target:
-    host: str
-    ip: str
-    port: int
-    path: str
-
-
-def _public_ip(value: str) -> bool:
-    address = ipaddress.ip_address(value)
-    mapped = getattr(address, "ipv4_mapped", None)
-    return address.is_global and (mapped is None or mapped.is_global)
-
-
-def _addresses(host: str, port: int) -> tuple[str, ...]:
-    try:
-        records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        addresses = tuple(dict.fromkeys(record[4][0] for record in records))
-    except (OSError, UnicodeError) as error:
-        raise ProviderError("AI provider unavailable") from error
-    if not addresses or not all(_public_ip(value) for value in addresses):
-        raise ProviderError("AI provider unavailable")
-    return addresses
-
-
-def _url_parts(base_url: str, allow_internal: bool = False) -> SplitResult:
-    try:
-        parts = urlsplit(base_url)
-        valid = (
-            parts.scheme == ("http" if allow_internal else "https") and parts.hostname
-        )
-        valid = valid and not parts.username and not parts.password
-        valid = valid and not parts.query and not parts.fragment
-        if not valid:
-            raise ValueError
-        parts.port
-        return parts
-    except ValueError as error:
-        raise ProviderError("AI provider unavailable") from error
 
 
 def _target(base_url: str, endpoint: str, allow_internal: bool = False) -> Target:
-    parts = _url_parts(base_url, allow_internal)
-    host = parts.hostname.encode("idna").decode("ascii")
-    port = parts.port or (80 if allow_internal else 443)
-    path = f"{parts.path.rstrip('/')}/{endpoint.lstrip('/')}".rstrip("/") or "/"
-    ip = socket.gethostbyname(host) if allow_internal else _addresses(host, port)[0]
-    return Target(host, ip, port, path)
+    target = target_for_url(base_url, allow_internal)
+    path = f"{target.path.rstrip('/')}/{endpoint.lstrip('/')}".rstrip("/") or "/"
+    return replace(target, path=path)
 
 
 class _PinnedNetworkBackend(httpcore.NetworkBackend):
@@ -76,21 +34,10 @@ class _PinnedNetworkBackend(httpcore.NetworkBackend):
         self.ip = ip
         self.backend = httpcore.SyncBackend()
 
-    def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options: Iterable | None = None,
-    ):
-        return self.backend.connect_tcp(
-            self.ip, port, timeout, local_address, socket_options
-        )
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        return self.backend.connect_tcp(self.ip, port, timeout, local_address, socket_options)
 
-    def connect_unix_socket(
-        self, path: str, timeout: float | None = None, socket_options: Iterable | None = None
-    ):
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
         return self.backend.connect_unix_socket(path, timeout, socket_options)
 
     def sleep(self, seconds: float) -> None:
@@ -100,37 +47,27 @@ class _PinnedNetworkBackend(httpcore.NetworkBackend):
 class _PinnedHTTPTransport(httpx.HTTPTransport):
     def __init__(self, target: Target):
         limits = httpx.Limits(max_connections=20, max_keepalive_connections=20)
-        super().__init__(verify=True, trust_env=False, limits=limits, retries=0)
-        ssl_context = self._pool._ssl_context
+        super().__init__(verify=target.secure, trust_env=False, limits=limits, retries=0)
+        ssl_context = self._pool._ssl_context if target.secure else None
         self._pool.close()
         self._pool = httpcore.ConnectionPool(
-            ssl_context=ssl_context,
-            max_connections=limits.max_connections,
+            ssl_context=ssl_context, max_connections=limits.max_connections,
             max_keepalive_connections=limits.max_keepalive_connections,
-            keepalive_expiry=limits.keepalive_expiry,
-            http1=True,
-            http2=False,
-            retries=0,
+            keepalive_expiry=limits.keepalive_expiry, http1=True, http2=False, retries=0,
             network_backend=_PinnedNetworkBackend(target.ip),
         )
 
 
 class _GuardedStream(httpx.SyncByteStream):
-    def __init__(self, stream, limit: int, require_done: bool):
-        self.stream, self.limit, self.require_done = stream, limit, require_done
-        self.total, self.tail, self.done = 0, b"", False
+    def __init__(self, stream, limit: int):
+        self.stream, self.limit, self.total = stream, limit, 0
 
     def __iter__(self):
         for part in self.stream:
             self.total += len(part)
             if self.total > self.limit:
                 raise ProviderError("AI provider unavailable")
-            if self.require_done:
-                self.tail = (self.tail + part)[-32:]
-                self.done = self.done or b"data: [DONE]" in self.tail
             yield part
-        if self.require_done and not self.done:
-            raise ProviderError("AI provider unavailable")
 
     def close(self) -> None:
         self.stream.close()
@@ -142,16 +79,10 @@ class _GuardedTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         response = self.transport.handle_request(request)
-        is_chat = request.url.path.rstrip("/").endswith("/chat/completions")
-        streaming = is_chat and _is_stream_request(request)
-        limit = MAX_CHAT_BYTES if is_chat else MAX_MODELS_BYTES
-        stream = _GuardedStream(response.stream, limit, streaming)
+        stream = _GuardedStream(response.stream, MAX_MODELS_BYTES)
         return httpx.Response(
-            response.status_code,
-            headers=response.headers,
-            stream=stream,
-            extensions=response.extensions,
-            request=request,
+            response.status_code, headers=response.headers, stream=stream,
+            extensions=response.extensions, request=request,
         )
 
     def close(self) -> None:
@@ -160,13 +91,6 @@ class _GuardedTransport(httpx.BaseTransport):
 
 def _transport(target: Target, _timeout: float, _secure: bool = True):
     return _PinnedHTTPTransport(target)
-
-
-def _is_stream_request(request: httpx.Request) -> bool:
-    try:
-        return json.loads(request.content or b"{}").get("stream") is True
-    except (TypeError, ValueError):
-        return False
 
 
 def _model_ids(payload: dict) -> list[str]:
@@ -182,40 +106,8 @@ def _model_ids(payload: dict) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def _chunk_text(chunk) -> str | None:
-    choices = getattr(chunk, "choices", [])
-    if not choices:
-        return None
-    text = getattr(getattr(choices[0], "delta", None), "content", None)
-    return text if isinstance(text, str) else None
-
-
-def _close_client(client) -> None:
-    if client is None:
-        return
-    try:
-        client.close()
-    except Exception:
-        pass
-
-
-def _close_stream(stream) -> None:
-    if stream is None:
-        return
-    try:
-        stream.close()
-    except Exception:
-        pass
-
-
-class OpenAICompatibleProvider:
-    def __init__(
-        self,
-        base_url: str,
-        api_key: str,
-        timeout_seconds: int,
-        allow_internal: bool = False,
-    ):
+class OpenAIModelDiscovery:
+    def __init__(self, base_url: str, api_key: str, timeout_seconds: int, allow_internal: bool = False):
         self.base_url = base_url
         self.api_key = api_key
         self.timeout = timeout_seconds
@@ -223,54 +115,14 @@ class OpenAICompatibleProvider:
 
     def _openai(self) -> OpenAI:
         target = _target(self.base_url, "", self.allow_internal)
-        transport = _transport(target, self.timeout, not self.allow_internal)
-        transport = _GuardedTransport(transport)
+        transport = _GuardedTransport(_transport(target, self.timeout, target.secure))
         client = httpx.Client(
-            transport=transport,
-            timeout=self.timeout,
-            follow_redirects=False,
-            trust_env=False,
+            transport=transport, timeout=self.timeout, follow_redirects=False, trust_env=False,
         )
         return OpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key,
-            http_client=client,
-            timeout=self.timeout,
-            max_retries=0,
+            base_url=self.base_url, api_key=self.api_key, http_client=client,
+            timeout=self.timeout, max_retries=0,
         )
-
-    def chat(self, messages: list[dict], model: str):
-        client = stream = None
-        try:
-            client = self._openai()
-            stream = client.chat.completions.create(
-                model=model, messages=messages, stream=True
-            )
-            for chunk in stream:
-                text = _chunk_text(chunk)
-                if text:
-                    yield text
-        except (Exception, CancelledError) as error:
-            raise ProviderError("AI provider unavailable") from error
-        finally:
-            _close_stream(stream)
-            _close_client(client)
-
-    def structured(self, messages: list[dict], model: str, response_model):
-        client = None
-        try:
-            client = self._openai()
-            response = client.beta.chat.completions.parse(
-                model=model, messages=messages, response_format=response_model
-            )
-            parsed = response.choices[0].message.parsed
-            if parsed is None:
-                raise ValueError("missing structured response")
-            return response_model.model_validate(parsed)
-        except (Exception, CancelledError) as error:
-            raise ProviderError("AI provider unavailable") from error
-        finally:
-            _close_client(client)
 
     def models(self) -> list[str]:
         client = None
@@ -279,7 +131,25 @@ class OpenAICompatibleProvider:
             page = client.models.list()
             payload = {"data": [{"id": getattr(row, "id", None)} for row in page.data]}
             return _model_ids(payload)
-        except (Exception, CancelledError) as error:
+        except Exception as error:
             raise ProviderError("AI provider unavailable") from error
         finally:
-            _close_client(client)
+            if client is not None:
+                client.close()
+
+
+@asynccontextmanager
+async def open_model(selection, allow_internal: bool) -> AsyncIterator[OpenAIChatModel]:
+    client = httpx2.AsyncClient(
+        transport=RestrictedProviderTransport(
+            selection.base_url, selection.timeout_seconds, allow_internal
+        ),
+        follow_redirects=False, timeout=selection.timeout_seconds, trust_env=False,
+    )
+    try:
+        provider = OpenAIProvider(
+            base_url=selection.base_url, api_key=selection.api_key, http_client=client
+        )
+        yield OpenAIChatModel(selection.model, provider=provider)
+    finally:
+        await client.aclose()

@@ -63,6 +63,8 @@ function select(tab) {
       v-if="active === 'ai'"
       :case-title="caseTitle"
       :case-document="caseDocument"
+      :case-id="caseRecord.id"
+      :revision="caseRecord.revision"
       :user="user"
       :editable="editable"
       :selection="selection"

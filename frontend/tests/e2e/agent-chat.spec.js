@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const ANSWER = "隔离 FunctionModel 回答：已依据当前案例完成分析。";
+const ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
 
 async function login(page) {
   await page.goto("/#/login");
@@ -38,8 +38,8 @@ async function configureChat(page) {
   const response = await page.context().request.put("/api/ai/settings", {
     headers: { "X-CSRF-Token": await csrf(page) },
     data: {
-      mode: "custom", baseUrl: "https://models.example/v1",
-      apiKey: "function-model-key", model: "function-model",
+      mode: "custom", baseUrl: "http://ai-provider:8080/v1",
+      apiKey: "e2e-api-key", model: "e2e-model-a",
     },
   });
   expect(response.ok()).toBe(true);
@@ -50,7 +50,6 @@ async function openChat(page, caseId) {
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
-  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
@@ -61,12 +60,7 @@ async function sendChat(page, text) {
   await page.getByLabel("向 AI 提问").fill(text);
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
-  return streamMessageId(await (await streamResponse).body());
-}
-
-function streamMessageId(body) {
-  const line = body.toString().split("\n").find((item) => item.startsWith('data: {"type":"start"'));
-  return JSON.parse(line.slice(6)).messageId;
+  await streamResponse;
 }
 
 async function chatSnapshot(page, caseId) {
@@ -122,10 +116,9 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  const streamId = await sendChat(page, "当前问题");
+  await sendChat(page, "当前问题");
   const snapshot = await chatSnapshot(page, created.id);
   const assistant = snapshot.messages.at(-1);
-  expect(streamId).toBe(assistant.id);
   expect(assistant.id).toBe(snapshot.latestRun.assistantMessageId);
   expect(snapshot.eventSeq).toBe(4);
   const persisted = {

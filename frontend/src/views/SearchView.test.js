@@ -28,7 +28,7 @@ const second = {
 function render() {
   return mount(SearchView, {
     global: { stubs: {
-      SiteHeader: true, SearchAIAnswer: true, SearchGraph: true,
+      SiteHeader: true, SearchGraph: true,
       SearchFilters: true, RouterLink: true,
     } },
   });

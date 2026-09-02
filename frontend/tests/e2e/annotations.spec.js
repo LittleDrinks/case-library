@@ -134,10 +134,6 @@ async function seedManualAnnotation(page, marker) {
 }
 
 async function manualAnnotationScenario(page) {
-  let chatRequests = 0;
-  page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().includes("/api/ai/chat")) chatRequests += 1;
-  });
   const marker = `手工批注正文 ${Date.now()}`;
   await seedManualAnnotation(page, marker);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -148,7 +144,6 @@ async function manualAnnotationScenario(page) {
   expect(panel.y + panel.height).toBeLessThanOrEqual(844);
   await editManualAnnotation(page, "已补充课堂活动与评价依据。");
   await deleteManualAnnotation(page);
-  expect(chatRequests).toBe(0);
 }
 
 test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => {

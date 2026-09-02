@@ -36,6 +36,33 @@ class AILease:
             }
         )
 
+    def bind_run(self, run_id: str) -> None:
+        now = _now()
+        result = self.database.ai_usage.update_many(
+            {
+                "_id": {"$in": self.quota_ids},
+                "token": self.token,
+                "expiresAt": {"$gt": now},
+            },
+            {"$set": {"runId": run_id}},
+        )
+        if result.matched_count != len(self.quota_ids):
+            self.release()
+            raise AIQuotaError("AI 租约已失效")
+
+    def renew(self) -> None:
+        now = _now()
+        result = self.database.ai_usage.update_many(
+            {
+                "_id": {"$in": self.quota_ids},
+                "token": self.token,
+                "expiresAt": {"$gt": now},
+            },
+            {"$set": {"expiresAt": now + timedelta(seconds=LEASE_SECONDS)}},
+        )
+        if result.matched_count != len(self.quota_ids):
+            raise AIQuotaError("AI 租约已失效")
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -78,21 +105,49 @@ def _claim_update(token: str, now: datetime) -> dict:
         "$set": {
             "token": token,
             "expiresAt": now + timedelta(seconds=LEASE_SECONDS),
-        }
+        },
+        "$unset": {"runId": ""},
     }
 
 
 def _claim(database, quota_id: str, token: str, now: datetime) -> bool:
     try:
+        current = database.ai_usage.find_one({"_id": quota_id})
+        run_id = current.get("runId") if current else None
+        if current and not _reclaimable(database, current, now):
+            return False
         row = database.ai_usage.find_one_and_update(
             _claim_query(quota_id, now),
             _claim_update(token, now),
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
+        if row and _active_owner(database, quota_id, run_id, now):
+            database.ai_usage.delete_one({"_id": quota_id, "token": token})
+            return False
         return row is not None
     except DuplicateKeyError:
         return False
+
+
+def _reclaimable(database, row: dict, now: datetime) -> bool:
+    if _aware(row.get("expiresAt", now)) > now:
+        return False
+    return not _active_owner(database, row["_id"], row.get("runId"), now)
+
+
+def _active_owner(database, quota_id: str, run_id: str | None, now: datetime) -> bool:
+    owners = [{"quotaIds": quota_id}]
+    if run_id:
+        owners.append({"id": run_id})
+    return database.agent_runs.find_one(
+        {"status": "active", "ownerExpiresAt": {"$gt": now}, "$or": owners},
+        {"_id": 1},
+    ) is not None
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _claim_scope(database, prefix: str, limit: int, token: str, now: datetime):

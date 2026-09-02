@@ -1,16 +1,21 @@
 <script setup>
 import {
   BookOpenCheck, FileSearch, Globe2, Link2, LoaderCircle, Search, Send,
-  Sparkles, WandSparkles, Square,
+  Sparkles, WandSparkles,
 } from "@lucide/vue";
+import { Chat } from "@ai-sdk/vue";
+import { DefaultChatTransport } from "ai";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../api.js";
+import { session } from "../session.js";
 import { candidatePrompt, parseCandidateResponse } from "../lib/writingCandidate.js";
 import WritingCandidateCard from "./WritingCandidateCard.vue";
 
 const props = defineProps({
   caseTitle: { type: String, required: true },
   caseDocument: { type: Object, required: true },
+  caseId: { type: String, required: true },
+  revision: { type: Number, required: true },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   selection: { type: Object, default: null },
@@ -39,7 +44,15 @@ const writingTarget = ref("");
 const candidateBusy = ref(0);
 const candidateSequence = ref(0);
 const generationOverride = ref(false);
-let controller;
+const chat = new Chat({
+  id: `workbench-ai-${props.caseId}`,
+  transport: new DefaultChatTransport({
+    api: `/api/cases/${encodeURIComponent(props.caseId)}/ai/chat`,
+    credentials: "same-origin",
+    headers: () => ({ "X-CSRF-Token": session.csrfToken }),
+  }),
+});
+let activeAnswer;
 const aiConfigured = computed(() => Boolean(aiSettings.value?.configured));
 const pendingCandidates = computed(() => messages.value.filter(
   (item) => item.candidate?.status === "pending",
@@ -52,6 +65,16 @@ const canSend = computed(() => {
     || Boolean(props.selection?.quote && props.selection?.quoteHash);
 });
 
+function textParts(message) {
+  return (message?.parts || []).filter((part) => part.type === "text")
+    .map((part) => part.text).join("");
+}
+
+function latestAssistant() {
+  const message = chat.messages.at(-1);
+  return message?.role === "assistant" ? message : null;
+}
+
 function selectWritingTarget(target) {
   if (sending.value || candidateBlocked.value) return;
   writingTarget.value = target;
@@ -59,26 +82,6 @@ function selectWritingTarget(target) {
 
 function usePrompt(tool) {
   draft.value = tool.prompt;
-}
-
-function nodeText(node) {
-  if (typeof node?.text === "string") return node.text;
-  return (node?.content || []).map(nodeText).join("");
-}
-
-function caseContext() {
-  const text = nodeText(props.caseDocument).slice(0, 12000);
-  return `当前案例标题：${props.caseTitle}\n当前案例正文：${text}`;
-}
-
-function requestMessages(request) {
-  const history = messages.value.filter((item) => item.content)
-    .map((item) => ({ role: item.role, content: item.content })).slice(-99);
-  const latest = history.at(-1);
-  latest.content = request.context
-    ? `${request.requestContent}\n\n当前正文修订号：${request.context.revision}`
-    : `${latest.content}\n\n${caseContext()}`;
-  return history;
 }
 
 function addAssistant() {
@@ -119,17 +122,6 @@ function finishCandidate(message, context, generation, target) {
   writingTarget.value = "";
 }
 
-function streamHandlers(message, context, generation, target) {
-  return {
-    onToken: (text) => { message.content += text; },
-    onDone: () => {
-      if (context) finishCandidate(message, context, generation, target);
-      message.pending = false;
-    },
-    onError: (text) => { message.error = text; message.pending = false; },
-  };
-}
-
 function candidateRequest() {
   const content = draft.value.trim();
   if (!content || sending.value || !aiConfigured.value || candidateBlocked.value) return null;
@@ -138,6 +130,19 @@ function candidateRequest() {
   if (writingTarget.value && !context) return null;
   const requestContent = context ? candidatePrompt(content, writingTarget.value, context) : content;
   return { content, context, generation, requestContent, target: writingTarget.value };
+}
+
+function serverContext(request) {
+  const source = request.context;
+  const section = source && {
+    heading: source.section,
+    from: source.sectionFrom,
+    to: source.sectionTo,
+    text: source.sectionText,
+  };
+  const selection = source && request.target === "selection"
+    ? { from: source.from, to: source.to, quote: source.quote } : null;
+  return { revision: props.revision, section, selection };
 }
 
 function beginRequest(request) {
@@ -150,15 +155,21 @@ function beginRequest(request) {
 
 async function streamAnswer(answer, request) {
   sending.value = true;
-  controller = new AbortController();
+  activeAnswer = answer;
   try {
-    await api.streamAI(
-      requestMessages(request), props.user.csrfToken,
-      streamHandlers(answer, request.context, request.generation, request.target), controller.signal,
-    );
-  } catch (reason) {
-    answer.error = reason.message || "AI 服务暂不可用";
-  } finally { answer.pending = false; sending.value = false; controller = null; }
+    await chat.sendMessage({ text: request.requestContent }, {
+      body: {
+        mode: request.target === "selection" ? "rewrite_selection" : request.target === "section" ? "rewrite_section" : "chat",
+        instruction: request.requestContent,
+        context: serverContext(request),
+      },
+    });
+    if (chat.status === "error") throw chat.error || new Error("AI 请求失败");
+    answer.content = textParts(latestAssistant());
+    if (request.context) finishCandidate(answer, request.context, request.generation, request.target);
+  } catch {
+    answer.error = "AI 服务暂不可用";
+  } finally { answer.pending = false; sending.value = false; activeAnswer = null; }
 }
 
 async function send() {
@@ -260,15 +271,6 @@ async function rollbackCandidate(candidate) {
   finally { candidateBusy.value = 0; }
 }
 
-function cancel() {
-  controller?.abort();
-  const answer = messages.value.at(-1);
-  if (answer?.role === "assistant" && answer.pending) answer.error = "已停止生成";
-  if (answer) answer.pending = false;
-  sending.value = false;
-  controller = null;
-}
-
 async function loadAISettings() {
   aiLoading.value = true;
   try { aiSettings.value = await api.aiSettings(); }
@@ -277,7 +279,10 @@ async function loadAISettings() {
 }
 
 onMounted(loadAISettings);
-onBeforeUnmount(() => controller?.abort());
+onBeforeUnmount(() => { void chat.stop(); });
+watch(() => textParts(latestAssistant()), (value) => {
+  if (activeAnswer && sending.value) activeAnswer.content = value;
+});
 watch(() => props.candidateInvalidation, expireCandidates);
 watch(() => props.selection, (value) => {
   if (!value && writingTarget.value === "selection") writingTarget.value = "";
@@ -339,8 +344,7 @@ watch(() => props.selection, (value) => {
     </div>
     <div class="assistant-composer">
       <textarea v-model="draft" aria-label="向 AI 提问" :placeholder="aiConfigured ? '输入问题' : '请先配置 AI 模型'" :disabled="!aiConfigured || aiLoading || sending || candidateBlocked" @keydown.enter.exact.prevent="send" />
-      <button v-if="sending" type="button" title="停止生成" aria-label="停止生成" @click="cancel"><Square :size="15" /></button>
-      <button v-else type="button" title="发送" aria-label="发送" :disabled="!canSend" @click="send"><Send :size="16" /></button>
+      <button type="button" title="发送" aria-label="发送" :disabled="!canSend" @click="send"><Send :size="16" /></button>
     </div>
   </section>
 </template>

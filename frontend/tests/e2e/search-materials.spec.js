@@ -61,15 +61,6 @@ async function assertOneSearchRequest(page, requests) {
   expect(queryRequests(requests, "思政")).toHaveLength(1);
 }
 
-async function assertAnonymousAI(page, chatRequests) {
-  const answer = page.getByRole("region", { name: "AI 回答" });
-  await expect(answer).toContainText("未生成 AI 解读（省流模式）");
-  expect(chatRequests).toEqual([]);
-  await page.getByRole("button", { name: "生成 AI 解读" }).click();
-  await expect(answer.getByRole("link", { name: "登录后生成 AI 回答" })).toBeVisible();
-  await expect(page.getByRole("list", { name: "AI 回答引用来源" })).toHaveCount(0);
-}
-
 async function assertGraph(page) {
   await page.getByRole("button", { name: "图谱", exact: true }).click();
   await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
@@ -79,29 +70,23 @@ async function assertGraph(page) {
   );
 }
 
-test("公共检索保留 AI 摘要、高级筛选和两种视图", async ({ page }) => {
+test("公共检索保留高级筛选和两种视图", async ({ page }) => {
   test.setTimeout(60_000);
   const searchRequests = watchRequests(page, "/api/search");
-  const chatRequests = watchRequests(page, "/api/ai/chat");
-  const settingsRequests = watchRequests(page, "/api/ai/settings");
   await waitForSearchReady(page, "");
   await page.goto("/#/search");
   await assertOneSearchRequest(page, searchRequests);
-  await assertAnonymousAI(page, chatRequests);
   await expect(page.getByRole("tab", { name: /知识/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toBeVisible();
   await assertGraph(page);
-  expect(settingsRequests).toEqual([]);
 });
 
-test("问题式检索自动进入 AI 解读流程", async ({ page }) => {
-  const chatRequests = watchRequests(page, "/api/ai/chat");
+test("问题式检索仍只请求检索接口", async ({ page }) => {
+  const requests = watchRequests(page, "/api/");
   await page.goto("/#/search");
   await search(page, "如何");
-  await expect(page.getByRole("link", { name: "登录后生成 AI 回答" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "生成 AI 解读" })).toHaveCount(0);
-  await expect(page.getByRole("list", { name: "AI 回答引用来源" })).toHaveCount(0);
-  expect(chatRequests).toEqual([]);
+  const allowed = new Set(["/api/auth/session", "/api/search"]);
+  expect(requests.filter((url) => !allowed.has(new URL(url).pathname))).toEqual([]);
 });
 
 async function assertCaseFacets(page) {
@@ -178,14 +163,6 @@ test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
   await page.getByRole("tab", { name: /案例/ }).click();
   const changedPayload = await (await changedScope).json();
   expect(changedPayload).toMatchObject({ page: 1, metadataIncluded: true });
-});
-
-test("登录但未配置 AI 时检索提供设置入口", async ({ page }) => {
-  await login(page);
-  await page.goto("/#/search?q=思政");
-  await page.getByRole("button", { name: "生成 AI 解读" }).click();
-  await expect(page.getByRole("region", { name: "AI 回答" })).toContainText("当前账号尚未配置可用模型");
-  await expect(page.getByRole("link", { name: "配置 AI 模型" })).toHaveAttribute("href", "#/ai-settings");
 });
 
 test("公共检索两种视图在手机端无横向溢出", async ({ page }) => {

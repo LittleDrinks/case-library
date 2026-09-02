@@ -261,15 +261,17 @@ async function selectionRequestScenario(page) {
   const { marker, created } = await openCandidateCase(page, "选区请求原文");
   const requests = [];
   page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().includes("/api/ai/chat")) {
+    if (request.method() === "POST" && request.url().includes(`/api/cases/${created.id}/ai/chat`)) {
       requests.push(request.postDataJSON());
     }
   });
   await selectParagraph(page, marker);
   await requestCandidate(page, "改写选区", "压缩这段表述");
-  const content = requests.at(-1).messages.at(-1).content;
+  const payload = requests.at(-1);
+  const content = payload.instruction;
   expect(content.split(marker)).toHaveLength(2);
-  expect(content).toContain(`当前正文修订号：${created.revision}`);
+  expect(payload.context.revision).toBe(created.revision);
+  expect(payload.context.selection.quote).toBe(marker);
   expect(content).toMatch(/选区锚点：revision=\d+; from=\d+; to=\d+; hash=[0-9a-f]{64}/);
 }
 
@@ -426,7 +428,7 @@ test("AI 修订保存与恢复查询均失败时本地回原并锁定到重载",
   withCandidateProvider(page, failCandidateRecoveryScenario)
 ));
 
-test("上游提前断流时工作台显示明确错误", async ({ page }) => {
+test("上游失败时工作台显示明确错误", async ({ page }) => {
   await login(page);
   try {
     await configureE2EProvider(page);

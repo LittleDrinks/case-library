@@ -59,6 +59,9 @@ class AgentRun(BaseModel):
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str | None = None
+    owner_id: str | None = Field(default=None, alias="ownerId", exclude=True)
+    owner_expires_at: datetime | None = Field(default=None, alias="ownerExpiresAt", exclude=True)
+    quota_ids: tuple[str, ...] = Field(default_factory=tuple, alias="quotaIds", exclude=True)
 
 
 class AgentThreadEvent(BaseModel):

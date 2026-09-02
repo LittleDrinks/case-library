@@ -4,15 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+
 MAX_PROMPT_CHARACTERS = 100000
-WORKBENCH_MODES = (
-    "chat",
-    "find_sources",
-    "rewrite_selection",
-    "rewrite_section",
-    "self_check",
-    "resolve_annotation",
-)
 REQUIRED_CONTEXT = {
     "rewrite_selection": ("selection", "section"),
     "rewrite_section": ("section",),
@@ -39,21 +32,6 @@ class ChatMessage(BaseModel):
 
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=20000)
-
-
-class ChatRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    messages: list[ChatMessage] = Field(min_length=1, max_length=100)
-
-    @model_validator(mode="after")
-    def validate_total_size(self):
-        if (
-            sum(len(message.content) for message in self.messages)
-            > MAX_PROMPT_CHARACTERS
-        ):
-            raise ValueError("AI 请求内容过长")
-        return self
 
 
 class WorkbenchSelection(BaseModel):
@@ -113,12 +91,8 @@ class WorkbenchChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal[
-        "chat",
-        "find_sources",
-        "rewrite_selection",
-        "rewrite_section",
-        "self_check",
-        "resolve_annotation",
+        "chat", "find_sources", "rewrite_selection", "rewrite_section",
+        "self_check", "resolve_annotation",
     ]
     instruction: str = Field(min_length=1, max_length=20000)
     history: list[ChatMessage] = Field(default_factory=list, max_length=100)

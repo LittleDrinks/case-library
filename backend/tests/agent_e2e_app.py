@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 import atexit
-import asyncio
 import os
 from threading import Event, Lock, Thread
 
 from pymongo import MongoClient
 from pymongo.monitoring import CommandListener
-from pydantic_ai import Agent
-from pydantic_ai.models.function import FunctionModel
-
 from app.core import database as database_module
 
 
-ANSWER = "隔离 FunctionModel 回答：已依据当前案例完成分析。"
 AGENT_COLLECTIONS = {"agent_messages", "agent_runs", "agent_thread_events"}
 TERMINAL_LABELS = ("assistant-message", "terminal-run", "terminal-event")
 
@@ -172,23 +167,10 @@ def _close_gate() -> None:
 atexit.register(_close_gate)
 
 
-async def _stream(_messages, _info):
-    delay = 0.25 if "并发" in str(_messages) else 0
-    if delay:
-        await asyncio.sleep(delay)
-    for character in ANSWER:
-        yield character
-
-
 def _application():
     from app.main import create_app
 
-    application = create_app()
-    model = FunctionModel(stream_function=_stream, model_name="function-e2e")
-    application.state.agent = Agent(
-        model=model, output_type=str, name="case-library-agent-e2e"
-    )
-    return application
+    return create_app()
 
 
 app = _application()
