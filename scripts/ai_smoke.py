@@ -4,12 +4,16 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import uuid
 from http.cookies import SimpleCookie
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, build_opener
 
 COOKIE_NAME = "case_library_session"
+RUN_TIMEOUT_SECONDS = 120
+RUN_POLL_SECONDS = 1
 
 
 class SmokeError(Exception):
@@ -46,38 +50,62 @@ def session_cookie(header: str | None) -> str:
     return f"{COOKIE_NAME}={value.value}"
 
 
-def open_chat(opener, base_url: str, csrf_token: str, cookie: str, case_id: str, thread_id: str):
+def _chat_request(base_url: str, csrf_token: str, cookie: str, case_id: str, thread_id: str, client_request_id: str):
     body = {
         "id": "ai-smoke",
         "trigger": "submit-message",
         "messages": [{
-            "id": "ai-smoke-message", "role": "user",
+            "id": client_request_id, "role": "user",
             "parts": [{"type": "text", "text": "只回复OK"}],
         }],
     }
-    data = json.dumps(body, ensure_ascii=False).encode()
-    request = Request(
+    return Request(
         base_url + f"/api/cases/{quote(case_id, safe='')}/agent/thread/{quote(thread_id, safe='')}/stream",
-        data=data,
+        data=json.dumps(body, ensure_ascii=False).encode(),
         headers={
             "Content-Type": "application/json",
             "X-CSRF-Token": csrf_token,
             "Cookie": cookie,
         },
     )
+
+
+def open_chat(
+    opener, base_url: str, csrf_token: str, cookie: str, case_id: str, thread_id: str,
+    client_request_id: str,
+):
     try:
+        request = _chat_request(
+            base_url, csrf_token, cookie, case_id, thread_id, client_request_id
+        )
         return opener.open(request, timeout=120)
     except (HTTPError, URLError, OSError) as error:
         raise SmokeError("chat request") from error
 
 
-def consume_chat(response) -> None:
+def drain_chat(response) -> None:
     try:
-        payload = response.read()
+        # Drain transport bytes only; persisted Run status owns completion.
+        response.read()
     except OSError as error:
-        raise SmokeError("chat stream") from error
-    if b"data: [DONE]" not in payload:
-        raise SmokeError("chat stream")
+        raise SmokeError("chat request") from error
+
+
+def wait_for_run(
+    opener, base_url: str, cookie: str, case_id: str, thread_id: str, client_request_id: str,
+) -> None:
+    path = f"/api/cases/{quote(case_id, safe='')}/agent/thread"
+    deadline = time.monotonic() + RUN_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        snapshot, _header = request_json(opener, base_url, path, cookie=cookie)
+        run = snapshot.get("latestRun") if isinstance(snapshot, dict) else None
+        if isinstance(run, dict) and run.get("clientRequestId") == client_request_id:
+            if run.get("status") == "completed":
+                return
+            if run.get("status") in {"failed", "cancelled"}:
+                raise SmokeError("chat run")
+        time.sleep(RUN_POLL_SECONDS)
+    raise SmokeError("chat run")
 
 
 def credentials() -> tuple[str, str]:
@@ -137,12 +165,16 @@ def run() -> None:
     base_url = os.environ.get("AI_SMOKE_APP_URL", "http://frontend").rstrip("/")
     username, password = credentials()
     opener = build_opener()
+    client_request_id = str(uuid.uuid4())
     csrf_token, cookie = login(opener, base_url, username, password)
     require_settings(opener, base_url, cookie)
     case_id, thread_id = select_thread(opener, base_url, cookie)
     print("AI smoke: chat", flush=True)
-    with open_chat(opener, base_url, csrf_token, cookie, case_id, thread_id) as response:
-        consume_chat(response)
+    with open_chat(
+        opener, base_url, csrf_token, cookie, case_id, thread_id, client_request_id
+    ) as response:
+        drain_chat(response)
+    wait_for_run(opener, base_url, cookie, case_id, thread_id, client_request_id)
     print("AI smoke: passed", flush=True)
 
 
