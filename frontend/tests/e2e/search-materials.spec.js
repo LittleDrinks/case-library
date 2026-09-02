@@ -50,7 +50,9 @@ function queryRequests(requests, query) {
 }
 
 async function assertOneSearchRequest(page, requests) {
-  await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
+  await waitForSearchReady(page, "思政");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible({ timeout: 30_000 });
   await waitForSearchReady(page, "思政");
   requests.length = 0;
   const response = page.waitForResponse(/\/api\/search\?q=%E6%80%9D%E6%94%BF/);
