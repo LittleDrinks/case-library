@@ -184,8 +184,10 @@ class _SilenceServer:
 
     def __exit__(self, *_args) -> None:
         self.httpd.release.set()
+        self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=2)
+        assert not self.thread.is_alive(), "serve_forever thread survived shutdown"
 
     @property
     def port(self) -> int:
@@ -209,3 +211,4 @@ def test_silent_provider_cleanup_meets_one_total_deadline() -> None:
         chunks, elapsed = asyncio.run(asyncio.wait_for(scenario(), GUARD_SECONDS))
     assert b"".join(chunks) == DRIP_CHUNK
     assert 0.9 * SILENCE_TIMEOUT <= elapsed < 1.3 * SILENCE_TIMEOUT
+    assert not server.thread.is_alive(), "server thread must exit with context"
