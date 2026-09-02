@@ -146,15 +146,18 @@ def _read(response) -> bytes:
 
 
 def _close_response(response) -> None:
+    try:
+        response.shutdown()
+    except RuntimeError:
+        pass
     response.close()
     response.release_conn()
 
 
 class _ProviderStream(httpx.AsyncByteStream):
-    def __init__(self, response, pool, timeout: float, limit: int, deadline: float) -> None:
+    def __init__(self, response, pool, limit: int, deadline: float) -> None:
         self.response = response
         self.pool = pool
-        self.timeout = timeout
         self.limit = limit
         self.deadline = deadline
         self.total = 0
@@ -202,7 +205,7 @@ class RestrictedProviderTransport(httpx.AsyncBaseTransport):
         target = _request_target(self.target, request)
         deadline = asyncio.get_running_loop().time() + self.timeout
         response, pool = await asyncio.to_thread(_open_response, target, request, body, self.timeout)
-        stream = _ProviderStream(response, pool, self.timeout, MAX_CHAT_BYTES, deadline)
+        stream = _ProviderStream(response, pool, MAX_CHAT_BYTES, deadline)
         return httpx.Response(response.status, headers=dict(response.headers), stream=stream, request=request)
 
     async def aclose(self) -> None:
