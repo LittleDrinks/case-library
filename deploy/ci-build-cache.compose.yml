@@ -3,132 +3,132 @@ services:
   agent-e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   agent-e2e-app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   agent-e2e-frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   agent-e2e-loser:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   backend-e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   backend-test:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-ai-provider:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-meilisearch:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-search-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   e2e-search-worker:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   frontend-test:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   meilisearch:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   mongo-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   production-config-check:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   search-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   search-worker:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
   searxng:
     build:
       cache_from:
-        - type=gha
+        - type=gha,version=1
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,version=1
