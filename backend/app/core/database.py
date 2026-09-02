@@ -153,6 +153,13 @@ def _initialize_agent_runs(database: Database) -> None:
         partialFilterExpression={"clientRequestId": {"$type": "string"}},
         name="agent_one_run_per_client_request",
     )
+    _initialize_agent_run_quota_index(database)
+
+
+def _initialize_agent_run_quota_index(database: Database) -> None:
+    database.agent_runs.create_index(
+        [("status", ASCENDING), ("quotaIds", ASCENDING), ("ownerExpiresAt", ASCENDING)]
+    )
 
 
 def _initialize_agent_events(database: Database) -> None:

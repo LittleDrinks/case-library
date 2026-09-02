@@ -80,3 +80,22 @@ def test_expired_lease_is_not_reclaimed_until_run_owner_expires(monkeypatch) -> 
         {"id": "run-1"}, {"$set": {"ownerExpiresAt": now - timedelta(seconds=1)}}
     )
     assert quota._claim(store, quota_id, "new", now)
+
+
+def test_missing_ttl_rows_stay_fenced_by_an_active_run(monkeypatch) -> None:
+    store = database()
+    monkeypatch.setattr(quota, "USER_CHAT_STREAMS", 1)
+    monkeypatch.setattr(quota, "PROVIDER_CHAT_STREAMS", 1)
+    monkeypatch.setattr(quota, "GLOBAL_CHAT_STREAMS", 1)
+    lease = quota.acquire_chat_lease(store, "user-1", "https://one.example/v1")
+    now = datetime.now(UTC)
+    store.agent_runs.insert_one({
+        "id": "run-1", "status": "active", "ownerId": "worker-a",
+        "ownerExpiresAt": now + timedelta(seconds=10),
+        "quotaIds": list(lease.quota_ids),
+    })
+    lease.bind_run("run-1")
+    store.ai_usage.delete_many({"_id": {"$in": lease.quota_ids}})
+
+    with pytest.raises(quota.AIQuotaError, match="AI 服务繁忙"):
+        quota.acquire_chat_lease(store, "user-1", "https://one.example/v1")
