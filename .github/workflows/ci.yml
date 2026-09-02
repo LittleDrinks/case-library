@@ -55,7 +55,7 @@ jobs:
       - name: gha roundtrip probe (temp)
         run: |
           set -e
-          prev=$(docker buildx inspect --format '{{.Name}}')
+          prev=$(docker buildx inspect | sed -n 's/^Name: *//p')
           docker compose --env-file .env.example --profile e2e build e2e-app
           docker buildx create --name verify --driver docker-container --bootstrap
           docker buildx use verify
