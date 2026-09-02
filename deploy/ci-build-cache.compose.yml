@@ -1,0 +1,134 @@
+# CI-only override: BuildKit GitHub Actions layer cache for all images built in CI flows.
+services:
+  agent-e2e:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  agent-e2e-app:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  agent-e2e-frontend:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  agent-e2e-loser:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  app:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  backend-e2e:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  backend-test:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-ai-provider:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-app:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-frontend:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-meilisearch:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-search-init:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  e2e-search-worker:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  frontend:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  frontend-test:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  meilisearch:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  mongo-init:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  production-config-check:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  search-init:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  search-worker:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
+  searxng:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max

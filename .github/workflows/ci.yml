@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  COMPOSE_FILE: docker-compose.yml:deploy/ci-build-cache.compose.yml
+
 jobs:
   config:
     name: Config
