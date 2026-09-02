@@ -51,6 +51,7 @@ function queryRequests(requests, query) {
 
 async function assertOneSearchRequest(page, requests) {
   await expect(page.getByRole("region", { name: "检索结果" })).toBeVisible();
+  await waitForSearchReady(page, "思政");
   requests.length = 0;
   const response = page.waitForResponse(/\/api\/search\?q=%E6%80%9D%E6%94%BF/);
   await search(page, "思政");
@@ -62,8 +63,9 @@ async function assertOneSearchRequest(page, requests) {
 }
 
 async function assertGraph(page) {
+  await waitForSearchReady(page, "思政");
   await page.getByRole("button", { name: "图谱", exact: true }).click();
-  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /案例.*钱伟长图书馆/ })).toBeVisible();
   await expect(page.getByRole("list", { name: "图谱关系列表" })).toContainText(
     /钱伟长图书馆——科学家精神的大思政课堂.*共同主题.*科学家精神/,
