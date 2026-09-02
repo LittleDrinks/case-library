@@ -1,134 +1,134 @@
-# CI-only override: BuildKit GitHub Actions layer cache for all images built in CI flows.
+# CI-only override: BuildKit gha layer cache, one scope per service (v2 index is replace-per-scope).
 services:
   agent-e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=agent-e2e
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=agent-e2e
   agent-e2e-app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=agent-e2e-app
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=agent-e2e-app
   agent-e2e-frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=agent-e2e-frontend
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=agent-e2e-frontend
   agent-e2e-loser:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=agent-e2e-loser
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=agent-e2e-loser
   app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=app
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=app
   backend-e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=backend-e2e
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=backend-e2e
   backend-test:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=backend-test
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=backend-test
   e2e:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e
   e2e-ai-provider:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-ai-provider
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-ai-provider
   e2e-app:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-app
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-app
   e2e-frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-frontend
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-frontend
   e2e-meilisearch:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-meilisearch
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-meilisearch
   e2e-search-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-search-init
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-search-init
   e2e-search-worker:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=e2e-search-worker
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=e2e-search-worker
   frontend:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=frontend
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=frontend
   frontend-test:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=frontend-test
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=frontend-test
   meilisearch:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=meilisearch
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=meilisearch
   mongo-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=mongo-init
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=mongo-init
   production-config-check:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=production-config-check
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=production-config-check
   search-init:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=search-init
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=search-init
   search-worker:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=search-worker
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=search-worker
   searxng:
     build:
       cache_from:
-        - type=gha
+        - type=gha,scope=searxng
       cache_to:
-        - type=gha,mode=max
+        - type=gha,mode=max,scope=searxng
