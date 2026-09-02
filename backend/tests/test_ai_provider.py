@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import httpx2
@@ -89,3 +90,57 @@ def test_open_model_constructs_an_openai_chat_model(monkeypatch) -> None:
 def _response(_request):
     body = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
     return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+
+DRIP_SECONDS = 0.02
+DEADLINE_TEST_TIMEOUT = 0.3
+GUARD_SECONDS = 5.0
+
+
+class _SlowDripResponse:
+    status = 200
+    headers = {"content-type": "text/event-stream"}
+
+    def __init__(self) -> None:
+        self.reads = 0
+        self.closed = False
+
+    def read1(self, _size: int) -> bytes:
+        self.reads += 1
+        time.sleep(DRIP_SECONDS)
+        return b"01234567"
+
+    def close(self) -> None:
+        self.closed = True
+
+    def release_conn(self) -> None:
+        return None
+
+
+class _SlowDripPool:
+    def __init__(self) -> None:
+        self.response = _SlowDripResponse()
+
+    def request(self, *_args, **_kwargs) -> _SlowDripResponse:
+        return self.response
+
+    def close(self) -> None:
+        return None
+
+
+def test_stream_total_deadline_stops_slow_drip(monkeypatch) -> None:
+    pool = _SlowDripPool()
+    monkeypatch.setattr(transport, "_provider_pool", lambda *_args: pool)
+    model_transport = transport.RestrictedProviderTransport(
+        "http://127.0.0.1:9/v1", DEADLINE_TEST_TIMEOUT, True
+    )
+
+    async def scenario() -> None:
+        request = httpx2.Request("POST", "http://127.0.0.1:9/v1/chat/completions", content=b"{}")
+        response = await model_transport.handle_async_request(request)
+        with pytest.raises(asyncio.TimeoutError):
+            async for _chunk in response.aiter_bytes():
+                pass
+        assert pool.response.closed and pool.response.reads > 0
+
+    asyncio.run(asyncio.wait_for(scenario(), GUARD_SECONDS))
