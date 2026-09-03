@@ -47,8 +47,8 @@ def _target(document: dict, paragraph_index: int) -> ArtifactTarget:
     return ArtifactTarget(paragraphIndex=paragraph_index, quote=rows[paragraph_index]["quote"])
 
 
-def _current_case(database: Database, case_id: str) -> dict:
-    case = database.cases.find_one({"id": case_id})
+def _current_case(database: Database, case_id: str, session=None) -> dict:
+    case = database.cases.find_one({"id": case_id}, session=session)
     if not case:
         raise CaseError(404, "案例不存在")
     return case
@@ -94,7 +94,7 @@ def decide_artifact(
 
 def _decide(database, case_id, artifact_id, user, decision, session):
     artifact = _existing_artifact(database, case_id, artifact_id, session)
-    case = _current_case(database, case_id)
+    case = _current_case(database, case_id, session)
     if artifact.status != "pending":
         return artifact, case
     _verify_writer(case, user)

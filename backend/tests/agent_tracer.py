@@ -66,11 +66,14 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
 
 
 def tracer_model(recorder: Callable | None = None) -> FunctionModel:
-    """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。"""
+    """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
+
+    recorder 每次模型请求收到 (messages, info)，供测试断言消息与 instructions 通道。
+    """
 
     async def stream(messages, info):
         if recorder:
-            recorder(messages)
+            recorder(messages, info)
         async for delta in _stream_deltas(tracer_response(messages, info)):
             yield delta
 

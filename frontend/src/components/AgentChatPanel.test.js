@@ -134,3 +134,76 @@ function tracerSnapshot() {
     latestRun: { id: "run-1", status: "completed" },
   };
 }
+
+it("renders the tracer skill load, sources and pending artifact card", async () => {
+  api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
+  expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("科学家精神案例");
+  const artifact = wrapper.get('[data-testid="agent-artifact"]');
+  expect(artifact.attributes("data-artifact-status")).toBe("pending");
+  expect(artifact.text()).toContain("原文：第二段原文");
+  expect(artifact.text()).toContain("替换为：替换后的第二段");
+  expect(wrapper.text()).toContain("已生成单段修订候选");
+});
+
+function decideResult(decision) {
+  return {
+    artifact: { status: decision },
+    case: decision === "accepted" ? { id: "case-1", revision: 2, document: { type: "doc", content: [] } } : null,
+  };
+}
+
+function mountWithDecision(decision) {
+  const snapshot = tracerSnapshot();
+  api.agentThread.mockResolvedValueOnce(structuredClone(snapshot)).mockResolvedValue(
+    structuredClone({ ...snapshot, artifacts: tracerArtifacts(decision) }),
+  );
+  api.agentDecide.mockResolvedValue(decideResult(decision));
+  return mountPanel();
+}
+
+it("accepting the artifact calls the decision API, emits the revised case and reloads", async () => {
+  const wrapper = mountWithDecision("accepted");
+  await flushPromises();
+
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "accepted", "csrf");
+  expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ id: "case-1", revision: 2 });
+  expect(api.agentThread).toHaveBeenCalledTimes(2);
+  expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("accepted");
+});
+
+it("rejecting the artifact records the decision without touching the case", async () => {
+  const wrapper = mountWithDecision("rejected");
+  await flushPromises();
+
+  await wrapper.get('[data-testid="agent-reject"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "rejected", "csrf");
+  expect(wrapper.emitted("case-revised")).toBeUndefined();
+  expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("rejected");
+  expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
+});
+
+it("restores skill load, sources and decided artifact from a reloaded thread snapshot", async () => {
+  api.agentThread.mockResolvedValue(
+    structuredClone({ ...tracerSnapshot(), artifacts: tracerArtifacts("accepted") }),
+  );
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
+  expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("以科学家精神为例");
+  const artifact = wrapper.get('[data-testid="agent-artifact"]');
+  expect(artifact.attributes("data-artifact-status")).toBe("accepted");
+  expect(artifact.text()).toContain("状态：已接受");
+  expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
+});

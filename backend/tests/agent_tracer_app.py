@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.main import create_app
 from app.modules.agent.runtime import agent
-from app.modules.agent.tracer import tracer_model
+from tests.agent_tracer import tracer_model
 
 _model_override = agent.override(model=tracer_model())
 _model_override.__enter__()

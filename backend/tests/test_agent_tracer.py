@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
 from app.modules.agent.resources import CASE_EDIT_SKILL
-from app.modules.agent.tracer import REPLACEMENT, SKILL_ID, tracer_model
+from tests.agent_tracer import REPLACEMENT, SKILL_ID, tracer_model
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
@@ -157,14 +157,20 @@ def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_cas
 def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     calls: list = []
 
+    def recorder(messages, info):
+        calls.append((messages, info.instructions or ""))
+
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(calls.append))
+    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder))
     assert response.status_code == 200, response.text
-    flattened = [str(part) for message in calls[0] for part in message.parts]
+    first_messages, first_instructions = calls[0]
+    flattened = [str(part) for message in first_messages for part in message.parts]
     assert not any(SKILL_BODY_MARK in text for text in flattened)
-    later = [str(part) for message in calls[-1] for part in message.parts]
-    assert any(SKILL_BODY_MARK in text for text in later)
+    assert "load_capability" in first_instructions
+    later_messages = [str(part) for message in calls[-1][0] for part in message.parts]
+    assert any(SKILL_BODY_MARK in text for text in later_messages)
+    assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
     assert len(calls) >= 3
 
 
