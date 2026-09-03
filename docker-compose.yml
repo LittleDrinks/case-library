@@ -45,7 +45,7 @@ services:
       - database
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 30
       start_period: 10s
@@ -66,7 +66,7 @@ services:
       - database
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 30
       start_period: 10s
@@ -87,7 +87,7 @@ services:
       - database
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 30
       start_period: 10s
@@ -130,7 +130,7 @@ services:
       - restore_test
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 30
       start_period: 10s
@@ -520,7 +520,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 18
       start_period: 10s
@@ -577,7 +577,7 @@ services:
     command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 18
       start_period: 10s
@@ -632,7 +632,7 @@ services:
     command: ["python", "-m", "uvicorn", "tests.agent_e2e_app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 18
       start_period: 10s
@@ -649,7 +649,7 @@ services:
         aliases: ["agent-frontend"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 12
     restart: "no"
@@ -669,7 +669,7 @@ services:
         aliases: ["agent-gateway"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 12
     restart: "no"
@@ -698,7 +698,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
-      interval: 5s
+      interval: 1s
       timeout: 4s
       retries: 12
     networks:

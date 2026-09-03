@@ -4,6 +4,7 @@ set -eu
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 runner="$project_dir/scripts/run-e2e.sh"
 makefile="$project_dir/Makefile"
+workflow="$project_dir/.github/workflows/ci.yml"
 playwright_config="$project_dir/frontend/playwright.config.js"
 compose_file="$project_dir/docker-compose.yml"
 pytest_config="$project_dir/backend/tests/pytest.ini"
@@ -23,26 +24,22 @@ matching_line() {
   printf '%s\n' "$1" | grep -n "$2" | cut -d: -f1
 }
 
-exact_line() {
-  grep -nFx "$2" "$1" | cut -d: -f1
-}
-
 require_line 'clear_e2e_bucket() {'
 require_line "  $backend_e2e_command python tests/clear_e2e_bucket.py"
-require_line 'clear_e2e_bucket'
 require_line 'compose up -d mongo1 mongo2 mongo3'
-require_line 'compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e'
+require_line 'browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"'
+require_line 'backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"'
+require_line 'compose build $build_services'
 require_line 'compose up -d --wait mongo-init'
-require_line '  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker'
+require_line '  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker'
+require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway'
 require_line '  drop_test_database "$database"'
-require_line '  compose --profile e2e run --rm --no-deps e2e-search-init'
-require_line '  compose --profile e2e up -d --force-recreate --no-deps e2e-search-worker'
-require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app'
-require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend'
+require_line '  compose --profile e2e up -d --wait e2e-app'
+require_line '  compose --profile e2e up -d --wait e2e-frontend'
 require_line 'preclean_e2e_resources'
 e2e_runner_lines="$(cat "$runner")"
 mongo_bg_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d mongo1 mongo2 mongo3' | cut -d: -f1)
-build_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e' | cut -d: -f1)
+build_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose build $build_services' | cut -d: -f1)
 mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init' | cut -d: -f1)
 test "$mongo_bg_line" -lt "$build_line" || {
   echo "Mongo replica set must boot in the background while images build" >&2
@@ -64,7 +61,11 @@ require_line 'run_browser_tests() {'
 require_line '  set -- compose --profile e2e run --rm --no-deps \'
 require_line '    -v "$artifact_dir:/app/test-results" e2e'
 require_line '  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"'
-require_line 'test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e'
+require_line 'run_backend_suite() {'
+require_line '  compose --profile e2e run --rm --no-deps backend-e2e'
+require_line 'run_browser_suite() {'
+require_line '  backend) run_backend_suite ;;'
+require_line '  browser) run_browser_suite ;;'
 require_line '  original_status=$?'
 require_line '  test "$original_status" -ne 0 && exit "$original_status"'
 require_line '  exit "$cleanup_status"'
@@ -74,13 +75,31 @@ require_line "trap 'exit 143' TERM"
 grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
 grep -q '^test-backend:' "$makefile"
 grep -q '^test-frontend:' "$makefile"
+grep -q '^backend-e2e:' "$makefile"
 grep -q '^e2e-spec:' "$makefile"
 make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
+make -C "$project_dir" -n backend-e2e | grep -Fx 'scripts/run-e2e.sh --backend'
 make -C "$project_dir" -n e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js | \
   grep -Fx 'scripts/run-e2e.sh "frontend/tests/e2e/homepage.spec.js"'
 grep -Fq 'artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"' "$runner"
 grep -Fq 'frontend/tests/e2e/*.spec.js' "$runner"
 grep -Fq 'tests/e2e/*.spec.js' "$runner"
+test "$(grep -Fc 'compose --profile e2e run --rm --no-deps backend-e2e' "$runner")" -eq 2
+! grep -Fq 'reset_browser_state' "$runner"
+stop_lines="$(grep 'compose .* stop ' "$runner")"
+test "$(printf '%s\n' "$stop_lines" | grep -c ' stop -t 1 ')" -eq 2
+
+backend_job="$(sed -n '/^  backend-e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
+browser_job="$(sed -n '/^  e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
+grep -Fqx 'concurrency:' "$workflow"
+grep -Fqx '  group: ${{ github.workflow }}-${{ github.ref }}' "$workflow"
+grep -Fqx '  cancel-in-progress: true' "$workflow"
+printf '%s\n' "$backend_job" | grep -Fq '    name: Backend E2E'
+printf '%s\n' "$backend_job" | grep -Fq '        run: make backend-e2e'
+! printf '%s\n' "$backend_job" | grep -Fq '    needs:'
+printf '%s\n' "$browser_job" | grep -Fq '    name: E2E'
+printf '%s\n' "$browser_job" | grep -Fq '        run: make e2e'
+! printf '%s\n' "$browser_job" | grep -Fq '    needs:'
 grep -Fq 'outputDir: "test-results"' "$playwright_config"
 grep -Fq '["json", { outputFile: "test-results/report.json" }]' "$playwright_config"
 grep -Fq 'trace: "retain-on-failure"' "$playwright_config"
@@ -91,6 +110,11 @@ test ! -e "$project_dir/frontend/playwright.agent.config.js"
 e2e_config="$(
   docker compose --env-file "$project_dir/.env.example" --profile e2e config --format json
 )"
+for service in mongo1 mongo2 mongo3 minio e2e-app agent-e2e-app agent-e2e-loser \
+  agent-e2e-frontend agent-e2e-gateway e2e-frontend; do
+  printf '%s' "$e2e_config" | jq -e --arg service "$service" \
+    '.services[$service].healthcheck.interval == "1s"' >/dev/null
+done
 printf '%s' "$e2e_config" | jq -e \
   '.services["backend-e2e"].command == [
     "python", "-m", "pytest", "-q", "-c", "tests/pytest.ini",
@@ -137,35 +161,17 @@ if grep -q 'playwright install' "$project_dir/deploy/e2e.Dockerfile"; then
   exit 1
 fi
 
-clear_line="$(exact_line "$runner" 'clear_e2e_bucket')"
-tests_line="$(grep -nFx 'test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e' \
-  "$runner" | cut -d: -f1)"
-test "$clear_line" -lt "$tests_line" || {
-  echo "E2E bucket must be cleared before tests run" >&2
-  exit 1
-}
+backend_suite="$(sed -n '/^run_backend_suite() {/,/^}/p' "$runner")"
+browser_suite="$(sed -n '/^run_browser_suite() {/,/^}/p' "$runner")"
+printf '%s\n' "$backend_suite" | grep -Fq '  clear_e2e_bucket'
+printf '%s\n' "$backend_suite" | grep -Fq '  start_agent_app'
+printf '%s\n' "$backend_suite" | grep -Fq '  compose --profile e2e run --rm --no-deps backend-e2e'
+printf '%s\n' "$browser_suite" | grep -Fq '  clear_e2e_bucket'
+printf '%s\n' "$browser_suite" | grep -Fq '  run_browser_tests'
+printf '%s\n' "$browser_suite" | grep -Fq '  test -n "$browser_spec" || run_agent_browser_tests'
+! printf '%s\n' "$browser_suite" | grep -Fq 'backend-e2e'
+! printf '%s\n' "$browser_suite" | grep -Fq 'drop_test_database'
 
-reset_line="$(exact_line "$runner" 'reset_browser_state')"
-browser_line="$(exact_line "$runner" 'run_browser_tests')"
-test "$tests_line" -lt "$reset_line" && test "$reset_line" -lt "$browser_line" || {
-  echo "E2E app state must reset between backend and browser suites" >&2
-  exit 1
-}
-
-reset_body="$(sed -n '/^reset_browser_state() {/,/^}/p' "$runner")"
-stop_line="$(matching_line "$reset_body" 'stop .*e2e-search-worker')"
-drop_line="$(matching_line "$reset_body" 'drop_test_database')"
-init_line="$(matching_line "$reset_body" '^  rebuild_search$')"
-worker_line="$(matching_line "$reset_body" 'up .*e2e-search-worker')"
-app_line="$(matching_line "$reset_body" 'up .*e2e-app')"
-frontend_line="$(matching_line "$reset_body" 'up .*e2e-frontend')"
-test "$stop_line" -lt "$drop_line"
-test "$drop_line" -lt "$init_line"
-test "$init_line" -lt "$worker_line"
-test "$worker_line" -lt "$app_line"
-test "$app_line" -lt "$frontend_line"
-
-test "$(grep -c '^rebuild_search$' "$runner" || true)" -eq 0
 grep -q '^compose_project="case-library-v2"$' "$runner"
 grep -Fq 'docker compose --project-name "$compose_project"' "$runner"
 grep -Fq 'e2e_meili_volume="${compose_project}_e2e_meili_data"' "$runner"
