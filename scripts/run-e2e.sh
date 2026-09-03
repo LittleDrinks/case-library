@@ -10,11 +10,17 @@ e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-wo
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
+suite=browser
+if test "${1:-}" = "--backend"; then
+  suite=backend
+  shift
+fi
 test "$#" -le 1 || {
-  echo "Usage: scripts/run-e2e.sh [frontend/tests/e2e/<name>.spec.js]" >&2
+  echo "Usage: scripts/run-e2e.sh [--backend | frontend/tests/e2e/<name>.spec.js]" >&2
   exit 2
 }
 requested_spec="${1:-}"
+test "$suite" = browser || test -z "$requested_spec" || exit 2
 artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"
 mkdir -p "$artifact_dir"
 
@@ -34,6 +40,12 @@ resolve_spec() {
 
 browser_spec=""
 test -z "$requested_spec" || browser_spec="$(resolve_spec "$requested_spec")"
+browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"
+backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"
+case "$suite" in
+  backend) build_services="$backend_build_services" ;;
+  browser) build_services="$browser_build_services" ;;
+esac
 
 compose() {
   docker compose --project-name "$compose_project" \
@@ -42,10 +54,6 @@ compose() {
 
 clear_e2e_bucket() {
   compose --profile e2e run --rm --no-deps backend-e2e python tests/clear_e2e_bucket.py
-}
-
-rebuild_search() {
-  compose --profile e2e run --rm --no-deps e2e-search-init
 }
 
 verify_test_database_absent() {
@@ -62,8 +70,8 @@ drop_and_verify_database() {
 }
 
 stop_e2e_runtime() {
-  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
-  compose --profile e2e stop agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
+  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker
+  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
 }
 
 remove_e2e_services() {
@@ -96,18 +104,6 @@ preclean_e2e_resources() {
   verify_e2e_resources_absent
 }
 
-reset_browser_state() {
-  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
-  compose --profile e2e stop agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
-  clear_e2e_bucket
-  drop_test_database "$database"
-  rebuild_search
-  compose --profile e2e up -d --force-recreate --no-deps e2e-search-worker
-  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app
-  start_agent_app
-  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend
-}
-
 start_agent_app() {
   compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser
 }
@@ -131,6 +127,21 @@ run_agent_browser_tests() {
   "$@"
 }
 
+run_backend_suite() {
+  compose --profile e2e up -d --wait e2e-app
+  start_agent_app
+  clear_e2e_bucket
+  compose --profile e2e run --rm --no-deps backend-e2e
+}
+
+run_browser_suite() {
+  compose --profile e2e up -d --wait e2e-frontend
+  start_agent_app
+  clear_e2e_bucket
+  run_browser_tests
+  test -n "$browser_spec" || run_agent_browser_tests
+}
+
 cleanup() {
   original_status=$?
   trap - EXIT INT TERM
@@ -151,13 +162,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 preclean_e2e_resources
 compose up -d mongo1 mongo2 mongo3
-compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e
+compose build $build_services
 compose up -d --wait mongo-init
 drop_and_verify_database
-compose --profile e2e up -d --wait e2e-frontend
-start_agent_app
-clear_e2e_bucket
-test -n "$browser_spec" || compose --profile e2e run --rm --no-deps backend-e2e
-reset_browser_state
-run_browser_tests
-test -n "$browser_spec" || run_agent_browser_tests
+case "$suite" in
+  backend) run_backend_suite ;;
+  browser) run_browser_suite ;;
+esac

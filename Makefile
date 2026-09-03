@@ -7,7 +7,7 @@ export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 COMPOSE := docker compose
 E2E_SPEC ?= $(SPEC)
 
-.PHONY: up down logs config config-contract release-contract test test-backend test-frontend check-function-lines check-backend-function-lines check-frontend-function-lines e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up down logs config config-contract release-contract test test-backend test-frontend check-function-lines check-backend-function-lines check-frontend-function-lines backend-e2e e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
@@ -51,6 +51,9 @@ check-backend-function-lines:
 
 check-frontend-function-lines:
 	$(COMPOSE) --env-file .env.example --profile test run --build --rm frontend-test npm run check:function-lines
+
+backend-e2e:
+	scripts/run-e2e.sh --backend
 
 e2e:
 	scripts/run-e2e.sh $(if $(strip $(E2E_SPEC)),"$(E2E_SPEC)")
