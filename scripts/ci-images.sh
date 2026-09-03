@@ -31,7 +31,9 @@ service_build_spec() {
 }
 
 service_image_name() {
-  service_field "$1" '.services[$s].image'
+  local image
+  image="$(service_field "$1" '.services[$s].image // empty')"
+  printf '%s' "${image:-$compose_project-$1}"
 }
 
 image_key() {
