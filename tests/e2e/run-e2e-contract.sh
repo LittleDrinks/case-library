@@ -33,7 +33,7 @@ require_line 'browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-p
 require_line 'backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"'
 require_line 'compose up -d --wait mongo-init'
 require_line '  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker'
-require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway'
+require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer-app agent-tracer-frontend agent-tracer-gateway'
 require_line '  drop_test_database "$database"'
 require_line '  compose --profile e2e up -d --wait e2e-app'
 require_line '  compose --profile e2e up -d --wait e2e-frontend'

@@ -5,7 +5,7 @@ import { api } from "../api.js";
 import { session } from "../session.js";
 
 vi.mock("../api.js", () => ({
-  api: { agentThread: vi.fn(), aiSettings: vi.fn() },
+  api: { agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn() },
 }));
 
 const snapshot = {
@@ -94,3 +94,43 @@ it("shows SDK request errors without a client stop or reconnect control", async 
   expect(wrapper.get('[role="alert"]').text()).toContain("运行任务无法创建");
   expect(wrapper.find('[title="停止生成"]').exists()).toBe(false);
 });
+
+function tracerMessages() {
+  return [{
+    id: "message-user", role: "user", metadata: {},
+    parts: [
+      { type: "text", text: "请结合平台资料修订第2段" },
+      { type: "data-skill", data: { skillId: "case-edit-skill" } },
+    ],
+  }, {
+    id: "message-assistant", role: "assistant", metadata: {},
+    parts: [
+      { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "case-edit-skill" }, output: { instructions: "SKILL" } },
+      { type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" }, output: { sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }] } },
+      { type: "tool-propose_revision", toolCallId: "t3", state: "output-available", input: {}, output: { artifactId: "artifact-9" } },
+      { type: "text", text: "已生成单段修订候选" },
+    ],
+  }];
+}
+
+function tracerArtifacts(status) {
+  return [{
+    id: "artifact-9", caseId: "case-1", threadId: "thread-tracer", runId: "run-1",
+    status, baseRevision: 1,
+    target: { paragraphIndex: 1, quote: "第二段原文" },
+    replacement: "替换后的第二段", reason: "补充评价依据",
+    sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }],
+  }];
+}
+
+function tracerSnapshot() {
+  return {
+    id: "thread-tracer",
+    caseId: "case-1",
+    eventSeq: 7,
+    messages: tracerMessages(),
+    artifacts: tracerArtifacts("pending"),
+    activeRun: null,
+    latestRun: { id: "run-1", status: "completed" },
+  };
+}

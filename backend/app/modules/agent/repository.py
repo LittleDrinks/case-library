@@ -9,6 +9,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.ids import new_id
 from app.modules.agent.models import (
+    AgentArtifact,
     AgentMessage,
     AgentRun,
     AgentSnapshot,
@@ -112,9 +113,16 @@ class AgentRepository:
             case_id=current.case_id,
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
+            artifacts=self.artifacts(current.id, session),
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
         )
+
+    def artifacts(self, thread_id: str, session=None) -> list[AgentArtifact]:
+        rows = self.database.agent_artifacts.find(
+            {"threadId": thread_id}, session=session
+        ).sort([("createdAt", ASCENDING), ("id", ASCENDING)])
+        return [_model_view(row, AgentArtifact) for row in rows]
 
     def start_run(
         self,
@@ -209,12 +217,19 @@ class AgentRepository:
             raise ThreadNotFoundError
         return thread["nextMessageSeq"]
 
-    def complete_run(self, run_id: str, assistant: AgentMessage, owner_id: str | None = None) -> bool:
+    def complete_run(
+        self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
+        resources: list[dict[str, str]] | None = None,
+    ) -> bool:
         return _transaction(
-            self.database, lambda session: self._complete_run(run_id, assistant, session, owner_id)
+            self.database,
+            lambda session: self._complete_run(
+                run_id, assistant, session, owner_id, resources
+            ),
         )
 
-    def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None) -> bool:
+    def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
+                      resources=None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
                 _active_query(run_id, owner_id), session=session
@@ -225,7 +240,7 @@ class AgentRepository:
             return False
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
-        self._finish_completed(run, assistant, session, owner_id)
+        self._finish_completed(run, assistant, session, owner_id, resources)
         return True
 
     def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
@@ -239,8 +254,11 @@ class AgentRepository:
         ) is None:
             raise RuntimeError("AI 运行已结束")
 
-    def _finish_completed(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
-        fields = {"assistantMessageId": assistant.id}
+    def _finish_completed(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None,
+                          resources=None) -> None:
+        fields: dict = {"assistantMessageId": assistant.id}
+        if resources is not None:
+            fields["resources"] = resources
         if not self._finish_record(run.id, "completed", fields, session, owner_id):
             raise RuntimeError("AI 运行已结束")
         self._clear_active(run.thread_id, run.id, session)
@@ -485,3 +503,8 @@ def _thread_event(
 def _transaction(database, callback):
     with database.client.start_session() as session:
         return session.with_transaction(callback)
+
+
+def transaction(database, callback):
+    """在真实 replica set 事务中执行回调；测试替身下等价于直接调用。"""
+    return _transaction(database, callback)

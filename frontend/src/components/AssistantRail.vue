@@ -26,7 +26,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "candidate-previews", "annotations",
+  "case-revised", "candidate-previews", "annotations",
 ]);
 
 const tabs = [
@@ -78,6 +78,7 @@ function select(tab) {
     <AgentChatPanel
       v-else-if="active === 'chat'"
       :case-record="caseRecord"
+      @case-revised="emit('case-revised', $event)"
     />
 
     <CommentPanel
