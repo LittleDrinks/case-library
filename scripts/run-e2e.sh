@@ -40,11 +40,11 @@ resolve_spec() {
 
 browser_spec=""
 test -z "$requested_spec" || browser_spec="$(resolve_spec "$requested_spec")"
-browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"
-backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"
+browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"
+backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"
 case "$suite" in
-  backend) build_services="$backend_build_services" ;;
-  browser) build_services="$browser_build_services" ;;
+  backend) ensure_services="$backend_ensure_services" ;;
+  browser) ensure_services="$browser_ensure_services" ;;
 esac
 
 compose() {
@@ -161,8 +161,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 preclean_e2e_resources
+scripts/ci-images.sh ensure mongo-init production-config-check
 compose up -d mongo1 mongo2 mongo3
-compose build $build_services
+scripts/ci-images.sh ensure $ensure_services
 compose up -d --wait mongo-init
 drop_and_verify_database
 case "$suite" in
