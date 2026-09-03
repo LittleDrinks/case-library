@@ -54,7 +54,11 @@ def _pieces(payload: dict) -> tuple[list[str], float]:
 
 
 def _interrupted(payload: dict) -> bool:
-    return "上游中断测试" in json.dumps(payload, ensure_ascii=False)
+    """重试语义：首次请求的用户文本只出现一次；重试 Run 的模型上下文包含两份。"""
+    prompt = json.dumps(payload, ensure_ascii=False)
+    if "重试测试" in prompt:
+        return prompt.count("重试测试") == 1
+    return "上游中断测试" in prompt
 
 
 def _send_pieces(handler, payload: dict) -> bool:
@@ -67,7 +71,10 @@ def _send_pieces(handler, payload: dict) -> bool:
 
 
 def _stream(handler, payload: dict) -> None:
-    if _interrupted(payload):
+    interrupted = _interrupted(payload)
+    with open("/tmp/decisions.log", "a") as log:
+        log.write(f"interrupted={interrupted}\n")
+    if interrupted:
         return _json(handler, 502, {"error": {"message": "upstream failed"}})
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream")
@@ -117,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 401, {"error": "unauthorized"})
         try:
             payload = _body(self)
+            with open("/tmp/requests.log", "a") as log:
+                log.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (ValueError, json.JSONDecodeError):
             return _json(self, 400, {"error": "invalid request"})
         if payload.get("model") not in MODELS:

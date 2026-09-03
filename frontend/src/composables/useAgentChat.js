@@ -21,7 +21,12 @@ function agentPath(caseId, threadId) {
   return `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/stream`;
 }
 
-function transport(caseId, threadId) {
+function eventsPath(caseId, threadId, afterSeq) {
+  return `/api/cases/${encodeURIComponent(caseId)}/agent/thread/`
+    + `${encodeURIComponent(threadId)}/events?afterSeq=${afterSeq}`;
+}
+
+function transport(caseId, threadId, state) {
   return new DefaultChatTransport({
     api: agentPath(caseId, threadId),
     credentials: "same-origin",
@@ -29,14 +34,17 @@ function transport(caseId, threadId) {
     prepareSendMessagesRequest: ({ id, messages, body, trigger, messageId }) => ({
       body: { ...body, id, messages: projectMessages(messages), trigger, messageId },
     }),
+    prepareReconnectToStreamRequest: () => ({
+      api: eventsPath(caseId, threadId, state.snapshot.value?.eventSeq ?? 0),
+    }),
   });
 }
 
-function buildChat(caseId, snapshot) {
+function buildChat(caseId, snapshot, state) {
   return new Chat({
     id: snapshot.id,
     messages: projectMessages(snapshot.messages),
-    transport: transport(caseId, snapshot.id),
+    transport: transport(caseId, snapshot.id, state),
   });
 }
 
@@ -55,9 +63,37 @@ function isCurrent(state, generation) {
   return !state.disposed && state.generation === generation;
 }
 
+function chatIdle(chat) {
+  return !chat || ["ready", "error"].includes(chat.status);
+}
+
 async function refreshSnapshot(caseId, state, generation) {
   const snapshot = await api.agentThread(caseId);
   if (isCurrent(state, generation)) state.snapshot.value = snapshot;
+  return snapshot;
+}
+
+async function rebuild(caseId, state, generation, force = false) {
+  const snapshot = await refreshSnapshot(caseId, state, generation);
+  if (isCurrent(state, generation) && (force || chatIdle(state.chat.value))) {
+    state.chat.value = buildChat(caseId, snapshot, state);
+  }
+  return snapshot;
+}
+
+async function resume(caseId, state, generation) {
+  const chat = state.chat.value;
+  if (!chat || !state.snapshot.value?.activeRun || !chatIdle(chat)) return;
+  await chat.resumeStream();
+  if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
+}
+
+async function settle(caseId, state, generation, { fresh = false } = {}) {
+  const snapshot = await (fresh
+    ? rebuild(caseId, state, generation)
+    : refreshSnapshot(caseId, state, generation));
+  if (!isCurrent(state, generation) || !snapshot?.activeRun || !chatIdle(state.chat.value)) return;
+  await resume(caseId, state, generation);
 }
 
 async function loadChat(caseId, state, generation) {
@@ -68,11 +104,12 @@ async function loadChat(caseId, state, generation) {
   const [threadResult, settingsResult] = results;
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
-    state.chat.value = buildChat(caseId, threadResult.value);
+    state.chat.value = buildChat(caseId, threadResult.value, state);
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
   else if (!state.error.value) state.error.value = settingsResult.reason.message || "AI 配置加载失败";
   state.loading.value = false;
+  await resume(caseId, state, generation);
 }
 
 async function sendChat(caseId, state, text, generation) {
@@ -85,7 +122,36 @@ async function sendChat(caseId, state, text, generation) {
       ],
     });
   } finally {
-    if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
+    if (isCurrent(state, generation)) await settle(caseId, state, generation);
+  }
+}
+
+function stopRequested(state) {
+  const chat = state.chat.value;
+  const chatStreaming = chat != null && ["streaming", "submitted"].includes(chat.status);
+  return chatStreaming || Boolean(state.snapshot.value?.activeRun);
+}
+
+async function stopChat(caseId, state, generation) {
+  const thread = state.chat.value?.id || state.snapshot.value?.id;
+  if (!isCurrent(state, generation) || !thread || !stopRequested(state)) return;
+  state.stopping.value = true;
+  try {
+    await api.agentCancel(caseId, thread, session.csrfToken);
+    await rebuild(caseId, state, generation, true);
+  } finally {
+    state.stopping.value = false;
+  }
+}
+
+async function retryChat(caseId, state, generation, messageId) {
+  if (!isCurrent(state, generation) || !state.chat.value) return;
+  await rebuild(caseId, state, generation);
+  if (!isCurrent(state, generation) || !state.chat.value) return;
+  try {
+    await state.chat.value.regenerate({ messageId });
+  } finally {
+    if (isCurrent(state, generation)) await settle(caseId, state, generation);
   }
 }
 
@@ -98,8 +164,18 @@ async function decideArtifact(caseId, state, generation, artifactId, decision) {
 function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
-    loading: ref(true), error: ref(""), generation: 0, disposed: false,
+    loading: ref(true), error: ref(""), stopping: ref(false),
+    generation: 0, disposed: false,
   };
+}
+
+function retryMessageId(state) {
+  const snapshot = state.snapshot.value;
+  const run = snapshot?.latestRun;
+  const messages = snapshot?.messages || [];
+  const last = messages.at(-1);
+  if (run?.status !== "failed" || last?.role !== "user") return "";
+  return last.id;
 }
 
 function computedState(state) {
@@ -112,25 +188,40 @@ function computedState(state) {
     }),
     chatError: computed(() => snapshotError(state.snapshot.value) || state.chat.value?.error?.message || ""),
     threadState: computed(() => state.snapshot.value),
+    stopping: computed(() => Boolean(state.stopping.value)),
+    retryableMessageId: computed(() => retryMessageId(state)),
   };
+}
+
+function reload(caseId, state) {
+  state.generation += 1;
+  return loadChat(caseId, state, state.generation);
+}
+
+function bindLifecycle(state, recover) {
+  window.addEventListener("online", recover);
+  onBeforeUnmount(() => {
+    window.removeEventListener("online", recover);
+    state.disposed = true;
+    state.generation += 1;
+  });
 }
 
 export function useAgentChat(caseId) {
   const state = createState();
-  const load = () => {
-    state.generation += 1;
-    return loadChat(caseId, state, state.generation);
+  const at = () => state.generation;
+  const send = (text) => sendChat(caseId, state, text, at());
+  const stop = () => stopChat(caseId, state, at());
+  const retry = (messageId) => retryChat(caseId, state, at(), messageId);
+  const decide = (artifactId, decision) => decideArtifact(caseId, state, at(), artifactId, decision);
+  const recover = () => {
+    if (!state.snapshot.value?.activeRun) return;
+    return resume(caseId, state, at());
   };
-  const send = (text) => sendChat(caseId, state, text, state.generation);
-  const decide = (artifactId, decision) => decideArtifact(caseId, state, state.generation, artifactId, decision);
-  onBeforeUnmount(() => {
-    state.disposed = true;
-    state.generation += 1;
-  });
-  void load();
+  bindLifecycle(state, recover);
+  void reload(caseId, state);
   return {
-    ...computedState(state),
-    loading: state.loading, error: state.error, settings: state.settings,
-    textParts, send, decide, reload: load,
+    ...computedState(state), loading: state.loading, error: state.error,
+    settings: state.settings, textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
   };
 }

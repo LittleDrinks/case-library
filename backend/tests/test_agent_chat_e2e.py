@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 
 import httpx
+import json
 import pytest
 from pymongo import MongoClient
 
@@ -502,7 +503,7 @@ def test_agent_http_real_mongo_upstream_failure_is_terminal_and_fenced():
         _close(client, mongo=mongo)
 
 
-def test_agent_http_client_disconnect_cancels_run_and_releases_lease():
+def test_agent_http_client_disconnect_does_not_cancel_run():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:
@@ -512,14 +513,92 @@ def test_agent_http_client_disconnect_cancels_run_and_releases_lease():
         path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream"
         with client.stream(
             "POST", path, headers={"X-CSRF-Token": csrf},
-            json=_body("cancel-real", "取消测试"), timeout=15,
+            json=_body("disconnect-real", "慢速测试"), timeout=15,
         ) as response:
             assert response.status_code == 200
             run = _await_active(database, thread_id)
             next(response.iter_bytes())
-        _assert_cancelled(database, thread_id, run["id"])
+        _assert_survived_disconnect(database, thread_id, run["id"])
     finally:
         _close(client, mongo=mongo)
+
+
+def _assert_survived_disconnect(database, thread_id: str, run_id: str) -> None:
+    terminal = _await_status(database, run_id, "completed")
+    events = _events(database, thread_id)
+    assert [event["type"] for event in events] == [
+        "message.created", "run.started", "message.created", "run.completed",
+    ]
+    assert terminal.get("error") is None
+    _await_released(database, run_id)
+
+
+def test_agent_http_cancel_command_is_idempotent_and_releases_lease():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        cancel_path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/cancel"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _send, client, csrf, case["id"], "取消测试", "cancel-real",
+                thread_id=thread_id,
+            )
+            run = _await_active(database, thread_id)
+            _assert_cancel_accepted(client, csrf, cancel_path)
+            assert future.result(timeout=15).status_code == 200
+        _assert_cancel_terminal(database, client, csrf, cancel_path, thread_id, run["id"])
+    finally:
+        _close(client, mongo=mongo)
+
+
+def _assert_cancel_accepted(client, csrf, cancel_path) -> None:
+    first = client.post(cancel_path, headers={"X-CSRF-Token": csrf})
+    assert first.status_code == 200
+    assert first.json()["status"] == "cancelling"
+    again = client.post(cancel_path, headers={"X-CSRF-Token": csrf})
+    assert again.status_code == 200
+
+
+def _assert_cancel_terminal(database, client, csrf, cancel_path, thread_id, run_id) -> None:
+    terminal = _await_status(database, run_id, "cancelled")
+    assert terminal["error"] == "运行已取消"
+    assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
+    idle = client.post(cancel_path, headers={"X-CSRF-Token": csrf})
+    assert idle.json() == {"runId": None, "status": "idle"}
+    _await_released(database, run_id)
+
+
+def test_agent_http_events_endpoint_replays_and_closes():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        thread_id = _thread(client, case["id"])["id"]
+        assert _send(client, csrf, case["id"], "恢复测试", "replay-real").status_code == 200
+        snapshot = _thread(client, case["id"])
+        path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/events"
+        _assert_events_replay(client, path, snapshot)
+    finally:
+        _close(client, mongo=mongo)
+
+
+def _assert_events_replay(client, path: str, snapshot: dict) -> None:
+    replay = client.get(path, params={"afterSeq": 0})
+    assert replay.status_code == 200
+    assert replay.headers["x-vercel-ai-ui-message-stream"] == "v1"
+    chunks = [
+        json.loads(line[6:]) for line in replay.text.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    assistant_id = snapshot["latestRun"]["assistantMessageId"]
+    assert chunks[0] == {"type": "start", "messageId": assistant_id}
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+    assert replay.text.endswith("data: [DONE]\n\n")
+    current = client.get(path, params={"afterSeq": snapshot["eventSeq"]})
+    assert current.status_code == 204
 
 
 def test_agent_http_renews_quota_while_long_provider_run_is_active():
@@ -618,11 +697,8 @@ def _run_after_owner_takeover(client, csrf, case, database, thread_id):
         leases = _await_run_leases(database, run["id"])
         assert {row["_id"] for row in leases} == set(run["quotaIds"])
         _takeover_owner(database, run)
-        try:
-            future.result(timeout=15)
-        except httpx.RemoteProtocolError as error:
-            return error, run
-    pytest.fail("the live Agent stream was not cancelled after ownership loss")
+        response = future.result(timeout=15)
+    return response, run
 
 
 def test_agent_http_heartbeat_loss_stops_the_live_worker():
@@ -632,19 +708,12 @@ def test_agent_http_heartbeat_loss_stops_the_live_worker():
         case = _create_case(client, csrf)
         database = mongo.get_default_database()
         thread_id = _thread(client, case["id"])["id"]
-        transport, run = _run_after_owner_takeover(client, csrf, case, database, thread_id)
-        assert isinstance(transport, httpx.RemoteProtocolError)
+        response, run = _run_after_owner_takeover(client, csrf, case, database, thread_id)
+        assert response.status_code == 200
         _assert_lost_worker_state(database, thread_id, run["id"])
         _await_released(database, run["id"])
     finally:
         _close(client, mongo=mongo)
-
-
-def _assert_cancelled(database, thread_id: str, run_id: str) -> None:
-    terminal = _await_status(database, run_id, "cancelled")
-    assert terminal["error"] == "运行已取消"
-    assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
-    _await_released(database, run_id)
 
 
 def _assert_failed_terminal(client, database, case_id: str, thread_id: str) -> None:

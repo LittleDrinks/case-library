@@ -10,8 +10,8 @@ const emit = defineEmits(["case-revised"]);
 
 const draft = ref("");
 const {
-  messages, status, chatError, loading, error, settings, textParts, send, decide,
-  artifacts, threadState,
+  messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
+  decide, artifacts, threadState, stopping, retryableMessageId,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
@@ -58,6 +58,22 @@ async function submit() {
   draft.value = "";
   await send(text);
 }
+
+async function stopRun() {
+  decideError.value = "";
+  await stop();
+}
+
+async function retryRun() {
+  decideError.value = "";
+  const messageId = retryableMessageId.value;
+  if (!messageId) return;
+  try {
+    await retry(messageId);
+  } catch (requestError) {
+    decideError.value = requestError.message || "重试失败";
+  }
+}
 </script>
 
 <template>
@@ -70,6 +86,14 @@ async function submit() {
     <div class="ai-status" role="status" :aria-busy="sending">
       <LoaderCircle v-if="loading || sending" class="spin" :size="14" />
       <span>{{ statusText() }}</span>
+      <button
+        v-if="sending"
+        type="button"
+        data-testid="agent-stop"
+        title="停止生成"
+        :disabled="stopping"
+        @click="stopRun"
+      >停止</button>
       <RouterLink v-if="!loading && !configured" :to="{ name: 'ai-settings' }">配置 AI 模型</RouterLink>
     </div>
     <div class="panel-scroll ai-conversation" aria-live="polite">
@@ -102,6 +126,12 @@ async function submit() {
         </template>
       </template>
       <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>
+      <button
+        v-if="retryableMessageId"
+        type="button"
+        data-testid="agent-retry"
+        @click="retryRun"
+      >重试</button>
       <div
         v-for="artifact in artifacts"
         :key="artifact.id"

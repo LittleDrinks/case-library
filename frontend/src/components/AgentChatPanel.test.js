@@ -5,7 +5,10 @@ import { api } from "../api.js";
 import { session } from "../session.js";
 
 vi.mock("../api.js", () => ({
-  api: { agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn() },
+  api: {
+    agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
+    agentCancel: vi.fn(),
+  },
 }));
 
 const snapshot = {
@@ -93,6 +96,63 @@ it("shows SDK request errors without a client stop or reconnect control", async 
 
   expect(wrapper.get('[role="alert"]').text()).toContain("运行任务无法创建");
   expect(wrapper.find('[title="停止生成"]').exists()).toBe(false);
+});
+
+function activeSnapshot() {
+  const running = structuredClone(snapshot);
+  running.activeRun = { id: "run-1", status: "active" };
+  running.latestRun = { id: "run-1", status: "active" };
+  return running;
+}
+
+function noContentResponse() {
+  return new Response(null, { status: 204 });
+}
+
+it("stops the active run through the idempotent cancel command", async () => {
+  api.agentThread
+    .mockResolvedValueOnce(activeSnapshot())
+    .mockResolvedValueOnce(activeSnapshot())
+    .mockResolvedValue(structuredClone(snapshot));
+  api.agentCancel.mockResolvedValue({ runId: "run-1", status: "cancelling" });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(noContentResponse()));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.find("[data-testid=\"agent-stop\"]").exists()).toBe(true);
+  await wrapper.get("[data-testid=\"agent-stop\"]").trigger("click");
+  await flushPromises();
+
+  expect(api.agentCancel).toHaveBeenCalledWith("case-1", "thread-1", "csrf");
+  expect(wrapper.find("[data-testid=\"agent-stop\"]").exists()).toBe(false);
+});
+
+function failedSnapshot() {
+  const failed = structuredClone(snapshot);
+  failed.messages = [{ id: "message-1", role: "user", metadata: {}, parts: [
+    { type: "text", text: "失败的问题" },
+  ] }];
+  failed.latestRun = { id: "run-9", status: "failed", userMessageId: "message-1" };
+  return failed;
+}
+
+async function mountAndRetry(fetch) {
+  api.agentThread.mockResolvedValue(failedSnapshot());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get("[data-testid=\"agent-retry\"]").trigger("click");
+  await flushPromises();
+  return wrapper;
+}
+
+it("retries a failed message as a regenerate that references the original", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  await mountAndRetry(fetch);
+  const post = fetch.mock.calls.find(([, options]) => options.method === "POST");
+  const body = JSON.parse(post[1].body);
+  expect(body.trigger).toBe("regenerate-message");
+  expect(body.messageId).toBe("message-1");
 });
 
 function tracerMessages() {
