@@ -78,14 +78,14 @@ try_pull() {
   local ref
   docker image inspect "$(service_image_name "$1")" >/dev/null 2>&1 && return 0
   ref="$(image_ref "$1")" || return 1
-  docker pull "$ref" && docker tag "$ref" "$(service_image_name "$1")"
+  docker pull --quiet "$ref" && docker tag "$ref" "$(service_image_name "$1")"
 }
 
 pull_missed() {
   local status_dir="$1" svc
   shift
   for svc in "$@"; do
-    ( try_pull "$svc" && : > "$status_dir/$svc" ) &
+    ( try_pull "$svc" && : > "$status_dir/$svc" ) >/dev/null &
   done
   wait
   for svc in "$@"; do test -f "$status_dir/$svc" || printf '%s\n' "$svc"; done
@@ -102,7 +102,20 @@ ensure() {
   status_dir="$(mktemp -d)"
   missed="$(pull_missed "$status_dir" "$@")"
   rm -rf "$status_dir"
-  test -z "$missed" || compose build $missed
+  test -z "$missed" || {
+    printf '[ci-images] fingerprint miss, building locally:%s\n' " $missed" >&2
+    compose build $missed
+  }
+}
+
+push_ref() {
+  local ref="$1" attempt
+  for attempt in 1 2 3; do
+    if docker push "$ref"; then return 0; fi
+    printf '[ci-images] push attempt %s failed for %s, retrying\n' "$attempt" "$ref" >&2
+    sleep 5
+  done
+  return 1
 }
 
 push() {
@@ -113,7 +126,7 @@ push() {
   for svc in "$@"; do
     ref="$(image_ref "$svc")"
     docker tag "$(service_image_name "$svc")" "$ref"
-    docker push "$ref"
+    push_ref "$ref"
   done
 }
 
