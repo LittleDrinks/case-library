@@ -5,6 +5,7 @@ on:
   push:
     branches: [main, v2]
   workflow_call:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,11 +13,29 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   COMPOSE_FILE: docker-compose.yml:deploy/ci-build-cache.compose.yml
 
 jobs:
+  images:
+    name: Images
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
+      - name: Push fingerprint-tagged images
+        run: scripts/ci-images.sh push production-config-check mongo-init app backend-test frontend frontend-test e2e e2e-ai-provider meilisearch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   config:
     name: Config
     runs-on: ubuntu-24.04
@@ -36,6 +55,8 @@ jobs:
       - uses: crazy-max/ghaction-github-runtime@v4
       - name: Run backend test stage
         run: make test-backend
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   frontend-test:
     name: Frontend test
@@ -47,6 +68,8 @@ jobs:
       - uses: crazy-max/ghaction-github-runtime@v4
       - name: Run frontend test stage
         run: make test-frontend
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   backend-e2e:
     name: Backend E2E
@@ -58,6 +81,8 @@ jobs:
       - uses: crazy-max/ghaction-github-runtime@v4
       - name: Run backend E2E stage
         run: make backend-e2e
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   e2e:
     name: E2E
@@ -71,6 +96,7 @@ jobs:
         run: make e2e
         env:
           E2E_ARTIFACT_DIR: ${{ runner.temp }}/e2e-artifacts
+          GITHUB_TOKEN: ${{ github.token }}
       - name: Upload failed E2E artifacts
         if: failure()
         uses: actions/upload-artifact@v4

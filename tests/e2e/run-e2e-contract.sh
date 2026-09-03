@@ -26,10 +26,11 @@ matching_line() {
 
 require_line 'clear_e2e_bucket() {'
 require_line "  $backend_e2e_command python tests/clear_e2e_bucket.py"
+require_line 'scripts/ci-images.sh ensure mongo-init production-config-check'
 require_line 'compose up -d mongo1 mongo2 mongo3'
-require_line 'browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"'
-require_line 'backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"'
-require_line 'compose build $build_services'
+require_line 'scripts/ci-images.sh ensure $ensure_services'
+require_line 'browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"'
+require_line 'backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"'
 require_line 'compose up -d --wait mongo-init'
 require_line '  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker'
 require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway'
@@ -38,17 +39,32 @@ require_line '  compose --profile e2e up -d --wait e2e-app'
 require_line '  compose --profile e2e up -d --wait e2e-frontend'
 require_line 'preclean_e2e_resources'
 e2e_runner_lines="$(cat "$runner")"
+ensure_boot_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure mongo-init production-config-check' | cut -d: -f1)
 mongo_bg_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d mongo1 mongo2 mongo3' | cut -d: -f1)
-build_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose build $build_services' | cut -d: -f1)
+ensure_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure $ensure_services' | cut -d: -f1)
 mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init' | cut -d: -f1)
-test "$mongo_bg_line" -lt "$build_line" || {
-  echo "Mongo replica set must boot in the background while images build" >&2
+test "$ensure_boot_line" -lt "$mongo_bg_line" || {
+  echo "mongo-init and production-config-check images must exist before mongo up so mongo never triggers a local build" >&2
   exit 1
 }
-test "$build_line" -lt "$mongo_wait_line" || {
-  echo "Mongo health wait must come after image builds" >&2
+test "$mongo_bg_line" -lt "$ensure_line" || {
+  echo "Remaining image pulls must overlap the mongo replica set boot" >&2
   exit 1
 }
+test "$ensure_line" -lt "$mongo_wait_line" || {
+  echo "Mongo health wait must come after image ensure" >&2
+  exit 1
+}
+ci_images="$project_dir/scripts/ci-images.sh"
+test -x "$ci_images"
+grep -Fq 'compose config --format json' "$ci_images"
+grep -Fq 'ls-files -s -- "$src"' "$ci_images"
+grep -Fq 'docker pull --quiet "$ref"' "$ci_images"
+grep -Fq 'docker tag "$ref"' "$ci_images"
+if grep -Fq 'compose build $build_services' "$runner"; then
+  echo "E2E must pull fingerprint-tagged images instead of unconditional compose build" >&2
+  exit 1
+fi
 if grep -Fq 'docker build -f deploy/e2e.Dockerfile' "$runner"; then
   echo "Playwright image must be built once via compose service e2e" >&2
   exit 1
@@ -75,6 +91,11 @@ require_line "trap 'exit 143' TERM"
 grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
 grep -q '^test-backend:' "$makefile"
 grep -q '^test-frontend:' "$makefile"
+grep -q '^ensure-backend-test:' "$makefile"
+grep -q '^ensure-frontend-test:' "$makefile"
+grep -Fq 'check-backend-function-lines: ensure-backend-test' "$makefile"
+grep -Fq 'check-frontend-function-lines: ensure-frontend-test' "$makefile"
+! grep -q 'run --build' "$makefile"
 grep -q '^backend-e2e:' "$makefile"
 grep -q '^e2e-spec:' "$makefile"
 make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
