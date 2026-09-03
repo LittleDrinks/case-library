@@ -12,7 +12,7 @@ function isolatedBaseUrl() {
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
-  workers: 1,
+  workers: 2,
   retries: 0,
   outputDir: "test-results",
   reporter: [["line"], ["json", { outputFile: "test-results/report.json" }]],
