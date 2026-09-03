@@ -31,6 +31,7 @@ def case_instructions(case: dict) -> str:
     return "\n\n".join(
         (
             prompt_text("case-agent.md"),
+            prompt_text("revision-task.md"),
             f"当前案例标题：{title}",
             f"当前案例正文：{text}",
         )

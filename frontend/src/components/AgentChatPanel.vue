@@ -6,19 +6,50 @@ import { useAgentChat } from "../composables/useAgentChat.js";
 const props = defineProps({
   caseRecord: { type: Object, required: true },
 });
+const emit = defineEmits(["case-revised"]);
 
 const draft = ref("");
-const { messages, status, chatError, loading, error, settings, textParts, send, threadState } =
-  useAgentChat(props.caseRecord.id);
+const {
+  messages, status, chatError, loading, error, settings, textParts, send, decide,
+  artifacts, threadState,
+} = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
 const canSend = computed(() => Boolean(draft.value.trim() && configured.value && !loading.value && !sending.value));
+const decideError = ref("");
 
 function statusText() {
   if (loading.value) return "正在加载对话";
   if (sending.value) return "正在生成";
   return settings.value?.effectiveModel || "对话助手";
+}
+
+function toolParts(message) {
+  return (message.parts || []).filter((part) => part.type.startsWith("tool-"));
+}
+
+function sourcesOf(part) {
+  return part.state === "output-available" ? part.output?.sources || [] : [];
+}
+
+async function acceptArtifact(artifactId) {
+  decideError.value = "";
+  try {
+    const result = await decide(artifactId, "accepted");
+    emit("case-revised", result.case);
+  } catch (requestError) {
+    decideError.value = requestError.message || "决定失败";
+  }
+}
+
+async function rejectArtifact(artifactId) {
+  decideError.value = "";
+  try {
+    await decide(artifactId, "rejected");
+  } catch (requestError) {
+    decideError.value = requestError.message || "决定失败";
+  }
 }
 
 async function submit() {
@@ -45,11 +76,51 @@ async function submit() {
       <div v-if="!messages.length && !loading" class="panel-empty">
         <MessageSquareText :size="24" /><span>{{ configured ? "向 AI 提问" : "配置模型后开始对话" }}</span>
       </div>
-      <article v-for="message in messages" :key="message.id" class="ai-message" :class="message.role">
-        <b>{{ message.role === "user" ? "我" : "AI" }}</b>
-        <p v-if="textParts(message)">{{ textParts(message) }}</p>
-      </article>
+      <template v-for="message in messages" :key="message.id">
+        <article class="ai-message" :class="message.role">
+          <b>{{ message.role === "user" ? "我" : "AI" }}</b>
+          <p v-if="textParts(message)">{{ textParts(message) }}</p>
+        </article>
+        <template v-if="message.role === 'assistant'">
+          <p
+            v-for="part in toolParts(message).filter((item) => item.type === 'tool-load_capability')"
+            :key="part.toolCallId"
+            class="agent-tool-trace"
+            data-testid="agent-skill-load"
+          >已加载 Skill：单段修订工作流 v2.1</p>
+          <div
+            v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
+            :key="part.toolCallId"
+            class="agent-sources"
+            data-testid="agent-sources"
+          >
+            <span v-if="sourcesOf(part).length">{{ sourcesOf(part).length }} 条来源</span>
+            <p v-for="source in sourcesOf(part)" :key="source.id" data-testid="agent-source">
+              <b>{{ source.title }}</b><span>{{ source.snippet }}</span>
+            </p>
+          </div>
+        </template>
+      </template>
       <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>
+      <div
+        v-for="artifact in artifacts"
+        :key="artifact.id"
+        class="agent-artifact"
+        :data-artifact-id="artifact.id"
+        :data-artifact-status="artifact.status"
+        data-testid="agent-artifact"
+      >
+        <b>修订候选（第 {{ artifact.target.paragraphIndex + 1 }} 段）</b>
+        <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
+        <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
+        <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
+        <p class="agent-artifact-status">状态：{{ artifact.status === "accepted" ? "已接受" : artifact.status === "rejected" ? "已拒绝" : "待确认" }}</p>
+        <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
+          <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
+          <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
+        </div>
+      </div>
+      <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
     </div>
     <div class="assistant-composer">
       <textarea

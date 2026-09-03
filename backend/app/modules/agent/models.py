@@ -15,7 +15,11 @@ ThreadEventType = Literal[
     "run.completed",
     "run.failed",
     "run.cancelled",
+    "artifact.created",
+    "artifact.decided",
 ]
+ArtifactStatus = Literal["pending", "accepted", "rejected"]
+ArtifactDecision = Literal["accepted", "rejected"]
 
 
 class AgentThread(BaseModel):
@@ -56,12 +60,49 @@ class AgentRun(BaseModel):
     assistant_message_id: str = Field(alias="assistantMessageId")
     client_request_id: str | None = Field(default=None, alias="clientRequestId")
     status: RunStatus
+    resources: list[dict[str, str]] = Field(default_factory=list)
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str | None = None
     owner_id: str | None = Field(default=None, alias="ownerId", exclude=True)
     owner_expires_at: datetime | None = Field(default=None, alias="ownerExpiresAt", exclude=True)
     quota_ids: tuple[str, ...] = Field(default_factory=tuple, alias="quotaIds", exclude=True)
+
+
+class SourceRef(BaseModel):
+    """服务端从工具实际结果重建的来源引用，模型输出不能伪造。"""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    kind: Literal["case", "knowledge", "material"]
+    id: str
+    title: str
+    snippet: str = ""
+
+
+class ArtifactTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
+    quote: str
+
+
+class AgentArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    case_id: str = Field(alias="caseId")
+    thread_id: str = Field(alias="threadId")
+    run_id: str = Field(alias="runId")
+    status: ArtifactStatus = "pending"
+    base_revision: int = Field(alias="baseRevision", ge=1)
+    target: ArtifactTarget
+    replacement: str
+    reason: str = ""
+    sources: list[SourceRef] = Field(default_factory=list)
+    decided_by: str | None = Field(default=None, alias="decidedBy")
+    decided_at: datetime | None = Field(default=None, alias="decidedAt")
+    created_at: datetime = Field(alias="createdAt")
 
 
 class AgentThreadEvent(BaseModel):
@@ -83,5 +124,6 @@ class AgentSnapshot(BaseModel):
     case_id: str = Field(alias="caseId")
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
+    artifacts: list[AgentArtifact] = Field(default_factory=list)
     active_run: AgentRun | None = Field(default=None, alias="activeRun")
     latest_run: AgentRun | None = Field(default=None, alias="latestRun")

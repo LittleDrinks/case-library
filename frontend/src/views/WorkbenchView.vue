@@ -533,6 +533,7 @@ onBeforeUnmount(() => {
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
+          @case-revised="applyCase"
           @mutation-state="contentMutationBusy = $event"
           @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"

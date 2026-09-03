@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
-from pydantic_ai.ui.vercel_ai.request_types import TextUIPart
+from pydantic_ai.ui.vercel_ai.request_types import DataUIPart, TextUIPart
 
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
-from app.modules.agent.models import AgentRun, AgentSnapshot, AgentThread
+from app.modules.agent.artifacts import decide_artifact
+from app.modules.agent.deps import ToolDeps
+from app.modules.agent.models import ArtifactDecision, AgentRun, AgentSnapshot, AgentThread
 from app.modules.agent.repository import ActiveRunError, AgentRepository, ThreadNotFoundError
+from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.service import RunContext, load_history, protocol_stream
+from app.modules.agent.skills import case_edit_skill
 from app.modules.agent.streaming import ClosableStreamingResponse
 from app.modules.ai.quota import AILease, AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
@@ -64,20 +68,35 @@ async def _adapter(request: Request, message_id: str):
         raise HTTPException(status_code=422, detail="AI 消息格式无效") from error
 
 
-def _prompt(adapter: VercelAIAdapter) -> tuple[list[dict], object, str, str]:
+def _skill_id(part) -> str | None:
+    """从 data-skill 原子块提取 Skill 标识；其他类型返回 None。"""
+    if not isinstance(part, DataUIPart) or part.type != "data-skill":
+        return None
+    skill_id = part.data.get("skillId") if isinstance(part.data, dict) else None
+    if not isinstance(skill_id, str) or not skill_id:
+        raise HTTPException(status_code=422, detail="AI 能力格式无效")
+    return skill_id
+
+
+def _prompt(adapter: VercelAIAdapter) -> tuple[list[dict], object, str, str, list[str]]:
     messages = adapter.run_input.messages
     if adapter.run_input.trigger != "submit-message" or not messages:
         raise HTTPException(status_code=422, detail="只支持发送新消息")
     latest = messages[-1]
-    if latest.role != "user" or any(not isinstance(part, TextUIPart) for part in latest.parts):
+    skills = [_skill_id(part) for part in latest.parts]
+    if any(skill and skill != CASE_EDIT_SKILL.id for skill in skills):
+        raise HTTPException(status_code=422, detail="AI 能力不可用")
+    if latest.role != "user" or any(
+        not isinstance(part, (TextUIPart, DataUIPart)) for part in latest.parts
+    ):
         raise HTTPException(status_code=422, detail="消息必须是普通文本")
-    text = "".join(part.text for part in latest.parts).strip()
+    text = "".join(part.text for part in latest.parts if isinstance(part, TextUIPart)).strip()
     if not text:
         raise HTTPException(status_code=422, detail="消息不能为空")
     if len(text) > MAX_MESSAGE_CHARACTERS:
         raise HTTPException(status_code=422, detail="消息内容过长")
     parts = [part.model_dump(by_alias=True, mode="json", exclude_none=True) for part in latest.parts]
-    return parts, {}, text, latest.id
+    return parts, {}, text, latest.id, [skill for skill in skills if skill]
 
 
 def _request_size(request: Request) -> None:
@@ -116,18 +135,32 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     thread = _thread(repository, thread_id, case_id, user["id"])
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    parts, metadata, prompt, client_request_id = _prompt(adapter)
+    parts, metadata, prompt, client_request_id, skills = _prompt(adapter)
     history = load_history(repository, thread)
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
     run = _start_run(repository, thread, user["id"], parts, metadata, assistant_id,
                      client_request_id, lease, worker_id)
-    context = RunContext(
+    return _start_stream(_run_context(
+        request, database, settings, user, case, repository, thread, adapter,
+        history, prompt, run, selection, lease, worker_id, skills,
+    ))
+
+
+def _run_context(request, database, settings, user, case, repository, thread, adapter,
+                 history, prompt, run, selection, lease, worker_id, skills):
+    deps = ToolDeps(
+        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
+        user=user, catalog=request.app.state.search_catalog,
+        catalog_state=request.app.state.catalog_state,
+        secret_path=settings.app_secret_file,
+    )
+    return RunContext(
         repository, run, adapter, history, prompt, case,
         request.app.state.agent, selection, settings, lease, worker_id,
+        deps=deps, capabilities=[case_edit_skill()] if skills else [],
     )
-    return _start_stream(context)
 
 
 def _selection(database, settings, user_id: str):
@@ -196,3 +229,22 @@ def _create_run(
 def _abort_start(lease) -> None:
     if lease:
         lease.release()
+
+
+class ArtifactDecisionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ArtifactDecision
+
+
+@router.post("/{case_id}/agent/artifacts/{artifact_id}/decision")
+def decide_case_artifact(
+    case_id: str,
+    artifact_id: str,
+    body: ArtifactDecisionBody,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> dict:
+    _author_case(database, case_id, user)
+    return decide_artifact(database, case_id, artifact_id, user, body.decision)

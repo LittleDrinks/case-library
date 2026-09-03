@@ -4,6 +4,8 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
+export const CASE_EDIT_SKILL_ID = "case-edit-skill";
+
 function textParts(message) {
   return (message?.parts || [])
     .filter((part) => part.type === "text")
@@ -76,10 +78,21 @@ async function loadChat(caseId, state, generation) {
 async function sendChat(caseId, state, text, generation) {
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({ text });
+    await state.chat.value.sendMessage({
+      parts: [
+        { type: "text", text },
+        { type: "data-skill", data: { skillId: CASE_EDIT_SKILL_ID } },
+      ],
+    });
   } finally {
     if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
   }
+}
+
+async function decideArtifact(caseId, state, generation, artifactId, decision) {
+  const result = await api.agentDecide(caseId, artifactId, decision, session.csrfToken);
+  if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation);
+  return result;
 }
 
 function createState() {
@@ -92,6 +105,7 @@ function createState() {
 function computedState(state) {
   return {
     messages: computed(() => state.chat.value?.messages || state.snapshot.value?.messages || []),
+    artifacts: computed(() => state.snapshot.value?.artifacts || []),
     status: computed(() => {
       const chatStatus = state.chat.value?.status;
       return chatStatus && chatStatus !== "ready" ? chatStatus : snapshotStatus(state.snapshot.value);
@@ -108,6 +122,7 @@ export function useAgentChat(caseId) {
     return loadChat(caseId, state, state.generation);
   };
   const send = (text) => sendChat(caseId, state, text, state.generation);
+  const decide = (artifactId, decision) => decideArtifact(caseId, state, state.generation, artifactId, decision);
   onBeforeUnmount(() => {
     state.disposed = true;
     state.generation += 1;
@@ -116,6 +131,6 @@ export function useAgentChat(caseId) {
   return {
     ...computedState(state),
     loading: state.loading, error: state.error, settings: state.settings,
-    textParts, send, reload: load,
+    textParts, send, decide, reload: load,
   };
 }

@@ -90,6 +90,15 @@ def create_snapshot(database: Database, case: dict, user: dict, session) -> dict
     return {"case": case_view(locked), "snapshot": _clean(snapshot)}
 
 
+def record_snapshot(database: Database, case: dict, user: dict, kind: str, session) -> dict:
+    """在既有事务会话内留存一份批前快照，供写回类操作（如 Agent 接受）回滚。"""
+    attachments = snapshot_attachments(database, case["id"], session)
+    materials = snapshot_materials(database, case["id"], session)
+    snapshot = _record(case, user, attachments, materials, kind)
+    database.case_snapshots.insert_one(snapshot, session=session)
+    return _clean(snapshot)
+
+
 def _target(database, case_id: str, target_id: str, session) -> dict:
     query = {"id": target_id, "caseId": case_id}
     target = database.case_snapshots.find_one(query, session=session)

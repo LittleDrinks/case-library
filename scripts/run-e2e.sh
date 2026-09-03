@@ -6,7 +6,7 @@ compose_project="case-library-v2"
 e2e_meili_volume="${compose_project}_e2e_meili_data"
 e2e_network="${compose_project}_e2e_test"
 database="case_library_e2e"
-e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch agent-e2e agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway"
+e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch agent-e2e agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer agent-tracer-app agent-tracer-frontend agent-tracer-gateway"
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
@@ -71,7 +71,7 @@ drop_and_verify_database() {
 
 stop_e2e_runtime() {
   compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker
-  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway
+  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer-app agent-tracer-frontend agent-tracer-gateway
 }
 
 remove_e2e_services() {
@@ -105,7 +105,7 @@ preclean_e2e_resources() {
 }
 
 start_agent_app() {
-  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser
+  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app
 }
 
 run_browser_tests() {
@@ -117,6 +117,11 @@ run_browser_tests() {
       -v "$artifact_dir:/app/test-results" agent-e2e
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   fi
+  if test "$browser_spec" = "tests/e2e/agent-tracer.spec.js"; then
+    set -- compose --profile e2e run --rm \
+      -v "$artifact_dir:/app/test-results" agent-tracer
+    test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  fi
   "$@"
 }
 
@@ -125,6 +130,11 @@ run_agent_browser_tests() {
     -v "$artifact_dir:/app/test-results" agent-e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   "$@"
+}
+
+run_tracer_browser_tests() {
+  compose --profile e2e run --rm \
+    -v "$artifact_dir:/app/test-results" agent-tracer
 }
 
 run_backend_suite() {
@@ -140,6 +150,7 @@ run_browser_suite() {
   clear_e2e_bucket
   run_browser_tests
   test -n "$browser_spec" || run_agent_browser_tests
+  test -n "$browser_spec" || run_tracer_browser_tests
 }
 
 cleanup() {

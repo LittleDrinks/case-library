@@ -11,7 +11,9 @@ from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
+from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
+from app.modules.agent.resources import CASE_EDIT_SKILL, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -34,6 +36,8 @@ class RunContext:
     lease: object | None = None
     worker_id: str | None = None
     result: object | None = None
+    deps: ToolDeps | None = None
+    capabilities: list | None = None
     cancelled: bool = False
     failed: bool = False
     lost: bool = False
@@ -47,7 +51,10 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "run_id": context.run.id,
         "instructions": case_instructions(context.case),
         "user_prompt": context.prompt,
+        "deps": context.deps,
     }
+    if context.capabilities:
+        values["capabilities"] = context.capabilities
     if model is not None:
         values["model"] = model
     return values
@@ -109,10 +116,32 @@ def _assistant_parts(assistant) -> list[dict]:
     ]
 
 
-def _assistant_message(context: RunContext, result) -> AgentMessage:
-    assistant = next((item for item in _dump_messages(context, result) if item.role == "assistant"), None)
+def _loaded_skill(parts: list[dict]) -> dict[str, str] | None:
+    if not any(part.get("type") == "tool-load_capability" for part in parts):
+        return None
+    return resource_record(CASE_EDIT_SKILL)
+
+
+def _run_resources(parts: list[dict]) -> list[dict[str, str]]:
+    records = [resource_record(SYSTEM_PROMPT), resource_record(TASK_PROMPT)]
+    skill = _loaded_skill(parts)
+    return [*records, skill] if skill else records
+
+
+def _assistant_ui(context: RunContext, result):
+    """把一次 Run 的全部 assistant 步骤合并为单条 UI 消息。"""
+    dumped = _dump_messages(context, result)
+    parts = [
+        part for message in dumped if message.role == "assistant" for part in message.parts
+    ]
+    assistant = next((message for message in dumped if message.role == "assistant"), None)
     if assistant is None:
         raise RuntimeError("AI 响应为空")
+    return assistant.model_copy(update={"parts": parts})
+
+
+def _assistant_message(context: RunContext, result) -> AgentMessage:
+    assistant = _assistant_ui(context, result)
     return AgentMessage(
         id=assistant.id, thread_id=context.run.thread_id, run_id=context.run.id,
         role="assistant", metadata=assistant.metadata, parts=_assistant_parts(assistant),
@@ -225,9 +254,14 @@ def _complete(context: RunContext) -> None:
         _terminal(context, context.repository.fail_run)
         return
     if not context.repository.complete_run(
-        context.run.id, _assistant_message(context, context.result), context.worker_id
+        context.run.id, _assistant_message(context, context.result), context.worker_id,
+        resources=_run_resources(_assistant_parts_of(context)),
     ):
         context.lost = True
+
+
+def _assistant_parts_of(context: RunContext) -> list[dict]:
+    return _assistant_parts(_assistant_ui(context, context.result))
 
 
 def _terminal(context: RunContext, finish) -> None:
