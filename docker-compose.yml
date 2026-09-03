@@ -334,7 +334,7 @@ services:
       dockerfile: backend.Dockerfile
       target: test
     network_mode: none
-    command: ["sh", "-c", "ruff check --no-cache app tests && python -m pytest -q -c tests/pytest.ini -m 'not e2e'"]
+    command: ["sh", "-c", "ruff check --no-cache app tests && python -m pytest -q -n auto -c tests/pytest.ini -m 'not e2e'"]
 
   frontend-test:
     profiles: ["test"]
@@ -458,10 +458,6 @@ services:
   e2e-search-worker:
     profiles: ["e2e"]
     image: case-library-v2-e2e-app
-    build:
-      context: .
-      dockerfile: backend.Dockerfile
-      target: runtime
     environment:
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
       MONGODB_DB_NAME: case_library_e2e
@@ -535,11 +531,7 @@ services:
 
   agent-e2e-app:
     profiles: ["e2e"]
-    image: case-library-v2-agent-e2e-app
-    build:
-      context: .
-      dockerfile: backend.Dockerfile
-      target: test
+    image: case-library-v2-backend-test
     environment:
       APP_ENV: test
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-app
@@ -593,11 +585,7 @@ services:
 
   agent-e2e-loser:
     profiles: ["e2e"]
-    image: case-library-v2-agent-e2e-app
-    build:
-      context: .
-      dockerfile: backend.Dockerfile
-      target: test
+    image: case-library-v2-backend-test
     environment:
       APP_ENV: test
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-loser
@@ -652,11 +640,7 @@ services:
 
   agent-e2e-frontend:
     profiles: ["e2e"]
-    image: case-library-v2-agent-e2e-frontend
-    build:
-      context: .
-      dockerfile: frontend.Dockerfile
-      target: runtime
+    image: case-library-v2-e2e-frontend
     depends_on:
       agent-e2e-app:
         condition: service_healthy
@@ -692,10 +676,7 @@ services:
 
   agent-e2e:
     profiles: ["e2e"]
-    image: case-library-v2-agent-e2e
-    build:
-      context: .
-      dockerfile: deploy/e2e.Dockerfile
+    image: case-library-v2-e2e
     environment:
       PLAYWRIGHT_BASE_URL: http://agent-gateway
     depends_on:

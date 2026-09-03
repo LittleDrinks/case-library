@@ -150,11 +150,10 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 preclean_e2e_resources
+compose up -d mongo1 mongo2 mongo3
+compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e
 compose up -d --wait mongo-init
 drop_and_verify_database
-compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch
-compose build agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e
-docker build -f deploy/e2e.Dockerfile -t case-library-v2-e2e:latest .
 compose --profile e2e up -d --wait e2e-frontend
 start_agent_app
 clear_e2e_bucket

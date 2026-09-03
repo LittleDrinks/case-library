@@ -30,7 +30,9 @@ exact_line() {
 require_line 'clear_e2e_bucket() {'
 require_line "  $backend_e2e_command python tests/clear_e2e_bucket.py"
 require_line 'clear_e2e_bucket'
-require_line 'compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch'
+require_line 'compose up -d mongo1 mongo2 mongo3'
+require_line 'compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e'
+require_line 'compose up -d --wait mongo-init'
 require_line '  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker'
 require_line '  drop_test_database "$database"'
 require_line '  compose --profile e2e run --rm --no-deps e2e-search-init'
@@ -38,6 +40,26 @@ require_line '  compose --profile e2e up -d --force-recreate --no-deps e2e-searc
 require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app'
 require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend'
 require_line 'preclean_e2e_resources'
+e2e_runner_lines="$(cat "$runner")"
+mongo_bg_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d mongo1 mongo2 mongo3' | cut -d: -f1)
+build_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e' | cut -d: -f1)
+mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init' | cut -d: -f1)
+test "$mongo_bg_line" -lt "$build_line" || {
+  echo "Mongo replica set must boot in the background while images build" >&2
+  exit 1
+}
+test "$build_line" -lt "$mongo_wait_line" || {
+  echo "Mongo health wait must come after image builds" >&2
+  exit 1
+}
+if grep -Fq 'docker build -f deploy/e2e.Dockerfile' "$runner"; then
+  echo "Playwright image must be built once via compose service e2e" >&2
+  exit 1
+fi
+if grep -Fq 'compose build agent-' "$runner"; then
+  echo "Agent e2e services must reuse shared images instead of rebuilding" >&2
+  exit 1
+fi
 require_line 'run_browser_tests() {'
 require_line '  set -- compose --profile e2e run --rm --no-deps \'
 require_line '    -v "$artifact_dir:/app/test-results" e2e'

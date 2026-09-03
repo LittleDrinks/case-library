@@ -1,29 +1,5 @@
 # CI-only override: BuildKit gha layer cache, one scope per service (v2 index is replace-per-scope).
 services:
-  agent-e2e:
-    build:
-      cache_from:
-        - type=gha,scope=agent-e2e
-      cache_to:
-        - type=gha,mode=max,scope=agent-e2e
-  agent-e2e-app:
-    build:
-      cache_from:
-        - type=gha,scope=agent-e2e-app
-      cache_to:
-        - type=gha,mode=max,scope=agent-e2e-app
-  agent-e2e-frontend:
-    build:
-      cache_from:
-        - type=gha,scope=agent-e2e-frontend
-      cache_to:
-        - type=gha,mode=max,scope=agent-e2e-frontend
-  agent-e2e-loser:
-    build:
-      cache_from:
-        - type=gha,scope=agent-e2e-loser
-      cache_to:
-        - type=gha,mode=max,scope=agent-e2e-loser
   app:
     build:
       cache_from:
@@ -78,12 +54,6 @@ services:
         - type=gha,scope=e2e-search-init
       cache_to:
         - type=gha,mode=max,scope=e2e-search-init
-  e2e-search-worker:
-    build:
-      cache_from:
-        - type=gha,scope=e2e-search-worker
-      cache_to:
-        - type=gha,mode=max,scope=e2e-search-worker
   frontend:
     build:
       cache_from:
