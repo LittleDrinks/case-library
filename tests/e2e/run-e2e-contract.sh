@@ -59,7 +59,7 @@ ci_images="$project_dir/scripts/ci-images.sh"
 test -x "$ci_images"
 grep -Fq 'compose config --format json' "$ci_images"
 grep -Fq 'ls-files -s -- "$src"' "$ci_images"
-grep -Fq 'docker pull "$ref"' "$ci_images"
+grep -Fq 'docker pull --quiet "$ref"' "$ci_images"
 grep -Fq 'docker tag "$ref"' "$ci_images"
 if grep -Fq 'compose build $build_services' "$runner"; then
   echo "E2E must pull fingerprint-tagged images instead of unconditional compose build" >&2
