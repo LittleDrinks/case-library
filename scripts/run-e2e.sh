@@ -112,7 +112,8 @@ run_browser_tests() {
   set -- compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir:/app/test-results" e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
-  if test "$browser_spec" = "tests/e2e/agent-chat.spec.js"; then
+  if test "$browser_spec" = "tests/e2e/agent-chat.spec.js" ||
+     test "$browser_spec" = "tests/e2e/agent-threads.spec.js"; then
     set -- compose --profile e2e run --rm \
       -v "$artifact_dir:/app/test-results" agent-e2e
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"

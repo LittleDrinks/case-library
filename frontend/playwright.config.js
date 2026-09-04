@@ -24,7 +24,7 @@ export default defineConfig({
   },
   projects: [
     { name: "generic", testIgnore: "**/agent-*.spec.js" },
-    { name: "agent", testMatch: "**/agent-chat.spec.js" },
+    { name: "agent", testMatch: ["**/agent-chat.spec.js", "**/agent-threads.spec.js"] },
     { name: "agent-tracer", testMatch: "**/agent-tracer.spec.js" },
   ],
 });
