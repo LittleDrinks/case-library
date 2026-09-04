@@ -28,6 +28,12 @@ class ActiveRunError(Exception):
     pass
 
 
+class MessageNotFoundError(Exception):
+    def __init__(self, message_id: str) -> None:
+        super().__init__(message_id)
+        self.message_id = message_id
+
+
 class ThreadNotFoundError(Exception):
     pass
 
@@ -69,6 +75,12 @@ class AgentRepository:
             raise ThreadNotFoundError
         return _model_view(row, AgentThread)
 
+    def thread_by_id(self, thread_id: str, session=None) -> AgentThread | None:
+        row = self.database.agent_threads.find_one(
+            {"id": thread_id}, session=session
+        )
+        return _model_view(row, AgentThread)
+
     def messages(self, thread_id: str, session=None) -> list[AgentMessage]:
         rows = self.database.agent_messages.find(
             {"threadId": thread_id}, session=session
@@ -81,6 +93,18 @@ class AgentRepository:
         )
         return _model_view(row, AgentRun)
 
+    def runs(self, thread_id: str, session=None) -> list[AgentRun]:
+        rows = self.database.agent_runs.find(
+            {"threadId": thread_id}, session=session
+        ).sort([("startedAt", ASCENDING), ("id", ASCENDING)])
+        return [_model_view(row, AgentRun) for row in rows]
+
+    def message(self, thread_id: str, message_id: str) -> AgentMessage | None:
+        row = self.database.agent_messages.find_one(
+            {"threadId": thread_id, "id": message_id}
+        )
+        return _model_view(row, AgentMessage)
+
     def latest_run(self, thread_id: str, session=None) -> AgentRun | None:
         row = self.database.agent_runs.find_one(
             {"threadId": thread_id},
@@ -89,14 +113,14 @@ class AgentRepository:
         )
         return _model_view(row, AgentRun)
 
-    def renew_run_owner(self, run_id: str, owner_id: str) -> bool:
+    def renew_run_owner(self, run_id: str, owner_id: str) -> dict | None:
         now = _now()
         row = self.database.agent_runs.find_one_and_update(
             _owned_query(run_id, owner_id, now),
             {"$set": {"ownerExpiresAt": now + _owner_delta()}},
             return_document=ReturnDocument.AFTER,
         )
-        return row is not None
+        return _without_id(row)
 
     def snapshot(self, thread: AgentThread) -> AgentSnapshot:
         return _transaction(self.database, lambda session: self._snapshot(thread, session))
@@ -114,9 +138,18 @@ class AgentRepository:
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
             artifacts=self.artifacts(current.id, session),
+            runs=self.runs(current.id, session),
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
         )
+
+    def events_after(
+        self, thread_id: str, after_seq: int, limit: int = 200
+    ) -> list[AgentThreadEvent]:
+        rows = self.database.agent_thread_events.find(
+            {"threadId": thread_id, "eventSeq": {"$gt": after_seq}}
+        ).sort([("eventSeq", ASCENDING)]).limit(limit)
+        return [_model_view(row, AgentThreadEvent) for row in rows]
 
     def artifacts(self, thread_id: str, session=None) -> list[AgentArtifact]:
         rows = self.database.agent_artifacts.find(
@@ -158,6 +191,59 @@ class AgentRepository:
         self._append_start_events(thread.id, run, message.id, session)
         return run
 
+    def retry_run(
+        self,
+        thread: AgentThread,
+        user_message_id: str,
+        assistant_id: str,
+        owner_id: str | None = None,
+        quota_ids: tuple[str, ...] = (),
+    ) -> AgentRun:
+        """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
+        try:
+            return _transaction(self.database, lambda session: self._retry_run(
+                thread, user_message_id, assistant_id, owner_id, quota_ids, session,
+            ))
+        except DuplicateKeyError as error:
+            raise ActiveRunError from error
+
+    def _retry_run(
+        self, thread, user_message_id, assistant_id, owner_id, quota_ids, session
+    ) -> AgentRun:
+        message = self.database.agent_messages.find_one(
+            {"threadId": thread.id, "id": user_message_id, "role": "user"},
+            session=session,
+        )
+        if message is None:
+            raise MessageNotFoundError(user_message_id)
+        run_id = new_id("run")
+        if self._reserve_active(thread, run_id, session, bump=False) is None:
+            raise ActiveRunError
+        return self._insert_retry_run(
+            thread, message, assistant_id, run_id, owner_id, quota_ids, session
+        )
+
+    def _insert_retry_run(
+        self, thread, message, assistant_id, run_id, owner_id, quota_ids, session
+    ) -> AgentRun:
+        run = _new_retry_run(thread, message, assistant_id, run_id, owner_id, quota_ids)
+        self.database.agent_runs.insert_one(_run_document(run), session=session)
+        self._append_event(
+            thread.id, "run.started", run.id,
+            {"userMessageId": message["id"], "assistantMessageId": assistant_id},
+            session,
+        )
+        return run
+
+    def request_cancel(self, run_id: str) -> AgentRun | None:
+        """幂等标记活动 Run 为取消请求；由持有者通过 cancellation token 执行。"""
+        row = self.database.agent_runs.find_one_and_update(
+            {"id": run_id, "status": "active"},
+            {"$set": {"cancelRequestedAt": _now()}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _model_view(row, AgentRun)
+
     def _insert_start_records(
         self, message: AgentMessage, run: AgentRun, session
     ) -> None:
@@ -174,20 +260,28 @@ class AgentRepository:
     ) -> int:
         if self._client_request_exists(thread.id, client_request_id, session):
             raise ActiveRunError
-        current = self.database.agent_threads.find_one_and_update(
+        current = self._reserve_active(thread, run_id, session)
+        if current is None:
+            raise ActiveRunError
+        return current["nextMessageSeq"]
+
+    def _reserve_active(
+        self, thread: AgentThread, run_id: str, session, bump: bool = True
+    ) -> dict | None:
+        update: dict = {"$set": {"activeRunId": run_id, "updatedAt": _now()}}
+        if bump:
+            update["$inc"] = {"nextMessageSeq": 1}
+        return self.database.agent_threads.find_one_and_update(
             {
                 "id": thread.id,
                 "activeRunId": None,
                 "eventSeq": thread.event_seq,
                 "nextMessageSeq": thread.next_message_seq,
             },
-            {"$inc": {"nextMessageSeq": 1}, "$set": {"activeRunId": run_id, "updatedAt": _now()}},
+            update,
             return_document=ReturnDocument.AFTER,
             session=session,
         )
-        if current is None:
-            raise ActiveRunError
-        return current["nextMessageSeq"]
 
     def _client_request_exists(self, thread_id: str, client_request_id: str | None, session) -> bool:
         return bool(client_request_id and self.database.agent_runs.find_one(
@@ -419,6 +513,21 @@ def _new_user_message(
     return AgentMessage(
         id=message_id, thread_id=thread.id, run_id=run_id, message_seq=message_seq,
         role="user", metadata=metadata, parts=parts, created_at=now,
+    )
+
+
+def _new_retry_run(
+    thread, message: dict, assistant_id: str, run_id: str,
+    owner_id: str | None, quota_ids: tuple[str, ...],
+) -> AgentRun:
+    now = _now()
+    return AgentRun(
+        id=run_id, thread_id=thread.id, user_id=thread.owner_id,
+        user_message_id=message["id"], assistant_message_id=assistant_id,
+        status="active", started_at=now,
+        owner_id=owner_id,
+        owner_expires_at=now + _owner_delta() if owner_id else None,
+        quota_ids=quota_ids,
     )
 
 

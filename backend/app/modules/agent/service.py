@@ -6,6 +6,7 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from pydantic_ai import CancellationToken
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
@@ -31,11 +32,14 @@ class RunContext:
     prompt: str
     case: dict
     agent: object
+    buffer: object = None
+    supervisor: object = None
     selection: object | None = None
     settings: object | None = None
     lease: object | None = None
     worker_id: str | None = None
     result: object | None = None
+    token: CancellationToken | None = None
     deps: ToolDeps | None = None
     capabilities: list | None = None
     cancelled: bool = False
@@ -52,6 +56,7 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "instructions": case_instructions(context.case),
         "user_prompt": context.prompt,
         "deps": context.deps,
+        "cancellation_token": context.token,
     }
     if context.capabilities:
         values["capabilities"] = context.capabilities
@@ -66,10 +71,7 @@ async def _native_events(context: RunContext):
             async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
                 async for event in events:
                     yield event
-    except RunCancelled:
-        context.cancelled = True
-        raise
-    except asyncio.CancelledError:
+    except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
         raise
     except Exception:
@@ -149,12 +151,19 @@ def _assistant_message(context: RunContext, result) -> AgentMessage:
     )
 
 
-async def _on_complete(context: RunContext, result) -> None:
-    context.result = result
+def _assistant_parts_of(context: RunContext) -> list[dict]:
+    return _assistant_parts(_assistant_ui(context, context.result))
 
 
-async def _on_cancel(context: RunContext, _cancelled) -> None:
-    context.cancelled = True
+async def _drain(context: RunContext) -> None:
+    try:
+        async with aclosing(_adapter_stream(context)) as stream:
+            async for chunk in stream:
+                await context.buffer.publish(chunk)
+    except (RunCancelled, asyncio.CancelledError):
+        context.cancelled = True
+    except Exception:
+        context.failed = True
 
 
 def _adapter_stream(context: RunContext):
@@ -165,24 +174,26 @@ def _adapter_stream(context: RunContext):
     )
 
 
-async def protocol_stream(context: RunContext):
+async def _on_complete(context: RunContext, result) -> None:
+    context.result = result
+
+
+async def _on_cancel(context: RunContext, _cancelled) -> None:
+    context.cancelled = True
+
+
+async def execute_run(context: RunContext, supervisor) -> None:
+    """后台执行一次 Run：断开不取消，终态由显式停止、完成或失败决定。"""
+    context.token = CancellationToken()
     monitor = asyncio.create_task(_monitor(context, asyncio.current_task()))
     try:
-        async with aclosing(_adapter_stream(context)) as stream:
-            async for chunk in stream:
-                yield chunk
-    except (RunCancelled, asyncio.CancelledError):
-        context.cancelled = True
-        raise
-    except (BrokenPipeError, ConnectionResetError, GeneratorExit) as error:
-        context.cancelled = True
-        raise asyncio.CancelledError from error
-    except Exception:
-        context.failed = True
-        raise
+        await _drain(context)
     finally:
         monitor.cancel()
         _finalize(context)
+        if context.supervisor is not None:
+            context.supervisor.unregister(context.run.id)
+        await context.buffer.close()
 
 
 def _stream_status(context: RunContext) -> TerminalRunStatus:
@@ -217,11 +228,22 @@ def _monitor_failed(context: RunContext) -> None:
 
 
 def _renew(context: RunContext) -> bool:
-    if context.worker_id and not context.repository.renew_run_owner(
-        context.run.id, context.worker_id
-    ):
-        context.lost = True
-        return False
+    row = None
+    if context.worker_id:
+        row = context.repository.renew_run_owner(context.run.id, context.worker_id)
+        if row is None:
+            context.lost = True
+            return False
+    _stop_if_requested(context, row)
+    return _renew_lease(context)
+
+
+def _stop_if_requested(context: RunContext, row: dict | None) -> None:
+    if row and row.get("cancelRequestedAt") and context.token:
+        context.token.cancel()
+
+
+def _renew_lease(context: RunContext) -> bool:
     if not context.lease:
         return True
     try:
@@ -260,10 +282,6 @@ def _complete(context: RunContext) -> None:
         context.lost = True
 
 
-def _assistant_parts_of(context: RunContext) -> list[dict]:
-    return _assistant_parts(_assistant_ui(context, context.result))
-
-
 def _terminal(context: RunContext, finish) -> None:
     if not finish(context.run.id, context.worker_id):
         context.lost = True
@@ -275,8 +293,9 @@ def _release_lease(context: RunContext) -> None:
         context.lease.release()
 
 
-def load_history(repository: AgentRepository, thread: AgentThread) -> list:
+def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None) -> list:
     rows = repository.messages(thread.id)
+    rows = [row for row in rows if max_seq is None or row.message_seq <= max_seq]
     return VercelAIAdapter.load_messages(
         [UIMessage.model_validate(_ui_message(row)) for row in rows]
     )

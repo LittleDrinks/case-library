@@ -64,6 +64,9 @@ class AgentRun(BaseModel):
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str | None = None
+    cancel_requested_at: datetime | None = Field(
+        default=None, alias="cancelRequestedAt", exclude=True
+    )
     owner_id: str | None = Field(default=None, alias="ownerId", exclude=True)
     owner_expires_at: datetime | None = Field(default=None, alias="ownerExpiresAt", exclude=True)
     quota_ids: tuple[str, ...] = Field(default_factory=tuple, alias="quotaIds", exclude=True)
@@ -125,5 +128,6 @@ class AgentSnapshot(BaseModel):
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
     artifacts: list[AgentArtifact] = Field(default_factory=list)
+    runs: list[AgentRun] = Field(default_factory=list)
     active_run: AgentRun | None = Field(default=None, alias="activeRun")
     latest_run: AgentRun | None = Field(default=None, alias="latestRun")

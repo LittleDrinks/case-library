@@ -89,6 +89,10 @@ export const api = {
   agentThread: (caseId) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
   ),
+  agentCancel: (caseId, threadId, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
+    jsonOptions("POST", {}, csrfToken),
+  ),
   agentDecide: (caseId, artifactId, decision, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),

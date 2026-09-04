@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from fastapi.testclient import TestClient
+from pydantic_ai.models import override_allow_model_requests
 
 
 class _ProviderHandler(BaseHTTPRequestHandler):
@@ -107,7 +108,7 @@ def _send(client: TestClient, auth: dict) -> object:
 def test_custom_provider_uses_production_agent_route_and_releases_lease(
     client: TestClient,
 ) -> None:
-    with _ProviderServer() as provider:
+    with _ProviderServer() as provider, override_allow_model_requests(True):
         auth = _login(client)
         _configure(client, auth, provider.base_url)
         response = _send(client, auth)
@@ -125,7 +126,7 @@ def test_custom_provider_uses_production_agent_route_and_releases_lease(
 
 
 def test_upstream_failure_is_a_stable_terminal_run(client: TestClient) -> None:
-    with _ProviderServer("failure") as provider:
+    with _ProviderServer("failure") as provider, override_allow_model_requests(True):
         auth = _login(client)
         _configure(client, auth, provider.base_url)
         response = _send(client, auth)
