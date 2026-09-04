@@ -71,9 +71,12 @@ def test_second_default_insert_is_rejected_by_unique_index() -> None:
 
 
 def _run_turn(repository, thread, owner_id: str) -> str:
-    run = repository.start_run(thread, owner_id, [{"type": "text", "text": "问题"}], {}, "asst")
+    assistant_id = new_id("message")
+    run = repository.start_run(
+        thread, owner_id, [{"type": "text", "text": "问题"}], {}, assistant_id
+    )
     assistant = AgentMessage(
-        id="assistant-message", thread_id=thread.id, run_id=run.id, role="assistant",
+        id=assistant_id, thread_id=thread.id, run_id=run.id, role="assistant",
         parts=[{"type": "text", "text": "回答"}], created_at=datetime.now(UTC),
     )
     assert repository.complete_run(run.id, assistant)

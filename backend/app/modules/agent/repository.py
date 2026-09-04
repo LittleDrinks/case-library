@@ -53,12 +53,18 @@ class AgentRepository:
         self.database = database
 
     def default_thread(self, case_id: str, owner_id: str) -> AgentThread:
-        row = self.database.agent_threads.find_one_and_update(
-            {"caseId": case_id, "ownerId": owner_id, "isDefault": True},
-            _default_thread_update(case_id, owner_id),
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
+        try:
+            row = self.database.agent_threads.find_one_and_update(
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True},
+                _default_thread_update(case_id, owner_id),
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # 并发首建竞争：部分唯一索引拒绝败者插入，回读胜者文档。
+            row = self.database.agent_threads.find_one(
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True}
+            )
         return _model_view(row, AgentThread)
 
     def thread(self, thread_id: str, case_id: str, owner_id: str) -> AgentThread:
