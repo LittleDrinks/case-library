@@ -28,6 +28,7 @@ class AgentThread(BaseModel):
     id: str
     case_id: str = Field(alias="caseId")
     owner_id: str = Field(alias="ownerId")
+    title: str | None = None
     is_default: bool = Field(alias="isDefault")
     next_message_seq: int = Field(default=0, alias="nextMessageSeq")
     event_seq: int = Field(default=0, alias="eventSeq")
@@ -117,11 +118,24 @@ class AgentThreadEvent(BaseModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class AgentThreadSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    title: str | None = None
+    is_default: bool = Field(alias="isDefault")
+    running: bool = False
+    event_seq: int = Field(default=0, alias="eventSeq")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
+
+
 class AgentSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str
     case_id: str = Field(alias="caseId")
+    title: str | None = None
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
     artifacts: list[AgentArtifact] = Field(default_factory=list)
