@@ -571,6 +571,60 @@ def _assert_cancel_terminal(database, client, csrf, cancel_path, thread_id, run_
     _await_released(database, run_id)
 
 
+def test_agent_http_stop_race_completion_wins_over_cancel():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        cancel_path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/cancel"
+        assert _send(client, csrf, case["id"], "停止竞态完成优先", "race-done").status_code == 200
+        run = database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
+        assert run["status"] == "completed"
+        idle = client.post(cancel_path, headers={"X-CSRF-Token": csrf})
+        assert idle.json() == {"runId": None, "status": "idle"}
+        assert database.agent_runs.find_one({"id": run["id"]}, {"_id": 0})["status"] == "completed"
+        assert not [event for event in _events(database, thread_id)
+                    if event["type"] == "run.cancelled"]
+    finally:
+        _close(client, mongo=mongo)
+
+
+def test_agent_http_stop_race_cancellation_wins_before_stream_end():
+    client, csrf = _login()
+    mongo = MongoClient(MONGO_URI)
+    try:
+        case = _create_case(client, csrf)
+        database = mongo.get_default_database()
+        thread_id = _thread(client, case["id"])["id"]
+        cancel_path = f"/api/cases/{case['id']}/agent/thread/{thread_id}/cancel"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _send, client, csrf, case["id"], "取消测试", "race-cancel",
+                thread_id=thread_id,
+            )
+            run = _await_active(database, thread_id)
+            _assert_cancel_accepted(client, csrf, cancel_path)
+            assert future.result(timeout=15).status_code == 200
+        _assert_stop_race_cancelled(database, thread_id, run["id"])
+    finally:
+        _close(client, mongo=mongo)
+
+
+def _assert_stop_race_cancelled(database, thread_id: str, run_id: str) -> None:
+    """取消竞态：token 先于流结束触发后，Run 终态封尾且不产生完成输出。"""
+    terminal = _await_status(database, run_id, "cancelled")
+    assert terminal["error"] == "运行已取消"
+    events = _events(database, thread_id)
+    assert events[-1]["type"] == "run.cancelled"
+    assert not [event for event in events if event["type"] in {"run.completed", "run.failed"}]
+    assert database.agent_messages.count_documents(
+        {"threadId": thread_id, "role": "assistant"}
+    ) == 0
+    _await_released(database, run_id)
+
+
 def test_agent_http_events_endpoint_replays_and_closes():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
@@ -710,6 +764,7 @@ def test_agent_http_heartbeat_loss_stops_the_live_worker():
         thread_id = _thread(client, case["id"])["id"]
         response, run = _run_after_owner_takeover(client, csrf, case, database, thread_id)
         assert response.status_code == 200
+        assert response.text.endswith("data: [DONE]\n\n")
         _assert_lost_worker_state(database, thread_id, run["id"])
         _await_released(database, run["id"])
     finally:

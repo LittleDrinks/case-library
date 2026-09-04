@@ -71,8 +71,8 @@ def _post_async(app, text: str, model, message_id: str = "lifecycle-message"):
     return pool.submit(send), client, pool
 
 
-def _gated_model(release: Event, reached: Event | None = None, tail: Event | None = None):
-    """确定性阻塞模型：两段文本，中间阻塞直到 release；tail 阻塞流结束。"""
+def _gated_model(release: Event, reached: Event | None = None):
+    """确定性阻塞模型：两段文本，中间阻塞直到 release。"""
 
     async def stream(_messages, _info):
         yield "前半"
@@ -80,8 +80,6 @@ def _gated_model(release: Event, reached: Event | None = None, tail: Event | Non
             reached.set()
         await asyncio.to_thread(release.wait, 60)
         yield "后半"
-        if tail:
-            await asyncio.to_thread(tail.wait, 60)
 
     return FunctionModel(stream_function=stream)
 
@@ -276,7 +274,7 @@ def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) 
             pool.shutdown()
 
 
-def test_stop_race_completion_wins_when_stream_finishes_first(client: TestClient) -> None:
+def test_cancel_after_terminal_completion_is_idle_noop(client: TestClient) -> None:
     auth = _login(client)
     with client.app.state.agent.override(model=TestModel(custom_output_text="竞态回答")):
         thread_id = _thread_id(client)
@@ -290,26 +288,6 @@ def test_stop_race_completion_wins_when_stream_finishes_first(client: TestClient
     assert database.agent_runs.find_one({"id": run["id"]}, {"_id": 0})["status"] == "completed"
     assert not [event for event in _events(database, thread_id)
                 if event["type"] == "run.cancelled"]
-
-
-def test_stop_race_cancellation_wins_when_token_fires_before_stream_end(client: TestClient) -> None:
-    auth = _login(client)
-    release, tail = Event(), Event()
-    model = _gated_model(release, tail=tail)
-    with client.app.state.agent.override(model=model):
-        future, _client, pool = _post_async(client.app, "停止竞态", model)
-        try:
-            thread_id = _stop_active_run(client, auth)
-            run = _await_run(client.app.state.database, thread_id)
-            assert run["status"] == "cancelled"
-            tail.set()
-        finally:
-            release.set()
-            future.result(timeout=15)
-            pool.shutdown()
-    assert not client.app.state.database.agent_messages.find_one({
-        "threadId": thread_id, "role": "assistant",
-    })
 
 
 def _retry_request(client: TestClient, auth: dict, message_id: str):
