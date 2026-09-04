@@ -141,6 +141,17 @@ async function reloadRestoresLastThread(page, caseId) {
   await expect(page.locator(".ai-message.user")).toContainText(FIRST_QUESTION);
 }
 
+async function assertCrossUserBlocked(page, caseId) {
+  const adminContext = await page.context().browser().newContext();
+  const loginResponse = await adminContext.request.post("/api/auth/login", {
+    data: { username: "admin", password: "admin123" },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  const list = await adminContext.request.get(`/api/cases/${caseId}/agent/threads`);
+  expect(list.status()).toBe(403);
+  await adminContext.close();
+}
+
 test("命名 Thread：创建、重命名、切换、刷新恢复、跨用户阻断与状态隔离", async ({ page }) => {
   const created = await seedTwoThreads(page);
   await renameAndSwitchBack(page);
@@ -148,7 +159,5 @@ test("命名 Thread：创建、重命名、切换、刷新恢复、跨用户阻�
   const [firstRow] = await threadList(page, created.id);
   await assertCrossCaseHidden(page, created.id, firstRow.id);
   await reloadRestoresLastThread(page, created.id);
-  await login(page, "admin", "admin123");
-  const forbidden = await page.context().request.get(`/api/cases/${created.id}/agent/threads`);
-  expect(forbidden.status()).toBe(403);
+  await assertCrossUserBlocked(page, created.id);
 });
