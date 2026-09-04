@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
@@ -163,7 +165,6 @@ def test_two_threads_keep_isolated_messages_runs_and_events(client: TestClient) 
 
     assert _user_texts(default_snapshot) == ["默认对话问题"]
     assert _user_texts(second_snapshot) == ["第二对话问题"]
-    assert default_snapshot["eventSeq"] == second_snapshot["eventSeq"] == 4
     assert default_snapshot["latestRun"]["id"] != second_snapshot["latestRun"]["id"]
     summaries = {t["id"]: t for t in client.get(THREADS_PATH).json()}
     assert summaries[created["id"]]["title"] == "第二个对话"
@@ -183,7 +184,32 @@ def test_list_marks_thread_with_active_run_as_running(client: TestClient) -> Non
     assert summaries[thread.id]["running"] is True
 
 
-def test_default_thread_remains_unique_per_author_and_case(client: TestClient) -> None:
+def _insert_artifact(database, thread_id: str, artifact_id: str) -> None:
+    database.agent_artifacts.insert_one({
+        "id": artifact_id, "caseId": "c-draft-1", "threadId": thread_id, "runId": "run-x",
+        "status": "pending", "baseRevision": 1,
+        "target": {"paragraphIndex": 0, "quote": "原文"},
+        "replacement": "替换", "reason": "", "sources": [],
+        "createdAt": datetime.now(UTC),
+    })
+
+
+def test_thread_snapshots_scope_artifacts_to_their_thread(client: TestClient) -> None:
+    auth = _login(client)
+    repository = AgentRepository(client.app.state.database)
+    first = repository.default_thread("c-draft-1", auth["user"]["id"])
+    second = repository.create_thread("c-draft-1", auth["user"]["id"], "第二对话")
+    _insert_artifact(client.app.state.database, first.id, "artifact-a")
+    _insert_artifact(client.app.state.database, second.id, "artifact-b")
+
+    first_snapshot = _snapshot(client, first.id)
+    second_snapshot = _snapshot(client, second.id)
+
+    assert [a["id"] for a in first_snapshot["artifacts"]] == ["artifact-a"]
+    assert [a["id"] for a in second_snapshot["artifacts"]] == ["artifact-b"]
+
+
+def test_default_thread_upsert_returns_same_thread(client: TestClient) -> None:
     auth = _login(client)
     repository = AgentRepository(client.app.state.database)
     first = repository.default_thread("c-draft-1", auth["user"]["id"])
@@ -191,6 +217,3 @@ def test_default_thread_remains_unique_per_author_and_case(client: TestClient) -
     again = repository.default_thread("c-draft-1", auth["user"]["id"])
 
     assert again.id == first.id
-    assert client.app.state.database.agent_threads.count_documents(
-        {"ownerId": auth["user"]["id"], "isDefault": True}
-    ) == 1

@@ -19,12 +19,19 @@ function message(id, text) {
   return { id, role: "user", metadata: {}, parts: [{ type: "text", text }] };
 }
 
-function snapshotOf(id, title, messages = []) {
+function snapshotOf(id, title, messages = [], artifacts = []) {
   return {
     id, caseId: "case-1", title, eventSeq: 4, messages,
-    artifacts: [], activeRun: null, latestRun: null,
+    artifacts, activeRun: null, latestRun: null,
   };
 }
+
+const pendingArtifact = {
+  id: "artifact-1", caseId: "case-1", threadId: "thread-1", runId: "run-1",
+  status: "pending", baseRevision: 1,
+  target: { paragraphIndex: 1, quote: "第二段原文" },
+  replacement: "替换后的第二段", reason: "补充评价依据", sources: [],
+};
 
 const snapshots = {
   "thread-1": snapshotOf("thread-1", "默认对话", [message("m-1", "默认消息")]),
@@ -149,6 +156,25 @@ it("falls back to the default thread when the preference is stale", async () => 
   expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-gone");
   expect(api.agentThread).toHaveBeenLastCalledWith("case-1");
   expect(wrapper.text()).toContain("默认消息");
+});
+
+it("keeps a pending artifact scoped to its thread and decidable after switching back", async () => {
+  snapshots["thread-1"] = snapshotOf("thread-1", "默认对话", [message("m-1", "默认消息")], [pendingArtifact]);
+  api.agentDecide.mockResolvedValue({ artifact: { status: "rejected" }, case: null });
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-artifact"]').text()).toContain("待确认");
+  await openList(wrapper);
+  await wrapper.findAll('[data-testid="agent-thread-open"]')[1].trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[data-testid="agent-artifact"]').exists()).toBe(false);
+  await openList(wrapper);
+  await wrapper.findAll('[data-testid="agent-thread-open"]')[0].trigger("click");
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("pending");
+  await wrapper.get('[data-testid="agent-reject"]').trigger("click");
+  await flushPromises();
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-1", "rejected", "csrf");
 });
 
 it("restores the saved scroll position when switching back", async () => {
