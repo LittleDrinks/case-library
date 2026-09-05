@@ -13,6 +13,7 @@ vi.mock("../api.js", () => ({
     agentDecide: vi.fn(),
     agentCancel: vi.fn(),
     aiSettings: vi.fn(),
+    listSkills: vi.fn(),
   },
 }));
 
@@ -65,6 +66,7 @@ beforeEach(() => {
   ));
   api.agentThreads.mockResolvedValue(structuredClone(threadRows));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
+  api.listSkills.mockResolvedValue([]);
 });
 
 it("opens the thread list with rows, status, back and create entries", async () => {

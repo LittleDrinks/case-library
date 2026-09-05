@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(),
+    agentCancel: vi.fn(), listSkills: vi.fn(),
   },
 }));
 
@@ -61,6 +61,7 @@ beforeEach(() => {
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
+  api.listSkills.mockResolvedValue([]);
 });
 
 it("restores the server thread and sends one turn through the SDK transport", async () => {
@@ -266,4 +267,80 @@ it("restores skill load, sources and decided artifact from a reloaded thread sna
   expect(artifact.text()).toContain("状态：已接受");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
   expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
+});
+
+const publishedSkills = [
+  { id: "skill-9", name: "思政案例生成", description: "按模板生成教学案例", version: "v2" },
+];
+
+async function sendTurn(wrapper, fetch) {
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  return JSON.parse(fetch.mock.calls[0][1].body);
+}
+
+it("attaches the default case-edit skill to a sent message", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const body = await sendTurn(wrapper, fetch);
+  expect(body.messages.at(-1).parts).toContainEqual(
+    { type: "data-skill", data: { skillId: "case-edit-skill" } },
+  );
+});
+
+it("sends the published skill selected in the composer", async () => {
+  api.listSkills.mockResolvedValue(publishedSkills);
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const select = wrapper.get('[data-testid="skill-select"]');
+  expect(select.text()).toContain("思政案例生成（v2）");
+  await select.setValue("skill-9");
+  const body = await sendTurn(wrapper, fetch);
+  expect(body.messages.at(-1).parts).toContainEqual(
+    { type: "data-skill", data: { skillId: "skill-9" } },
+  );
+});
+
+it("sends no skill part when the teacher chooses none", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[data-testid="skill-select"]').setValue("");
+  const body = await sendTurn(wrapper, fetch);
+  const parts = body.messages.at(-1).parts;
+  expect(parts.some((part) => part.type === "data-skill")).toBe(false);
+});
+
+it("shows the selected skill name on a restored user message", async () => {
+  api.listSkills.mockResolvedValue(publishedSkills);
+  const restored = structuredClone(snapshot);
+  restored.messages = [{
+    id: "message-skill", role: "user", metadata: {},
+    parts: [
+      { type: "text", text: "按模板生成案例" },
+      { type: "data-skill", data: { skillId: "skill-9" } },
+    ],
+  }];
+  api.agentThread.mockResolvedValue(restored);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("思政案例生成");
+});
+
+it("labels the built-in case-edit skill load in Chinese", async () => {
+  api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toBe("已加载 Skill：案例修订工作流");
 });

@@ -1,7 +1,7 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, ref } from "vue";
-import { useAgentChat } from "../composables/useAgentChat.js";
+import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -13,6 +13,7 @@ const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
+  skills, selectedSkillId,
   listThreads, selectThread, createThread, renameThread,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
@@ -75,6 +76,24 @@ function statusText() {
 
 function toolParts(message) {
   return (message.parts || []).filter((part) => part.type.startsWith("tool-"));
+}
+
+function skillPartOf(message) {
+  return (message.parts || []).find((part) => part.type === "data-skill");
+}
+
+function skillName(skillId) {
+  if (skillId === CASE_EDIT_SKILL_ID) return "案例修订工作流";
+  return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
+}
+
+function skillLoadLabel(part) {
+  const name = part.output?.name || part.output?.skillId || part.input?.id || "";
+  return name ? `已加载 Skill：${skillName(name)}` : "已加载 Skill";
+}
+
+function skillOptionLabel(skill) {
+  return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
 }
 
 function sourcesOf(part) {
@@ -166,6 +185,11 @@ async function retryRun() {
           <article class="ai-message" :class="message.role">
             <b>{{ message.role === "user" ? "我" : "AI" }}</b>
             <p v-if="textParts(message)">{{ textParts(message) }}</p>
+            <p
+              v-if="skillPartOf(message)"
+              class="ai-skill-chip"
+              data-testid="message-skill"
+            >使用 Skill：{{ skillName(skillPartOf(message).data?.skillId) }}</p>
           </article>
           <template v-if="message.role === 'assistant'">
             <p
@@ -173,7 +197,7 @@ async function retryRun() {
               :key="part.toolCallId"
               class="agent-tool-trace"
               data-testid="agent-skill-load"
-            >已加载 Skill：单段修订工作流 v2.1</p>
+            >{{ skillLoadLabel(part) }}</p>
             <div
               v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
               :key="part.toolCallId"
@@ -215,6 +239,22 @@ async function retryRun() {
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
       <div class="assistant-composer">
+        <div class="assistant-skill-picker">
+          <label for="agent-skill-select">Skill</label>
+          <select
+            id="agent-skill-select"
+            v-model="selectedSkillId"
+            aria-label="选择 Skill"
+            data-testid="skill-select"
+            :disabled="loading || sending"
+          >
+            <option :value="CASE_EDIT_SKILL_ID">案例修订工作流（默认）</option>
+            <option value="">不使用 Skill</option>
+            <option v-for="skill in skills" :key="skill.id" :value="skill.id">
+              {{ skillOptionLabel(skill) }}
+            </option>
+          </select>
+        </div>
         <textarea
           v-model="draft"
           aria-label="向 AI 提问"

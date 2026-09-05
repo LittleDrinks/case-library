@@ -40,6 +40,12 @@ function materialImportForm(files, accessLevel) {
   return body;
 }
 
+function skillPackageForm(file) {
+  const body = new FormData();
+  body.append("file", file);
+  return body;
+}
+
 function attachmentRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/attachments`;
 }
@@ -212,6 +218,17 @@ export const api = {
     `/api/admin/material-candidates/${encodeURIComponent(id)}/decision`,
     jsonOptions("POST", decision, csrfToken),
   ),
+  listAdminSkills: () => request("/api/admin/skills"),
+  uploadSkillPackage: (file, csrfToken) => request("/api/admin/skills/packages", {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+    body: skillPackageForm(file),
+  }),
+  publishSkillVersion: (id, versionId, csrfToken) => request(
+    `/api/admin/skills/${encodeURIComponent(id)}/publish`,
+    jsonOptions("POST", { versionId }, csrfToken),
+  ),
+  listSkills: () => request("/api/skills"),
   attachmentContentUrl: (id, attachmentId, versionId) => (
     `${attachmentRoot(id)}/${encodeURIComponent(attachmentId)}/content${versionQuery(versionId)}`
   ),

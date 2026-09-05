@@ -126,9 +126,11 @@ async function settle(caseId, state, generation, { fresh = false } = {}) {
 async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
-  const results = await Promise.allSettled([resolveSnapshot(caseId), api.aiSettings()]);
+  const results = await Promise.allSettled([
+    resolveSnapshot(caseId), api.aiSettings(), api.listSkills(),
+  ]);
   if (!isCurrent(state, generation)) return;
-  const [threadResult, settingsResult] = results;
+  const [threadResult, settingsResult, skillsResult] = results;
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
     state.threadId.value = threadResult.value.id;
@@ -136,6 +138,7 @@ async function loadChat(caseId, state, generation) {
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
   else if (!state.error.value) state.error.value = settingsResult.reason.message || "AI 配置加载失败";
+  if (skillsResult.status === "fulfilled") state.skills.value = skillsResult.value || [];
   state.loading.value = false;
   await resume(caseId, state, generation);
 }
@@ -159,15 +162,17 @@ async function selectThread(caseId, state, threadId) {
   await resume(caseId, state, generation);
 }
 
+function messageParts(state, text) {
+  const parts = [{ type: "text", text }];
+  const skillId = state.selectedSkillId.value;
+  if (skillId) parts.push({ type: "data-skill", data: { skillId } });
+  return parts;
+}
+
 async function sendChat(caseId, state, text, generation) {
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({
-      parts: [
-        { type: "text", text },
-        { type: "data-skill", data: { skillId: CASE_EDIT_SKILL_ID } },
-      ],
-    });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation);
   }
@@ -234,6 +239,7 @@ function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
+    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID),
     generation: 0, disposed: false,
   };
 }
@@ -284,15 +290,13 @@ export function useAgentChat(caseId) {
   const stop = () => stopChat(caseId, state, at());
   const retry = (messageId) => retryChat(caseId, state, at(), messageId);
   const decide = (artifactId, decision) => decideArtifact(caseId, state, at(), artifactId, decision);
-  const recover = () => {
-    if (!state.snapshot.value?.activeRun) return;
-    return resume(caseId, state, at());
-  };
+  const recover = () => (state.snapshot.value?.activeRun ? resume(caseId, state, at()) : undefined);
   bindLifecycle(state, recover);
   void reload(caseId, state);
   return {
     ...computedState(state), ...threadActions(caseId, state),
     loading: state.loading, error: state.error, settings: state.settings,
+    skills: state.skills, selectedSkillId: state.selectedSkillId,
     textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
   };
 }
