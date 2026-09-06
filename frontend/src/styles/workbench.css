@@ -135,7 +135,25 @@
   overflow: hidden;
   field-sizing: content;
 }
-.document-byline { display: flex; justify-content: center; gap: 18px; margin-bottom: 42px; color: var(--ink-3); font-size: 12px; }
+.document-byline { display: flex; justify-content: center; gap: 18px; margin-bottom: 12px; color: var(--ink-3); font-size: 12px; }
+.case-tags { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-bottom: 34px; color: var(--ink-3); font-size: 12px; }
+.case-tag-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.case-tag-list li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); }
+.case-tag-list li button { display: grid; padding: 1px; place-items: center; border: 0; background: transparent; color: var(--ink-3); }
+.case-tag-list li button:hover { color: var(--brand); }
+.case-tags-state { display: inline-flex; align-items: center; gap: 5px; }
+.case-tags-state button { padding: 0; border: 0; background: transparent; color: var(--brand); }
+.case-tag-editor > button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px dashed var(--line-strong); border-radius: 999px; background: transparent; color: var(--ink-3); }
+.case-tag-editor > button:hover { border-color: var(--brand); color: var(--brand); }
+.case-tag-popover { position: absolute; z-index: 5; top: 100%; display: grid; width: 300px; max-height: min(480px, calc(100vh - 260px)); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); text-align: left; }
+.case-tag-popover fieldset { display: grid; gap: 4px; margin: 0; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line-soft); }
+.case-tag-popover fieldset:last-child { border-bottom: 0; }
+.case-tag-popover legend { padding: 0 0 4px; color: var(--ink-3); font-size: 12px; font-weight: 650; }
+.case-tag-popover legend b { margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--brand-soft); color: var(--brand); font-size: 11px; }
+.case-tag-popover label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; color: var(--ink-2); }
+.case-tag-popover > p { margin: 0; padding: 12px 14px; }
+.submission-todo { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
+.submission-todo ul { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; padding-left: 16px; }
 .canvas-editor { min-height: 600px; outline: 0; font: 16px/2 var(--serif); }
 .canvas-editor h1 { margin: 36px 0 16px; font-size: 24px; }
 .canvas-editor h2 { margin: 30px 0 14px; font-size: 21px; }

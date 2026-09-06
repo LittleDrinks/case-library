@@ -163,6 +163,19 @@ export const api = {
     jsonOptions("POST", command, csrfToken),
   ),
   caseHistory: (id) => request(`/api/cases/${encodeURIComponent(id)}/history`),
+  listTagGroups: () => request("/api/tag-groups"),
+  createTagGroup: (group, csrfToken) => request(
+    "/api/tag-groups", jsonOptions("POST", group, csrfToken),
+  ),
+  updateTagGroup: (id, patch, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  createTag: (groupId, tag, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(groupId)}/tags`, jsonOptions("POST", tag, csrfToken),
+  ),
+  updateTag: (id, patch, csrfToken) => request(
+    `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
   listAnnotations: (id) => request(annotationRoot(id)),
   createAnnotation: (id, annotation, csrfToken) => request(
     annotationRoot(id), jsonOptions("POST", annotation, csrfToken),
