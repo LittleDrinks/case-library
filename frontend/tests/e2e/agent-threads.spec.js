@@ -213,6 +213,23 @@ async function defaultThread(page, caseId) {
   return (await threadList(page, caseId)).find((row) => row.isDefault);
 }
 
+async function expectMidGeneration(page, caseId, threadId) {
+  const serverRunId = (await threadSnapshot(page, caseId, threadId)).latestRun.id;
+  await expect(page.getByTestId("agent-stop")).toBeVisible();
+  await expect(page.locator(".ai-message.user")).toContainText(SLOW_QUESTION);
+  const panel = page.locator(".agent-chat-panel");
+  await expect(panel).toHaveAttribute("data-run-id", serverRunId);
+  await expect(panel).toHaveAttribute("data-run-status", "active");
+  return serverRunId;
+}
+
+async function expectSameRunTerminal(page, caseId, threadId, runId, question) {
+  const snapshot = await threadSnapshot(page, caseId, threadId);
+  expect(snapshot.latestRun.id).toBe(runId);
+  expectSingleExchange(snapshot, question);
+  await expectPanelMatches(page, snapshot);
+}
+
 test("生成中 A→B→A：切换不取消不重发，切回重连同一 Run 到终态且无重复写入", async ({ page }) => {
   await login(page);
   await configureChat(page);
@@ -223,10 +240,9 @@ test("生成中 A→B→A：切换不取消不重发，切回重连同一 Run �
   await expectActive(page, created.id, threadA.id);
   await createEmptyThread(page);
   await switchToThread(page, "慢速测试");
+  const resumedRunId = await expectMidGeneration(page, created.id, threadA.id);
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
-  const snapshot = await threadSnapshot(page, created.id, threadA.id);
-  expectSingleExchange(snapshot, SLOW_QUESTION);
-  await expectPanelMatches(page, snapshot);
+  await expectSameRunTerminal(page, created.id, threadA.id, resumedRunId, SLOW_QUESTION);
 });
 
 test("非默认 Thread 生成中刷新：恢复选中 Thread，续跑同一 Run 到终态且无重复写入", async ({ page }) => {
@@ -238,12 +254,11 @@ test("非默认 Thread 生成中刷新：恢复选中 Thread，续跑同一 Run 
   await sendSlow(page, SLOW_QUESTION);
   const threadB = (await threadList(page, created.id)).find((row) => !row.isDefault);
   await expectActive(page, created.id, threadB.id);
+  const runBefore = (await threadSnapshot(page, created.id, threadB.id)).latestRun.id;
   await page.reload();
   await openChat(page, created.id);
   await expect(page.getByTestId("agent-thread-list-open")).toContainText("慢速测试");
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
-  const snapshot = await threadSnapshot(page, created.id, threadB.id);
-  expectSingleExchange(snapshot, SLOW_QUESTION);
-  await expectPanelMatches(page, snapshot);
+  await expectSameRunTerminal(page, created.id, threadB.id, runBefore, SLOW_QUESTION);
   expect((await defaultThread(page, created.id)).running).toBe(false);
 });

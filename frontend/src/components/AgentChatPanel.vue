@@ -1,6 +1,6 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import AgentThreadList from "./AgentThreadList.vue";
 
@@ -28,16 +28,41 @@ const conversation = ref(null);
 const scrollPositions = new Map();
 const currentTitle = computed(() => threadState.value?.title || "未命名对话");
 
+const THREADS_POLL_MS = 2000;
+let threadsTimer = null;
+
+function stopThreadsPolling() {
+  clearInterval(threadsTimer);
+  threadsTimer = null;
+}
+
+async function refreshThreads() {
+  try {
+    threads.value = await listThreads();
+  } catch {
+    // 轮询失败时保留当前列表，等待下一轮刷新
+  }
+}
+
 async function openThreads() {
   rememberScroll();
   mode.value = "threads";
   threadsLoading.value = true;
   try {
-    threads.value = await listThreads();
+    await refreshThreads();
   } finally {
     threadsLoading.value = false;
+    stopThreadsPolling();
+    threadsTimer = setInterval(refreshThreads, THREADS_POLL_MS);
   }
 }
+
+function closeThreads() {
+  stopThreadsPolling();
+  mode.value = "chat";
+}
+
+onBeforeUnmount(stopThreadsPolling);
 
 function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
@@ -49,6 +74,7 @@ async function restoreScroll(id) {
 }
 
 async function chooseThread(id) {
+  stopThreadsPolling();
   if (id !== threadId.value) {
     await selectThread(id);
   }
@@ -57,6 +83,7 @@ async function chooseThread(id) {
 }
 
 async function addThread() {
+  stopThreadsPolling();
   await createThread();
   mode.value = "chat";
   await restoreScroll(threadId.value);
@@ -232,7 +259,7 @@ async function retryRun() {
       :threads="threads"
       :current-id="threadId"
       :loading="threadsLoading"
-      @back="mode = 'chat'"
+      @back="closeThreads"
       @select="chooseThread"
       @create="addThread"
       @rename="applyRename"
