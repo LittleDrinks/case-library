@@ -209,6 +209,98 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(wrapper.text()).toContain("已生成单段修订候选");
 });
 
+function tracerPartsSnapshot() {
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [
+    { type: "reasoning", state: "streaming", text: "先查资料" },
+    { type: "tool-search_corpus", toolCallId: "t2", state: "input-available", input: { query: "科学家精神" } },
+    { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "case-edit-skill" }, output: {} },
+    { type: "text", text: "结论" },
+  ];
+  return structuredClone(tracer);
+}
+
+it("renders assistant parts in structural order with running tools expanded", async () => {
+  api.agentThread.mockResolvedValue(tracerPartsSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const text = wrapper.get(".ai-message.assistant").text();
+  expect(text.indexOf("思考中")).toBeGreaterThanOrEqual(0);
+  expect(text.indexOf("思考中")).toBeLessThan(text.indexOf("检索案例 · 进行中"));
+  expect(text.indexOf("检索案例 · 进行中")).toBeLessThan(text.indexOf("已加载 Skill"));
+  expect(text.indexOf("已加载 Skill")).toBeLessThan(text.indexOf("结论"));
+
+  const traces = wrapper.findAll('[data-testid="agent-skill-load"]');
+  expect(traces[0].classes()).toContain("running");
+  expect(traces[0].attributes("open")).toBeDefined();
+  expect(traces[0].text()).toContain("检索词：科学家精神");
+  expect(traces[1].classes()).not.toContain("running");
+  expect(traces[1].attributes("open")).toBeUndefined();
+});
+
+it("labels a skill load from the tool call and shows the skill chip on the user turn", async () => {
+  api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toBe("已加载 Skill：单段修订工作流 · 已完成");
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toBe("使用 Skill：单段修订工作流");
+});
+
+function searchPartWithSources() {
+  return {
+    type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" },
+    output: { sources: [
+      { kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" },
+      { kind: "material", id: "m-7", title: "配套阅读材料", snippet: "材料节选" },
+    ] },
+  };
+}
+
+it("shows tool failures and keeps source cards on stable in-site ids", async () => {
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [
+    searchPartWithSources(),
+    { type: "tool-read_source", toolCallId: "t3", state: "output-error", input: { source_id: "x" }, errorText: "读取失败" },
+  ];
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expectSourceCards(wrapper);
+  const failed = wrapper.findAll('[data-testid="agent-skill-load"]')[1];
+  expect(failed.text()).toContain("阅读来源 · 读取失败");
+});
+
+function expectSourceCards(wrapper) {
+  const cards = wrapper.findAll('[data-testid="agent-source"]');
+  expect(cards).toHaveLength(2);
+  const links = wrapper.findAll('[data-testid="agent-source"] a');
+  expect(links).toHaveLength(1);
+  expect(links[0].attributes("href")).toBe("#/cases/c-42");
+  expect(links[0].attributes("title")).toContain("在站内打开");
+  expect(cards[1].text()).toContain("配套阅读材料");
+  expect(cards[1].find("a").exists()).toBe(false);
+}
+
+it("renders unknown tools by name without exposing raw arguments", async () => {
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [
+    { type: "tool-future_tool", toolCallId: "t9", state: "output-available",
+      input: { secretPrompt: "内部参数" }, output: { internal: "原始结果" } },
+  ];
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const trace = wrapper.get('[data-testid="agent-skill-load"]');
+  expect(trace.text()).toContain("future_tool · 已完成");
+  expect(trace.text()).not.toContain("内部参数");
+  expect(trace.text()).not.toContain("原始结果");
+  expect(trace.find("pre").exists()).toBe(false);
+});
+
 function decideResult(decision) {
   return {
     artifact: { status: decision },

@@ -63,6 +63,13 @@ async function openChat(page, caseId) {
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
+async function expandSearchTool(page) {
+  const search = page.locator('[data-testid="agent-skill-load"]').filter({ hasText: "检索案例" });
+  await expect(search).toBeVisible();
+  if (await search.getAttribute("open")) return;
+  await search.locator("summary").click();
+}
+
 async function sendRequest(page) {
   await page.getByLabel("向 AI 提问").fill(REQUEST_TEXT);
   await page.getByRole("button", { name: "发送", exact: true }).click();
@@ -82,6 +89,7 @@ async function reloadRestoresTracer(page, caseId) {
   await page.reload();
   await openChat(page, caseId);
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expandSearchTool(page);
   await expect(page.getByTestId("agent-source").first()).toBeVisible();
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
@@ -97,14 +105,17 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
   await openChat(page, created.id);
 
   await sendRequest(page);
-  await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expandSearchTool(page);
   const sources = page.getByTestId("agent-source");
   await expect(sources.first()).toBeVisible();
   expect(await sources.count()).toBeGreaterThan(0);
+  await acceptAndVerify(page, created.id);
+  await reloadRestoresTracer(page, created.id);
+});
 
+async function acceptAndVerify(page, caseId) {
   await page.getByTestId("agent-accept").click();
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted", { timeout: 15_000 });
-  await acceptedViaApi(page, created.id);
-  await reloadRestoresTracer(page, created.id);
-});
+  await acceptedViaApi(page, caseId);
+}
