@@ -1,6 +1,12 @@
 <script setup>
-import { Check, FilePlus2, LoaderCircle, RefreshCw, Upload } from "@lucide/vue";
-import { onMounted, ref } from "vue";
+import { ElAlert, ElButton, ElForm, ElFormItem, ElTable, ElTableColumn, ElTag, ElUpload } from "element-plus";
+import "element-plus/es/components/alert/style/css";
+import "element-plus/es/components/button/style/css";
+import "element-plus/es/components/form/style/css";
+import "element-plus/es/components/table/style/css";
+import "element-plus/es/components/tag/style/css";
+import "element-plus/es/components/upload/style/css";
+import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
 import { session } from "../session.js";
@@ -13,6 +19,9 @@ const uploading = ref(false);
 const uploadError = ref("");
 const uploaded = ref(null);
 const publishing = ref("");
+const rows = computed(() => skills.value.flatMap((skill) =>
+  skill.versions.map((version) => ({ skill, version })),
+));
 
 function dateLabel(value) {
   return value ? String(value).slice(0, 10) : "日期待定";
@@ -25,8 +34,12 @@ function sizeLabel(size) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function selectFile(event) {
-  file.value = event.target.files?.[0] || null;
+function isPublished(row) {
+  return row.skill.publishedVersionId === row.version.id;
+}
+
+function onFileChange(uploadFile) {
+  file.value = uploadFile.raw || null;
   uploadError.value = "";
   uploaded.value = null;
 }
@@ -81,38 +94,45 @@ onMounted(load);
         <RouterLink :to="{ name: 'admin-dashboard' }">返回管理后台</RouterLink>
       </header>
 
-      <form class="skills-upload" aria-label="上传 Skill 包" @submit.prevent="submit">
-        <label class="skills-file-button" title="选择 Skill 包">
-          <FilePlus2 :size="19" aria-hidden="true" />
-          <input
-            type="file"
+      <el-form class="skills-upload" aria-label="上传 Skill 包" @submit.prevent="submit">
+        <el-form-item label="Skill 包">
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="false"
             accept=".zip,application/zip"
-            required
-            aria-label="选择 Skill 包"
-            @change="selectFile"
-          />
-        </label>
-        <span class="skills-file-selection" :title="file?.name">{{ file?.name || "未选择文件" }}</span>
-        <button class="skills-upload-submit" type="submit" :disabled="uploading || !file">
-          <LoaderCircle v-if="uploading" class="spin" :size="17" aria-hidden="true" />
-          <Upload v-else :size="17" aria-hidden="true" />
-          <span>{{ uploading ? "上传中" : "上传并识别" }}</span>
-        </button>
-      </form>
-      <p v-if="uploadError" class="skills-error" role="alert">{{ uploadError }}</p>
+            @change="onFileChange"
+          >
+            <el-button aria-label="选择 Skill 包">选择文件</el-button>
+          </el-upload>
+          <span class="skills-file-selection" :title="file?.name">{{ file?.name || "未选择文件" }}</span>
+        </el-form-item>
+        <el-button
+          class="skills-upload-submit"
+          type="primary"
+          native-type="submit"
+          :loading="uploading"
+          :disabled="!file"
+        >上传并识别</el-button>
+      </el-form>
+      <el-alert
+        v-if="uploadError"
+        class="skills-error"
+        type="error"
+        :title="uploadError"
+        role="alert"
+        show-icon
+        :closable="false"
+      />
 
       <section v-if="uploaded" class="skills-uploaded" aria-labelledby="skills-uploaded-title">
         <header>
           <div><span>识别结果</span><h2 id="skills-uploaded-title">{{ uploaded.skill.name }}</h2></div>
-          <button
-            type="button"
+          <el-button
+            type="primary"
             data-testid="skill-publish-uploaded"
-            :disabled="Boolean(publishing)"
+            :loading="Boolean(publishing)"
             @click="publish(uploaded.skill.id, uploaded.version.id)"
-          >
-            <LoaderCircle v-if="publishing" class="spin" :size="15" aria-hidden="true" />
-            <Check v-else :size="15" aria-hidden="true" />发布此版本
-          </button>
+          >发布此版本</el-button>
         </header>
         <p class="skills-uploaded-desc">{{ uploaded.skill.description || "暂无描述" }}</p>
         <dl>
@@ -124,36 +144,42 @@ onMounted(load);
 
       <section class="skills-list" aria-labelledby="skills-list-title">
         <header><div><span>已上传</span><h2 id="skills-list-title">Skill 列表</h2></div><b>{{ skills.length }}</b></header>
-        <div v-if="loading" class="skills-state"><LoaderCircle class="spin" :size="20" />正在加载 Skill 列表</div>
-        <div v-else-if="error" class="skills-state skills-error" role="alert">
-          {{ error }}<button type="button" @click="load"><RefreshCw :size="15" />重试</button>
-        </div>
-        <p v-else-if="!skills.length" class="skills-empty">暂无 Skill 包，请先上传</p>
-        <article v-for="skill in skills" :key="skill.id" class="skill-card" :aria-label="`Skill：${skill.name}`">
-          <header>
-            <div>
-              <h3>{{ skill.name }}</h3>
-              <p>{{ skill.description || "暂无描述" }}</p>
-            </div>
-            <span v-if="skill.publishedVersionId" class="skill-published-tag">已发布</span>
-          </header>
-          <ul>
-            <li v-for="version in skill.versions" :key="version.id">
-              <b>{{ version.version }}</b>
-              <span>{{ dateLabel(version.createdAt) }}</span>
-              <em v-if="skill.publishedVersionId === version.id" data-testid="skill-version-published">当前发布</em>
-              <button
-                v-else
-                type="button"
-                :data-testid="`skill-publish-${version.id}`"
-                :disabled="Boolean(publishing)"
-                @click="publish(skill.id, version.id)"
-              >
-                <LoaderCircle v-if="publishing === version.id" class="spin" :size="14" aria-hidden="true" />发布
-              </button>
-            </li>
-          </ul>
-        </article>
+        <div v-if="loading" class="skills-state">正在加载 Skill 列表</div>
+        <el-alert v-else-if="error" type="error" :title="error" role="alert" show-icon :closable="false">
+          <el-button size="small" @click="load">重试</el-button>
+        </el-alert>
+        <el-table v-else :data="rows" aria-label="Skill 版本列表">
+          <el-table-column prop="skill.name" label="Skill" min-width="140" />
+          <el-table-column label="描述" min-width="180">
+            <template #default="{ row }">{{ row.skill.description || "暂无描述" }}</template>
+          </el-table-column>
+          <el-table-column prop="version.version" label="版本" width="80" />
+          <el-table-column label="上传时间" width="110">
+            <template #default="{ row }">{{ dateLabel(row.version.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="isPublished(row)" type="success" data-testid="skill-version-published">当前发布</el-tag>
+              <el-tag v-else-if="row.skill.publishedVersionId" type="info">已发布</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100">
+            <template #default="{ row }">
+              <el-button
+                v-if="!isPublished(row)"
+                size="small"
+                type="primary"
+                plain
+                :data-testid="`skill-publish-${row.version.id}`"
+                :loading="publishing === row.version.id"
+                @click="publish(row.skill.id, row.version.id)"
+              >发布</el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <span class="skills-empty">暂无 Skill 包，请先上传</span>
+          </template>
+        </el-table>
       </section>
     </main>
   </div>

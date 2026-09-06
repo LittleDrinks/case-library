@@ -108,7 +108,7 @@ it("carries the selected published skill id and shows the catalog options", asyn
   expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
 });
 
-it("restores the selected skill from the thread snapshot after reload", async () => {
+function restoredSnapshot() {
   const restored = structuredClone(snapshot);
   restored.messages.unshift({
     id: "message-user", role: "user", metadata: {},
@@ -117,12 +117,51 @@ it("restores the selected skill from the thread snapshot after reload", async ()
       { type: "data-skill", data: { skillId: "skill-pub" } },
     ],
   });
-  api.agentThread.mockResolvedValue(restored);
+  return restored;
+}
+
+it("restores the selected skill from the thread snapshot after reload", async () => {
+  api.agentThread.mockResolvedValue(restoredSnapshot());
   const wrapper = mountPanel();
   await flushPromises();
 
   expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
   expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：思政案例生成");
+});
+
+it("keeps the server skill through a failed catalog and restores it on retry", async () => {
+  api.listSkills.mockRejectedValueOnce(new Error("目录服务不可用"));
+  api.agentThread.mockResolvedValue(restoredSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="skill-catalog-error"]').text()).toContain("目录加载失败");
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：skill-pub");
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
+  expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
+
+  await wrapper.get('[data-testid="skill-catalog-retry"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="skill-catalog-error"]').exists()).toBe(false);
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
+  expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+});
+
+it("shows an empty catalog state and still sends with the builtin skill", async () => {
+  api.listSkills.mockResolvedValue([]);
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="skill-catalog-empty"]').text()).toContain("暂无已发布 Skill");
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("当前问题");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "case-edit-skill" } });
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {

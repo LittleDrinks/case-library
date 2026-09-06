@@ -29,13 +29,14 @@ const uploadResult = {
 };
 
 function mountView() {
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   return mount(AdminSkillsView, {
     global: { stubs: { SiteHeader: true, RouterLink: true } },
   });
 }
 
 async function uploadPackage(wrapper) {
-  const input = wrapper.get('input[aria-label="选择 Skill 包"]');
+  const input = wrapper.get('input[type="file"]');
   const file = new File(["zip-bytes"], "skill.zip", { type: "application/zip" });
   Object.defineProperty(input.element, "files", { value: [file], configurable: true });
   await input.trigger("change");

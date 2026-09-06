@@ -13,11 +13,14 @@ const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
   decide, artifacts, threadState, stopping, retryableMessageId, skills, selectedSkillId,
+  catalog, reloadCatalog, skillReady,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
-const canSend = computed(() => Boolean(draft.value.trim() && configured.value && !loading.value && !sending.value));
+const canSend = computed(() => Boolean(
+  draft.value.trim() && configured.value && skillReady.value && !loading.value && !sending.value,
+));
 const decideError = ref("");
 
 function statusText() {
@@ -184,13 +187,19 @@ async function retryRun() {
         v-model="selectedSkillId"
         aria-label="选择 Skill"
         data-testid="skill-select"
-        :disabled="loading || sending"
+        :disabled="loading || sending || catalog === 'loading'"
       >
         <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
         <option v-for="skill in skills" :key="skill.id" :value="skill.id">
           {{ skillOptionLabel(skill) }}
         </option>
       </select>
+      <span v-if="catalog === 'loading'" class="skill-catalog-state" data-testid="skill-catalog-loading">正在加载目录</span>
+      <template v-else-if="catalog === 'error'">
+        <span class="skill-catalog-state error" data-testid="skill-catalog-error">目录加载失败</span>
+        <button type="button" class="skill-catalog-retry" data-testid="skill-catalog-retry" @click="reloadCatalog">重试</button>
+      </template>
+      <span v-else-if="!skills.length" class="skill-catalog-state" data-testid="skill-catalog-empty">暂无已发布 Skill</span>
     </div>
     <div class="assistant-composer">
       <textarea

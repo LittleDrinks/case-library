@@ -96,8 +96,7 @@ async function settle(caseId, state, generation, { fresh = false } = {}) {
   await resume(caseId, state, generation);
 }
 
-function applyResults(caseId, state, [threadResult, settingsResult, skillsResult]) {
-  if (skillsResult.status === "fulfilled") state.skills.value = skillsResult.value || [];
+function applyResults(caseId, state, [threadResult, settingsResult]) {
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
     state.chat.value = buildChat(caseId, threadResult.value, state);
@@ -110,9 +109,7 @@ function applyResults(caseId, state, [threadResult, settingsResult, skillsResult
 async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
-  const results = await Promise.allSettled(
-    [api.agentThread(caseId), api.aiSettings(), api.listSkills()],
-  );
+  const results = await Promise.allSettled([api.agentThread(caseId), api.aiSettings()]);
   if (!isCurrent(state, generation)) return;
   applyResults(caseId, state, results);
   state.loading.value = false;
@@ -122,9 +119,27 @@ async function loadChat(caseId, state, generation) {
 function restoreSkill(state, snapshot) {
   const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
   const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
+  if (skillId) state.selectedSkillId.value = skillId;
+}
+
+function dropUnknownSkill(state) {
+  const skillId = state.selectedSkillId.value;
   const known = skillId === CASE_EDIT_SKILL_ID
     || state.skills.value.some((skill) => skill.id === skillId);
-  if (skillId && known) state.selectedSkillId.value = skillId;
+  if (!known) state.selectedSkillId.value = CASE_EDIT_SKILL_ID;
+}
+
+async function loadCatalog(state, generation) {
+  state.catalog.value = "loading";
+  try {
+    const catalog = await api.listSkills();
+    if (!isCurrent(state, generation)) return;
+    state.skills.value = catalog || [];
+    state.catalog.value = "ready";
+    dropUnknownSkill(state);
+  } catch {
+    if (isCurrent(state, generation)) state.catalog.value = "error";
+  }
 }
 
 async function sendChat(caseId, state, text, generation) {
@@ -178,7 +193,7 @@ function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     loading: ref(true), error: ref(""), stopping: ref(false),
-    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID),
+    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID), catalog: ref("loading"),
     generation: 0, disposed: false,
   };
 }
@@ -190,6 +205,13 @@ function retryMessageId(state) {
   const last = messages.at(-1);
   if (run?.status !== "failed" || last?.role !== "user") return "";
   return last.id;
+}
+
+function isSelectedSkillValid(state) {
+  const skillId = state.selectedSkillId.value;
+  if (skillId === CASE_EDIT_SKILL_ID) return true;
+  return state.catalog.value === "ready"
+    && state.skills.value.some((skill) => skill.id === skillId);
 }
 
 function computedState(state) {
@@ -204,6 +226,15 @@ function computedState(state) {
     threadState: computed(() => state.snapshot.value),
     stopping: computed(() => Boolean(state.stopping.value)),
     retryableMessageId: computed(() => retryMessageId(state)),
+    skillReady: computed(() => isSelectedSkillValid(state)),
+  };
+}
+
+function exposedState(state) {
+  return {
+    ...computedState(state), loading: state.loading, error: state.error,
+    settings: state.settings, skills: state.skills, selectedSkillId: state.selectedSkillId,
+    catalog: state.catalog, textParts,
   };
 }
 
@@ -234,9 +265,9 @@ export function useAgentChat(caseId) {
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
+  void loadCatalog(state, at());
   return {
-    ...computedState(state), loading: state.loading, error: state.error,
-    settings: state.settings, skills: state.skills, selectedSkillId: state.selectedSkillId,
-    textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
+    ...exposedState(state), reloadCatalog: () => loadCatalog(state, at()),
+    send, stop, retry, decide, reload: () => reload(caseId, state),
   };
 }
