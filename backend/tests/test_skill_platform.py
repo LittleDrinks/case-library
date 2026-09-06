@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
@@ -210,16 +212,16 @@ def test_resource_read_rejects_traversal_and_binary(client: TestClient) -> None:
     ).status_code == 404
 
 
-def test_frontmatter_rejects_non_string_metadata(client: TestClient) -> None:
-    """name/description 必须是真实非空字符串：数字、布尔、列表、对象、纯空白都拒绝。"""
-    good_name = 'name: "sizheng-case-generator"'
-    good_description = 'description: "简要描述"'
+def _non_string_frontmatter_cases() -> dict[str, str]:
+    """非法样例：数字/布尔/列表/对象一律拒绝，纯空白视为缺失。"""
 
-    def frontmatter(name: str = good_name, description: str = good_description) -> str:
+    def frontmatter(
+        name: str = 'name: "sizheng-case-generator"',
+        description: str = 'description: "简要描述"',
+    ) -> str:
         return f"{name}\n{description}"
 
-    auth = _csrf(_login(client, ADMIN))
-    for expected, raw in {
+    return {
         "name 必须是字符串，收到数字": frontmatter(name="name: 123"),
         "name 必须是字符串，收到布尔值": frontmatter(name="name: true"),
         "name 必须是字符串，收到列表": frontmatter(name="name: [sizheng-case-generator]"),
@@ -227,11 +229,16 @@ def test_frontmatter_rejects_non_string_metadata(client: TestClient) -> None:
         "description 必须是字符串，收到对象": frontmatter(description="description: {zh: 简介}"),
         "缺少非空 name": frontmatter(name='name: "   "'),
         "缺少非空 description": frontmatter(description='description: "\\n \\t"'),
-    }.items():
-        data = _package_with_raw_frontmatter(raw)
+    }
+
+
+def test_frontmatter_rejects_non_string_metadata(client: TestClient) -> None:
+    """name/description 必须是真实非空字符串，不做类型强转。"""
+    auth = _csrf(_login(client, ADMIN))
+    for expected, raw in _non_string_frontmatter_cases().items():
         response = client.post(
             PACKAGE_PATH, headers=auth,
-            files={"file": ("skill.zip", data, "application/zip")},
+            files={"file": ("skill.zip", _package_with_raw_frontmatter(raw), "application/zip")},
         )
         assert response.status_code == 422, (expected, response.text)
         assert expected in response.json()["detail"], expected
@@ -285,3 +292,79 @@ def test_concurrent_uploads_allocate_distinct_versions(client: TestClient) -> No
     assert versions == [f"v{index}" for index in range(1, 7)]
     listing = client.get("/api/admin/skills", headers=_csrf(admin)).json()[0]
     assert len(listing["versions"]) == 6
+
+
+def test_late_finishing_upload_never_regresses_latest(
+    client: TestClient, monkeypatch
+) -> None:
+    """并发完成乱序：v1 迟到完成不得把 latestVersionId 从 v2 倒退回 v1。"""
+    from app.modules.skills import service
+
+    database = client.app.state.database
+    second, late = _upload_out_of_order(client, monkeypatch, service)
+    assert late.status_code == 201
+    assert second["version"]["version"] == "v2"
+    assert second["skill"]["latestVersionId"] == second["version"]["id"]
+    skill = database.skills.find_one({"id": SKILL_ID})
+    assert skill["latestVersionNumber"] == 2
+    assert skill["latestVersionId"] == second["version"]["id"]
+
+
+def _upload_out_of_order(client: TestClient, monkeypatch, service) -> tuple[dict, object]:
+    """v1 卡在版本落库前，v2 完成并指向最新后再放行 v1 完成写库。"""
+    release = threading.Event()
+    original_insert = service._insert_version
+
+    def gated_insert(db, package, number, now):
+        if number == 1:
+            release.wait(timeout=10)
+        return original_insert(db, package, number, now)
+
+    monkeypatch.setattr(service, "_insert_version", gated_insert)
+    admin = _login(client, ADMIN)
+    late_package = build_package(_altered_files("迟到-v1"))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        late = pool.submit(_upload, client, admin, late_package)
+        _wait_for_reserved_number(client.app.state.database, 1)
+        second = _upload(client, admin, build_package(_altered_files("抢先-v2"))).json()
+        release.set()
+    return second, late.result()
+
+
+def _altered_files(note: str) -> dict[str, str]:
+    files = dict(FILES)
+    files[f"{SKILL_DIR}/{TEMPLATE_PATH}"] = f"# 模板规范 {note}"
+    return files
+
+
+def _wait_for_reserved_number(database, number: int) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        skill = database.skills.find_one({"id": SKILL_ID})
+        if skill and skill.get("versionCounter", 0) >= number:
+            return
+        time.sleep(0.01)
+    raise AssertionError("版本号未被预留")
+
+
+def test_republish_same_version_keeps_published_at(client: TestClient) -> None:
+    """重复发布同一版本幂等：publishedAt 不被改写；换发新版本才更新。"""
+    admin = _login(client, ADMIN)
+    first = _upload(client, admin, build_package()).json()["version"]
+    _publish(client, admin, SKILL_ID, first["id"])
+    published_at = _published_at(client, admin)
+    time.sleep(0.02)
+    again = _publish(client, admin, SKILL_ID, first["id"])
+    assert again.status_code == 200
+    assert _published_at(client, admin) == published_at
+    assert again.json()["skill"]["publishedVersionId"] == first["id"]
+    second = _upload(
+        client, admin, build_package(_altered_files("新-v2"))
+    ).json()["version"]
+    _publish(client, admin, SKILL_ID, second["id"])
+    assert _published_at(client, admin) != published_at
+
+
+def _published_at(client: TestClient, auth: dict) -> str | None:
+    listing = client.get("/api/admin/skills", headers=_csrf(auth)).json()
+    return next(row for row in listing if row["id"] == SKILL_ID)["publishedAt"]
