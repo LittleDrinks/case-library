@@ -471,9 +471,10 @@ class ArtifactDecisionBody(BaseModel):
     decision: ArtifactDecision
 
 
-@router.post("/{case_id}/agent/artifacts/{artifact_id}/decision")
-def decide_case_artifact(
+@router.post("/{case_id}/agent/thread/{thread_id}/artifacts/{artifact_id}/decision")
+def decide_thread_artifact(
     case_id: str,
+    thread_id: str,
     artifact_id: str,
     body: ArtifactDecisionBody,
     database=Depends(get_database),
@@ -481,4 +482,4 @@ def decide_case_artifact(
     _session: dict = Depends(require_csrf),
 ) -> dict:
     _author_case(database, case_id, user)
-    return decide_artifact(database, case_id, artifact_id, user, body.decision)
+    return decide_artifact(database, case_id, thread_id, artifact_id, user, body.decision)

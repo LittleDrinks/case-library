@@ -188,7 +188,10 @@ def _insert_artifact(database, thread_id: str, artifact_id: str) -> None:
     database.agent_artifacts.insert_one({
         "id": artifact_id, "caseId": "c-draft-1", "threadId": thread_id, "runId": "run-x",
         "status": "pending", "baseRevision": 1,
-        "target": {"paragraphIndex": 0, "quote": "原文"},
+        "target": {
+            "paragraphIndex": 0,
+            "quote": "某高端制造团队长期依赖进口精密传感部件。假设国际贸易环境突变，关键部件供应中断，且短期内无法通过第三渠道获得。团队手头有一批处于不同研发阶段的国产替代方案，成熟度参差不齐。",
+        },
         "replacement": "替换", "reason": "", "sources": [],
         "createdAt": datetime.now(UTC),
     })
@@ -207,6 +210,88 @@ def test_thread_snapshots_scope_artifacts_to_their_thread(client: TestClient) ->
 
     assert [a["id"] for a in first_snapshot["artifacts"]] == ["artifact-a"]
     assert [a["id"] for a in second_snapshot["artifacts"]] == ["artifact-b"]
+
+
+def _decide_artifact(client: TestClient, auth: dict, thread_id: str,
+                     artifact_id: str, decision: str = "accepted"):
+    return client.post(
+        f"{DEFAULT_PATH}/{thread_id}/artifacts/{artifact_id}/decision",
+        headers=_csrf(auth), json={"decision": decision},
+    )
+
+
+def _assert_decision_rejected(database, artifact_id: str) -> None:
+    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 1
+    assert database.agent_artifacts.find_one({"id": artifact_id})["status"] == "pending"
+    assert database.agent_thread_events.count_documents(
+        {"type": "artifact.decided"}
+    ) == 0
+
+
+def test_artifact_decision_rejects_other_thread_id_without_side_effects(client: TestClient) -> None:
+    auth = _login(client)
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    owner = repository.default_thread("c-draft-1", auth["user"]["id"])
+    other = repository.create_thread("c-draft-1", auth["user"]["id"], "另一对话")
+    _insert_artifact(database, owner.id, "artifact-a")
+
+    response = _decide_artifact(client, auth, other.id, "artifact-a")
+
+    assert response.status_code == 404
+    _assert_decision_rejected(database, "artifact-a")
+    accepted = _decide_artifact(client, auth, owner.id, "artifact-a")
+    assert accepted.status_code == 200
+    assert database.agent_artifacts.find_one({"id": "artifact-a"})["status"] == "accepted"
+
+
+def test_artifact_decision_repeat_still_binds_thread(client: TestClient) -> None:
+    auth = _login(client)
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    owner = repository.default_thread("c-draft-1", auth["user"]["id"])
+    other = repository.create_thread("c-draft-1", auth["user"]["id"], "另一对话")
+    _insert_artifact(database, owner.id, "artifact-a")
+    assert _decide_artifact(client, auth, owner.id, "artifact-a").status_code == 200
+    decided_revision = database.cases.find_one({"id": "c-draft-1"})["revision"]
+
+    response = _decide_artifact(client, auth, other.id, "artifact-a")
+
+    assert response.status_code == 404
+    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == decided_revision
+    assert database.agent_thread_events.count_documents(
+        {"type": "artifact.decided"}
+    ) == 1
+
+
+def test_artifact_decision_rejects_unknown_thread(client: TestClient) -> None:
+    auth = _login(client)
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    owner = repository.default_thread("c-draft-1", auth["user"]["id"])
+    _insert_artifact(database, owner.id, "artifact-a")
+
+    response = _decide_artifact(client, auth, "thread-not-exist", "artifact-a")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "对话不存在"
+    _assert_decision_rejected(database, "artifact-a")
+
+
+def test_unscoped_artifact_decision_route_is_gone(client: TestClient) -> None:
+    auth = _login(client)
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    owner = repository.default_thread("c-draft-1", auth["user"]["id"])
+    _insert_artifact(database, owner.id, "artifact-a")
+
+    response = client.post(
+        "/api/cases/c-draft-1/agent/artifacts/artifact-a/decision",
+        headers=_csrf(auth), json={"decision": "accepted"},
+    )
+
+    assert response.status_code == 404
+    _assert_decision_rejected(database, "artifact-a")
 
 
 def test_default_thread_upsert_returns_same_thread(client: TestClient) -> None:
