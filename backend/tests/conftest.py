@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import mongomock
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai.models import override_allow_model_requests
 
 from app.core.config import Settings
 from app.main import create_app
@@ -142,6 +143,13 @@ def _seed_worker_state(database) -> None:
             "updatedAt": datetime.now(UTC),
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def deny_model_requests():
+    """确定性测试禁止真实模型请求（FunctionModel/TestModel 不受影响）。"""
+    with override_allow_model_requests(False):
+        yield
 
 
 @pytest.fixture(autouse=True)

@@ -46,3 +46,10 @@ class SearchQuery(BaseModel):
             "accessLevel": [self.access_level] if self.access_level else [],
             "mountedInCaseId": self.mounted_case_id,
         }
+
+
+class SearchSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(max_length=200)
+    items: list[dict[str, object]] = Field(max_length=15)

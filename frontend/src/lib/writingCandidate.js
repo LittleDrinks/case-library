@@ -32,6 +32,11 @@ export function candidateSource(candidate, mode) {
   return "";
 }
 
+function selectionAnchor(target, context) {
+  if (target !== "selection") return "";
+  return `选区锚点：revision=${context.revision}; from=${context.from}; to=${context.to}; hash=${context.quoteHash}`;
+}
+
 export function candidatePrompt(instruction, target, context) {
   const source = target === "selection" ? context.quote : context.sectionText;
   return [
@@ -40,6 +45,7 @@ export function candidatePrompt(instruction, target, context) {
     "仅输出 JSON 对象，不要 Markdown：{\"text\":\"候选正文\",\"reason\":\"修改理由\"}",
     `目标：${target === "selection" ? "所选文字" : `小节「${context.section}」`}`,
     `教师要求：${instruction}`,
+    selectionAnchor(target, context),
     `原文：${source}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }

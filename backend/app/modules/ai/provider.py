@@ -1,280 +1,96 @@
 from __future__ import annotations
 
-import ipaddress
-import json
-import queue
-import socket
-import threading
-from dataclasses import dataclass
-from time import monotonic
-from urllib.parse import SplitResult, urlsplit
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from typing import AsyncIterator
 
-import urllib3
+import httpcore
+import httpx
+import httpx2
+from openai import OpenAI
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
-MAX_MODELS_BYTES = 1024 * 1024
+from app.modules.ai.transport import (
+    ProviderError,
+    RestrictedProviderTransport,
+    Target,
+    target_for_url,
+)
+
+
 MAX_MODELS = 200
-MAX_CHAT_BYTES = 512 * 1024
-MAX_SSE_FRAME_BYTES = 64 * 1024
-READ_SIZE = 8192
-
-
-class ProviderError(Exception):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class Target:
-    host: str
-    ip: str
-    port: int
-    path: str
-
-
-def _public_ip(value: str) -> bool:
-    address = ipaddress.ip_address(value)
-    mapped = getattr(address, "ipv4_mapped", None)
-    return address.is_global and (mapped is None or mapped.is_global)
-
-
-def _addresses(host: str, port: int) -> tuple[str, ...]:
-    try:
-        records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        addresses = tuple(dict.fromkeys(record[4][0] for record in records))
-    except (OSError, UnicodeError) as error:
-        raise ProviderError("AI provider unavailable") from error
-    if not addresses or not all(_public_ip(value) for value in addresses):
-        raise ProviderError("AI provider unavailable")
-    return addresses
-
-
-def _url_parts(base_url: str, allow_internal: bool = False) -> SplitResult:
-    try:
-        parts = urlsplit(base_url)
-        valid = (
-            parts.scheme == ("http" if allow_internal else "https") and parts.hostname
-        )
-        valid = valid and not parts.username and not parts.password
-        valid = valid and not parts.query and not parts.fragment
-        if not valid:
-            raise ValueError
-        parts.port
-        return parts
-    except ValueError as error:
-        raise ProviderError("AI provider unavailable") from error
+MAX_MODELS_BYTES = 1024 * 1024
 
 
 def _target(base_url: str, endpoint: str, allow_internal: bool = False) -> Target:
-    parts = _url_parts(base_url, allow_internal)
-    host = parts.hostname.encode("idna").decode("ascii")
-    port = parts.port or (80 if allow_internal else 443)
-    path = f"{parts.path.rstrip('/')}/{endpoint}"
-    ip = socket.gethostbyname(host) if allow_internal else _addresses(host, port)[0]
-    return Target(host, ip, port, path)
+    target = target_for_url(base_url, allow_internal)
+    path = f"{target.path.rstrip('/')}/{endpoint.lstrip('/')}".rstrip("/") or "/"
+    return replace(target, path=path)
 
 
-def _host_header(target: Target) -> str:
-    host = f"[{target.host}]" if ":" in target.host else target.host
-    return host if target.port == 443 else f"{host}:{target.port}"
+class _PinnedNetworkBackend(httpcore.NetworkBackend):
+    def __init__(self, ip: str):
+        self.ip = ip
+        self.backend = httpcore.SyncBackend()
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        return self.backend.connect_tcp(self.ip, port, timeout, local_address, socket_options)
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        return self.backend.connect_unix_socket(path, timeout, socket_options)
+
+    def sleep(self, seconds: float) -> None:
+        self.backend.sleep(seconds)
 
 
-def _pool(target: Target, timeout: float, secure: bool = True):
-    if not secure:
-        return urllib3.HTTPConnectionPool(
-            target.ip,
-            target.port,
-            timeout=urllib3.Timeout(total=timeout),
-            maxsize=1,
-            block=True,
+class _PinnedHTTPTransport(httpx.HTTPTransport):
+    def __init__(self, target: Target):
+        limits = httpx.Limits(max_connections=20, max_keepalive_connections=20)
+        super().__init__(verify=target.secure, trust_env=False, limits=limits, retries=0)
+        ssl_context = self._pool._ssl_context if target.secure else None
+        self._pool.close()
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=ssl_context, max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry, http1=True, http2=False, retries=0,
+            network_backend=_PinnedNetworkBackend(target.ip),
         )
-    return urllib3.HTTPSConnectionPool(
-        target.ip,
-        target.port,
-        timeout=urllib3.Timeout(total=timeout, connect=timeout, read=timeout),
-        cert_reqs="CERT_REQUIRED",
-        assert_hostname=target.host,
-        server_hostname=target.host,
-        maxsize=1,
-        block=True,
-    )
 
 
-def _headers(target: Target, api_key: str) -> dict[str, str]:
-    return {
-        "Host": _host_header(target),
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+class _GuardedStream(httpx.SyncByteStream):
+    def __init__(self, stream, limit: int):
+        self.stream, self.limit, self.total = stream, limit, 0
 
-
-def _close(response, pool) -> None:
-    if response is not None:
-        response.close()
-        response.release_conn()
-    pool.close()
-
-
-def _offer(output: queue.Queue, item: tuple, stopped: threading.Event) -> None:
-    while not stopped.is_set():
-        try:
-            output.put(item, timeout=0.05)
-            return
-        except queue.Full:
-            continue
-
-
-def _read_part(response) -> bytes:
-    reader = getattr(response, "read1", None) or response.read
-    return reader(READ_SIZE)
-
-
-def _read_worker(response, output: queue.Queue, stopped: threading.Event) -> None:
-    try:
-        while not stopped.is_set():
-            part = _read_part(response)
-            _offer(output, (part, None), stopped)
-            if not part:
-                return
-    except Exception as error:
-        _offer(output, (None, error), stopped)
-
-
-def _next_part(output: queue.Queue, deadline: float) -> tuple:
-    remaining = deadline - monotonic()
-    if remaining <= 0:
-        raise ProviderError("AI provider unavailable")
-    try:
-        return output.get(timeout=remaining)
-    except queue.Empty as error:
-        raise ProviderError("AI provider unavailable") from error
-
-
-def _reader(response, output: queue.Queue, stopped: threading.Event) -> None:
-    worker = threading.Thread(
-        target=_read_worker, args=(response, output, stopped), daemon=True
-    )
-    worker.start()
-
-
-def _parts(response, deadline: float, byte_limit: int):
-    output, stopped = queue.Queue(maxsize=2), threading.Event()
-    _reader(response, output, stopped)
-    total = 0
-    try:
-        while True:
-            part, error = _next_part(output, deadline)
-            if error:
-                raise error
-            if not part:
-                return
-            total += len(part)
-            if total > byte_limit:
+    def __iter__(self):
+        for part in self.stream:
+            self.total += len(part)
+            if self.total > self.limit:
                 raise ProviderError("AI provider unavailable")
             yield part
-    finally:
-        stopped.set()
+
+    def close(self) -> None:
+        self.stream.close()
 
 
-def _frames(parts):
-    buffer = b""
-    for part in parts:
-        buffer = (buffer + part).replace(b"\r\n", b"\n")
-        while b"\n\n" in buffer:
-            frame, buffer = buffer.split(b"\n\n", 1)
-            if len(frame) > MAX_SSE_FRAME_BYTES:
-                raise ProviderError("AI provider unavailable")
-            yield frame
-        if len(buffer) > MAX_SSE_FRAME_BYTES:
-            raise ProviderError("AI provider unavailable")
-    if buffer.strip():
-        yield buffer
+class _GuardedTransport(httpx.BaseTransport):
+    def __init__(self, transport):
+        self.transport = transport
 
-
-def _frame_data(frame: bytes) -> str | None:
-    try:
-        lines = frame.decode("utf-8").splitlines()
-    except UnicodeError as error:
-        raise ProviderError("AI provider unavailable") from error
-    values = [line[5:].lstrip() for line in lines if line.startswith("data:")]
-    return "\n".join(values) if values else None
-
-
-def _chat_tokens(response, deadline: float):
-    completed = False
-    for frame in _frames(_parts(response, deadline, MAX_CHAT_BYTES)):
-        data = _frame_data(frame)
-        if data == "[DONE]":
-            completed = True
-            break
-        token = _token(data)
-        if token:
-            yield token
-    if not completed:
-        raise ProviderError("AI provider unavailable")
-
-
-class OpenAICompatibleProvider:
-    def __init__(
-        self,
-        base_url: str,
-        api_key: str,
-        timeout_seconds: int,
-        allow_internal: bool = False,
-    ):
-        self.base_url = base_url
-        self.api_key = api_key
-        self.timeout = timeout_seconds
-        self.allow_internal = allow_internal
-
-    def _request(self, endpoint: str, body: dict | None = None):
-        target = _target(self.base_url, endpoint, self.allow_internal)
-        pool = _pool(target, self.timeout, not self.allow_internal)
-        method = "POST" if body is not None else "GET"
-        response = pool.request(
-            method,
-            target.path,
-            headers=_headers(target, self.api_key),
-            json=body,
-            retries=False,
-            redirect=False,
-            preload_content=False,
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        response = self.transport.handle_request(request)
+        stream = _GuardedStream(response.stream, MAX_MODELS_BYTES)
+        return httpx.Response(
+            response.status_code, headers=response.headers, stream=stream,
+            extensions=response.extensions, request=request,
         )
-        return response, pool
 
-    def chat(self, messages: list[dict], model: str):
-        response = pool = None
-        deadline = monotonic() + self.timeout
-        try:
-            body = {"model": model, "messages": messages, "stream": True}
-            response, pool = self._request("chat/completions", body)
-            if response.status != 200:
-                raise ProviderError("AI provider unavailable")
-            yield from _chat_tokens(response, deadline)
-        except (urllib3.exceptions.HTTPError, OSError, ValueError, UnicodeError):
-            raise ProviderError("AI provider unavailable") from None
-        finally:
-            if pool is not None:
-                _close(response, pool)
-
-    def models(self) -> list[str]:
-        response = pool = None
-        deadline = monotonic() + self.timeout
-        try:
-            response, pool = self._request("models")
-            return _read_models(response, deadline)
-        except (urllib3.exceptions.HTTPError, OSError, ValueError, UnicodeError):
-            raise ProviderError("AI provider unavailable") from None
-        finally:
-            if pool is not None:
-                _close(response, pool)
+    def close(self) -> None:
+        self.transport.close()
 
 
-def _read_models(response, deadline: float) -> list[str]:
-    content_type = response.headers.get("content-type", "").lower()
-    if response.status != 200 or "application/json" not in content_type:
-        raise ProviderError("AI provider unavailable")
-    payload = b"".join(_parts(response, deadline, MAX_MODELS_BYTES))
-    return _model_ids(json.loads(payload))
+def _transport(target: Target, _timeout: float, _secure: bool = True):
+    return _PinnedHTTPTransport(target)
 
 
 def _model_ids(payload: dict) -> list[str]:
@@ -282,9 +98,7 @@ def _model_ids(payload: dict) -> list[str]:
     if not isinstance(values, list) or len(values) > MAX_MODELS:
         raise ProviderError("AI provider unavailable")
     raw_ids = [item.get("id") for item in values if isinstance(item, dict)]
-    if len(raw_ids) != len(values) or not all(
-        isinstance(value, str) for value in raw_ids
-    ):
+    if len(raw_ids) != len(values) or not all(isinstance(value, str) for value in raw_ids):
         raise ProviderError("AI provider unavailable")
     ids = [value.strip() for value in raw_ids]
     if any(not value or len(value) > 200 for value in ids):
@@ -292,9 +106,50 @@ def _model_ids(payload: dict) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def _token(data: str | None) -> str | None:
-    if not data:
-        return None
-    chunk = json.loads(data)
-    choices = chunk.get("choices") or []
-    return choices[0].get("delta", {}).get("content") if choices else None
+class OpenAIModelDiscovery:
+    def __init__(self, base_url: str, api_key: str, timeout_seconds: int, allow_internal: bool = False):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.timeout = timeout_seconds
+        self.allow_internal = allow_internal
+
+    def _openai(self) -> OpenAI:
+        target = _target(self.base_url, "", self.allow_internal)
+        transport = _GuardedTransport(_transport(target, self.timeout, target.secure))
+        client = httpx.Client(
+            transport=transport, timeout=self.timeout, follow_redirects=False, trust_env=False,
+        )
+        return OpenAI(
+            base_url=self.base_url, api_key=self.api_key, http_client=client,
+            timeout=self.timeout, max_retries=0,
+        )
+
+    def models(self) -> list[str]:
+        client = None
+        try:
+            client = self._openai()
+            page = client.models.list()
+            payload = {"data": [{"id": getattr(row, "id", None)} for row in page.data]}
+            return _model_ids(payload)
+        except Exception as error:
+            raise ProviderError("AI provider unavailable") from error
+        finally:
+            if client is not None:
+                client.close()
+
+
+@asynccontextmanager
+async def open_model(selection, allow_internal: bool) -> AsyncIterator[OpenAIChatModel]:
+    client = httpx2.AsyncClient(
+        transport=RestrictedProviderTransport(
+            selection.base_url, selection.timeout_seconds, allow_internal
+        ),
+        follow_redirects=False, timeout=selection.timeout_seconds, trust_env=False,
+    )
+    try:
+        provider = OpenAIProvider(
+            base_url=selection.base_url, api_key=selection.api_key, http_client=client
+        )
+        yield OpenAIChatModel(selection.model, provider=provider)
+    finally:
+        await client.aclose()

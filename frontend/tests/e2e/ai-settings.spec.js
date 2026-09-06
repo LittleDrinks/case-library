@@ -257,6 +257,24 @@ async function rejectCandidateScenario(page) {
   await expectPersistedText(page, created.id, marker);
 }
 
+async function selectionRequestScenario(page) {
+  const { marker, created } = await openCandidateCase(page, "选区请求原文");
+  const requests = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes(`/api/cases/${created.id}/ai/chat`)) {
+      requests.push(request.postDataJSON());
+    }
+  });
+  await selectParagraph(page, marker);
+  await requestCandidate(page, "改写选区", "压缩这段表述");
+  const payload = requests.at(-1);
+  const content = payload.instruction;
+  expect(content.split(marker)).toHaveLength(2);
+  expect(payload.context.revision).toBe(created.revision);
+  expect(payload.context.selection.quote).toBe(marker);
+  expect(content).toMatch(/选区锚点：revision=\d+; from=\d+; to=\d+; hash=[0-9a-f]{64}/);
+}
+
 async function rollbackCandidateScenario(page) {
   const { marker, created } = await openCandidateCase(page, "批前正文");
   const { candidate, held } = await acceptFirstCandidate(page, created.id);
@@ -386,6 +404,10 @@ test("AI 选区候选被拒绝后不修改正文", async ({ page }) => (
   withCandidateProvider(page, rejectCandidateScenario)
 ));
 
+test("AI 选区请求携带精确锚点且不重复正文", async ({ page }) => (
+  withCandidateProvider(page, selectionRequestScenario)
+));
+
 test("连续接受 AI 候选只建一个批前快照、持久化并可整批回滚", async ({ page }) => (
   withCandidateProvider(page, rollbackCandidateScenario)
 ));
@@ -406,7 +428,7 @@ test("AI 修订保存与恢复查询均失败时本地回原并锁定到重载",
   withCandidateProvider(page, failCandidateRecoveryScenario)
 ));
 
-test("上游提前断流时工作台显示明确错误", async ({ page }) => {
+test("上游失败时工作台显示明确错误", async ({ page }) => {
   await login(page);
   try {
     await configureE2EProvider(page);

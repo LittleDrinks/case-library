@@ -41,16 +41,19 @@ printf '%s\n' "$config" | grep -q 'source: meili_data'
 ci="$project_dir/.github/workflows/ci.yml"
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -Fq 'workflow_call:' "$ci"
-grep -Fq 'make config' "$ci"
-if test "$(grep -Fxc '          make test || status=1' "$ci" || true)" -ne 1; then
-  echo "CI must run the exact make test gate once" >&2
+for job in config backend-test frontend-test e2e; do
+  grep -Fq "  $job:" "$ci"
+done
+for command in 'make config' 'make test-backend' 'make test-frontend' 'make e2e'; do
+  grep -Fq "$command" "$ci"
+done
+if grep -Eq 'docker compose .* (backend-test|frontend-test)' "$ci"; then
+  echo "CI must invoke test stages through Make targets" >&2
   exit 1
 fi
-if grep -Eq 'backend-test|frontend-test' "$ci"; then
-  echo "CI must not invoke stale test containers directly" >&2
-  exit 1
-fi
-grep -Fq 'make e2e' "$ci"
+grep -Fq 'E2E_ARTIFACT_DIR:' "$ci"
+grep -Fq 'actions/upload-artifact@v4' "$ci"
+grep -Fq 'if: failure()' "$ci"
 grep -Fq 'actions: read' "$release_workflow"
 grep -Fq 'packages: write' "$release_workflow"
 grep -Fq 'git fetch origin v2:refs/remotes/origin/v2 --depth=1' "$release_workflow"

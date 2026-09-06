@@ -419,7 +419,7 @@ test("旧标签页不会覆盖新的工作版本", async ({ page }) => {
       data: { title: `较新版本 ${Date.now()}`, revision: original.revision },
     });
     await page.getByLabel("案例标题").fill("旧页面内容");
-    await expect(page.getByRole("alert")).toContainText("本页内容尚未保存", { timeout: 5000 });
+    await expect(page.locator(".conflict-banner")).toContainText("本页内容尚未保存", { timeout: 5000 });
   } finally {
     await restoreCase(request, original);
   }

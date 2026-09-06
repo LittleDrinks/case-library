@@ -6,9 +6,46 @@ compose_project="case-library-v2"
 e2e_meili_volume="${compose_project}_e2e_meili_data"
 e2e_network="${compose_project}_e2e_test"
 database="case_library_e2e"
-e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch"
+e2e_services="e2e backend-e2e e2e-frontend e2e-app e2e-ai-provider e2e-search-worker e2e-search-init e2e-meilisearch agent-e2e agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer agent-tracer-app agent-tracer-frontend agent-tracer-gateway"
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
+
+suite=browser
+if test "${1:-}" = "--backend"; then
+  suite=backend
+  shift
+fi
+test "$#" -le 1 || {
+  echo "Usage: scripts/run-e2e.sh [--backend | frontend/tests/e2e/<name>.spec.js]" >&2
+  exit 2
+}
+requested_spec="${1:-}"
+test "$suite" = browser || test -z "$requested_spec" || exit 2
+artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"
+mkdir -p "$artifact_dir"
+
+resolve_spec() {
+  case "$1" in
+    frontend/tests/e2e/*.spec.js) spec="${1#frontend/}" ;;
+    tests/e2e/*.spec.js) spec="$1" ;;
+    *.spec.js) spec="tests/e2e/$1" ;;
+    *) echo "E2E spec must be a Playwright .spec.js file" >&2; return 2 ;;
+  esac
+  test -f "$project_dir/frontend/$spec" || {
+    echo "E2E spec not found: $1" >&2
+    return 2
+  }
+  printf '%s\n' "$spec"
+}
+
+browser_spec=""
+test -z "$requested_spec" || browser_spec="$(resolve_spec "$requested_spec")"
+browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"
+backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"
+case "$suite" in
+  backend) ensure_services="$backend_ensure_services" ;;
+  browser) ensure_services="$browser_ensure_services" ;;
+esac
 
 compose() {
   docker compose --project-name "$compose_project" \
@@ -17,10 +54,6 @@ compose() {
 
 clear_e2e_bucket() {
   compose --profile e2e run --rm --no-deps backend-e2e python tests/clear_e2e_bucket.py
-}
-
-rebuild_search() {
-  compose --profile e2e run --rm --no-deps e2e-search-init
 }
 
 verify_test_database_absent() {
@@ -37,7 +70,8 @@ drop_and_verify_database() {
 }
 
 stop_e2e_runtime() {
-  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
+  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker
+  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer-app agent-tracer-frontend agent-tracer-gateway
 }
 
 remove_e2e_services() {
@@ -70,14 +104,53 @@ preclean_e2e_resources() {
   verify_e2e_resources_absent
 }
 
-reset_browser_state() {
-  compose --profile e2e stop e2e-frontend e2e-app e2e-search-worker
+start_agent_app() {
+  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app
+}
+
+run_browser_tests() {
+  set -- compose --profile e2e run --rm --no-deps \
+    -v "$artifact_dir:/app/test-results" e2e
+  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  if test "$browser_spec" = "tests/e2e/agent-chat.spec.js"; then
+    set -- compose --profile e2e run --rm \
+      -v "$artifact_dir:/app/test-results" agent-e2e
+    test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  fi
+  if test "$browser_spec" = "tests/e2e/agent-tracer.spec.js"; then
+    set -- compose --profile e2e run --rm \
+      -v "$artifact_dir:/app/test-results" agent-tracer
+    test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  fi
+  "$@"
+}
+
+run_agent_browser_tests() {
+  set -- compose --profile e2e run --rm \
+    -v "$artifact_dir:/app/test-results" agent-e2e
+  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
+  "$@"
+}
+
+run_tracer_browser_tests() {
+  compose --profile e2e run --rm \
+    -v "$artifact_dir:/app/test-results" agent-tracer
+}
+
+run_backend_suite() {
+  compose --profile e2e up -d --wait e2e-app
+  start_agent_app
   clear_e2e_bucket
-  drop_test_database "$database"
-  rebuild_search
-  compose --profile e2e up -d --force-recreate --no-deps e2e-search-worker
-  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-app
-  compose --profile e2e up -d --force-recreate --no-deps --wait e2e-frontend
+  compose --profile e2e run --rm --no-deps backend-e2e
+}
+
+run_browser_suite() {
+  compose --profile e2e up -d --wait e2e-frontend
+  start_agent_app
+  clear_e2e_bucket
+  run_browser_tests
+  test -n "$browser_spec" || run_agent_browser_tests
+  test -n "$browser_spec" || run_tracer_browser_tests
 }
 
 cleanup() {
@@ -99,12 +172,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 preclean_e2e_resources
+scripts/ci-images.sh ensure mongo-init production-config-check
+compose up -d mongo1 mongo2 mongo3
+scripts/ci-images.sh ensure $ensure_services
 compose up -d --wait mongo-init
 drop_and_verify_database
-compose build e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch
-docker build -f deploy/e2e.Dockerfile -t case-library-v2-e2e:latest .
-compose --profile e2e up -d --wait e2e-frontend
-clear_e2e_bucket
-compose --profile e2e run --rm --no-deps backend-e2e
-reset_browser_state
-compose --profile e2e run --rm --no-deps e2e
+case "$suite" in
+  backend) run_backend_suite ;;
+  browser) run_browser_suite ;;
+esac

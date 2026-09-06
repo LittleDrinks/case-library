@@ -40,7 +40,7 @@ make load-steady
 make load-all
 make failover
 ```
-`make test` 运行后端与前端测试，`make e2e` 运行真实 HTTP、MongoDB、对象存储和浏览器流程；`make ai-smoke` 仅对已启动服务验证平台 AI 配置与一次流式响应，生产凭据从环境或隐藏输入提供，日志不记录配置、请求和响应内容；负载测试使用隔离业务库，`make load-all` 按 smoke、peak、resilience、rate、steady 串行执行并分别产出 artifact；`make failover` 在独立 Compose 项目和命名卷中执行 MongoDB 选主与 bundle 备份恢复，销毁演练资源并校验默认栈就绪状态和业务数据哈希不变。
+`make test` 运行后端与前端测试，`make e2e` 运行真实 HTTP、MongoDB、对象存储和浏览器流程；`make ai-smoke` 仅对已启动服务验证平台 AI 配置，提交一次真实 Chat 并以 Thread 快照中的持久化 Run 成功终态确认完成，不解释流协议，生产凭据从环境或隐藏输入提供，日志不记录配置、请求和响应内容；负载测试使用隔离业务库，`make load-all` 按 smoke、peak、resilience、rate、steady 串行执行并分别产出 artifact；`make failover` 在独立 Compose 项目和命名卷中执行 MongoDB 选主与 bundle 备份恢复，销毁演练资源并校验默认栈就绪状态和业务数据哈希不变。
 ## 备份与恢复
 `make backup` 短暂停止 app，只导出业务真源并排除会话、AI 瞬时配额和可重建检索状态；Mongo archive、被附件/工作快照/发布版本/素材候选引用的对象、集合与对象计数及逐项 SHA-256 加密为 `backups/` 下的 bundle，退出时恢复原 app 容器状态。
 `make restore-drill BACKUP=backups/<bundle>.age` 校验并恢复到一次性 MongoDB 容器和随机隔离 bucket，核对数据库作用域、集合计数、对象数量、对象哈希与附件引用，结束后删除隔离资源，不连接业务 MongoDB。

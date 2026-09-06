@@ -121,6 +121,72 @@ def _initialize_search_delivery(database: Database) -> None:
     )
 
 
+def _initialize_agent_threads(database: Database) -> None:
+    database.agent_threads.create_index([("id", ASCENDING)], unique=True)
+    database.agent_threads.create_index(
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
+        unique=True,
+    )
+
+
+def _initialize_agent_messages(database: Database) -> None:
+    database.agent_messages.create_index([("id", ASCENDING)], unique=True)
+    database.agent_messages.create_index(
+        [("threadId", ASCENDING), ("messageSeq", ASCENDING)], unique=True
+    )
+
+
+def _initialize_agent_runs(database: Database) -> None:
+    database.agent_runs.create_index([("id", ASCENDING)], unique=True)
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("startedAt", DESCENDING), ("id", DESCENDING)]
+    )
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("status", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"status": "active"},
+        name="agent_one_active_run_per_thread",
+    )
+    database.agent_runs.create_index(
+        [("threadId", ASCENDING), ("clientRequestId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"clientRequestId": {"$type": "string"}},
+        name="agent_one_run_per_client_request",
+    )
+    _initialize_agent_run_quota_index(database)
+
+
+def _initialize_agent_run_quota_index(database: Database) -> None:
+    database.agent_runs.create_index(
+        [("status", ASCENDING), ("quotaIds", ASCENDING), ("ownerExpiresAt", ASCENDING)]
+    )
+
+
+def _initialize_agent_events(database: Database) -> None:
+    database.agent_thread_events.create_index([("id", ASCENDING)], unique=True)
+    database.agent_thread_events.create_index(
+        [("threadId", ASCENDING), ("eventSeq", ASCENDING)], unique=True
+    )
+
+
+def _initialize_agent_artifacts(database: Database) -> None:
+    database.agent_artifacts.create_index([("id", ASCENDING)], unique=True)
+    database.agent_artifacts.create_index(
+        [("threadId", ASCENDING), ("createdAt", ASCENDING)]
+    )
+    database.agent_artifacts.create_index(
+        [("caseId", ASCENDING), ("status", ASCENDING)]
+    )
+
+
+def _initialize_agent(database: Database) -> None:
+    _initialize_agent_threads(database)
+    _initialize_agent_messages(database)
+    _initialize_agent_runs(database)
+    _initialize_agent_events(database)
+    _initialize_agent_artifacts(database)
+
+
 def initialize(database: Database) -> None:
     database.client.admin.command("ping")
     _initialize_auth(database)
@@ -130,3 +196,4 @@ def initialize(database: Database) -> None:
     _initialize_materials(database)
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
+    _initialize_agent(database)

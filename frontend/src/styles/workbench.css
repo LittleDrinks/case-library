@@ -159,6 +159,7 @@
 .editor-toolbar button:hover:not(:disabled), .editor-toolbar button.active { border-color: var(--line); background: var(--paper); color: var(--brand); }
 .toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
 .annotation-trigger { position: absolute; z-index: 12; min-width: 62px; height: 30px; padding: 0 10px; border: 1px solid var(--brand); border-radius: 5px; background: #fff; color: var(--brand); box-shadow: var(--shadow); }
+.annotation-anchor { background: #fff1b8; box-shadow: inset 0 -2px 0 #c88700; }
 .assistant-rail {
   position: sticky;
   top: 114px;
@@ -244,6 +245,10 @@
 .comment-card header b.resolved { color: var(--green); }
 .comment-card blockquote, .comment-composer blockquote { margin: 0; padding: 7px 9px; border-left: 2px solid var(--brand); background: var(--paper); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
 .comment-card > p { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.65; }
+.comment-edit-input { width: 100%; min-height: 72px; padding: 8px 9px; border: 1px solid var(--brand); border-radius: 5px; resize: vertical; }
+.comment-owner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.comment-owner-actions button { display: flex; min-height: 29px; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); }
+.comment-owner-actions button:first-child { border-color: var(--brand); color: var(--brand); }
 .comment-replies { display: grid; gap: 6px; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--line-soft); list-style: none; }
 .comment-replies li { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
 .comment-replies svg { flex: none; margin-top: 2px; color: var(--ink-3); }
@@ -254,6 +259,7 @@
 .comment-composer { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .comment-composer textarea { padding-right: 11px; }
 .comment-composer button { border-color: var(--brand); background: var(--brand); color: #fff; }
+.comment-selection-hint { margin: 0; color: var(--ink-3); font-size: 12px; }
 .comment-inline-error { padding: 8px 12px; border-top: 1px solid #edc5cb; color: var(--red); font-size: 12px; }
 .folder-tabs { display: flex; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .folder-tabs button { flex: 1; padding: 7px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); }

@@ -14,6 +14,9 @@ DEFAULT_OBJECT_STORE_BUCKET = "case-library"
 DEFAULT_AI_TIMEOUT_SECONDS = 60
 DEFAULT_SEARCH_URL = "http://localhost:7700"
 DEFAULT_SEARCH_INDEX_UID = "catalog"
+DEFAULT_SEARXNG_BASE_URL = "http://localhost:8080"
+DEFAULT_SEARXNG_TIMEOUT_SECONDS = 5
+DEFAULT_SEARXNG_MAX_RESULTS = 10
 
 
 def _enabled(value: str | None) -> bool:
@@ -84,6 +87,20 @@ def _search_environment() -> dict:
     }
 
 
+def _searxng_environment() -> dict:
+    return {
+        "searxng_base_url": os.getenv(
+            "SEARXNG_BASE_URL", DEFAULT_SEARXNG_BASE_URL
+        ).strip(),
+        "searxng_timeout_seconds": int(
+            os.getenv("SEARXNG_TIMEOUT_SECONDS", DEFAULT_SEARXNG_TIMEOUT_SECONDS)
+        ),
+        "searxng_max_results": int(
+            os.getenv("SEARXNG_MAX_RESULTS", DEFAULT_SEARXNG_MAX_RESULTS)
+        ),
+    }
+
+
 def _environment() -> dict:
     return {
         "app_environment": os.getenv("APP_ENV", DEFAULT_APP_ENVIRONMENT),
@@ -93,6 +110,7 @@ def _environment() -> dict:
         **_object_store_environment(),
         **_ai_environment(),
         **_search_environment(),
+        **_searxng_environment(),
     }
 
 
@@ -120,6 +138,9 @@ class Settings:
     search_url: str = DEFAULT_SEARCH_URL
     search_index_uid: str = DEFAULT_SEARCH_INDEX_UID
     search_api_key_file: str = ""
+    searxng_base_url: str = DEFAULT_SEARXNG_BASE_URL
+    searxng_timeout_seconds: int = DEFAULT_SEARXNG_TIMEOUT_SECONDS
+    searxng_max_results: int = DEFAULT_SEARXNG_MAX_RESULTS
 
     def __post_init__(self) -> None:
         if self.app_environment.strip().lower() != "production":
