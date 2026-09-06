@@ -14,6 +14,8 @@ import pytest
 
 from app.modules.skills.parse import (
     ENTRY_NAME,
+    MAX_PACKAGE_FILES,
+    MAX_TOTAL_UNCOMPRESSED_BYTES,
     SkillPackageError,
     open_package,
     parse_package,
@@ -86,6 +88,17 @@ def test_not_a_zip_is_rejected() -> None:
     expect_error(b"not a zip", "不是有效的 ZIP 文件")
 
 
+@pytest.mark.parametrize("bad_entry", [
+    "../SKILL.md",
+    "/SKILL.md",
+    ".hidden/SKILL.md",
+    "./SKILL.md",
+])
+def test_rejects_unsafe_entry_paths(bad_entry: str) -> None:
+    """入口路径沿用同一安全校验：..、绝对路径、点目录、非常规化写法都拒绝。"""
+    expect_error(build_package({bad_entry: SKILL_MD}), "不安全的资源路径")
+
+
 def raw_skill_md(raw: str) -> str:
     body = SKILL_MD.split("---\n", 2)[-1]
     return f"---\n{raw}\n---{body}"
@@ -146,21 +159,37 @@ def test_reads_chinese_resource_content_exactly() -> None:
         assert archive.read(f"{ENTRY_DIR}/{INSTALL_PATH}").decode("utf-8") == INSTALL_TEXT
 
 
-def _local_entry(name: bytes, data: bytes) -> bytes:
+def _local_entry(name: bytes, data: bytes, declared: int | None = None) -> bytes:
+    size = declared if declared is not None else len(data)
     header = struct.pack(
         "<IHHHHHIIIHH", 0x04034B50, 20, 0, 0, 0, 0, zlib.crc32(data) & 0xFFFFFFFF,
-        len(data), len(data), len(name), 0,
+        size, size, len(name), 0,
     )
     return header + name + data
 
 
-def _central_entry(name: bytes, data: bytes, offset: int) -> bytes:
+def _central_entry(
+    name: bytes, data: bytes, offset: int, declared: int | None = None,
+) -> bytes:
+    size = declared if declared is not None else len(data)
     header = struct.pack(
         "<IHHHHHHIIIHHHHHII", 0x02014B50, 20, 20, 0, 0, 0, 0,
-        zlib.crc32(data) & 0xFFFFFFFF, len(data), len(data), len(name),
+        zlib.crc32(data) & 0xFFFFFFFF, size, size, len(name),
         0, 0, 0, 0, 0, offset,
     )
     return header + name
+
+
+def build_lying_size_package(declared: int) -> bytes:
+    """手工 ZIP：成员声明解压大小远超实际字节，用于证明计量先于内容读取。"""
+    name = f"{ENTRY_DIR}/{ENTRY_NAME}".encode("utf-8")
+    data = b"\xff\x00 binary garbage"
+    local = _local_entry(name, data, declared)
+    central = _central_entry(name, data, 0, declared)
+    eocd = struct.pack(
+        "<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(central), len(local), 0,
+    )
+    return local + central + eocd
 
 
 def build_unflagged_package(files: dict[str, str]) -> bytes:
@@ -189,3 +218,17 @@ def test_unflagged_utf8_names_read_chinese_paths_exactly() -> None:
     assert {row.path for row in package.files} >= {EXAMPLE_PATH, INSTALL_PATH}
     with open_package(data) as archive:
         assert archive.read(f"{ENTRY_DIR}/{EXAMPLE_PATH}").decode("utf-8") == EXAMPLE_TEXT
+
+
+def test_entry_body_counts_toward_total_before_read() -> None:
+    """入口正文计入解压总量且在读取前拒绝：实际字节非法，先读必报不是文本文件。"""
+    declared = MAX_TOTAL_UNCOMPRESSED_BYTES + 1
+    expect_error(build_lying_size_package(declared), "解压后总大小")
+
+
+def test_file_count_limit_rejected_before_read() -> None:
+    """入口计入数量限制：入口加 1000 个资源共 1001 个成员，在任何读取前拒绝。"""
+    files = base_files()
+    for index in range(MAX_PACKAGE_FILES):
+        files[f"{ENTRY_DIR}/bulk/成员{index}.txt"] = "内容"
+    expect_error(build_package(files), "包内文件数量不能超过")

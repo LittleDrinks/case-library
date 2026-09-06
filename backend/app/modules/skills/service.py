@@ -70,22 +70,23 @@ def upload_package(database: Database, store: BlobStore, data: bytes) -> dict:
     store.put(package.package_sha256, io.BytesIO(data), len(data), "application/zip")
     number = _reserve_version_number(database, package.name, now)
     version = _insert_version(database, package, number, now)
-    skill = _mark_latest_version(database, package, version["id"], now)
-    return {"skill": skill_view(skill), "version": version_view(version)}
+    skill = _mark_latest_version(database, package, version["id"], number, now)
+    return {
+        "skill": skill_view(skill or _skill_or_404(database, package.name)),
+        "version": version_view(version),
+    }
 
 
 def publish_version(database: Database, skill_id: str, version_id: str) -> dict:
-    """发布指定版本：仅移动已发布指针；重复发布同一版本幂等。"""
+    """发布指定版本：仅移动已发布指针；重复发布同一版本不改写发布时间。"""
     version = _skill_version(database, skill_id, version_id)
     now = _now()
     skill = database.skills.find_one_and_update(
-        {"id": skill_id},
+        {"id": skill_id, "publishedVersionId": {"$ne": version["id"]}},
         {"$set": {"publishedVersionId": version["id"], "publishedAt": now}},
         return_document=ReturnDocument.AFTER,
     )
-    if skill is None:
-        raise SkillError(404, "Skill 不存在")
-    return skill_view(skill)
+    return skill_view(skill if skill is not None else _skill_or_404(database, skill_id))
 
 
 def admin_list(database: Database) -> list[dict]:
@@ -192,19 +193,27 @@ def _reserve_version_number(database: Database, skill_id: str, now: str) -> int:
 
 
 def _mark_latest_version(
-    database: Database, package: SkillPackage, version_id: str, now: str
-) -> dict:
-    """版本落库后再指向最新：latestVersionId 只指向真实存在的版本。"""
-    skill = database.skills.find_one_and_update(
-        {"id": package.name},
-        {
-            "$set": {
-                "latestVersionId": version_id, "name": package.name,
-                "description": package.description, "updatedAt": now,
-            },
-        },
+    database: Database, package: SkillPackage, version_id: str, number: int, now: str
+) -> dict | None:
+    """仅当版本号新于 latestVersionNumber 才前进：写时核验 filter，指针不倒退。"""
+    newer = {"$or": [
+        {"latestVersionNumber": {"$exists": False}},
+        {"latestVersionNumber": {"$lt": number}},
+    ]}
+    changes = {
+        "latestVersionId": version_id, "latestVersionNumber": number,
+        "name": package.name, "description": package.description, "updatedAt": now,
+    }
+    return database.skills.find_one_and_update(
+        {"id": package.name, **newer}, {"$set": changes},
         return_document=ReturnDocument.AFTER,
     )
+
+
+def _skill_or_404(database: Database, skill_id: str) -> dict:
+    skill = database.skills.find_one({"id": skill_id})
+    if skill is None:
+        raise SkillError(404, "Skill 不存在")
     return skill
 
 

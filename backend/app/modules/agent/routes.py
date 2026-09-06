@@ -12,7 +12,13 @@ from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.models import ArtifactDecision, AgentRun, AgentSnapshot, AgentThread
+from app.modules.agent.models import (
+    AgentRun,
+    AgentSnapshot,
+    AgentThread,
+    AgentThreadSummary,
+    ArtifactDecision,
+)
 from app.modules.agent.recovery import (
     LiveBuffer,
     events_stream,
@@ -37,6 +43,7 @@ from app.modules.cases.service import get_case
 router = APIRouter(prefix="/api/cases", tags=["agent"])
 MAX_REQUEST_BYTES = 512 * 1024
 MAX_MESSAGE_CHARACTERS = 20_000
+MAX_THREAD_TITLE_CHARACTERS = 60
 
 
 @dataclass(slots=True)
@@ -175,6 +182,101 @@ def _thread(repository, thread_id: str, case_id: str, user_id: str) -> AgentThre
         raise HTTPException(status_code=404, detail="对话不存在") from error
 
 
+def _summary(thread: AgentThread) -> AgentThreadSummary:
+    return AgentThreadSummary(
+        id=thread.id,
+        title=thread.title,
+        is_default=thread.is_default,
+        running=thread.active_run_id is not None,
+        event_seq=thread.event_seq,
+        created_at=thread.created_at,
+        updated_at=thread.updated_at,
+    )
+
+
+def _valid_title(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    title = raw.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="对话标题不能为空")
+    if len(title) > MAX_THREAD_TITLE_CHARACTERS:
+        raise HTTPException(status_code=422, detail="对话标题过长")
+    return title
+
+
+def _default_title(text: str) -> str:
+    return text.strip().splitlines()[0][:MAX_THREAD_TITLE_CHARACTERS]
+
+
+class ThreadCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+
+
+class ThreadRenameBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+
+
+@router.get("/{case_id}/agent/threads")
+def list_threads(
+    case_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+) -> list[AgentThreadSummary]:
+    _editable_case(_author_case(database, case_id, user))
+    threads = _repository(database).list_threads(case_id, user["id"])
+    return [_summary(thread) for thread in threads]
+
+
+@router.post("/{case_id}/agent/threads", status_code=201)
+def create_thread(
+    case_id: str,
+    body: ThreadCreateBody,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> AgentThreadSummary:
+    _editable_case(_author_case(database, case_id, user))
+    repository = _repository(database)
+    thread = repository.create_thread(case_id, user["id"], _valid_title(body.title))
+    return _summary(thread)
+
+
+@router.get("/{case_id}/agent/threads/{thread_id}")
+def show_named_thread(
+    case_id: str,
+    thread_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+) -> AgentSnapshot:
+    _editable_case(_author_case(database, case_id, user))
+    repository = _repository(database)
+    return repository.snapshot(_thread(repository, thread_id, case_id, user["id"]))
+
+
+@router.patch("/{case_id}/agent/threads/{thread_id}")
+def rename_thread(
+    case_id: str,
+    thread_id: str,
+    body: ThreadRenameBody,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> AgentThreadSummary:
+    _editable_case(_author_case(database, case_id, user))
+    repository = _repository(database)
+    title = _valid_title(body.title)
+    try:
+        thread = repository.rename_thread(thread_id, case_id, user["id"], title)
+    except ThreadNotFoundError as error:
+        raise HTTPException(status_code=404, detail="对话不存在") from error
+    return _summary(thread)
+
+
 @router.post("/{case_id}/agent/thread/{thread_id}/stream")
 async def send_message(
     case_id: str,
@@ -268,6 +370,7 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
         run = repository.start_run(
             thread, user_id, plan.parts, plan.metadata, assistant_id,
             plan.client_request_id, owner_id=worker_id, quota_ids=quota_ids,
+            default_title=_default_title(plan.prompt),
         )
     _bind_lease(repository, run, lease, worker_id)
     return run
@@ -349,9 +452,10 @@ class ArtifactDecisionBody(BaseModel):
     decision: ArtifactDecision
 
 
-@router.post("/{case_id}/agent/artifacts/{artifact_id}/decision")
-def decide_case_artifact(
+@router.post("/{case_id}/agent/thread/{thread_id}/artifacts/{artifact_id}/decision")
+def decide_thread_artifact(
     case_id: str,
+    thread_id: str,
     artifact_id: str,
     body: ArtifactDecisionBody,
     database=Depends(get_database),
@@ -359,4 +463,4 @@ def decide_case_artifact(
     _session: dict = Depends(require_csrf),
 ) -> dict:
     _author_case(database, case_id, user)
-    return decide_artifact(database, case_id, artifact_id, user, body.decision)
+    return decide_artifact(database, case_id, thread_id, artifact_id, user, body.decision)

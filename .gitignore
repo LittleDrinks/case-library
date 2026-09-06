@@ -1,10 +1,18 @@
 # 密钥与本地配置
 .env
 AGENTS.md
+agents.md
+MEMORY.md
+memory.md
+CLAUDE.md
+claude.md
 .agents/
 .kimi/
 .codex/
 .claude/
+.pi/
+.scratch/
+docs/agents/
 files/case-attachments/
 
 # Python

@@ -92,15 +92,29 @@ export const api = {
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
-  agentThread: (caseId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  agentThread: (caseId, threadId) => request(
+    threadId
+      ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
+      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  ),
+  agentThreads: (caseId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+  ),
+  agentCreateThread: (caseId, title, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+    jsonOptions("POST", title ? { title } : {}, csrfToken),
+  ),
+  agentRenameThread: (caseId, threadId, title, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`,
+    jsonOptions("PATCH", { title }, csrfToken),
   ),
   agentCancel: (caseId, threadId, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
     jsonOptions("POST", {}, csrfToken),
   ),
-  agentDecide: (caseId, artifactId, decision, csrfToken) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
+  agentDecide: (caseId, threadId, artifactId, decision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),
   ),
   aiSettings: () => request("/api/ai/settings"),
@@ -199,4 +213,5 @@ export const api = {
     `${attachmentRoot(id)}/${encodeURIComponent(attachmentId)}/content${versionQuery(versionId)}`
   ),
   materialContentUrl: (id) => `/api/materials/${encodeURIComponent(id)}/content`,
+  getMaterial: (id) => request(`/api/materials/${encodeURIComponent(id)}`),
 };
