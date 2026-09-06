@@ -121,6 +121,14 @@ def _initialize_search_delivery(database: Database) -> None:
     )
 
 
+def _initialize_skills(database: Database) -> None:
+    database.skills.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index(
+        [("skillId", ASCENDING), ("version", ASCENDING)], unique=True
+    )
+
+
 def _initialize_agent_threads(database: Database) -> None:
     if "ownerId_1_caseId_1_isDefault_1" in database.agent_threads.index_information():
         database.agent_threads.drop_index("ownerId_1_caseId_1_isDefault_1")
@@ -214,5 +222,6 @@ def initialize(database: Database) -> None:
     _initialize_materials(database)
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
+    _initialize_skills(database)
     _initialize_agent(database)
     _initialize_tags(database)

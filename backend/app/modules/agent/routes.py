@@ -33,11 +33,12 @@ from app.modules.agent.repository import (
 )
 from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import case_edit_skill
+from app.modules.agent.skills import bound_skill_capability, case_edit_skill
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
 from app.modules.cases.service import get_case
+from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
 
 router = APIRouter(prefix="/api/cases", tags=["agent"])
@@ -120,9 +121,7 @@ def _submit_prompt(adapter: VercelAIAdapter) -> tuple[list[dict], dict, str, str
     if adapter.run_input.trigger != "submit-message":
         raise HTTPException(status_code=422, detail="只支持发送新消息或重试")
     latest = _latest_message(adapter)
-    skills = [_skill_id(part) for part in latest.parts]
-    if any(skill and skill != CASE_EDIT_SKILL.id for skill in skills):
-        raise HTTPException(status_code=422, detail="AI 能力不可用")
+    skills = list(dict.fromkeys(skill for skill in (_skill_id(part) for part in latest.parts) if skill))
     if latest.role != "user" or any(
         not isinstance(part, (TextUIPart, DataUIPart)) for part in latest.parts
     ):
@@ -150,7 +149,7 @@ def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
     ]
     return RunPlan(
         parts=parts, metadata=message.metadata, prompt=prompt,
-        skills=[skill for skill in skills if skill == CASE_EDIT_SKILL.id],
+        skills=list(dict.fromkeys(skill for skill in skills if skill)),
         history=load_history(repository, thread, max_seq=message.message_seq),
         retry_message_id=message.id,
     )
@@ -298,30 +297,50 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _run_plan(repository, thread, adapter)
+    bounds, legacy = _resolve_skills(database, request.app.state.blob_store, plan.skills)
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
     run = _start_run(repository, thread, user["id"], plan, assistant_id, lease, worker_id)
     context = _run_context(request, database, settings, user, case, repository, thread,
-                           adapter, plan, run, selection, lease, worker_id)
+                           adapter, plan, run, selection, lease, worker_id, bounds, legacy)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
 
 
+def _resolve_skills(
+    database, store, skill_ids: list[str]
+) -> tuple[tuple[BoundSkill, ...], bool]:
+    """服务端解析消息选择的 Skill：平台 Skill 走固定资源，其余须已发布。"""
+    legacy = CASE_EDIT_SKILL.id in skill_ids
+    bounds: list[BoundSkill] = []
+    for skill_id in dict.fromkeys(skill_ids):
+        if skill_id == CASE_EDIT_SKILL.id:
+            continue
+        try:
+            bounds.append(bind_published_skill(database, store, skill_id))
+        except SkillError as error:
+            raise HTTPException(status_code=422, detail="AI 能力不可用") from error
+    return tuple(bounds), legacy
+
+
 def _run_context(request, database, settings, user, case, repository, thread, adapter,
-                 plan, run, selection, lease, worker_id):
+                 plan, run, selection, lease, worker_id, bounds, legacy):
+    capabilities = ([case_edit_skill()] if legacy else []) + [
+        bound_skill_capability(bound) for bound in bounds
+    ]
     deps = ToolDeps(
         database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
         user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state,
-        secret_path=settings.app_secret_file,
+        secret_path=settings.app_secret_file, skills=bounds,
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, case,
         request.app.state.agent, buffer=LiveBuffer(),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
-        deps=deps, capabilities=[case_edit_skill()] if plan.skills else [],
+        deps=deps, capabilities=capabilities,
     )
 
 

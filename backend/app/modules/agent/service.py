@@ -118,16 +118,30 @@ def _assistant_parts(assistant) -> list[dict]:
     ]
 
 
-def _loaded_skill(parts: list[dict]) -> dict[str, str] | None:
-    if not any(part.get("type") == "tool-load_capability" for part in parts):
-        return None
-    return resource_record(CASE_EDIT_SKILL)
+def _loaded_capability_ids(parts: list[dict]) -> list[str]:
+    """从 load_capability 工具调用中提取模型实际加载的能力标识。"""
+    ids = []
+    for part in parts:
+        if part.get("type") != "tool-load_capability":
+            continue
+        data = part.get("input")
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            ids.append(data["id"])
+    return ids
 
 
-def _run_resources(parts: list[dict]) -> list[dict[str, str]]:
+def _loaded_platform_skill(parts: list[dict]) -> bool:
+    """平台 Skill 保持原语义：仅模型实际 load_capability 后记录。"""
+    return CASE_EDIT_SKILL.id in _loaded_capability_ids(parts)
+
+
+def _run_resources(parts: list[dict], bounds: tuple = ()) -> list[dict[str, str]]:
+    """系统提示词 + 每个绑定 Skill 的版本哈希 + 已加载的平台 Skill。"""
     records = [resource_record(SYSTEM_PROMPT), resource_record(TASK_PROMPT)]
-    skill = _loaded_skill(parts)
-    return [*records, skill] if skill else records
+    records += [bound.resource_record() for bound in bounds]
+    if _loaded_platform_skill(parts):
+        records.append(resource_record(CASE_EDIT_SKILL))
+    return records
 
 
 def _assistant_ui(context: RunContext, result):
@@ -277,7 +291,10 @@ def _complete(context: RunContext) -> None:
         return
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
-        resources=_run_resources(_assistant_parts_of(context)),
+        resources=_run_resources(
+            _assistant_parts_of(context),
+            context.deps.skills if context.deps else (),
+        ),
     ):
         context.lost = True
 
