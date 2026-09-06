@@ -61,12 +61,12 @@ def parse_package(data: bytes) -> SkillPackage:
         infos = archive.infolist()
         entry = _find_entry(infos)
         root = _root_of(entry)
+        _require_manifest(infos, entry, root)
         meta, body = _parse_entry(archive, entry)
         files = _resource_files(archive, infos, entry, root)
         return SkillPackage(
-            name=meta[0], description=meta[1], entry_path=entry.filename,
-            root=root, body=body, package_sha256=hashlib.sha256(data).hexdigest(),
-            files=files,
+            name=meta[0], description=meta[1], entry_path=entry.filename, root=root,
+            body=body, package_sha256=hashlib.sha256(data).hexdigest(), files=files,
         )
 
 
@@ -96,11 +96,13 @@ def _needs_utf8(info: zipfile.ZipInfo) -> bool:
 
 
 def _find_entry(infos: list[zipfile.ZipInfo]) -> zipfile.ZipInfo:
-    """入口只能是根目录或一级子目录下的 SKILL.md；附属嵌套文件不算 Skill。"""
+    """入口只能是根目录或一级子目录下的 SKILL.md；原始路径非法必须拒绝。"""
     candidates = [
         info for info in infos
         if not info.is_dir() and _is_entry_path(info.filename)
     ]
+    for info in candidates:
+        _require_safe(info.filename)
     if not candidates:
         raise SkillPackageError(422, "包内缺少 SKILL.md 入口文件")
     if len(candidates) > 1:
@@ -171,12 +173,13 @@ def _validate_name(name: str) -> None:
         )
 
 
-def _resource_files(
-    archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo], entry: zipfile.ZipInfo, root: str,
-) -> tuple[PackageFile, ...]:
-    files: list[PackageFile] = []
+def _require_manifest(
+    infos: list[zipfile.ZipInfo], entry: zipfile.ZipInfo, root: str,
+) -> None:
+    """仅凭 ZipInfo 元数据校验清单：安全、重复、数量与解压总量（含入口正文）。"""
     seen: set[str] = set()
-    total = 0
+    count = 1
+    total = entry.file_size
     for info in infos:
         if info.is_dir() or info is entry:
             continue
@@ -184,9 +187,23 @@ def _resource_files(
         if relative is None:
             continue
         _require_safe_new(relative, seen)
+        count += 1
         total += info.file_size
+    _require_size_limits(count, total)
+
+
+def _resource_files(
+    archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo], entry: zipfile.ZipInfo, root: str,
+) -> tuple[PackageFile, ...]:
+    """清单与总量校验通过后的有界读取：仅逐成员计算内容哈希。"""
+    files: list[PackageFile] = []
+    for info in infos:
+        if info.is_dir() or info is entry:
+            continue
+        relative = _relative_of(info, root)
+        if relative is None:
+            continue
         files.append(_package_file(archive, info, relative))
-    _require_size_limits(len(files), total)
     return tuple(files)
 
 
