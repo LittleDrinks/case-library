@@ -23,6 +23,15 @@ SettingsDependency = Annotated[Settings, Depends(get_settings)]
 UserDependency = Annotated[dict | None, Depends(optional_user)]
 
 
+def _respond(query, database, catalog, catalog_state, settings, user):
+    return search_catalog(
+        database,
+        catalog,
+        catalog_state,
+        CatalogSearch(query, user, settings.app_secret_file),
+    )
+
+
 @router.get("")
 def search(
     query: Annotated[SearchQuery, Query()],
@@ -32,13 +41,7 @@ def search(
     settings: SettingsDependency,
     user: UserDependency,
 ):
-    catalog_search = CatalogSearch(query, user, settings.app_secret_file)
-    return search_catalog(
-        database,
-        catalog,
-        catalog_state,
-        catalog_search,
-    )
+    return _respond(query, database, catalog, catalog_state, settings, user)
 
 
 @router.post("")
@@ -50,10 +53,4 @@ def search_documents(
     settings: SettingsDependency,
     user: UserDependency,
 ):
-    catalog_search = CatalogSearch(body, user, settings.app_secret_file)
-    return search_catalog(
-        database,
-        catalog,
-        catalog_state,
-        catalog_search,
-    )
+    return _respond(body, database, catalog, catalog_state, settings, user)

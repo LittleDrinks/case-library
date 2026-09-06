@@ -40,6 +40,7 @@ def _published_view(case: dict, version: dict) -> dict:
         "id": case["id"],
         "title": version["title"],
         "summary": version.get("summary", ""),
+        "tagIds": version["metadata"].get("tagIds", []),
         "document": version["document"],
         "revision": version["sourceRevision"],
         "workflowStatus": "published",

@@ -82,3 +82,19 @@ def test_demo_case_seed_uses_the_current_schema_directly() -> None:
     assert database.cases.count_documents({"status": {"$exists": True}}) == 0
     draft = case_view(database.cases.find_one({"id": "c-draft-1"}))
     assert (draft["course"], draft["typeName"]) == ("自然辩证法概论", "思想实验类")
+
+
+def test_fresh_demo_seed_carries_fixture_tags() -> None:
+    database = mongomock.MongoClient()["fresh_case_seed"]
+    seed_demo_cases(database)
+
+    published = database.cases.find_one({"id": "c-02"})
+    version = database.case_versions.find_one({"id": "cv-seed-c-02-v1"})
+    fixture = [
+        "tag-seed-3-2",
+        "tag-seed-2-1",
+        "tag-seed-4-1",
+        "tag-seed-4-5",
+    ]
+    assert published["tagIds"] == fixture
+    assert version["metadata"]["tagIds"] == fixture

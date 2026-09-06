@@ -102,6 +102,62 @@ def test_group_and_tag_names_stay_unique(client: TestClient) -> None:
     assert _create_tag(client, auth, group["id"], "同名词") == 409
 
 
+def test_tag_move_updates_the_real_group(client: TestClient) -> None:
+    auth = _csrf(client)
+    source = _create_group(client, auth, "迁出组", False)
+    target = _create_group(client, auth, "迁入组", False)
+    tag = client.post(
+        f"/api/tag-groups/{source['id']}/tags", headers=auth, json={"name": "迁移标签"}
+    ).json()
+
+    moved = client.patch(
+        f"/api/tags/{tag['id']}", headers=auth, json={"groupId": target["id"]}
+    )
+
+    assert moved.status_code == 200
+    assert moved.json()["groupId"] == target["id"]
+    groups = {row["id"]: row for row in client.get("/api/tag-groups").json()}
+    assert groups[source["id"]]["tags"] == []
+    assert [row["name"] for row in groups[target["id"]]["tags"]] == ["迁移标签"]
+
+
+def test_tag_save_with_unchanged_name_succeeds(client: TestClient) -> None:
+    auth = _csrf(client)
+    group = _create_group(client, auth, "保留组", False)
+    tag = client.post(
+        f"/api/tag-groups/{group['id']}/tags", headers=auth, json={"name": "专名"}
+    ).json()
+
+    saved = client.patch(
+        f"/api/tags/{tag['id']}", headers=auth, json={"name": "专名", "sortKey": 2}
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["name"] == "专名"
+    assert saved.json()["sortKey"] == 2
+
+
+def test_tag_move_onto_existing_name_is_an_explicit_conflict(client: TestClient) -> None:
+    auth = _csrf(client)
+    source = _create_group(client, auth, "冲突源组", False)
+    target = _create_group(client, auth, "冲突目标组", False)
+    assert (
+        client.post(
+            f"/api/tag-groups/{target['id']}/tags", headers=auth, json={"name": "撞名"}
+        ).status_code
+        == 201
+    )
+    tag = client.post(
+        f"/api/tag-groups/{source['id']}/tags", headers=auth, json={"name": "撞名"}
+    ).json()
+
+    moved = client.patch(
+        f"/api/tags/{tag['id']}", headers=auth, json={"groupId": target["id"]}
+    )
+
+    assert moved.status_code == 409
+
+
 def _create_tag(client: TestClient, auth: dict, group_id: str, name: str) -> int:
     return client.post(
         f"/api/tag-groups/{group_id}/tags", headers=auth, json={"name": name}

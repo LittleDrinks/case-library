@@ -39,7 +39,9 @@ class TagPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
-    group_id: str | None = Field(default=None, min_length=1, max_length=100)
+    group_id: str | None = Field(
+        default=None, min_length=1, max_length=100, alias="groupId"
+    )
     sort_key: int | None = Field(default=None, alias="sortKey")
 
     @model_validator(mode="after")

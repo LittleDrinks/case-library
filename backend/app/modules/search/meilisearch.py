@@ -402,38 +402,35 @@ def _count_plans(request: CatalogRequest, index_uid: str) -> list[_Plan]:
     return [full, restricted]
 
 
+def _count_knowledge_branch(request: CatalogRequest) -> str:
+    if _business_clause(request, "knowledge") == NEVER:
+        return NEVER
+    return _knowledge_level(request)
+
+
 def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
+    """分类计数与结果页同条件：q、业务筛选、标签条件与可见性全部生效。"""
     full_filter = _or(
-        _count_case_branch(request),
-        _count_material_branch(request),
-        _knowledge_level(request),
+        _full_branch(request, "case"),
+        _full_branch(request, "material"),
+        _count_knowledge_branch(request),
     )
     payload = _payload(index_uid, request.q, full_filter)
     payload["facets"] = ["kind"]
     return _Plan("count-full", payload)
 
 
-def _count_case_branch(request: CatalogRequest) -> str:
-    return _and(
-        'kind = "case"', _case_access(request.principal), _excluded(request, "case")
-    )
-
-
-def _count_material_branch(request: CatalogRequest) -> str:
-    return _and(
-        'docClass = "material-full"',
-        _allowed(request.principal),
-        _excluded(request, "material"),
-    )
-
-
 def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
-    denied = _and(
-        'docClass = "material-restricted"',
-        _denied(request.principal),
-        "publicReferenceCount > 0",
-        _excluded(request, "material"),
-    )
+    business = _restricted_business(request)
+    denied = NEVER
+    if business != NEVER:
+        denied = _and(
+            'docClass = "material-restricted"',
+            _denied(request.principal),
+            "publicReferenceCount > 0",
+            business,
+            _excluded(request, "material"),
+        )
     payload = _payload(index_uid, request.q, denied)
     payload["attributesToSearchOn"] = ["title"]
     return _Plan("count-restricted", payload)

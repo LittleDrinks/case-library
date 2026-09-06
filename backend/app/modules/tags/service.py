@@ -14,7 +14,6 @@ from app.modules.cases.service import CaseError
 GROUP_SORT = [("sortKey", ASCENDING), ("name", ASCENDING)]
 GROUP_FIELDS = ("id", "name", "requiredForSubmission", "sortKey")
 TAG_FIELDS = ("id", "groupId", "name", "sortKey")
-NAME_LIMIT = (1, 80)
 
 
 def _now() -> str:
@@ -54,8 +53,11 @@ def _assert_group_name_free(database: Database, name: str, exclude: str = "") ->
         raise CaseError(409, "同名标签组已存在")
 
 
-def _assert_tag_name_free(database: Database, group_id: str, name: str) -> None:
-    if database.tags.find_one({"groupId": group_id, "name": name}):
+def _assert_tag_name_free(
+    database: Database, group_id: str, name: str, exclude: str = ""
+) -> None:
+    query = {"groupId": group_id, "name": name, "id": {"$ne": exclude}}
+    if database.tags.find_one(query):
         raise CaseError(409, "该标签组内已存在同名标签")
 
 
@@ -119,8 +121,8 @@ def update_tag(database: Database, tag_id: str, body: dict, user) -> dict:
     target_group = body.get("groupId") or current["groupId"]
     if body.get("groupId"):
         _group(database, target_group)
-    if body.get("name"):
-        _assert_tag_name_free(database, target_group, body["name"])
+    name = body.get("name") or current["name"]
+    _assert_tag_name_free(database, target_group, name, exclude=tag_id)
     changes = {key: value for key, value in body.items() if value is not None}
     updated = database.tags.find_one_and_update(
         {"id": tag_id},
@@ -160,7 +162,7 @@ def ensure_tags_exist(database: Database, tag_ids: list[str]) -> None:
 
 
 def validate_submission_tags(database: Database, tag_ids: list[str]) -> list[dict]:
-    """返回给定标签集合未覆盖的必填组；Issue 17 在投稿流程接入。"""
+    """返回给定标签集合未覆盖的必填组；投稿流程据此阻止缺组提交。"""
     required = list(database.tag_groups.find({"requiredForSubmission": True}))
     if not required:
         return []
