@@ -331,52 +331,49 @@ def test_docx_export_preserves_blockquote_paragraphs(client: TestClient) -> None
     assert [paragraph_text(item) for item in quotes] == ["引用第一段", "引用第二段"]
 
 
-def test_docx_export_emits_one_marker_per_contiguous_citation(
-    client: TestClient,
-) -> None:
-    auth = login(client)
-    csrf = {"X-CSRF-Token": auth["csrfToken"]}
-    case = client.post(
-        "/api/cases", headers=csrf, json={"title": "引用标记测试"}
-    ).json()
-    case_id = case["id"]
-    mounted = client.post(
-        f"/api/cases/{case_id}/materials",
-        headers=csrf,
-        json={"materialId": "m-kcsz", "revision": case["revision"]},
-    )
-    assert mounted.status_code == 201
+def _citation_marked_document() -> dict:
     citation = {
         "type": "citation",
         "attrs": {"sourceType": "material", "sourceId": "m-kcsz"},
     }
-    document = {
+    return {
         "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "加粗依据",
-                        "marks": [{"type": "bold"}, citation],
-                    },
-                    {
-                        "type": "text",
-                        "text": "斜体依据",
-                        "marks": [{"type": "italic"}, citation],
-                    },
-                    {"type": "text", "text": "后续正文"},
-                    {"type": "text", "text": "再次引用", "marks": [citation]},
-                ],
-            }
-        ],
+        "content": [{
+            "type": "paragraph",
+            "content": [
+                {"type": "text", "text": "加粗依据", "marks": [{"type": "bold"}, citation]},
+                {"type": "text", "text": "斜体依据", "marks": [{"type": "italic"}, citation]},
+                {"type": "text", "text": "后续正文"},
+                {"type": "text", "text": "再次引用", "marks": [citation]},
+            ],
+        }],
     }
-    revision = client.get(f"/api/cases/{case_id}").json()["revision"]
+
+
+def _save_cited_document(client) -> str:
+    auth = login(client)
+    csrf = {"X-CSRF-Token": auth["csrfToken"]}
+    case = client.post("/api/cases", headers=csrf, json={"title": "引用标记测试"}).json()
+    mounted = client.post(
+        f"/api/cases/{case['id']}/materials",
+        headers=csrf,
+        json={"materialId": "m-kcsz", "revision": case["revision"]},
+    )
+    assert mounted.status_code == 201
+    revision = client.get(f"/api/cases/{case['id']}").json()["revision"]
     saved = client.patch(
-        f"/api/cases/{case_id}", headers=csrf, json={"document": document, "revision": revision}
+        f"/api/cases/{case['id']}",
+        headers=csrf,
+        json={"document": _citation_marked_document(), "revision": revision},
     )
     assert saved.status_code == 200
+    return case["id"]
+
+
+def test_docx_export_emits_one_marker_per_contiguous_citation(
+    client: TestClient,
+) -> None:
+    case_id = _save_cited_document(client)
     root = document_xml(client.get(f"/api/cases/{case_id}/export.docx").content)
     body = next(
         paragraph_text(item)

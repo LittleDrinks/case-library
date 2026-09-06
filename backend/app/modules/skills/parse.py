@@ -176,21 +176,27 @@ def _resource_files(
 ) -> tuple[PackageFile, ...]:
     files: list[PackageFile] = []
     seen: set[str] = set()
-    total = 0
     for info in infos:
         if info.is_dir() or info is entry:
             continue
-        relative = _relative_of(info, root)
-        if relative is None:
-            continue
-        _require_safe(relative)
-        if relative in seen:
-            raise SkillPackageError(422, f"包内存在重复资源路径：{relative}")
-        seen.add(relative)
-        total += info.file_size
-        files.append(_package_file(archive, info, relative))
-    _require_size_limits(len(files), total)
+        packaged = _resource_entry(archive, info, root, seen)
+        if packaged is not None:
+            files.append(packaged)
+    _require_size_limits(len(files), sum(item.size for item in files))
     return tuple(files)
+
+
+def _resource_entry(
+    archive: zipfile.ZipFile, info: zipfile.ZipInfo, root: str, seen: set[str],
+) -> PackageFile | None:
+    relative = _relative_of(info, root)
+    if relative is None:
+        return None
+    _require_safe(relative)
+    if relative in seen:
+        raise SkillPackageError(422, f"包内存在重复资源路径：{relative}")
+    seen.add(relative)
+    return _package_file(archive, info, relative)
 
 
 def _package_file(

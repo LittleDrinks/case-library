@@ -210,29 +210,27 @@ def test_resource_read_rejects_traversal_and_binary(client: TestClient) -> None:
     ).status_code == 404
 
 
+def _frontmatter(name: str = 'name: "sizheng-case-generator"',
+                 description: str = 'description: "简要描述"') -> str:
+    return f"{name}\n{description}"
+
+
+_INVALID_FRONTMATTER_CASES = {
+    "name 必须是字符串，收到数字": _frontmatter(name="name: 123"),
+    "name 必须是字符串，收到布尔值": _frontmatter(name="name: true"),
+    "name 必须是字符串，收到列表": _frontmatter(name="name: [sizheng-case-generator]"),
+    "description 必须是字符串，收到数字": _frontmatter(description="description: 20240901"),
+    "description 必须是字符串，收到对象": _frontmatter(description="description: {zh: 简介}"),
+    "缺少非空 name": _frontmatter(name='name: "   "'),
+    "缺少非空 description": _frontmatter(description='description: "\\n \\t"'),
+}
+
+
 def test_frontmatter_rejects_non_string_metadata(client: TestClient) -> None:
     """name/description 必须是真实非空字符串：数字、布尔、列表、对象、纯空白都拒绝。"""
-    good_name = 'name: "sizheng-case-generator"'
-    good_description = 'description: "简要描述"'
-
-    def frontmatter(name: str = good_name, description: str = good_description) -> str:
-        return f"{name}\n{description}"
-
-    auth = _csrf(_login(client, ADMIN))
-    for expected, raw in {
-        "name 必须是字符串，收到数字": frontmatter(name="name: 123"),
-        "name 必须是字符串，收到布尔值": frontmatter(name="name: true"),
-        "name 必须是字符串，收到列表": frontmatter(name="name: [sizheng-case-generator]"),
-        "description 必须是字符串，收到数字": frontmatter(description="description: 20240901"),
-        "description 必须是字符串，收到对象": frontmatter(description="description: {zh: 简介}"),
-        "缺少非空 name": frontmatter(name='name: "   "'),
-        "缺少非空 description": frontmatter(description='description: "\\n \\t"'),
-    }.items():
-        data = _package_with_raw_frontmatter(raw)
-        response = client.post(
-            PACKAGE_PATH, headers=auth,
-            files={"file": ("skill.zip", data, "application/zip")},
-        )
+    auth = _login(client, ADMIN)
+    for expected, raw in _INVALID_FRONTMATTER_CASES.items():
+        response = _upload(client, auth, _package_with_raw_frontmatter(raw))
         assert response.status_code == 422, (expected, response.text)
         assert expected in response.json()["detail"], expected
 

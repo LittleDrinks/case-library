@@ -175,13 +175,24 @@ def _placeholder_tool_name(skill_id: str) -> str:
     return resource_tool_name(bound)
 
 
+def _skill_parts(skill_id: str | None) -> list[dict]:
+    parts = [{"type": "text", "text": "请按范例写一份教学设计"}]
+    if skill_id:
+        parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
+    return parts
+
+
+def _submit_payload(parts: list[dict]) -> dict:
+    return {
+        "id": f"browser-{uuid.uuid4().hex}", "trigger": "submit-message",
+        "messages": [{"id": f"client-{uuid.uuid4().hex}", "role": "user", "parts": parts}],
+    }
+
+
 def _send_message(
     client: TestClient, auth: dict, case_id: str, skill_id: str | None,
     model: FunctionModel | None = None,
 ):
-    parts = [{"type": "text", "text": "请按范例写一份教学设计"}]
-    if skill_id:
-        parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
     thread_id = client.get(f"{CASES_PATH}/{case_id}/agent/thread").json()["id"]
     if model is None:
         model = _skill_model(
@@ -190,14 +201,7 @@ def _send_message(
     with agent.override(model=model):
         return client.post(
             f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}/stream",
-            headers=_csrf(auth),
-            json={
-                "id": f"browser-{uuid.uuid4().hex}", "trigger": "submit-message",
-                "messages": [{
-                    "id": f"client-{uuid.uuid4().hex}", "role": "user",
-                    "parts": parts,
-                }],
-            },
+            headers=_csrf(auth), json=_submit_payload(_skill_parts(skill_id)),
         )
 
 
@@ -301,35 +305,90 @@ def test_bound_snapshot_reads_stored_package_bytes(client: TestClient) -> None:
     assert bound.resource_record()["contentHash"] == version["packageSha256"]
 
 
+def _cancel_and_expect_bindings(client, teacher, case_id, thread_id, version) -> None:
+    cancelled = client.post(
+        f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}/cancel",
+        headers=_csrf(teacher),
+    )
+    assert cancelled.status_code == 200
+    terminal = _await_run(client.app.state.database, thread_id, status="cancelled")
+    assert terminal["skillBindings"] == [_binding_record(version)]
+    assert terminal.get("resources", []) == []
+
+
+def _cancel_while_model_gated(client, teacher, case, database, version, reached, release) -> None:
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _send_message, client, teacher, case["id"], SKILL_ID,
+            _gated_skill_model(SKILL_ID, reached, release),
+        )
+        try:
+            thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
+            assert reached.wait(10), "model did not reach the gated step"
+            run = _await_run(database, thread_id, status="active")
+            assert run["skillBindings"] == [_binding_record(version)]
+            _cancel_and_expect_bindings(client, teacher, case["id"], thread_id, version)
+        finally:
+            release.set()
+            future.result(timeout=15)
+
+
 def test_binding_persisted_before_provider_execution_and_survives_cancel(
     client: TestClient,
 ) -> None:
     version = _upload_and_publish(client)
     teacher = _login(client, TEACHER)
     case = _create_case(client, teacher)
-    database = client.app.state.database
     reached, release = Event(), Event()
-    model = _gated_skill_model(SKILL_ID, reached, release)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(_send_message, client, teacher, case["id"], SKILL_ID, model)
-        try:
-            thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
-            assert reached.wait(10), "model did not reach the gated step"
-            # 提供方仍阻塞在第二步：版本凭据已随 Run 创建固化，成功完成前即可审计。
-            run = _await_run(database, thread_id, status="active")
-            assert run["skillBindings"] == [_binding_record(version)]
+    # 提供方阻塞在门控步时：版本凭据已随 Run 创建固化，取消后仍可审计。
+    _cancel_while_model_gated(
+        client, teacher, case, client.app.state.database, version, reached, release,
+    )
 
-            cancelled = client.post(
-                f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/cancel",
-                headers=_csrf(teacher),
-            )
-            assert cancelled.status_code == 200
-            terminal = _await_run(database, thread_id, status="cancelled")
-            assert terminal["skillBindings"] == [_binding_record(version)]
-            assert terminal.get("resources", []) == []
-        finally:
-            release.set()
-            future.result(timeout=15)
+
+def _assert_skill_version(database, run_id: str, version: dict) -> None:
+    row = database.agent_runs.find_one({"id": run_id}, {"_id": 0, "skillBindings": 1})
+    assert row["skillBindings"] == [_binding_record(version)]
+
+
+def _regenerate_message(client, teacher, case_id, thread_id, message_id):
+    with agent.override(model=_skill_model(SKILL_ID, _placeholder_tool_name(SKILL_ID))):
+        return client.post(
+            f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}/stream",
+            headers=_csrf(teacher),
+            json={
+                "id": f"browser-{uuid.uuid4().hex}", "trigger": "regenerate-message",
+                "messageId": message_id, "messages": [],
+            },
+        )
+
+
+def _failed_run_receipt(client, teacher, case, database, v1):
+    """首跑失败，返回 (thread_id, failed_run)，并校验失败凭据已固化为 v1。"""
+    failed_response = _send_message(
+        client, teacher, case["id"], SKILL_ID,
+        model=_failing_skill_model(SKILL_ID),
+    )
+    assert failed_response.status_code == 200, failed_response.text
+    thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
+    failed = _await_run(database, thread_id, status="failed")
+    _assert_skill_version(database, failed["id"], v1)
+    return thread_id, failed
+
+
+def _retry_and_assert_v2(client, case, database, thread_id, failed_id):
+    """发布 v2 后重试，返回 (retried_run, v2)，并校验重试凭据换成 v2。"""
+    v2 = _upload_and_publish(client, 2)
+    teacher = _login(client, TEACHER)  # 管理员登录会替换共享会话 cookie，需重取教师会话
+    user_message = database.agent_messages.find_one(
+        {"threadId": thread_id, "role": "user"}, {"_id": 0}
+    )
+    response = _regenerate_message(client, teacher, case["id"], thread_id, user_message["id"])
+    assert response.status_code == 200, response.text
+    retried = _await_run(database, thread_id, status="completed")
+    assert retried["id"] != failed_id
+    _assert_skill_version(database, retried["id"], v2)
+    return retried, v2
 
 
 def test_failed_run_and_retry_keep_version_receipts(client: TestClient) -> None:
@@ -338,40 +397,11 @@ def test_failed_run_and_retry_keep_version_receipts(client: TestClient) -> None:
     teacher = _login(client, TEACHER)
     case = _create_case(client, teacher)
     database = client.app.state.database
-    failed_response = _send_message(
-        client, teacher, case["id"], SKILL_ID,
-        model=_failing_skill_model(SKILL_ID),
-    )
-    assert failed_response.status_code == 200, failed_response.text
-    thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
-    failed = _await_run(database, thread_id, status="failed")
-    assert failed["skillBindings"] == [_binding_record(v1)]
+    thread_id, failed = _failed_run_receipt(client, teacher, case, database, v1)
 
-    v2 = _upload_and_publish(client, 2)
-    assert v2["packageSha256"] != v1["packageSha256"]
-    teacher = _login(client, TEACHER)  # 管理员登录会替换共享会话 cookie，需重取教师会话
-    user_message = database.agent_messages.find_one(
-        {"threadId": thread_id, "role": "user"}, {"_id": 0}
-    )
-    with agent.override(model=_skill_model(SKILL_ID, _placeholder_tool_name(SKILL_ID))):
-        retried_response = client.post(
-            f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/stream",
-            headers=_csrf(teacher),
-            json={
-                "id": f"browser-{uuid.uuid4().hex}",
-                "trigger": "regenerate-message",
-                "messageId": user_message["id"],
-                "messages": [],
-            },
-        )
-    assert retried_response.status_code == 200, retried_response.text
-    retried = _await_run(database, thread_id, status="completed")
-    assert retried["id"] != failed["id"]
-    assert retried["skillBindings"] == [_binding_record(v2)]
+    retried, v2 = _retry_and_assert_v2(client, case, database, thread_id, failed["id"])
     # 历史 Run 的凭据不受新发布影响。
-    assert database.agent_runs.find_one(
-        {"id": failed["id"]}, {"_id": 0, "skillBindings": 1}
-    )["skillBindings"] == [_binding_record(v1)]
+    _assert_skill_version(database, failed["id"], v1)
     records = {row["kind"]: row for row in retried["resources"]}
     assert {key: records["skill"][key] for key in ("kind", "id", "version")} == {
         "kind": "skill", "id": SKILL_ID, "version": v2["version"],

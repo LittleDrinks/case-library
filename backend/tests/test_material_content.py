@@ -67,13 +67,11 @@ def test_anonymous_downloads_approved_public_material_bytes(client: TestClient) 
 
 def test_public_material_detail_hides_storage_fields(client: TestClient) -> None:
     material_id, admin = _approved_material(client, "detail.txt", b"detail", "public")
-    client.app.state.database.materials.update_one(
-        {"id": material_id},
-        {"$set": {
-            "summary": "详情摘要", "source": "资料来源", "sourceUrl": "https://example.test/source",
-            "authority": "original", "materialType": "政策文件", "collectedAt": "2026-08-26",
-        }},
-    )
+    detail_fields = {
+        "summary": "详情摘要", "source": "资料来源", "sourceUrl": "https://example.test/source",
+        "authority": "original", "materialType": "政策文件", "collectedAt": "2026-08-26",
+    }
+    client.app.state.database.materials.update_one({"id": material_id}, {"$set": detail_fields})
     _logout(client, admin)
 
     response = client.get(f"/api/materials/{material_id}")
