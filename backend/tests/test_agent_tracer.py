@@ -174,11 +174,15 @@ def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     assert len(calls) >= 3
 
 
-def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str):
+def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
+            thread_id: str | None = None):
+    if thread_id is None:
+        thread_id = client.get(_thread_path(case_id)).json()["id"]
     body = {"decision": decision}
     headers = _csrf(_login(client))
     return client.post(
-        f"{CASES_PATH}/{case_id}/agent/artifacts/{artifact_id}/decision",
+        f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact_id}/decision",
         headers=headers, json=body,
     )
 
@@ -242,10 +246,12 @@ def test_accept_fails_when_quote_no_longer_matches(client: TestClient, tracer_ca
 def test_non_author_cannot_decide_artifact(client: TestClient, tracer_case) -> None:
     artifact = _assert_pending_artifact(client, tracer_case)
     case_id = tracer_case["id"]
+    thread_id = client_thread(client.app.state.database, case_id)
     admin = _login(client, "admin", "admin123")
     body = {"decision": "accepted"}
     response = client.post(
-        f"{CASES_PATH}/{case_id}/agent/artifacts/{artifact['id']}/decision",
+        f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact['id']}/decision",
         headers=_csrf(admin), json=body,
     )
     assert response.status_code == 403
