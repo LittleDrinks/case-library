@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -33,10 +34,11 @@ from app.modules.agent.repository import (
 )
 from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import bound_skill_capability, case_edit_skill
+from app.modules.agent.skills import bound_skill_capability, case_edit_skill, reader_capability
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
+from app.modules.cases.published import published_view, version_readable
 from app.modules.cases.service import get_case
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
@@ -48,6 +50,15 @@ MAX_THREAD_TITLE_CHARACTERS = 60
 
 
 @dataclass(slots=True)
+class Conversation:
+    """单次对话操作的服务端上下文：作者工作稿或读者绑定的已发布版本。"""
+
+    case: dict
+    version_id: str | None
+    reader: bool
+
+
+@dataclass(slots=True)
 class RunPlan:
     parts: list[dict]
     metadata: dict
@@ -56,6 +67,13 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+
+
+class ThreadCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    versionId: str | None = None
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -71,6 +89,58 @@ def _editable_case(case: dict) -> dict:
     return case
 
 
+def _existing_case(database, case_id: str) -> dict:
+    case = database.cases.find_one({"id": case_id})
+    if not case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    return case
+
+
+def _readable_case(case: dict, user: dict) -> bool:
+    return case.get("publicationStatus") == "public" or user["role"] == "admin"
+
+
+def _gate_case(database, case_id: str, user: dict) -> dict:
+    """case 级门禁先于任何 Thread 枚举：不可读 404；非作者可读但未公开保持 403。"""
+    case = _existing_case(database, case_id)
+    if case["ownerId"] == user["id"] or _readable_case(case, user):
+        if case["ownerId"] != user["id"] and case.get("publicationStatus") != "public":
+            raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
+        return case
+    raise HTTPException(status_code=404, detail="案例不存在")
+
+
+def _conversation(database, case_id: str, user: dict, version_id: str | None) -> Conversation:
+    """versionId 缺省为作者工作稿上下文；给定则绑定实际可读的已发布版本。"""
+    if not version_id:
+        return Conversation(_editable_case(_author_case(database, case_id, user)), None, False)
+    case = _gate_case(database, case_id, user)
+    version = _readable_version(database, case, version_id)
+    return Conversation(published_view(case, version), version_id, True)
+
+
+def _readable_version(database, case: dict, version_id: str) -> dict:
+    """读者对话只绑定真实已批准发布的版本；按当前身份即时重验可读性。"""
+    version = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
+    if not version or not version_readable(database, case, version_id, version, False):
+        raise HTTPException(status_code=404, detail="案例版本不存在")
+    return version
+
+
+def _thread_conversation(
+    database, case_id: str, user: dict, repository: AgentRepository, thread_id: str
+) -> tuple[Conversation, AgentThread]:
+    """Thread 自身的绑定决定上下文；恢复/续跑/取消/事件全部即时重验可读性。"""
+    case = _gate_case(database, case_id, user)
+    thread = _thread(repository, thread_id, case_id, user["id"])
+    if thread.version_id is None:
+        if case["ownerId"] != user["id"]:
+            raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
+        return Conversation(_editable_case(case), None, False), thread
+    version = _readable_version(database, case, thread.version_id)
+    return Conversation(published_view(case, version), thread.version_id, True), thread
+
+
 def _repository(database) -> AgentRepository:
     return AgentRepository(database)
 
@@ -78,12 +148,14 @@ def _repository(database) -> AgentRepository:
 @router.get("/{case_id}/agent/thread")
 def show_thread(
     case_id: str,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
-    _editable_case(_author_case(database, case_id, user))
+    conversation = _conversation(database, case_id, user, version_id)
     repository = _repository(database)
-    return repository.snapshot(repository.default_thread(case_id, user["id"]))
+    thread = repository.default_thread(case_id, user["id"], conversation.version_id)
+    return repository.snapshot(thread)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -184,6 +256,7 @@ def _thread(repository, thread_id: str, case_id: str, user_id: str) -> AgentThre
 def _summary(thread: AgentThread) -> AgentThreadSummary:
     return AgentThreadSummary(
         id=thread.id,
+        version_id=thread.version_id,
         title=thread.title,
         is_default=thread.is_default,
         running=thread.active_run_id is not None,
@@ -208,12 +281,6 @@ def _default_title(text: str) -> str:
     return text.strip().splitlines()[0][:MAX_THREAD_TITLE_CHARACTERS]
 
 
-class ThreadCreateBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str | None = None
-
-
 class ThreadRenameBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -223,11 +290,12 @@ class ThreadRenameBody(BaseModel):
 @router.get("/{case_id}/agent/threads")
 def list_threads(
     case_id: str,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> list[AgentThreadSummary]:
-    _editable_case(_author_case(database, case_id, user))
-    threads = _repository(database).list_threads(case_id, user["id"])
+    _conversation(database, case_id, user, version_id)
+    threads = _repository(database).list_threads(case_id, user["id"], version_id or None)
     return [_summary(thread) for thread in threads]
 
 
@@ -239,9 +307,11 @@ def create_thread(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> AgentThreadSummary:
-    _editable_case(_author_case(database, case_id, user))
+    conversation = _conversation(database, case_id, user, body.versionId)
     repository = _repository(database)
-    thread = repository.create_thread(case_id, user["id"], _valid_title(body.title))
+    thread = repository.create_thread(
+        case_id, user["id"], _valid_title(body.title), conversation.version_id
+    )
     return _summary(thread)
 
 
@@ -252,9 +322,9 @@ def show_named_thread(
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
-    _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    return repository.snapshot(_thread(repository, thread_id, case_id, user["id"]))
+    _, thread = _thread_conversation(database, case_id, user, repository, thread_id)
+    return repository.snapshot(thread)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -266,8 +336,8 @@ def rename_thread(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> AgentThreadSummary:
-    _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
+    _, thread = _thread_conversation(database, case_id, user, repository, thread_id)
     title = _valid_title(body.title)
     try:
         thread = repository.rename_thread(thread_id, case_id, user["id"], title)
@@ -291,13 +361,14 @@ async def send_message(
 
 async def _send_message(case_id, thread_id, request, database, settings, user):
     _request_size(request)
-    case = _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    conversation, thread = _thread_conversation(database, case_id, user, repository, thread_id)
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _run_plan(repository, thread, adapter)
-    bounds, legacy = _resolve_skills(database, request.app.state.blob_store, plan.skills)
+    bounds, legacy = _resolve_skills(
+        database, request.app.state.blob_store, plan.skills, conversation.reader
+    )
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
@@ -305,16 +376,19 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
         repository, thread, user["id"], plan, assistant_id, lease, worker_id,
         [bound.binding_record() for bound in bounds],
     )
-    context = _run_context(request, database, settings, user, case, repository, thread,
-                           adapter, plan, run, selection, lease, worker_id, bounds, legacy)
+    context = _run_context(request, database, settings, user, conversation, repository,
+                           thread, adapter, plan, run, selection, lease, worker_id,
+                           bounds, legacy)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
 
 
 def _resolve_skills(
-    database, store, skill_ids: list[str]
+    database, store, skill_ids: list[str], reader: bool
 ) -> tuple[tuple[BoundSkill, ...], bool]:
-    """服务端解析消息选择的 Skill：平台 Skill 走固定资源，其余须已发布。"""
+    """服务端解析消息选择的 Skill：平台修订 Skill 仅作者；已发布 Skill 双方可用。"""
+    if reader and CASE_EDIT_SKILL.id in skill_ids:
+        raise HTTPException(status_code=422, detail="AI 能力不可用")
     legacy = CASE_EDIT_SKILL.id in skill_ids
     bounds: list[BoundSkill] = []
     for skill_id in dict.fromkeys(skill_ids):
@@ -327,24 +401,32 @@ def _resolve_skills(
     return tuple(bounds), legacy
 
 
-def _run_context(request, database, settings, user, case, repository, thread, adapter,
-                 plan, run, selection, lease, worker_id, bounds, legacy):
-    capabilities = ([case_edit_skill()] if legacy else []) + [
-        bound_skill_capability(bound) for bound in bounds
-    ]
+def _run_context(request, database, settings, user, conversation: Conversation,
+                 repository, thread, adapter, plan, run, selection, lease, worker_id,
+                 bounds, legacy):
+    capabilities = _capabilities(conversation.reader, legacy, bounds)
     deps = ToolDeps(
-        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
-        user=user, catalog=request.app.state.search_catalog,
+        database=database, case_id=conversation.case["id"], thread_id=thread.id,
+        run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state,
         secret_path=settings.app_secret_file, skills=bounds,
     )
     return RunContext(
-        repository, run, adapter, plan.history, plan.prompt, case,
+        repository, run, adapter, plan.history, plan.prompt, conversation.case,
         request.app.state.agent, buffer=LiveBuffer(),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
-        deps=deps, capabilities=capabilities,
+        deps=deps, capabilities=capabilities, reader=conversation.reader,
     )
+
+
+def _capabilities(reader: bool, legacy: bool, bounds) -> list:
+    """读者固定只读检索能力；作者按需获得修订能力；已发布 Skill 双方可用。"""
+    if reader:
+        return [reader_capability()] + [bound_skill_capability(b) for b in bounds]
+    return ([case_edit_skill()] if legacy else []) + [
+        bound_skill_capability(bound) for bound in bounds
+    ]
 
 
 def _selection(database, settings, user_id: str):
@@ -434,9 +516,8 @@ def cancel_thread_run(
     _session: dict = Depends(require_csrf),
 ) -> dict:
     """幂等取消：标记活动 Run 并触发本进程 cancellation token。"""
-    _author_case(database, case_id, user)
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    _, thread = _thread_conversation(database, case_id, user, repository, thread_id)
     run = repository.active_run(thread.id)
     if run is None:
         return {"runId": None, "status": "idle"}
@@ -455,9 +536,8 @@ def thread_events(
     user: dict = Depends(require_user),
 ):
     """恢复流：按 Thread 游标 afterSeq/Last-Event-ID 只补发增量。"""
-    _author_case(database, case_id, user)
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    _, thread = _thread_conversation(database, case_id, user, repository, thread_id)
     cursor = after_seq if after_seq is not None else _last_event_id(request)
     if thread.active_run_id is None and cursor >= thread.event_seq:
         return Response(status_code=204)

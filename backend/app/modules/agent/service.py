@@ -14,7 +14,7 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import CASE_EDIT_SKILL, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import CASE_EDIT_SKILL, READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -42,6 +42,7 @@ class RunContext:
     token: CancellationToken | None = None
     deps: ToolDeps | None = None
     capabilities: list | None = None
+    reader: bool = False
     cancelled: bool = False
     failed: bool = False
     lost: bool = False
@@ -53,7 +54,7 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
-        "instructions": case_instructions(context.case),
+        "instructions": case_instructions(context.case, context.reader),
         "user_prompt": context.prompt,
         "deps": context.deps,
         "cancellation_token": context.token,
@@ -135,9 +136,10 @@ def _loaded_platform_skill(parts: list[dict]) -> bool:
     return CASE_EDIT_SKILL.id in _loaded_capability_ids(parts)
 
 
-def _run_resources(parts: list[dict], bounds: tuple = ()) -> list[dict[str, str]]:
-    """系统提示词 + 每个绑定 Skill 的版本哈希 + 已加载的平台 Skill。"""
-    records = [resource_record(SYSTEM_PROMPT), resource_record(TASK_PROMPT)]
+def _run_resources(parts: list[dict], bounds: tuple = (), reader: bool = False) -> list[dict[str, str]]:
+    """系统提示词 + 任务提示词（作者或读者）+ Skill 版本哈希 + 已加载的平台 Skill。"""
+    task = READER_PROMPT if reader else TASK_PROMPT
+    records = [resource_record(SYSTEM_PROMPT), resource_record(task)]
     records += [bound.resource_record() for bound in bounds]
     if _loaded_platform_skill(parts):
         records.append(resource_record(CASE_EDIT_SKILL))
@@ -294,6 +296,7 @@ def _complete(context: RunContext) -> None:
         resources=_run_resources(
             _assistant_parts_of(context),
             context.deps.skills if context.deps else (),
+            context.reader,
         ),
     ):
         context.lost = True

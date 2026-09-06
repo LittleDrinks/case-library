@@ -28,6 +28,7 @@ class AgentThread(BaseModel):
     id: str
     case_id: str = Field(alias="caseId")
     owner_id: str = Field(alias="ownerId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     next_message_seq: int = Field(default=0, alias="nextMessageSeq")
@@ -129,6 +130,7 @@ class AgentThreadSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     running: bool = False
@@ -142,6 +144,7 @@ class AgentSnapshot(BaseModel):
 
     id: str
     case_id: str = Field(alias="caseId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]

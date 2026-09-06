@@ -26,7 +26,7 @@ class PublishedCaseReader:
         version = self._published_version(case)
         if not version or case.get("publicationStatus") != "public":
             raise CaseError(404, "案例不存在")
-        return _published_view(case, version)
+        return published_view(case, version)
 
     def _published_version(self, case: dict) -> dict | None:
         return self._find_version(case.get("publishedVersionId"), case["id"])
@@ -51,7 +51,7 @@ class PublishedCaseReader:
         )
         if not version or not self._version_readable(case, version, internal):
             raise CaseError(404, "案例版本不存在")
-        view = _published_view(case, version)
+        view = published_view(case, version)
         view["versionId"] = version["id"]
         view["versionNumber"] = version["number"]
         return view
@@ -88,7 +88,7 @@ def version_readable(
     return bool(approved)
 
 
-def _published_view(case: dict, version: dict) -> dict:
+def published_view(case: dict, version: dict) -> dict:
     metadata = {
         field: version["metadata"].get(field) for field in PUBLIC_METADATA_FIELDS
     }

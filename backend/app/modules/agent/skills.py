@@ -25,7 +25,7 @@ SKILL_ID = CASE_EDIT_SKILL.id
 async def propose_revision(
     ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str = ""
 ) -> dict:
-    """只为当前 baseRevision 的一个段落创建 pending Artifact，正文不变。"""
+    """只为当前 baseRevision 的一个段落创建 pending Artifact，正文不变；仅作者草稿上下文注册。"""
     try:
         artifact = _propose(ctx, paragraph_index, replacement, reason)
     except CaseError as error:
@@ -36,7 +36,7 @@ async def propose_revision(
 def _propose(ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        paragraph_index, replacement, reason, list(ctx.deps.sources),
+        paragraph_index, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
     )
 
 
@@ -50,6 +50,18 @@ def _artifact_view(artifact) -> dict:
         "sources": [item.model_dump(by_alias=True) for item in artifact.sources],
         "baseRevision": artifact.base_revision,
     }
+
+
+READER_CAPABILITY_ID = "case-reading"
+
+
+def reader_capability() -> Capability:
+    """读者上下文的固定只读能力：仅平台检索，不暴露任何案例写工具。"""
+    return Capability(
+        id=READER_CAPABILITY_ID,
+        description="检索平台公开资料辅助案例讨论",
+        tools=[search_corpus],
+    )
 
 
 def case_edit_skill() -> Capability:

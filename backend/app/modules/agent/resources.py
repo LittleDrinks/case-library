@@ -37,6 +37,9 @@ TASK_PROMPT = AgentResource("task-prompt", "agent/revision-task", "1", "prompts/
 CASE_EDIT_SKILL = AgentResource(
     "skill", "case-edit-skill", "2.1", "skills/case-edit-skill/SKILL.md"
 )
+READER_PROMPT = AgentResource(
+    "task-prompt", "agent/reader-agent", "1", "prompts/reader-agent.md"
+)
 
 
 @lru_cache(maxsize=None)
