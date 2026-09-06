@@ -63,12 +63,39 @@ function isCurrent(state, generation) {
   return !state.disposed && state.generation === generation;
 }
 
+function readPreference(caseId) {
+  try {
+    return localStorage.getItem(`agent-thread:${caseId}`) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writePreference(caseId, threadId) {
+  try {
+    localStorage.setItem(`agent-thread:${caseId}`, threadId);
+  } catch {
+    // 选择偏好只是本地记录，写入失败不影响对话
+  }
+}
+
+async function resolveSnapshot(caseId) {
+  const preferred = readPreference(caseId);
+  if (!preferred) return api.agentThread(caseId);
+  try {
+    return await api.agentThread(caseId, preferred);
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    return api.agentThread(caseId);
+  }
+}
+
 function chatIdle(chat) {
   return !chat || ["ready", "error"].includes(chat.status);
 }
 
 async function refreshSnapshot(caseId, state, generation) {
-  const snapshot = await api.agentThread(caseId);
+  const snapshot = await api.agentThread(caseId, state.threadId.value);
   if (isCurrent(state, generation)) state.snapshot.value = snapshot;
   return snapshot;
 }
@@ -99,16 +126,36 @@ async function settle(caseId, state, generation, { fresh = false } = {}) {
 async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
-  const results = await Promise.allSettled([api.agentThread(caseId), api.aiSettings()]);
+  const results = await Promise.allSettled([resolveSnapshot(caseId), api.aiSettings()]);
   if (!isCurrent(state, generation)) return;
   const [threadResult, settingsResult] = results;
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
+    state.threadId.value = threadResult.value.id;
     state.chat.value = buildChat(caseId, threadResult.value, state);
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
   else if (!state.error.value) state.error.value = settingsResult.reason.message || "AI 配置加载失败";
   state.loading.value = false;
+  await resume(caseId, state, generation);
+}
+
+async function selectThread(caseId, state, threadId) {
+  const generation = (state.generation += 1);
+  state.loading.value = true;
+  state.error.value = "";
+  try {
+    const snapshot = await api.agentThread(caseId, threadId);
+    if (!isCurrent(state, generation)) return;
+    state.snapshot.value = snapshot;
+    state.threadId.value = snapshot.id;
+    state.chat.value = buildChat(caseId, snapshot, state);
+    writePreference(caseId, snapshot.id);
+  } catch (requestError) {
+    if (isCurrent(state, generation)) state.error.value = requestError.message || "对话加载失败";
+  } finally {
+    if (isCurrent(state, generation)) state.loading.value = false;
+  }
   await resume(caseId, state, generation);
 }
 
@@ -133,7 +180,7 @@ function stopRequested(state) {
 }
 
 async function stopChat(caseId, state, generation) {
-  const thread = state.chat.value?.id || state.snapshot.value?.id;
+  const thread = state.threadId.value || state.chat.value?.id || state.snapshot.value?.id;
   if (!isCurrent(state, generation) || !thread || !stopRequested(state)) return;
   state.stopping.value = true;
   try {
@@ -161,10 +208,32 @@ async function decideArtifact(caseId, state, generation, artifactId, decision) {
   return result;
 }
 
+async function renameThread(caseId, state, threadId, title) {
+  const summary = await api.agentRenameThread(caseId, threadId, title, session.csrfToken);
+  if (state.threadId.value === threadId && state.snapshot.value) {
+    state.snapshot.value = { ...state.snapshot.value, title: summary.title };
+  }
+  return summary;
+}
+
+async function createThread(caseId, state) {
+  const created = await api.agentCreateThread(caseId, null, session.csrfToken);
+  await selectThread(caseId, state, created.id);
+}
+
+function threadActions(caseId, state) {
+  return {
+    listThreads: () => api.agentThreads(caseId),
+    selectThread: (threadId) => selectThread(caseId, state, threadId),
+    createThread: () => createThread(caseId, state),
+    renameThread: (threadId, title) => renameThread(caseId, state, threadId, title),
+  };
+}
+
 function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
-    loading: ref(true), error: ref(""), stopping: ref(false),
+    threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
     generation: 0, disposed: false,
   };
 }
@@ -182,6 +251,7 @@ function computedState(state) {
   return {
     messages: computed(() => state.chat.value?.messages || state.snapshot.value?.messages || []),
     artifacts: computed(() => state.snapshot.value?.artifacts || []),
+    threadId: computed(() => state.threadId.value),
     status: computed(() => {
       const chatStatus = state.chat.value?.status;
       return chatStatus && chatStatus !== "ready" ? chatStatus : snapshotStatus(state.snapshot.value);
@@ -221,7 +291,8 @@ export function useAgentChat(caseId) {
   bindLifecycle(state, recover);
   void reload(caseId, state);
   return {
-    ...computedState(state), loading: state.loading, error: state.error,
-    settings: state.settings, textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
+    ...computedState(state), ...threadActions(caseId, state),
+    loading: state.loading, error: state.error, settings: state.settings,
+    textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
   };
 }
