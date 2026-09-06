@@ -1,9 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import { ExternalLink } from "@lucide/vue";
 import { createForceLayout } from "../lib/forceGraph.js";
 import { buildSearchGraph } from "../lib/searchGraph.js";
-import { publicUrl } from "../lib/publicUrl.js";
 
 const props = defineProps({ query: String, items: { type: Array, required: true } });
 const graph = computed(() => buildSearchGraph(props.query, props.items));
@@ -126,7 +124,7 @@ defineExpose({ graph });
     <aside v-if="selected?.item" class="graph-selection" aria-live="polite">
       <div><span>{{ { case: '案例', knowledge: '知识', material: '素材' }[selected.type] }}</span><b>{{ selected.label }}</b><p>{{ selected.item.summary || "暂无摘要" }}</p></div>
       <RouterLink v-if="selected.type === 'case'" :to="{ name: 'case-public', params: { id: selected.item.id } }">查看案例</RouterLink>
-      <a v-else-if="selected.type === 'material' && publicUrl(selected.item.sourceUrl)" :href="publicUrl(selected.item.sourceUrl)" target="_blank" rel="noopener noreferrer">查看来源<ExternalLink :size="14" /></a>
+      <RouterLink v-else-if="selected.type === 'material'" :to="{ name: 'material-detail', params: { id: selected.item.id }, query: { from: 'search' } }">查看素材</RouterLink>
     </aside>
     <ul class="visually-hidden" aria-label="图谱资源清单"><li v-for="node in resourceNodes" :key="node.id">{{ nodeLabel(node) }}</li></ul>
     <ul class="visually-hidden" aria-label="图谱关系列表"><li v-for="(link, index) in graph.links" :key="index">{{ relationLabel(link) }}</li></ul>
