@@ -14,7 +14,6 @@ from pymongo import MongoClient
 
 BASE_URL = os.environ.get("AGENT_TRACER_E2E_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
-SKILL_LOAD_MARK = "单段修订工作流"
 pytestmark = pytest.mark.e2e("AGENT_TRACER_E2E_URL", "AUTH_QUERY_MONGODB_URI")
 
 
@@ -74,10 +73,7 @@ def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Res
             "messages": [{
                 "id": "client-message",
                 "role": "user",
-                "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
-                ],
+                "parts": [{"type": "text", "text": text}],
             }],
         },
     )
@@ -113,9 +109,11 @@ def _wait_for_catalog(client: httpx.Client) -> None:
     pytest.fail("e2e catalog never became searchable")
 
 
-def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str):
+def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str,
+            thread_id: str):
     return client.post(
-        f"/api/cases/{case_id}/agent/artifacts/{artifact_id}/decision",
+        f"/api/cases/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact_id}/decision",
         headers={"X-CSRF-Token": csrf},
         json={"decision": "accepted"},
     )
@@ -146,11 +144,10 @@ def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, 
     return case["id"], run, artifact
 
 
-def _assert_skill_loaded(run: dict) -> None:
+def _assert_read_evidence(run: dict) -> None:
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert kinds["skill"]["id"] == "case-edit-skill"
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert set(kinds) == {"system-prompt", "task-prompt"}
+    assert kinds["system-prompt"]["contentHash"]
 
 
 def test_tracer_run_builds_pending_artifact_with_server_sources():
@@ -159,7 +156,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
     try:
         database = mongo.get_default_database()
         case_id, run, artifact = _tracer_case(client, csrf, database)
-        _assert_skill_loaded(run)
+        _assert_read_evidence(run)
         assert artifact["status"] == "pending"
         assert artifact["baseRevision"] == 1
         assert artifact["target"]["paragraphIndex"] == 1
@@ -179,9 +176,9 @@ def test_accept_writes_revision_snapshot_and_replays_decision():
     try:
         database = mongo.get_default_database()
         case_id, _run, artifact = _tracer_case(client, csrf, database)
-        first = _accept(client, csrf, case_id, artifact["id"])
+        first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert first.status_code == 200, first.text
-        duplicate = _accept(client, csrf, case_id, artifact["id"])
+        duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert duplicate.status_code == 200
         assert duplicate.json()["artifact"]["status"] == "accepted"
         _assert_atomic_decision(database, case_id, artifact)
@@ -195,7 +192,10 @@ def test_accept_writes_revision_snapshot_and_replays_decision():
 
 def _concurrent_accepts(client, csrf, case_id, artifact, database):
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_accept, client, csrf, case_id, artifact["id"]) for _ in range(2)]
+        futures = [
+            pool.submit(_accept, client, csrf, case_id, artifact["id"], artifact["threadId"])
+            for _ in range(2)
+        ]
         responses = [future.result(timeout=30) for future in futures]
     assert [response.status_code for response in responses] == [200, 200]
     _assert_atomic_decision(database, case_id, artifact)
@@ -225,7 +225,7 @@ def test_accept_rejects_stale_revision_on_real_replica_set():
             json={"revision": 1, "document": changed},
         )
         assert patch.status_code == 200
-        response = _accept(client, csrf, case_id, artifact["id"])
+        response = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert response.status_code == 409
         assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "pending"
         assert database.cases.find_one({"id": case_id})["revision"] == 2

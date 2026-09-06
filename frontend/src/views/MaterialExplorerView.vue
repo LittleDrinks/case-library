@@ -61,7 +61,7 @@ async function load(activeCursor = cursor.value) {
   const current = ++searchGeneration;
   error.value = "";
   try {
-    const payload = await api.search(query.value.trim(), "material", activeCursor, 50, searchFilters());
+    const payload = await api.search(query.value.trim(), "material", activeCursor, 20, searchFilters());
     if (current !== searchGeneration) return;
     materials.value = payload.items;
     updateMetadata(payload);
@@ -104,8 +104,7 @@ function submitSearch() {
 }
 
 function selectPage(nextCursor) {
-  cursor.value = nextCursor;
-  load(nextCursor);
+  router.replace({ name: "materials", query: { ...route.query, cursor: nextCursor || undefined } });
 }
 
 async function loadContext() {
@@ -172,8 +171,8 @@ function syncSearchRoute() {
   materialType.value = String(route.query.materialType || "");
   externalOnly.value = route.query.accessLevel === "public";
   viewMode.value = route.query.view === "mounted" && caseId.value ? "mounted" : "all";
-  cursor.value = "";
-  load(null);
+  cursor.value = String(route.query.cursor || "");
+  load(cursor.value);
 }
 
 watch(() => route.fullPath, syncSearchRoute, { immediate: true });
@@ -212,7 +211,7 @@ watch(caseId, loadContext, { immediate: true });
           <p v-if="error" class="error-state" role="alert">{{ error }}</p>
           <p v-else-if="notice" class="material-notice" role="status">{{ notice }}</p>
           <div v-else class="material-table-wrap">
-            <table><thead><tr><th v-if="caseId" class="selection-column">选择</th><th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th class="download-column">下载</th></tr></thead><tbody><tr v-for="item in materials" :key="item.id"><td v-if="caseId" class="selection-column" data-label="选择"><span v-if="mountedIds.has(item.id)" class="mounted-label">已加入</span><input v-else v-model="selected" type="checkbox" :value="item.id" :aria-label="`选择${item.title}`" :disabled="!item.contentAvailable || !editable || busy" /></td><td data-label="素材"><b>{{ item.title }}</b><small>{{ item.summary }}</small></td><td data-label="来源">{{ item.source }}</td><td data-label="类型">{{ item.materialType }}</td><td data-label="权威性">{{ { original: '原始权威来源', secondary: '可靠二手来源', pending: '待核验线索' }[item.authority] }}</td><td class="download-column" data-label="下载"><MaterialDownloadAction :material="item" /></td></tr></tbody></table>
+            <table><thead><tr><th v-if="caseId" class="selection-column">选择</th><th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th class="download-column">下载</th></tr></thead><tbody><tr v-for="item in materials" :key="item.id"><td v-if="caseId" class="selection-column" data-label="选择"><span v-if="mountedIds.has(item.id)" class="mounted-label">已加入</span><input v-else v-model="selected" type="checkbox" :value="item.id" :aria-label="`选择${item.title}`" :disabled="!item.contentAvailable || !editable || busy" /></td><td data-label="素材"><RouterLink v-if="item.contentAvailable" :to="{ name: 'material-detail', params: { id: item.id }, query: { caseId: caseId || undefined, from: route.fullPath } }"><b>{{ item.title }}</b></RouterLink><b v-else>{{ item.title }}</b><small>{{ item.summary }}</small></td><td data-label="来源">{{ item.source }}</td><td data-label="类型">{{ item.materialType }}</td><td data-label="权威性">{{ { original: '原始权威来源', secondary: '可靠二手来源', pending: '待核验线索' }[item.authority] }}</td><td class="download-column" data-label="下载"><MaterialDownloadAction :material="item" /></td></tr></tbody></table>
             <p v-if="!materials.length" class="search-empty">当前筛选下没有结果</p>
             <CatalogPagination v-if="total" :page="page" :total="total" :next-cursor="nextCursor" :previous-cursor="previousCursor" @change="selectPage" />
           </div>

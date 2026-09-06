@@ -1,4 +1,4 @@
-"""最小单段修订 tracer：生产 Agent + Skill 按需加载 + Artifact 领域路径。"""
+"""最小单段修订 tracer：生产 Agent 领域工具检索-读源-提议 + Artifact 领域路径。"""
 
 from __future__ import annotations
 
@@ -6,12 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
-from app.modules.agent.resources import CASE_EDIT_SKILL
-from tests.agent_tracer import REPLACEMENT, SKILL_ID, tracer_model
+from tests.agent_tracer import REPLACEMENT, HIT_ID, tracer_model
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
-SKILL_BODY_MARK = "单段修订工作流 v2.1"
 
 
 class StubCatalog:
@@ -63,15 +61,7 @@ def _thread_path(case_id: str) -> str:
     return f"{CASES_PATH}/{case_id}/agent/thread"
 
 
-def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
-    parts = [{"type": "text", "text": text}]
-    if skill_id:
-        parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
-    return parts
-
-
-def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
-          skill_id: str | None = SKILL_ID):
+def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None):
     with agent.override(model=model or tracer_model()):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
@@ -82,7 +72,7 @@ def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
                 "trigger": "submit-message",
                 "messages": [{
                     "id": "client-message", "role": "user",
-                    "parts": _message_parts(text, skill_id),
+                    "parts": [{"type": "text", "text": text}],
                 }],
             },
         )
@@ -93,8 +83,14 @@ def _artifact(database, thread_id: str) -> dict:
 
 
 HIT = {
-    "id": "c-42", "kind": "case", "title": "科学家精神融入课堂",
+    "id": HIT_ID, "kind": "case",
+    "title": "钱伟长图书馆——科学家精神的大思政课堂",
     "summary": "以科学家精神为主题的教学案例，含教学目标与评价量规。",
+}
+EVIDENCE = {
+    "kind": "case", "id": HIT_ID, "title": HIT["title"], "snippet": "",
+    "version": "v1", "versionId": "cv-seed-c-02-v1",
+    "locator": f"case:{HIT_ID}@cv-seed-c-02-v1",
 }
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
 
@@ -119,9 +115,7 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["target"]["paragraphIndex"] == 1
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
-    assert artifact["sources"] == [{
-        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": HIT["summary"],
-    }]
+    assert artifact["sources"] == [EVIDENCE]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)
     return artifact
@@ -137,24 +131,25 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
+        "tool-search_corpus", "tool-read_source", "tool-propose_revision",
     ]
-    assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
+    assert tool_parts[0]["output"]["sources"][0]["id"] == HIT_ID
+    assert tool_parts[1]["output"]["source"]["versionId"] == "cv-seed-c-02-v1"
+    assert "钱伟长图书馆" in tool_parts[1]["output"]["content"]
     assert tool_parts[2]["output"]["artifactId"]
 
 
-def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_case) -> None:
+def test_run_records_resource_hash_without_skill(client: TestClient, tracer_case) -> None:
     database = client.app.state.database
     run = database.agent_runs.find_one({}, {"_id": 0})
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert set(kinds) == {"system-prompt", "task-prompt", "skill"}
-    assert kinds["skill"]["id"] == SKILL_ID
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert set(kinds) == {"system-prompt", "task-prompt"}
     assert kinds["system-prompt"]["contentHash"]
+    assert run["readOnly"] is False
 
 
-def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
+def test_domain_tools_available_without_skill_selection(client: TestClient) -> None:
+    """领域工具常驻：不选择任何 Skill 也能检索、读源并提议修订。"""
     calls: list = []
 
     def recorder(messages, info):
@@ -164,21 +159,21 @@ def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     case = _create_case(client, auth, *PARAGRAPHS)
     response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder))
     assert response.status_code == 200, response.text
-    first_messages, first_instructions = calls[0]
-    flattened = [str(part) for message in first_messages for part in message.parts]
-    assert not any(SKILL_BODY_MARK in text for text in flattened)
-    assert "load_capability" in first_instructions
+    assert "资料区" in calls[0][1]
     later_messages = [str(part) for message in calls[-1][0] for part in message.parts]
-    assert any(SKILL_BODY_MARK in text for text in later_messages)
-    assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
+    assert any("search_corpus" in text for text in later_messages)
     assert len(calls) >= 3
 
 
-def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str):
+def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
+            thread_id: str | None = None):
+    if thread_id is None:
+        thread_id = client.get(_thread_path(case_id)).json()["id"]
     body = {"decision": decision}
     headers = _csrf(_login(client))
     return client.post(
-        f"{CASES_PATH}/{case_id}/agent/artifacts/{artifact_id}/decision",
+        f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact_id}/decision",
         headers=headers, json=body,
     )
 
@@ -242,10 +237,12 @@ def test_accept_fails_when_quote_no_longer_matches(client: TestClient, tracer_ca
 def test_non_author_cannot_decide_artifact(client: TestClient, tracer_case) -> None:
     artifact = _assert_pending_artifact(client, tracer_case)
     case_id = tracer_case["id"]
+    thread_id = client_thread(client.app.state.database, case_id)
     admin = _login(client, "admin", "admin123")
     body = {"decision": "accepted"}
     response = client.post(
-        f"{CASES_PATH}/{case_id}/agent/artifacts/{artifact['id']}/decision",
+        f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact['id']}/decision",
         headers=_csrf(admin), json=body,
     )
     assert response.status_code == 403
@@ -272,19 +269,28 @@ def test_snapshot_restores_artifact_and_decision(client: TestClient, tracer_case
     assert snapshot["artifacts"][0]["status"] == "accepted"
     assert snapshot["latestRun"]["status"] == "completed"
     resources = {row["kind"] for row in snapshot["latestRun"]["resources"]}
-    assert resources == {"system-prompt", "task-prompt", "skill"}
-
-
-def test_skill_manifest_matches_registered_resource() -> None:
-    text = CASE_EDIT_SKILL.read()
-    assert text.startswith("---\nid: case-edit-skill\nversion: 2.1\n")
-    assert SKILL_BODY_MARK in text
+    assert resources == {"system-prompt", "task-prompt"}
 
 
 def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "伪造能力", skill_id="fake-skill")
+    with agent.override(model=tracer_model()):
+        thread_id = client.get(_thread_path(case["id"])).json()["id"]
+        response = client.post(
+            f"{_thread_path(case['id'])}/{thread_id}/stream",
+            headers=_csrf(auth),
+            json={
+                "id": "browser-chat-id", "trigger": "submit-message",
+                "messages": [{
+                    "id": "client-message", "role": "user",
+                    "parts": [
+                        {"type": "text", "text": "伪造能力"},
+                        {"type": "data-skill", "data": {"skillId": "fake-skill"}},
+                    ],
+                }],
+            },
+        )
     assert response.status_code == 422
     database = client.app.state.database
     assert database.agent_runs.count_documents({}) == 0

@@ -1,9 +1,11 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
+import AddSourceToCase from "../components/AddSourceToCase.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
+import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
 import SiteHeader from "../components/SiteHeader.vue";
@@ -12,9 +14,12 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { collectCitationKeys } from "../lib/citation.js";
 import { session } from "../session.js";
 
 const route = useRoute();
+const readerMode = computed(() => route.name === "case-public");
+const readerVersion = computed(() => readerMode.value ? caseRecord.value?.versionId || "" : "");
 const activeCaseId = String(route.params.id);
 const caseRecord = ref(null);
 const title = ref("");
@@ -22,6 +27,10 @@ const titleInput = ref(null);
 const canvasEditor = ref(null);
 const document = ref(normalizeDocument());
 const revision = ref(0);
+const tagIds = ref([]);
+const tagCatalog = ref([]);
+const tagCatalogLoading = ref(false);
+const tagCatalogError = ref("");
 const loading = ref(true);
 const loadError = ref("");
 const conflict = ref(null);
@@ -33,45 +42,81 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
-const candidatePreviews = ref([]);
-const candidateInvalidation = ref(0);
-const candidateBatchSnapshotId = ref("");
-const candidateBatchLastRevision = ref(0);
-const applyingCandidate = ref(false);
-const candidateRecoveryBlocked = ref(false);
 const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
 const outline = computed(() => documentOutline(document.value));
+const citedKeys = computed(() => collectCitationKeys(document.value));
+const activeCitation = computed(() => writingContext.value?.citation || null);
 const reviewMode = computed(() => route.name === "case-review");
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
 const isOwner = computed(() => caseRecord.value?.ownerId === session.user?.id);
 const historyAvailable = computed(() => Boolean(
-  session.user && (isOwner.value || session.user.role === "admin"),
+  !readerMode.value && session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
-    ? caseId() : ""
+  publicationStatus.value === "public" ? caseId() : ""
 ));
 const editable = computed(() => (
-  isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
+  !readerMode.value && isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
   && !busyAction.value && !contentMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
-  session.user && (
+  !readerMode.value && session.user && (
     (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
     || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
   ),
 ));
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
+  if (readerMode.value) return `发布版本 v${caseRecord.value?.versionNumber || 1} · 只读`;
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
   ] || "草稿";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
-const lifecycleActions = computed(() => availableActions());
+const lastReview = computed(() => (
+  workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
+));
+const lastReviewLabel = computed(() => (
+  lastReview.value?.action === "supplement" ? "要求补充" : "退回修改"
+));
+const LIFECYCLE_META = {
+  submit: { label: "提交审核", primary: true, area: "author" },
+  withdraw: { label: "撤回提交", primary: false, area: "author" },
+  reopen: { label: "另开新稿", primary: true, area: "author" },
+  start: { label: "开始审核", primary: true, area: "review" },
+  approve: { label: "通过发布", primary: true, area: "review" },
+  reject: { label: "退回修改", primary: false, area: "review" },
+  supplement: { label: "要求补充", primary: false, area: "review" },
+  hide: { label: "暂时隐藏", primary: false, area: "review" },
+  restore: { label: "恢复公开", primary: false, area: "review" },
+};
+const lifecycleActions = computed(() => {
+  const area = reviewMode.value ? "review" : "author";
+  return (caseRecord.value?.availableActions || [])
+    .filter((command) => LIFECYCLE_META[command]?.area === area)
+    .map((command) => ({ command, ...LIFECYCLE_META[command] }));
+});
+
+const submissionTodo = computed(() => {
+  const missing = [];
+  if (!title.value.trim()) missing.push("填写案例标题");
+  if (!documentHasText(document.value)) missing.push("填写正文");
+  tagCatalog.value.filter((group) => group.requiredForSubmission).forEach((group) => {
+    if (!group.tags.some((tag) => tagIds.value.includes(tag.id))) missing.push(`选择${group.name}标签`);
+  });
+  return missing;
+});
+
+function documentHasText(node) {
+  return Boolean(node?.text?.trim() || node?.content?.some(documentHasText));
+}
 
 const autosave = createAutosave({
   save: persist,
@@ -91,15 +136,11 @@ function caseId() {
 }
 
 function snapshot() {
-  return { ...contentSnapshot(), revision: revision.value };
+  return { ...contentSnapshot(), tagIds: tagIds.value, revision: revision.value };
 }
 
 function contentSnapshot() {
   return { title: title.value, document: document.value };
-}
-
-function cloneContentSnapshot() {
-  return { title: title.value, document: structuredClone(toRaw(document.value)) };
 }
 
 async function persist(payload) {
@@ -111,11 +152,8 @@ async function persist(payload) {
   return saved;
 }
 
-function expireCandidates() {
+function invalidateContext() {
   invalidateSelection();
-  candidateInvalidation.value += 1;
-  candidateBatchSnapshotId.value = "";
-  candidateBatchLastRevision.value = 0;
 }
 
 function invalidateSelection() {
@@ -124,22 +162,23 @@ function invalidateSelection() {
 
 function handleSaveConflict(error) {
   conflict.value = error;
-  expireCandidates();
+  invalidateContext();
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) expireCandidates();
+  if (invalidate) invalidateContext();
   caseRecord.value = value;
   title.value = value.title;
   document.value = normalizeDocument(value.document);
   revision.value = value.revision;
+  tagIds.value = value.tagIds || [];
   conflict.value = null;
   if (editable.value) crashDraft.load(value);
   void nextTick(resizeTitle);
 }
 
 async function loadAnnotations() {
-  if (!session.user) {
+  if (!session.user || readerMode.value) {
     annotations.value = [];
     return;
   }
@@ -147,9 +186,33 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
+const sources = ref([]);
+
+async function loadSources() {
+  try { sources.value = (await api.listSources(caseId(), readerVersion.value)).entries; }
+  catch { sources.value = []; }
+}
+
+function insertSourceCitation(source) {
+  try {
+    changeDocument(canvasEditor.value.insertCitation(source));
+  } catch (error) {
+    actionNotice.value = error.message;
+  }
+}
+
+function removeSourceCitation() {
+  try {
+    changeDocument(canvasEditor.value.removeCitation());
+  } catch (error) {
+    actionNotice.value = error.message;
+  }
+}
+
 function applyAttachmentCase(value) {
-  expireCandidates();
+  invalidateContext();
   syncCaseRevision(value);
+  void loadSources();
 }
 
 function syncCaseRevision(value) {
@@ -170,14 +233,11 @@ async function loadCase() {
   loading.value = true;
   loadError.value = "";
   try {
-    const current = await api.getCase(caseId());
-    if (candidateRecoveryBlocked.value) {
-      candidateRecoveryBlocked.value = false;
-      contentMutationBusy.value = false;
-      autosave.reconcile(current.revision);
-    }
+    const current = readerMode.value
+      ? await api.getPublicCase(caseId(), String(route.query.versionId || ""))
+      : await api.getCase(caseId());
     applyCase(current, !initial);
-    await loadAnnotations();
+    await Promise.all([loadAnnotations(), loadSources()]);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -186,11 +246,24 @@ async function loadCase() {
 }
 
 function changeTitle(event) {
-  expireCandidates();
+  invalidateContext();
   title.value = event.target.value;
   resizeTitle();
   crashDraft.queue();
   autosave.markDirty();
+}
+
+function changeTags(next) {
+  tagIds.value = next;
+  autosave.markDirty();
+}
+
+async function loadTagCatalog() {
+  tagCatalogLoading.value = true;
+  tagCatalogError.value = "";
+  try { tagCatalog.value = await api.listTagGroups(); }
+  catch { tagCatalogError.value = "标签目录加载失败"; }
+  finally { tagCatalogLoading.value = false; }
 }
 
 function resizeTitle() {
@@ -201,7 +274,7 @@ function resizeTitle() {
 
 function changeDocument(value) {
   invalidateSelection();
-  if (!applyingCandidate.value) expireCandidates();
+  invalidateContext();
   document.value = value;
   crashDraft.queue();
   autosave.markDirty();
@@ -220,45 +293,6 @@ function locateHeading(order) {
 function selectTool(tool) {
   activeTool.value = tool;
   drawerOpen.value = true;
-}
-
-function reviewActions() {
-  if (workflowStatus.value === "pending") {
-    return [{ command: "start", label: "开始审核", primary: true }];
-  }
-  if (workflowStatus.value === "reviewing") {
-    return [
-      { command: "reject", label: "退回修改", primary: false },
-      { command: "supplement", label: "要求补充", primary: false },
-      { command: "approve", label: "通过发布", primary: true },
-    ];
-  }
-  return null;
-}
-
-function publicationActions() {
-  if (!reviewMode.value || workflowStatus.value !== "published") return null;
-  if (publicationStatus.value === "public") {
-    return [{ command: "hide", label: "暂时隐藏", primary: false }];
-  }
-  return [
-    { command: "restore", label: "恢复公开", primary: false },
-    { command: "reopen", label: "下线编辑", primary: true },
-  ];
-}
-
-function availableActions() {
-  const review = reviewMode.value && reviewActions();
-  if (review) return review;
-  const publication = publicationActions();
-  if (publication) return publication;
-  if (isOwner.value && workflowStatus.value === "draft") {
-    return [{ command: "submit", label: "提交审核", primary: true }];
-  }
-  if (isOwner.value && workflowStatus.value === "pending") {
-    return [{ command: "withdraw", label: "撤回提交", primary: false }];
-  }
-  return [];
 }
 
 async function prepareLifecycle(command) {
@@ -298,10 +332,18 @@ async function performLifecycle(command, details = {}) {
     return true;
   } catch (error) {
     actionNotice.value = error.message || "操作失败";
+    if (error.status === 409) await refreshLifecycleState();
     return false;
   } finally {
     busyAction.value = "";
   }
+}
+
+async function refreshLifecycleState() {
+  if (autosave.state.value !== "saved") return;
+  try {
+    applyCase(await api.getCase(caseId()));
+  } catch { /* 保留错误提示，用户可手动重试 */ }
 }
 
 async function confirmDecision(details) {
@@ -322,120 +364,15 @@ async function prepareContentMutation() {
   return revision.value;
 }
 
-async function createCandidateSnapshot() {
-  const current = await prepareContentMutation();
-  const result = await api.lifecycleCase(caseId(), {
-    command: "snapshot", revision: current,
-  }, session.csrfToken);
-  syncCaseRevision(result.case);
-  return result.snapshot.id;
-}
-
-function restoreCandidateBackup(backup) {
-  title.value = backup.title;
-  document.value = normalizeDocument(backup.document);
-  crashDraft.queue();
-  crashDraft.flush();
-}
-
-function candidateMatches(caseValue, applied) {
-  return caseValue.title === applied.title
-    && JSON.stringify(caseValue.document) === JSON.stringify(applied.document);
-}
-
-function reconcileCandidateSave(caseValue) {
-  syncCaseRevision(caseValue);
-  autosave.reconcile(caseValue.revision);
-}
-
-async function recoverCandidateSave(backup, applied) {
-  restoreCandidateBackup(backup);
-  const current = await api.getCase(caseId());
-  reconcileCandidateSave(current);
-  if (candidateMatches(current, applied)) {
-    document.value = normalizeDocument(current.document);
-    crashDraft.saved(applied);
-    return;
-  }
-  if (!candidateMatches(current, backup)) {
-    candidateRecoveryBlocked.value = true;
-    throw new Error("案例已在其他页面更新，请重新载入后再生成修订。");
-  }
-  crashDraft.saved(backup);
-  crashDraft.flush();
-  throw new Error("修订保存失败，正文已恢复。");
-}
-
-async function coordinateCandidateRecovery(backup, applied) {
-  try {
-    await recoverCandidateSave(backup, applied);
-  } catch (error) {
-    if (candidateRecoveryBlocked.value || autosave.state.value === "error") {
-      candidateRecoveryBlocked.value = true;
-      conflict.value = error;
-    }
-    throw error;
-  }
-}
-
-async function saveCandidateChange(candidate) {
-  const backup = cloneContentSnapshot();
-  applyingCandidate.value = true;
-  try {
-    changeDocument(canvasEditor.value.applyCandidate(candidate));
-    const applied = cloneContentSnapshot();
-    await autosave.flush();
-    if (autosave.state.value === "saved") return;
-    await coordinateCandidateRecovery(backup, applied);
-  } catch (error) {
-    restoreCandidateBackup(backup);
-    throw error;
-  } finally { applyingCandidate.value = false; }
-}
-
-async function applyWritingCandidate(candidate) {
-  if (contentMutationBusy.value) throw new Error("正在处理其他正文操作。");
-  contentMutationBusy.value = true;
-  try {
-    const snapshotId = candidateBatchSnapshotId.value || await createCandidateSnapshot();
-    candidateBatchSnapshotId.value = snapshotId;
-    await saveCandidateChange(candidate);
-    candidateBatchLastRevision.value = revision.value;
-    return { snapshotId, acceptedRevision: revision.value };
-  } finally {
-    if (!candidateRecoveryBlocked.value) contentMutationBusy.value = false;
-  }
-}
-
-function assertCandidateBatch(snapshotId) {
-  const current = revision.value;
-  if (snapshotId !== candidateBatchSnapshotId.value
-    || current !== candidateBatchLastRevision.value) {
-    throw new Error("本批修订后正文或资料已变化，不能再回滚。");
-  }
-}
-
-async function rollbackCandidateBatch(snapshotId) {
-  if (!window.confirm("回滚本批 AI 修订？当前内容会自动保存为回滚前快照。")) return false;
-  assertCandidateBatch(snapshotId);
-  contentMutationBusy.value = true;
-  try {
-    const current = await prepareContentMutation();
-    const result = await api.lifecycleCase(caseId(), {
-      command: "rollback", revision: current, targetId: snapshotId,
-    }, session.csrfToken);
-    applyCase(result.case);
-    return true;
-  } finally { contentMutationBusy.value = false; }
-}
-
 function startDownload() {
   const link = window.document.createElement("a");
-  link.href = `/api/cases/${encodeURIComponent(caseId())}/export.docx`;
+  const version = readerVersion.value ? `/versions/${encodeURIComponent(readerVersion.value)}` : "";
+  link.href = `/api/cases/${encodeURIComponent(caseId())}${version}/export.docx`;
   link.click();
 }
 
 async function exportCase() {
+  if (readerMode.value) { startDownload(); return; }
   actionNotice.value = "";
   await autosave.flush();
   if (autosave.state.value !== "saved") {
@@ -448,7 +385,10 @@ async function exportCase() {
 watch(autosave.revision, (value) => {
   if (value != null) revision.value = value;
 });
-onMounted(loadCase);
+onMounted(() => {
+  loadCase();
+  loadTagCatalog();
+});
 onBeforeUnmount(() => {
   crashDraft.flush();
   crashDraft.destroy();
@@ -469,6 +409,7 @@ onBeforeUnmount(() => {
         :save-state="autosave.state.value"
         :editable="editable"
         :review-mode="reviewMode"
+        :read-only="readerMode"
         :actions="lifecycleActions"
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
@@ -496,17 +437,36 @@ onBeforeUnmount(() => {
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
+          <AddSourceToCase v-if="readerMode && session.user && readerVersion" :source-case-id="caseId()" :version-id="readerVersion" :source-title="title" />
+          <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
+            <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
+          </div>
+          <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
+            <AlertTriangle :size="17" aria-hidden="true" />
+            <span>
+              {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
+            </span>
+          </div>
           <article class="document-paper">
             <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
             <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
+            <CaseTagPicker
+              :tag-ids="tagIds"
+              :groups="tagCatalog"
+              :editable="editable"
+              :loading="tagCatalogLoading"
+              :error="tagCatalogError"
+              @update:tag-ids="changeTags"
+              @retry="loadTagCatalog"
+            />
             <CanvasEditor
               ref="canvasEditor"
               :document="document"
               :revision="revision"
               :editable="editable"
               :annotatable="annotatable"
-              :candidate-previews="candidatePreviews"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"
@@ -516,6 +476,9 @@ onBeforeUnmount(() => {
         </main>
         <AssistantRail
           :active="activeTool"
+          :read-only="readerMode"
+          :version-id="readerVersion"
+          :sources="sources"
           :open="drawerOpen"
           :case-record="caseRecord"
           :case-title="title"
@@ -524,18 +487,18 @@ onBeforeUnmount(() => {
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"
-          :apply-candidate="applyWritingCandidate"
-          :rollback-candidate-batch="rollbackCandidateBatch"
-          :candidate-invalidation="candidateInvalidation"
           :before-attachment-mutation="prepareContentMutation"
           :before-version-mutation="prepareContentMutation"
+          :cited-keys="citedKeys"
+          :active-citation="activeCitation"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
+          @insert-citation="insertSourceCitation"
+          @remove-citation="removeSourceCitation"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
           @case-revised="applyCase"
           @mutation-state="contentMutationBusy = $event"
-          @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"
         />
       </div>

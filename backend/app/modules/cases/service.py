@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pymongo import DESCENDING, ReturnDocument
 from pymongo.database import Database
 
+from app.modules.cases.actions import available_actions
+
 CASE_METADATA_FIELDS = (
     "typeId",
     "typeName",
@@ -16,6 +18,7 @@ CASE_METADATA_FIELDS = (
     "audience",
     "purpose",
     "theoryPoints",
+    "tagIds",
     "citations",
     "kit",
     "likes",
@@ -36,6 +39,7 @@ CASE_VIEW_FIELDS = (
     "updatedAt",
     "submittedAt",
     "publishedAt",
+    "tagIds",
     *CASE_METADATA_FIELDS,
 )
 CASE_CARD_FIELDS = (
@@ -96,10 +100,20 @@ def case_view(case: dict) -> dict:
     return {key: case.get(key) for key in CASE_VIEW_FIELDS}
 
 
-def case_card(case: dict, include_owner: bool = False) -> dict:
+def case_card(case: dict, include_owner: bool = False, user: dict | None = None) -> dict:
     view = {key: case.get(key) for key in CASE_CARD_FIELDS}
     if include_owner:
         view["ownerId"] = case.get("ownerId")
+    view["availableActions"] = available_actions(case, user)
+    return view
+
+
+def internal_case_view(case: dict, user: dict) -> dict:
+    """内部案例视图唯一权威序列化：动作资格实时计算，lastReview 仅作者可见。"""
+    view = case_view(case)
+    if user["id"] == case.get("ownerId"):
+        view["lastReview"] = case.get("lastReview")
+    view["availableActions"] = available_actions(case, user)
     return view
 
 
@@ -121,7 +135,7 @@ def get_public_case(database: Database, case_id: str) -> dict:
 
 def _reader_view(database: Database, case: dict, user: dict | None) -> dict:
     if _is_internal(case, user):
-        return case_view(case)
+        return internal_case_view(case, user)
     from app.modules.cases.published import PublishedCaseReader
 
     return PublishedCaseReader(database).get(case)
@@ -146,14 +160,14 @@ def _list_my_cases(database: Database, user: dict | None) -> list[dict]:
     if not user:
         raise CaseError(401, "请先登录")
     rows = database.cases.find({"ownerId": user["id"]}).sort("updatedAt", DESCENDING)
-    return [case_card(case, include_owner=True) for case in rows]
+    return [case_card(case, include_owner=True, user=user) for case in rows]
 
 
 def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
     if not user or user["role"] != "admin":
         raise CaseError(403, "仅管理员可查看管理队列")
     rows = database.cases.find({}).sort("updatedAt", DESCENDING)
-    return [case_card(case, include_owner=True) for case in rows]
+    return [case_card(case, include_owner=True, user=user) for case in rows]
 
 
 def create_case(database: Database, body: dict, user: dict) -> dict:
@@ -172,7 +186,7 @@ def create_case(database: Database, body: dict, user: dict) -> dict:
         "updatedAt": now,
     }
     database.cases.insert_one(case)
-    return case_view(case)
+    return internal_case_view(case, user)
 
 
 def update_case(database: Database, case_id: str, body: dict, user: dict) -> dict:
@@ -183,13 +197,21 @@ def update_case(database: Database, case_id: str, body: dict, user: dict) -> dic
         raise CaseError(403, "无权编辑该案例")
     if current["workflowStatus"] != "draft":
         raise CaseError(409, "案例当前不可编辑")
-    return _cas_update(database, case_id, body)
+    document = body.get("document")
+    if document is not None:
+        from app.modules.cases.sources import citations_resolve
+
+        citations_resolve(database, case_id, document, None)
+    updated = _cas_update(database, case_id, body)
+    return internal_case_view(updated, user)
 
 
 def _cas_update(database: Database, case_id: str, body: dict) -> dict:
     changes = {
         key: body[key] for key in ("title", "document") if body.get(key) is not None
     }
+    if body.get("tag_ids") is not None:
+        _apply_tags(database, changes, body["tag_ids"])
     changes["updatedAt"] = _now()
     updated = database.cases.find_one_and_update(
         {"id": case_id, "revision": body["revision"]},
@@ -197,6 +219,13 @@ def _cas_update(database: Database, case_id: str, body: dict) -> dict:
         return_document=ReturnDocument.AFTER,
     )
     if updated:
-        return case_view(updated)
+        return updated
     current = database.cases.find_one({"id": case_id})
     raise RevisionConflict(current["revision"])
+
+
+def _apply_tags(database: Database, changes: dict, tag_ids: list) -> None:
+    from app.modules.tags.service import ensure_tags_exist
+
+    ensure_tags_exist(database, tag_ids)
+    changes["tagIds"] = list(dict.fromkeys(tag_ids))[:50]

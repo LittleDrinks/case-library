@@ -10,7 +10,7 @@ RESOURCE_ROOT = Path(__file__).parent
 
 @dataclass(frozen=True, slots=True)
 class AgentResource:
-    """Git 追踪的提示词或 Skill 资源：稳定标识、固定版本与内容哈希。"""
+    """Git 追踪的提示词资源：稳定标识、固定版本与内容哈希。"""
 
     kind: str
     id: str
@@ -32,10 +32,10 @@ class AgentResource:
         }
 
 
-SYSTEM_PROMPT = AgentResource("system-prompt", "agent/case-agent", "1", "prompts/case-agent.md")
+SYSTEM_PROMPT = AgentResource("system-prompt", "agent/case-agent", "2", "prompts/case-agent.md")
 TASK_PROMPT = AgentResource("task-prompt", "agent/revision-task", "1", "prompts/revision-task.md")
-CASE_EDIT_SKILL = AgentResource(
-    "skill", "case-edit-skill", "2.1", "skills/case-edit-skill/SKILL.md"
+READER_PROMPT = AgentResource(
+    "task-prompt", "agent/reader-agent", "1", "prompts/reader-agent.md"
 )
 
 

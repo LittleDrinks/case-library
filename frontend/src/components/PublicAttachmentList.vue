@@ -25,7 +25,7 @@ async function loadAttachments() {
 
 function canDownload(row) {
   if (row.accessLevel === "public") return true;
-  if (row.accessLevel === "campus") return Boolean(session.user);
+  if (row.accessLevel === "campus") return Boolean(session.user?.campusVerified || session.user?.role === "admin");
   return session.user?.role === "admin" || props.isOwner;
 }
 

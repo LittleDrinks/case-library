@@ -168,34 +168,28 @@ def reject_command(case: dict) -> dict:
     }
 
 
-def assert_rejected(returned: dict, case: dict, annotation: dict) -> None:
+def assert_rejected(returned: dict, case: dict) -> None:
     assert returned["case"]["workflowStatus"] == "draft"
     assert returned["case"]["publicationStatus"] == "none"
     assert returned["case"]["submittedVersionId"] is None
+    assert "lastReview" not in returned["case"]
     assert returned["event"]["action"] == "reject"
     assert returned["event"]["versionId"] == case["submittedVersionId"]
     assert returned["event"]["reasonType"] == "教学目标不清晰"
     assert returned["event"]["summary"] == "请依据批注修改后重新提交。"
-    assert returned["event"]["annotationIds"] == [annotation["id"]]
+    assert returned["event"]["annotationIds"] == []
 
 
-def test_admin_cannot_reject_without_current_version_annotation(
-    client: TestClient,
-) -> None:
+def test_admin_can_reject_without_any_annotation(client: TestClient) -> None:
     author, admin, started = reviewing_case(client)
     case, command = started["case"], reject_command(started["case"])
-    blocked = client.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers={"X-CSRF-Token": admin["csrfToken"]},
-        json=command,
-    )
-    annotation = create_annotation(client, admin, case)
     returned = lifecycle(client, admin["csrfToken"], case["id"], command)
 
-    assert blocked.status_code == 409
-    assert_rejected(returned, case, annotation)
+    assert_rejected(returned, case)
     login(client, "user", "user123")
-    assert client.get(f"/api/cases/{case['id']}/annotations").json() == [annotation]
+    assert client.get(f"/api/cases/{case['id']}/annotations").json() == []
+    view = client.get(f"/api/cases/{case['id']}").json()
+    assert view["lastReview"]["annotationIds"] == []
     assert author["user"]["id"] == returned["case"]["ownerId"]
 
 
@@ -204,7 +198,10 @@ def publish_then_reopen(client: TestClient) -> tuple[dict, dict, dict, dict]:
     case = first_review["case"]
     approved = _approve_case(client, admin, case)
     hidden = _transition_case(client, admin, approved["case"], "hide")
-    reopened = _transition_case(client, admin, hidden["case"], "reopen")
+    author = login(client, "user", "user123")
+    reopened = lifecycle(
+        client, author["csrfToken"], case["id"], command(hidden["case"], "reopen")
+    )
     return author, admin, approved, reopened
 
 

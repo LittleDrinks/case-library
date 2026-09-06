@@ -148,4 +148,4 @@ def test_docx_rejects_an_unknown_persisted_node() -> None:
     }
 
     with pytest.raises(ValueError, match="未知节点"):
-        build_case_docx(case)
+        build_case_docx(case, [])

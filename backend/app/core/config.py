@@ -18,7 +18,6 @@ DEFAULT_SEARXNG_BASE_URL = "http://localhost:8080"
 DEFAULT_SEARXNG_TIMEOUT_SECONDS = 5
 DEFAULT_SEARXNG_MAX_RESULTS = 10
 
-
 def _enabled(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -105,6 +104,7 @@ def _environment() -> dict:
     return {
         "app_environment": os.getenv("APP_ENV", DEFAULT_APP_ENVIRONMENT),
         "enable_demo_seed": _enabled(os.getenv("ENABLE_DEMO_SEED")),
+        "public_base_url": os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/"),
         **_mongo_environment(),
         **_session_environment(),
         **_object_store_environment(),
@@ -122,6 +122,7 @@ class Settings:
     mongo_timeout_ms: int = DEFAULT_MONGO_TIMEOUT_MS
     mongo_max_pool_size: int = DEFAULT_MONGO_MAX_POOL_SIZE
     enable_demo_seed: bool = False
+    public_base_url: str = ""
     session_cookie_secure: bool = True
     session_ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS
     object_store_endpoint: str = DEFAULT_OBJECT_STORE_ENDPOINT

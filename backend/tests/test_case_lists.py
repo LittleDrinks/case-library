@@ -111,3 +111,18 @@ def test_public_detail_does_not_expose_internal_metadata(client: TestClient) -> 
     assert "kit" not in payload
     assert "ownerId" not in payload
     assert "submittedVersionId" not in payload
+
+
+def test_public_detail_returns_frozen_tag_ids(client: TestClient) -> None:
+    database = client.app.state.database
+    database.cases.update_one({"id": "c-02"}, {"$set": {"tagIds": ["teacher-tag"]}})
+
+    response = client.get("/api/cases/c-02/public")
+
+    assert response.status_code == 200
+    assert response.json()["tagIds"] == [
+        "tag-seed-3-2",
+        "tag-seed-2-1",
+        "tag-seed-4-1",
+        "tag-seed-4-5",
+    ]

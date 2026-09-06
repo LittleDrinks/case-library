@@ -40,6 +40,12 @@ function materialImportForm(files, accessLevel) {
   return body;
 }
 
+function skillPackageForm(file) {
+  const body = new FormData();
+  body.append("file", file);
+  return body;
+}
+
 function attachmentRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/attachments`;
 }
@@ -54,6 +60,10 @@ function annotationRoot(id) {
 
 function materialRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/materials`;
+}
+
+function caseSourceRoot(id) {
+  return `/api/cases/${encodeURIComponent(id)}/case-sources`;
 }
 
 function appendSearchFilters(params, filters) {
@@ -83,18 +93,56 @@ export const api = {
     headers: { "X-CSRF-Token": csrfToken },
   }),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
+  listTagGroups: () => request("/api/tag-groups"),
+  createTagGroup: (group, csrfToken) => request(
+    "/api/tag-groups", jsonOptions("POST", group, csrfToken),
+  ),
+  updateTagGroup: (id, patch, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  deleteTagGroup: (id, csrfToken) => request(`/api/tag-groups/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  }),
+  createTag: (groupId, tag, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(groupId)}/tags`, jsonOptions("POST", tag, csrfToken),
+  ),
+  updateTag: (id, patch, csrfToken) => request(
+    `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  deleteTag: (id, csrfToken) => request(`/api/tags/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  }),
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
-  agentThread: (caseId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  listSources: (caseId, versionId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/sources${versionQuery(versionId)}`,
+  ),
+  agentThread: (caseId, threadId, versionId) => request(
+    threadId
+      ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
+      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread${versionQuery(versionId)}`,
+  ),
+  agentThreads: (caseId, versionId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads${versionQuery(versionId)}`,
+  ),
+  agentCreateThread: (caseId, title, csrfToken, versionId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+    jsonOptions("POST", { ...(title ? { title } : {}), ...(versionId ? { versionId } : {}) }, csrfToken),
+  ),
+  agentRenameThread: (caseId, threadId, title, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`,
+    jsonOptions("PATCH", { title }, csrfToken),
   ),
   agentCancel: (caseId, threadId, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
     jsonOptions("POST", {}, csrfToken),
   ),
-  agentDecide: (caseId, artifactId, decision, csrfToken) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
+  agentDecide: (caseId, threadId, artifactId, decision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),
   ),
   aiSettings: () => request("/api/ai/settings"),
@@ -122,7 +170,19 @@ export const api = {
     "/api/cases", jsonOptions("POST", caseRecord, csrfToken),
   ),
   getCase: (id) => request(`/api/cases/${encodeURIComponent(id)}`),
-  getPublicCase: (id) => request(`/api/cases/${encodeURIComponent(id)}/public`),
+  getPublicCase: (id, versionId) => request(
+    `/api/cases/${encodeURIComponent(id)}/public${versionQuery(versionId)}`,
+  ),
+  listCaseSources: (id, versionId) => request(
+    `${caseSourceRoot(id)}${versionQuery(versionId)}`,
+  ),
+  addCaseSource: (id, payload, csrfToken) => request(
+    caseSourceRoot(id), jsonOptions("POST", payload, csrfToken),
+  ),
+  removeCaseSource: (id, sourceId, revision, csrfToken) => request(
+    `${caseSourceRoot(id)}/${encodeURIComponent(sourceId)}?revision=${revision}`,
+    { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
+  ),
   saveCase: (id, snapshot, csrfToken) => request(
     `/api/cases/${encodeURIComponent(id)}`,
     jsonOptions("PATCH", snapshot, csrfToken),
@@ -178,8 +238,20 @@ export const api = {
     `/api/admin/material-candidates/${encodeURIComponent(id)}/decision`,
     jsonOptions("POST", decision, csrfToken),
   ),
+  listAdminSkills: () => request("/api/admin/skills"),
+  uploadSkillPackage: (file, csrfToken) => request("/api/admin/skills/packages", {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+    body: skillPackageForm(file),
+  }),
+  publishSkillVersion: (id, versionId, csrfToken) => request(
+    `/api/admin/skills/${encodeURIComponent(id)}/publish`,
+    jsonOptions("POST", { versionId }, csrfToken),
+  ),
+  listSkills: () => request("/api/skills"),
   attachmentContentUrl: (id, attachmentId, versionId) => (
     `${attachmentRoot(id)}/${encodeURIComponent(attachmentId)}/content${versionQuery(versionId)}`
   ),
   materialContentUrl: (id) => `/api/materials/${encodeURIComponent(id)}/content`,
+  materialDetail: (id) => request(`/api/materials/${encodeURIComponent(id)}`),
 };

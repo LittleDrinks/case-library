@@ -65,6 +65,39 @@ def test_anonymous_downloads_approved_public_material_bytes(client: TestClient) 
     assert material_id not in str(response.headers)
 
 
+def test_public_material_detail_hides_storage_fields(client: TestClient) -> None:
+    material_id, admin = _approved_material(client, "detail.txt", b"detail", "public")
+    client.app.state.database.materials.update_one(
+        {"id": material_id},
+        {"$set": {
+            "summary": "详情摘要", "source": "资料来源", "sourceUrl": "https://example.test/source",
+            "authority": "original", "materialType": "政策文件", "collectedAt": "2026-08-26",
+        }},
+    )
+    _logout(client, admin)
+
+    response = client.get(f"/api/materials/{material_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == "详情摘要"
+    assert payload["sourceUrl"] == "https://example.test/source"
+    assert payload["materialType"] == "政策文件"
+    assert payload["contentAvailable"] is payload["hasFile"] is True
+    assert {"blobId", "sha256", "createdBy", "approvedBy", "provenance"}.isdisjoint(payload)
+
+
+def test_material_detail_follows_content_permissions(client: TestClient) -> None:
+    material_id, admin = _approved_material(client, "campus.txt", b"campus", "campus")
+    _logout(client, admin)
+
+    anonymous = client.get(f"/api/materials/{material_id}")
+    _login(client, "user", "user123")
+    teacher = client.get(f"/api/materials/{material_id}")
+
+    assert (anonymous.status_code, teacher.status_code) == (404, 200)
+
+
 def test_campus_material_requires_login(client: TestClient) -> None:
     content = b"campus-only"
     material_id, admin = _approved_material(client, "campus.txt", content, "campus")
@@ -84,9 +117,10 @@ def test_private_material_is_hidden_from_other_users(client: TestClient) -> None
     )
     _login(client, "user", "user123")
 
-    response = client.get(f"/api/materials/{material_id}/content")
+    content = client.get(f"/api/materials/{material_id}/content")
+    detail = client.get(f"/api/materials/{material_id}")
 
-    assert response.status_code == 404
+    assert (content.status_code, detail.status_code) == (404, 404)
 
 
 def test_private_material_is_available_to_creator_and_admin(client: TestClient) -> None:
@@ -113,7 +147,8 @@ def test_unapproved_and_inactive_materials_are_hidden(client: TestClient) -> Non
         {"id": disabled_id}, {"$set": {"status": "disabled"}}
     )
 
-    candidate = client.get(f"/api/materials/{candidate_id}/content")
-    disabled = client.get(f"/api/materials/{disabled_id}/content")
+    candidate = client.get(f"/api/materials/{candidate_id}")
+    disabled = client.get(f"/api/materials/{disabled_id}")
+    missing = client.get("/api/materials/not-found")
 
-    assert (candidate.status_code, disabled.status_code) == (404, 404)
+    assert (candidate.status_code, disabled.status_code, missing.status_code) == (404, 404, 404)

@@ -11,15 +11,22 @@ from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
     case_metadata,
-    case_view,
+    internal_case_view,
 )
 from app.modules.cases.snapshots import (
     create_snapshot,
     list_snapshots,
     rollback_snapshot,
 )
+from app.modules.case_sources.service import snapshot_case_sources
+from app.modules.cases.submission_check import submission_issues
 from app.modules.case_materials.service import snapshot_materials
+from app.modules.cases.sources import citations_resolve
 from app.modules.search.outbox import SearchOutbox
+
+# 作者已投稿且审核结论未定的状态：仅在这些状态下作者可撤回。
+WITHDRAWABLE_STATES = ("pending", "reviewing")
+SUBMISSION_FIELDS = ("submittedVersionId", "submittedAt", "reviewStartedAt")
 
 
 def _now() -> str:
@@ -46,31 +53,26 @@ def _require_revision(case: dict, revision: int) -> None:
 
 
 def _authorize(case: dict, user: dict, command: str) -> None:
-    if command in {"submit", "withdraw", "snapshot", "rollback"}:
+    if command in {"submit", "withdraw", "reopen", "snapshot", "rollback"}:
         _require_owner(case, user)
     else:
         _require_admin(user)
 
 
 def _version(
-    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict]
+    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict],
+    case_sources: list[dict]
 ) -> dict:
     number = case.get("versionNumber", 0) + 1
-    return {
-        "id": _id("cv"),
-        "caseId": case["id"],
-        "number": number,
-        "kind": "submission",
-        "title": case["title"],
-        "summary": case.get("summary", ""),
-        "document": case["document"],
-        "attachments": attachments,
-        "materials": materials,
-        "metadata": case_metadata(case),
-        "sourceRevision": case["revision"],
-        "createdBy": user["id"],
-        "createdAt": now,
+    base = {
+        "id": _id("cv"), "caseId": case["id"], "number": number,
+        "kind": "submission", "title": case["title"],
+        "summary": case.get("summary", ""), "document": case["document"],
+        "attachments": attachments, "materials": materials,
+        "caseSources": case_sources, "metadata": case_metadata(case),
+        "sourceRevision": case["revision"], "createdBy": user["id"], "createdAt": now,
     }
+    return base
 
 
 def _event(case: dict, user: dict, version: dict, now: str, action: str) -> dict:
@@ -86,21 +88,30 @@ def _event(case: dict, user: dict, version: dict, now: str, action: str) -> dict
     }
 
 
+def _validate_submission(database: Database, case: dict) -> None:
+    issues = submission_issues(database, case)
+    if issues:
+        raise CaseError(422, "；".join(issues))
+
+
 def _submit(database: Database, case: dict, user: dict, session) -> dict:
     _require_owner(case, user)
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可提交")
+    citations_resolve(database, case["id"], case["document"], session)
+    _validate_submission(database, case)
     now = _now()
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
-    version = _version(case, user, now, attachments, materials)
+    case_sources = snapshot_case_sources(database, case["id"], session)
+    version = _version(case, user, now, attachments, materials, case_sources)
     event = _event(case, user, version, now, "submit")
     updated = _mark_pending(database, case, version, now, session)
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.case_versions.insert_one(version, session=session)
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
 def _mark_pending(database, case: dict, version: dict, now: str, session) -> dict:
@@ -111,11 +122,11 @@ def _mark_pending(database, case: dict, version: dict, now: str, session) -> dic
         "updatedAt": now,
         "versionNumber": version["number"],
     }
-    return database.cases.find_one_and_update(
+    return _write_case(
+        database,
         {"id": case["id"], "revision": case["revision"], "workflowStatus": "draft"},
-        {"$set": changes, "$inc": {"revision": 1}},
-        session=session,
-        return_document=ReturnDocument.AFTER,
+        {"$set": changes, "$unset": {"lastReview": ""}, "$inc": {"revision": 1}},
+        session,
     )
 
 
@@ -127,13 +138,19 @@ def _clean(record: dict) -> dict:
         ]
     if "materials" not in cleaned:
         cleaned["materials"] = []
+    if "caseSources" not in cleaned:
+        cleaned["caseSources"] = []
     return cleaned
 
 
-def _result(case: dict, version: dict, event: dict) -> dict:
+def _result(case: dict, version: dict, event: dict, user: dict) -> dict:
     if not case:
         raise CaseError(409, "案例状态已变化")
-    return {"case": case_view(case), "version": _clean(version), "event": _clean(event)}
+    return {
+        "case": internal_case_view(case, user),
+        "version": _clean(version),
+        "event": _clean(event),
+    }
 
 
 def _submitted_version(database, case: dict, session) -> dict:
@@ -154,20 +171,28 @@ def _published_version(database, case: dict, session) -> dict:
     return version
 
 
-def _change_status(database, case: dict, expected: str, changes: dict, session):
+def _write_case(database, query: dict, update: dict, session):
+    return database.cases.find_one_and_update(
+        query,
+        update,
+        session=session,
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+def _change_status(
+    database, case: dict, expected: str, changes: dict, session, consume: bool = False
+):
     query = {
         "id": case["id"],
         "revision": case["revision"],
         "workflowStatus": expected,
         "submittedVersionId": case.get("submittedVersionId"),
     }
-    changes["updatedAt"] = _now()
-    return database.cases.find_one_and_update(
-        query,
-        {"$set": changes, "$inc": {"revision": 1}},
-        session=session,
-        return_document=ReturnDocument.AFTER,
-    )
+    update = {"$set": {**changes, "updatedAt": _now()}, "$inc": {"revision": 1}}
+    if consume:
+        update["$unset"] = {field: "" for field in SUBMISSION_FIELDS}
+    return _write_case(database, query, update, session)
 
 
 def _start(database, case: dict, user: dict, session) -> dict:
@@ -184,57 +209,67 @@ def _start(database, case: dict, user: dict, session) -> dict:
         {"workflowStatus": "reviewing", "reviewStartedAt": now},
         session,
     )
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
 def _withdraw(database, case: dict, user: dict, session) -> dict:
     _require_owner(case, user)
-    if case["workflowStatus"] != "pending":
-        raise CaseError(409, "仅待审案例可撤回")
+    if case["workflowStatus"] not in WITHDRAWABLE_STATES:
+        raise CaseError(409, "审核结论产生前方可撤回")
     version, now = _submitted_version(database, case, session), _now()
     event = _event(case, user, version, now, "withdraw")
     updated = _mark_withdrawn(database, case, version, now, session)
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
 def _mark_withdrawn(database, case: dict, version: dict, now: str, session) -> dict:
-    update = {
-        "$set": {"workflowStatus": "draft", "updatedAt": now},
-        "$unset": {
-            "submittedVersionId": "",
-            "submittedAt": "",
-            "reviewStartedAt": "",
-        },
-        "$inc": {"revision": 1},
-    }
     query = {
         "id": case["id"],
         "revision": case["revision"],
-        "workflowStatus": "pending",
+        "workflowStatus": {"$in": list(WITHDRAWABLE_STATES)},
         "submittedVersionId": version["id"],
     }
-    return database.cases.find_one_and_update(
-        query, update, session=session, return_document=ReturnDocument.AFTER
-    )
+    update = {
+        "$set": {"workflowStatus": "draft", "updatedAt": now},
+        "$unset": {**{field: "" for field in SUBMISSION_FIELDS}, "lastReview": ""},
+        "$inc": {"revision": 1},
+    }
+    return _write_case(database, query, update, session)
 
 
 def _approve(database, case: dict, body: dict, user: dict, session) -> dict:
     _require_admin(user)
-    if case["workflowStatus"] != "reviewing":
-        raise CaseError(409, "仅审核中的案例可通过")
+    _require_active_review(case)
     if body.get("submittedVersionId") != case.get("submittedVersionId"):
         raise CaseError(409, "待审版本已变化")
     version, now = _submitted_version(database, case, session), _now()
     event = _event(case, user, version, now, "approve")
     database.lifecycle_events.insert_one(event, session=session)
-    changes = _publication_changes(version, now)
-    updated = _change_status(database, case, "reviewing", changes, session)
+    updated = _publish_approved_version(database, case, version, session)
+    return _result(updated, version, event, user)
+
+
+def _publish_approved_version(database, case: dict, version: dict, session) -> dict:
+    replaced = _replaced_version(database, case, session)
+    updated = _change_status(
+        database,
+        case,
+        "reviewing",
+        _publication_changes(version, _now()),
+        session,
+        consume=True,
+    )
     if not updated:
         raise CaseError(409, "案例状态已变化")
-    _adjust_material_references(database, version, 1, session)
-    _record_publication(database, case["id"], version, False, session)
-    return _result(updated, version, event)
+    _move_material_references(database, replaced, version, session)
+    _record_publication(database, case["id"], version, False, session, replaced)
+    return updated
+
+
+def _require_active_review(case: dict) -> None:
+    if case["workflowStatus"] != "reviewing":
+        raise CaseError(409, "仅审核中的案例可产生审核结论")
 
 
 def _publication_changes(version: dict, now: str) -> dict:
@@ -244,6 +279,21 @@ def _publication_changes(version: dict, now: str) -> dict:
         "publishedVersionId": version["id"],
         "publishedAt": now,
     }
+
+
+def _replaced_version(database, case: dict, session) -> dict | None:
+    previous = case.get("publishedVersionId")
+    if not previous or previous == case.get("submittedVersionId"):
+        return None
+    return database.case_versions.find_one(
+        {"id": previous, "caseId": case["id"]}, session=session
+    )
+
+
+def _move_material_references(database, removed, added: dict, session) -> None:
+    if removed:
+        _adjust_material_references(database, removed, -1, session)
+    _adjust_material_references(database, added, 1, session)
 
 
 def _adjust_material_references(database, version: dict, amount: int, session) -> None:
@@ -261,16 +311,19 @@ def _material_ids(version: dict) -> list[str]:
     return list(dict.fromkeys(row["id"] for row in version.get("materials", [])))
 
 
-def _record_publication(database, case_id, version, revoke, session) -> None:
-    keys = [f"case:{case_id}"] + [
-        f"material:{material_id}" for material_id in _material_ids(version)
-    ]
-    SearchOutbox(database).record(keys, revoke=keys if revoke else (), session=session)
+def _record_publication(
+    database, case_id, version, revoke, session, replaced: dict | None = None
+) -> None:
+    keys = [f"case:{case_id}"] + [f"material:{mid}" for mid in _material_ids(version)]
+    if replaced:
+        keys += [f"material:{mid}" for mid in _material_ids(replaced)]
+    SearchOutbox(database).record(
+        list(dict.fromkeys(keys)), revoke=keys if revoke else (), session=session
+    )
 
 
 def _require_review_return(case: dict, body: dict) -> None:
-    if case["workflowStatus"] != "reviewing":
-        raise CaseError(409, "仅审核中的案例可退回")
+    _require_active_review(case)
     if body.get("submittedVersionId") != case.get("submittedVersionId"):
         raise CaseError(409, "待审版本已变化")
 
@@ -284,10 +337,7 @@ def _review_annotation_ids(database, case: dict, version: dict, session) -> list
         },
         session=session,
     ).sort("createdAt", 1)
-    ids = [row["id"] for row in rows]
-    if not ids:
-        raise CaseError(409, "退回或要求补充前至少添加一条批注")
-    return ids
+    return [row["id"] for row in rows]
 
 
 def _review_event(case, user: dict, version: dict, body: dict, ids: list[str]) -> dict:
@@ -302,7 +352,19 @@ def _review_event(case, user: dict, version: dict, body: dict, ids: list[str]) -
     return event
 
 
-def _mark_returned(database, case: dict, version: dict, now: str, session) -> dict:
+def _last_review(event: dict, version: dict) -> dict:
+    return {
+        "action": event["action"],
+        "reasonType": event["reasonType"],
+        "summary": event["summary"],
+        "annotationIds": event["annotationIds"],
+        "versionNumber": version["number"],
+        "actorId": event["actorId"],
+        "createdAt": event["createdAt"],
+    }
+
+
+def _mark_returned(database, case: dict, version: dict, event: dict, session) -> dict:
     query = {
         "id": case["id"],
         "revision": case["revision"],
@@ -310,31 +372,33 @@ def _mark_returned(database, case: dict, version: dict, now: str, session) -> di
         "submittedVersionId": version["id"],
     }
     update = {
-        "$set": {"workflowStatus": "draft", "updatedAt": now},
-        "$unset": {"submittedVersionId": "", "submittedAt": "", "reviewStartedAt": ""},
+        "$set": {
+            "workflowStatus": "draft",
+            "lastReview": _last_review(event, version),
+            "updatedAt": event["createdAt"],
+        },
+        "$unset": {field: "" for field in SUBMISSION_FIELDS},
         "$inc": {"revision": 1},
     }
-    return database.cases.find_one_and_update(
-        query,
-        update,
-        session=session,
-        return_document=ReturnDocument.AFTER,
-    )
+    return _write_case(database, query, update, session)
 
 
 def _return_for_revision(database, case: dict, body: dict, user: dict, session) -> dict:
     _require_review_return(case, body)
     version = _submitted_version(database, case, session)
-    ids = _review_annotation_ids(database, case, version, session)
-    event = _review_event(case, user, version, body, ids)
-    updated = _mark_returned(database, case, version, event["createdAt"], session)
+    event = _review_event(
+        case, user, version, body, _review_annotation_ids(database, case, version, session)
+    )
+    updated = _mark_returned(database, case, version, event, session)
+    if not updated:
+        raise CaseError(409, "案例状态已变化")
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
 def _publication_change(database, case: dict, user: dict, action: str, session) -> dict:
     expected, target = _publication_states(action)
-    if case["workflowStatus"] != "published" or case["publicationStatus"] != expected:
+    if case["publicationStatus"] != expected:
         raise CaseError(409, "案例当前不能执行该发布操作")
     version, now = _published_version(database, case, session), _now()
     updated = _set_publication(database, case, version, expected, target, now, session)
@@ -346,7 +410,7 @@ def _publication_change(database, case: dict, user: dict, action: str, session) 
     _record_publication(database, case["id"], version, action == "hide", session)
     event = _event(case, user, version, now, action)
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
 def _publication_states(action: str) -> tuple[str, str]:
@@ -357,46 +421,47 @@ def _published_query(case: dict, version: dict, status: str) -> dict:
     return {
         "id": case["id"],
         "revision": case["revision"],
-        "workflowStatus": "published",
         "publicationStatus": status,
         "publishedVersionId": version["id"],
     }
 
 
 def _set_publication(database, case, version, expected, target, now, session) -> dict:
-    return database.cases.find_one_and_update(
+    return _write_case(
+        database,
         _published_query(case, version, expected),
         {
             "$set": {"publicationStatus": target, "updatedAt": now},
             "$inc": {"revision": 1},
         },
-        session=session,
-        return_document=ReturnDocument.AFTER,
+        session,
     )
 
 
 def _reopen(database, case: dict, user: dict, session) -> dict:
-    if case["workflowStatus"] != "published" or case["publicationStatus"] != "hidden":
-        raise CaseError(409, "仅已隐藏案例可下线编辑")
+    _require_owner(case, user)
+    if case["workflowStatus"] != "published":
+        raise CaseError(409, "仅已发布案例可另起新稿")
     version, now = _published_version(database, case, session), _now()
-    updated = _mark_reopened(database, case, version, now, session)
+    updated = _mark_reopened(database, case, now, session)
+    if not updated:
+        raise CaseError(409, "案例状态已变化")
     event = _event(case, user, version, now, "reopen")
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event)
+    return _result(updated, version, event, user)
 
 
-def _mark_reopened(database, case: dict, version: dict, now: str, session) -> dict:
+def _mark_reopened(database, case: dict, now: str, session) -> dict:
+    query = {
+        "id": case["id"],
+        "revision": case["revision"],
+        "workflowStatus": "published",
+    }
     update = {
         "$set": {"workflowStatus": "draft", "updatedAt": now},
-        "$unset": {"submittedVersionId": "", "submittedAt": "", "reviewStartedAt": ""},
         "$inc": {"revision": 1},
     }
-    return database.cases.find_one_and_update(
-        _published_query(case, version, "hidden"),
-        update,
-        session=session,
-        return_document=ReturnDocument.AFTER,
-    )
+    return _write_case(database, query, update, session)
 
 
 def _admin_action(database, case: dict, body: dict, user: dict, session) -> dict:
@@ -404,8 +469,6 @@ def _admin_action(database, case: dict, body: dict, user: dict, session) -> dict
         return _return_for_revision(database, case, body, user, session)
     if body["command"] in {"hide", "restore"}:
         return _publication_change(database, case, user, body["command"], session)
-    if body["command"] == "reopen":
-        return _reopen(database, case, user, session)
     return _approve(database, case, body, user, session)
 
 
@@ -425,6 +488,8 @@ def _execute(database, case_id: str, body: dict, user: dict, session) -> dict:
         return create_snapshot(database, case, user, session)
     if body["command"] == "rollback":
         return rollback_snapshot(database, case, user, body.get("targetId"), session)
+    if body["command"] == "reopen":
+        return _reopen(database, case, user, session)
     return _admin_action(database, case, body, user, session)
 
 

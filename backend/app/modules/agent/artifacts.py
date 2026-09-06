@@ -17,7 +17,7 @@ from app.modules.agent.models import (
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
 from app.modules.agent.repository import AgentRepository, transaction
-from app.modules.cases.service import CaseError, case_view
+from app.modules.cases.service import CaseError, internal_case_view
 from app.modules.cases.snapshots import record_snapshot
 
 
@@ -28,10 +28,11 @@ def _now() -> datetime:
 def propose_artifact(
     database: Database, case_id: str, thread_id: str, run_id: str,
     paragraph_index: int, replacement: str, reason: str,
-    sources: list[SourceRef],
+    sources: list[SourceRef], user: dict,
 ) -> AgentArtifact:
     """在当前 baseRevision 上创建单段落 pending Artifact 并记录 Thread 事件。"""
     case = _current_case(database, case_id)
+    _verify_writer(case, user)
     artifact = _artifact_document(
         case, thread_id, run_id, _target(case["document"], paragraph_index),
         replacement, reason, sources,
@@ -42,9 +43,10 @@ def propose_artifact(
 
 def _target(document: dict, paragraph_index: int) -> ArtifactTarget:
     rows = prosemirror.paragraphs(document)
-    if paragraph_index < 0 or paragraph_index >= len(rows):
+    target = next((row for row in rows if row["paragraphIndex"] == paragraph_index), None)
+    if target is None:
         raise CaseError(422, "目标段落不存在")
-    return ArtifactTarget(paragraphIndex=paragraph_index, quote=rows[paragraph_index]["quote"])
+    return ArtifactTarget(paragraphIndex=paragraph_index, quote=target["quote"])
 
 
 def _current_case(database: Database, case_id: str, session=None) -> dict:
@@ -81,19 +83,26 @@ def _append_event(database, thread_id, event_type, run_id, payload, session) -> 
 
 
 def decide_artifact(
-    database: Database, case_id: str, artifact_id: str, user: dict,
+    database: Database, case_id: str, thread_id: str, artifact_id: str, user: dict,
     decision: ArtifactDecision,
 ) -> dict:
-    """接受或拒绝 Artifact；接受在事务内重验并恰好写一次正文，重复决定返回原决定。"""
+    """接受或拒绝 Artifact；接受在事务内重验并恰好写一次正文，重复决定返回原决定。
+
+    事务内先校验 Thread 归属（案例+用户），再校验 Artifact 绑定该 Thread；
+    幂等与冲突路径同样执行校验，伪造 threadId 时不产生任何变更或事件。
+    """
     artifact, case = transaction(
         database,
-        lambda session: _decide(database, case_id, artifact_id, user, decision, session),
+        lambda session: _decide(
+            database, case_id, thread_id, artifact_id, user, decision, session
+        ),
     )
-    return {"artifact": artifact, "case": case_view(case)}
+    return {"artifact": artifact, "case": internal_case_view(case, user)}
 
 
-def _decide(database, case_id, artifact_id, user, decision, session):
-    artifact = _existing_artifact(database, case_id, artifact_id, session)
+def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
+    _existing_thread(database, case_id, thread_id, user, session)
+    artifact = _existing_artifact(database, case_id, thread_id, artifact_id, session)
     case = _current_case(database, case_id, session)
     if artifact.status != "pending":
         return artifact, case
@@ -103,9 +112,17 @@ def _decide(database, case_id, artifact_id, user, decision, session):
     return _save_decision(database, artifact, user, decision, session), case
 
 
-def _existing_artifact(database, case_id, artifact_id, session) -> AgentArtifact:
+def _existing_thread(database, case_id, thread_id, user, session) -> None:
+    row = database.agent_threads.find_one(
+        {"id": thread_id, "caseId": case_id, "ownerId": user["id"]}, session=session
+    )
+    if not row:
+        raise CaseError(404, "对话不存在")
+
+
+def _existing_artifact(database, case_id, thread_id, artifact_id, session) -> AgentArtifact:
     row = database.agent_artifacts.find_one(
-        {"id": artifact_id, "caseId": case_id}, session=session
+        {"id": artifact_id, "caseId": case_id, "threadId": thread_id}, session=session
     )
     if not row:
         raise CaseError(404, "修订候选不存在")

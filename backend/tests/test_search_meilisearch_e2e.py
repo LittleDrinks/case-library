@@ -46,14 +46,14 @@ def _materials() -> list[dict]:
     return rows
 
 
-def _case(case_id: str, title: str) -> dict:
+def _case(case_id: str, title: str, tags: tuple[str, ...] = ()) -> dict:
     version = {
         "caseId": case_id,
         "title": title,
         "summary": "依托场馆实践与专业课程建设思政课堂",
         "document": {"type": "doc", "content": []},
         "attachments": [],
-        "metadata": {"theoryPoints": ["科学家精神"]},
+        "metadata": {"theoryPoints": ["科学家精神"], "tagIds": list(tags)},
     }
     publication = {"publishedAt": "2026-08-14", "ownerId": "u-owner"}
     return project_catalog_documents("case", version, publication)[0]
@@ -78,7 +78,7 @@ def _knowledge() -> list[dict]:
 
 def _documents() -> list[dict]:
     cases = [
-        _case("spirit-case", "如何将科学家精神融入思政课堂"),
+        _case("spirit-case", "如何将科学家精神融入思政课堂", ("tag-contract",)),
         _case("shared-id", "同名案例实体"),
     ]
     meta = {
@@ -259,3 +259,41 @@ def test_real_catalog_rejects_an_unconfirmed_index_epoch(catalog) -> None:
 
     with pytest.raises(SearchUnavailable, match="同步"):
         catalog.search(_request(uid, "unconfirmed-epoch"))
+
+
+def _counts_for(catalog, uid: str, epoch: str, **changes) -> dict:
+    page = catalog.search(_request(uid, epoch, kind="all", page_size=3, **changes))
+    return page.metadata.counts
+
+
+def test_real_catalog_tagged_condition_keeps_case_counts_exact(catalog) -> None:
+    from app.modules.search.models import TagLeaf
+
+    catalog, uid, epoch = catalog
+    request = _request(
+        uid, epoch, kind="all", page_size=3, tag_condition=TagLeaf(tagId="tag-contract")
+    )
+    page = catalog.search(request)
+    assert [item["id"] for item in page.items] == ["spirit-case"]
+    assert page.metadata.counts == {"all": 1, "case": 1, "knowledge": 0, "material": 0}
+    assert page.metadata.facets["tagCatalog"] == [{"value": "tag-contract", "count": 1}]
+
+
+def test_real_catalog_business_filters_constrain_kind_counts(catalog) -> None:
+    catalog, uid, epoch = catalog
+    assert _counts_for(catalog, uid, epoch)["case"] == 2
+
+    filtered = _counts_for(catalog, uid, epoch, filters={"typeName": ("人物传记类",)})
+
+    assert filtered == {"all": 0, "case": 0, "knowledge": 0, "material": 0}
+
+
+def test_real_catalog_unknown_tag_zeroes_every_kind_count(catalog) -> None:
+    from app.modules.search.models import TagLeaf
+
+    catalog, uid, epoch = catalog
+    counts = _counts_for(
+        catalog, uid, epoch, tag_condition=TagLeaf(tagId="tag-missing")
+    )
+
+    assert counts == {"all": 0, "case": 0, "knowledge": 0, "material": 0}

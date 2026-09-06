@@ -64,3 +64,23 @@ class MaterialCandidatePage(BaseModel):
     pageSize: int
     total: int
     items: list[MaterialCandidateView]
+
+
+class MaterialDetailView(BaseModel):
+    id: str
+    title: str
+    summary: str | None = None
+    source: str | None = None
+    sourceUrl: str | None = None
+    materialType: str | None = None
+    authority: str | None = None
+    accessLevel: AccessLevel
+    filename: str | None = None
+    mediaType: str | None = None
+    size: int | None = None
+    publishedAt: str | None = None
+    collectedAt: str | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    contentAvailable: bool
+    hasFile: bool

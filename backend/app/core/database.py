@@ -68,6 +68,12 @@ def _initialize_case_assets(database: Database) -> None:
     database.case_materials.create_index(
         [("materialId", ASCENDING), ("caseId", ASCENDING)]
     )
+    database.case_sources.create_index([("id", ASCENDING)], unique=True)
+    database.case_sources.create_index([("caseId", ASCENDING), ("createdAt", ASCENDING)])
+    database.case_sources.create_index(
+        [("caseId", ASCENDING), ("sourceCaseId", ASCENDING), ("versionId", ASCENDING)],
+        unique=True,
+    )
 
 
 def _initialize_materials(database: Database) -> None:
@@ -121,11 +127,28 @@ def _initialize_search_delivery(database: Database) -> None:
     )
 
 
+def _initialize_skills(database: Database) -> None:
+    database.skills.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index(
+        [("skillId", ASCENDING), ("version", ASCENDING)], unique=True
+    )
+
+
 def _initialize_agent_threads(database: Database) -> None:
+    information = database.agent_threads.index_information()
+    for legacy in ("ownerId_1_caseId_1_isDefault_1", "agent_one_default_thread"):
+        if legacy in information:
+            database.agent_threads.drop_index(legacy)
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     database.agent_threads.create_index(
-        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("versionId", ASCENDING)],
         unique=True,
+        partialFilterExpression={"isDefault": True},
+        name="agent_one_default_thread",
+    )
+    database.agent_threads.create_index(
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("updatedAt", DESCENDING)]
     )
 
 
@@ -187,6 +210,17 @@ def _initialize_agent(database: Database) -> None:
     _initialize_agent_artifacts(database)
 
 
+def _initialize_tags(database: Database) -> None:
+    database.tag_groups.create_index([("id", ASCENDING)], unique=True)
+    database.tag_groups.create_index([("name", ASCENDING)], unique=True)
+    database.tags.create_index([("id", ASCENDING)], unique=True)
+    database.tags.create_index(
+        [("groupId", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    database.cases.create_index("tagIds")
+    database.case_versions.create_index("metadata.tagIds")
+
+
 def initialize(database: Database) -> None:
     database.client.admin.command("ping")
     _initialize_auth(database)
@@ -196,4 +230,6 @@ def initialize(database: Database) -> None:
     _initialize_materials(database)
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
+    _initialize_skills(database)
     _initialize_agent(database)
+    _initialize_tags(database)

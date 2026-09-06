@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(),
+    agentCancel: vi.fn(), listSkills: vi.fn(), listSources: vi.fn(),
   },
 }));
 
@@ -61,6 +61,7 @@ beforeEach(() => {
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
+  api.listSkills.mockResolvedValue([]);
 });
 
 it("restores the server thread and sends one turn through the SDK transport", async () => {
@@ -209,6 +210,35 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(wrapper.text()).toContain("已生成单段修订候选");
 });
 
+function tracerPartsSnapshot() {
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [
+    { type: "reasoning", state: "streaming", text: "先查资料" },
+    { type: "tool-search_corpus", toolCallId: "t2", state: "input-available", input: { query: "科学家精神" } },
+    { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "s" }, output: {} },
+    { type: "text", text: "结论" },
+  ];
+  return structuredClone(tracer);
+}
+
+it("renders assistant parts in structural order with running tools expanded", async () => {
+  api.agentThread.mockResolvedValue(tracerPartsSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const text = wrapper.get(".ai-message.assistant").text();
+  expect(text.indexOf("思考中")).toBeGreaterThanOrEqual(0);
+  expect(text.indexOf("思考中")).toBeLessThan(text.indexOf("检索案例 · 进行中"));
+  expect(text.indexOf("检索案例 · 进行中")).toBeLessThan(text.indexOf("已加载 Skill"));
+  expect(text.indexOf("已加载 Skill")).toBeLessThan(text.indexOf("结论"));
+
+  const traces = wrapper.findAll('[data-testid="agent-skill-load"]');
+  expect(traces[0].classes()).toContain("running");
+  expect(traces[0].attributes("open")).toBeDefined();
+  expect(traces[1].classes()).not.toContain("running");
+  expect(traces[1].attributes("open")).toBeUndefined();
+});
+
 function decideResult(decision) {
   return {
     artifact: { status: decision },
@@ -232,7 +262,7 @@ it("accepting the artifact calls the decision API, emits the revised case and re
   await wrapper.get('[data-testid="agent-accept"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "accepted", "csrf");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
   expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ id: "case-1", revision: 2 });
   expect(api.agentThread).toHaveBeenCalledTimes(2);
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("accepted");
@@ -245,7 +275,7 @@ it("rejecting the artifact records the decision without touching the case", asyn
   await wrapper.get('[data-testid="agent-reject"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "rejected", "csrf");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "rejected", "csrf");
   expect(wrapper.emitted("case-revised")).toBeUndefined();
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("rejected");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
@@ -266,4 +296,92 @@ it("restores skill load, sources and decided artifact from a reloaded thread sna
   expect(artifact.text()).toContain("状态：已接受");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
   expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
+});
+
+const publishedSkills = [
+  { id: "skill-9", name: "思政案例生成", description: "按模板生成教学案例", version: "v2" },
+];
+
+async function sendTurn(wrapper, fetch) {
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  return JSON.parse(fetch.mock.calls[0][1].body);
+}
+
+it("sends chosen sources as structured context with the turn", async () => {
+  api.listSources.mockResolvedValue({ entries: [{ sourceType: "material", id: "m-7", title: "配套阅读材料" }] });
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[title="选择资料"]').trigger("click");
+  await flushPromises();
+  await wrapper.get('.agent-source-options input[type="checkbox"]').setValue(true);
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("结合资料分析");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  const parts = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+  expect(parts).toContainEqual({ type: "data-source", data: { sourceType: "material", id: "m-7" } });
+});
+
+it("sends the published skill selected in the composer", async () => {
+  api.listSkills.mockResolvedValue(publishedSkills);
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const select = wrapper.get('[data-testid="skill-select"]');
+  expect(select.text()).toContain("思政案例生成（v2）");
+  await select.setValue("skill-9");
+  const body = await sendTurn(wrapper, fetch);
+  expect(body.messages.at(-1).parts).toContainEqual(
+    { type: "data-skill", data: { skillId: "skill-9" } },
+  );
+});
+
+it("sends no skill part when the teacher chooses none", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[data-testid="skill-select"]').setValue("");
+  const body = await sendTurn(wrapper, fetch);
+  const parts = body.messages.at(-1).parts;
+  expect(parts.some((part) => part.type === "data-skill")).toBe(false);
+});
+
+it("shows the selected skill name on a restored user message", async () => {
+  api.listSkills.mockResolvedValue(publishedSkills);
+  const restored = structuredClone(snapshot);
+  restored.messages = [{
+    id: "message-skill", role: "user", metadata: {},
+    parts: [
+      { type: "text", text: "按模板生成案例" },
+      { type: "data-skill", data: { skillId: "skill-9" } },
+    ],
+  }];
+  api.agentThread.mockResolvedValue(restored);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("思政案例生成");
+});
+
+it("labels a skill load with the published skill name and readable state", async () => {
+  api.listSkills.mockResolvedValue([{ id: "skill-9", name: "思政案例生成", version: "v2" }]);
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts[0] = {
+    type: "tool-load_capability", toolCallId: "t1", state: "output-available",
+    input: { id: "skill-9" }, output: { instructions: "SKILL" },
+  };
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toBe("已加载 Skill：思政案例生成 · 已完成");
 });

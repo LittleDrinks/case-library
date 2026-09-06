@@ -4,7 +4,9 @@ import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
-import CaseDetailView from "./views/CaseDetailView.vue";
+import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
+import AdminSkillsView from "./views/AdminSkillsView.vue";
+import MaterialDetailView from "./views/MaterialDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
@@ -53,7 +55,8 @@ const routes = [
     component: WorkbenchView,
     meta: { requiresAuth: true },
   },
-  { path: "/cases/:id", name: "case-public", component: CaseDetailView },
+  { path: "/cases/:id", name: "case-public", component: WorkbenchView },
+  { path: "/materials/:id", name: "material-detail", component: MaterialDetailView },
   {
     path: "/admin",
     name: "admin-dashboard",
@@ -70,6 +73,18 @@ const routes = [
     path: "/admin/material-imports",
     name: "material-imports",
     component: MaterialImportView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/tag-catalog",
+    name: "admin-tag-catalog",
+    component: AdminTagCatalogView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/skills",
+    name: "admin-skills",
+    component: AdminSkillsView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
