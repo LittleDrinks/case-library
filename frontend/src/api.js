@@ -102,6 +102,10 @@ export const api = {
     `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`,
     jsonOptions("PATCH", { title }, csrfToken),
   ),
+  agentCancel: (caseId, threadId, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
+    jsonOptions("POST", {}, csrfToken),
+  ),
   agentDecide: (caseId, artifactId, decision, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),

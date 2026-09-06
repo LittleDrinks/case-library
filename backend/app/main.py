@@ -16,6 +16,7 @@ from app.core.ids import new_id
 from app.modules.attachments.service import AttachmentError
 from app.modules.attachments.storage import BlobStore, minio_blob_store
 from app.modules.agent import agent
+from app.modules.agent.supervisor import RunSupervisor
 from app.modules.cases.service import CaseError, RevisionConflict
 from app.modules.materials.errors import MaterialImportError
 from app.modules.search.client import create_reader
@@ -69,6 +70,7 @@ def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api.state.catalog_state = catalog_state
     api.state.agent = agent
     api.state.agent_worker_id = new_id("agent-worker")
+    api.state.run_supervisor = RunSupervisor()
     api.add_exception_handler(CaseError, _case_error)
     api.add_exception_handler(AttachmentError, _attachment_error)
     api.add_exception_handler(MaterialImportError, _material_error)
@@ -91,6 +93,7 @@ def _lifespan(connection: ApplicationDatabase, settings, blob_store, catalog):
             bootstrap(connection.database, settings)
             yield
         finally:
+            await api.state.run_supervisor.shutdown()
             connection.close()
 
     return lifespan

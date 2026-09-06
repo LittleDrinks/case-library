@@ -92,11 +92,8 @@ async function browserChatProjection(page) {
   };
 }
 
-async function reloadAndAssertChat(page, caseId, persisted) {
-  await page.reload();
-  await openChat(page, caseId);
-  await expectPersistedChat(page);
-  await expect.poll(() => browserChatProjection(page)).toEqual({
+function projectionOf(persisted) {
+  return {
     messages: persisted.messages.map((message) => ({
       role: message.role,
       text: message.parts.filter((part) => part.type === "text").map((part) => part.text).join(""),
@@ -107,7 +104,27 @@ async function reloadAndAssertChat(page, caseId, persisted) {
       status: persisted.latestRun.status,
       busy: "false",
     },
-  });
+  };
+}
+
+async function expectProjectionMatches(page, caseId) {
+  const persisted = await chatSnapshot(page, caseId);
+  await expect.poll(() => browserChatProjection(page)).toEqual(projectionOf(persisted));
+  return persisted;
+}
+
+async function expectCompletedProjection(page, caseId) {
+  await expectPersistedChat(page);
+  await expect.poll(async () => (await chatSnapshot(page, caseId)).latestRun.status)
+    .toBe("completed");
+  return expectProjectionMatches(page, caseId);
+}
+
+async function reloadAndAssertChat(page, caseId, persisted) {
+  await page.reload();
+  await openChat(page, caseId);
+  await expectPersistedChat(page);
+  await expect.poll(() => browserChatProjection(page)).toEqual(projectionOf(persisted));
   await expect.poll(() => chatSnapshot(page, caseId)).toMatchObject(persisted);
 }
 
@@ -127,4 +144,83 @@ test("deterministic Chat stream persists the server-owned thread across reload",
     eventSeq: snapshot.eventSeq,
   };
   await reloadAndAssertChat(page, created.id, persisted);
+});
+
+async function submitMessage(page, text) {
+  await page.getByLabel("向 AI 提问").fill(text);
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+}
+
+async function sendAndWaitActive(page, caseId, text) {
+  const streamResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/stream")
+  ));
+  await submitMessage(page, text);
+  await streamResponse;
+  await expect.poll(async () => (await chatSnapshot(page, caseId)).activeRun).toBeTruthy();
+}
+
+test("stop command cancels the active run without waiting for the provider", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendAndWaitActive(page, created.id, "取消测试");
+  const cancelResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST" && response.url().includes("/cancel")
+  ));
+  await page.getByTestId("agent-stop").click();
+  expect((await cancelResponse).status()).toBe(200);
+  await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
+    .toBe("cancelled");
+  await expect(page.locator(".ai-message-error")).toContainText("运行已取消");
+  await expect(page.getByTestId("agent-stop")).toHaveCount(0);
+  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+});
+
+test("failed message can be retried as a new run that references the original", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  const text = "重试测试这条消息第一次会失败";
+  await submitMessage(page, text);
+  await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
+    .toBe("failed");
+  await expect(page.locator(".ai-message-error")).toBeVisible();
+  await page.getByTestId("agent-retry").click();
+  const persisted = await expectCompletedProjection(page, created.id);
+  const users = persisted.messages.filter((message) => message.role === "user");
+  expect(users.map((message) => message.parts[0].text)).toEqual([text]);
+  expect(persisted.latestRun.userMessageId).toBe(users[0].id);
+  expect(persisted.latestRun.status).toBe("completed");
+});
+
+test("page refresh mid-run resumes the server-owned run to terminal", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendAndWaitActive(page, created.id, "慢速测试");
+  await page.reload();
+  await openChat(page, created.id);
+  const persisted = await expectCompletedProjection(page, created.id);
+  expect(persisted.activeRun).toBeNull();
+  await expect.poll(() => browserChatProjection(page)).toMatchObject({
+    messages: [{ role: "user" }, { role: "assistant", text: ANSWER }],
+    run: { status: "completed", busy: "false" },
+  });
+});
+
+test("connection loss mid-run recovers through the same transport without duplication", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendAndWaitActive(page, created.id, "慢速测试");
+  // Aborts the browser-side stream only; the server keeps executing the run.
+  await page.evaluate(() => window.stop());
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  const persisted = await expectCompletedProjection(page, created.id);
+  expect(persisted.activeRun).toBeNull();
 });
