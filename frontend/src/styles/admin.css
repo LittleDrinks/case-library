@@ -18,6 +18,30 @@
 .admin-queue h3 { margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 650; }
 .admin-queue p { margin: 3px 0 0; color: var(--ink-3); font-size: 12px; }
 .admin-empty { margin: 0; padding: 28px 18px; border: 1px solid var(--line); border-top: 0; color: var(--ink-3); }
+.tag-group-create { display: flex; gap: 8px; margin-top: 24px; }
+.tag-group-create input { flex: 1; max-width: 360px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.tag-group-create button { display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 6px; background: var(--brand); color: #fff; font-weight: 650; }
+.tag-catalog-error { margin: 12px 0 0; padding: 9px 13px; border: 1px solid var(--red); border-radius: 6px; background: #fff; color: var(--red); font-size: 13px; }
+.tag-group { margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); }
+.tag-group > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.tag-group h2 { margin: 0; margin-right: auto; font: 650 15px/1.4 var(--serif); }
+.tag-group h2 b { margin-left: 8px; padding: 1px 7px; border-radius: 4px; background: var(--brand-soft); color: var(--brand); font-size: 11px; }
+.tag-group header input[type="text"], .tag-group header input:not([type]) { height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; }
+.tag-group header label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; }
+.tag-group header button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 12px; }
+.tag-group header button:hover { border-color: var(--brand); color: var(--brand); }
+.tag-group ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 12px 14px; list-style: none; }
+.tag-group li { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-size: 13px; }
+.tag-group li button { display: grid; padding: 2px; place-items: center; border: 0; background: transparent; color: var(--ink-3); }
+.tag-group li button:hover { color: var(--brand); }
+.tag-group li input { height: 24px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; }
+.tag-group > form { display: flex; gap: 8px; padding: 0 14px 12px; }
+.tag-group > form input { width: 220px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; }
+.tag-group > form button { display: inline-flex; align-items: center; gap: 4px; padding: 0 11px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); }
+.tag-group > form button:hover { border-color: var(--brand); color: var(--brand); }
+.tag-group.tag-disabled { opacity: .62; }
+.tag-group li.tag-disabled > span { color: var(--ink-3); }
+.tag-disabled-mark { margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--paper); color: var(--ink-3); font-size: 11px; }
 
 @media (max-width: 680px) {
   .admin-main { padding: 22px 14px 48px; }
