@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -205,3 +208,80 @@ def test_resource_read_rejects_traversal_and_binary(client: TestClient) -> None:
     assert client.get(
         f"{SKILLS_PATH}/{SKILL_ID}/resources/..%2F..%2Fetc%2Fpasswd", headers=auth
     ).status_code == 404
+
+
+def test_frontmatter_rejects_non_string_metadata(client: TestClient) -> None:
+    """name/description 必须是真实非空字符串：数字、布尔、列表、对象、纯空白都拒绝。"""
+    good_name = 'name: "sizheng-case-generator"'
+    good_description = 'description: "简要描述"'
+
+    def frontmatter(name: str = good_name, description: str = good_description) -> str:
+        return f"{name}\n{description}"
+
+    auth = _csrf(_login(client, ADMIN))
+    for expected, raw in {
+        "name 必须是字符串，收到数字": frontmatter(name="name: 123"),
+        "name 必须是字符串，收到布尔值": frontmatter(name="name: true"),
+        "name 必须是字符串，收到列表": frontmatter(name="name: [sizheng-case-generator]"),
+        "description 必须是字符串，收到数字": frontmatter(description="description: 20240901"),
+        "description 必须是字符串，收到对象": frontmatter(description="description: {zh: 简介}"),
+        "缺少非空 name": frontmatter(name='name: "   "'),
+        "缺少非空 description": frontmatter(description='description: "\\n \\t"'),
+    }.items():
+        data = _package_with_raw_frontmatter(raw)
+        response = client.post(
+            PACKAGE_PATH, headers=auth,
+            files={"file": ("skill.zip", data, "application/zip")},
+        )
+        assert response.status_code == 422, (expected, response.text)
+        assert expected in response.json()["detail"], expected
+
+
+def _package_with_raw_frontmatter(frontmatter: str) -> bytes:
+    body = SKILL_MD.split("---\n", 2)[-1]
+    text = f"---\n{frontmatter}\n---{body}"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{SKILL_DIR}/SKILL.md", text)
+        archive.writestr(f"{SKILL_DIR}/{TEMPLATE_PATH}", TEMPLATE_TEXT)
+    return buffer.getvalue()
+
+
+def test_duplicate_resource_paths_rejected_before_any_write(client: TestClient) -> None:
+    """ZIP 允许同名成员；清单记首个哈希、按名读取却命中末个内容，必须整体拒绝。"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{SKILL_DIR}/SKILL.md", SKILL_MD)
+        archive.writestr(f"{SKILL_DIR}/{TEMPLATE_PATH}", TEMPLATE_TEXT)
+        archive.writestr(f"{SKILL_DIR}/{TEMPLATE_PATH}", "# 后写入的同名内容")
+    auth = _csrf(_login(client, ADMIN))
+    response = client.post(
+        PACKAGE_PATH, headers=auth,
+        files={"file": ("dup.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 422, response.text
+    assert "重复资源路径" in response.json()["detail"]
+    database = client.app.state.database
+    assert database.skill_versions.count_documents({}) == 0
+    assert database.skills.count_documents({}) == 0
+    assert client.app.state.blob_store.objects == {}
+
+
+def test_concurrent_uploads_allocate_distinct_versions(client: TestClient) -> None:
+    """并发上传同一 Skill：版本号原子分配，各得唯一 vN，无 DuplicateKeyError 漏出。"""
+    admin = _login(client, ADMIN)
+
+    def upload(index: int):
+        files = dict(FILES)
+        files[f"{SKILL_DIR}/{TEMPLATE_PATH}"] = f"# 模板规范 并发-{index}"
+        return _upload(client, admin, build_package(files))
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        responses = list(pool.map(upload, range(6)))
+    assert all(response.status_code == 201 for response in responses)
+    versions = sorted(
+        response.json()["version"]["version"] for response in responses
+    )
+    assert versions == [f"v{index}" for index in range(1, 7)]
+    listing = client.get("/api/admin/skills", headers=_csrf(admin)).json()[0]
+    assert len(listing["versions"]) == 6

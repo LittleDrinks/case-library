@@ -1,6 +1,7 @@
 """Skill 平台服务：上传（不可变版本）、发布、目录、按需内容与资源读取。
 
-发布仅移动指针，版本内容与包字节一旦写入不再变更；资源按版本清单读取。
+版本号由 Skill 文档原子自增分配，并发上传各得唯一版本；发布仅移动指针，
+版本内容与包字节一旦写入不再变更；资源按版本清单读取。
 """
 
 from __future__ import annotations
@@ -51,6 +52,13 @@ class BoundSkill:
             "version": self.version, "contentHash": self.package_sha256,
         }
 
+    def binding_record(self) -> dict[str, str]:
+        """Run 创建时固化的凭据：以不可变 versionId 标识版本，不新增摘要计算。"""
+        return {
+            "kind": "skill", "id": self.skill_id,
+            "versionId": self.version_id, "version": self.version,
+        }
+
     def read_resource(self, path: str) -> str:
         for file in self.files:
             if file.path == path:
@@ -73,19 +81,9 @@ def upload_package(database: Database, store: BlobStore, data: bytes) -> dict:
     package = parse_package(data)
     now = _now()
     store.put(package.package_sha256, io.BytesIO(data), len(data), "application/zip")
-    version_number = _next_version_number(database, package.name)
-    version = _insert_version(database, package, version_number, now)
-    skill = database.skills.find_one_and_update(
-        {"id": package.name},
-        {
-            "$set": {
-                "latestVersionId": version["id"], "name": package.name,
-                "description": package.description, "updatedAt": now,
-            },
-            "$setOnInsert": {"id": package.name, "createdAt": now},
-        },
-        upsert=True, return_document=ReturnDocument.AFTER,
-    )
+    number = _reserve_version_number(database, package.name, now)
+    version = _insert_version(database, package, number, now)
+    skill = _mark_latest_version(database, package, version["id"], now)
     return {"skill": skill_view(skill), "version": version_view(version)}
 
 
@@ -198,14 +196,34 @@ def _insert_version(
     return version
 
 
-def _next_version_number(database: Database, skill_id: str) -> int:
-    latest = database.skill_versions.find_one(
-        {"skillId": skill_id}, sort=[("createdAt", -1)]
+def _reserve_version_number(database: Database, skill_id: str, now: str) -> int:
+    """Skill 文档原子自增分配版本号：并发上传各得唯一号码，唯一索引仅兜底。"""
+    skill = database.skills.find_one_and_update(
+        {"id": skill_id},
+        {
+            "$inc": {"versionCounter": 1},
+            "$setOnInsert": {"id": skill_id, "createdAt": now},
+        },
+        upsert=True, return_document=ReturnDocument.AFTER,
     )
-    if latest is None:
-        return 1
-    previous = int(str(latest["version"]).removeprefix("v") or "0")
-    return previous + 1
+    return int(skill["versionCounter"])
+
+
+def _mark_latest_version(
+    database: Database, package: SkillPackage, version_id: str, now: str
+) -> dict:
+    """版本落库后再指向最新：latestVersionId 只指向真实存在的版本。"""
+    skill = database.skills.find_one_and_update(
+        {"id": package.name},
+        {
+            "$set": {
+                "latestVersionId": version_id, "name": package.name,
+                "description": package.description, "updatedAt": now,
+            },
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    return skill
 
 
 def _skill_version(database: Database, skill_id: str, version_id: str) -> dict:

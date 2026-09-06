@@ -127,14 +127,39 @@ def _parse_entry(
         post = frontmatter.loads(text)
     except Exception as error:
         raise SkillPackageError(422, f"SKILL.md frontmatter 解析失败：{error}") from error
-    name = str(post.metadata.get("name") or "").strip()
-    description = str(post.metadata.get("description") or "").strip()
+    name = _meta_text(post.metadata, "name")
+    description = _meta_text(post.metadata, "description")
     _validate_name(name)
-    if not description:
-        raise SkillPackageError(422, "SKILL.md frontmatter 缺少非空 description")
     if len(description) > MAX_DESCRIPTION_LENGTH:
         raise SkillPackageError(422, "description 不能超过 1024 字符")
     return (name, description), post.content
+
+
+def _meta_text(metadata: dict, key: str) -> str:
+    """frontmatter 字段必须是真实非空字符串：数字/布尔/列表/对象一律拒绝，不做类型强转。"""
+    value = metadata.get(key)
+    if value is None:
+        raise SkillPackageError(422, f"SKILL.md frontmatter 缺少非空 {key}")
+    if not isinstance(value, str):
+        raise SkillPackageError(
+            422, f"SKILL.md frontmatter {key} 必须是字符串，收到{_type_of(value)}"
+        )
+    text = value.strip()
+    if not text:
+        raise SkillPackageError(422, f"SKILL.md frontmatter 缺少非空 {key}")
+    return text
+
+
+def _type_of(value: object) -> str:
+    if isinstance(value, bool):
+        return "布尔值"
+    if isinstance(value, (int, float)):
+        return "数字"
+    if isinstance(value, list):
+        return "列表"
+    if isinstance(value, dict):
+        return "对象"
+    return type(value).__name__
 
 
 def _validate_name(name: str) -> None:
@@ -151,6 +176,7 @@ def _resource_files(
     entry: zipfile.ZipInfo, root: str,
 ) -> tuple[PackageFile, ...]:
     files: list[PackageFile] = []
+    seen: set[str] = set()
     total = 0
     for info in infos:
         if info.is_dir() or info is entry:
@@ -159,6 +185,10 @@ def _resource_files(
         if relative is None:
             continue
         _require_safe(relative)
+        if relative in seen:
+            # ZIP 允许同名成员：清单记首个哈希、按名读取却命中末个内容，必须整体拒绝。
+            raise SkillPackageError(422, f"包内存在重复资源路径：{relative}")
+        seen.add(relative)
         total += info.file_size
         files.append(_package_file(archive, info, relative))
     _require_size_limits(len(files), total)

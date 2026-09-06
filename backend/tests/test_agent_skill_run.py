@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 from fastapi.testclient import TestClient
 from pydantic_ai import ModelResponse, TextPart, ToolCallPart
@@ -100,6 +104,44 @@ def _skill_model(skill_id: str, tool_name: str) -> FunctionModel:
     return FunctionModel(stream_function=stream)
 
 
+def _failing_skill_model(skill_id: str) -> FunctionModel:
+    """先加载能力再提供方失败：验证失败 Run 保留创建时固化的版本凭据。"""
+    issued: list[str] = []
+
+    async def stream(_messages, _info):
+        if "load_capability" not in issued:
+            issued.append("load_capability")
+            response = ModelResponse(parts=[ToolCallPart(
+                tool_name="load_capability", args={"id": skill_id},
+            )])
+        else:
+            raise RuntimeError("provider unavailable")
+        async for delta in _stream_deltas(response):
+            yield delta
+
+    return FunctionModel(stream_function=stream)
+
+
+def _gated_skill_model(skill_id: str, reached: Event, release: Event) -> FunctionModel:
+    """加载能力后阻塞：证明凭据先于提供方执行落库，且取消后仍保留。"""
+    issued: list[str] = []
+
+    async def stream(_messages, _info):
+        if "load_capability" not in issued:
+            issued.append("load_capability")
+            response = ModelResponse(parts=[ToolCallPart(
+                tool_name="load_capability", args={"id": skill_id},
+            )])
+        else:
+            reached.set()
+            await asyncio.to_thread(release.wait, 60)
+            response = ModelResponse(parts=[TextPart(content="不应到达")])
+        async for delta in _stream_deltas(response):
+            yield delta
+
+    return FunctionModel(stream_function=stream)
+
+
 def _next_skill_step(issued: list[str], skill_id: str, tool_name: str) -> ModelResponse:
     if "load_capability" not in issued:
         issued.append("load_capability")
@@ -133,12 +175,18 @@ def _placeholder_tool_name(skill_id: str) -> str:
     return resource_tool_name(bound)
 
 
-def _send_message(client: TestClient, auth: dict, case_id: str, skill_id: str | None):
+def _send_message(
+    client: TestClient, auth: dict, case_id: str, skill_id: str | None,
+    model: FunctionModel | None = None,
+):
     parts = [{"type": "text", "text": "请按范例写一份教学设计"}]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
     thread_id = client.get(f"{CASES_PATH}/{case_id}/agent/thread").json()["id"]
-    model = _skill_model(skill_id or "unused", _placeholder_tool_name(skill_id or "unused"))
+    if model is None:
+        model = _skill_model(
+            skill_id or "unused", _placeholder_tool_name(skill_id or "unused")
+        )
     with agent.override(model=model):
         return client.post(
             f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}/stream",
@@ -155,6 +203,27 @@ def _send_message(client: TestClient, auth: dict, case_id: str, skill_id: str | 
 
 def _run_rows(database) -> list[dict]:
     return list(database.agent_runs.find({}, {"_id": 0, "resources": 1}).sort("_id", 1))
+
+
+def _await_run(database, thread_id: str, status: str | None = None,
+               deadline: float = 10) -> dict:
+    end = time.monotonic() + deadline
+    query: dict = {"threadId": thread_id}
+    if status:
+        query["status"] = status
+    while time.monotonic() < end:
+        run = database.agent_runs.find_one(query, {"_id": 0})
+        if run:
+            return run
+        Event().wait(0.02)
+    raise AssertionError(f"run not found: status={status}")
+
+
+def _binding_record(version: dict) -> dict:
+    return {
+        "kind": "skill", "id": SKILL_ID,
+        "versionId": version["id"], "version": version["version"],
+    }
 
 
 def test_published_skill_drives_run_and_records_version_hash(client: TestClient) -> None:
@@ -230,3 +299,80 @@ def test_bound_snapshot_reads_stored_package_bytes(client: TestClient) -> None:
     assert bound.version_id == version["id"]
     assert bound.read_resource(RESOURCE_PATH) == EXAMPLE_TEXT
     assert bound.resource_record()["contentHash"] == version["packageSha256"]
+
+
+def test_binding_persisted_before_provider_execution_and_survives_cancel(
+    client: TestClient,
+) -> None:
+    version = _upload_and_publish(client)
+    teacher = _login(client, TEACHER)
+    case = _create_case(client, teacher)
+    database = client.app.state.database
+    reached, release = Event(), Event()
+    model = _gated_skill_model(SKILL_ID, reached, release)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_send_message, client, teacher, case["id"], SKILL_ID, model)
+        try:
+            thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
+            assert reached.wait(10), "model did not reach the gated step"
+            # 提供方仍阻塞在第二步：版本凭据已随 Run 创建固化，成功完成前即可审计。
+            run = _await_run(database, thread_id, status="active")
+            assert run["skillBindings"] == [_binding_record(version)]
+
+            cancelled = client.post(
+                f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/cancel",
+                headers=_csrf(teacher),
+            )
+            assert cancelled.status_code == 200
+            terminal = _await_run(database, thread_id, status="cancelled")
+            assert terminal["skillBindings"] == [_binding_record(version)]
+            assert terminal.get("resources", []) == []
+        finally:
+            release.set()
+            future.result(timeout=15)
+
+
+def test_failed_run_and_retry_keep_version_receipts(client: TestClient) -> None:
+    """失败 Run 保留 v1 凭据；重试是新 Run，固化当时已发布的 v2 凭据。"""
+    v1 = _upload_and_publish(client, 1)
+    teacher = _login(client, TEACHER)
+    case = _create_case(client, teacher)
+    database = client.app.state.database
+    failed_response = _send_message(
+        client, teacher, case["id"], SKILL_ID,
+        model=_failing_skill_model(SKILL_ID),
+    )
+    assert failed_response.status_code == 200, failed_response.text
+    thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
+    failed = _await_run(database, thread_id, status="failed")
+    assert failed["skillBindings"] == [_binding_record(v1)]
+
+    v2 = _upload_and_publish(client, 2)
+    assert v2["packageSha256"] != v1["packageSha256"]
+    teacher = _login(client, TEACHER)  # 管理员登录会替换共享会话 cookie，需重取教师会话
+    user_message = database.agent_messages.find_one(
+        {"threadId": thread_id, "role": "user"}, {"_id": 0}
+    )
+    with agent.override(model=_skill_model(SKILL_ID, _placeholder_tool_name(SKILL_ID))):
+        retried_response = client.post(
+            f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/stream",
+            headers=_csrf(teacher),
+            json={
+                "id": f"browser-{uuid.uuid4().hex}",
+                "trigger": "regenerate-message",
+                "messageId": user_message["id"],
+                "messages": [],
+            },
+        )
+    assert retried_response.status_code == 200, retried_response.text
+    retried = _await_run(database, thread_id, status="completed")
+    assert retried["id"] != failed["id"]
+    assert retried["skillBindings"] == [_binding_record(v2)]
+    # 历史 Run 的凭据不受新发布影响。
+    assert database.agent_runs.find_one(
+        {"id": failed["id"]}, {"_id": 0, "skillBindings": 1}
+    )["skillBindings"] == [_binding_record(v1)]
+    records = {row["kind"]: row for row in retried["resources"]}
+    assert {key: records["skill"][key] for key in ("kind", "id", "version")} == {
+        "kind": "skill", "id": SKILL_ID, "version": v2["version"],
+    }

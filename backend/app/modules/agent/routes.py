@@ -301,7 +301,10 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
-    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease, worker_id)
+    run = _start_run(
+        repository, thread, user["id"], plan, assistant_id, lease, worker_id,
+        [bound.binding_record() for bound in bounds],
+    )
     context = _run_context(request, database, settings, user, case, repository, thread,
                            adapter, plan, run, selection, lease, worker_id, bounds, legacy)
     request.app.state.run_supervisor.start(context)
@@ -363,9 +366,16 @@ def _lease(database, user_id: str, selection):
         raise HTTPException(status_code=429, detail=str(error)) from error
 
 
-def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id) -> AgentRun:
+def _start_run(
+    repository, thread, user_id, plan, assistant_id, lease, worker_id,
+    skill_bindings: list[dict[str, str]],
+) -> AgentRun:
+    """创建 Run 即固化 Skill 版本凭据，先于提供方执行；失败/取消不丢失。"""
     try:
-        return _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id)
+        return _create_run(
+            repository, thread, user_id, plan, assistant_id, lease, worker_id,
+            skill_bindings,
+        )
     except ActiveRunError as error:
         if lease:
             lease.release()
@@ -378,18 +388,22 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
         raise
 
 
-def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id):
+def _create_run(
+    repository, thread, user_id, plan, assistant_id, lease, worker_id,
+    skill_bindings: list[dict[str, str]],
+):
     quota_ids = lease.quota_ids if lease else ()
     if plan.retry_message_id:
         run = repository.retry_run(
             thread, plan.retry_message_id, assistant_id,
-            owner_id=worker_id, quota_ids=quota_ids,
+            owner_id=worker_id, quota_ids=quota_ids, skill_bindings=skill_bindings,
         )
     else:
         run = repository.start_run(
             thread, user_id, plan.parts, plan.metadata, assistant_id,
             plan.client_request_id, owner_id=worker_id, quota_ids=quota_ids,
             default_title=_default_title(plan.prompt),
+            skill_bindings=skill_bindings,
         )
     _bind_lease(repository, run, lease, worker_id)
     return run
