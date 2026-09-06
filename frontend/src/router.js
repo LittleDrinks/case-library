@@ -4,6 +4,7 @@ import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
+import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
 import CaseDetailView from "./views/CaseDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
@@ -70,6 +71,12 @@ const routes = [
     path: "/admin/material-imports",
     name: "material-imports",
     component: MaterialImportView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/tag-catalog",
+    name: "admin-tag-catalog",
+    component: AdminTagCatalogView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {

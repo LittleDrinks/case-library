@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api.js";
@@ -25,8 +25,16 @@ const view = ref(route.query.view === "graph" ? "graph" : "list");
 const loading = ref(false);
 const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
+const catalog = ref([]);
+const catalogError = ref("");
 const items = computed(() => payload.value.items);
 let searchGeneration = 0;
+
+async function loadTagCatalog() {
+  catalogError.value = "";
+  try { catalog.value = await api.listTagGroups(); }
+  catch { catalogError.value = "标签目录加载失败"; }
+}
 
 function tabLabel(kind, label) {
   return `${label} ${payload.value.counts[kind] || 0}`;
@@ -147,11 +155,15 @@ function selectFilters(next) {
 }
 
 function searchRouteState() {
-  const names = ["typeName", "audience", "authority", "materialType", "tag", "publishedWithin"];
+  const names = [
+    "typeName", "audience", "authority", "materialType", "tag", "publishedWithin",
+    "tagIds", "tagMode",
+  ];
   return [route.query.q, route.query.kind, ...names.map(name => route.query[name])];
 }
 
 watch(searchRouteState, syncSearchRoute, { immediate: true });
+onMounted(loadTagCatalog);
 watch(() => route.query.view, (value) => {
   view.value = value === "graph" ? "graph" : "list";
 });
@@ -183,7 +195,15 @@ watch(() => route.query.view, (value) => {
               {{ tabLabel(tab[0], tab[1]) }}
             </button>
           </div>
-          <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
+          <SearchFilters
+            :filters="filters"
+            :facets="payload.facets || {}"
+            :kind="activeKind"
+            :catalog="catalog"
+            :catalog-error="catalogError"
+            @update:filters="selectFilters"
+            @retry-catalog="loadTagCatalog"
+          />
         </div>
         <section class="mixed-results" aria-label="检索结果">
           <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">

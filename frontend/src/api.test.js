@@ -35,3 +35,16 @@ it("serializes multi-select search facets as repeated query parameters", async (
   expect(params.getAll("audience")).toEqual(["ug"]);
   expect(params.get("publishedWithin")).toBe("30d");
 });
+
+it("serializes catalog tag conditions as repeated tagIds with tagMode", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}", {
+    status: 200, headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetch);
+
+  await api.search("", "case", null, 20, { tagIds: ["tag-1", "tag-2"], tagMode: "any" });
+
+  const params = new URL(fetch.mock.calls[0][0], "http://local").searchParams;
+  expect(params.getAll("tagIds")).toEqual(["tag-1", "tag-2"]);
+  expect(params.get("tagMode")).toBe("any");
+});

@@ -4,6 +4,7 @@ import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
+import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
 import SiteHeader from "../components/SiteHeader.vue";
@@ -22,6 +23,10 @@ const titleInput = ref(null);
 const canvasEditor = ref(null);
 const document = ref(normalizeDocument());
 const revision = ref(0);
+const tagIds = ref([]);
+const tagCatalog = ref([]);
+const tagCatalogLoading = ref(false);
+const tagCatalogError = ref("");
 const loading = ref(true);
 const loadError = ref("");
 const conflict = ref(null);
@@ -91,7 +96,7 @@ function caseId() {
 }
 
 function snapshot() {
-  return { ...contentSnapshot(), revision: revision.value };
+  return { ...contentSnapshot(), tagIds: tagIds.value, revision: revision.value };
 }
 
 function contentSnapshot() {
@@ -133,6 +138,7 @@ function applyCase(value, invalidate = true) {
   title.value = value.title;
   document.value = normalizeDocument(value.document);
   revision.value = value.revision;
+  tagIds.value = value.tagIds || [];
   conflict.value = null;
   if (editable.value) crashDraft.load(value);
   void nextTick(resizeTitle);
@@ -191,6 +197,19 @@ function changeTitle(event) {
   resizeTitle();
   crashDraft.queue();
   autosave.markDirty();
+}
+
+function changeTags(next) {
+  tagIds.value = next;
+  autosave.markDirty();
+}
+
+async function loadTagCatalog() {
+  tagCatalogLoading.value = true;
+  tagCatalogError.value = "";
+  try { tagCatalog.value = await api.listTagGroups(); }
+  catch { tagCatalogError.value = "标签目录加载失败"; }
+  finally { tagCatalogLoading.value = false; }
 }
 
 function resizeTitle() {
@@ -448,7 +467,10 @@ async function exportCase() {
 watch(autosave.revision, (value) => {
   if (value != null) revision.value = value;
 });
-onMounted(loadCase);
+onMounted(() => {
+  loadCase();
+  loadTagCatalog();
+});
 onBeforeUnmount(() => {
   crashDraft.flush();
   crashDraft.destroy();
@@ -499,6 +521,15 @@ onBeforeUnmount(() => {
           <article class="document-paper">
             <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
             <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
+            <CaseTagPicker
+              :tag-ids="tagIds"
+              :groups="tagCatalog"
+              :editable="editable"
+              :loading="tagCatalogLoading"
+              :error="tagCatalogError"
+              @update:tag-ids="changeTags"
+              @retry="loadTagCatalog"
+            />
             <CanvasEditor
               ref="canvasEditor"
               :document="document"

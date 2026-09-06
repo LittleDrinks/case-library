@@ -36,6 +36,12 @@
 .filter-popover fieldset { display: grid; gap: 5px; margin: 0; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line-soft); }
 .filter-popover fieldset:last-child { border-bottom: 0; }
 .filter-popover legend { padding: 0 0 5px; color: var(--ink-3); font-size: 12px; font-weight: 650; }
+.tag-mode { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
+.tag-mode span { margin-right: auto; color: var(--ink-3); font-size: 12px; font-weight: 650; }
+.tag-mode button { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 12px; }
+.tag-mode button[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.filter-catalog-state { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); color: var(--red); font-size: 12px; }
+.filter-catalog-state button { border: 0; background: transparent; color: var(--brand); }
 .filter-popover label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; color: var(--ink-2); }
 .filter-popover label small { color: var(--ink-3); }
 .filter-chips { display: flex; width: min(760px, calc(100vw - 40px)); flex-wrap: wrap; justify-content: flex-end; gap: 6px; pointer-events: none; }

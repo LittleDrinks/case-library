@@ -83,6 +83,27 @@ export const api = {
     headers: { "X-CSRF-Token": csrfToken },
   }),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
+  listTagGroups: () => request("/api/tag-groups"),
+  createTagGroup: (group, csrfToken) => request(
+    "/api/tag-groups", jsonOptions("POST", group, csrfToken),
+  ),
+  updateTagGroup: (id, patch, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  deleteTagGroup: (id, csrfToken) => request(`/api/tag-groups/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  }),
+  createTag: (groupId, tag, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(groupId)}/tags`, jsonOptions("POST", tag, csrfToken),
+  ),
+  updateTag: (id, patch, csrfToken) => request(
+    `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  deleteTag: (id, csrfToken) => request(`/api/tags/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": csrfToken },
+  }),
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),

@@ -9,10 +9,12 @@ export const GROUPS = {
 
 export const GROUPS_BY_KIND = {
   all: ["tags", "time"],
-  case: ["type", "audience", "tags", "time"],
+  case: ["type", "audience", "time"],
   knowledge: [],
   material: ["authority", "materialType", "tags", "time"],
 };
+
+export const CATALOG_KINDS = ["all", "case"];
 
 const LABELS = {
   grad: "研究生", ug: "本科", embed: "专业课融入",
@@ -21,7 +23,10 @@ const LABELS = {
 };
 
 export function emptyFilters() {
-  return { type: [], audience: [], authority: [], materialType: [], tags: [], time: "" };
+  return {
+    type: [], audience: [], authority: [], materialType: [], tags: [], time: "",
+    tagIds: [], tagMode: "all",
+  };
 }
 
 export function filterLabel(value) {
@@ -39,6 +44,10 @@ export function filtersFromQuery(query, kind) {
     const values = queryValues(query, GROUPS[group].parameter);
     filters[group] = group === "time" ? values[0] || "" : values;
   });
+  if (CATALOG_KINDS.includes(kind)) {
+    filters.tagIds = queryValues(query, "tagIds");
+    filters.tagMode = query.tagMode === "any" ? "any" : "all";
+  }
   return filters;
 }
 
@@ -47,10 +56,15 @@ function selectedValues(filters, group) {
 }
 
 export function filterQuery(filters, kind) {
-  return Object.fromEntries(GROUPS_BY_KIND[kind].flatMap((group) => {
+  const entries = Object.fromEntries(GROUPS_BY_KIND[kind].flatMap((group) => {
     const values = selectedValues(filters, group);
     return values.length ? [[GROUPS[group].parameter, group === "time" ? values[0] : values]] : [];
   }));
+  if (CATALOG_KINDS.includes(kind) && filters.tagIds.length) {
+    entries.tagIds = filters.tagIds;
+    if (filters.tagMode === "any") entries.tagMode = "any";
+  }
+  return entries;
 }
 
 function facetRows(facets, group) {
