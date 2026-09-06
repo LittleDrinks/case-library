@@ -34,9 +34,9 @@ def paragraphs(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _match_target(document: dict[str, Any], paragraph_index: int, quote: str) -> dict:
     rows = paragraphs(document)
-    if paragraph_index >= len(rows):
+    target = next((row for row in rows if row["paragraphIndex"] == paragraph_index), None)
+    if target is None:
         raise ParagraphNotFoundError
-    target = rows[paragraph_index]
     if target["quote"] != quote:
         raise ParagraphChangedError
     return target
@@ -52,13 +52,8 @@ def replaced_document(
 ) -> dict[str, Any]:
     """返回目标段落文本替换后的新文档，替换前重验编号与原文。"""
     _match_target(document, paragraph_index, quote)
-    position, content = 0, list(document.get("content", []))
-    for index, node in enumerate(content):
-        if node.get("type") == "paragraph":
-            if position == paragraph_index:
-                content[index] = _replaced_node(node, replacement)
-                break
-            position += 1
+    content = list(document.get("content", []))
+    content[paragraph_index] = _replaced_node(content[paragraph_index], replacement)
     updated = {**document, "content": content}
     validate_prosemirror_document(updated)
     return updated

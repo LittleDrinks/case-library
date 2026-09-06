@@ -49,7 +49,8 @@ function writingContext(activeEditor, from, to) {
   const quote = activeEditor.state.doc.textBetween(from, to, " ");
   const sectionText = activeEditor.state.doc
     .textBetween(section.sectionFrom, section.sectionTo, "\n").trim();
-  return { ...section, quote, from, to, sectionText };
+  const paragraphIndex = activeEditor.state.doc.resolve(from).index(0);
+  return { ...section, quote, from, to, sectionText, paragraphIndex };
 }
 
 function positionTrigger(context) {

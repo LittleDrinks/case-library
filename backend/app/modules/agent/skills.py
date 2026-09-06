@@ -29,7 +29,7 @@ async def propose_revision(
 def _propose(ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        paragraph_index, replacement, reason, list(ctx.deps.sources),
+        paragraph_index, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
     )
 
 

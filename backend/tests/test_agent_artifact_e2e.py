@@ -62,24 +62,30 @@ def _thread(client: httpx.Client, case_id: str) -> dict:
     return response.json()
 
 
+def _send_payload(text: str) -> dict:
+    return {
+        "id": "browser-chat-id",
+        "trigger": "submit-message",
+        "messages": [{
+            "id": "client-message",
+            "role": "user",
+            "parts": [
+                {"type": "text", "text": text},
+                {"type": "data-selection",
+                 "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}},
+                {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
+            ],
+        }],
+    }
+
+
 def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Response:
     thread_id = _thread(client, case_id)["id"]
     return client.post(
         f"/api/cases/{case_id}/agent/thread/{thread_id}/stream",
         headers={"X-CSRF-Token": csrf},
         timeout=30,
-        json={
-            "id": "browser-chat-id",
-            "trigger": "submit-message",
-            "messages": [{
-                "id": "client-message",
-                "role": "user",
-                "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
-                ],
-            }],
-        },
+        json=_send_payload(text),
     )
 
 

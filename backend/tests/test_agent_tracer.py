@@ -64,7 +64,10 @@ def _thread_path(case_id: str) -> str:
 
 
 def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
-    parts = [{"type": "text", "text": text}]
+    parts = [{"type": "text", "text": text}, {
+        "type": "data-selection",
+        "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]},
+    }]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
     return parts
@@ -99,9 +102,24 @@ HIT = {
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
 
 
+def _seed_source_case(database) -> None:
+    """检索命中来源落库为真实已发布案例，供接受前证据复验。"""
+    database.cases.insert_one({
+        "id": HIT["id"], "ownerId": "u-source", "publicationStatus": "public",
+        "workflowStatus": "published", "publishedVersionId": "cv-hit-1",
+        "revision": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+    database.case_versions.insert_one({
+        "id": "cv-hit-1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+
+
 @pytest.fixture
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
+    _seed_source_case(client.app.state.database)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
     with agent.override(model=tracer_model()):
