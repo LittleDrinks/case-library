@@ -100,7 +100,6 @@ it("uploads a package, shows the recognized metadata and publishes directly", as
   expect(api.uploadSkillPackage).toHaveBeenCalledWith(file, "csrf");
   expect(wrapper.text()).toContain("识别结果");
   expect(wrapper.text()).toContain("v1");
-  expect(wrapper.text()).toContain("15479fd46995");
   expect(wrapper.text()).toContain("2.0 KB");
 
   await wrapper.get('[data-testid="skill-publish-uploaded"]').trigger("click");

@@ -7,7 +7,7 @@ vi.mock("../api.js", () => ({
   api: {
     listAttachments: vi.fn().mockResolvedValue([]),
     listCaseMaterials: vi.fn().mockResolvedValue([]),
-    listCaseSources: vi.fn(),
+    listSources: vi.fn(),
     removeCaseSource: vi.fn().mockResolvedValue(null),
     getCase: vi.fn().mockResolvedValue({ id: "case-1" }),
     attachmentContentUrl: (id, attachmentId) => `/api/cases/${id}/attachments/${attachmentId}/content`,
@@ -27,7 +27,7 @@ const sourceRows = [
 ];
 
 async function setup(props = {}) {
-  api.listCaseSources.mockResolvedValue(sourceRows);
+  api.listSources.mockResolvedValue({ entries: sourceRows });
   const wrapper = mount(AttachmentPanel, {
     props: {
       caseRecord: { id: "case-1", ownerId: "u1" },

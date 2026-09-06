@@ -33,7 +33,7 @@ function render() {
   return mount(MaterialExplorerView, {
     global: {
       stubs: {
-        SiteHeader: true, RouterLink: true, CatalogPagination: true,
+        SiteHeader: true, RouterLink: { template: "<a><slot /></a>" }, CatalogPagination: true,
         MaterialDownloadAction: true,
       },
     },
@@ -93,17 +93,20 @@ function mockMaterialPages() {
     });
 }
 
-test("素材翻页不写 URL 并保留首屏分面与总数", async () => {
+test("素材翻页把游标写进 URL 并保留首屏分面与总数", async () => {
   mockMaterialPages();
   const wrapper = render();
   await flushPromises();
   wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
   await flushPromises();
 
-  expect(api.search).toHaveBeenLastCalledWith("", "material", "next-token", 50, {});
-  expect(replace).not.toHaveBeenCalled();
-  expect(wrapper.getComponent({ name: "CatalogPagination" }).props()).toMatchObject({
-    page: 2, total: 51,
+  expect(replace).toHaveBeenCalledWith({
+    name: "materials",
+    query: { caseId: "case-1", cursor: "next-token" },
   });
-  expect(wrapper.text()).toContain("受限素材");
+  expect(api.search).toHaveBeenLastCalledWith("", "material", "", 20, {});
+  expect(wrapper.getComponent({ name: "CatalogPagination" }).props()).toMatchObject({
+    page: 1, total: 51,
+  });
+  expect(wrapper.text()).toContain("可用素材");
 });

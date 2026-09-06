@@ -75,7 +75,7 @@ it("opens the thread list with rows, status, back and create entries", async () 
 
   await openList(wrapper);
 
-  expect(api.agentThreads).toHaveBeenCalledWith("case-1");
+  expect(api.agentThreads).toHaveBeenCalledWith("case-1", "");
   const list = wrapper.get('[data-testid="agent-thread-list"]');
   expect(list.text()).toContain("返回当前对话");
   expect(list.text()).toContain("新建对话");
@@ -98,7 +98,7 @@ it("switches to another thread and shows only its messages", async () => {
   expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-2");
   expect(wrapper.text()).toContain("第二对话消息");
   expect(wrapper.text()).not.toContain("默认消息");
-  expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-2");
+  expect(localStorage.getItem("agent-thread:anonymous:case-1:draft")).toBe("thread-2");
   expect(wrapper.get(".agent-thread-current").text()).toContain("资料梳理");
 });
 
@@ -112,7 +112,7 @@ it("creates a new thread into an empty chat with a fixed composer", async () => 
   await wrapper.get('[data-testid="agent-thread-create"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf");
+  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf", "");
   expect(wrapper.findAll(".ai-message")).toHaveLength(0);
   expect(wrapper.get('[aria-label="向 AI 提问"]').exists()).toBe(true);
   expect(wrapper.get(".agent-thread-current").text()).toContain("未命名对话");
@@ -136,7 +136,7 @@ it("renames the current thread from the list", async () => {
 });
 
 it("restores the locally preferred thread on reload", async () => {
-  localStorage.setItem("agent-thread:case-1", "thread-2");
+  localStorage.setItem("agent-thread:anonymous:case-1:draft", "thread-2");
 
   const wrapper = mountPanel();
   await flushPromises();
@@ -147,7 +147,7 @@ it("restores the locally preferred thread on reload", async () => {
 });
 
 it("falls back to the default thread when the preference is stale", async () => {
-  localStorage.setItem("agent-thread:case-1", "thread-gone");
+  localStorage.setItem("agent-thread:anonymous:case-1:draft", "thread-gone");
   const notFound = Object.assign(new Error("对话不存在"), { status: 404 });
   api.agentThread.mockImplementation((caseId, threadId) => (
     threadId ? Promise.reject(notFound) : Promise.resolve(structuredClone(snapshots["thread-1"]))
@@ -157,7 +157,7 @@ it("falls back to the default thread when the preference is stale", async () => 
   await flushPromises();
 
   expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-gone");
-  expect(api.agentThread).toHaveBeenLastCalledWith("case-1");
+  expect(api.agentThread).toHaveBeenLastCalledWith("case-1", null, "");
   expect(wrapper.text()).toContain("默认消息");
 });
 
@@ -268,7 +268,7 @@ it("reconnects the running thread's event stream after switching away and back",
     "/api/cases/case-1/agent/thread/thread-1/events?afterSeq=2",
   ]);
   expect(fetch.mock.calls.filter(([url]) => url.includes("/stream"))).toHaveLength(0);
-  expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-1");
+  expect(localStorage.getItem("agent-thread:anonymous:case-1:draft")).toBe("thread-1");
 });
 
 it("binds the cancel command to the thread selected at click time", async () => {
@@ -355,7 +355,7 @@ it("ignores the old thread's late stream completion after switching away", async
   await flushPromises();
   expect(wrapper.text()).toContain("第二对话消息");
   expect(wrapper.text()).not.toContain("生成中的问题");
-  expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-2");
+  expect(localStorage.getItem("agent-thread:anonymous:case-1:draft")).toBe("thread-2");
 });
 
 it("resumes a held stream to completion without duplicating messages", async () => {
