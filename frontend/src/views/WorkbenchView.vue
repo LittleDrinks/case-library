@@ -59,8 +59,7 @@ const historyAvailable = computed(() => Boolean(
   session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
-    ? caseId() : ""
+  publicationStatus.value === "public" ? caseId() : ""
 ));
 const editable = computed(() => (
   isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
@@ -75,11 +74,37 @@ const annotatable = computed(() => Boolean(
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
   ] || "草稿";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
-const lifecycleActions = computed(() => availableActions());
+const lastReview = computed(() => (
+  workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
+));
+const lastReviewLabel = computed(() => (
+  lastReview.value?.action === "supplement" ? "要求补充" : "退回修改"
+));
+const LIFECYCLE_META = {
+  submit: { label: "提交审核", primary: true, area: "author" },
+  withdraw: { label: "撤回提交", primary: false, area: "author" },
+  reopen: { label: "另开新稿", primary: true, area: "author" },
+  start: { label: "开始审核", primary: true, area: "review" },
+  approve: { label: "通过发布", primary: true, area: "review" },
+  reject: { label: "退回修改", primary: false, area: "review" },
+  supplement: { label: "要求补充", primary: false, area: "review" },
+  hide: { label: "暂时隐藏", primary: false, area: "review" },
+  restore: { label: "恢复公开", primary: false, area: "review" },
+};
+const lifecycleActions = computed(() => {
+  const area = reviewMode.value ? "review" : "author";
+  return (caseRecord.value?.availableActions || [])
+    .filter((command) => LIFECYCLE_META[command]?.area === area)
+    .map((command) => ({ command, ...LIFECYCLE_META[command] }));
+});
 
 const autosave = createAutosave({
   save: persist,
@@ -268,45 +293,6 @@ function selectTool(tool) {
   drawerOpen.value = true;
 }
 
-function reviewActions() {
-  if (workflowStatus.value === "pending") {
-    return [{ command: "start", label: "开始审核", primary: true }];
-  }
-  if (workflowStatus.value === "reviewing") {
-    return [
-      { command: "reject", label: "退回修改", primary: false },
-      { command: "supplement", label: "要求补充", primary: false },
-      { command: "approve", label: "通过发布", primary: true },
-    ];
-  }
-  return null;
-}
-
-function publicationActions() {
-  if (!reviewMode.value || workflowStatus.value !== "published") return null;
-  if (publicationStatus.value === "public") {
-    return [{ command: "hide", label: "暂时隐藏", primary: false }];
-  }
-  return [
-    { command: "restore", label: "恢复公开", primary: false },
-    { command: "reopen", label: "下线编辑", primary: true },
-  ];
-}
-
-function availableActions() {
-  const review = reviewMode.value && reviewActions();
-  if (review) return review;
-  const publication = publicationActions();
-  if (publication) return publication;
-  if (isOwner.value && workflowStatus.value === "draft") {
-    return [{ command: "submit", label: "提交审核", primary: true }];
-  }
-  if (isOwner.value && workflowStatus.value === "pending") {
-    return [{ command: "withdraw", label: "撤回提交", primary: false }];
-  }
-  return [];
-}
-
 async function prepareLifecycle(command) {
   if (command !== "submit") return true;
   await autosave.flush();
@@ -344,10 +330,18 @@ async function performLifecycle(command, details = {}) {
     return true;
   } catch (error) {
     actionNotice.value = error.message || "操作失败";
+    if (error.status === 409) await refreshLifecycleState();
     return false;
   } finally {
     busyAction.value = "";
   }
+}
+
+async function refreshLifecycleState() {
+  if (autosave.state.value !== "saved") return;
+  try {
+    applyCase(await api.getCase(caseId()));
+  } catch { /* 保留错误提示，用户可手动重试 */ }
 }
 
 async function confirmDecision(details) {
@@ -545,6 +539,12 @@ onBeforeUnmount(() => {
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
+          <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
+            <AlertTriangle :size="17" aria-hidden="true" />
+            <span>
+              {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
+            </span>
+          </div>
           <article class="document-paper">
             <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
             <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>

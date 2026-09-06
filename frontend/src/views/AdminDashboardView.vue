@@ -15,7 +15,7 @@ function needsReview(item) {
 }
 
 function isPublished(item) {
-  return item.workflowStatus === "published";
+  return ["public", "hidden"].includes(item.publicationStatus);
 }
 
 function reviewLabel(item) {

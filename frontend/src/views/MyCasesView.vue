@@ -29,9 +29,19 @@ const groupedCases = computed(() => groups.map((group) => ({
   cases: cases.value.filter((item) => group.statuses.includes(item.workflowStatus)),
 })));
 
+function cardStatus(item) {
+  if (item.publicationStatus === "hidden") return "已隐藏";
+  const base = statusLabels[item.workflowStatus] || "草稿";
+  if (item.publicationStatus === "public" && item.workflowStatus !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
+}
+
 function caseDestination(item) {
-  const name = item.workflowStatus === "published" ? "case-public" : "workbench";
-  return { name, params: { id: item.id } };
+  const publiclyReadable = item.workflowStatus === "published"
+    && item.publicationStatus === "public";
+  return { name: publiclyReadable ? "case-public" : "workbench", params: { id: item.id } };
 }
 
 async function loadCases() {
@@ -89,7 +99,7 @@ onMounted(loadCases);
               :key="item.id"
               :case-record="item"
               :destination="caseDestination(item)"
-              :status="statusLabels[item.workflowStatus]"
+              :status="cardStatus(item)"
               :action-label="actionLabels[item.workflowStatus]"
             />
           </div>
