@@ -233,7 +233,7 @@ it("accepting the artifact calls the decision API, emits the revised case and re
   await wrapper.get('[data-testid="agent-accept"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "accepted", "csrf");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
   expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ id: "case-1", revision: 2 });
   expect(api.agentThread).toHaveBeenCalledTimes(2);
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("accepted");
@@ -246,7 +246,7 @@ it("rejecting the artifact records the decision without touching the case", asyn
   await wrapper.get('[data-testid="agent-reject"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-9", "rejected", "csrf");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "rejected", "csrf");
   expect(wrapper.emitted("case-revised")).toBeUndefined();
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("rejected");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);

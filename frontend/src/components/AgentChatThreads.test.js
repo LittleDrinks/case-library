@@ -177,7 +177,7 @@ it("keeps a pending artifact scoped to its thread and decidable after switching 
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("pending");
   await wrapper.get('[data-testid="agent-reject"]').trigger("click");
   await flushPromises();
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "artifact-1", "rejected", "csrf");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-1", "artifact-1", "rejected", "csrf");
 });
 
 it("restores the saved scroll position when switching back", async () => {
@@ -210,8 +210,8 @@ function streamResponse(chunks) {
   });
 }
 
-function resumeResponse() {
-  return streamResponse([
+function resumeChunks() {
+  return [
     'data: {"type":"start","messageId":"message-resumed"}\n\n',
     'data: {"type":"start-step"}\n\n',
     'data: {"type":"text-start","id":"text-resumed"}\n\n',
@@ -220,7 +220,11 @@ function resumeResponse() {
     'data: {"type":"finish-step"}\n\n',
     'data: {"type":"finish","finishReason":"stop"}\n\n',
     "data: [DONE]\n\n",
-  ]);
+  ];
+}
+
+function resumeResponse() {
+  return streamResponse(resumeChunks());
 }
 
 function runningThread() {
@@ -279,4 +283,123 @@ it("binds the cancel command to the thread selected at click time", async () => 
   await wrapper.get('[data-testid="agent-stop"]').trigger("click");
   await flushPromises();
   expect(api.agentCancel).toHaveBeenCalledWith("case-1", "thread-1", "csrf");
+});
+
+function heldFetch(streams) {
+  return vi.fn().mockImplementation(() => {
+    const held = {};
+    held.stream = new ReadableStream({ start(controller) { held.controller = controller; } });
+    streams.push(held);
+    return Promise.resolve(new Response(held.stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+    }));
+  });
+}
+
+it("shows conversation and stop before the resumed stream terminates", async () => {
+  const streams = [];
+  const wrapper = mountRunning(heldFetch(streams));
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-stop"]').exists()).toBe(true);
+  await switchTo(wrapper, 1);
+  await switchTo(wrapper, 0);
+  expect(wrapper.find('[data-testid="agent-thread-list"]').exists()).toBe(false);
+  expect(wrapper.text()).toContain("生成中的问题");
+  expect(wrapper.get('[data-testid="agent-stop"]').exists()).toBe(true);
+  expect(streams).toHaveLength(2);
+});
+
+it("disconnects the superseded stream reader on switch without a server cancel", async () => {
+  const fetch = heldFetch([]);
+  const wrapper = mountRunning(fetch);
+  await flushPromises();
+  const resumed = fetch.mock.calls.find(([url]) => url.includes("/events"));
+  await switchTo(wrapper, 1);
+  expect(resumed[1].signal.aborted).toBe(true);
+  expect(api.agentCancel).not.toHaveBeenCalled();
+  await switchTo(wrapper, 0);
+  expect(api.agentCancel).not.toHaveBeenCalled();
+});
+
+it("disconnects the stream reader on unmount without a server cancel", async () => {
+  const fetch = heldFetch([]);
+  const wrapper = mountRunning(fetch);
+  await flushPromises();
+  const resumed = fetch.mock.calls.find(([url]) => url.includes("/events"));
+  wrapper.unmount();
+  expect(resumed[1].signal.aborted).toBe(true);
+  expect(api.agentCancel).not.toHaveBeenCalled();
+});
+
+it("keeps the current stream connected while the thread list is open", async () => {
+  const fetch = heldFetch([]);
+  const wrapper = mountRunning(fetch);
+  await flushPromises();
+  const resumed = fetch.mock.calls.find(([url]) => url.includes("/events"));
+  await openList(wrapper);
+  expect(resumed[1].signal.aborted).toBe(false);
+  expect(wrapper.get('[data-testid="agent-thread-list"]').text()).toContain("生成中");
+});
+
+it("ignores the old thread's late stream completion after switching away", async () => {
+  const streams = [];
+  const encoder = new TextEncoder();
+  const wrapper = mountRunning(heldFetch(streams));
+  await flushPromises();
+  await switchTo(wrapper, 1);
+  try {
+    streams[0].controller.enqueue(encoder.encode('data: {"type":"finish","finishReason":"stop"}\n\n'));
+    streams[0].controller.close();
+  } catch { /* 旧读取端已断开 */ }
+  await flushPromises();
+  expect(wrapper.text()).toContain("第二对话消息");
+  expect(wrapper.text()).not.toContain("生成中的问题");
+  expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-2");
+});
+
+it("resumes a held stream to completion without duplicating messages", async () => {
+  const streams = [];
+  const encoder = new TextEncoder();
+  const wrapper = mountRunning(heldFetch(streams));
+  await flushPromises();
+  resumeChunks().forEach((chunk) => streams[0].controller.enqueue(encoder.encode(chunk)));
+  streams[0].controller.close();
+  await flushPromises();
+  expect(wrapper.text()).toContain("恢复回答");
+  expect(wrapper.findAll(".ai-message.user")).toHaveLength(1);
+  expect(wrapper.findAll(".ai-message.assistant")).toHaveLength(1);
+  expect(wrapper.get(".agent-chat-panel").attributes("data-run-id")).toBe("run-1");
+});
+
+it("cannot let a late artifact decision overwrite the newly selected thread", async () => {
+  snapshots["thread-1"] = snapshotOf("thread-1", "默认对话", [message("m-1", "默认消息")], [pendingArtifact]);
+  let release;
+  api.agentDecide.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-reject"]').trigger("click");
+  await switchTo(wrapper, 1);
+  release({ artifact: { status: "rejected" }, case: null });
+  await flushPromises();
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-1", "artifact-1", "rejected", "csrf");
+  expect(wrapper.text()).toContain("第二对话消息");
+  expect(wrapper.find('[data-testid="agent-artifact"]').exists()).toBe(false);
+});
+
+it("keeps refreshing run state while the thread list stays open", async () => {
+  vi.useFakeTimers();
+  try {
+    const wrapper = mountPanel();
+    await vi.advanceTimersByTimeAsync(1);
+    await wrapper.get('[data-testid="agent-thread-list-open"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wrapper.text()).toContain("生成中");
+    api.agentThreads.mockResolvedValue(threadRows.map((row) => ({ ...row, running: false })));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.text()).not.toContain("生成中");
+    wrapper.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });

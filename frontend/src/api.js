@@ -137,8 +137,9 @@ export const api = {
     `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
     jsonOptions("POST", {}, csrfToken),
   ),
-  agentDecide: (caseId, artifactId, decision, csrfToken) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
+  agentDecide: (caseId, threadId, artifactId, decision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),
   ),
   aiSettings: () => request("/api/ai/settings"),
