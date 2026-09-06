@@ -142,9 +142,7 @@ async function settle(caseId, state, generation, threadId, { fresh = false } = {
 async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
-  const results = await Promise.allSettled([
-    resolveSnapshot(caseId, state), api.aiSettings(), api.listSkills(),
-  ]);
+  const results = await Promise.allSettled([resolveSnapshot(caseId, state), api.aiSettings(), api.listSkills()]);
   if (!isCurrent(state, generation)) return;
   const [threadResult, settingsResult, skillsResult] = results;
   if (threadResult.status === "fulfilled") {

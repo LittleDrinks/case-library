@@ -3,12 +3,16 @@ import {
   ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles,
 } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
+import PublicSourceList from "./PublicSourceList.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
 import VersionPanel from "./VersionPanel.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
+  readOnly: { type: Boolean, default: false },
+  versionId: { type: String, default: "" },
+  sources: { type: Array, default: () => [] },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   caseTitle: { type: String, required: true },
@@ -19,15 +23,12 @@ const props = defineProps({
   beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
-  applyCandidate: { type: Function, required: true },
-  rollbackCandidateBatch: { type: Function, required: true },
-  candidateInvalidation: { type: Number, default: 0 },
   citedKeys: { type: Array, default: () => [] },
   activeCitation: { type: Object, default: null },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "candidate-previews", "annotations",
+  "case-revised", "annotations",
   "insert-citation", "remove-citation",
 ]);
 
@@ -47,6 +48,7 @@ function select(tab) {
       <button
         v-for="tab in tabs"
         :key="tab.id"
+        v-show="!readOnly || tab.id !== 'comments'"
         type="button"
         :class="{ active: active === tab.id }"
         @click="select(tab.id)"
@@ -61,12 +63,17 @@ function select(tab) {
     </nav>
 
     <AgentChatPanel
-      v-if="active === 'ai'"
+      v-if="active === 'ai' && user"
+      :key="versionId || 'draft'"
+      :read-only="readOnly"
+      :version-id="versionId"
       :case-record="caseRecord"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
     />
 
+    <div v-else-if="active === 'ai'" class="panel-empty"><RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink></div>
+    <div v-else-if="readOnly" class="assistant-panel panel-scroll"><PublicSourceList :sources="sources" /></div>
     <CommentPanel
       v-else-if="active === 'comments'"
       :case-record="caseRecord"

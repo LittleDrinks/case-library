@@ -46,14 +46,14 @@ function contextParts() {
 
 function toolLabel(part) {
   const name = part.type.slice(5);
-  return ({ load_capability: "加载 Skill", search_corpus: "检索案例", read_source: "阅读来源", propose_revision: "生成修订建议" })[name]
+  return ({ load_capability: "加载 Skill", search_corpus: "检索案例", list_tag_catalog: "查询标签", read_source: "阅读来源", propose_revision: "生成修订建议" })[name]
     || (name.startsWith("read_skill_resource") ? "阅读 Skill 资源" : name);
 }
 
 function toolState(part) {
   if (part.state === "output-error") return part.errorText || "执行失败";
   if (part.state !== "output-available") return "进行中";
-  return part.output?.status || "已完成";
+  return ({ ok: "已完成", pending: "待确认", unavailable: "无法读取", not_found: "未找到" })[part.output?.status] || "已完成";
 }
 
 onMounted(loadSources);
@@ -68,8 +68,27 @@ const mode = ref("chat");
 const threads = ref([]);
 const threadsLoading = ref(false);
 const conversation = ref(null);
+const nearBottom = ref(true);
 const scrollPositions = new Map();
 const currentTitle = computed(() => threadState.value?.title || "未命名对话");
+
+function trackScroll() {
+  const node = conversation.value;
+  if (node) nearBottom.value = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+}
+
+async function scrollToLatest() {
+  await nextTick();
+  if (conversation.value) conversation.value.scrollTop = conversation.value.scrollHeight;
+  nearBottom.value = true;
+}
+
+watch(messages, () => { if (nearBottom.value) void scrollToLatest(); }, { deep: true });
+watch(artifacts, () => { if (nearBottom.value) void scrollToLatest(); }, { deep: true });
+
+function artifactStatus(artifact) {
+  return ({ accepted: "已接受", rejected: "已拒绝", expired: "已过期", pending: "待确认" })[artifact.status] || artifact.status;
+}
 
 const THREADS_POLL_MS = 2000;
 let threadsTimer = null;
@@ -245,13 +264,17 @@ async function retryRun() {
         >停止</button>
         <RouterLink v-if="!loading && !configured" :to="{ name: 'ai-settings' }">配置 AI 模型</RouterLink>
       </div>
-      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite">
+      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite" @scroll="trackScroll">
         <div v-if="!messages.length && !loading" class="panel-empty">
           <MessageSquareText :size="24" /><span>{{ configured ? "向 AI 提问" : "配置模型后开始对话" }}</span>
         </div>
         <template v-for="message in messages" :key="message.id">
           <article class="ai-message" :class="message.role">
             <b>{{ message.role === "user" ? "我" : "AI" }}</b>
+            <details v-for="(part, index) in (message.parts || []).filter(part => part.type === 'reasoning')" :key="index" class="agent-reasoning" :open="part.state === 'streaming'">
+              <summary><LoaderCircle v-if="part.state === 'streaming'" class="spin" :size="13" />{{ part.state === 'streaming' ? "思考中" : "思考过程" }}</summary>
+              <p>{{ part.text }}</p>
+            </details>
             <p v-if="textParts(message)">{{ textParts(message) }}</p>
             <p
               v-if="skillPartOf(message)"
@@ -298,14 +321,16 @@ async function retryRun() {
           <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
           <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
           <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
-          <p class="agent-artifact-status">状态：{{ artifact.status === "accepted" ? "已接受" : artifact.status === "rejected" ? "已拒绝" : "待确认" }}</p>
+          <p class="agent-artifact-status">{{ artifactStatus(artifact) }}</p>
+          <p v-for="source in artifact.sources || []" :key="source.id" class="agent-artifact-source">依据：{{ source.title || source.id }}</p>
           <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
-            <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
+            <button type="button" data-testid="agent-accept" :disabled="sending" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
           </div>
         </div>
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
+      <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
       <div class="assistant-composer">
         <div class="agent-context-picker">
           <button type="button" title="选择资料" @click="sourcePickerOpen = !sourcePickerOpen; loadSources()">

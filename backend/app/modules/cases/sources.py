@@ -119,14 +119,8 @@ def _base_entry(row: dict, rank: int) -> dict:
 
 
 def _entry(
-    database: Database,
-    source_type: str,
-    row: dict,
-    user: dict | None,
-    origin: str,
-    internal: bool,
-    record: dict,
-    ranks: dict,
+    database: Database, source_type: str, row: dict, user: dict | None,
+    origin: str, internal: bool, record: dict, ranks: dict,
 ) -> dict:
     entry_id = row.get("materialId") or row["id"]
     entry = _base_entry(row, ranks.get((source_type, entry_id), len(ranks)))

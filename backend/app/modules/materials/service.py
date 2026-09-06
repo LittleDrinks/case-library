@@ -17,6 +17,24 @@ from app.modules.materials.models import AccessLevel
 from app.modules.materials.models import CandidateDecision
 from app.modules.search.outbox import SearchOutbox
 
+DETAIL_FIELDS = (
+    "id",
+    "title",
+    "summary",
+    "source",
+    "sourceUrl",
+    "materialType",
+    "authority",
+    "accessLevel",
+    "filename",
+    "mediaType",
+    "size",
+    "publishedAt",
+    "collectedAt",
+    "createdAt",
+    "updatedAt",
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -175,6 +193,22 @@ def can_read_material(material: dict, user: dict | None) -> bool:
     return bool(
         user and (user["role"] == "admin" or material.get("createdBy") == user["id"])
     )
+
+
+def material_detail(material: dict) -> dict:
+    details = {
+        field: material[field]
+        for field in DETAIL_FIELDS
+        if material.get(field) is not None
+    }
+    return {**details, "contentAvailable": True, "hasFile": bool(material.get("blobId"))}
+
+
+def get_material_detail(database, material_id: str, user: dict | None) -> dict:
+    material = database.materials.find_one({"id": material_id, "status": "active"})
+    if not material or not can_read_material(material, user):
+        raise MaterialImportError(404, "素材不存在")
+    return material_detail(material)
 
 
 def download_material(database, store, material_id: str, user: dict | None):

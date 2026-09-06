@@ -253,4 +253,5 @@ export const api = {
     `${attachmentRoot(id)}/${encodeURIComponent(attachmentId)}/content${versionQuery(versionId)}`
   ),
   materialContentUrl: (id) => `/api/materials/${encodeURIComponent(id)}/content`,
+  materialDetail: (id) => request(`/api/materials/${encodeURIComponent(id)}`),
 };

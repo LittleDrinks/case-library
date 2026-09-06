@@ -8,7 +8,6 @@ import SearchAIAnswer from "../components/SearchAIAnswer.vue";
 import SearchGraph from "../components/SearchGraph.vue";
 import SearchFilters from "../components/SearchFilters.vue";
 import SiteHeader from "../components/SiteHeader.vue";
-import { publicUrl } from "../lib/publicUrl.js";
 import { emptyFilters, filterQuery, filtersFromQuery } from "../lib/searchFilters.js";
 
 const route = useRoute();
@@ -49,7 +48,7 @@ function searchKind(value) {
 function destination(item) {
   return item.kind === "case"
     ? { name: "case-public", params: { id: item.id } }
-    : publicUrl(item.sourceUrl);
+    : { name: "material-detail", params: { id: item.id } };
 }
 
 function kindLabel(item) {
@@ -233,7 +232,7 @@ watch(() => route.query.view, (value) => {
         <section class="mixed-results" aria-label="检索结果">
           <article v-for="item in items" :key="`${item.kind}-${item.id}`" :id="anchorId(item)" class="mixed-result" tabindex="-1">
             <span>{{ kindLabel(item) }}</span>
-            <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><a v-else-if="item.kind === 'material' && destination(item)" :href="destination(item)" target="_blank" rel="noopener noreferrer">{{ item.title }}</a><span v-else>{{ item.title }}</span></h2>
+            <h2><RouterLink v-if="item.kind === 'case' || (item.kind === 'material' && item.contentAvailable)" :to="destination(item)">{{ item.title }}</RouterLink><span v-else>{{ item.title }}</span></h2>
             <p>{{ item.summary || "暂无摘要" }}</p>
             <small>{{ metaLine(item) }}</small>
           </article>

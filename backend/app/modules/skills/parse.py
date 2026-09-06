@@ -172,8 +172,7 @@ def _validate_name(name: str) -> None:
 
 
 def _resource_files(
-    archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
-    entry: zipfile.ZipInfo, root: str,
+    archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo], entry: zipfile.ZipInfo, root: str,
 ) -> tuple[PackageFile, ...]:
     files: list[PackageFile] = []
     seen: set[str] = set()
@@ -186,7 +185,6 @@ def _resource_files(
             continue
         _require_safe(relative)
         if relative in seen:
-            # ZIP 允许同名成员：清单记首个哈希、按名读取却命中末个内容，必须整体拒绝。
             raise SkillPackageError(422, f"包内存在重复资源路径：{relative}")
         seen.add(relative)
         total += info.file_size
