@@ -208,12 +208,14 @@ class AgentRepository:
         metadata: dict[str, object], assistant_id: str,
         client_request_id: str | None = None, owner_id: str | None = None,
         quota_ids: tuple[str, ...] = (), default_title: str | None = None,
+
         base_revision: int | None = None, target: ArtifactTarget | None = None,
     ) -> AgentRun:
         try:
             run = _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, session, default_title,
+
                 base_revision, target,
             ))
         except DuplicateKeyError as error:

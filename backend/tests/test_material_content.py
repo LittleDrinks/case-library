@@ -117,3 +117,35 @@ def test_unapproved_and_inactive_materials_are_hidden(client: TestClient) -> Non
     disabled = client.get(f"/api/materials/{disabled_id}/content")
 
     assert (candidate.status_code, disabled.status_code) == (404, 404)
+
+
+def test_material_detail_returns_content_metadata_without_storage_keys(
+    client: TestClient,
+) -> None:
+    material_id, _admin = _approved_material(client, "detail.txt", b"detail", "public")
+    response = client.get(f"/api/materials/{material_id}")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["title"] == "detail"
+    assert body["contentAvailable"] is True
+    assert body["downloadAvailable"] is True
+    assert not {"blobId", "sha256", "createdBy", "provenance"} & body.keys()
+
+
+def test_material_detail_and_download_hide_denied_inactive_and_missing_records(
+    client: TestClient,
+) -> None:
+    private_id, admin = _approved_material(client, "private-detail.txt", b"private", "private")
+    inactive_id, admin = _approved_material(client, "inactive-detail.txt", b"inactive", "public")
+    client.app.state.database.materials.update_one(
+        {"id": inactive_id}, {"$set": {"status": "disabled"}}
+    )
+    _logout(client, admin)
+    _login(client, "user", "user123")
+
+    detail = client.get(f"/api/materials/{private_id}")
+    download = client.get(f"/api/materials/{private_id}/content")
+    inactive = client.get(f"/api/materials/{inactive_id}")
+    missing = client.get("/api/materials/not-a-material")
+    assert {response.status_code for response in (detail, download, inactive, missing)} == {404}

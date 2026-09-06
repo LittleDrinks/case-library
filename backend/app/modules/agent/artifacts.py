@@ -117,10 +117,10 @@ def decide_artifact(
     database: Database, case_id: str, thread_id: str, artifact_id: str, user: dict,
     decision: ArtifactDecision,
 ) -> dict:
-    """接受或拒绝 Artifact；接受在事务内恰好写一次正文，重复决定返回原决定。
+    """接受或拒绝 Artifact；接受在事务内重验并恰好写一次正文，重复决定返回原决定。
 
-    运行未到终态前拒绝决定；同向重复返回原结果，反向决定返回稳定冲突；
-    基线被越过时读取侧展示 expired。
+    事务内先校验 Thread 归属（案例+用户），再校验 Artifact 绑定该 Thread；
+    幂等与冲突路径同样执行校验，伪造 threadId 时不产生任何变更或事件。
     """
     artifact, case = transaction(
         database,

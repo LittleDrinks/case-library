@@ -18,6 +18,7 @@ from app.modules.agent.models import (
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
+
     ArtifactTarget,
 )
 from app.modules.agent.recovery import (
@@ -409,8 +410,7 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
     if plan.retry_message_id:
         run = repository.retry_run(
             thread, plan.retry_message_id, assistant_id,
-            owner_id=worker_id, quota_ids=quota_ids,
-            base_revision=base_revision, target=target,
+            owner_id=worker_id, quota_ids=quota_ids, base_revision=base_revision, target=target,
         )
     else:
         run = repository.start_run(

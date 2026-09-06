@@ -8,6 +8,7 @@ import CaseDetailView from "./views/CaseDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
+import MaterialDetailView from "./views/MaterialDetailView.vue";
 import MaterialExplorerView from "./views/MaterialExplorerView.vue";
 import MyCasesView from "./views/MyCasesView.vue";
 import SearchView from "./views/SearchView.vue";
@@ -28,6 +29,11 @@ const routes = [
     name: "materials",
     component: MaterialExplorerView,
     meta: { requiresAuth: true },
+  },
+  {
+    path: "/materials/:id",
+    name: "material-detail",
+    component: MaterialDetailView,
   },
   {
     path: "/my-cases",
