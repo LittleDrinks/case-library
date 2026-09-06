@@ -4,8 +4,6 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
-export const CASE_EDIT_SKILL_ID = "case-edit-skill";
-
 function textParts(message) {
   return (message?.parts || [])
     .filter((part) => part.type === "text")
@@ -79,14 +77,14 @@ function writePreference(caseId, threadId) {
   }
 }
 
-async function resolveSnapshot(caseId) {
-  const preferred = readPreference(caseId);
-  if (!preferred) return api.agentThread(caseId);
+async function resolveSnapshot(caseId, state) {
+  const preferred = readPreference(state.preferenceKey);
+  if (!preferred) return api.agentThread(caseId, null, state.versionId);
   try {
     return await api.agentThread(caseId, preferred);
   } catch (error) {
     if (error.status !== 404) throw error;
-    return api.agentThread(caseId);
+    return api.agentThread(caseId, null, state.versionId);
   }
 }
 
@@ -145,13 +143,14 @@ async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
   const results = await Promise.allSettled([
-    resolveSnapshot(caseId), api.aiSettings(), api.listSkills(),
+    resolveSnapshot(caseId, state), api.aiSettings(), api.listSkills(),
   ]);
   if (!isCurrent(state, generation)) return;
   const [threadResult, settingsResult, skillsResult] = results;
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
     state.threadId.value = threadResult.value.id;
+    restoreSkill(state, threadResult.value);
     replaceChat(state, buildChat(caseId, threadResult.value, state));
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
@@ -170,8 +169,9 @@ async function selectThread(caseId, state, threadId) {
     if (!isCurrent(state, generation)) return;
     state.snapshot.value = snapshot;
     state.threadId.value = snapshot.id;
+    restoreSkill(state, snapshot);
     replaceChat(state, buildChat(caseId, snapshot, state));
-    writePreference(caseId, snapshot.id);
+    writePreference(state.preferenceKey, snapshot.id);
   } catch (requestError) {
     if (isCurrent(state, generation)) state.error.value = requestError.message || "对话加载失败";
   } finally {
@@ -180,18 +180,18 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
-function messageParts(state, text) {
-  const parts = [{ type: "text", text }];
+function messageParts(state, text, contextParts) {
+  const parts = [{ type: "text", text }, ...contextParts];
   const skillId = state.selectedSkillId.value;
   if (skillId) parts.push({ type: "data-skill", data: { skillId } });
   return parts;
 }
 
-async function sendChat(caseId, state, text, generation) {
+async function sendChat(caseId, state, text, generation, contextParts) {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({ parts: messageParts(state, text) });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
@@ -248,24 +248,30 @@ async function renameThread(caseId, state, threadId, title) {
 }
 
 async function createThread(caseId, state) {
-  const created = await api.agentCreateThread(caseId, null, session.csrfToken);
+  const created = await api.agentCreateThread(caseId, null, session.csrfToken, state.versionId);
   await selectThread(caseId, state, created.id);
 }
 
 function threadActions(caseId, state) {
   return {
-    listThreads: () => api.agentThreads(caseId),
+    listThreads: () => api.agentThreads(caseId, state.versionId),
     selectThread: (threadId) => selectThread(caseId, state, threadId),
     createThread: () => createThread(caseId, state),
     renameThread: (threadId, title) => renameThread(caseId, state, threadId, title),
   };
 }
 
-function createState() {
+function restoreSkill(state, snapshot) {
+  const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
+  state.selectedSkillId.value = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId || "";
+}
+
+function createState(caseId, versionId) {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
-    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID),
+    skills: ref([]), selectedSkillId: ref(""), versionId,
+    preferenceKey: `${session.user?.id || "anonymous"}:${caseId}:${versionId || "draft"}`,
     generation: 0, disposed: false,
   };
 }
@@ -310,10 +316,10 @@ function bindLifecycle(state, recover) {
   });
 }
 
-export function useAgentChat(caseId) {
-  const state = createState();
+export function useAgentChat(caseId, versionId = "") {
+  const state = createState(caseId, versionId);
   const at = () => state.generation;
-  const send = (text) => sendChat(caseId, state, text, at());
+  const send = (text, parts = []) => sendChat(caseId, state, text, at(), parts);
   const stop = () => stopChat(caseId, state, at());
   const retry = (messageId) => retryChat(caseId, state, at(), messageId);
   const decide = (artifactId, decision) => decideArtifact(caseId, state, at(), artifactId, decision);

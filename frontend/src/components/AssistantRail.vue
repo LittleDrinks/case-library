@@ -1,12 +1,11 @@
 <script setup>
 import {
-  ChevronDown, ChevronUp, MessageCircle, MessageSquareText, Paperclip, Sparkles,
+  ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles,
 } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
 import VersionPanel from "./VersionPanel.vue";
-import WritingCandidatePanel from "./WritingCandidatePanel.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
@@ -34,9 +33,8 @@ const emit = defineEmits([
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
-  { id: "chat", label: "对话", icon: MessageSquareText },
   { id: "comments", label: "批注", icon: MessageCircle },
-  { id: "files", label: "附件", icon: Paperclip },
+  { id: "files", label: "资料", icon: Paperclip },
 ];
 function select(tab) {
   emit("select", tab);
@@ -62,25 +60,10 @@ function select(tab) {
       </button>
     </nav>
 
-    <WritingCandidatePanel
-      v-if="active === 'ai'"
-      :case-title="caseTitle"
-      :case-document="caseDocument"
-      :case-id="caseRecord.id"
-      :revision="caseRecord.revision"
-      :user="user"
-      :editable="editable"
-      :selection="selection"
-      :writing-context="writingContext"
-      :apply-candidate="applyCandidate"
-      :rollback-candidate-batch="rollbackCandidateBatch"
-      :candidate-invalidation="candidateInvalidation"
-      @candidate-previews="emit('candidate-previews', $event)"
-    />
-
     <AgentChatPanel
-      v-else-if="active === 'chat'"
+      v-if="active === 'ai'"
       :case-record="caseRecord"
+      :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
     />
 

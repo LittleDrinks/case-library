@@ -184,7 +184,7 @@ async function loadAnnotations() {
 const sources = ref([]);
 
 async function loadSources() {
-  try { sources.value = await api.listCaseSources(caseId()); }
+  try { sources.value = (await api.listSources(caseId())).entries; }
   catch { sources.value = []; }
 }
 

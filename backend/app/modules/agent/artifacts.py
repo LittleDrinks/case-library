@@ -17,7 +17,7 @@ from app.modules.agent.models import (
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
 from app.modules.agent.repository import AgentRepository, transaction
-from app.modules.cases.service import CaseError, case_view
+from app.modules.cases.service import CaseError, internal_case_view
 from app.modules.cases.snapshots import record_snapshot
 
 
@@ -43,9 +43,10 @@ def propose_artifact(
 
 def _target(document: dict, paragraph_index: int) -> ArtifactTarget:
     rows = prosemirror.paragraphs(document)
-    if paragraph_index < 0 or paragraph_index >= len(rows):
+    target = next((row for row in rows if row["paragraphIndex"] == paragraph_index), None)
+    if target is None:
         raise CaseError(422, "目标段落不存在")
-    return ArtifactTarget(paragraphIndex=paragraph_index, quote=rows[paragraph_index]["quote"])
+    return ArtifactTarget(paragraphIndex=paragraph_index, quote=target["quote"])
 
 
 def _current_case(database: Database, case_id: str, session=None) -> dict:
@@ -96,7 +97,7 @@ def decide_artifact(
             database, case_id, thread_id, artifact_id, user, decision, session
         ),
     )
-    return {"artifact": artifact, "case": case_view(case)}
+    return {"artifact": artifact, "case": internal_case_view(case, user)}
 
 
 def _decide(database, case_id, thread_id, artifact_id, user, decision, session):

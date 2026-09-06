@@ -45,7 +45,7 @@ async function loadAttachments() {
     [rows.value, materials.value, sources.value] = await Promise.all([
       api.listAttachments(props.caseRecord.id),
       api.listCaseMaterials(props.caseRecord.id),
-      api.listCaseSources(props.caseRecord.id),
+      api.listSources(props.caseRecord.id).then((result) => result.entries),
     ]);
   } catch (caught) {
     error.value = caught.message || "附件加载失败";
@@ -118,6 +118,8 @@ function removeSource(row) {
     sourceConflict.value = `「${row.title}」在正文中已有引用，请先删除或替换引用标记再移除来源。`;
     return Promise.resolve();
   }
+  if (row.sourceType === "attachment") return remove(row);
+  if (row.sourceType === "material") return removeMaterial(row);
   return mutate(row.id, (revision) => api.removeCaseSource(
     props.caseRecord.id, row.id, revision, props.user.csrfToken,
   ));
@@ -127,14 +129,14 @@ watch(() => props.citedKeys, () => { sourceConflict.value = ""; });
 
 function canDownload(row) {
   if (row.accessLevel === "public") return true;
-  if (row.accessLevel === "campus") return Boolean(props.user);
+  if (row.accessLevel === "campus") return Boolean(props.user?.campusVerified || props.user?.role === "admin");
   return Boolean(props.user && (
     props.user.role === "admin" || props.user.id === props.caseRecord.ownerId
   ));
 }
 
 function restriction(row) {
-  return row.accessLevel === "campus" ? "登录后可下载" : "仅作者与管理员可下载";
+  return row.accessLevel === "campus" ? "校内认证后可下载" : "仅作者与管理员可下载";
 }
 
 function sizeLabel(size) {
@@ -171,11 +173,12 @@ onMounted(loadAttachments);
           <li v-for="(row, index) in sources" :key="row.id" :class="{ 'citation-active': isActiveCitation(row) }">
             <BookOpen :size="18" aria-hidden="true" />
             <div class="attachment-copy">
-              <b>〔{{ index + 1 }}〕{{ row.title }}</b>
+              <b>〔{{ row.number ?? index + 1 }}〕{{ row.title }}</b>
               <span>{{ sourceMeta(row) || "案例来源" }}</span>
               <small v-if="!row.contentAvailable"><LockKeyhole :size="12" />内容按权限开放</small>
             </div>
             <a
+              v-if="row.contentAvailable"
               class="attachment-icon"
               :href="caseVersionUrl(row)"
               target="_blank"

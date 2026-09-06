@@ -55,7 +55,8 @@ function writingContext(activeEditor, from, to) {
     .textBetween(section.sectionFrom, section.sectionTo, "\n").trim();
   const citation = activeEditor.isActive("citation")
     ? activeEditor.getAttributes("citation") : null;
-  return { ...section, quote, from, to, sectionText, citation };
+  const paragraphIndex = activeEditor.state.doc.resolve(from).index(0);
+  return { ...section, quote, from, to, sectionText, citation, paragraphIndex };
 }
 
 function positionTrigger(context) {

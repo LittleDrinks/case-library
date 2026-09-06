@@ -1,11 +1,15 @@
 <script setup>
-import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
-import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
+import { ChevronDown, LoaderCircle, MessageSquareText, Send, Paperclip } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useAgentChat } from "../composables/useAgentChat.js";
+import { api } from "../api.js";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
+  writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised"]);
 
@@ -15,7 +19,45 @@ const {
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   skills, selectedSkillId,
   listThreads, selectThread, createThread, renameThread,
-} = useAgentChat(props.caseRecord.id);
+} = useAgentChat(props.caseRecord.id, props.versionId);
+const availableSources = ref([]);
+const chosenSources = ref([]);
+const sourceQuery = ref("");
+const sourcePickerOpen = ref(false);
+const filteredSources = computed(() => availableSources.value.filter(
+  (source) => source.title.toLowerCase().includes(sourceQuery.value.toLowerCase()),
+));
+
+async function loadSources() {
+  try { availableSources.value = (await api.listSources(props.caseRecord.id, props.versionId)).entries; }
+  catch { availableSources.value = []; }
+}
+
+function contextParts() {
+  const parts = chosenSources.value.map((source) => ({
+    type: "data-source", data: { sourceType: source.sourceType, id: source.id },
+  }));
+  const selection = props.writingContext;
+  if (selection?.quote && Number.isInteger(selection.paragraphIndex)) {
+    parts.push({ type: "data-selection", data: { paragraphIndex: selection.paragraphIndex, quote: selection.quote } });
+  }
+  return parts;
+}
+
+function toolLabel(part) {
+  const name = part.type.slice(5);
+  return ({ load_capability: "加载 Skill", search_corpus: "检索案例", read_source: "阅读来源", propose_revision: "生成修订建议" })[name]
+    || (name.startsWith("read_skill_resource") ? "阅读 Skill 资源" : name);
+}
+
+function toolState(part) {
+  if (part.state === "output-error") return part.errorText || "执行失败";
+  if (part.state !== "output-available") return "进行中";
+  return part.output?.status || "已完成";
+}
+
+onMounted(loadSources);
+watch(() => props.caseRecord.revision, loadSources);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -110,7 +152,6 @@ function skillPartOf(message) {
 }
 
 function skillName(skillId) {
-  if (skillId === CASE_EDIT_SKILL_ID) return "案例修订工作流";
   return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
 }
 
@@ -150,7 +191,7 @@ async function submit() {
   if (!canSend.value) return;
   const text = draft.value.trim();
   draft.value = "";
-  await send(text);
+  await send(text, contextParts());
 }
 
 async function stopRun() {
@@ -220,11 +261,11 @@ async function retryRun() {
           </article>
           <template v-if="message.role === 'assistant'">
             <p
-              v-for="part in toolParts(message).filter((item) => item.type === 'tool-load_capability')"
+              v-for="part in toolParts(message)"
               :key="part.toolCallId"
               class="agent-tool-trace"
               data-testid="agent-skill-load"
-            >{{ skillLoadLabel(part) }}</p>
+            ><details><summary>{{ toolLabel(part) }} · {{ toolState(part) }}</summary><pre>{{ part.output || part.input }}</pre></details></p>
             <div
               v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
               :key="part.toolCallId"
@@ -258,7 +299,7 @@ async function retryRun() {
           <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
           <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
           <p class="agent-artifact-status">状态：{{ artifact.status === "accepted" ? "已接受" : artifact.status === "rejected" ? "已拒绝" : "待确认" }}</p>
-          <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
+          <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
             <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
           </div>
@@ -266,6 +307,20 @@ async function retryRun() {
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
       <div class="assistant-composer">
+        <div class="agent-context-picker">
+          <button type="button" title="选择资料" @click="sourcePickerOpen = !sourcePickerOpen; loadSources()">
+            <Paperclip :size="15" />资料 {{ chosenSources.length || "" }}
+          </button>
+          <span v-if="writingContext?.quote">已选正文</span>
+          <div v-if="sourcePickerOpen" class="agent-source-options">
+            <input v-model="sourceQuery" type="search" placeholder="查找资料" aria-label="查找资料" />
+            <label v-for="source in filteredSources" :key="`${source.sourceType}:${source.id}`">
+              <input v-model="chosenSources" type="checkbox" :value="source" />
+              <span>{{ source.title }}</span>
+            </label>
+            <p v-if="!filteredSources.length">暂无资料</p>
+          </div>
+        </div>
         <div class="assistant-skill-picker">
           <label for="agent-skill-select">Skill</label>
           <select
@@ -275,7 +330,6 @@ async function retryRun() {
             data-testid="skill-select"
             :disabled="loading || sending"
           >
-            <option :value="CASE_EDIT_SKILL_ID">案例修订工作流（默认）</option>
             <option value="">不使用 Skill</option>
             <option v-for="skill in skills" :key="skill.id" :value="skill.id">
               {{ skillOptionLabel(skill) }}

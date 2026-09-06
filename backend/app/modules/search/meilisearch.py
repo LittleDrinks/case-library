@@ -315,7 +315,11 @@ def _case_access(principal: Principal) -> str:
         return 'docClass = "case-private"'
     own = _and('docClass = "case-private"', f"createdBy = {_quote(principal.user_id)}")
     if not principal.verified:
-        return own
+        public = _and(
+            'docClass = "case-public"',
+            f"createdBy != {_quote(principal.user_id)}",
+        )
+        return _or(public, own)
     others = _and(
         'docClass = "case-campus"', f"createdBy != {_quote(principal.user_id)}"
     )

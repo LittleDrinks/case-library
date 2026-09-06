@@ -12,6 +12,10 @@ const props = defineProps({
 });
 const emit = defineEmits(["update:tagIds", "retry"]);
 const open = ref(false);
+const query = ref("");
+const filteredGroups = computed(() => props.groups.map((group) => ({
+  ...group, tags: group.tags.filter((tag) => `${group.name} ${tag.name}`.includes(query.value.trim())),
+})).filter((group) => group.tags.length));
 const labels = computed(() => {
   const index = tagIndex(props.groups);
   return props.tagIds.map(id => ({ id, name: index.get(id)?.name || id }));
@@ -50,8 +54,9 @@ function remove(id) {
       <div v-if="editable" class="case-tag-editor">
         <button type="button" :aria-expanded="open" @click="open = !open">设置标签<ChevronDown :size="12" /></button>
         <div v-if="open" class="case-tag-popover">
+          <input v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
           <p v-if="!groups.length" class="case-tags-state">管理员尚未维护标签目录</p>
-          <fieldset v-for="group in groups" :key="group.id">
+          <fieldset v-for="group in filteredGroups" :key="group.id">
             <legend>{{ group.name }}<b v-if="group.requiredForSubmission">投稿必填</b></legend>
             <label v-for="tag in group.tags" :key="tag.id">
               <input type="checkbox" :checked="tagIds.includes(tag.id)" @change="toggle(tag.id, $event)" />

@@ -84,8 +84,9 @@ def ordered_entries(
 ) -> list[dict]:
     internal = is_internal(record, user)
     rows = _source_rows(database, record)
+    ranks = _citation_ranks(record)
     entries = [
-        _entry(database, source_type, row, user, origin, internal, record)
+        _entry(database, source_type, row, user, origin, internal, record, ranks)
         for source_type, row in rows
     ]
     entries.sort(key=lambda item: item["_sort"])
@@ -95,9 +96,17 @@ def ordered_entries(
     return entries
 
 
-def _base_entry(row: dict, origin: str) -> tuple[dict, tuple]:
+def _citation_ranks(record: dict) -> dict[tuple[str | None, str | None], int]:
+    """正文引用按首次出现顺序编号，未引用来源稳定排在引用来源之后。"""
+    refs = citation_refs(record.get("document") or {})
+    return {
+        (ref["sourceType"], ref["sourceId"]): index for index, ref in enumerate(refs)
+    }
+
+
+def _base_entry(row: dict, rank: int) -> dict:
     entry_id = row.get("materialId") or row["id"]
-    entry = {
+    return {
         "sourceType": "attachment",
         "id": entry_id,
         "title": row.get("title") or row.get("name", ""),
@@ -105,9 +114,8 @@ def _base_entry(row: dict, origin: str) -> tuple[dict, tuple]:
         "version": None,
         "url": "",
         "contentAvailable": False,
-        "_sort": (row.get("createdAt") or "", entry_id),
+        "_sort": (rank, row.get("createdAt") or "", entry_id),
     }
-    return entry, (entry_id,)
 
 
 def _entry(
@@ -118,10 +126,12 @@ def _entry(
     origin: str,
     internal: bool,
     record: dict,
+    ranks: dict,
 ) -> dict:
-    entry, _ = _base_entry(row, origin)
+    entry_id = row.get("materialId") or row["id"]
+    entry = _base_entry(row, ranks.get((source_type, entry_id), len(ranks)))
     entry["sourceType"] = source_type
-    entry["url"] = _entry_url(database, source_type, row, origin)
+    entry["url"] = _entry_url(database, source_type, row, origin, record)
     entry["contentAvailable"] = _content_available(
         database, source_type, row, user, internal
     )
@@ -159,12 +169,23 @@ def _attachment_readable(row: dict, user: dict | None) -> bool:
     return False
 
 
-def _entry_url(database: Database, source_type: str, row: dict, origin: str) -> str:
+def _entry_url(
+    database: Database, source_type: str, row: dict, origin: str, record: dict
+) -> str:
     if source_type == "case":
         return source_case_url(origin, row["sourceCaseId"], row["versionId"])
     if source_type == "material":
         return f"{origin}/api/materials/{row.get('materialId') or row['id']}/content"
-    return f"{origin}/api/cases/{row['caseId']}/attachments/{row['id']}/content"
+    url = f"{origin}/api/cases/{row['caseId']}/attachments/{row['id']}/content"
+    version_id = _containing_version_id(record)
+    if version_id:
+        url = f"{url}?versionId={version_id}"
+    return url
+
+
+def _containing_version_id(record: dict) -> str | None:
+    """冻结版本记录携带 caseId，其附件链接必须定位该版本的快照内容。"""
+    return record["id"] if "caseId" in record else None
 
 
 def _case_origin(database: Database, row: dict) -> tuple[str | None, str | None]:

@@ -348,7 +348,16 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
     ("principal", "expected"),
     [
         (Principal(None, "anonymous"), 'docClass = "case-public"'),
-        (Principal("u-1", "user"), 'docClass = "case-private"'),
+        (
+            Principal("u-1", "user"),
+            '(docClass = "case-public" AND createdBy != "u-1" OR '
+            'docClass = "case-private" AND createdBy = "u-1")',
+        ),
+        (
+            Principal("u-1", "user", verified=True),
+            '(docClass = "case-private" AND createdBy = "u-1" OR '
+            'docClass = "case-campus" AND createdBy != "u-1")',
+        ),
         (Principal("u-admin", "admin"), 'docClass = "case-private"'),
     ],
 )
@@ -359,7 +368,7 @@ def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
     MeilisearchCatalog(client).search(request)
 
     case_filter = client.batches[0][0]["filter"]
-    assert expected in case_filter
+    assert case_filter == f'kind = "case" AND {expected}'
     assert ("createdBy" in case_filter) is (principal.role == "user")
 
 

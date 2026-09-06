@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { AlertTriangle, BookMarked, Download, FilePenLine, LoaderCircle, RefreshCw } from "@lucide/vue";
+import { AlertTriangle, BookMarked, Download, FilePenLine, LoaderCircle, RefreshCw, MessageSquareText, X } from "@lucide/vue";
+import AgentChatPanel from "../components/AgentChatPanel.vue";
 import { useRoute } from "vue-router";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
 import PublishedDocument from "../components/PublishedDocument.vue";
@@ -19,12 +20,15 @@ const loading = ref(true);
 const error = ref("");
 const canOpenWorkbench = ref(false);
 const sources = ref([]);
+const chatOpen = ref(false);
 const pinnedVersionId = computed(() => String(route.query.versionId || ""));
 const sourcesVersionId = computed(() => (
   pinnedVersionId.value || caseRecord.value?.publishedVersionId || ""
 ));
 const outline = computed(() => documentOutline(caseRecord.value?.document));
-const exportUrl = computed(() => `/api/cases/${encodeURIComponent(caseId)}/public/export.docx`);
+const exportUrl = computed(() => sourcesVersionId.value
+  ? `/api/cases/${encodeURIComponent(caseId)}/versions/${encodeURIComponent(sourcesVersionId.value)}/export.docx`
+  : `/api/cases/${encodeURIComponent(caseId)}/public/export.docx`);
 
 async function loadCase() {
   loading.value = true;
@@ -45,7 +49,7 @@ async function loadSources() {
     return;
   }
   try {
-    sources.value = await api.listCaseSources(caseId, sourcesVersionId.value);
+    sources.value = (await api.listSources(caseId, sourcesVersionId.value)).entries;
   } catch {
     sources.value = [];
   }
@@ -120,9 +124,10 @@ watch(pinnedVersionId, initialize);
             <ul v-if="caseRecord.theoryPoints?.length" class="case-detail-tags">
               <li v-for="point in caseRecord.theoryPoints" :key="point">{{ point }}</li>
             </ul>
-            <PublicAttachmentList :case-id="caseId" :version-id="sourcesVersionId" :is-owner="canOpenWorkbench" />
-            <PublicMaterialList :case-id="caseId" :version-id="sourcesVersionId" />
             <PublicSourceList :sources="sources" />
+            <button v-if="session.user" class="case-detail-workbench" type="button" @click="chatOpen = true">
+              <MessageSquareText :size="16" />讨论本案例
+            </button>
             <AddSourceToCase
               v-if="session.user"
               :source-case-id="caseId"
@@ -135,5 +140,9 @@ watch(pinnedVersionId, initialize);
         </div>
       </template>
     </main>
+    <aside v-if="chatOpen && caseRecord && sourcesVersionId" class="reader-chat-drawer" aria-label="本案例私人对话">
+      <header><b>本案例对话</b><button type="button" title="关闭对话" @click="chatOpen = false"><X :size="18" /></button></header>
+      <AgentChatPanel :key="sourcesVersionId" :case-record="caseRecord" :version-id="sourcesVersionId" read-only />
+    </aside>
   </div>
 </template>

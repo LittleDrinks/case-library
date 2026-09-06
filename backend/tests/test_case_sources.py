@@ -211,6 +211,67 @@ def test_sources_endpoint_orders_and_numbers_all_entries(client: TestClient) -> 
     assert case_entry["version"].startswith("v")
 
 
+def test_sources_order_by_body_citations_and_pin_frozen_attachment_links(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    assert mount_material(client, auth, "m-kcsz").status_code == 201
+    source_id = mount_source(client, auth, "c-02").json()["id"]
+    cited_attachment = upload_attachment(client, auth)
+    spare_attachment = upload_attachment(client, auth)
+    assert (
+        cite_document(
+            client,
+            auth,
+            [
+                {
+                    "type": "citation",
+                    "attrs": {
+                        "sourceType": "attachment",
+                        "sourceId": cited_attachment["id"],
+                    },
+                },
+                {
+                    "type": "citation",
+                    "attrs": {"sourceType": "case", "sourceId": source_id},
+                },
+            ],
+        ).status_code
+        == 200
+    )
+    submitted = client.post(
+        "/api/cases/c-draft-1/lifecycle",
+        headers=headers(auth),
+        json={"command": "submit", "revision": revision(client)},
+    )
+    assert submitted.status_code == 200
+    version_id = submitted.json()["version"]["id"]
+
+    live = client.get("/api/cases/c-draft-1/sources").json()["entries"]
+    live_link = next(
+        entry for entry in live if entry["id"] == cited_attachment["id"]
+    )
+    assert "?versionId" not in live_link["url"]
+
+    frozen = client.get(
+        "/api/cases/c-draft-1/sources", params={"versionId": version_id}
+    ).json()["entries"]
+    assert [entry["id"] for entry in frozen] == [
+        cited_attachment["id"],
+        source_id,
+        "m-kcsz",
+        spare_attachment["id"],
+    ]
+    assert [entry["number"] for entry in frozen] == [1, 2, 3, 4]
+    link = next(
+        entry for entry in frozen if entry["id"] == cited_attachment["id"]
+    )
+    assert link["url"].endswith(
+        f"/api/cases/c-draft-1/attachments/{cited_attachment['id']}"
+        f"/content?versionId={version_id}"
+    )
+
+
 def test_public_pinned_read_and_export_permissions(client: TestClient) -> None:
     login(client)
     admin_client = other_client(client)

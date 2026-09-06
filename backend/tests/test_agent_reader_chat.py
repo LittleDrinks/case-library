@@ -185,7 +185,7 @@ def test_reader_cannot_decide_artifacts(client: TestClient) -> None:
     reader = _login(client, READER)
 
     response = client.post(
-        f"/api/cases/{CASE}/agent/artifacts/artifact-x/decision",
+        f"/api/cases/{CASE}/agent/thread/thread-x/artifacts/artifact-x/decision",
         headers=_csrf(reader),
         json={"decision": "accepted"},
     )

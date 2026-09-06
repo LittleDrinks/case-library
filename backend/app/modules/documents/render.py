@@ -45,13 +45,32 @@ def _format_marks(run: Run, node: dict) -> None:
     run.font.strike = "strike" in marks
 
 
-def _citation_number(node: dict, numbers: dict) -> str | None:
+def _citation_key(node: dict) -> tuple[str | None, str | None] | None:
     for mark in node.get("marks", []):
         if mark.get("type") != "citation":
             continue
         attrs = mark.get("attrs", {})
-        return numbers.get((attrs.get("sourceType"), attrs.get("sourceId")))
+        return (attrs.get("sourceType"), attrs.get("sourceId"))
     return None
+
+
+def _inline_atoms(
+    nodes: list[dict],
+) -> list[tuple[str | None, dict | None, tuple[str | None, str | None] | None]]:
+    """拍平内联节点；硬换行与嵌套边界切断引用标记的连续区间。"""
+    atoms: list[
+        tuple[str | None, dict | None, tuple[str | None, str | None] | None]
+    ] = []
+    for node in nodes:
+        if node.get("type") == "hardBreak":
+            atoms.append((None, None, None))
+        elif node.get("type") == "text":
+            atoms.append((str(node.get("text", "")), node, _citation_key(node)))
+        elif node.get("content"):
+            atoms.append((None, None, None))
+            atoms.extend(_inline_atoms(node["content"]))
+            atoms.append((None, None, None))
+    return atoms
 
 
 def _add_citation_run(paragraph: Paragraph, number: int, font: str, size: int) -> None:
@@ -63,19 +82,21 @@ def _add_citation_run(paragraph: Paragraph, number: int, font: str, size: int) -
 def _add_inlines(
     paragraph: Paragraph, nodes: list[dict], font: str, size: int, numbers: dict
 ) -> None:
-    for node in nodes:
-        if node.get("type") == "hardBreak":
+    atoms = _inline_atoms(nodes)
+    for index, (text, node, key) in enumerate(atoms):
+        if text is None:
             paragraph.add_run().add_break()
             continue
-        if node.get("type") == "text":
-            run = paragraph.add_run(str(node.get("text", "")))
-            set_run_font(run, font, size)
-            _format_marks(run, node)
-            number = _citation_number(node, numbers)
-            if number is not None:
-                _add_citation_run(paragraph, number, font, size)
-        elif node.get("content"):
-            _add_inlines(paragraph, node["content"], font, size, numbers)
+        run = paragraph.add_run(text)
+        set_run_font(run, font, size)
+        _format_marks(run, node)
+        # 相邻同引用属性的文本（即使加粗/斜体不同）只产生一个上标标记。
+        runs_on = index + 1 < len(atoms) and atoms[index + 1][2] == key
+        if key is None or runs_on:
+            continue
+        number = numbers.get(key)
+        if number is not None:
+            _add_citation_run(paragraph, number, font, size)
 
 
 def _add_title(document: DocxDocument, title: str) -> None:

@@ -12,7 +12,7 @@ export function sourceKey(source) {
 
 export function citationNumberMap(sources) {
   const map = new Map();
-  (sources || []).forEach((source, index) => map.set(sourceKey(source), index + 1));
+  (sources || []).forEach((source, index) => map.set(sourceKey(source), source.number ?? index + 1));
   return map;
 }
 
@@ -21,7 +21,7 @@ export function collectCitationKeys(document) {
   const stack = [...(document?.content || [])];
   while (stack.length) {
     const node = stack.shift();
-    stack.push(...(node?.content || []));
+    stack.unshift(...(node?.content || []));
     (node?.marks || []).filter((mark) => mark.type === "citation").forEach((mark) => {
       const key = citationKey(mark.attrs?.sourceType, mark.attrs?.sourceId);
       if (!keys.includes(key)) keys.push(key);
@@ -31,6 +31,7 @@ export function collectCitationKeys(document) {
 }
 
 export function caseVersionUrl(source) {
+  if (source.url) return source.url;
   const base = `#/cases/${encodeURIComponent(source.caseId)}`;
   return source.versionId ? `${base}?versionId=${encodeURIComponent(source.versionId)}` : base;
 }
@@ -75,8 +76,10 @@ function markerWidget(mark, sources) {
 
 function citationDecorations(document, sources) {
   const decorations = [];
-  document.descendants((node, pos) => {
+  document.descendants((node, pos, parent, index) => {
     const mark = node.isText && node.marks.find((item) => item.type.name === "citation");
+    const next = parent?.maybeChild(index + 1);
+    if (mark && next?.marks.some((item) => item.eq(mark))) return false;
     if (mark) decorations.push(Decoration.widget(
       pos + node.nodeSize, () => markerWidget(mark, sources),
       { key: `citation-${pos}`, side: 1 },

@@ -331,6 +331,62 @@ def test_docx_export_preserves_blockquote_paragraphs(client: TestClient) -> None
     assert [paragraph_text(item) for item in quotes] == ["引用第一段", "引用第二段"]
 
 
+def test_docx_export_emits_one_marker_per_contiguous_citation(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    csrf = {"X-CSRF-Token": auth["csrfToken"]}
+    case = client.post(
+        "/api/cases", headers=csrf, json={"title": "引用标记测试"}
+    ).json()
+    case_id = case["id"]
+    mounted = client.post(
+        f"/api/cases/{case_id}/materials",
+        headers=csrf,
+        json={"materialId": "m-kcsz", "revision": case["revision"]},
+    )
+    assert mounted.status_code == 201
+    citation = {
+        "type": "citation",
+        "attrs": {"sourceType": "material", "sourceId": "m-kcsz"},
+    }
+    document = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "加粗依据",
+                        "marks": [{"type": "bold"}, citation],
+                    },
+                    {
+                        "type": "text",
+                        "text": "斜体依据",
+                        "marks": [{"type": "italic"}, citation],
+                    },
+                    {"type": "text", "text": "后续正文"},
+                    {"type": "text", "text": "再次引用", "marks": [citation]},
+                ],
+            }
+        ],
+    }
+    revision = client.get(f"/api/cases/{case_id}").json()["revision"]
+    saved = client.patch(
+        f"/api/cases/{case_id}", headers=csrf, json={"document": document, "revision": revision}
+    )
+    assert saved.status_code == 200
+    root = document_xml(client.get(f"/api/cases/{case_id}/export.docx").content)
+    body = next(
+        paragraph_text(item)
+        for item in root.iter(w("p"))
+        if paragraph_text(item).startswith("加粗依据")
+    )
+
+    assert body == "加粗依据斜体依据〔1〕后续正文再次引用〔1〕"
+
+
 def test_docx_export_preserves_the_required_case_structure(client: TestClient) -> None:
     root = document_xml(create_default_case(client))
     texts = [paragraph_text(item) for item in root.iter(w("p"))]

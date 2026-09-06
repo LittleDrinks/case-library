@@ -19,8 +19,9 @@ function sourceMeta(row) {
     <ul v-else>
       <li v-for="(row, index) in sources" :key="row.id">
         <BookOpen :size="16" aria-hidden="true" />
-        <span>〔{{ index + 1 }}〕{{ row.title }}</span>
+        <span>〔{{ row.number ?? index + 1 }}〕{{ row.title }}</span>
         <a
+          v-if="row.contentAvailable"
           :href="caseVersionUrl(row)"
           target="_blank"
           rel="noopener noreferrer"
