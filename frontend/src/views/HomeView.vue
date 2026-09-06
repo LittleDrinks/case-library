@@ -110,17 +110,15 @@ onMounted(loadCases);
               <h2 id="material-title">推荐素材</h2><RouterLink to="/search">检索</RouterLink>
             </header>
             <div v-if="recommendedMaterials.length">
-              <a
+              <RouterLink
                 v-for="item in recommendedMaterials"
                 :key="item.id"
                 class="home-material-item"
-                :href="item.sourceUrl || undefined"
-                :target="item.sourceUrl ? '_blank' : undefined"
-                :rel="item.sourceUrl ? 'noreferrer' : undefined"
+                :to="{ name: 'material-detail', params: { id: item.id } }"
               >
                 <b>{{ item.title }}</b>
                 <span>{{ item.source || "来源未设置" }} · {{ item.materialType || "素材" }}</span>
-              </a>
+              </RouterLink>
             </div>
             <p v-else class="home-empty">暂无推荐</p>
           </section>

@@ -19,10 +19,11 @@ class TagGroupPatch(BaseModel):
         default=None, alias="requiredForSubmission"
     )
     sort_key: int | None = Field(default=None, alias="sortKey")
+    enabled: bool | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> TagGroupPatch:
-        fields = (self.name, self.required_for_submission, self.sort_key)
+        fields = (self.name, self.required_for_submission, self.sort_key, self.enabled)
         if all(value is None for value in fields):
             raise ValueError("至少提供一项修改")
         return self
@@ -43,9 +44,15 @@ class TagPatch(BaseModel):
         default=None, min_length=1, max_length=100, alias="groupId"
     )
     sort_key: int | None = Field(default=None, alias="sortKey")
+    enabled: bool | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> TagPatch:
-        if self.name is None and self.group_id is None and self.sort_key is None:
+        if (
+            self.name is None
+            and self.group_id is None
+            and self.sort_key is None
+            and self.enabled is None
+        ):
             raise ValueError("至少提供一项修改")
         return self

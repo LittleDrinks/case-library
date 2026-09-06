@@ -133,10 +133,17 @@ def _initialize_search_delivery(database: Database) -> None:
 
 
 def _initialize_agent_threads(database: Database) -> None:
+    if "ownerId_1_caseId_1_isDefault_1" in database.agent_threads.index_information():
+        database.agent_threads.drop_index("ownerId_1_caseId_1_isDefault_1")
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     database.agent_threads.create_index(
-        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
+        [("ownerId", ASCENDING), ("caseId", ASCENDING)],
         unique=True,
+        partialFilterExpression={"isDefault": True},
+        name="agent_one_default_thread",
+    )
+    database.agent_threads.create_index(
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("updatedAt", DESCENDING)]
     )
 
 
@@ -144,6 +151,14 @@ def _initialize_agent_messages(database: Database) -> None:
     database.agent_messages.create_index([("id", ASCENDING)], unique=True)
     database.agent_messages.create_index(
         [("threadId", ASCENDING), ("messageSeq", ASCENDING)], unique=True
+    )
+
+
+def _initialize_skills(database: Database) -> None:
+    database.skills.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index(
+        [("skillId", ASCENDING), ("version", ASCENDING)], unique=True
     )
 
 
@@ -209,3 +224,4 @@ def initialize(database: Database) -> None:
     _initialize_tags(database)
     _initialize_search_delivery(database)
     _initialize_agent(database)
+    _initialize_skills(database)

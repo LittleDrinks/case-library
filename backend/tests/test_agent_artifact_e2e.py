@@ -113,9 +113,11 @@ def _wait_for_catalog(client: httpx.Client) -> None:
     pytest.fail("e2e catalog never became searchable")
 
 
-def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str):
+def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str,
+            thread_id: str):
     return client.post(
-        f"/api/cases/{case_id}/agent/artifacts/{artifact_id}/decision",
+        f"/api/cases/{case_id}/agent/thread/{thread_id}"
+        f"/artifacts/{artifact_id}/decision",
         headers={"X-CSRF-Token": csrf},
         json={"decision": "accepted"},
     )
@@ -179,9 +181,9 @@ def test_accept_writes_revision_snapshot_and_replays_decision():
     try:
         database = mongo.get_default_database()
         case_id, _run, artifact = _tracer_case(client, csrf, database)
-        first = _accept(client, csrf, case_id, artifact["id"])
+        first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert first.status_code == 200, first.text
-        duplicate = _accept(client, csrf, case_id, artifact["id"])
+        duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert duplicate.status_code == 200
         assert duplicate.json()["artifact"]["status"] == "accepted"
         _assert_atomic_decision(database, case_id, artifact)
@@ -195,7 +197,10 @@ def test_accept_writes_revision_snapshot_and_replays_decision():
 
 def _concurrent_accepts(client, csrf, case_id, artifact, database):
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_accept, client, csrf, case_id, artifact["id"]) for _ in range(2)]
+        futures = [
+            pool.submit(_accept, client, csrf, case_id, artifact["id"], artifact["threadId"])
+            for _ in range(2)
+        ]
         responses = [future.result(timeout=30) for future in futures]
     assert [response.status_code for response in responses] == [200, 200]
     _assert_atomic_decision(database, case_id, artifact)
@@ -225,7 +230,7 @@ def test_accept_rejects_stale_revision_on_real_replica_set():
             json={"revision": 1, "document": changed},
         )
         assert patch.status_code == 200
-        response = _accept(client, csrf, case_id, artifact["id"])
+        response = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert response.status_code == 409
         assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "pending"
         assert database.cases.find_one({"id": case_id})["revision"] == 2

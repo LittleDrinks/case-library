@@ -1,4 +1,4 @@
-"""标签目录领域服务：管理员维护标签组与标签，检索侧校验标签身份。"""
+"""标签目录领域服务：管理员维护标签组与标签，停用保留身份，检索侧校验标签身份。"""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
 from app.core.ids import new_id
 from app.modules.cases.service import CaseError
 
 GROUP_SORT = [("sortKey", ASCENDING), ("name", ASCENDING)]
-GROUP_FIELDS = ("id", "name", "requiredForSubmission", "sortKey")
-TAG_FIELDS = ("id", "groupId", "name", "sortKey")
+GROUP_FIELDS = ("id", "name", "requiredForSubmission", "sortKey", "enabled")
+TAG_FIELDS = ("id", "groupId", "name", "sortKey", "enabled")
 
 
 def _now() -> str:
@@ -47,18 +48,19 @@ def _tag(database: Database, tag_id: str) -> dict:
     return tag
 
 
-def _assert_group_name_free(database: Database, name: str, exclude: str = "") -> None:
-    query = {"name": name, "id": {"$ne": exclude}}
-    if database.tag_groups.find_one(query):
-        raise CaseError(409, "同名标签组已存在")
+def _raise_conflict(error: DuplicateKeyError) -> None:
+    raise CaseError(409, "名称与现有标签目录冲突") from error
 
 
-def _assert_tag_name_free(
-    database: Database, group_id: str, name: str, exclude: str = ""
-) -> None:
-    query = {"groupId": group_id, "name": name, "id": {"$ne": exclude}}
-    if database.tags.find_one(query):
-        raise CaseError(409, "该标签组内已存在同名标签")
+def _apply_update(collection, query: dict, changes: dict) -> dict:
+    try:
+        return collection.find_one_and_update(
+            query,
+            {"$set": {**changes, "updatedAt": _now()}},
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError as error:
+        _raise_conflict(error)
 
 
 def list_groups(database: Database) -> list[dict]:
@@ -71,83 +73,56 @@ def list_groups(database: Database) -> list[dict]:
 
 def create_group(database: Database, body: dict, user: dict | None) -> dict:
     _require_admin(user)
-    _assert_group_name_free(database, body["name"])
-    group = {"id": new_id("tgg"), **body, "createdAt": _now(), "updatedAt": _now()}
-    database.tag_groups.insert_one(group)
+    group = {
+        "id": new_id("tgg"),
+        **body,
+        "enabled": True,
+        "createdAt": _now(),
+        "updatedAt": _now(),
+    }
+    try:
+        database.tag_groups.insert_one(group)
+    except DuplicateKeyError as error:
+        _raise_conflict(error)
     return group_view(group)
 
 
 def update_group(database: Database, group_id: str, body: dict, user) -> dict:
     _require_admin(user)
     _group(database, group_id)
-    if body.get("name"):
-        _assert_group_name_free(database, body["name"], exclude=group_id)
     changes = {key: value for key, value in body.items() if value is not None}
-    updated = database.tag_groups.find_one_and_update(
-        {"id": group_id},
-        {"$set": {**changes, "updatedAt": _now()}},
-        return_document=ReturnDocument.AFTER,
-    )
-    return group_view(updated)
-
-
-def delete_group(database: Database, group_id: str, user) -> dict:
-    _require_admin(user)
-    _group(database, group_id)
-    if database.tags.find_one({"groupId": group_id}):
-        raise CaseError(409, "标签组内仍有标签，不能删除")
-    database.tag_groups.delete_one({"id": group_id})
-    return {"status": "deleted"}
+    return group_view(_apply_update(database.tag_groups, {"id": group_id}, changes))
 
 
 def create_tag(database: Database, group_id: str, body: dict, user) -> dict:
     _require_admin(user)
     _group(database, group_id)
-    _assert_tag_name_free(database, group_id, body["name"])
     tag = {
         "id": new_id("tag"),
         "groupId": group_id,
         **body,
+        "enabled": True,
         "createdAt": _now(),
         "updatedAt": _now(),
     }
-    database.tags.insert_one(tag)
+    try:
+        database.tags.insert_one(tag)
+    except DuplicateKeyError as error:
+        _raise_conflict(error)
     return tag_view(tag)
 
 
 def update_tag(database: Database, tag_id: str, body: dict, user) -> dict:
     _require_admin(user)
-    current = _tag(database, tag_id)
-    target_group = body.get("groupId") or current["groupId"]
-    if body.get("groupId"):
-        _group(database, target_group)
-    name = body.get("name") or current["name"]
-    _assert_tag_name_free(database, target_group, name, exclude=tag_id)
-    changes = {key: value for key, value in body.items() if value is not None}
-    updated = database.tags.find_one_and_update(
-        {"id": tag_id},
-        {"$set": {**changes, "updatedAt": _now()}},
-        return_document=ReturnDocument.AFTER,
-    )
-    return tag_view(updated)
-
-
-def _tag_in_use(database: Database, tag_id: str) -> bool:
-    if database.cases.find_one({"tagIds": tag_id}):
-        return True
-    return bool(database.case_versions.find_one({"metadata.tagIds": tag_id}))
-
-
-def delete_tag(database: Database, tag_id: str, user) -> dict:
-    _require_admin(user)
     _tag(database, tag_id)
-    if _tag_in_use(database, tag_id):
-        raise CaseError(409, "标签已被案例使用，不能删除")
-    database.tags.delete_one({"id": tag_id})
-    return {"status": "deleted"}
+    if body.get("groupId"):
+        _group(database, body["groupId"])
+    changes = {key: value for key, value in body.items() if value is not None}
+    return tag_view(_apply_update(database.tags, {"id": tag_id}, changes))
 
 
 def unknown_tag_ids(database: Database, tag_ids: list[str]) -> list[str]:
+    """停用标签仍保留身份，历史引用不视为缺失。"""
     wanted = list(dict.fromkeys(tag_ids))
     found = set(database.tags.distinct("id", {"id": {"$in": wanted}}))
     return sorted(set(wanted) - found)
@@ -162,8 +137,10 @@ def ensure_tags_exist(database: Database, tag_ids: list[str]) -> None:
 
 
 def validate_submission_tags(database: Database, tag_ids: list[str]) -> list[dict]:
-    """返回给定标签集合未覆盖的必填组；投稿流程据此阻止缺组提交。"""
-    required = list(database.tag_groups.find({"requiredForSubmission": True}))
+    """返回启用必填组中未被覆盖的组；停用组不再约束投稿，缺组时阻止提交。"""
+    required = list(
+        database.tag_groups.find({"requiredForSubmission": True, "enabled": True})
+    )
     if not required:
         return []
     chosen = set(tag_ids or [])

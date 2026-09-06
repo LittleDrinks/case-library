@@ -22,6 +22,8 @@ from app.modules.materials.errors import MaterialImportError
 from app.modules.search.client import create_reader
 from app.modules.search.meilisearch import MeilisearchCatalog, SearchUnavailable
 from app.modules.search.state import MongoCatalogState
+from app.modules.skills.parse import SkillPackageError
+from app.modules.skills.service import SkillError
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,10 @@ def _search_error(_request: Request, error: SearchUnavailable) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": str(error)})
 
 
+def _skill_error(_request: Request, error: SkillError | SkillPackageError) -> JSONResponse:
+    return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
+
+
 def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api = FastAPI(title="Case Library API", lifespan=lifespan)
     api.state.database = database
@@ -75,6 +81,8 @@ def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api.add_exception_handler(AttachmentError, _attachment_error)
     api.add_exception_handler(MaterialImportError, _material_error)
     api.add_exception_handler(SearchUnavailable, _search_error)
+    api.add_exception_handler(SkillError, _skill_error)
+    api.add_exception_handler(SkillPackageError, _skill_error)
     api.include_router(router)
     return api
 

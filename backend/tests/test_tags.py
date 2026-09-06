@@ -1,4 +1,4 @@
-"""标签目录 API 与提交校验服务的契约测试（案例 tagIds 保存归后续票）。"""
+"""标签目录 API 与提交校验服务的契约测试（停用保留身份；案例 tagIds 保存归后续票）。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.cases.service import CaseError
-from app.modules.tags.service import ensure_tags_exist, validate_submission_tags
+from app.modules.tags.seed import seed_demo_tags
+from app.modules.tags.service import (
+    ensure_tags_exist,
+    unknown_tag_ids,
+    validate_submission_tags,
+)
 
 TGG_SEEDED = "tgg-seed-4"
 TAG_SEEDED = "tag-seed-4-1"
@@ -29,6 +34,8 @@ def test_catalog_lists_seeded_groups_publicly(client: TestClient) -> None:
     names = {group["name"]: group for group in groups}
     assert set(names) == {"学科", "课程", "案例类型", "思政元素"}
     assert all(group["requiredForSubmission"] is False for group in groups)
+    assert all(group["enabled"] is True for group in groups)
+    assert all(tag["enabled"] is True for group in groups for tag in group["tags"])
     elements = names["思政元素"]["tags"]
     assert {"id": TAG_SEEDED, "name": "科学家精神"}.items() <= set(
         elements[0].items()
@@ -43,22 +50,34 @@ def test_admin_manages_groups_and_tags(client: TestClient) -> None:
         "name": "育人场域",
         "requiredForSubmission": True,
         "sortKey": 0,
+        "enabled": True,
     }
     renamed = client.patch(
         f"/api/tag-groups/{group['id']}", headers=auth, json={"name": "育人场景"}
     )
     assert renamed.json()["name"] == "育人场景"
-    _assert_group_and_tag_lifecycle(client, auth, group["id"])
+    _assert_group_and_tag_disable_lifecycle(client, auth, group["id"])
 
 
-def _assert_group_and_tag_lifecycle(client: TestClient, auth: dict, group_id: str) -> None:
+def _assert_group_and_tag_disable_lifecycle(
+    client: TestClient, auth: dict, group_id: str
+) -> None:
     tag = client.post(
         f"/api/tag-groups/{group_id}/tags", headers=auth, json={"name": "场馆育人"}
     )
     assert tag.status_code == 201
-    assert client.delete(f"/api/tag-groups/{group_id}", headers=auth).status_code == 409
-    assert client.delete(f"/api/tags/{tag.json()['id']}", headers=auth).status_code == 200
-    assert client.delete(f"/api/tag-groups/{group_id}", headers=auth).status_code == 200
+    disabled_tag = client.patch(
+        f"/api/tags/{tag.json()['id']}", headers=auth, json={"enabled": False}
+    )
+    assert disabled_tag.json()["enabled"] is False
+    disabled_group = client.patch(
+        f"/api/tag-groups/{group_id}", headers=auth, json={"enabled": False}
+    )
+    assert disabled_group.json()["enabled"] is False
+    catalog = client.get("/api/tag-groups").json()
+    saved = {row["id"]: row for row in catalog}[group_id]
+    assert saved["enabled"] is False
+    assert saved["tags"][0]["enabled"] is False
 
 
 def _create_group(client: TestClient, auth: dict, name: str, required: bool) -> dict:
@@ -165,12 +184,10 @@ def _create_tag(client: TestClient, auth: dict, group_id: str, name: str) -> int
     ).status_code
 
 
-def test_tag_delete_rejected_while_referenced(client: TestClient) -> None:
-    database = client.app.state.database
-    database.cases.insert_one({"id": "c-tagged", "tagIds": [TAG_SEEDED]})
-    response = client.delete(f"/api/tags/{TAG_SEEDED}", headers=_csrf(client))
-    assert response.status_code == 409
-    database.cases.delete_one({"id": "c-tagged"})
+def test_physical_deletion_is_not_available(client: TestClient) -> None:
+    auth = _csrf(client)
+    assert client.delete(f"/api/tag-groups/{TGG_SEEDED}", headers=auth).status_code == 405
+    assert client.delete(f"/api/tags/{TAG_SEEDED}", headers=auth).status_code == 405
 
 
 def test_unknown_group_and_tag_are_not_found(client: TestClient) -> None:
@@ -184,17 +201,42 @@ def test_validate_submission_tags_reports_uncovered_required_groups(
     client: TestClient,
 ) -> None:
     database = client.app.state.database
+    auth = _csrf(client)
     assert validate_submission_tags(database, []) == []
-    group = client.post(
-        "/api/tag-groups", headers=_csrf(client), json={"name": "必填组", "requiredForSubmission": True}
-    ).json()
-    tag = client.post(
-        f"/api/tag-groups/{group['id']}/tags", headers=_csrf(client), json={"name": "必填标签"}
-    ).json()
+    group = _create_group(client, auth, "必填组", True)
+    tag = client.post(f"/api/tag-groups/{group['id']}/tags", headers=auth, json={"name": "必填标签"}).json()
     missing = validate_submission_tags(database, [])
-    assert missing == [{"id": group["id"], "name": "必填组", "requiredForSubmission": True, "sortKey": 0}]
+    assert missing == [{
+        "id": group["id"],
+        "name": "必填组",
+        "requiredForSubmission": True,
+        "sortKey": 0,
+        "enabled": True,
+    }]
     assert validate_submission_tags(database, [tag["id"]]) == []
     assert validate_submission_tags(database, [TAG_SEEDED]) == missing
+
+
+def test_disabled_required_group_no_longer_blocks_submission(
+    client: TestClient,
+) -> None:
+    database = client.app.state.database
+    auth = _csrf(client)
+    group = client.post(
+        "/api/tag-groups", headers=auth, json={"name": "停用必填组", "requiredForSubmission": True}
+    ).json()
+    assert validate_submission_tags(database, []) != []
+    client.patch(f"/api/tag-groups/{group['id']}", headers=auth, json={"enabled": False})
+    assert validate_submission_tags(database, []) == []
+
+
+def test_disabled_tag_keeps_identity_for_history(client: TestClient) -> None:
+    database = client.app.state.database
+    client.patch(
+        f"/api/tags/{TAG_SEEDED}", headers=_csrf(client), json={"enabled": False}
+    )
+    ensure_tags_exist(database, [TAG_SEEDED])
+    assert unknown_tag_ids(database, [TAG_SEEDED]) == []
 
 
 def test_ensure_tags_exist_rejects_unknown_ids(client: TestClient) -> None:
@@ -205,3 +247,24 @@ def test_ensure_tags_exist_rejects_unknown_ids(client: TestClient) -> None:
         ensure_tags_exist(database, ["tag-missing"])
     assert error.value.status_code == 422
     assert "tag-missing" in error.value.detail
+
+
+def test_seed_rerun_preserves_admin_changes(client: TestClient) -> None:
+    database = client.app.state.database
+    auth = _csrf(client)
+    client.patch(
+        f"/api/tags/{TAG_SEEDED}",
+        headers=auth,
+        json={"name": "管理员改名", "enabled": False},
+    )
+    client.patch(
+        f"/api/tag-groups/{TGG_SEEDED}", headers=auth, json={"name": "管理员改组名"}
+    )
+
+    seed_demo_tags(database)
+
+    tag = database.tags.find_one({"id": TAG_SEEDED})
+    assert tag["name"] == "管理员改名"
+    assert tag["enabled"] is False
+    group = database.tag_groups.find_one({"id": TGG_SEEDED})
+    assert group["name"] == "管理员改组名"

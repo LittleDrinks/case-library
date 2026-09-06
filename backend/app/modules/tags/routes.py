@@ -10,8 +10,6 @@ from app.modules.tags.models import TagCreate, TagGroupCreate, TagGroupPatch, Ta
 from app.modules.tags.service import (
     create_group,
     create_tag,
-    delete_group,
-    delete_tag,
     list_groups,
     update_group,
     update_tag,
@@ -50,16 +48,6 @@ def save(
     return update_group(database, group_id, body.model_dump(by_alias=True), user)
 
 
-@group_router.delete("/{group_id}")
-def remove(
-    group_id: str,
-    database: DatabaseDependency,
-    user: UserDependency,
-    _csrf: dict = Depends(require_csrf),
-):
-    return delete_group(database, group_id, user)
-
-
 @group_router.post("/{group_id}/tags", status_code=201)
 def add_tag(
     group_id: str,
@@ -80,13 +68,3 @@ def save_tag(
     _csrf: dict = Depends(require_csrf),
 ):
     return update_tag(database, tag_id, body.model_dump(by_alias=True), user)
-
-
-@tag_router.delete("/{tag_id}")
-def remove_tag(
-    tag_id: str,
-    database: DatabaseDependency,
-    user: UserDependency,
-    _csrf: dict = Depends(require_csrf),
-):
-    return delete_tag(database, tag_id, user)

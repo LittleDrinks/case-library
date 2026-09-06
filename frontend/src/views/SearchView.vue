@@ -8,7 +8,6 @@ import SearchAIAnswer from "../components/SearchAIAnswer.vue";
 import SearchGraph from "../components/SearchGraph.vue";
 import SearchFilters from "../components/SearchFilters.vue";
 import SiteHeader from "../components/SiteHeader.vue";
-import { publicUrl } from "../lib/publicUrl.js";
 import { emptyFilters, filterQuery, filtersFromQuery } from "../lib/searchFilters.js";
 
 const route = useRoute();
@@ -26,7 +25,9 @@ const loading = ref(false);
 const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
 const items = computed(() => payload.value.items);
+const summarySnapshot = ref(null);
 let searchGeneration = 0;
+let summaryRevision = 0;
 
 function tabLabel(kind, label) {
   return `${label} ${payload.value.counts[kind] || 0}`;
@@ -37,9 +38,11 @@ function searchKind(value) {
 }
 
 function destination(item) {
-  return item.kind === "case"
-    ? { name: "case-public", params: { id: item.id } }
-    : publicUrl(item.sourceUrl);
+  if (item.kind === "case") return { name: "case-public", params: { id: item.id } };
+  if (item.kind === "material") {
+    return { name: "material-detail", params: { id: item.id }, query: { ...route.query, from: "search" } };
+  }
+  return "";
 }
 
 function kindLabel(item) {
@@ -71,17 +74,40 @@ function selectView(mode) {
   router.replace({ name: "search", query: routeQuery({ mode }) });
 }
 
+function applyResult(term, result) {
+  payload.value = mergeMetadata(result);
+  submitted.value = term;
+  page.value = result.page;
+  applySummarySnapshot(term);
+}
+
+function applySummarySnapshot(term) {
+  const visible = payload.value.items.slice(0, 15);
+  if (!term || !visible.length) { summarySnapshot.value = null; return; }
+  summaryRevision += 1;
+  summarySnapshot.value = Object.freeze({
+    revision: summaryRevision, query: term,
+    items: Object.freeze(visible.map((item) => Object.freeze({ ...item }))),
+  });
+}
+
+function anchorId(target) {
+  return `result-${target.kind}-${target.id}`;
+}
+
+function locateResult(target) {
+  const card = window.document.getElementById(anchorId(target));
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  card?.focus({ preventScroll: true });
+}
+
 async function requestSearch(term, kind, activeCursor, searchFilters) {
   const current = ++searchGeneration;
   loading.value = true;
   error.value = "";
   try {
     const result = await searchWithSyncRetry(term, kind, activeCursor, searchFilters, () => current === searchGeneration);
-    if (current === searchGeneration) {
-      payload.value = mergeMetadata(result);
-      submitted.value = term;
-      page.value = result.page;
-    }
+    if (current === searchGeneration) applyResult(term, result);
   } catch (caught) {
     if (current === searchGeneration) error.value = caught.message || "检索失败";
   } finally {
@@ -176,7 +202,7 @@ watch(() => route.query.view, (value) => {
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
       <template v-else-if="view === 'list'">
         <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
-        <SearchAIAnswer v-if="submitted" :query="submitted" :items="items" />
+        <SearchAIAnswer v-if="summarySnapshot" :snapshot="summarySnapshot" @locate="locateResult" />
         <div class="result-toolbar">
           <div class="result-tabs" role="tablist" aria-label="资源类型">
             <button v-for="tab in [['all','全部'],['case','案例'],['knowledge','知识'],['material','素材']]" :key="tab[0]" type="button" role="tab" :aria-selected="activeKind === tab[0]" @click="selectKind(tab[0])">
@@ -186,9 +212,9 @@ watch(() => route.query.view, (value) => {
           <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
         </div>
         <section class="mixed-results" aria-label="检索结果">
-          <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">
+          <article v-for="item in items" :key="`${item.kind}-${item.id}`" :id="anchorId(item)" class="mixed-result" tabindex="-1">
             <span>{{ kindLabel(item) }}</span>
-            <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><a v-else-if="item.kind === 'material' && destination(item)" :href="destination(item)" target="_blank" rel="noopener noreferrer">{{ item.title }}</a><span v-else>{{ item.title }}</span></h2>
+            <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><RouterLink v-else-if="item.kind === 'material'" :to="destination(item)">{{ item.title }}</RouterLink><span v-else>{{ item.title }}</span></h2>
             <p>{{ item.summary || "暂无摘要" }}</p>
             <small>{{ metaLine(item) }}</small>
           </article>
