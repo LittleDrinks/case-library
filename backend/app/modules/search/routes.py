@@ -12,7 +12,7 @@ from app.core.dependencies import (
     get_settings,
 )
 from app.modules.auth.dependencies import optional_user
-from app.modules.search.models import SearchQuery, SearchRequest
+from app.modules.search.models import SearchQuery, SearchRequest, SearchResponse
 from app.modules.search.service import CatalogSearch, search_catalog
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -32,7 +32,7 @@ def _respond(query, database, catalog, catalog_state, settings, user):
     )
 
 
-@router.get("")
+@router.get("", response_model=SearchResponse)
 def search(
     query: Annotated[SearchQuery, Query()],
     database: DatabaseDependency,
@@ -44,7 +44,7 @@ def search(
     return _respond(query, database, catalog, catalog_state, settings, user)
 
 
-@router.post("")
+@router.post("", response_model=SearchResponse)
 def search_documents(
     body: SearchRequest,
     database: DatabaseDependency,

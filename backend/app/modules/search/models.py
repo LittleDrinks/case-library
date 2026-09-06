@@ -105,6 +105,84 @@ class SearchRequest(SearchQuery):
         return self.tag_expression or flat_tag_condition(self.tag_ids, self.tag_mode)
 
 
+class SearchItem(BaseModel):
+    """结果条目：公共字段必填，类型专属字段按 kind 可选。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: Literal["case", "knowledge", "material"]
+    title: str
+    score: int
+    summary: str | None = None
+    publishedAt: str | None = None
+    typeId: str | None = None
+    typeName: str | None = None
+    course: str | None = None
+    author: str | None = None
+    organization: str | None = None
+    stageText: str | None = None
+    audience: str | None = None
+    purpose: str | None = None
+    likes: int | None = None
+    tagIds: list[str] | None = None
+    edition: str | None = None
+    chapterCount: int | None = None
+    sectionCount: int | None = None
+    sourceId: str | None = None
+    chapterId: str | None = None
+    chapter: str | None = None
+    index: int | None = None
+    unit: str | None = None
+    source: str | None = None
+    sourceUrl: str | None = None
+    tags: list[str] | None = None
+    materialType: str | None = None
+    authority: str | None = None
+    accessLevel: str | None = None
+    citedCount: int | None = None
+    filename: str | None = None
+    mediaType: str | None = None
+    size: int | None = None
+    hasFile: bool | None = None
+    contentAvailable: bool | None = None
+
+
+class FacetRow(BaseModel):
+    """分面计数字：value 为维度取值，count 为当前可见结果数。"""
+
+    value: str
+    count: int
+
+
+class CountSummary(BaseModel):
+    """分类计数：与结果页同条件，含受限资料引用计数。"""
+
+    all: int
+    case: int
+    knowledge: int
+    material: int
+
+
+class SearchResponse(BaseModel):
+    """GET/POST /api/search 统一响应：结构对齐现有前端契约。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    kind: Literal["all", "case", "knowledge", "material"]
+    tagCondition: TagExpression | None = None
+    page: int
+    pageSize: int
+    items: list[SearchItem]
+    total: int | None = None
+    counts: CountSummary | None = None
+    facets: dict[str, list[FacetRow]] | None = None
+    metadataIncluded: bool
+    nextCursor: str | None = None
+    previousCursor: str | None = None
+
+
 class SearchSummaryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
