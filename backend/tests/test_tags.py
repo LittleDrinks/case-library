@@ -201,13 +201,10 @@ def test_validate_submission_tags_reports_uncovered_required_groups(
     client: TestClient,
 ) -> None:
     database = client.app.state.database
+    auth = _csrf(client)
     assert validate_submission_tags(database, []) == []
-    group = client.post(
-        "/api/tag-groups", headers=_csrf(client), json={"name": "必填组", "requiredForSubmission": True}
-    ).json()
-    tag = client.post(
-        f"/api/tag-groups/{group['id']}/tags", headers=_csrf(client), json={"name": "必填标签"}
-    ).json()
+    group = _create_group(client, auth, "必填组", True)
+    tag = client.post(f"/api/tag-groups/{group['id']}/tags", headers=auth, json={"name": "必填标签"}).json()
     missing = validate_submission_tags(database, [])
     assert missing == [{
         "id": group["id"],
