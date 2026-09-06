@@ -32,16 +32,14 @@ const restricted = {
 function render() {
   return mount(MaterialExplorerView, {
     global: {
-      stubs: {
-        SiteHeader: true, RouterLink: true, CatalogPagination: true,
-        MaterialDownloadAction: true,
-      },
+      stubs: { SiteHeader: true, RouterLink: { template: "<a><slot /></a>" }, CatalogPagination: true, MaterialDownloadAction: true },
     },
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   api.search.mockResolvedValue({
     items: [available, restricted], facets: {}, total: 2, page: 1,
     metadataIncluded: true, nextCursor: null, previousCursor: null,
@@ -100,10 +98,33 @@ test("素材翻页不写 URL 并保留首屏分面与总数", async () => {
   wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
   await flushPromises();
 
-  expect(api.search).toHaveBeenLastCalledWith("", "material", "next-token", 50, {});
+  expect(api.search).toHaveBeenLastCalledWith("", "material", "next-token", 20, {});
   expect(replace).not.toHaveBeenCalled();
   expect(wrapper.getComponent({ name: "CatalogPagination" }).props()).toMatchObject({
     page: 2, total: 51,
   });
   expect(wrapper.text()).toContain("受限素材");
+});
+
+test("翻页清除上一页的素材选择", async () => {
+  mockMaterialPages();
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("[aria-label='选择可用素材']").setValue(true);
+  wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
+  await flushPromises();
+
+  expect(wrapper.text()).toContain("已选择 0 条");
+});
+
+test("筛选重置素材列表的分页状态和选择", async () => {
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("[aria-label='选择可用素材']").setValue(true);
+  await wrapper.findAll("input[name='authority']")[1].trigger("change");
+
+  expect(replace).toHaveBeenCalledWith({
+    name: "materials", query: { caseId: "case-1", authority: "original" },
+  });
+  expect(wrapper.text()).toContain("已选择 0 条");
 });

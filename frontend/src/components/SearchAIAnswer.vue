@@ -1,18 +1,20 @@
 <script setup>
 import { Chat } from "@ai-sdk/vue";
 import { DefaultChatTransport } from "ai";
-import { computed, ref, shallowRef, watch } from "vue";
-import { LoaderCircle, RotateCcw } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { ChevronDown, LoaderCircle, RotateCcw } from "@lucide/vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
-import { publicUrl } from "../lib/publicUrl.js";
 
-const props = defineProps({ query: String, items: { type: Array, required: true } });
+const props = defineProps({
+  snapshot: { type: Object, required: true },
+});
+const emit = defineEmits(["locate"]);
 const chat = shallowRef(null);
 const settings = ref(null);
 const override = ref("idle");
-const signature = computed(() => props.items.map((item) => `${item.kind}:${item.id}`).join("|"));
-const contextItems = computed(() => props.items.slice(0, 15));
+const expanded = ref(false);
+const contextItems = computed(() => props.snapshot.items.slice(0, 15));
 let generation = 0;
 
 function textParts(message) {
@@ -24,7 +26,7 @@ const text = computed(() => textParts(chat.value?.messages.findLast((item) => it
 const error = computed(() => "AI 服务暂不可用");
 const state = computed(() => {
   if (!session.user) return "login";
-  if (["checking", "skipped", "unconfigured", "error"].includes(override.value)) return override.value;
+  if (["checking", "unconfigured", "error", "idle"].includes(override.value)) return override.value;
   if (!settings.value) return "checking";
   if (!settings.value.configured) return "unconfigured";
   if (chat.value?.status === "error") return "error";
@@ -32,15 +34,36 @@ const state = computed(() => {
   return text.value ? "complete" : override.value;
 });
 
-function itemDestination(item) {
-  if (item.kind === "case") return { name: "case-public", params: { id: item.id } };
-  return item.kind === "material" ? publicUrl(item.sourceUrl) : "";
+function resolveMarker(raw) {
+  const marker = raw.trim();
+  const ordered = /^\d+$/.test(marker) ? contextItems.value[Number(marker) - 1] : null;
+  const item = ordered || contextItems.value.find((entry) => entry.id === marker);
+  return item ? { item, order: contextItems.value.indexOf(item) + 1 } : null;
 }
 
-function shouldGenerate() {
-  return contextItems.value.length < 3
-    || /哪些|怎么|为什么|如何|吗|？|\?/.test(props.query)
-    || props.query.length >= 15;
+function parseSegments(value) {
+  const segments = [];
+  let last = 0;
+  for (const match of value.matchAll(/〔([^〔〕]+)〕|\[([^\[\]]+)\]/g)) {
+    if (match.index > last) segments.push({ type: "text", value: value.slice(last, match.index) });
+    const resolved = resolveMarker(match[1] ?? match[2]);
+    segments.push(resolved ? { type: "marker", ...resolved } : { type: "text", value: match[0] });
+    last = match.index + match[0].length;
+  }
+  if (last < value.length) segments.push({ type: "text", value: value.slice(last) });
+  return segments;
+}
+
+const segments = computed(() => parseSegments(text.value || ""));
+const citedSources = computed(() => {
+  const cited = new Map();
+  segments.value.filter((segment) => segment.type === "marker")
+    .forEach((segment) => cited.set(`${segment.item.kind}:${segment.item.id}`, segment));
+  return [...cited.values()];
+});
+
+function locate(item) {
+  emit("locate", { kind: item.kind, id: item.id });
 }
 
 function newChat() {
@@ -53,33 +76,33 @@ function newChat() {
   });
 }
 
-function clear(next) {
+function retire(next) {
   generation += 1;
+  chat.value?.stop();
   chat.value = null;
+  settings.value = null;
   override.value = next;
 }
 
-async function generate(force = false) {
-  const current = ++generation;
-  if (!props.query || !props.items.length) return clear("idle");
-  if (!session.user) return clear("login");
-  if (!force && !shouldGenerate()) return clear("skipped");
-  override.value = "checking";
-  try { settings.value = await api.aiSettings(); }
-  catch { override.value = "error"; return; }
+async function generate() {
+  retire("checking");
+  expanded.value = false;
+  if (!props.snapshot.query || !contextItems.value.length) return retire("idle");
+  if (!session.user) return retire("login");
+  const current = generation;
+  const loaded = await api.aiSettings().catch(() => null);
   if (current !== generation) return;
-  if (!settings.value.configured) return;
-  const next = newChat();
-  chat.value = next;
+  settings.value = loaded;
+  if (!loaded) { override.value = "error"; return; }
+  if (!loaded.configured) { override.value = "unconfigured"; return; }
+  chat.value = newChat();
   override.value = "streaming";
-  try {
-    await next.sendMessage({ text: props.query }, {
-      body: { query: props.query, items: contextItems.value },
-    });
-  } catch { /* Chat exposes the transport error through its state. */ }
+  try { await chat.value.sendMessage({ text: props.snapshot.query }, { body: { query: props.snapshot.query, items: contextItems.value } }); }
+  catch { /* Chat exposes the transport error through its state. */ }
 }
 
-watch(() => [props.query, signature.value], () => generate(), { immediate: true });
+watch(() => props.snapshot.revision, () => generate(), { immediate: true });
+onBeforeUnmount(() => retire("idle"));
 </script>
 
 <template>
@@ -87,31 +110,31 @@ watch(() => [props.query, signature.value], () => generate(), { immediate: true 
     <header>
       <span>AI 回答</span>
       <small>基于当前 {{ contextItems.length }} 条可见平台资源 · 仅供参考</small>
-      <button v-if="state === 'complete' || state === 'error'" type="button" title="重新生成" aria-label="重新生成 AI 回答" @click="generate(true)">
+      <button v-if="state === 'complete' || state === 'error'" type="button" title="重新生成" aria-label="重新生成 AI 回答" @click="generate()">
         <RotateCcw :size="14" aria-hidden="true" />
       </button>
     </header>
     <div v-if="state === 'login'" class="ai-answer-state">
       <p>登录后可基于当前检索结果生成摘要。</p>
-      <RouterLink :to="{ name: 'login', query: { redirect: `/search?q=${encodeURIComponent(query)}` } }">登录后生成 AI 回答</RouterLink>
+      <RouterLink :to="{ name: 'login', query: { redirect: `/search?q=${encodeURIComponent(snapshot.query)}` } }">登录后生成 AI 回答</RouterLink>
     </div>
     <div v-else-if="state === 'unconfigured'" class="ai-answer-state">
       <p>当前账号尚未配置可用模型。</p>
       <RouterLink :to="{ name: 'ai-settings' }">配置 AI 模型</RouterLink>
     </div>
-    <div v-else-if="state === 'skipped'" class="ai-answer-state">
-      <p>命中明确，未生成 AI 解读（省流模式）。</p>
-      <button type="button" class="ai-generate" @click="generate(true)">生成 AI 解读</button>
-    </div>
     <p v-else-if="state === 'checking'" class="ai-progress"><LoaderCircle class="spin" :size="16" />检查模型配置</p>
-    <p v-else-if="state === 'streaming' || state === 'complete'" class="ai-answer-text">{{ text }}<span v-if="state === 'streaming'" class="stream-caret" /></p>
+    <template v-else-if="state === 'streaming' || state === 'complete'">
+      <p class="ai-answer-text" :class="{ collapsed: !expanded }"><template v-for="(segment, index) in segments" :key="index"><span v-if="segment.type === 'text'">{{ segment.value }}</span><button v-else type="button" class="ai-marker" @click="locate(segment.item)">〔{{ segment.order }}〕</button></template><span v-if="state === 'streaming'" class="stream-caret" /></p>
+      <button type="button" class="ai-answer-toggle" :aria-expanded="expanded" @click="expanded = !expanded">
+        {{ expanded ? "收起" : "展开全文" }}
+        <ChevronDown :size="14" aria-hidden="true" :class="{ flipped: expanded }" />
+      </button>
+    </template>
     <p v-else-if="state === 'error'" class="ai-answer-error" role="alert">{{ error }}</p>
     <p v-else class="ai-answer-state">当前结果不足以生成摘要。</p>
-    <ol v-if="text" class="ai-answer-sources" aria-label="AI 回答引用来源">
-      <li v-for="(item, index) in contextItems" :key="`${item.kind}-${item.id}`">
-        <RouterLink v-if="item.kind === 'case'" :to="itemDestination(item)">〔{{ index + 1 }}〕{{ item.title }}</RouterLink>
-        <a v-else-if="itemDestination(item)" :href="itemDestination(item)" target="_blank" rel="noopener noreferrer">〔{{ index + 1 }}〕{{ item.title }}</a>
-        <span v-else>〔{{ index + 1 }}〕{{ item.title }}</span>
+    <ol v-if="citedSources.length" class="ai-answer-sources" aria-label="AI 回答引用来源">
+      <li v-for="cited in citedSources" :key="`${cited.item.kind}-${cited.item.id}`">
+        <button type="button" @click="locate(cited.item)">〔{{ cited.order }}〕 {{ cited.item.title }}</button>
       </li>
     </ol>
   </section>
