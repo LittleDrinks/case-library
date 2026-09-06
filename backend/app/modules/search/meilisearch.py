@@ -4,7 +4,9 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Union
+
+from app.modules.search.models import TagExpression, TagLeaf
 
 Kind = Literal["all", "case", "knowledge", "material"]
 Role = Literal["anonymous", "user", "admin"]
@@ -15,13 +17,13 @@ STOP_WORDS = re.compile(
     r"如何|怎么|怎样|请问|是否|可以|能够|通过|把|将|融入|结合|用于|有关|关于|相关|以及|进行|实现"
 )
 FACETS = {
-    "all": ("tag", "publishedWithin"),
-    "case": ("typeName", "audience", "tag", "publishedWithin"),
+    "all": ("tagCatalog", "tag", "publishedWithin"),
+    "case": ("typeName", "audience", "tagCatalog", "publishedWithin"),
     "knowledge": (),
     "material": ("authority", "materialType", "tag", "publishedWithin", "accessLevel"),
 }
 FILTER_FIELDS = {
-    "case": {"typeName": "typeName", "audience": "audience", "tag": "tags"},
+    "case": {"typeName": "typeName", "audience": "audience"},
     "knowledge": {},
     "material": {
         "authority": "authority",
@@ -30,6 +32,7 @@ FILTER_FIELDS = {
         "accessLevel": "accessLevel",
     },
 }
+FACET_FIELDS = {"tag": "tags", "tagCatalog": "tagIds"}
 PERIOD_DAYS = {"7d": 7, "30d": 30, "365d": 365}
 CASE_FIELDS = (
     "id",
@@ -46,6 +49,7 @@ CASE_FIELDS = (
     "audience",
     "purpose",
     "likes",
+    "tagIds",
 )
 KNOWLEDGE_FIELDS = (
     "id",
@@ -137,6 +141,7 @@ class CatalogRequest:
     principal: Principal
     mounted_filter: MountedFilter | None = None
     excluded_keys: tuple[CatalogKey, ...] = ()
+    tag_condition: Union[TagExpression, TagLeaf, None] = None
     include_metadata: bool = True
 
     def __post_init__(self) -> None:
@@ -237,6 +242,22 @@ def _filter_clause(field: str, name: str, values: tuple[str, ...]) -> str:
     return _in(field, values)
 
 
+def _tag_filter(condition: TagExpression | TagLeaf) -> str:
+    """把嵌套混合条件编译为显式括号的 Meilisearch 布尔表达式。"""
+    if isinstance(condition, TagLeaf):
+        return f"tagIds = {_quote(condition.tagId)}"
+    clauses = [_tag_filter(child) for child in condition.children]
+    joined = f" {condition.op.upper()} ".join(clauses)
+    return f"({joined})" if len(clauses) > 1 else joined
+
+
+def _tag_clause(request: CatalogRequest, kind: str) -> str:
+    """原生标签只属于案例：其他类型分支直接不可匹配。"""
+    if request.tag_condition is None:
+        return ""
+    return _tag_filter(request.tag_condition) if kind == "case" else NEVER
+
+
 def _business_clause(request: CatalogRequest, kind: str, skipped: str = "") -> str:
     clauses = []
     for name in request.filters:
@@ -248,7 +269,7 @@ def _business_clause(request: CatalogRequest, kind: str, skipped: str = "") -> s
         if not field:
             return NEVER
         clauses.append(_filter_clause(field, name, values))
-    return _and(*clauses, _mount_clause(request, kind))
+    return _and(*clauses, _tag_clause(request, kind), _mount_clause(request, kind))
 
 
 def _mount_clause(request: CatalogRequest, kind: str) -> str:
@@ -318,6 +339,8 @@ def _knowledge_level(request: CatalogRequest) -> str:
 def _restricted_business(request: CatalogRequest, skipped: str = "") -> str:
     compatible = {"accessLevel", "publishedWithin"}
     incompatible = set(request.filters) - compatible
+    if request.tag_condition is not None:
+        return NEVER
     if any(_values(request.filters, name) for name in incompatible):
         return NEVER
     clauses = []
@@ -422,14 +445,16 @@ def _facet_payload(
     index_uid: str,
     period: str = "",
 ) -> dict:
-    branch = _full_scope(request, name)
+    """标签目录计数使用完整当前条件，其余维度仍跳过自身维度。"""
+    skip = "" if name == "tagCatalog" else name
+    branch = _full_scope(request, skip)
     if period:
-        restricted = _restricted_branch(request, name)
+        restricted = _restricted_branch(request, skip)
         branch = _or(branch, restricted) if restricted != NEVER else branch
         branch = _and(branch, f"publishedAt >= {_quote(_cutoff(period))}")
     payload = _payload(index_uid, request.q, branch)
     if not period:
-        payload["facets"] = ["tags" if name == "tag" else name]
+        payload["facets"] = [FACET_FIELDS.get(name, name)]
     return payload
 
 
@@ -512,8 +537,6 @@ def _full_item(hit: dict, query: str) -> dict:
         "material": MATERIAL_FIELDS,
     }.get(kind, ("id", "kind", "title"))
     item = _present_fields(hit, fields)
-    if kind == "case" and "theoryPoints" not in item:
-        item["theoryPoints"] = list(hit.get("tags") or [])
     if kind == "material":
         item.update({"contentAvailable": True, "hasFile": bool(hit.get("hasFile"))})
     item["score"] = _score(hit, query)
@@ -567,7 +590,7 @@ def _time_rows(responses: dict[str, dict]) -> list[dict]:
 
 
 def _facet_values(responses: dict[str, dict], name: str) -> dict[str, int]:
-    field = "tags" if name == "tag" else name
+    field = FACET_FIELDS.get(name, name)
     values = dict(
         responses[f"facet-{name}-full"].get("facetDistribution", {}).get(field, {})
     )

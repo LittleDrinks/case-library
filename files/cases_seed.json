@@ -193,7 +193,13 @@
       "createdAt": "2026-05-20 10:00",
       "updatedAt": "2026-06-02",
       "submittedAt": null,
-      "publishedAt": "2026-06-02"
+      "publishedAt": "2026-06-02",
+      "tagIds": [
+        "tag-seed-3-2",
+        "tag-seed-2-1",
+        "tag-seed-4-1",
+        "tag-seed-4-5"
+      ]
     },
     "version": {
       "id": "cv-seed-c-02-v1",
@@ -381,7 +387,13 @@
           "discussion": [],
           "ppt": [],
           "reflist": []
-        }
+        },
+        "tagIds": [
+          "tag-seed-3-2",
+          "tag-seed-2-1",
+          "tag-seed-4-1",
+          "tag-seed-4-5"
+        ]
       },
       "sourceRevision": 1,
       "createdBy": "u-admin-demo",
@@ -578,7 +590,12 @@
       "createdAt": "2026-05-20 10:00",
       "updatedAt": "2026-06-02",
       "submittedAt": null,
-      "publishedAt": "2026-06-02"
+      "publishedAt": "2026-06-02",
+      "tagIds": [
+        "tag-seed-3-3",
+        "tag-seed-1-4",
+        "tag-seed-4-1"
+      ]
     },
     "version": {
       "id": "cv-seed-c-05-v1",
@@ -762,7 +779,12 @@
           "discussion": [],
           "ppt": [],
           "reflist": []
-        }
+        },
+        "tagIds": [
+          "tag-seed-3-3",
+          "tag-seed-1-4",
+          "tag-seed-4-1"
+        ]
       },
       "sourceRevision": 1,
       "createdBy": "u-admin-demo",
@@ -963,7 +985,12 @@
       "createdAt": "2026-05-20 10:00",
       "updatedAt": "2026-06-02",
       "submittedAt": null,
-      "publishedAt": "2026-06-02"
+      "publishedAt": "2026-06-02",
+      "tagIds": [
+        "tag-seed-3-3",
+        "tag-seed-1-4",
+        "tag-seed-4-4"
+      ]
     },
     "version": {
       "id": "cv-seed-c-08-v1",
@@ -1151,7 +1178,12 @@
           "discussion": [],
           "ppt": [],
           "reflist": []
-        }
+        },
+        "tagIds": [
+          "tag-seed-3-3",
+          "tag-seed-1-4",
+          "tag-seed-4-4"
+        ]
       },
       "sourceRevision": 1,
       "createdBy": "u-admin-demo",
@@ -1352,7 +1384,13 @@
       "createdAt": "2026-05-20 10:00",
       "updatedAt": "2026-06-02",
       "submittedAt": null,
-      "publishedAt": "2026-06-02"
+      "publishedAt": "2026-06-02",
+      "tagIds": [
+        "tag-seed-3-1",
+        "tag-seed-1-3",
+        "tag-seed-4-1",
+        "tag-seed-4-2"
+      ]
     },
     "version": {
       "id": "cv-seed-c-11-v1",
@@ -1540,7 +1578,13 @@
           "discussion": [],
           "ppt": [],
           "reflist": []
-        }
+        },
+        "tagIds": [
+          "tag-seed-3-1",
+          "tag-seed-1-3",
+          "tag-seed-4-1",
+          "tag-seed-4-2"
+        ]
       },
       "sourceRevision": 1,
       "createdBy": "u-admin-demo",

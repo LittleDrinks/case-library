@@ -15,6 +15,8 @@ from app.modules.materials.routes import content_router as material_content_rout
 from app.modules.materials.routes import router as materials_router
 from app.modules.search.routes import router as search_router
 from app.modules.search.ai_routes import router as search_ai_router
+from app.modules.tags.routes import group_router as tag_group_router
+from app.modules.tags.routes import tag_router as tag_item_router
 
 router = APIRouter()
 router.include_router(operations_router)
@@ -32,3 +34,5 @@ router.include_router(material_candidates_router)
 router.include_router(material_content_router)
 router.include_router(search_router)
 router.include_router(search_ai_router)
+router.include_router(tag_group_router)
+router.include_router(tag_item_router)

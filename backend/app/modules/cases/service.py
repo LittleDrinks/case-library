@@ -16,6 +16,7 @@ CASE_METADATA_FIELDS = (
     "audience",
     "purpose",
     "theoryPoints",
+    "tagIds",
     "citations",
     "kit",
     "likes",
@@ -190,6 +191,8 @@ def _cas_update(database: Database, case_id: str, body: dict) -> dict:
     changes = {
         key: body[key] for key in ("title", "document") if body.get(key) is not None
     }
+    if body.get("tag_ids") is not None:
+        _apply_tags(database, changes, body["tag_ids"])
     changes["updatedAt"] = _now()
     updated = database.cases.find_one_and_update(
         {"id": case_id, "revision": body["revision"]},
@@ -200,3 +203,10 @@ def _cas_update(database: Database, case_id: str, body: dict) -> dict:
         return case_view(updated)
     current = database.cases.find_one({"id": case_id})
     raise RevisionConflict(current["revision"])
+
+
+def _apply_tags(database: Database, changes: dict, tag_ids: list) -> None:
+    from app.modules.tags.service import ensure_tags_exist
+
+    ensure_tags_exist(database, tag_ids)
+    changes["tagIds"] = list(dict.fromkeys(tag_ids))[:50]

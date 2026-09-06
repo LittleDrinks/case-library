@@ -187,6 +187,17 @@ def _initialize_agent(database: Database) -> None:
     _initialize_agent_artifacts(database)
 
 
+def _initialize_tags(database: Database) -> None:
+    database.tag_groups.create_index([("id", ASCENDING)], unique=True)
+    database.tag_groups.create_index([("name", ASCENDING)], unique=True)
+    database.tags.create_index([("id", ASCENDING)], unique=True)
+    database.tags.create_index(
+        [("groupId", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    database.cases.create_index("tagIds")
+    database.case_versions.create_index("metadata.tagIds")
+
+
 def initialize(database: Database) -> None:
     database.client.admin.command("ping")
     _initialize_auth(database)
@@ -197,3 +208,4 @@ def initialize(database: Database) -> None:
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
     _initialize_agent(database)
+    _initialize_tags(database)

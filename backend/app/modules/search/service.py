@@ -10,9 +10,10 @@ from app.modules.search.meilisearch import (
     Principal,
     SearchUnavailable,
 )
-from app.modules.search.models import SearchQuery
+from app.modules.search.models import SearchQuery, TagExpression, TagLeaf
 from app.modules.search.outbox import CatalogTarget
 from app.modules.search.state import CatalogSnapshot
+from app.modules.tags.service import unknown_tag_ids
 
 MAX_SEARCH_ATTEMPTS = 3
 
@@ -47,6 +48,7 @@ class _CatalogSearchPlan:
             principal=_principal(self.search.user),
             mounted_filter=self.mounted_filter,
             excluded_keys=revoked,
+            tag_condition=query.condition(),
             include_metadata=self.cursor.page == 1,
         )
 
@@ -109,7 +111,11 @@ def _stable_search(state, catalog, plan: _CatalogSearchPlan, before: CatalogSnap
 
 def _scope(search: CatalogSearch, target: CatalogTarget, filters: dict) -> str:
     query = search.query
-    scoped = {**filters, "mountedInCaseId": query.mounted_case_id}
+    scoped = {
+        **filters,
+        "mountedInCaseId": query.mounted_case_id,
+        "tagCondition": _condition_dump(query.condition()),
+    }
     return scope_key(
         query.q,
         query.kind,
@@ -120,8 +126,32 @@ def _scope(search: CatalogSearch, target: CatalogTarget, filters: dict) -> str:
     )
 
 
+def _condition_dump(condition: TagExpression | None) -> dict | None:
+    return None if condition is None else condition.model_dump()
+
+
+def _condition_ids(condition) -> list[str]:
+    if condition is None:
+        return []
+    if isinstance(condition, TagLeaf):
+        return [condition.tagId]
+    return [
+        tag_id for child in condition.children for tag_id in _condition_ids(child)
+    ]
+
+
+def _assert_condition_tags(database, condition) -> None:
+    ids = _condition_ids(condition)
+    if not ids:
+        return
+    missing = unknown_tag_ids(database, ids)
+    if missing:
+        raise CaseError(422, f"标签不存在或已删除: {', '.join(missing)}")
+
+
 def _resolve_search(database, search: CatalogSearch, target: CatalogTarget):
     query = search.query
+    _assert_condition_tags(database, query.condition())
     filters = _clean_filters(query.filters())
     scope = _scope(search, target, filters)
     cursor = decode_cursor(query.cursor, scope, search.secret_path)
@@ -135,6 +165,7 @@ def _response(plan: _CatalogSearchPlan, page) -> dict:
     return {
         "query": query.q.strip(),
         "kind": query.kind,
+        "tagCondition": _condition_dump(query.condition()),
         "page": plan.cursor.page,
         "pageSize": query.page_size,
         "items": page.items,
