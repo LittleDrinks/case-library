@@ -206,7 +206,12 @@ async function stopChat(caseId, state, generation) {
     await api.agentCancel(caseId, thread, session.csrfToken);
     if (isCurrent(state, generation)) {
       detachChat(state);
-      await rebuild(caseId, state, generation, thread, true);
+      const snapshot = await rebuild(caseId, state, generation, thread, true);
+      // 取消 ACK 不是终态：快照仍 active 时必须接回恢复流等待收敛，
+      // 否则唯一 reader 已断开，界面停留生成中
+      if (isCurrent(state, generation) && snapshot?.activeRun) {
+        await resume(caseId, state, generation);
+      }
     }
   } finally {
     state.stopping.value = false;
