@@ -66,18 +66,14 @@ def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
             f"{_thread_path(case_id)}/{thread_id}/stream",
-            headers=_csrf(auth),
-            json={
+            headers=_csrf(auth), json={
                 "id": "browser-chat-id",
                 "trigger": "submit-message",
-                "messages": [{
-                    "id": "client-message", "role": "user",
-                    "parts": [
+                "messages": [{"id": "client-message", "role": "user", "parts": [
                         {"type": "text", "text": text},
                         {"type": "data-selection",
                          "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}},
-                    ],
-                }],
+                ]}],
             },
         )
 
@@ -283,16 +279,12 @@ def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:
         thread_id = client.get(_thread_path(case["id"])).json()["id"]
         response = client.post(
             f"{_thread_path(case['id'])}/{thread_id}/stream",
-            headers=_csrf(auth),
-            json={
+            headers=_csrf(auth), json={
                 "id": "browser-chat-id", "trigger": "submit-message",
-                "messages": [{
-                    "id": "client-message", "role": "user",
-                    "parts": [
+                "messages": [{"id": "client-message", "role": "user", "parts": [
                         {"type": "text", "text": "伪造能力"},
                         {"type": "data-skill", "data": {"skillId": "fake-skill"}},
-                    ],
-                }],
+                ]}],
             },
         )
     assert response.status_code == 422

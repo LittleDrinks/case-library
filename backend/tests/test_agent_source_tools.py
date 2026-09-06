@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from fastapi.testclient import TestClient
 
 from app.modules.agent.case_area import dedupe_refs, retained_sources
 from app.modules.agent.deps import ToolDeps
@@ -69,6 +70,12 @@ def _test_db():
 
 
 def _seed_source_case(database) -> None:
+    _seed_catalog_case(database)
+    _seed_versioned_sources(database)
+    _seed_working_case(database)
+
+
+def _seed_catalog_case(database) -> None:
     database.cases.insert_one({
         "id": "c-02", "ownerId": "u-other", "publicationStatus": "public",
         "workflowStatus": "published", "publishedVersionId": "cv-seed-c-02-v1",
@@ -81,6 +88,27 @@ def _seed_source_case(database) -> None:
             {"type": "paragraph", "content": [{"type": "text", "text": "案例A发布正文"}]},
         ]},
     })
+
+
+def _seed_versioned_sources(database) -> None:
+    database.cases.insert_one({
+        "id": "c-src", "ownerId": "u-other", "publicationStatus": "public",
+        "workflowStatus": "published", "publishedVersionId": "cv-2", "revision": 1,
+        "title": "来源案例", "document": {"type": "doc", "content": []},
+    })
+    for number, content in [(1, "第一版内容"), (2, "第二版内容")]:
+        database.case_versions.insert_one({
+            "id": f"cv-{number}", "caseId": "c-src", "number": number,
+            "title": f"来源案例 v{number}", "document": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": content}]},
+            ]},
+        })
+    database.lifecycle_events.insert_one(
+        {"caseId": "c-src", "action": "approve", "versionId": "cv-1"}
+    )
+
+
+def _seed_working_case(database) -> None:
     database.cases.insert_one({
         "id": "c-draft-1", "ownerId": "u-1", "revision": 1,
         "workflowStatus": "draft", "title": "草稿案例",
@@ -88,26 +116,6 @@ def _seed_source_case(database) -> None:
             {"type": "paragraph", "content": [{"type": "text", "text": "原段落"}]},
         ]},
     })
-    database.cases.insert_one({
-        "id": "c-src", "ownerId": "u-other", "publicationStatus": "public",
-        "workflowStatus": "published", "publishedVersionId": "cv-2", "revision": 1,
-        "title": "来源案例", "document": {"type": "doc", "content": []},
-    })
-    database.case_versions.insert_one({
-        "id": "cv-1", "caseId": "c-src", "number": 1, "title": "来源案例 v1",
-        "document": {"type": "doc", "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": "第一版内容"}]},
-        ]},
-    })
-    database.case_versions.insert_one({
-        "id": "cv-2", "caseId": "c-src", "number": 2, "title": "来源案例 v2",
-        "document": {"type": "doc", "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": "第二版内容"}]},
-        ]},
-    })
-    database.lifecycle_events.insert_one(
-        {"caseId": "c-src", "action": "approve", "versionId": "cv-1"}
-    )
     database.case_sources.insert_many([
         {"id": "src-a", "sourceType": "case", "caseId": "c-draft-1",
          "sourceCaseId": "c-src", "versionId": "cv-1", "versionNumber": 1,
@@ -211,6 +219,10 @@ def test_read_statuses_are_explicit(tmp_path) -> None:
     assert missing["status"] == "unavailable"
     unknown = read_domain_source(database, store, user, "c-draft-1", "case", "c-none")
     assert unknown["status"] == "error"
+    _assert_empty_image_source(database, store, user)
+
+
+def _assert_empty_image_source(database, store, user) -> None:
     store.put("blob-1", io.BytesIO(b"\x89PNG"), 4, "image/png")
     database.attachments.insert_one({
         "id": "att-1", "caseId": "c-draft-1", "name": "图.png",

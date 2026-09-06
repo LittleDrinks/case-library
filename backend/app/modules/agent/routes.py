@@ -428,8 +428,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
         [bound.binding_record() for bound in bounds], _run_lock(conversation, plan),
     )
     context = _run_context(request, database, settings, user, conversation, repository,
-                           thread, adapter, plan, run, selection, lease, worker_id,
-                           bounds)
+                           thread, adapter, plan, run, selection, lease, worker_id, bounds)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
 
@@ -455,13 +454,11 @@ def _run_context(request, database, settings, user, conversation: Conversation,
         catalog_state=request.app.state.catalog_state,
         secret_path=settings.app_secret_file, store=request.app.state.blob_store,
         write_enabled=not conversation.reader, sources=refs, selected=plan.selected,
-        case_version_id=conversation.version_id,
-        selections=plan.selections, skills=bounds,
+        case_version_id=conversation.version_id, selections=plan.selections, skills=bounds,
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, conversation.case,
-        request.app.state.agent, buffer=LiveBuffer(),
-        supervisor=request.app.state.run_supervisor,
+        request.app.state.agent, buffer=LiveBuffer(), supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
         deps=deps, capabilities=capabilities, reader=conversation.reader,
     )

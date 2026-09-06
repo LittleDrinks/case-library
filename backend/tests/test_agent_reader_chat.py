@@ -112,7 +112,7 @@ def test_author_draft_context_stays_author_only(client: TestClient) -> None:
     assert client.post(
         THREADS_PATH, headers=_csrf(reader), json={"title": "x"}
     ).status_code == 403
-    admin = _login(client, ADMIN)
+    _login(client, ADMIN)
     assert client.get(f"/api/cases/{CASE}/agent/thread").status_code == 409
 
 
