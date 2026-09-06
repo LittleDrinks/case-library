@@ -389,6 +389,7 @@ services:
       AGENT_TRACER_E2E_URL: http://agent-tracer-app:8001
       AUTH_QUERY_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
       SEARCH_CURSOR_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
+      LIFECYCLE_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
       MEILI_CONTRACT_URL: http://e2e-meilisearch:7700
       MEILI_CONTRACT_KEY_FILE: /run/secrets/meili_master_key
       OBJECT_STORE_ENDPOINT: minio:9000

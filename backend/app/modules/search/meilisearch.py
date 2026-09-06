@@ -287,7 +287,7 @@ def _allowed(principal: Principal) -> str:
         return ""
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
-    levels = '["public", "campus"]' if principal.verified else '"public"'
+    levels = '["public", "campus"]' if principal.verified else '["public"]'
     return _or(f"accessLevel IN {levels}", _own_private(principal))
 
 

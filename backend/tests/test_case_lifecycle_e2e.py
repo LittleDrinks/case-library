@@ -37,12 +37,24 @@ def login(username: str, password: str):
 
 
 def create_case(opener, csrf: str, title: str):
-    document = {"type": "doc", "content": [{"type": "paragraph"}]}
+    document = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "教学案例正文"}]}]}
     status, case = request(
         opener, "POST", "/api/cases", {"title": title, "document": document}, csrf
     )
     assert status == 200
-    return case
+    return _prepare_submission(opener, csrf, case)
+
+
+def _prepare_submission(opener, csrf: str, case: dict) -> dict:
+    status, groups = request(opener, "GET", "/api/tag-groups")
+    assert status == 200
+    tag_ids = [group["tags"][0]["id"] for group in groups if group["tags"]]
+    status, saved = request(
+        opener, "PATCH", f"/api/cases/{case['id']}",
+        {"revision": case["revision"], "tagIds": tag_ids}, csrf,
+    )
+    assert status == 200
+    return saved
 
 
 def _command(command: str, revision: int, **extra) -> dict:

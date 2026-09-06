@@ -128,6 +128,7 @@ def _user(user_id: str, username: str, role: str) -> dict:
         "status": "active",
         "token_version": 0,
         "must_change_password": False,
+        "campusVerified": True,
     }
 
 
