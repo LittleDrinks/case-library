@@ -95,6 +95,8 @@ def published_view(case: dict, version: dict) -> dict:
     return {
         **metadata,
         "id": case["id"],
+        "versionId": version["id"],
+        "versionNumber": version["number"],
         "title": version["title"],
         "summary": version.get("summary", ""),
         "tagIds": version["metadata"].get("tagIds", []),
