@@ -68,6 +68,12 @@ def _initialize_case_assets(database: Database) -> None:
     database.case_materials.create_index(
         [("materialId", ASCENDING), ("caseId", ASCENDING)]
     )
+    database.case_sources.create_index([("id", ASCENDING)], unique=True)
+    database.case_sources.create_index([("caseId", ASCENDING), ("createdAt", ASCENDING)])
+    database.case_sources.create_index(
+        [("caseId", ASCENDING), ("sourceCaseId", ASCENDING), ("versionId", ASCENDING)],
+        unique=True,
+    )
 
 
 def _initialize_materials(database: Database) -> None:

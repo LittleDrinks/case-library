@@ -12,6 +12,7 @@ from app.modules.attachments.models import AccessLevel
 from app.modules.attachments.storage import BlobStore
 from app.modules.attachments.text import extract_search_text
 from app.modules.cases.service import CaseError, RevisionConflict
+from app.modules.materials.service import campus_verified
 
 MAX_ATTACHMENT_BYTES = 128 * 1024 * 1024
 SNAPSHOT_FIELDS = (
@@ -230,15 +231,16 @@ def _attachment_rows(database, case: dict, user: dict | None, version_id: str | 
 
 
 def _version_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id or (
-        version_id != case.get("publishedVersionId") and not _is_internal(case, user)
-    ):
+    from app.modules.cases.published import version_readable
+
+    internal = _is_internal(case, user)
+    if not version_id:
         raise AttachmentError(404, "附件版本不存在")
     version = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
     version = version or database.case_snapshots.find_one(
         {"id": version_id, "caseId": case["id"]}
     )
-    if not version:
+    if not version or not version_readable(database, case, version_id, version, internal):
         raise AttachmentError(404, "附件版本不存在")
     return version.get("attachments", [])
 
@@ -265,7 +267,7 @@ def _require_content_access(case: dict, attachment: dict, user: dict | None) -> 
     internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
     if internal or attachment["accessLevel"] == "public":
         return
-    if attachment["accessLevel"] == "campus" and user:
+    if attachment["accessLevel"] == "campus" and campus_verified(user):
         return
     raise AttachmentError(403, "无权读取该附件")
 
@@ -292,10 +294,13 @@ def delete_attachment(
 def _delete(
     database, case_id: str, attachment_id: str, user: dict, revision: int, session
 ):
+    from app.modules.cases.sources import require_uncited
+
     query = {"id": attachment_id, "caseId": case_id}
     attachment = database.attachments.find_one(query, session=session)
     if not attachment:
         raise AttachmentError(404, "附件不存在")
+    require_uncited(database, case_id, "attachment", attachment_id, session)
     _advance_revision(database, case_id, user, revision, session)
     database.attachments.delete_one({"_id": attachment["_id"]}, session=session)
     query = {"attachments.blobId": attachment["blobId"]}

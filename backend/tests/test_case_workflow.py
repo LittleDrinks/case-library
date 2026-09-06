@@ -77,17 +77,22 @@ def reopen_hidden_case(client: TestClient, admin: dict, approved: dict):
     return _transition(client, case["id"], admin["csrfToken"], "reopen", hidden["case"])
 
 
-def test_user_can_login_and_restore_session(client: TestClient) -> None:
-    response = login(client)
-
-    assert response.status_code == 200
-    assert response.json()["user"] == {
+def _expected_admin_view() -> dict:
+    return {
         "id": "u-admin-demo",
         "username": "admin",
         "name": "演示管理员",
         "role": "admin",
         "mustChangePassword": False,
+        "campusVerified": True,
     }
+
+
+def test_user_can_login_and_restore_session(client: TestClient) -> None:
+    response = login(client)
+
+    assert response.status_code == 200
+    assert response.json()["user"] == _expected_admin_view()
     assert response.json()["csrfToken"]
     assert "HttpOnly" in response.headers["set-cookie"]
     assert "SameSite=strict" in response.headers["set-cookie"]

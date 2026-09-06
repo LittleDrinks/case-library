@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
@@ -43,7 +45,7 @@ def material_view(row: dict) -> dict:
     details = {field: row[field] for field in VIEW_FIELDS if row.get(field) is not None}
     return {
         **details,
-        "contentAvailable": True,
+        "contentAvailable": row.get("status", "active") == "active",
         "hasFile": bool(row.get("blobId") or row.get("hasFile")),
     }
 
@@ -91,20 +93,26 @@ def _material_rows(database, case: dict, user: dict | None, version_id: str | No
 
 
 def _version_materials(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id or (
-        version_id != case.get("publishedVersionId") and not _is_internal(case, user)
-    ):
+    from app.modules.cases.published import version_readable
+
+    internal = _is_internal(case, user)
+    if not version_id:
         raise CaseError(404, "素材版本不存在")
     query = {"id": version_id, "caseId": case["id"]}
     version = database.case_versions.find_one(query)
     version = version or database.case_snapshots.find_one(query)
-    if not version:
+    if not version or not version_readable(database, case, version_id, version, internal):
         raise CaseError(404, "素材版本不存在")
     return version.get("materials", [])
 
 
 def _mounted(case_id: str, material: dict) -> dict:
-    return {**material_view(material), "caseId": case_id, "materialId": material["id"]}
+    return {
+        **material_view(material),
+        "caseId": case_id,
+        "materialId": material["id"],
+        "createdAt": datetime.now(UTC).isoformat(),
+    }
 
 
 def _insert(database, case_id, material, revision, user, session) -> dict:
@@ -149,10 +157,13 @@ def unmount_material(
 
 
 def _delete(database, case_id, material_id, revision, user, session) -> None:
+    from app.modules.cases.sources import require_uncited
+
     query = {"caseId": case_id, "materialId": material_id}
     mounted = database.case_materials.find_one(query, session=session)
     if not mounted:
         raise CaseError(404, "素材未加入当前案例")
+    require_uncited(database, case_id, "material", material_id, session)
     _advance_revision(database, case_id, user, revision, session)
     database.case_materials.delete_one({"_id": mounted["_id"]}, session=session)
     _record_materials(database, [material_id], session, [material_id])

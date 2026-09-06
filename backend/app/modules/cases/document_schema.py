@@ -10,7 +10,9 @@ BLOCK_NODES = {"paragraph", "heading", "bulletList", "orderedList", "blockquote"
 INLINE_NODES = {"text", "hardBreak"}
 LIST_NODES = {"bulletList", "orderedList"}
 ALLOWED_NODES = BLOCK_NODES | INLINE_NODES | {"doc", "listItem"}
-ALLOWED_MARKS = {"bold", "italic", "strike"}
+ALLOWED_MARKS = {"bold", "italic", "strike", "citation"}
+CITATION_SOURCE_TYPES = {"case", "material", "attachment"}
+MAX_SOURCE_ID = 120
 REQUIRED_CONTENT = LIST_NODES | {"blockquote", "listItem"}
 NODE_KEYS = {
     "doc": {"type", "content"},
@@ -23,6 +25,24 @@ NODE_KEYS = {
     "blockquote": {"type", "content"},
     "hardBreak": {"type"},
 }
+
+
+def citation_refs(document: dict[str, Any]) -> list[dict[str, str]]:
+    """按出现顺序收集去重后的 citation 引用对。"""
+    refs: list[dict[str, str]] = []
+    stack = [document]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        for mark in node.get("marks", []):
+            if isinstance(mark, dict) and mark.get("type") == "citation":
+                ref = mark.get("attrs", {})
+                pair = {"sourceType": ref.get("sourceType"), "sourceId": ref.get("sourceId")}
+                if pair not in refs:
+                    refs.append(pair)
+        stack.extend(reversed(node.get("content", [])))
+    return refs
 
 
 def _document_size(document: dict[str, Any]) -> int:
@@ -61,20 +81,39 @@ def _validate_attrs(node: dict, kind: str) -> None:
             raise ValueError("orderedList.start 必须是正整数")
 
 
+def _validate_mark(mark: Any) -> str:
+    if not isinstance(mark, dict):
+        raise ValueError("mark 必须是对象")
+    mark_type = mark.get("type")
+    if not isinstance(mark_type, str) or mark_type not in ALLOWED_MARKS:
+        raise ValueError(f"未知 mark：{mark_type}")
+    if mark_type == "citation":
+        _validate_citation_attrs(mark)
+    elif set(mark) != {"type"}:
+        raise ValueError("mark 只能包含 type")
+    return mark_type
+
+
+def _validate_citation_attrs(mark: dict) -> None:
+    if set(mark) != {"type", "attrs"} or not isinstance(mark.get("attrs"), dict):
+        raise ValueError("citation mark 只能包含 type 和 attrs")
+    attrs = mark["attrs"]
+    if set(attrs) != {"sourceType", "sourceId"}:
+        raise ValueError("citation attrs 只能包含 sourceType 和 sourceId")
+    if attrs["sourceType"] not in CITATION_SOURCE_TYPES:
+        raise ValueError("citation sourceType 必须是 case、material 或 attachment")
+    source_id = attrs["sourceId"]
+    if not isinstance(source_id, str) or not 1 <= len(source_id) <= MAX_SOURCE_ID:
+        raise ValueError("citation sourceId 必须是 1-120 个字符")
+
+
 def _validate_text(node: dict) -> None:
     if not isinstance(node.get("text"), str) or not node["text"]:
         raise ValueError("text.text 必须是非空字符串")
     marks = node.get("marks", [])
     if not isinstance(marks, list):
         raise ValueError("text.marks 必须是数组")
-    mark_types = []
-    for mark in marks:
-        if not isinstance(mark, dict) or set(mark) != {"type"}:
-            raise ValueError("mark 只能包含 type")
-        mark_type = mark["type"]
-        if not isinstance(mark_type, str) or mark_type not in ALLOWED_MARKS:
-            raise ValueError(f"未知 mark：{mark_type}")
-        mark_types.append(mark_type)
+    mark_types = [_validate_mark(mark) for mark in marks]
     if len(mark_types) != len(set(mark_types)):
         raise ValueError("text.marks 不能重复")
 

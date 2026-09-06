@@ -93,6 +93,7 @@ class SearchUnavailable(RuntimeError):
 class Principal:
     user_id: str | None
     role: Role
+    verified: bool = False
 
     def __post_init__(self) -> None:
         if self.role not in {"anonymous", "user", "admin"}:
@@ -286,10 +287,14 @@ def _allowed(principal: Principal) -> str:
         return ""
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
-    private = _and(
+    levels = '["public", "campus"]' if principal.verified else '"public"'
+    return _or(f"accessLevel IN {levels}", _own_private(principal))
+
+
+def _own_private(principal: Principal) -> str:
+    return _and(
         'accessLevel = "private"', f"createdBy = {_quote(principal.user_id)}"
     )
-    return _or('accessLevel IN ["public", "campus"]', private)
 
 
 def _denied(principal: Principal) -> str:
@@ -297,7 +302,10 @@ def _denied(principal: Principal) -> str:
         return NEVER
     if principal.role == "anonymous":
         return 'accessLevel IN ["campus", "private"]'
-    return _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
+    denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
+    if not principal.verified:
+        denied = _or('accessLevel = "campus"', denied)
+    return denied
 
 
 def _case_access(principal: Principal) -> str:
@@ -306,6 +314,8 @@ def _case_access(principal: Principal) -> str:
     if principal.role == "admin":
         return 'docClass = "case-private"'
     own = _and('docClass = "case-private"', f"createdBy = {_quote(principal.user_id)}")
+    if not principal.verified:
+        return own
     others = _and(
         'docClass = "case-campus"', f"createdBy != {_quote(principal.user_id)}"
     )

@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.core.dependencies import get_database
+from app.core.dependencies import get_database, get_settings
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
 from app.modules.cases.lifecycle import execute_lifecycle, get_history
 from app.modules.cases.models import CaseCreate, CasePatch, LifecycleCommand
+from app.modules.cases.published import PublishedCaseReader
 from app.modules.cases.service import (
+    CaseError,
     create_case,
     get_case,
     get_public_case,
     list_cases,
     update_case,
 )
+from app.modules.cases.sources import ordered_entries
 from app.modules.documents import build_case_docx
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -49,31 +52,96 @@ def detail(
 
 
 @router.get("/{case_id}/public")
-def public_detail(case_id: str, database=Depends(get_database)):
-    return get_public_case(database, case_id)
+def public_detail(
+    case_id: str,
+    request: Request,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+    user: dict | None = Depends(optional_user),
+):
+    if not version_id:
+        return get_public_case(database, case_id)
+    case = _reader_case(database, case_id, user)
+    view = PublishedCaseReader(database).read_public_version(case, version_id, user)
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    entries = ordered_entries(database, version, user, _origin(request, settings))
+    return {**view, "sources": {"entries": entries}}
 
 
 @router.get("/{case_id}/public/export.docx")
-def export_public_docx(case_id: str, database=Depends(get_database)):
-    return _docx_response(get_public_case(database, case_id), case_id)
+def export_public_docx(
+    case_id: str,
+    request: Request,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+):
+    _, record = _published_record(database, case_id)
+    entries = ordered_entries(database, record, None, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
 @router.get("/{case_id}/export.docx")
 def export_docx(
     case_id: str,
+    request: Request,
     database=Depends(get_database),
+    settings=Depends(get_settings),
     user: dict | None = Depends(optional_user),
 ):
-    return _docx_response(get_case(database, case_id, user), case_id)
+    case = _reader_case(database, case_id, user)
+    record = _internal_record(database, case, user) or _published_record(
+        database, case_id
+    )[1]
+    entries = ordered_entries(database, record, user, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
-def _docx_response(case: dict, case_id: str) -> Response:
-    headers = {"Content-Disposition": f'attachment; filename="case-{case_id}.docx"'}
-    return Response(
-        build_case_docx(case),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=headers,
-    )
+@router.get("/{case_id}/versions/{version_id}")
+def read_version(
+    case_id: str,
+    version_id: str,
+    request: Request,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+    user: dict | None = Depends(optional_user),
+):
+    case = _reader_case(database, case_id, user)
+    view = PublishedCaseReader(database).read_version(case, version_id, user)
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    entries = ordered_entries(database, version, user, _origin(request, settings))
+    return {**view, "sources": {"entries": entries}}
+
+
+@router.get("/{case_id}/versions/{version_id}/export.docx")
+def export_version_docx(
+    case_id: str,
+    version_id: str,
+    request: Request,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+    user: dict | None = Depends(optional_user),
+):
+    case = _reader_case(database, case_id, user)
+    PublishedCaseReader(database).read_version(case, version_id, user)
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    entries = ordered_entries(database, version, user, _origin(request, settings))
+    return _docx_response(version, entries, case_id)
+
+
+@router.get("/{case_id}/sources")
+def sources(
+    case_id: str,
+    request: Request,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+    user: dict | None = Depends(optional_user),
+):
+    case = _reader_case(database, case_id, user)
+    record = _sources_record(database, case, version_id or None, user)
+    entries = ordered_entries(database, record, user, _origin(request, settings))
+    return {"entries": entries}
 
 
 @router.patch("/{case_id}")
@@ -105,3 +173,53 @@ def history(
     user: dict = Depends(require_user),
 ):
     return get_history(database, case_id, user)
+
+
+def _reader_case(database, case_id: str, user: dict | None) -> dict:
+    case = database.cases.find_one({"id": case_id})
+    internal = bool(user and (user["role"] == "admin" or (case or {}).get("ownerId") == user["id"]))
+    if not case or (case["publicationStatus"] != "public" and not internal):
+        raise CaseError(404, "案例不存在")
+    return case
+
+
+def _internal_record(database, case: dict, user: dict | None) -> dict | None:
+    internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
+    return case if internal else None
+
+
+def _published_record(database, case_id: str) -> tuple[dict, dict]:
+    case = database.cases.find_one({"id": case_id})
+    version_id = (case or {}).get("publishedVersionId")
+    if (
+        not case
+        or case.get("publicationStatus") != "public"
+        or not version_id
+    ):
+        raise CaseError(404, "案例不存在")
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    if not version:
+        raise CaseError(404, "案例不存在")
+    return case, version
+
+
+def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
+    if version_id:
+        PublishedCaseReader(database).read_version(case, version_id, user)
+        return database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
+    return _internal_record(database, case, user) or _published_record(
+        database, case["id"]
+    )[1]
+
+
+def _origin(request: Request, settings) -> str:
+    return settings.public_base_url or str(request.base_url).rstrip("/")
+
+
+def _docx_response(case: dict, entries: list[dict], case_id: str) -> Response:
+    headers = {"Content-Disposition": f'attachment; filename="case-{case_id}.docx"'}
+    return Response(
+        build_case_docx(case, entries),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=headers,
+    )

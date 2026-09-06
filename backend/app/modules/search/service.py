@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.cases.service import CaseError
+from app.modules.materials.service import campus_verified
 from app.modules.search.cursor import CursorState, decode_cursor, encode_cursor, scope_key
 from app.modules.search.meilisearch import (
     CatalogRequest,
@@ -74,7 +75,7 @@ def _principal(user: dict | None) -> Principal:
     if not user:
         return Principal(None, "anonymous")
     role = "admin" if user["role"] == "admin" else "user"
-    return Principal(user["id"], role)
+    return Principal(user["id"], role, campus_verified(user))
 
 
 def _can_read(case: dict, user: dict) -> bool:

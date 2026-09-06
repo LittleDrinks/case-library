@@ -18,7 +18,9 @@ from app.modules.cases.snapshots import (
     list_snapshots,
     rollback_snapshot,
 )
+from app.modules.case_sources.service import snapshot_case_sources
 from app.modules.case_materials.service import snapshot_materials
+from app.modules.cases.sources import citations_resolve
 from app.modules.search.outbox import SearchOutbox
 
 
@@ -53,24 +55,19 @@ def _authorize(case: dict, user: dict, command: str) -> None:
 
 
 def _version(
-    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict]
+    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict],
+    case_sources: list[dict]
 ) -> dict:
     number = case.get("versionNumber", 0) + 1
-    return {
-        "id": _id("cv"),
-        "caseId": case["id"],
-        "number": number,
-        "kind": "submission",
-        "title": case["title"],
-        "summary": case.get("summary", ""),
-        "document": case["document"],
-        "attachments": attachments,
-        "materials": materials,
-        "metadata": case_metadata(case),
-        "sourceRevision": case["revision"],
-        "createdBy": user["id"],
-        "createdAt": now,
+    base = {
+        "id": _id("cv"), "caseId": case["id"], "number": number,
+        "kind": "submission", "title": case["title"],
+        "summary": case.get("summary", ""), "document": case["document"],
+        "attachments": attachments, "materials": materials,
+        "caseSources": case_sources, "metadata": case_metadata(case),
+        "sourceRevision": case["revision"], "createdBy": user["id"], "createdAt": now,
     }
+    return base
 
 
 def _event(case: dict, user: dict, version: dict, now: str, action: str) -> dict:
@@ -90,10 +87,12 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
     _require_owner(case, user)
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可提交")
+    citations_resolve(database, case["id"], case["document"], session)
     now = _now()
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
-    version = _version(case, user, now, attachments, materials)
+    case_sources = snapshot_case_sources(database, case["id"], session)
+    version = _version(case, user, now, attachments, materials, case_sources)
     event = _event(case, user, version, now, "submit")
     updated = _mark_pending(database, case, version, now, session)
     if not updated:
@@ -127,6 +126,8 @@ def _clean(record: dict) -> dict:
         ]
     if "materials" not in cleaned:
         cleaned["materials"] = []
+    if "caseSources" not in cleaned:
+        cleaned["caseSources"] = []
     return cleaned
 
 
