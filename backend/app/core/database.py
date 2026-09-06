@@ -102,6 +102,17 @@ def _initialize_knowledge(database: Database) -> None:
     )
 
 
+def _initialize_tags(database: Database) -> None:
+    database.tag_groups.create_index([("id", ASCENDING)], unique=True)
+    database.tag_groups.create_index([("name", ASCENDING)], unique=True)
+    database.tags.create_index([("id", ASCENDING)], unique=True)
+    database.tags.create_index(
+        [("groupId", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    database.cases.create_index("tagIds")
+    database.case_versions.create_index("metadata.tagIds")
+
+
 def _initialize_search_delivery(database: Database) -> None:
     database.search_outbox.create_index(
         [
@@ -203,6 +214,7 @@ def initialize(database: Database) -> None:
     _initialize_case_assets(database)
     _initialize_materials(database)
     _initialize_knowledge(database)
+    _initialize_tags(database)
     _initialize_search_delivery(database)
     _initialize_agent(database)
     _initialize_skills(database)
