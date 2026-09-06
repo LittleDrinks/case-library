@@ -136,6 +136,14 @@ def _initialize_agent_messages(database: Database) -> None:
     )
 
 
+def _initialize_skills(database: Database) -> None:
+    database.skills.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index(
+        [("skillId", ASCENDING), ("version", ASCENDING)], unique=True
+    )
+
+
 def _initialize_agent_runs(database: Database) -> None:
     database.agent_runs.create_index([("id", ASCENDING)], unique=True)
     database.agent_runs.create_index(
@@ -197,3 +205,4 @@ def initialize(database: Database) -> None:
     _initialize_knowledge(database)
     _initialize_search_delivery(database)
     _initialize_agent(database)
+    _initialize_skills(database)
