@@ -72,7 +72,11 @@ def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None):
                 "trigger": "submit-message",
                 "messages": [{
                     "id": "client-message", "role": "user",
-                    "parts": [{"type": "text", "text": text}],
+                    "parts": [
+                        {"type": "text", "text": text},
+                        {"type": "data-selection",
+                         "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}},
+                    ],
                 }],
             },
         )

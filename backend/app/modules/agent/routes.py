@@ -25,6 +25,7 @@ from app.modules.agent.models import (
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
+    ArtifactTarget,
 )
 from app.modules.agent.recovery import (
     LiveBuffer,
@@ -150,6 +151,25 @@ def _thread_conversation(
 
 def _repository(database) -> AgentRepository:
     return AgentRepository(database)
+
+
+def _run_lock(conversation: Conversation,
+              plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
+    """Run 创建即锁定 baseRevision 与教师选定目标段；只读上下文不锁写目标。
+
+    恰好一个选区锁定该段；无选区且正文只有一段时允许该段；其余不锁，
+    提议修订将被拒绝，不由模型推断目标。
+    """
+    if conversation.reader or conversation.version_id:
+        return None, None
+    case = conversation.case
+    rows = plan.selections or prosemirror.paragraphs(case.get("document") or {})
+    if len(rows) != 1:
+        return case.get("revision"), None
+    row = rows[0]
+    return case.get("revision"), ArtifactTarget(
+        paragraph_index=row["paragraphIndex"], quote=row["quote"],
+    )
 
 
 @router.get("/{case_id}/agent/thread")
@@ -405,7 +425,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     worker_id = request.app.state.agent_worker_id
     run = _start_run(
         repository, thread, user["id"], plan, assistant_id, lease, worker_id,
-        [bound.binding_record() for bound in bounds],
+        [bound.binding_record() for bound in bounds], _run_lock(conversation, plan),
     )
     context = _run_context(request, database, settings, user, conversation, repository,
                            thread, adapter, plan, run, selection, lease, worker_id,
@@ -473,15 +493,14 @@ def _lease(database, user_id: str, selection):
         raise HTTPException(status_code=429, detail=str(error)) from error
 
 
-def _start_run(
-    repository, thread, user_id, plan, assistant_id, lease, worker_id,
-    skill_bindings: list[dict[str, str]],
-) -> AgentRun:
-    """创建 Run 即固化 Skill 版本凭据，先于提供方执行；失败/取消不丢失。"""
+def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+               skill_bindings: list[dict[str, str]],
+               lock: tuple[int | None, ArtifactTarget | None] = (None, None)) -> AgentRun:
+    """创建 Run 即固化 Skill 版本凭据与修订锁，先于提供方执行；失败/取消不丢失。"""
     try:
         return _create_run(
             repository, thread, user_id, plan, assistant_id, lease, worker_id,
-            skill_bindings,
+            skill_bindings, lock,
         )
     except ActiveRunError as error:
         if lease:
@@ -495,22 +514,22 @@ def _start_run(
         raise
 
 
-def _create_run(
-    repository, thread, user_id, plan, assistant_id, lease, worker_id,
-    skill_bindings: list[dict[str, str]],
-):
+def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+                skill_bindings: list[dict[str, str]],
+                lock: tuple[int | None, ArtifactTarget | None] = (None, None)):
     quota_ids = lease.quota_ids if lease else ()
+    base_revision, target = lock
+    run_kwargs = {
+        "owner_id": worker_id, "quota_ids": quota_ids,
+        "skill_bindings": skill_bindings,
+        "base_revision": base_revision, "target": target,
+    }
     if plan.retry_message_id:
-        run = repository.retry_run(
-            thread, plan.retry_message_id, assistant_id,
-            owner_id=worker_id, quota_ids=quota_ids, skill_bindings=skill_bindings,
-        )
+        run = repository.retry_run(thread, plan.retry_message_id, assistant_id, **run_kwargs)
     else:
         run = repository.start_run(
             thread, user_id, plan.parts, plan.metadata, assistant_id,
-            plan.client_request_id, owner_id=worker_id, quota_ids=quota_ids,
-            default_title=_default_title(plan.prompt),
-            skill_bindings=skill_bindings,
+            plan.client_request_id, default_title=_default_title(plan.prompt), **run_kwargs
         )
     _bind_lease(repository, run, lease, worker_id)
     return run
@@ -596,9 +615,13 @@ def decide_thread_artifact(
     thread_id: str,
     artifact_id: str,
     body: ArtifactDecisionBody,
+    request: Request,
     database=Depends(get_database),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> dict:
     _author_case(database, case_id, user)
-    return decide_artifact(database, case_id, thread_id, artifact_id, user, body.decision)
+    return decide_artifact(
+        database, case_id, thread_id, artifact_id, user, body.decision,
+        store=request.app.state.blob_store,
+    )

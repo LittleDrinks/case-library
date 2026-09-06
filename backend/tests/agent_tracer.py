@@ -24,19 +24,15 @@ def _tool_calls(messages) -> list[str]:
     ]
 
 
-def _paragraph_index(messages) -> int:
-    for message in messages:
-        for part in getattr(message, "parts", []):
-            if part.part_kind != "user-prompt":
-                continue
-            match = re.search(r"第(\d+)段", str(getattr(part, "content", "")))
-            if match:
-                return max(0, int(match.group(1)) - 1)
-    return 0
+def _locked_paragraph(info) -> int:
+    """从服务端 instructions 的教师选区行解析锁定段落，不解析自然语言正文。"""
+    instructions = getattr(info, "instructions", None) or ""
+    match = re.search(r"教师选中的正文段落：第 (\d+) 段", instructions)
+    return int(match.group(1)) - 1 if match else 0
 
 
-def tracer_response(messages, _info=None) -> ModelResponse:
-    """按已发生的工具调用推进：检索 → 读源 → 提议 → 结束。"""
+def tracer_response(messages, info=None) -> ModelResponse:
+    """按已发生的工具调用推进：检索 → 读源 → 提议锁定选段 → 结束。"""
     called = _tool_calls(messages)
     if "search_corpus" not in called:
         return ModelResponse(parts=[ToolCallPart(
@@ -44,12 +40,11 @@ def tracer_response(messages, _info=None) -> ModelResponse:
         )])
     if "read_source" not in called:
         return ModelResponse(parts=[ToolCallPart(
-            tool_name="read_source", args={"source_type": "case", "source_id": HIT_ID},
-        )])
+            tool_name="read_source", args={"source_type": "case", "source_id": HIT_ID})])
     if "propose_revision" not in called:
         return ModelResponse(parts=[ToolCallPart(
             tool_name="propose_revision", args={
-                "paragraph_index": _paragraph_index(messages),
+                "paragraph_index": _locked_paragraph(info),
                 "replacement": REPLACEMENT,
                 "reason": REASON,
             },

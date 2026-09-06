@@ -7,6 +7,7 @@ import io
 
 from app.modules.agent.case_area import dedupe_refs, retained_sources
 from app.modules.agent.deps import ToolDeps
+from app.modules.agent.models import ArtifactTarget
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.search import list_tag_catalog, search_platform
 from app.modules.agent.skills import domain_tools, propose_revision, read_source
@@ -258,9 +259,12 @@ def test_proposal_only_attaches_evidence_actually_read(tmp_path) -> None:
     database = _test_db()
     _seed_source_case(database)
     thread = AgentRepository(database).default_thread("c-draft-1", "u-1")
+    run = AgentRepository(database).start_run(
+        thread, "u-1", [{"type": "text", "text": "修订"}], {}, "assistant-x",
+        base_revision=1, target=ArtifactTarget(paragraph_index=0, quote="原段落"))
     catalog = RecordingCatalog([_page([ITEM_A, ITEM_B], 2, False)])
     deps = _deps(database, catalog, secret_file=_secret_file(tmp_path))
-    deps.thread_id = thread.id
+    deps.thread_id, deps.run_id = thread.id, run.id
     ctx = Ctx(deps)
     from app.modules.agent.search import search_corpus
 

@@ -71,9 +71,12 @@ def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Res
             "id": "browser-chat-id",
             "trigger": "submit-message",
             "messages": [{
-                "id": "client-message",
-                "role": "user",
-                "parts": [{"type": "text", "text": text}],
+                "id": "client-message", "role": "user",
+                "parts": [
+                    {"type": "text", "text": text},
+                    {"type": "data-selection",
+                     "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}},
+                ],
             }],
         },
     )

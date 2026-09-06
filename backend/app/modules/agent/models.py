@@ -19,7 +19,7 @@ ThreadEventType = Literal[
     "artifact.created",
     "artifact.decided",
 ]
-ArtifactStatus = Literal["pending", "accepted", "rejected"]
+ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
 ArtifactDecision = Literal["accepted", "rejected"]
 
 
@@ -53,6 +53,13 @@ class AgentMessage(BaseModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class ArtifactTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
+    quote: str
+
+
 class AgentRun(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -68,6 +75,14 @@ class AgentRun(BaseModel):
         description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
     )
     read_only: bool = Field(default=False, alias="readOnly")
+    base_revision: int | None = Field(
+        default=None, alias="baseRevision", ge=1,
+        description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",
+    )
+    target: ArtifactTarget | None = Field(
+        default=None,
+        description="Run 创建时锁定的教师选定目标段；唯一段落可自动锁定，其余必须显式选区",
+    )
     resources: list[dict[str, str]] = Field(default_factory=list)
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
@@ -102,13 +117,6 @@ class SourceRef(BaseModel):
     def identity(self) -> tuple[str, str, str]:
         """跨多次检索的稳定证据身份：类型 + 条目 ID + 实际版本。"""
         return (self.kind, self.id, self.version_id or self.version or "")
-
-
-class ArtifactTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
-    quote: str
 
 
 class AgentArtifact(BaseModel):

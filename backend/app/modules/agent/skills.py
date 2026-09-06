@@ -49,8 +49,10 @@ def _record_evidence(deps: ToolDeps, ref) -> None:
 async def propose_revision(
     ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str = ""
 ) -> dict:
-    """只为当前 baseRevision 的一个段落创建 pending Artifact，正文不变。
+    """为 Run 创建时教师选定的段落创建 pending Artifact，正文不变。
 
+    目标段落在 Run 创建时锁定：paragraph_index 必须与教师选中（或唯一段落）
+    一致，正文更新后基线过期即拒绝；一次运行最多一个修订候选。
     引用只关联本次 Run 实际读过的来源证据；未读过时 sources 为空。
     """
     try:
