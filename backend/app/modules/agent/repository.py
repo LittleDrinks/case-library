@@ -594,7 +594,7 @@ def _new_retry_run(
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=thread.owner_id,
         user_message_id=message["id"], assistant_message_id=assistant_id,
-        status="active", started_at=now,
+        status="active", started_at=now, read_only=thread.version_id is not None,
         skill_bindings=list(skill_bindings or []),
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
@@ -609,7 +609,7 @@ def _new_active_run(
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
         assistant_message_id=assistant_id, client_request_id=client_request_id,
-        status="active", started_at=now,
+        status="active", started_at=now, read_only=thread.version_id is not None,
         skill_bindings=list(skill_bindings or []),
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,

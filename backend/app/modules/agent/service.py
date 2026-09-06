@@ -14,7 +14,7 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import CASE_EDIT_SKILL, READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -131,18 +131,11 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
     return ids
 
 
-def _loaded_platform_skill(parts: list[dict]) -> bool:
-    """平台 Skill 保持原语义：仅模型实际 load_capability 后记录。"""
-    return CASE_EDIT_SKILL.id in _loaded_capability_ids(parts)
-
-
 def _run_resources(parts: list[dict], bounds: tuple = (), reader: bool = False) -> list[dict[str, str]]:
-    """系统提示词 + 任务提示词（作者或读者）+ Skill 版本哈希 + 已加载的平台 Skill。"""
     task = READER_PROMPT if reader else TASK_PROMPT
     records = [resource_record(SYSTEM_PROMPT), resource_record(task)]
-    records += [bound.resource_record() for bound in bounds]
-    if _loaded_platform_skill(parts):
-        records.append(resource_record(CASE_EDIT_SKILL))
+    loaded = set(_loaded_capability_ids(parts))
+    records += [bound.resource_record() for bound in bounds if bound.skill_id in loaded]
     return records
 
 

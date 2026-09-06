@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -11,7 +11,13 @@ from starlette.responses import StreamingResponse
 
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
+from app.modules.agent import prosemirror
 from app.modules.agent.artifacts import decide_artifact
+from app.modules.agent.case_area import (
+    catalog_instructions,
+    retained_sources,
+    selection_from_parts,
+)
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import (
     AgentRun,
@@ -32,9 +38,8 @@ from app.modules.agent.repository import (
     MessageNotFoundError,
     ThreadNotFoundError,
 )
-from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import bound_skill_capability, case_edit_skill, reader_capability
+from app.modules.agent.skills import bound_skill_capability, domain_capability
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -67,6 +72,8 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+    selected: list[dict] = field(default_factory=list)
+    selections: list[dict] = field(default_factory=list)
 
 
 class ThreadCreateBody(BaseModel):
@@ -205,6 +212,32 @@ def _submit_prompt(adapter: VercelAIAdapter) -> tuple[list[dict], dict, str, str
         raise HTTPException(status_code=422, detail="消息内容过长")
     parts = [part.model_dump(by_alias=True, mode="json", exclude_none=True) for part in latest.parts]
     return parts, {}, text, latest.id, [skill for skill in skills if skill]
+
+
+def _validate_plan(database, case: dict, plan: RunPlan, version_id=None) -> RunPlan:
+    """服务端校验消息来源选区与正文选区；不信任浏览器提交的名称或版本。"""
+    plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
+    plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    return plan
+
+
+def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
+    """解析 data-selection 部分：引文须与当前正文段落一致，编号服务端解析。"""
+    rows = prosemirror.paragraphs(document)
+    return [_resolve_selection(rows, part.get("data")) for part in parts
+            if part.get("type") == "data-selection"]
+
+
+def _resolve_selection(rows: list[dict], data: object) -> dict:
+    quote = data.get("quote") if isinstance(data, dict) else None
+    if not isinstance(quote, str) or not quote:
+        raise HTTPException(status_code=422, detail="正文选区格式无效")
+    index = data.get("paragraphIndex")
+    matches = [row["paragraphIndex"] for row in rows if quote in row["quote"]
+               and (index is None or row["paragraphIndex"] == index)]
+    if len(matches) != 1:
+        raise HTTPException(status_code=422, detail="正文选区与当前案例不匹配")
+    return {"paragraphIndex": matches[0], "quote": quote}
 
 
 def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
@@ -365,10 +398,8 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     conversation, thread = _thread_conversation(database, case_id, user, repository, thread_id)
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    plan = _run_plan(repository, thread, adapter)
-    bounds, legacy = _resolve_skills(
-        database, request.app.state.blob_store, plan.skills, conversation.reader
-    )
+    plan = _validate_plan(database, conversation.case, _run_plan(repository, thread, adapter), conversation.version_id)
+    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
@@ -378,38 +409,34 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     )
     context = _run_context(request, database, settings, user, conversation, repository,
                            thread, adapter, plan, run, selection, lease, worker_id,
-                           bounds, legacy)
+                           bounds)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
 
 
-def _resolve_skills(
-    database, store, skill_ids: list[str], reader: bool
-) -> tuple[tuple[BoundSkill, ...], bool]:
-    """服务端解析消息选择的 Skill：平台修订 Skill 仅作者；已发布 Skill 双方可用。"""
-    if reader and CASE_EDIT_SKILL.id in skill_ids:
-        raise HTTPException(status_code=422, detail="AI 能力不可用")
-    legacy = CASE_EDIT_SKILL.id in skill_ids
+def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
     bounds: list[BoundSkill] = []
     for skill_id in dict.fromkeys(skill_ids):
-        if skill_id == CASE_EDIT_SKILL.id:
-            continue
         try:
             bounds.append(bind_published_skill(database, store, skill_id))
         except SkillError as error:
             raise HTTPException(status_code=422, detail="AI 能力不可用") from error
-    return tuple(bounds), legacy
+    return tuple(bounds)
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
                  repository, thread, adapter, plan, run, selection, lease, worker_id,
-                 bounds, legacy):
-    capabilities = _capabilities(conversation.reader, legacy, bounds)
+                 bounds):
+    refs = retained_sources(database, conversation.case["id"], conversation.version_id)
+    capabilities = _capabilities(conversation, bounds, refs, plan)
     deps = ToolDeps(
         database=database, case_id=conversation.case["id"], thread_id=thread.id,
         run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state,
-        secret_path=settings.app_secret_file, skills=bounds,
+        secret_path=settings.app_secret_file, store=request.app.state.blob_store,
+        write_enabled=not conversation.reader, sources=refs, selected=plan.selected,
+        case_version_id=conversation.version_id,
+        selections=plan.selections, skills=bounds,
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, conversation.case,
@@ -420,11 +447,9 @@ def _run_context(request, database, settings, user, conversation: Conversation,
     )
 
 
-def _capabilities(reader: bool, legacy: bool, bounds) -> list:
-    """读者固定只读检索能力；作者按需获得修订能力；已发布 Skill 双方可用。"""
-    if reader:
-        return [reader_capability()] + [bound_skill_capability(b) for b in bounds]
-    return ([case_edit_skill()] if legacy else []) + [
+def _capabilities(conversation, bounds, refs, plan) -> list:
+    instructions = catalog_instructions(conversation.case["title"], refs, plan.selected, plan.selections)
+    return [domain_capability(instructions, not conversation.reader)] + [
         bound_skill_capability(bound) for bound in bounds
     ]
 

@@ -14,7 +14,6 @@ from pymongo import MongoClient
 
 BASE_URL = os.environ.get("AGENT_TRACER_E2E_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
-SKILL_LOAD_MARK = "单段修订工作流"
 pytestmark = pytest.mark.e2e("AGENT_TRACER_E2E_URL", "AUTH_QUERY_MONGODB_URI")
 
 
@@ -74,10 +73,7 @@ def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Res
             "messages": [{
                 "id": "client-message",
                 "role": "user",
-                "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
-                ],
+                "parts": [{"type": "text", "text": text}],
             }],
         },
     )
@@ -148,11 +144,10 @@ def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, 
     return case["id"], run, artifact
 
 
-def _assert_skill_loaded(run: dict) -> None:
+def _assert_read_evidence(run: dict) -> None:
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert kinds["skill"]["id"] == "case-edit-skill"
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert set(kinds) == {"system-prompt", "task-prompt"}
+    assert kinds["system-prompt"]["contentHash"]
 
 
 def test_tracer_run_builds_pending_artifact_with_server_sources():
@@ -161,7 +156,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
     try:
         database = mongo.get_default_database()
         case_id, run, artifact = _tracer_case(client, csrf, database)
-        _assert_skill_loaded(run)
+        _assert_read_evidence(run)
         assert artifact["status"] == "pending"
         assert artifact["baseRevision"] == 1
         assert artifact["target"]["paragraphIndex"] == 1

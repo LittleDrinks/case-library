@@ -106,6 +106,20 @@ const lifecycleActions = computed(() => {
     .map((command) => ({ command, ...LIFECYCLE_META[command] }));
 });
 
+const submissionTodo = computed(() => {
+  const missing = [];
+  if (!title.value.trim()) missing.push("填写案例标题");
+  if (!documentHasText(document.value)) missing.push("填写正文");
+  tagCatalog.value.filter((group) => group.requiredForSubmission).forEach((group) => {
+    if (!group.tags.some((tag) => tagIds.value.includes(tag.id))) missing.push(`选择${group.name}标签`);
+  });
+  return missing;
+});
+
+function documentHasText(node) {
+  return Boolean(node?.text?.trim() || node?.content?.some(documentHasText));
+}
+
 const autosave = createAutosave({
   save: persist,
   getSnapshot: snapshot,
@@ -539,6 +553,9 @@ onBeforeUnmount(() => {
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
+          <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
+            <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
+          </div>
           <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
             <AlertTriangle :size="17" aria-hidden="true" />
             <span>

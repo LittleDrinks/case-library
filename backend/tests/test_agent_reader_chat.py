@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
 from app.modules.agent.runtime import agent
-from app.modules.agent.skills import reader_capability
+from app.modules.agent.skills import domain_capability
 from app.modules.cases.service import CaseError
 
 CASE = "c-02"
@@ -213,13 +213,13 @@ def test_propose_tool_guard_blocks_readers_and_published_cases(client: TestClien
 
 
 def test_reader_capability_exposes_search_only() -> None:
-    capability = reader_capability()
+    capability = domain_capability("", False)
     assert capability.defer_loading is False
     names = {
         getattr(tool, "name", None) or getattr(tool, "__name__", None)
         for tool in capability.tools
     }
-    assert names == {"search_corpus"}
+    assert names == {"search_corpus", "read_source", "list_tag_catalog"}
 
 
 def _assert_blocked(client: TestClient, auth: dict, thread_id: str) -> None:

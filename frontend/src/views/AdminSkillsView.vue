@@ -121,7 +121,6 @@ onMounted(load);
         <p class="skills-uploaded-desc">{{ uploaded.skill.description || "暂无描述" }}</p>
         <dl>
           <div><dt>版本</dt><dd>{{ uploaded.version.version }}</dd></div>
-          <div><dt>内容哈希</dt><dd :title="uploaded.version.packageSha256">{{ shortSha(uploaded.version.packageSha256) }}</dd></div>
           <div><dt>文件数</dt><dd>{{ uploaded.version.fileCount }}</dd></div>
           <div><dt>大小</dt><dd>{{ sizeLabel(uploaded.version.size) }}</dd></div>
         </dl>
@@ -145,7 +144,6 @@ onMounted(load);
           <ul>
             <li v-for="version in skill.versions" :key="version.id">
               <b>{{ version.version }}</b>
-              <span :title="version.packageSha256">哈希 {{ shortSha(version.packageSha256) }}</span>
               <span>{{ dateLabel(version.createdAt) }}</span>
               <em v-if="skill.publishedVersionId === version.id" data-testid="skill-version-published">当前发布</em>
               <button

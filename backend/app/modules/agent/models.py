@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 MessageRole = Literal["user", "assistant"]
+SourceKind = Literal["case", "knowledge", "material", "attachment"]
 RunStatus = Literal["active", "completed", "failed", "cancelled"]
 TerminalRunStatus = Literal["completed", "failed", "cancelled"]
 ThreadEventType = Literal[
@@ -66,6 +67,7 @@ class AgentRun(BaseModel):
         default_factory=list, alias="skillBindings",
         description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
     )
+    read_only: bool = Field(default=False, alias="readOnly")
     resources: list[dict[str, str]] = Field(default_factory=list)
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
@@ -79,14 +81,27 @@ class AgentRun(BaseModel):
 
 
 class SourceRef(BaseModel):
-    """服务端从工具实际结果重建的来源引用，模型输出不能伪造。"""
+    """服务端从工具实际结果重建的来源引用，模型输出不能伪造。
+
+    资料区条目的 id 是统一来源 API 的稳定条目 id（案例来源即挂载 id，
+    同一案例的 v1/v2 各自成条）；version 是展示版本，version_id 是服务
+    端核实的已批准版本号记录，locator 携带可定位引用的真实版本标识。
+    三者都只能由读源工具与服务端写入，浏览器提交不采信。
+    """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["case", "knowledge", "material"]
+    kind: SourceKind
     id: str
     title: str
     snippet: str = ""
+    version: str | None = None
+    version_id: str | None = Field(default=None, alias="versionId")
+    locator: str | None = None
+
+    def identity(self) -> tuple[str, str, str]:
+        """跨多次检索的稳定证据身份：类型 + 条目 ID + 实际版本。"""
+        return (self.kind, self.id, self.version_id or self.version or "")
 
 
 class ArtifactTarget(BaseModel):
