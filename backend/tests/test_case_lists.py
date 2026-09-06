@@ -21,6 +21,7 @@ CARD_FIELDS = {
     "purpose",
     "likes",
     "theoryPoints",
+    "availableActions",
 }
 
 

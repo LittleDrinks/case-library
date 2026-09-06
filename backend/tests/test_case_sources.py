@@ -360,6 +360,14 @@ def _admin_command(client: TestClient, case_id: str, command: str) -> None:
     assert response.status_code == 200, response.json()
 
 
+def _owner_reopen(client: TestClient, owner: dict, case_id: str) -> None:
+    response = client.post(
+        f"/api/cases/{case_id}/lifecycle", headers=headers(owner),
+        json={"command": "reopen", "revision": revision(client, case_id)},
+    )
+    assert response.status_code == 200, response.json()
+
+
 def _approve_first_submission(client: TestClient, owner: dict, case_id: str) -> str:
     _submit_if_draft(client, owner, case_id)
     _admin_command(client, case_id, "start")
@@ -410,7 +418,7 @@ def test_fixed_citations_read_old_approved_versions(client: TestClient) -> None:
     owner = login(client)
     v1 = _approve_first_submission(client, owner, "c-draft-1")
     _admin_command(client, "c-draft-1", "hide")
-    _admin_command(client, "c-draft-1", "reopen")
+    _owner_reopen(client, owner, "c-draft-1")
     _edit_and_submit(client, owner, "第二版标题")
     pending = client.get("/api/cases/c-draft-1").json()["submittedVersionId"]
     new_case = client.post(

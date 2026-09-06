@@ -100,7 +100,9 @@ def _await_run(database, thread_id: str, deadline: float = 10) -> dict | None:
             {"threadId": thread_id, "status": {"$ne": "active"}},
             {"_id": 0}, sort=[("startedAt", -1), ("id", -1)],
         )
-        if run:
+        if run and database.agent_thread_events.find_one(
+            {"runId": run["id"], "type": f"run.{run['status']}"}
+        ):
             return run
         Event().wait(0.02)
     return None
@@ -276,7 +278,7 @@ def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) 
 
 def test_cancel_after_terminal_completion_is_idle_noop(client: TestClient) -> None:
     auth = _login(client)
-    with client.app.state.agent.override(model=TestModel(custom_output_text="竞态回答")):
+    with client.app.state.agent.override(model=TestModel(call_tools=[], custom_output_text="竞态回答")):
         thread_id = _thread_id(client)
         assert _post(client, auth, "竞态测试").status_code == 200
     database = client.app.state.database
@@ -343,7 +345,7 @@ def test_retry_failed_message_creates_new_run_referencing_original(client: TestC
     database = client.app.state.database
     thread_id, failed, user_message = _failed_first_run(client, auth, database)
 
-    with client.app.state.agent.override(model=TestModel(custom_output_text="重试成功")):
+    with client.app.state.agent.override(model=TestModel(call_tools=[], custom_output_text="重试成功")):
         assert _retry_request(client, auth, user_message["id"]).status_code == 200
     retried = _await_run(database, thread_id)
     assert retried["status"] == "completed"
@@ -375,7 +377,7 @@ def _assert_replayed_assistant(chunks: list, snapshot: dict) -> None:
 
 def test_events_endpoint_replays_from_after_seq(client: TestClient) -> None:
     auth = _login(client)
-    with client.app.state.agent.override(model=TestModel(custom_output_text="恢复回答")):
+    with client.app.state.agent.override(model=TestModel(call_tools=[], custom_output_text="恢复回答")):
         assert _post(client, auth, "恢复测试").status_code == 200
     thread_id = _thread_id(client)
     snapshot = client.get(THREAD_PATH).json()
@@ -431,7 +433,7 @@ def _assert_events_tail(client: TestClient, thread_id: str, release: Event) -> N
 
 def test_terminal_event_seals_the_thread_event_tail(client: TestClient) -> None:
     auth = _login(client)
-    with client.app.state.agent.override(model=TestModel(custom_output_text="终态回答")):
+    with client.app.state.agent.override(model=TestModel(call_tools=[], custom_output_text="终态回答")):
         assert _post(client, auth, "终态顺序").status_code == 200
     database = client.app.state.database
     thread_id = _thread_id(client)
