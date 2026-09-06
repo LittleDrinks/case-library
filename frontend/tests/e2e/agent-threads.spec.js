@@ -161,3 +161,89 @@ test("命名 Thread：创建、重命名、切换、刷新恢复、跨用户阻�
   await reloadRestoresLastThread(page, created.id);
   await assertCrossUserBlocked(page, created.id);
 });
+
+const SLOW_QUESTION = "慢速测试：生成中切换线程";
+
+async function sendSlow(page, text) {
+  const stream = page.waitForResponse((response) => (
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/stream")
+  ));
+  await page.getByLabel("向 AI 提问").fill(text);
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await stream;
+}
+
+async function expectActive(page, caseId, threadId) {
+  await expect.poll(async () => (await threadSnapshot(page, caseId, threadId)).activeRun)
+    .toBeTruthy();
+}
+
+async function createEmptyThread(page) {
+  await openThreadList(page);
+  await page.getByTestId("agent-thread-create").click();
+  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+  await expect(page.locator(".ai-message")).toHaveCount(0);
+}
+
+async function switchToThread(page, text) {
+  await openThreadList(page);
+  await page.getByTestId("agent-thread-open").filter({ hasText: text }).click();
+}
+
+function expectSingleExchange(snapshot, question) {
+  expect(snapshot.activeRun).toBeNull();
+  expect(snapshot.latestRun.status).toBe("completed");
+  expect(snapshot.eventSeq).toBe(4);
+  expect(userTexts(snapshot)).toEqual([question]);
+  expect(snapshot.messages).toHaveLength(2);
+  const ids = snapshot.messages.map((message) => message.id);
+  expect(new Set(ids).size).toBe(ids.length);
+}
+
+async function expectPanelMatches(page, snapshot) {
+  const panel = page.locator(".agent-chat-panel");
+  await expect(panel).toHaveAttribute("data-event-seq", String(snapshot.eventSeq));
+  await expect(panel).toHaveAttribute("data-run-id", snapshot.latestRun.id);
+  await expect(panel).toHaveAttribute("data-run-status", "completed");
+  await expect(page.locator(".ai-message.user")).toHaveCount(1);
+  await expect(page.locator(".ai-message.assistant")).toHaveCount(1);
+}
+
+async function defaultThread(page, caseId) {
+  return (await threadList(page, caseId)).find((row) => row.isDefault);
+}
+
+test("生成中 A→B→A：切换不取消不重发，切回重连同一 Run 到终态且无重复写入", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page, `Switch ${Date.now()}`);
+  await openChat(page, created.id);
+  await sendSlow(page, SLOW_QUESTION);
+  const threadA = await defaultThread(page, created.id);
+  await expectActive(page, created.id, threadA.id);
+  await createEmptyThread(page);
+  await switchToThread(page, "慢速测试");
+  await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
+  const snapshot = await threadSnapshot(page, created.id, threadA.id);
+  expectSingleExchange(snapshot, SLOW_QUESTION);
+  await expectPanelMatches(page, snapshot);
+});
+
+test("非默认 Thread 生成中刷新：恢复选中 Thread，续跑同一 Run 到终态且无重复写入", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page, `Reload ${Date.now()}`);
+  await openChat(page, created.id);
+  await createEmptyThread(page);
+  await sendSlow(page, SLOW_QUESTION);
+  const threadB = (await threadList(page, created.id)).find((row) => !row.isDefault);
+  await expectActive(page, created.id, threadB.id);
+  await page.reload();
+  await openChat(page, created.id);
+  await expect(page.getByTestId("agent-thread-list-open")).toContainText("慢速测试");
+  await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
+  const snapshot = await threadSnapshot(page, created.id, threadB.id);
+  expectSingleExchange(snapshot, SLOW_QUESTION);
+  await expectPanelMatches(page, snapshot);
+  expect((await defaultThread(page, created.id)).running).toBe(false);
+});

@@ -11,6 +11,7 @@ vi.mock("../api.js", () => ({
     agentCreateThread: vi.fn(),
     agentRenameThread: vi.fn(),
     agentDecide: vi.fn(),
+    agentCancel: vi.fn(),
     aiSettings: vi.fn(),
   },
 }));
@@ -192,4 +193,88 @@ it("restores the saved scroll position when switching back", async () => {
   await flushPromises();
 
   expect(wrapper.get(".panel-scroll").element.scrollTop).toBe(120);
+});
+
+function streamResponse(chunks) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+  });
+}
+
+function resumeResponse() {
+  return streamResponse([
+    'data: {"type":"start","messageId":"message-resumed"}\n\n',
+    'data: {"type":"start-step"}\n\n',
+    'data: {"type":"text-start","id":"text-resumed"}\n\n',
+    'data: {"type":"text-delta","id":"text-resumed","delta":"恢复回答"}\n\n',
+    'data: {"type":"text-end","id":"text-resumed"}\n\n',
+    'data: {"type":"finish-step"}\n\n',
+    'data: {"type":"finish","finishReason":"stop"}\n\n',
+    "data: [DONE]\n\n",
+  ]);
+}
+
+function runningThread() {
+  return {
+    ...snapshotOf("thread-1", "默认对话", [message("m-1", "生成中的问题")]),
+    eventSeq: 2,
+    activeRun: { id: "run-1", status: "active" },
+    latestRun: { id: "run-1", status: "active" },
+  };
+}
+
+function mountRunning(fetch) {
+  api.agentThread.mockImplementation((caseId, threadId) => Promise.resolve(
+    structuredClone(threadId === "thread-2" ? snapshots["thread-2"] : runningThread()),
+  ));
+  vi.stubGlobal("fetch", fetch);
+  return mountPanel();
+}
+
+async function switchTo(wrapper, index) {
+  await openList(wrapper);
+  await wrapper.findAll('[data-testid="agent-thread-open"]')[index].trigger("click");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await flushPromises();
+}
+
+function eventCalls(fetch) {
+  return fetch.mock.calls.map(([url]) => url).filter((url) => url.includes("/events"));
+}
+
+it("reconnects the running thread's event stream after switching away and back", async () => {
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(resumeResponse()));
+  const wrapper = mountRunning(fetch);
+  await flushPromises();
+  await switchTo(wrapper, 1);
+  expect(wrapper.text()).toContain("第二对话消息");
+  await switchTo(wrapper, 0);
+  expect(wrapper.text()).toContain("恢复回答");
+  expect(eventCalls(fetch)).toEqual([
+    "/api/cases/case-1/agent/thread/thread-1/events?afterSeq=2",
+    "/api/cases/case-1/agent/thread/thread-1/events?afterSeq=2",
+  ]);
+  expect(fetch.mock.calls.filter(([url]) => url.includes("/stream"))).toHaveLength(0);
+  expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-1");
+});
+
+it("binds the cancel command to the thread selected at click time", async () => {
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(resumeResponse()));
+  api.agentCancel.mockResolvedValue({ runId: "run-1", status: "cancelling" });
+  const wrapper = mountRunning(fetch);
+  await flushPromises();
+  expect(wrapper.find('[data-testid="agent-stop"]').exists()).toBe(true);
+  await switchTo(wrapper, 1);
+  expect(wrapper.find('[data-testid="agent-stop"]').exists()).toBe(false);
+  await switchTo(wrapper, 0);
+  await wrapper.get('[data-testid="agent-stop"]').trigger("click");
+  await flushPromises();
+  expect(api.agentCancel).toHaveBeenCalledWith("case-1", "thread-1", "csrf");
 });

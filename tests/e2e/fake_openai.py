@@ -54,7 +54,11 @@ def _pieces(payload: dict) -> tuple[list[str], float]:
 
 
 def _interrupted(payload: dict) -> bool:
-    return "上游中断测试" in json.dumps(payload, ensure_ascii=False)
+    """重试语义：首次请求的用户文本只出现一次；重试 Run 的模型上下文包含两份。"""
+    prompt = json.dumps(payload, ensure_ascii=False)
+    if "重试测试" in prompt:
+        return prompt.count("重试测试") == 1
+    return "上游中断测试" in prompt
 
 
 def _send_pieces(handler, payload: dict) -> bool:
