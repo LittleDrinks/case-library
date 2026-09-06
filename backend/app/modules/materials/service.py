@@ -162,11 +162,16 @@ def _clean(record: dict) -> dict:
     return {key: value for key, value in record.items() if key != "_id"}
 
 
+def campus_verified(user: dict | None) -> bool:
+    """校内内容需要已确认的机构身份，登录本身不构成验证。"""
+    return bool(user and (user.get("campus_verified") or user.get("role") == "admin"))
+
+
 def can_read_material(material: dict, user: dict | None) -> bool:
     if material["accessLevel"] == "public":
         return True
     if material["accessLevel"] == "campus":
-        return bool(user)
+        return campus_verified(user)
     return bool(
         user and (user["role"] == "admin" or material.get("createdBy") == user["id"])
     )
