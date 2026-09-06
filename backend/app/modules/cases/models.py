@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from app.modules.cases.document_schema import (
     validate_optional_document,
@@ -60,8 +60,13 @@ class LifecycleCommand(BaseModel):
     revision: int = Field(ge=1)
     submittedVersionId: str | None = None
     targetId: str | None = None
-    reasonType: str | None = Field(default=None, min_length=1, max_length=80)
-    summary: str | None = Field(default=None, max_length=4000)
+    # strip_whitespace 先于 min_length 执行：纯空白退回原因直接 422，合法原因去空格后持久化。
+    reasonType: Annotated[str | None, StringConstraints(strip_whitespace=True)] | None = (
+        Field(default=None, min_length=1, max_length=80)
+    )
+    summary: Annotated[str | None, StringConstraints(strip_whitespace=True)] | None = (
+        Field(default=None, max_length=4000)
+    )
 
     @model_validator(mode="after")
     def require_review_reason(self) -> LifecycleCommand:

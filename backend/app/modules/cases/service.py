@@ -39,7 +39,6 @@ CASE_VIEW_FIELDS = (
     "updatedAt",
     "submittedAt",
     "publishedAt",
-    "lastReview",
     "tagIds",
     *CASE_METADATA_FIELDS,
 )
@@ -110,7 +109,10 @@ def case_card(case: dict, include_owner: bool = False, user: dict | None = None)
 
 
 def internal_case_view(case: dict, user: dict) -> dict:
+    """内部案例视图唯一权威序列化：动作资格实时计算，lastReview 仅作者可见。"""
     view = case_view(case)
+    if user["id"] == case.get("ownerId"):
+        view["lastReview"] = case.get("lastReview")
     view["availableActions"] = available_actions(case, user)
     return view
 

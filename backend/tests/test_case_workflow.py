@@ -246,6 +246,7 @@ def test_author_can_snapshot_and_rollback_a_working_version(client: TestClient) 
     snapshot = _transition_json(
         client, case["id"], auth["csrfToken"], "snapshot", saved
     )
+    assert snapshot["case"]["availableActions"] == ["submit", "snapshot", "rollback"]
     changed = _save_title(client, auth, saved, "回滚前")
     rolled = _transition(
         client,
@@ -256,6 +257,7 @@ def test_author_can_snapshot_and_rollback_a_working_version(client: TestClient) 
         targetId=snapshot["snapshot"]["id"],
     )
     assert rolled.status_code == 200 and rolled.json()["case"]["title"] == "快照基线"
+    assert rolled.json()["case"]["availableActions"] == ["submit", "snapshot", "rollback"]
 
 
 def test_admin_can_hide_and_restore_the_same_published_version(
@@ -341,25 +343,71 @@ def test_owner_withdraws_while_review_is_active(client: TestClient) -> None:
 
 def _assert_return_feedback(returned):
     assert returned["case"]["workflowStatus"] == "draft"
-    assert returned["case"]["lastReview"]["action"] == "reject"
-    assert returned["case"]["lastReview"]["reasonType"] == "证据不足"
-    assert returned["case"]["lastReview"]["annotationIds"] == []
+    assert "lastReview" not in returned["case"]
+    assert returned["event"]["action"] == "reject"
+    assert returned["event"]["reasonType"] == "证据不足"
     assert returned["event"]["annotationIds"] == []
+
+
+def _reject_and_view(client, started):
+    admin = _relogin(client, "admin", "admin123")
+    returned = _decide(client, admin, started, "reject", reasonType="证据不足")
+    _assert_return_feedback(returned)
+    admin_view = client.get("/api/cases/c-draft-1").json()
+    client.cookies.clear()
+    assert client.get("/api/cases/c-draft-1").status_code == 404
+    _relogin(client)
+    return admin_view, client.get("/api/cases/c-draft-1").json()
 
 
 def test_reviewer_returns_without_annotations_and_owner_sees_reason(
     client: TestClient,
 ) -> None:
     _admin, _case, _submitted, started = _review_round(client)
-    admin = _relogin(client, "admin", "admin123")
-    returned = _decide(client, admin, started, "reject", reasonType="证据不足")
-    _assert_return_feedback(returned)
-    client.cookies.clear()
-    assert client.get("/api/cases/c-draft-1").status_code == 404
-    _relogin(client)
-    view = client.get("/api/cases/c-draft-1").json()
+    admin_view, view = _reject_and_view(client, started)
+    assert "lastReview" not in admin_view
+    history = client.get("/api/cases/c-draft-1/history").json()
+    rejects = [event for event in history["events"] if event["action"] == "reject"]
+    assert len(rejects) == 1 and rejects[0]["reasonType"] == "证据不足"
+    assert view["lastReview"]["action"] == "reject"
+    assert view["lastReview"]["reasonType"] == "证据不足"
     assert view["lastReview"]["summary"] == ""
     assert view["availableActions"] == ["submit", "snapshot", "rollback"]
+
+
+def test_whitespace_only_return_reason_is_rejected(client: TestClient) -> None:
+    _admin, case, submitted, started = _review_round(client)
+    admin = _relogin(client, "admin", "admin123")
+    for reason in ("   ", "\t\n", "\u3000"):
+        response = _transition(
+            client,
+            case["id"],
+            admin["csrfToken"],
+            "reject",
+            started["case"],
+            submittedVersionId=submitted["version"]["id"],
+            reasonType=reason,
+        )
+        assert response.status_code == 422
+
+
+def test_return_reason_is_trimmed_before_persisted(client: TestClient) -> None:
+    _admin, _case, _submitted, started = _review_round(client)
+    admin = _relogin(client, "admin", "admin123")
+    returned = _decide(
+        client,
+        admin,
+        started,
+        "supplement",
+        reasonType="  证据不足\u3000",
+        summary="\n 请补充数据来源。 ",
+    )
+    assert returned["event"]["reasonType"] == "证据不足"
+    assert returned["event"]["summary"] == "请补充数据来源。"
+    _relogin(client)
+    view = client.get("/api/cases/c-draft-1").json()
+    assert view["lastReview"]["reasonType"] == "证据不足"
+    assert view["lastReview"]["summary"] == "请补充数据来源。"
 
 
 def test_return_without_reason_is_rejected(client: TestClient) -> None:

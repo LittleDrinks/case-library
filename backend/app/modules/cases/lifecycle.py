@@ -7,12 +7,11 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
-from app.modules.cases.actions import available_actions
 from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
     case_metadata,
-    case_view,
+    internal_case_view,
 )
 from app.modules.cases.snapshots import (
     create_snapshot,
@@ -25,7 +24,8 @@ from app.modules.case_materials.service import snapshot_materials
 from app.modules.cases.sources import citations_resolve
 from app.modules.search.outbox import SearchOutbox
 
-SUBMITTABLE_STATES = ("pending", "reviewing")
+# 作者已投稿且审核结论未定的状态：仅在这些状态下作者可撤回。
+WITHDRAWABLE_STATES = ("pending", "reviewing")
 SUBMISSION_FIELDS = ("submittedVersionId", "submittedAt", "reviewStartedAt")
 
 
@@ -147,16 +147,10 @@ def _result(case: dict, version: dict, event: dict, user: dict) -> dict:
     if not case:
         raise CaseError(409, "案例状态已变化")
     return {
-        "case": _case_view(case, user),
+        "case": internal_case_view(case, user),
         "version": _clean(version),
         "event": _clean(event),
     }
-
-
-def _case_view(case: dict, user: dict) -> dict:
-    view = case_view(case)
-    view["availableActions"] = available_actions(case, user)
-    return view
 
 
 def _submitted_version(database, case: dict, session) -> dict:
@@ -220,7 +214,7 @@ def _start(database, case: dict, user: dict, session) -> dict:
 
 def _withdraw(database, case: dict, user: dict, session) -> dict:
     _require_owner(case, user)
-    if case["workflowStatus"] not in SUBMITTABLE_STATES:
+    if case["workflowStatus"] not in WITHDRAWABLE_STATES:
         raise CaseError(409, "审核结论产生前方可撤回")
     version, now = _submitted_version(database, case, session), _now()
     event = _event(case, user, version, now, "withdraw")
@@ -233,7 +227,7 @@ def _mark_withdrawn(database, case: dict, version: dict, now: str, session) -> d
     query = {
         "id": case["id"],
         "revision": case["revision"],
-        "workflowStatus": {"$in": list(SUBMITTABLE_STATES)},
+        "workflowStatus": {"$in": list(WITHDRAWABLE_STATES)},
         "submittedVersionId": version["id"],
     }
     update = {
