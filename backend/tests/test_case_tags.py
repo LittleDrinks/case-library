@@ -19,7 +19,9 @@ def _auth(client: TestClient, username: str = "user") -> dict:
 def _create_case(client: TestClient, auth: dict) -> dict:
     document = {
         "type": "doc",
-        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "正文"}]}],
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "正文"}]}
+        ],
     }
     return client.post(
         "/api/cases", headers=auth, json={"title": "标签案例", "document": document}
@@ -31,6 +33,28 @@ def _save_tags(client: TestClient, auth: dict, case: dict, tag_ids: list) -> dic
         f"/api/cases/{case['id']}",
         headers=auth,
         json={"tagIds": tag_ids, "revision": case["revision"]},
+    )
+
+
+def _create_required_group(
+    client: TestClient, admin: dict, name: str
+) -> tuple[dict, dict]:
+    group = client.post(
+        "/api/tag-groups",
+        headers=admin,
+        json={"name": name, "requiredForSubmission": True},
+    ).json()
+    tag = client.post(
+        f"/api/tag-groups/{group['id']}/tags", headers=admin, json={"name": "必填标签"}
+    ).json()
+    return group, tag
+
+
+def _submit_case(client: TestClient, auth: dict, case: dict, revision: int) -> dict:
+    return client.post(
+        f"/api/cases/{case['id']}/lifecycle",
+        headers=auth,
+        json={"command": "submit", "revision": revision},
     )
 
 
@@ -51,31 +75,11 @@ def test_case_rejects_unknown_tag_ids(client: TestClient) -> None:
     assert saved.status_code == 422
 
 
-def _seed_required_group(client):
-    admin = _auth(client, "admin")
-    group = client.post(
-        "/api/tag-groups",
-        headers=admin,
-        json={"name": "投稿必填组", "requiredForSubmission": True},
-    ).json()
-    tag = client.post(
-        f"/api/tag-groups/{group['id']}/tags", headers=admin, json={"name": "必填标签"}
-    ).json()
-    return group, tag
-
-
-def _submit_case(client, owner, case, revision):
-    return client.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers=owner,
-        json={"command": "submit", "revision": revision},
-    )
-
-
 def test_submit_blocks_missing_required_group(client: TestClient) -> None:
     owner = _auth(client)
     case = _create_case(client, owner)
-    _group, tag = _seed_required_group(client)
+    admin = _auth(client, "admin")
+    group, tag = _create_required_group(client, admin, "投稿必填组")
     owner = _auth(client)
     blocked = _submit_case(client, owner, case, case["revision"])
     assert blocked.status_code == 422
@@ -83,5 +87,4 @@ def test_submit_blocks_missing_required_group(client: TestClient) -> None:
     _save_tags(client, owner, case, [tag["id"]])
     allowed = _submit_case(client, owner, case, case["revision"] + 1)
     assert allowed.status_code == 200
-    versions = allowed.json()["version"]
-    assert versions["metadata"]["tagIds"] == [tag["id"]]
+    assert allowed.json()["version"]["metadata"]["tagIds"] == [tag["id"]]
