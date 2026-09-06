@@ -197,22 +197,14 @@ def test_unknown_group_and_tag_are_not_found(client: TestClient) -> None:
     assert client.patch("/api/tags/tag-none", headers=auth, json={"sortKey": 3}).status_code == 404
 
 
-def _seed_required_group(client: TestClient) -> tuple[dict, dict]:
-    group = client.post(
-        "/api/tag-groups", headers=_csrf(client), json={"name": "必填组", "requiredForSubmission": True}
-    ).json()
-    tag = client.post(
-        f"/api/tag-groups/{group['id']}/tags", headers=_csrf(client), json={"name": "必填标签"}
-    ).json()
-    return group, tag
-
-
 def test_validate_submission_tags_reports_uncovered_required_groups(
     client: TestClient,
 ) -> None:
     database = client.app.state.database
+    auth = _csrf(client)
     assert validate_submission_tags(database, []) == []
-    group, tag = _seed_required_group(client)
+    group = _create_group(client, auth, "必填组", True)
+    tag = client.post(f"/api/tag-groups/{group['id']}/tags", headers=auth, json={"name": "必填标签"}).json()
     missing = validate_submission_tags(database, [])
     assert missing == [{
         "id": group["id"],

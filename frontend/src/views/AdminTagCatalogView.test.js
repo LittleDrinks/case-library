@@ -25,6 +25,10 @@ function render() {
   });
 }
 
+function headerButton(view, label) {
+  return view.findAll(".tag-group > header button").find((node) => node.text().includes(label));
+}
+
 async function loadContract() {
   const view = render();
   await flushPromises();
@@ -47,7 +51,7 @@ async function requiredToggleContract() {
   api.updateTagGroup.mockResolvedValue({});
   const view = render();
   await flushPromises();
-  await view.get(".tag-group header label input[type='checkbox']").setValue(true);
+  await view.get(".tag-group header input[type='checkbox']").setValue(true);
   await flushPromises();
   expect(api.updateTagGroup).toHaveBeenCalledWith("g1", { requiredForSubmission: true }, "");
 }
@@ -56,7 +60,7 @@ async function disableGroupContract() {
   api.updateTagGroup.mockResolvedValue({});
   const view = render();
   await flushPromises();
-  await view.get("[aria-label='停用标签组：思政元素']").trigger("click");
+  await headerButton(view, "停用").trigger("click");
   await flushPromises();
   expect(api.updateTagGroup).toHaveBeenCalledWith("g1", { enabled: false }, "");
 }
@@ -78,9 +82,9 @@ async function serverErrorContract() {
   api.updateTagGroup.mockRejectedValue(new Error("名称与现有标签目录冲突"));
   const view = render();
   await flushPromises();
-  await view.get("[aria-label='停用标签组：思政元素']").trigger("click");
+  await headerButton(view, "停用").trigger("click");
   await flushPromises();
-  expect(view.get(".tag-catalog-error").text()).toBe("名称与现有标签目录冲突");
+  expect(view.get(".tag-catalog-error").text()).toContain("名称与现有标签目录冲突");
 }
 
 beforeEach(() => {

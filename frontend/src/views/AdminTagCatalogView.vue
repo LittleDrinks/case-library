@@ -1,4 +1,12 @@
 <script setup>
+import { ElAlert, ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElTag } from "element-plus";
+import "element-plus/es/components/alert/style/css";
+import "element-plus/es/components/button/style/css";
+import "element-plus/es/components/checkbox/style/css";
+import "element-plus/es/components/form-item/style/css";
+import "element-plus/es/components/form/style/css";
+import "element-plus/es/components/input/style/css";
+import "element-plus/es/components/tag/style/css";
 import { LoaderCircle, Pencil, Plus, RefreshCw, Tags } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { api } from "../api.js";
@@ -88,40 +96,105 @@ onMounted(load);
           <RouterLink :to="{ name: 'admin-dashboard' }"><Tags :size="16" />管理后台</RouterLink>
         </nav>
       </header>
-      <form class="tag-group-create" @submit.prevent="createGroup">
-        <input v-model="newGroupName" aria-label="新标签组名称" placeholder="新标签组名称，如学科、课程" maxlength="80" />
-        <button type="submit"><Plus :size="15" />新建标签组</button>
-      </form>
-      <p v-if="actionError" class="tag-catalog-error" role="alert">{{ actionError }}</p>
+      <ElForm class="tag-group-create" @submit.prevent="createGroup">
+        <ElFormItem class="tag-group-create-item">
+          <ElInput
+            v-model="newGroupName"
+            aria-label="新标签组名称"
+            placeholder="新标签组名称，如学科、课程"
+            maxlength="80"
+          />
+        </ElFormItem>
+        <ElButton type="primary" native-type="submit"><Plus :size="15" />新建标签组</ElButton>
+      </ElForm>
+      <ElAlert
+        v-if="actionError"
+        class="tag-catalog-error"
+        type="error"
+        :title="actionError"
+        :closable="false"
+        show-icon
+      />
       <div v-if="loading" class="admin-state"><LoaderCircle class="spin" :size="20" />正在加载标签目录</div>
       <div v-else-if="error" class="admin-state error-state" role="alert">
-        {{ error }}<button type="button" @click="load"><RefreshCw :size="15" />重试</button>
+        {{ error }}<ElButton link type="primary" @click="load"><RefreshCw :size="15" />重试</ElButton>
       </div>
       <p v-else-if="!groups.length" class="admin-empty">暂无标签组，先创建一个标签组</p>
-      <section v-for="group in groups" :key="group.id" class="tag-group" :class="{ 'tag-disabled': !group.enabled }" :aria-label="`标签组：${group.name}`">
+      <section
+        v-for="group in groups"
+        :key="group.id"
+        class="tag-group"
+        :class="{ 'tag-disabled': !group.enabled }"
+        :aria-label="`标签组：${group.name}`"
+      >
         <header>
-          <input v-if="editing?.kind === 'group' && editing.id === group.id" v-model="editing.name" aria-label="标签组名称" maxlength="80" @keyup.enter="saveEdit" @blur="saveEdit" />
-          <h2 v-else>{{ group.name }}<b v-if="group.requiredForSubmission">投稿必填</b><b v-if="!group.enabled" class="tag-disabled-mark">已停用</b></h2>
-          <label><input type="checkbox" :checked="group.requiredForSubmission" :disabled="!group.enabled" @change="toggleRequired(group)" />投稿必填</label>
-          <button type="button" :aria-label="`重命名标签组：${group.name}`" @click="startEdit('group', group)"><Pencil :size="13" />重命名</button>
-          <button type="button" :aria-label="`${group.enabled ? '停用' : '启用'}标签组：${group.name}`" @click="toggleGroupEnabled(group)">
-            {{ group.enabled ? "停用" : "启用" }}
-          </button>
+          <ElInput
+            v-if="editing?.kind === 'group' && editing.id === group.id"
+            v-model="editing.name"
+            aria-label="标签组名称"
+            maxlength="80"
+            @keyup.enter="saveEdit"
+            @blur="saveEdit"
+          />
+          <h2 v-else>
+            {{ group.name }}
+            <ElTag v-if="group.requiredForSubmission" type="warning" size="small">投稿必填</ElTag>
+            <ElTag v-if="!group.enabled" type="info" size="small">已停用</ElTag>
+          </h2>
+          <ElCheckbox
+            :model-value="group.requiredForSubmission"
+            :disabled="!group.enabled"
+            @change="toggleRequired(group)"
+          >投稿必填</ElCheckbox>
+          <ElButton :aria-label="`重命名标签组：${group.name}`" @click="startEdit('group', group)">
+            <Pencil :size="13" />重命名
+          </ElButton>
+          <ElButton
+            :aria-label="`${group.enabled ? '停用' : '启用'}标签组：${group.name}`"
+            :type="group.enabled ? 'warning' : 'primary'"
+            plain
+            @click="toggleGroupEnabled(group)"
+          >{{ group.enabled ? "停用" : "启用" }}</ElButton>
         </header>
         <ul>
           <li v-for="tag in group.tags" :key="tag.id" :class="{ 'tag-disabled': !tag.enabled }">
-            <input v-if="editing?.kind === 'tag' && editing.id === tag.id" v-model="editing.name" aria-label="标签名称" maxlength="80" @keyup.enter="saveEdit" @blur="saveEdit" />
-            <span v-else>{{ tag.name }}<b v-if="!tag.enabled" class="tag-disabled-mark">已停用</b></span>
-            <button type="button" :aria-label="`重命名标签：${tag.name}`" @click="startEdit('tag', tag)"><Pencil :size="12" /></button>
-            <button type="button" :aria-label="`${tag.enabled ? '停用' : '启用'}标签：${tag.name}`" @click="toggleTagEnabled(tag)">
-              {{ tag.enabled ? "停用" : "启用" }}
-            </button>
+            <ElInput
+              v-if="editing?.kind === 'tag' && editing.id === tag.id"
+              v-model="editing.name"
+              aria-label="标签名称"
+              maxlength="80"
+              @keyup.enter="saveEdit"
+              @blur="saveEdit"
+            />
+            <span v-else>
+              {{ tag.name }}
+              <ElTag v-if="!tag.enabled" type="info" size="small">已停用</ElTag>
+            </span>
+            <ElButton
+              link
+              type="primary"
+              :aria-label="`重命名标签：${tag.name}`"
+              @click="startEdit('tag', tag)"
+            ><Pencil :size="12" /></ElButton>
+            <ElButton
+              link
+              :type="tag.enabled ? 'warning' : 'primary'"
+              :aria-label="`${tag.enabled ? '停用' : '启用'}标签：${tag.name}`"
+              @click="toggleTagEnabled(tag)"
+            >{{ tag.enabled ? "停用" : "启用" }}</ElButton>
           </li>
         </ul>
-        <form v-if="group.enabled" @submit.prevent="createTag(group)">
-          <input v-model="newTagNames[group.id]" :aria-label="`在${group.name}添加标签`" placeholder="新标签名称" maxlength="80" />
-          <button type="submit"><Plus :size="13" />添加标签</button>
-        </form>
+        <ElForm v-if="group.enabled" class="tag-add-form" @submit.prevent="createTag(group)">
+          <ElFormItem class="tag-add-item">
+            <ElInput
+              v-model="newTagNames[group.id]"
+              :aria-label="`在${group.name}添加标签`"
+              placeholder="新标签名称"
+              maxlength="80"
+            />
+          </ElFormItem>
+          <ElButton native-type="submit"><Plus :size="13" />添加标签</ElButton>
+        </ElForm>
       </section>
     </main>
   </div>
