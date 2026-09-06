@@ -37,7 +37,10 @@ def login(username: str, password: str):
 
 
 def create_case(opener, csrf: str, title: str):
-    document = {"type": "doc", "content": [{"type": "paragraph"}]}
+    document = {
+        "type": "doc",
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "教学案例正文"}]}],
+    }
     status, case = request(
         opener, "POST", "/api/cases", {"title": title, "document": document}, csrf
     )
@@ -117,6 +120,7 @@ def _assert_approved(approved: dict, submitted: dict) -> None:
     assert approved["case"]["workflowStatus"] == "published"
     assert approved["case"]["publicationStatus"] == "public"
     assert approved["case"]["publishedVersionId"] == submitted["version"]["id"]
+    assert approved["case"]["submittedVersionId"] is None
 
 
 def _hide(admin, csrf: str, case_id: str, case: dict) -> dict:
@@ -244,20 +248,60 @@ def test_admin_reopens_only_a_hidden_published_case() -> None:
     )
 
 
-def test_owner_withdraws_only_before_review_starts() -> None:
+def test_owner_withdraws_even_after_review_starts() -> None:
     owner, csrf = login("user", "user123")
     case = create_case(owner, csrf, f"withdraw-{uuid.uuid4().hex}")
     first = submit_case(owner, csrf, case)
-    withdrawn = _withdraw(owner, csrf, case["id"], first["case"])
+    admin, admin_csrf = login("admin", "admin123")
+    started = _start_review(admin, admin_csrf, case["id"], first)
+    withdrawn = _withdraw(owner, csrf, case["id"], started["case"])
     assert withdrawn["case"]["workflowStatus"] == "draft"
     assert withdrawn["case"]["submittedVersionId"] is None
+    stale = _command(
+        "approve",
+        started["case"]["revision"],
+        submittedVersionId=started["case"]["submittedVersionId"],
+    )
+    assert transition(admin, admin_csrf, case["id"], stale)[0] == 409
     edited = patch_title(owner, csrf, withdrawn["case"], "撤回后修改")
     second = submit_case(owner, csrf, edited)
-    admin, admin_csrf = login("admin", "admin123")
-    started = _start_review(admin, admin_csrf, case["id"], second)
-    revision = started["case"]["revision"]
-    assert _transition_status(owner, csrf, case["id"], "withdraw", revision) == 409
+    _start_review(admin, admin_csrf, case["id"], second)
     assert_lifecycle_history(owner, case["id"])
+
+
+def _race_withdraw_approve(
+    owner, owner_csrf, admin, admin_csrf, case_id, revision, version_id
+):
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        withdraw = pool.submit(
+            lambda: _transition_status(owner, owner_csrf, case_id, "withdraw", revision)
+        )
+        approve = pool.submit(
+            lambda: transition(
+                admin,
+                admin_csrf,
+                case_id,
+                _command("approve", revision, submittedVersionId=version_id),
+            )[0]
+        )
+        return sorted([withdraw.result(), approve.result()])
+
+
+def test_withdraw_and_approve_admit_exactly_one_decision() -> None:
+    owner, owner_csrf = login("user", "user123")
+    case = create_case(owner, owner_csrf, f"race-{uuid.uuid4().hex}")
+    submitted = submit_case(owner, owner_csrf, case)
+    admin, admin_csrf = login("admin", "admin123")
+    started = _start_review(admin, admin_csrf, case["id"], submitted)
+    revision = started["case"]["revision"]
+    version_id = submitted["version"]["id"]
+    statuses = _race_withdraw_approve(
+        owner, owner_csrf, admin, admin_csrf, case["id"], revision, version_id
+    )
+    assert statuses == [200, 409]
+    _status, final = request(owner, "GET", f"/api/cases/{case['id']}")
+    decided = final["workflowStatus"]
+    assert decided == ("published" if final.get("publishedVersionId") else "draft")
 
 
 def test_concurrent_submit_returns_one_conflict_instead_of_server_error() -> None:
