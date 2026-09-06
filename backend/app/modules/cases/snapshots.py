@@ -8,6 +8,10 @@ from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
 from app.modules.case_materials.service import restore_materials, snapshot_materials
+from app.modules.case_sources.service import (
+    restore_case_sources,
+    snapshot_case_sources,
+)
 from app.modules.cases.service import (
     CASE_METADATA_FIELDS,
     CaseError,
@@ -29,7 +33,8 @@ def _require_draft_owner(case: dict, user: dict) -> None:
 
 
 def _record(
-    case: dict, user: dict, attachments: list[dict], materials: list[dict], kind: str
+    case: dict, user: dict, attachments: list[dict], materials: list[dict],
+    case_sources: list[dict], kind: str,
 ) -> dict:
     return {
         "id": f"cs-{secrets.token_hex(8)}",
@@ -40,6 +45,7 @@ def _record(
         "document": case["document"],
         "attachments": attachments,
         "materials": materials,
+        "caseSources": case_sources,
         "metadata": case_metadata(case),
         "sourceRevision": case["revision"],
         "createdBy": user["id"],
@@ -51,6 +57,7 @@ def _clean(snapshot: dict) -> dict:
     result = {key: value for key, value in snapshot.items() if key != "_id"}
     result["attachments"] = [attachment_view(row) for row in snapshot["attachments"]]
     result["materials"] = snapshot.get("materials", [])
+    result["caseSources"] = snapshot.get("caseSources", [])
     return result
 
 
@@ -85,7 +92,8 @@ def create_snapshot(database: Database, case: dict, user: dict, session) -> dict
     locked = _lock_case(database, case, user, session)
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
-    snapshot = _record(locked, user, attachments, materials, "manual")
+    case_sources = snapshot_case_sources(database, case["id"], session)
+    snapshot = _record(locked, user, attachments, materials, case_sources, "manual")
     database.case_snapshots.insert_one(snapshot, session=session)
     return {"case": case_view(locked), "snapshot": _clean(snapshot)}
 
@@ -94,7 +102,8 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
     """在既有事务会话内留存一份批前快照，供写回类操作（如 Agent 接受）回滚。"""
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
-    snapshot = _record(case, user, attachments, materials, kind)
+    case_sources = snapshot_case_sources(database, case["id"], session)
+    snapshot = _record(case, user, attachments, materials, case_sources, kind)
     database.case_snapshots.insert_one(snapshot, session=session)
     return _clean(snapshot)
 
@@ -133,6 +142,15 @@ def _restore_attachments(database, case_id: str, target: dict, session) -> None:
         database.attachments.insert_many(attachments, session=session)
 
 
+def _frozen_assets(database, case_id: str, session) -> tuple[list, list, list]:
+    """冻结资料区三源：附件、素材与案例来源，供版本记录与回滚共用。"""
+    return (
+        snapshot_attachments(database, case_id, session),
+        snapshot_materials(database, case_id, session),
+        snapshot_case_sources(database, case_id, session),
+    )
+
+
 def rollback_snapshot(
     database: Database, case: dict, user: dict, target_id: str | None, session
 ) -> dict:
@@ -141,15 +159,16 @@ def rollback_snapshot(
         raise CaseError(422, "回滚目标不能为空")
     target = _target(database, case["id"], target_id, session)
     locked = _lock_case(database, case, user, session)
-    attachments = snapshot_attachments(database, case["id"], session)
-    materials = snapshot_materials(database, case["id"], session)
-    before = _record(locked, user, attachments, materials, "pre_rollback")
+    before = _record(
+        locked, user, *_frozen_assets(database, case["id"], session), "pre_rollback",
+    )
     database.case_snapshots.insert_one(before, session=session)
     restored = _restore_case(database, locked, target, session)
     if not restored:
         raise CaseError(409, "案例状态已变化")
     _restore_attachments(database, case["id"], target, session)
     restore_materials(database, case["id"], target, session)
+    restore_case_sources(database, case["id"], target, session)
     return {"case": case_view(restored), "snapshot": _clean(before)}
 
 

@@ -2,9 +2,11 @@
 import { computed, onMounted, ref } from "vue";
 import { AlertTriangle, Download, FilePenLine, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
+import AddSourceToCase from "../components/AddSourceToCase.vue";
 import PublishedDocument from "../components/PublishedDocument.vue";
 import PublicAttachmentList from "../components/PublicAttachmentList.vue";
 import PublicMaterialList from "../components/PublicMaterialList.vue";
+import PublicSourceList from "../components/PublicSourceList.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
@@ -16,6 +18,7 @@ const caseRecord = ref(null);
 const loading = ref(true);
 const error = ref("");
 const canOpenWorkbench = ref(false);
+const sources = ref([]);
 const outline = computed(() => documentOutline(caseRecord.value?.document));
 const exportUrl = computed(() => `/api/cases/${encodeURIComponent(caseId)}/public/export.docx`);
 
@@ -38,8 +41,21 @@ async function loadAccess() {
   canOpenWorkbench.value = mine.some((item) => item.id === caseId);
 }
 
+async function loadSources() {
+  if (!caseRecord.value?.publishedVersionId) {
+    sources.value = [];
+    return;
+  }
+  try {
+    sources.value = await api.listCaseSources(caseId, caseRecord.value.publishedVersionId);
+  } catch {
+    sources.value = [];
+  }
+}
+
 async function initialize() {
   await Promise.all([loadCase(), loadAccess()]);
+  await loadSources();
 }
 
 function locateHeading(order) {
@@ -96,6 +112,13 @@ onMounted(initialize);
             </ul>
             <PublicAttachmentList :case-id="caseId" :version-id="caseRecord.publishedVersionId" :is-owner="canOpenWorkbench" />
             <PublicMaterialList :case-id="caseId" :version-id="caseRecord.publishedVersionId" />
+            <PublicSourceList :sources="sources" />
+            <AddSourceToCase
+              v-if="session.user"
+              :source-case-id="caseId"
+              :version-id="caseRecord.publishedVersionId"
+              :source-title="caseRecord.title"
+            />
             <RouterLink v-if="canOpenWorkbench" class="case-detail-workbench" :to="{ name: 'workbench', params: { id: caseId } }"><FilePenLine :size="16" aria-hidden="true" />进入工作台</RouterLink>
             <a class="case-detail-export" :href="exportUrl" download><Download :size="16" aria-hidden="true" />导出 DOCX</a>
           </aside>

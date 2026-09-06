@@ -7,6 +7,7 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
+from app.modules.case_sources.service import snapshot_case_sources
 from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
@@ -53,23 +54,17 @@ def _authorize(case: dict, user: dict, command: str) -> None:
 
 
 def _version(
-    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict]
+    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict],
+    case_sources: list[dict],
 ) -> dict:
     number = case.get("versionNumber", 0) + 1
     return {
-        "id": _id("cv"),
-        "caseId": case["id"],
-        "number": number,
-        "kind": "submission",
-        "title": case["title"],
-        "summary": case.get("summary", ""),
-        "document": case["document"],
-        "attachments": attachments,
-        "materials": materials,
-        "metadata": case_metadata(case),
-        "sourceRevision": case["revision"],
-        "createdBy": user["id"],
-        "createdAt": now,
+        "id": _id("cv"), "caseId": case["id"], "number": number,
+        "kind": "submission", "title": case["title"],
+        "summary": case.get("summary", ""), "document": case["document"],
+        "attachments": attachments, "materials": materials,
+        "caseSources": case_sources, "metadata": case_metadata(case),
+        "sourceRevision": case["revision"], "createdBy": user["id"], "createdAt": now,
     }
 
 
@@ -93,7 +88,8 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
     now = _now()
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
-    version = _version(case, user, now, attachments, materials)
+    case_sources = snapshot_case_sources(database, case["id"], session)
+    version = _version(case, user, now, attachments, materials, case_sources)
     event = _event(case, user, version, now, "submit")
     updated = _mark_pending(database, case, version, now, session)
     if not updated:
@@ -127,6 +123,8 @@ def _clean(record: dict) -> dict:
         ]
     if "materials" not in cleaned:
         cleaned["materials"] = []
+    if "caseSources" not in cleaned:
+        cleaned["caseSources"] = []
     return cleaned
 
 

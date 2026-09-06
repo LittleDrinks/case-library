@@ -56,6 +56,14 @@ function materialRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/materials`;
 }
 
+function caseSourceRoot(id) {
+  return `/api/cases/${encodeURIComponent(id)}/case-sources`;
+}
+
+function sourcesRoot(id) {
+  return `/api/cases/${encodeURIComponent(id)}/sources`;
+}
+
 function appendSearchFilters(params, filters) {
   Object.entries(filters).forEach(([name, raw]) => {
     const values = Array.isArray(raw) ? raw : [raw];
@@ -116,6 +124,19 @@ export const api = {
   ),
   unmountCaseMaterial: (id, materialId, revision, csrfToken) => request(
     `${materialRoot(id)}/${encodeURIComponent(materialId)}?revision=${revision}`,
+    { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
+  ),
+  listSources: (id, versionId) => request(
+    `${sourcesRoot(id)}${versionQuery(versionId)}`,
+  ),
+  listCaseSources: (id, versionId) => request(
+    `${caseSourceRoot(id)}${versionQuery(versionId)}`,
+  ),
+  addCaseSource: (id, payload, csrfToken) => request(
+    caseSourceRoot(id), jsonOptions("POST", payload, csrfToken),
+  ),
+  removeCaseSource: (id, sourceId, revision, csrfToken) => request(
+    `${caseSourceRoot(id)}/${encodeURIComponent(sourceId)}?revision=${revision}`,
     { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
   ),
   createCase: (caseRecord, csrfToken) => request(
