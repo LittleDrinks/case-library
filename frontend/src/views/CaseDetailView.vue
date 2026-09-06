@@ -23,7 +23,7 @@ const sources = ref([]);
 const chatOpen = ref(false);
 const pinnedVersionId = computed(() => String(route.query.versionId || ""));
 const sourcesVersionId = computed(() => (
-  pinnedVersionId.value || caseRecord.value?.publishedVersionId || ""
+  pinnedVersionId.value || caseRecord.value?.versionId || ""
 ));
 const outline = computed(() => documentOutline(caseRecord.value?.document));
 const exportUrl = computed(() => sourcesVersionId.value

@@ -260,12 +260,12 @@ async function retryRun() {
             >使用 Skill：{{ skillName(skillPartOf(message).data?.skillId) }}</p>
           </article>
           <template v-if="message.role === 'assistant'">
-            <p
+            <div
               v-for="part in toolParts(message)"
               :key="part.toolCallId"
               class="agent-tool-trace"
               data-testid="agent-skill-load"
-            ><details><summary>{{ toolLabel(part) }} · {{ toolState(part) }}</summary><pre>{{ part.output || part.input }}</pre></details></p>
+            ><details><summary>{{ toolLabel(part) }} · {{ toolState(part) }}</summary><pre>{{ part.output || part.input }}</pre></details></div>
             <div
               v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
               :key="part.toolCallId"

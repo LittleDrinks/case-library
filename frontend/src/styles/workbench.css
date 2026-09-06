@@ -445,7 +445,7 @@
   .panel-head { min-height: 42px; padding: 11px 12px; }
 }
 .agent-context-picker { position: relative; display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.agent-context-picker > button { display: inline-flex; align-items: center; gap: 4px; padding: 5px; }
+.agent-context-picker > button { position: static; display: inline-flex; width: auto; height: 28px; align-items: center; gap: 4px; padding: 5px; background: transparent; color: var(--ink); }
 .agent-source-options { position: absolute; bottom: 100%; left: 0; right: 0; max-height: 240px; overflow: auto; padding: 10px; background: white; border: 1px solid var(--line); z-index: 10; }
 .agent-source-options input[type="search"] { width: 100%; margin-bottom: 8px; }
 .agent-source-options label { display: flex; gap: 7px; padding: 6px 0; align-items: start; }
