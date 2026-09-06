@@ -13,6 +13,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { collectCitationKeys } from "../lib/citation.js";
 import { session } from "../session.js";
 
 const route = useRoute();
@@ -48,6 +49,8 @@ const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
 const outline = computed(() => documentOutline(document.value));
+const citedKeys = computed(() => collectCitationKeys(document.value));
+const activeCitation = computed(() => writingContext.value?.citation || null);
 const reviewMode = computed(() => route.name === "case-review");
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
@@ -153,9 +156,33 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
+const sources = ref([]);
+
+async function loadSources() {
+  try { sources.value = await api.listCaseSources(caseId()); }
+  catch { sources.value = []; }
+}
+
+function insertSourceCitation(source) {
+  try {
+    changeDocument(canvasEditor.value.insertCitation(source));
+  } catch (error) {
+    actionNotice.value = error.message;
+  }
+}
+
+function removeSourceCitation() {
+  try {
+    changeDocument(canvasEditor.value.removeCitation());
+  } catch (error) {
+    actionNotice.value = error.message;
+  }
+}
+
 function applyAttachmentCase(value) {
   expireCandidates();
   syncCaseRevision(value);
+  void loadSources();
 }
 
 function syncCaseRevision(value) {
@@ -183,7 +210,7 @@ async function loadCase() {
       autosave.reconcile(current.revision);
     }
     applyCase(current, !initial);
-    await loadAnnotations();
+    await Promise.all([loadAnnotations(), loadSources()]);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -538,6 +565,7 @@ onBeforeUnmount(() => {
               :annotatable="annotatable"
               :candidate-previews="candidatePreviews"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"
@@ -560,8 +588,12 @@ onBeforeUnmount(() => {
           :candidate-invalidation="candidateInvalidation"
           :before-attachment-mutation="prepareContentMutation"
           :before-version-mutation="prepareContentMutation"
+          :cited-keys="citedKeys"
+          :active-citation="activeCitation"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
+          @insert-citation="insertSourceCitation"
+          @remove-citation="removeSourceCitation"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
           @case-revised="applyCase"

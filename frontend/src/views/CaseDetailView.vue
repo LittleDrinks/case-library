@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
-import { AlertTriangle, Download, FilePenLine, LoaderCircle, RefreshCw } from "@lucide/vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { AlertTriangle, BookMarked, Download, FilePenLine, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
+import AddSourceToCase from "../components/AddSourceToCase.vue";
 import PublishedDocument from "../components/PublishedDocument.vue";
 import PublicAttachmentList from "../components/PublicAttachmentList.vue";
 import PublicMaterialList from "../components/PublicMaterialList.vue";
+import PublicSourceList from "../components/PublicSourceList.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
@@ -16,6 +18,11 @@ const caseRecord = ref(null);
 const loading = ref(true);
 const error = ref("");
 const canOpenWorkbench = ref(false);
+const sources = ref([]);
+const pinnedVersionId = computed(() => String(route.query.versionId || ""));
+const sourcesVersionId = computed(() => (
+  pinnedVersionId.value || caseRecord.value?.publishedVersionId || ""
+));
 const outline = computed(() => documentOutline(caseRecord.value?.document));
 const exportUrl = computed(() => `/api/cases/${encodeURIComponent(caseId)}/public/export.docx`);
 
@@ -23,12 +30,24 @@ async function loadCase() {
   loading.value = true;
   error.value = "";
   try {
-    const value = await api.getPublicCase(caseId);
+    const value = await api.getPublicCase(caseId, pinnedVersionId.value || undefined);
     caseRecord.value = { ...value, document: normalizeDocument(value.document) };
   } catch (reason) {
     error.value = reason.message || "案例加载失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadSources() {
+  if (!sourcesVersionId.value) {
+    sources.value = [];
+    return;
+  }
+  try {
+    sources.value = await api.listCaseSources(caseId, sourcesVersionId.value);
+  } catch {
+    sources.value = [];
   }
 }
 
@@ -40,6 +59,7 @@ async function loadAccess() {
 
 async function initialize() {
   await Promise.all([loadCase(), loadAccess()]);
+  await loadSources();
 }
 
 function locateHeading(order) {
@@ -52,6 +72,7 @@ function dateLabel(value) {
 }
 
 onMounted(initialize);
+watch(pinnedVersionId, initialize);
 </script>
 
 <template>
@@ -69,6 +90,11 @@ onMounted(initialize);
           <h1>{{ caseRecord.title }}</h1>
           <p>{{ caseRecord.course || "课程未设置" }} · {{ caseRecord.typeName || "教学案例" }}</p>
         </header>
+        <p v-if="pinnedVersionId" class="version-pin-banner" role="status">
+          <BookMarked :size="15" aria-hidden="true" />
+          正在阅读固定的发布版本，来源引用始终定位此版本。
+          <RouterLink :to="{ name: 'case-public', params: { id: caseId } }">查看最新版本</RouterLink>
+        </p>
         <div class="case-detail-layout">
           <aside class="case-detail-outline" aria-label="内容目录">
             <h2>内容目录</h2>
@@ -80,7 +106,7 @@ onMounted(initialize);
               <h2>案例摘要</h2>
               <p>{{ caseRecord.summary }}</p>
             </section>
-            <PublishedDocument :document="caseRecord.document" />
+            <PublishedDocument :document="caseRecord.document" :sources="sources" />
           </article>
           <aside class="case-detail-info">
             <h2>案例信息</h2>
@@ -94,8 +120,15 @@ onMounted(initialize);
             <ul v-if="caseRecord.theoryPoints?.length" class="case-detail-tags">
               <li v-for="point in caseRecord.theoryPoints" :key="point">{{ point }}</li>
             </ul>
-            <PublicAttachmentList :case-id="caseId" :version-id="caseRecord.publishedVersionId" :is-owner="canOpenWorkbench" />
-            <PublicMaterialList :case-id="caseId" :version-id="caseRecord.publishedVersionId" />
+            <PublicAttachmentList :case-id="caseId" :version-id="sourcesVersionId" :is-owner="canOpenWorkbench" />
+            <PublicMaterialList :case-id="caseId" :version-id="sourcesVersionId" />
+            <PublicSourceList :sources="sources" />
+            <AddSourceToCase
+              v-if="session.user"
+              :source-case-id="caseId"
+              :version-id="sourcesVersionId"
+              :source-title="caseRecord.title"
+            />
             <RouterLink v-if="canOpenWorkbench" class="case-detail-workbench" :to="{ name: 'workbench', params: { id: caseId } }"><FilePenLine :size="16" aria-hidden="true" />进入工作台</RouterLink>
             <a class="case-detail-export" :href="exportUrl" download><Download :size="16" aria-hidden="true" />导出 DOCX</a>
           </aside>

@@ -123,3 +123,6 @@ a { color: inherit; }
   .login-page { place-items: start center; padding: 64px 18px 18px; background: #fff; }
   .login-panel { padding: 0; border: 0; box-shadow: none; }
 }
+
+.citation-anchor { border-bottom: 1px dashed var(--brand); }
+.citation-marker { padding: 0 1px; color: var(--brand); font-size: .72em; font-weight: 600; cursor: default; user-select: none; }

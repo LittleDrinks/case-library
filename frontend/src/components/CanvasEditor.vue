@@ -6,6 +6,9 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { hashQuote } from "../lib/annotationAnchor.js";
+import {
+  CitationMark, citationMarkerExtension, refreshCitationMarkers,
+} from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
 const props = defineProps({
@@ -15,6 +18,7 @@ const props = defineProps({
   annotatable: { type: Boolean, default: false },
   candidatePreviews: { type: Array, default: () => [] },
   annotations: { type: Array, default: () => [] },
+  sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
 const selection = ref(null);
@@ -49,7 +53,9 @@ function writingContext(activeEditor, from, to) {
   const quote = activeEditor.state.doc.textBetween(from, to, " ");
   const sectionText = activeEditor.state.doc
     .textBetween(section.sectionFrom, section.sectionTo, "\n").trim();
-  return { ...section, quote, from, to, sectionText };
+  const citation = activeEditor.isActive("citation")
+    ? activeEditor.getAttributes("citation") : null;
+  return { ...section, quote, from, to, sectionText, citation };
 }
 
 function positionTrigger(context) {
@@ -232,7 +238,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), candidateExtension, annotationExtension],
+  }), candidateExtension, annotationExtension, CitationMark, citationMarkerExtension],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: captureSelection,
@@ -283,6 +289,25 @@ function applyCandidate(candidate) {
   return activeEditor.getJSON();
 }
 
+function insertCitation(source) {
+  const activeEditor = editor.value;
+  if (!activeEditor || !props.editable) throw new Error("当前案例不可编辑。");
+  const { from, to } = activeEditor.state.selection;
+  if (from >= to) throw new Error("请先在正文中选中要标注来源的文字。");
+  activeEditor.chain().focus().setMark("citation", {
+    sourceType: source.sourceType, sourceId: source.id,
+  }).run();
+  return activeEditor.getJSON();
+}
+
+function removeCitation() {
+  const activeEditor = editor.value;
+  if (!activeEditor || !props.editable) throw new Error("当前案例不可编辑。");
+  if (!activeEditor.isActive("citation")) throw new Error("请先将光标放在正文引用标记内。");
+  activeEditor.chain().focus().extendMarkRange("citation").unsetMark("citation").run();
+  return activeEditor.getJSON();
+}
+
 function replaceDocument(document) {
   if (!editor.value) return;
   const current = JSON.stringify(editor.value.getJSON());
@@ -302,6 +327,7 @@ function refreshCandidatePreviews() {
 
 watch(() => props.candidatePreviews, refreshCandidatePreviews, { deep: true });
 watch(() => props.annotations, refreshAnnotationAnchors, { deep: true });
+watch(() => props.sources, (sources) => refreshCitationMarkers(editor.value, sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;
   selectionBlocked = true;
@@ -317,9 +343,10 @@ onMounted(() => {
   captureSelection({ editor: editor.value });
   refreshCandidatePreviews();
   refreshAnnotationAnchors();
+  refreshCitationMarkers(editor.value, props.sources);
 });
 onBeforeUnmount(() => window.document.removeEventListener("selectionchange", handleSelectionChange));
-defineExpose({ applyCandidate, recaptureSelection });
+defineExpose({ applyCandidate, recaptureSelection, insertCitation, removeCitation });
 </script>
 
 <template>

@@ -319,6 +319,9 @@
 .upload-control input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .attachment-error { display: grid; min-height: 150px; place-content: center; justify-items: center; gap: 10px; padding: 18px; color: var(--red); font-size: 12px; text-align: center; }
 .attachment-error button { padding: 6px 10px; border: 1px solid currentColor; border-radius: 5px; background: #fff; color: inherit; }
+.source-list li { grid-template-columns: 20px minmax(0, 1fr) repeat(3, 32px); }
+.source-list li.citation-active { background: var(--brand-soft); }
+.source-conflict { display: flex; align-items: center; gap: 6px; margin: 10px 12px 0; padding: 8px 10px; border: 1px solid var(--amber); border-radius: 6px; background: var(--amber-soft); color: var(--amber); font-size: 12px; line-height: 1.6; }
 .version-head { display: flex; align-items: center; justify-content: space-between; }
 .version-head button { display: flex; height: 30px; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); }
 .version-list { margin: 0; padding: 0 12px; list-style: none; }

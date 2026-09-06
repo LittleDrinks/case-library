@@ -108,3 +108,50 @@ it("修订变化或手动编辑会立即清除旧选区", async () => {
   await nextTick();
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
 });
+
+const citationSources = [
+  { id: "src-1", sourceType: "case", caseId: "case-9", versionId: "ver-1", title: "来源案例" },
+];
+
+function selectText(wrapper, from = 9, to = 13) {
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+}
+
+it("插入引用为选区添加 citation 标记并按来源顺序编号", async () => {
+  const { wrapper } = await setup({ sources: citationSources });
+  selectText(wrapper);
+  const document = wrapper.vm.insertCitation({ id: "src-1", sourceType: "case" });
+  expect(document.content[1].content[0].marks).toEqual([
+    { type: "citation", attrs: { sourceType: "case", sourceId: "src-1" } },
+  ]);
+  await nextTick();
+  expect(wrapper.get(".citation-marker").text()).toBe("〔1〕");
+  expect(wrapper.emitted("writing-context").at(-1)[0].citation)
+    .toMatchObject({ sourceType: "case", sourceId: "src-1" });
+});
+
+it("来源缺失时引用标记显示占位编号", async () => {
+  const { wrapper } = await setup({ sources: [] });
+  selectText(wrapper);
+  wrapper.vm.insertCitation({ id: "src-1", sourceType: "case" });
+  await nextTick();
+  expect(wrapper.get(".citation-marker").text()).toBe("〔?〕");
+});
+
+it("没有选区时拒绝插入引用", async () => {
+  const { wrapper } = await setup();
+  expect(() => wrapper.vm.insertCitation({ id: "src-1", sourceType: "case" }))
+    .toThrow("请先在正文中选中要标注来源的文字");
+});
+
+it("取消引用移除光标所在的 citation 标记", async () => {
+  const { wrapper } = await setup({ sources: citationSources });
+  selectText(wrapper);
+  wrapper.vm.insertCitation({ id: "src-1", sourceType: "case" });
+  selectText(wrapper, 10, 10);
+  const document = wrapper.vm.removeCitation();
+  expect(document.content[1].content[0].marks).toBeUndefined();
+  await nextTick();
+  expect(wrapper.find(".citation-marker").exists()).toBe(false);
+});

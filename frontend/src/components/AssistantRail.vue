@@ -23,10 +23,13 @@ const props = defineProps({
   applyCandidate: { type: Function, required: true },
   rollbackCandidateBatch: { type: Function, required: true },
   candidateInvalidation: { type: Number, default: 0 },
+  citedKeys: { type: Array, default: () => [] },
+  activeCitation: { type: Object, default: null },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
   "case-revised", "candidate-previews", "annotations",
+  "insert-citation", "remove-citation",
 ]);
 
 const tabs = [
@@ -95,8 +98,12 @@ function select(tab) {
       :user="user"
       :editable="editable"
       :before-mutation="beforeAttachmentMutation"
+      :cited-keys="citedKeys"
+      :active-citation="activeCitation"
       @case-refreshed="emit('case-refreshed', $event)"
       @mutation-state="emit('mutation-state', $event)"
+      @insert-citation="emit('insert-citation', $event)"
+      @remove-citation="emit('remove-citation')"
     />
     <VersionPanel
       v-else-if="active === 'history'"
