@@ -96,31 +96,44 @@ async function settle(caseId, state, generation, { fresh = false } = {}) {
   await resume(caseId, state, generation);
 }
 
-async function loadChat(caseId, state, generation) {
-  state.loading.value = true;
-  state.error.value = "";
-  const results = await Promise.allSettled([api.agentThread(caseId), api.aiSettings()]);
-  if (!isCurrent(state, generation)) return;
-  const [threadResult, settingsResult] = results;
+function applyResults(caseId, state, [threadResult, settingsResult, skillsResult]) {
+  if (skillsResult.status === "fulfilled") state.skills.value = skillsResult.value || [];
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
     state.chat.value = buildChat(caseId, threadResult.value, state);
+    restoreSkill(state, threadResult.value);
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
   else if (!state.error.value) state.error.value = settingsResult.reason.message || "AI 配置加载失败";
+}
+
+async function loadChat(caseId, state, generation) {
+  state.loading.value = true;
+  state.error.value = "";
+  const results = await Promise.allSettled(
+    [api.agentThread(caseId), api.aiSettings(), api.listSkills()],
+  );
+  if (!isCurrent(state, generation)) return;
+  applyResults(caseId, state, results);
   state.loading.value = false;
   await resume(caseId, state, generation);
+}
+
+function restoreSkill(state, snapshot) {
+  const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
+  const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
+  const known = skillId === CASE_EDIT_SKILL_ID
+    || state.skills.value.some((skill) => skill.id === skillId);
+  if (skillId && known) state.selectedSkillId.value = skillId;
 }
 
 async function sendChat(caseId, state, text, generation) {
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({
-      parts: [
-        { type: "text", text },
-        { type: "data-skill", data: { skillId: CASE_EDIT_SKILL_ID } },
-      ],
-    });
+    const skillId = state.selectedSkillId.value;
+    const parts = [{ type: "text", text }];
+    if (skillId) parts.push({ type: "data-skill", data: { skillId } });
+    await state.chat.value.sendMessage({ parts });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation);
   }
@@ -165,6 +178,7 @@ function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     loading: ref(true), error: ref(""), stopping: ref(false),
+    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID),
     generation: 0, disposed: false,
   };
 }
@@ -222,6 +236,7 @@ export function useAgentChat(caseId) {
   void reload(caseId, state);
   return {
     ...computedState(state), loading: state.loading, error: state.error,
-    settings: state.settings, textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
+    settings: state.settings, skills: state.skills, selectedSkillId: state.selectedSkillId,
+    textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
   };
 }

@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(),
+    agentCancel: vi.fn(), listSkills: vi.fn(),
   },
 }));
 
@@ -61,7 +61,15 @@ beforeEach(() => {
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
+  api.listSkills.mockResolvedValue([
+    { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
+  ]);
 });
+
+function sentRequest(fetch) {
+  const [url, options] = fetch.mock.calls[0];
+  return { url, headers: new Headers(options.headers), body: JSON.parse(options.body) };
+}
 
 it("restores the server thread and sends one turn through the SDK transport", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
@@ -74,13 +82,47 @@ it("restores the server thread and sends one turn through the SDK transport", as
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
 
-  const [url, options] = fetch.mock.calls[0];
-  const body = JSON.parse(options.body);
+  const { url, headers, body } = sentRequest(fetch);
   expect(url).toBe("/api/cases/case-1/agent/thread/thread-1/stream");
-  expect(new Headers(options.headers).get("X-CSRF-Token")).toBe("csrf");
+  expect(headers.get("X-CSRF-Token")).toBe("csrf");
   expect(body.trigger).toBe("submit-message");
   expect(body.messages.at(-1).parts[0].text).toBe("当前问题");
+  expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "case-edit-skill" } });
   expect(wrapper.text()).toContain("确定回答");
+});
+
+it("carries the selected published skill id and shows the catalog options", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const select = wrapper.get('[data-testid="skill-select"]');
+  expect(select.findAll("option").at(1).text()).toContain("思政案例生成（v1）");
+  await select.setValue("skill-pub");
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
+});
+
+it("restores the selected skill from the thread snapshot after reload", async () => {
+  const restored = structuredClone(snapshot);
+  restored.messages.unshift({
+    id: "message-user", role: "user", metadata: {},
+    parts: [
+      { type: "text", text: "生成一个案例" },
+      { type: "data-skill", data: { skillId: "skill-pub" } },
+    ],
+  });
+  api.agentThread.mockResolvedValue(restored);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：思政案例生成");
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {

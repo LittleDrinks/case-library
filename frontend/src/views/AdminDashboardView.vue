@@ -1,5 +1,5 @@
 <script setup>
-import { Bot, FileStack, LoaderCircle, PackageOpen, RefreshCw } from "@lucide/vue";
+import { Bot, FileStack, LoaderCircle, PackageOpen, Puzzle, RefreshCw } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
@@ -45,6 +45,7 @@ onMounted(loadCases);
         <div><span>平台管理</span><h1>管理后台</h1></div>
         <nav aria-label="管理工具">
           <RouterLink :to="{ name: 'material-imports' }"><PackageOpen :size="16" />素材入库</RouterLink>
+          <RouterLink :to="{ name: 'admin-skills' }"><Puzzle :size="16" />Skill 管理</RouterLink>
           <RouterLink :to="{ name: 'admin-ai-settings' }"><Bot :size="16" />平台 AI</RouterLink>
         </nav>
       </header>

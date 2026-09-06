@@ -1,17 +1,18 @@
 <script setup>
 import { LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, ref } from "vue";
-import { useAgentChat } from "../composables/useAgentChat.js";
+import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
 });
 const emit = defineEmits(["case-revised"]);
 
+const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
-  decide, artifacts, threadState, stopping, retryableMessageId,
+  decide, artifacts, threadState, stopping, retryableMessageId, skills, selectedSkillId,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
@@ -27,6 +28,24 @@ function statusText() {
 
 function toolParts(message) {
   return (message.parts || []).filter((part) => part.type.startsWith("tool-"));
+}
+
+function skillName(skillId) {
+  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
+  return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
+}
+
+function skillOptionLabel(skill) {
+  return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
+}
+
+function skillLoadLabel(part) {
+  const id = part.output?.name || part.output?.skillId || part.input?.id || "";
+  return id ? `已加载 Skill：${skillName(id)}` : "已加载 Skill";
+}
+
+function skillParts(message) {
+  return (message.parts || []).filter((part) => part.type === "data-skill");
 }
 
 function sourcesOf(part) {
@@ -105,13 +124,19 @@ async function retryRun() {
           <b>{{ message.role === "user" ? "我" : "AI" }}</b>
           <p v-if="textParts(message)">{{ textParts(message) }}</p>
         </article>
+        <p
+          v-for="(part, index) in skillParts(message)"
+          :key="`${message.id}-skill-${index}`"
+          class="ai-skill-chip"
+          data-testid="message-skill"
+        >使用 Skill：{{ skillName(part.data?.skillId) }}</p>
         <template v-if="message.role === 'assistant'">
           <p
             v-for="part in toolParts(message).filter((item) => item.type === 'tool-load_capability')"
             :key="part.toolCallId"
             class="agent-tool-trace"
             data-testid="agent-skill-load"
-          >已加载 Skill：单段修订工作流 v2.1</p>
+          >{{ skillLoadLabel(part) }}</p>
           <div
             v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
             :key="part.toolCallId"
@@ -151,6 +176,21 @@ async function retryRun() {
         </div>
       </div>
       <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
+    </div>
+    <div class="assistant-skill-picker">
+      <label for="agent-skill-select">Skill</label>
+      <select
+        id="agent-skill-select"
+        v-model="selectedSkillId"
+        aria-label="选择 Skill"
+        data-testid="skill-select"
+        :disabled="loading || sending"
+      >
+        <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+        <option v-for="skill in skills" :key="skill.id" :value="skill.id">
+          {{ skillOptionLabel(skill) }}
+        </option>
+      </select>
     </div>
     <div class="assistant-composer">
       <textarea

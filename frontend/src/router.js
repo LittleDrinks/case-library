@@ -4,6 +4,7 @@ import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
+import AdminSkillsView from "./views/AdminSkillsView.vue";
 import CaseDetailView from "./views/CaseDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
@@ -76,6 +77,12 @@ const routes = [
     path: "/admin/ai-settings",
     name: "admin-ai-settings",
     component: AdminAISettingsView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/skills",
+    name: "admin-skills",
+    component: AdminSkillsView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   { path: "/:pathMatch(.*)*", redirect: "/" },
