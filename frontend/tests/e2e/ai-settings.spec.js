@@ -206,6 +206,13 @@ async function expectSearchAnswer(page) {
   const answer = page.getByRole("region", { name: "AI 回答" });
   await expect(answer).toContainText(E2E_ANSWER);
   await expect(answer.locator(".stream-caret")).toHaveCount(0);
+  const toggle = answer.getByRole("button", { name: "展开全文" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  const collapse = answer.getByRole("button", { name: "收起" });
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await collapse.click();
+  await expect(answer.getByRole("button", { name: "展开全文" })).toHaveAttribute("aria-expanded", "false");
 }
 
 async function expectWorkbenchAnswer(page) {
