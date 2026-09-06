@@ -1,4 +1,4 @@
-"""演示环境标签目录种子：默认组与标签均不设投稿必填。"""
+"""演示环境标签目录种子：稳定 ID upsert，重启不覆盖管理员改名与停用。"""
 
 from __future__ import annotations
 
@@ -13,28 +13,44 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def seed_demo_tags(database: Database) -> None:
-    for sort_key, (group_name, tags) in enumerate(GROUPS):
-        group = database.tag_groups.find_one({"name": group_name})
-        if not group:
-            group = {
-                "id": f"tgg-seed-{sort_key + 1}",
-                "name": group_name,
-                "requiredForSubmission": False,
-                "sortKey": sort_key,
-            }
-            database.tag_groups.insert_one(group)
+    for group_sort, (group_name, tags) in enumerate(GROUPS):
+        group_number = group_sort + 1
+        database.tag_groups.update_one(
+            {"id": _group_id(group_number)},
+            {"$setOnInsert": _group_document(group_name, group_number)},
+            upsert=True,
+        )
         for tag_sort, tag_name in enumerate(tags):
-            _seed_tag(database, group["id"], tag_name, tag_sort)
+            database.tags.update_one(
+                {"id": _tag_id(group_number, tag_sort + 1)},
+                {"$setOnInsert": _tag_document(group_number, tag_sort + 1, tag_name)},
+                upsert=True,
+            )
 
 
-def _seed_tag(database: Database, group_id: str, tag_name: str, sort_key: int) -> None:
-    if database.tags.find_one({"groupId": group_id, "name": tag_name}):
-        return
-    database.tags.insert_one(
-        {
-            "id": f"tag-seed-{group_id.removeprefix('tgg-seed-')}-{sort_key + 1}",
-            "groupId": group_id,
-            "name": tag_name,
-            "sortKey": sort_key,
-        }
-    )
+def _group_id(group_number: int) -> str:
+    return f"tgg-seed-{group_number}"
+
+
+def _tag_id(group_number: int, tag_number: int) -> str:
+    return f"tag-seed-{group_number}-{tag_number}"
+
+
+def _group_document(name: str, group_number: int) -> dict:
+    return {
+        "id": _group_id(group_number),
+        "name": name,
+        "requiredForSubmission": False,
+        "sortKey": group_number - 1,
+        "enabled": True,
+    }
+
+
+def _tag_document(group_number: int, tag_number: int, name: str) -> dict:
+    return {
+        "id": _tag_id(group_number, tag_number),
+        "groupId": _group_id(group_number),
+        "name": name,
+        "sortKey": tag_number - 1,
+        "enabled": True,
+    }
