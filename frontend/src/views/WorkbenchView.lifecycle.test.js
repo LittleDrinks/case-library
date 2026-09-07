@@ -16,9 +16,11 @@ vi.mock("../session.js", () => ({
 vi.mock("../api.js", () => ({
   api: {
     getCase: vi.fn(),
+    getPublicCase: vi.fn(),
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    listSources: vi.fn().mockResolvedValue({ entries: [] }),
   },
 }));
 
@@ -55,6 +57,7 @@ async function renderCase(overrides) {
 beforeEach(() => {
   vi.clearAllMocks();
   state.route.name = "workbench";
+  state.route.query = {};
   state.user = { id: "user-1", role: "user" };
 });
 
@@ -101,6 +104,33 @@ test("审核工作台保留管理员下线隐藏版本动作", async () => {
     availableActions: ["reopen", "restore"],
   });
   expect(wrapper.find('button[aria-label="下线编辑"]').exists()).toBe(true);
+});
+
+test("公开响应的 publishedVersionId 固定来源版本", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(caseFixture({
+    workflowStatus: "published", publicationStatus: "public", ownerId: "user-9",
+    publishedVersionId: "published-2", versionId: undefined,
+  }));
+  const wrapper = render();
+  await flushPromises();
+  expect(api.listSources).toHaveBeenCalledWith("case-1", "published-2");
+  expect(wrapper.findComponent({ name: "AssistantRail" }).props("versionId")).toBe("published-2");
+});
+
+test("历史阅读导出携带固定版本并使用公开接口", async () => {
+  state.route.name = "case-public";
+  state.route.query = { versionId: "published-1" };
+  api.getPublicCase.mockResolvedValue(caseFixture({ publishedVersionId: "published-1" }));
+  const wrapper = render();
+  await flushPromises();
+  let href;
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+    href = this.getAttribute("href");
+  });
+  await wrapper.get('button[aria-label="导出 DOCX"]').trigger("click");
+  expect(href).toBe("/api/cases/case-1/public/export.docx?versionId=published-1");
+  click.mockRestore();
 });
 
 test("退回草稿展示最近审核意见", async () => {

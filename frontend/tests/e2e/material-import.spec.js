@@ -246,6 +246,7 @@ async function publishDraft(page, caseId) {
 }
 
 async function expectPublicDownload(page, title, content) {
+  await page.locator(".workspace-actions").getByRole("button", { name: "附件" }).click();
   const pending = page.waitForEvent("download");
   await page.getByRole("link", { name: `打开来源${title}` }).click();
   expect(await readFile(await (await pending).path(), "utf8")).toBe(content);

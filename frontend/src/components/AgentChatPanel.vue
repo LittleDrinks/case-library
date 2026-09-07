@@ -7,6 +7,8 @@ import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised"]);
@@ -17,7 +19,7 @@ const {
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread,
   skills, selectedSkillId, catalog, reloadCatalog, skillReady,
-} = useAgentChat(props.caseRecord.id);
+} = useAgentChat(props.caseRecord.id, props.versionId);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -233,6 +235,7 @@ async function retryRun() {
             <p v-if="textParts(message)">{{ textParts(message) }}</p>
           </article>
           <p
+            v-if="!readOnly"
             v-for="(part, index) in skillParts(message)"
             :key="`${message.id}-skill-${index}`"
             class="ai-skill-chip"
@@ -288,14 +291,14 @@ async function retryRun() {
             :key="source.id"
             class="agent-artifact-source"
           >依据：{{ source.title || source.id }}</p>
-          <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
+          <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
             <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
           </div>
         </div>
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
-      <div class="assistant-skill-picker">
+      <div v-if="!readOnly" class="assistant-skill-picker">
         <label for="agent-skill-select">Skill</label>
         <select
           id="agent-skill-select"

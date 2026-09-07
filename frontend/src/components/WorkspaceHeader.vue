@@ -7,6 +7,7 @@ const props = defineProps({
   saveState: { type: String, required: true },
   editable: { type: Boolean, required: true },
   reviewMode: { type: Boolean, default: false },
+  readOnly: { type: Boolean, default: false },
   actions: { type: Array, default: () => [] },
   busyAction: { type: String, default: "" },
   historyAvailable: { type: Boolean, default: false },
@@ -26,15 +27,15 @@ const saveLabels = {
 
 <template>
   <header class="workspace-header" :class="{ 'review-header': reviewMode }">
-    <div class="workspace-crumb" :data-mobile-label="reviewMode ? '案例审核' : '案例编辑'">
-      <span>{{ reviewMode ? "审核管理" : "我的案例" }}</span><i>/</i><b>{{ title }}</b>
+    <div class="workspace-crumb" :data-mobile-label="readOnly ? '案例阅读' : reviewMode ? '案例审核' : '案例编辑'">
+      <span>{{ readOnly ? "案例库" : reviewMode ? "审核管理" : "我的案例" }}</span><i>/</i><b>{{ title }}</b>
     </div>
     <div class="workspace-state">
       <span class="case-status">{{ status }}</span>
-      <span class="save-state" :data-state="saveState">{{ saveLabels[saveState] }}</span>
+      <span v-if="!readOnly" class="save-state" :data-state="saveState">{{ saveLabels[saveState] }}</span>
     </div>
     <div class="workspace-actions">
-      <button type="button" title="AI" aria-label="AI" @click="emit('tool', 'chat')"><Sparkles :size="17" /></button>
+      <button type="button" title="AI" aria-label="AI" @click="emit('tool', readOnly ? 'ai' : 'chat')"><Sparkles :size="17" /></button>
       <button type="button" title="版本历史" aria-label="版本历史" :disabled="!historyAvailable" @click="emit('tool', 'history')"><History :size="17" /></button>
       <button type="button" title="附件" aria-label="附件" @click="emit('tool', 'files')"><Paperclip :size="17" /></button>
       <button type="button" title="提交前自检" aria-label="提交前自检" disabled><ClipboardCheck :size="17" /></button>
