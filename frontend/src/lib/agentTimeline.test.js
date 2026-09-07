@@ -34,7 +34,17 @@ describe("tool parameter summaries", () => {
     expect(toolParamSummary({ type: "tool-list_tag_catalog", input: { query: "评价" } }))
       .toBe("筛选：评价");
   });
+});
 
+describe("document write scope summaries", () => {
+  it("summarizes whole-draft scopes without character positions", () => {
+    expect(toolParamSummary({ type: "tool-propose_document", input: {} }))
+      .toBe("范围：全文（待确认）");
+    expect(toolParamSummary({ type: "tool-write_document", input: { scope: "document" } }))
+      .toBe("范围：全文");
+    expect(toolParamSummary({ type: "tool-write_document", input: { scope: "selection" } }))
+      .toBe("范围：选区");
+  });
 });
 
 describe("tool result summaries", () => {
@@ -48,6 +58,21 @@ describe("tool result summaries", () => {
   it("points at the pending decision without leaking payloads", () => {
     expect(toolResultSummary({ type: "tool-propose_revision", state: "output-available", output: { artifactId: "a-1" } }))
       .toBe("已创建修订候选，等待决定");
+  });
+});
+
+describe("document write result summaries", () => {
+  it("reports document drafts without leaking payloads", () => {
+    const propose = { type: "tool-propose_document", state: "output-available" };
+    expect(toolResultSummary({ ...propose, output: { artifactId: "a-2", kind: "document" } }))
+      .toBe("已创建全文初稿候选，等待确认");
+  });
+
+  it("reports direct writes only when truly written", () => {
+    const write = { type: "tool-write_document", state: "output-available" };
+    expect(toolResultSummary({ ...write, output: { status: "written", writeId: "w-1" } }))
+      .toBe("已写入正文，可撤销");
+    expect(toolResultSummary({ ...write, output: {} })).toBe("");
   });
 });
 

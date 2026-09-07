@@ -17,9 +17,13 @@ ThreadEventType = Literal[
     "run.cancelled",
     "artifact.created",
     "artifact.decided",
+    "document.written",
+    "document.undone",
 ]
 ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
 ArtifactDecision = Literal["accepted", "rejected"]
+ArtifactKind = Literal["range", "document"]
+WriteStatus = Literal["written", "undone"]
 SourceKind = Literal["case", "knowledge", "material", "attachment"]
 
 
@@ -68,6 +72,11 @@ class AgentRun(BaseModel):
         description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
     )
     read_only: bool = Field(default=False, alias="readOnly")
+    write_authorized: bool = Field(
+        default=False, alias="writeAuthorized",
+        description="Run 创建时由服务端从教师当前消息文本判定的直接写入授权，"
+                    "不来自工具参数或模型自报",
+    )
     base_revision: int | None = Field(
         default=None, alias="baseRevision", ge=1,
         description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",
@@ -126,14 +135,50 @@ class AgentArtifact(BaseModel):
     thread_id: str = Field(alias="threadId")
     run_id: str = Field(alias="runId")
     status: ArtifactStatus = "pending"
+    kind: ArtifactKind = "range"
     base_revision: int = Field(alias="baseRevision", ge=1)
     target: ArtifactTarget
     replacement: str
+    blocks: list[dict[str, object]] = Field(default_factory=list)
     reason: str = ""
     sources: list[SourceRef] = Field(default_factory=list)
     decided_by: str | None = Field(default=None, alias="decidedBy")
     decided_at: datetime | None = Field(default=None, alias="decidedAt")
     created_at: datetime = Field(alias="createdAt")
+
+
+class AgentWrite(BaseModel):
+    """显式直接写入的落地记录：恰好一次写正文，保留撤销所需的前后文档。"""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    case_id: str = Field(alias="caseId")
+    thread_id: str = Field(alias="threadId")
+    run_id: str = Field(alias="runId")
+    status: WriteStatus = "written"
+    scope: Literal["document", "selection"]
+    summary: str = ""
+    blocks: list[dict[str, object]] = Field(default_factory=list)
+    before_document: dict[str, object] = Field(alias="beforeDocument")
+    document: dict[str, object]
+    base_revision: int = Field(alias="baseRevision", ge=1)
+    result_revision: int = Field(alias="resultRevision", ge=1)
+    created_by: str = Field(alias="createdBy")
+    created_at: datetime = Field(alias="createdAt")
+    undone_by: str | None = Field(default=None, alias="undoneBy")
+    undone_at: datetime | None = Field(default=None, alias="undoneAt")
+
+
+class AgentWriteView(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    run_id: str = Field(alias="runId")
+    scope: Literal["document", "selection"]
+    summary: str = ""
+    status: WriteStatus
+    revision: int = Field(ge=1)
 
 
 class AgentThreadEvent(BaseModel):

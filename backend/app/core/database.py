@@ -213,12 +213,21 @@ def _initialize_agent_artifacts(database: Database) -> None:
     )
 
 
+def _initialize_agent_writes(database: Database) -> None:
+    database.agent_writes.create_index([("id", ASCENDING)], unique=True)
+    database.agent_writes.create_index([("runId", ASCENDING)], unique=True)
+    database.agent_writes.create_index(
+        [("threadId", ASCENDING), ("createdAt", ASCENDING)]
+    )
+
+
 def _initialize_agent(database: Database) -> None:
     _initialize_agent_threads(database)
     _initialize_agent_messages(database)
     _initialize_agent_runs(database)
     _initialize_agent_events(database)
     _initialize_agent_artifacts(database)
+    _initialize_agent_writes(database)
 
 
 def initialize(database: Database) -> None:

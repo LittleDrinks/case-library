@@ -113,3 +113,21 @@ def replaced_document(
     ).doc.to_json()
     validate_prosemirror_document(updated)
     return updated
+
+
+def replaced_document_lines(
+    document: dict[str, Any], from_pos: int, to_pos: int, quote: str, lines: list[str]
+) -> dict[str, Any]:
+    """Replace a checked range with plain lines separated by hard breaks."""
+    check_target(document, from_pos, to_pos, quote)
+    content: list = []
+    for index, line in enumerate(lines):
+        if index:
+            content.append(_SCHEMA.node("hardBreak"))
+        if line:
+            content.append(_SCHEMA.text(line))
+    updated = Transform(_document(document)).replace_with(
+        from_pos, to_pos, content
+    ).doc.to_json()
+    validate_prosemirror_document(updated)
+    return updated

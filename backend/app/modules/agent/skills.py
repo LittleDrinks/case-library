@@ -11,7 +11,7 @@ from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext, Tool
 
-from app.modules.agent import artifacts
+from app.modules.agent import artifacts, writes
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import search_corpus
 from app.modules.agent.models import SourceRef
@@ -88,9 +88,52 @@ def _artifact_view(artifact) -> dict:
     }
 
 
+async def propose_document(
+    ctx: RunContext[ToolDeps], blocks: list[dict], reason: str = ""
+) -> dict:
+    """为空草稿或模板提议整篇初稿候选；随运行完成事务统一提交，教师确认后才生效。"""
+    if ctx.deps.proposed is not None:
+        raise ModelRetry("本次运行已提议过修订候选")
+    try:
+        artifact = artifacts.propose_document_artifact(
+            ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
+            blocks, reason, list(ctx.deps.evidence), ctx.deps.user,
+        )
+    except CaseError as error:
+        raise ModelRetry(str(error.detail)) from error
+    ctx.deps.proposed = artifact
+    return {
+        "artifactId": artifact.id, "kind": artifact.kind,
+        "blocks": len(artifact.blocks), "baseRevision": artifact.base_revision,
+    }
+
+
+async def write_document(
+    ctx: RunContext[ToolDeps], scope: str, blocks: list[dict], summary: str = ""
+) -> dict:
+    """按教师明确的直接写入指令执行正文写入；服务端全部校验通过才返回 written。
+
+    写入即落库并保留可撤销记录；失败或冲突向模型返回原因，不虚报成功。
+    """
+    if ctx.deps.wrote:
+        raise ModelRetry("本次运行已直接写入过正文")
+    try:
+        record = writes.apply_write(
+            ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id, scope,
+            blocks, ctx.deps.user, summary,
+        )
+    except CaseError as error:
+        raise ModelRetry(str(error.detail)) from error
+    ctx.deps.wrote = True
+    return {**writes.write_view(record), "undoable": True}
+
+
 def domain_capability() -> Capability:
-    """平台基础能力立即常驻，不依赖是否选择 Skill。"""
-    return Capability(tools=[search_corpus, read_source, propose_revision])
+    """平台基础能力立即常驻，不依赖是否选择 Skill；写工具仅作者运行可用。"""
+    return Capability(
+        tools=[search_corpus, read_source, propose_revision, propose_document,
+               write_document]
+    )
 
 
 def bound_skill_capability(bound: BoundSkill) -> Capability:

@@ -2,6 +2,7 @@
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
+import { session } from "../session.js";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import {
   sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
@@ -49,6 +50,9 @@ const selectedSources = ref([]);
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
+const syncedWrites = new Set();
+const undoingWrites = reactive(new Set());
+const undoneWrites = reactive(new Set());
 
 function sourceRefs() {
   const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
@@ -227,6 +231,7 @@ async function scrollToLatest() {
 
 watch(messages, () => {
   void refreshSources();
+  void syncWrittenDocuments();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 watch(artifacts, () => {
@@ -329,6 +334,45 @@ async function acceptArtifact(artifactId) {
     emit("case-revised", result.case);
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
+  }
+}
+
+async function syncWrittenDocuments() {
+  const parts = messages.value.flatMap((message) => message.parts || [])
+    .filter((part) => part.type === "tool-write_document"
+      && part.state === "output-available"
+      && part.output?.status === "written" && part.output?.writeId);
+  for (const part of parts) {
+    const writeId = part.output.writeId;
+    if (syncedWrites.has(writeId)) continue;
+    syncedWrites.add(writeId);
+    if (!sending.value) continue;
+    try {
+      emit("case-revised", await api.getCase(props.caseRecord.id));
+    } catch {
+      // 画布刷新失败不阻塞对话，教师可手动刷新
+    }
+  }
+}
+
+function writeUndone(part) {
+  return undoneWrites.has(part.output?.writeId);
+}
+
+async function undoWrite(writeId) {
+  if (!writeId || !threadId.value || undoingWrites.has(writeId)) return;
+  undoingWrites.add(writeId);
+  decideError.value = "";
+  try {
+    const result = await api.agentUndoWrite(
+      props.caseRecord.id, threadId.value, writeId, session.csrfToken,
+    );
+    undoneWrites.add(writeId);
+    emit("case-revised", result.case);
+  } catch (requestError) {
+    decideError.value = requestError.message || "撤销失败";
+  } finally {
+    undoingWrites.delete(writeId);
   }
 }
 
@@ -494,6 +538,20 @@ async function retryRun() {
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
+              <div
+                v-if="part.type === 'tool-write_document' && part.output?.status === 'written' && !readOnly"
+                class="agent-write-actions"
+                data-testid="agent-write-actions"
+              >
+                <span v-if="writeUndone(part)" data-testid="agent-write-undone">已撤销写入</span>
+                <button
+                  v-else
+                  type="button"
+                  data-testid="agent-undo-write"
+                  :disabled="undoingWrites.has(part.output?.writeId)"
+                  @click="undoWrite(part.output?.writeId)"
+                >撤销写入</button>
+              </div>
             </template>
             <AgentArtifactCard
               v-for="artifact in messageArtifacts(message)"

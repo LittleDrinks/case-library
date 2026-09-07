@@ -23,6 +23,7 @@ from app.modules.agent.models import (
     ArtifactDecision,
     ArtifactTarget,
 )
+from app.modules.agent.writes import direct_write_requested, undo_write, write_view
 from app.modules.agent.recovery import (
     LiveBuffer,
     events_stream,
@@ -49,7 +50,7 @@ from app.modules.cases.published import (
     version_readable,
     version_readable_by_id,
 )
-from app.modules.cases.service import get_case
+from app.modules.cases.service import case_view, get_case
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
 
@@ -506,12 +507,17 @@ def _start_context(
 
 
 def _run_lock_for(conversation: Conversation, plan: RunPlan):
+    """Run 创建即冻结写入控制信息：基线修订号、锁定选区与直接写入授权。
+
+    授权只来自服务端对当前教师消息文本的判定；读者对话永不授权。
+    """
     if conversation.reader:
-        return None, None
+        return None, None, False
     plan.selections = _document_selections(
         conversation.case.get("document") or {}, plan.parts
     )
-    return _run_lock(conversation.case, plan)
+    base_revision, target = _run_lock(conversation.case, plan)
+    return base_revision, target, direct_write_requested(plan.prompt)
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
@@ -582,7 +588,6 @@ def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | N
         from_pos=row["from"], to_pos=row["to"], quote=row["quote"],
     )
 
-
 def _resolve_selection(document: dict, data: object) -> dict:
     from_pos = data.get("from") if isinstance(data, dict) else None
     to_pos = data.get("to") if isinstance(data, dict) else None
@@ -602,7 +607,7 @@ def _resolve_selection(document: dict, data: object) -> dict:
 
 def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                skill_bindings: list[dict[str, str]],
-               lock: tuple[int | None, ArtifactTarget | None] = (None, None)) -> AgentRun:
+               lock: tuple[int | None, ArtifactTarget | None, bool] = (None, None, False)) -> AgentRun:
     try:
         return _create_run(
             repository, thread, user_id, plan, assistant_id, lease, worker_id,
@@ -622,7 +627,7 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                 skill_bindings: list[dict[str, str]],
-                lock: tuple[int | None, ArtifactTarget | None] = (None, None)):
+                lock: tuple[int | None, ArtifactTarget | None, bool] = (None, None, False)):
     run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock)
     if plan.retry_message_id:
         run = repository.retry_run(
@@ -640,11 +645,12 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
 
 def _run_fields(lease, worker_id, skill_bindings, lock):
     quota_ids = lease.quota_ids if lease else ()
-    base_revision, target = lock
+    base_revision, target, write_authorized = lock
     return {
         "owner_id": worker_id, "quota_ids": quota_ids,
         "skill_bindings": skill_bindings,
         "base_revision": base_revision, "target": target,
+        "write_authorized": write_authorized,
     }
 
 
@@ -751,3 +757,18 @@ def decide_thread_artifact(
 ) -> dict:
     _author_case(database, case_id, user)
     return decide_artifact(database, case_id, thread_id, artifact_id, user, body.decision)
+
+
+@router.post("/{case_id}/agent/thread/{thread_id}/writes/{write_id}/undo")
+def undo_thread_write(
+    case_id: str,
+    thread_id: str,
+    write_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> dict:
+    """撤销一次直接写入；仅作者且工作版本可编辑，重复撤销幂等返回。"""
+    _author_case(database, case_id, user)
+    result = undo_write(database, case_id, thread_id, write_id, user)
+    return {"write": write_view(result["write"]), "case": case_view(result["case"])}

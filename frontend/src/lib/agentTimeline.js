@@ -1,6 +1,7 @@
 export const TOOL_LABELS = {
   load_capability: "加载 Skill", search_corpus: "检索案例", list_tag_catalog: "查询标签",
   read_source: "阅读来源", propose_revision: "生成修订建议",
+  propose_document: "生成全文初稿", write_document: "直接写入正文",
 };
 export const TOOL_STATUS_LABELS = {
   ok: "已完成", pending: "待确认", unavailable: "无法读取", not_found: "未找到",
@@ -53,6 +54,10 @@ export function toolParamSummary(part) {
     return Number.isInteger(input.start) && Number.isInteger(input.end)
       ? `目标：${input.start}–${input.end}` : "";
   }
+  if (toolName(part) === "propose_document") return "范围：全文（待确认）";
+  if (toolName(part) === "write_document") {
+    return input.scope === "selection" ? "范围：选区" : "范围：全文";
+  }
   if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
   return "";
 }
@@ -61,6 +66,12 @@ export function toolResultSummary(part) {
   if (part.state === "output-error") return part.errorText || "执行失败";
   if (part.state !== "output-available") return "";
   const output = part.output || {};
+  if (part.type === "tool-propose_document" && output.artifactId) {
+    return "已创建全文初稿候选，等待确认";
+  }
+  if (part.type === "tool-write_document" && output.status === "written") {
+    return "已写入正文，可撤销";
+  }
   if (output.artifactId) return "已创建修订候选，等待决定";
   if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
   if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
