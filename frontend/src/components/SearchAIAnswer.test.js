@@ -222,6 +222,39 @@ test("四种标记形式解析并统一呈现顺序编号，未知标记保持�
   expect(wrapper.text()).toContain("[8]");
 });
 
+test("回答按 Markdown 渲染标题、列表与可滚动表格，引用仍可定位", async () => {
+  const answer = "## 结论〔1〕\n\n- **要点**加粗\n\n| 指标〔1〕 | 数值 |\n| --- | --- |\n| 甲 | 12 |";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse(answer)));
+  const wrapper = mountAnswer();
+  await flushPromises();
+  const body = wrapper.get(".ai-answer-text");
+  expect(body.get("h2").text()).toContain("结论");
+  expect(body.get("li").text()).toContain("要点");
+  expect(body.get("li").get("strong").text()).toBe("要点");
+  expect(body.get(".md-table-scroll table").exists()).toBe(true);
+  expect(body.findAll(".ai-marker").map((marker) => marker.text())).toEqual(["〔1〕", "〔1〕"]);
+  await body.get(".ai-marker").trigger("click");
+  expect(wrapper.emitted("locate")[0]).toEqual([{ kind: "case", id: "c-05" }]);
+  expect(wrapper.get(".ai-answer-sources").text()).toContain("重复标题");
+});
+
+test("流式过程中未完成的 Markdown 不破坏页面且与完成态一致", async () => {
+  const pending = pendingStream();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(pending.response));
+  const wrapper = mountAnswer();
+  await flushPromises();
+  pending.pushDelta("## 未完成\n\n**加粗");
+  await flushPromises();
+  expect(wrapper.get(".ai-answer-text h2").text()).toBe("未完成");
+  expect(wrapper.get(".stream-caret").exists()).toBe(true);
+  pending.pushDelta("，表格如下\n\n| 列A | 列B |\n| --- | --- |\n| 甲 | 乙 |");
+  await flushPromises();
+  expect(wrapper.get(".ai-answer-text .md-table-scroll table").exists()).toBe(true);
+  pending.close();
+  await flushPromises();
+  expect(wrapper.get(".ai-answer-text .md-table-scroll table").exists()).toBe(true);
+});
+
 test("已解析引用与来源行按稳定 kind+id 定位精确结果卡片", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse("依据[2]与〔kn-1〕。")));
   const wrapper = mountAnswer();
