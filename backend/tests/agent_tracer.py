@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 
-from pydantic_ai import ModelResponse, TextPart, ToolCallPart
-from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+from pydantic_ai import ModelResponse, TextPart, ThinkingPart, ToolCallPart
+from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
@@ -17,6 +18,9 @@ TRACER_SELECTION = (11, 30)
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
 RESOURCE_TOOL = f"read_skill_resource_{SKILL_ID.replace('-', '_')}"
+# 侧栏浏览器验收：带标记的提问首轮同时流出慢速 ThinkingPart 与既有工具调用。
+THINKING_MARKER = "思考测试"
+THINKING_TEXT = "先核对资料区与选区，再检索平台依据。"
 
 
 def _tool_calls(messages) -> list[str]:
@@ -26,6 +30,29 @@ def _tool_calls(messages) -> list[str]:
         for part in getattr(message, "parts", [])
         if part.part_kind == "tool-call"
     ]
+
+
+def _wants_thinking(messages) -> bool:
+    """仅看最近一条用户输入（user-prompt），忽略工具返回等其他 part。"""
+    for message in reversed(messages):
+        for part in getattr(message, "parts", []):
+            if getattr(part, "part_kind", "") == "user-prompt":
+                return THINKING_MARKER in part.content
+    return False
+
+
+def thinking_pieces(content: str) -> list[str]:
+    half = max(1, len(content) // 2)
+    return [content[:half], content[half:]]
+
+
+def _load_capability_response(messages, skill_id) -> ModelResponse:
+    """首轮加载 Skill；带思考标记时同一响应内先流出慢速 ThinkingPart。"""
+    parts: list = []
+    if _wants_thinking(messages):
+        parts.append(ThinkingPart(content=THINKING_TEXT))
+    parts.append(ToolCallPart(tool_name="load_capability", args={"id": skill_id}))
+    return ModelResponse(parts=parts)
 
 
 def _tool_response(name: str, args: dict) -> ModelResponse:
@@ -50,6 +77,7 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
     """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
     called = _tool_calls(messages)
     if skill_id and "load_capability" not in called:
+        return _load_capability_response(messages, skill_id)
         return _tool_response("load_capability", {"id": skill_id})
     if skill_id and RESOURCE_TOOL not in called:
         return _tool_response(RESOURCE_TOOL, {"path": EXAMPLE_PATH})
@@ -69,6 +97,10 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
     for index, part in enumerate(response.parts):
         if isinstance(part, TextPart):
             yield part.content
+        elif isinstance(part, ThinkingPart):
+            for piece in thinking_pieces(part.content):
+                yield {0: DeltaThinkingPart(content=piece)}
+                await asyncio.sleep(0.8)
         elif isinstance(part, ToolCallPart):
             delta = DeltaToolCall(
                 name=part.tool_name, json_args=json.dumps(part.args_as_dict()),
