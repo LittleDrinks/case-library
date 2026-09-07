@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(), listSkills: vi.fn(),
+    agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
   },
 }));
 
@@ -58,6 +58,7 @@ function mountPanel() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
@@ -135,6 +136,77 @@ function pendingThread() {
   api.agentThread.mockReturnValue(promise);
   return resolve;
 }
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function emptyThread(id) {
+  const result = structuredClone(snapshot);
+  result.id = id;
+  result.messages = [];
+  return result;
+}
+
+function threadWithSkill(id, skillId) {
+  const result = emptyThread(id);
+  result.messages = [{ id: `${id}-message`, role: "user", metadata: {}, parts: [
+    { type: "data-skill", data: { skillId } },
+  ] }];
+  return result;
+}
+
+async function switchThread(wrapper, index = 0) {
+  await wrapper.get('[data-testid="agent-thread-list-open"]').trigger("click");
+  await flushPromises();
+  await wrapper.findAll('[data-testid="agent-thread-open"]')[index].trigger("click");
+  await flushPromises();
+}
+
+it("keeps a delayed catalog alive while switching threads", async () => {
+  const catalog = deferred();
+  api.listSkills.mockReturnValue(catalog.promise);
+  api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
+  api.agentThread.mockImplementation((_, id) => Promise.resolve(
+    id === "thread-2" ? emptyThread("thread-2") : structuredClone(snapshot),
+  ));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await switchThread(wrapper);
+  catalog.resolve([{ id: "skill-pub", version: "v1", name: "思政案例生成" }]);
+  await flushPromises();
+  expect(wrapper.find('[data-testid="skill-catalog-loading"]').exists()).toBe(false);
+  expect(wrapper.get('[data-testid="skill-select"] option:nth-child(2)').text()).toContain("思政案例生成");
+});
+
+it("resets to the builtin skill for a thread without skill history", async () => {
+  api.agentThreads.mockResolvedValue([{ id: "thread-empty", title: "空对话" }]);
+  api.agentThread.mockImplementation((_, id) => Promise.resolve(
+    id === "thread-empty" ? emptyThread("thread-empty") : restoredSnapshot(),
+  ));
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
+  await switchThread(wrapper);
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("case-edit-skill");
+});
+
+it("restores the target skill when switching between published skills", async () => {
+  api.agentThreads.mockResolvedValue([{ id: "thread-two", title: "第二 Skill" }]);
+  api.agentThread.mockImplementation((_, id) => Promise.resolve(
+    id === "thread-two" ? threadWithSkill("thread-two", "skill-two") : restoredSnapshot(),
+  ));
+  api.listSkills.mockResolvedValue([
+    { id: "skill-pub", version: "v1", name: "思政案例生成" },
+    { id: "skill-two", version: "v2", name: "第二 Skill" },
+  ]);
+  const wrapper = mountPanel();
+  await flushPromises();
+  await switchThread(wrapper);
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-two");
+});
 
 it("reconciles a withdrawn skill when the catalog arrives before the thread", async () => {
   const resolve = pendingThread();

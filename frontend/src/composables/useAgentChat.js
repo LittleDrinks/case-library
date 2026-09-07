@@ -63,6 +63,10 @@ function isCurrent(state, generation) {
   return !state.disposed && state.generation === generation;
 }
 
+function isCatalogCurrent(state, generation) {
+  return !state.disposed && state.catalogGeneration === generation;
+}
+
 function readPreference(caseId) {
   try {
     return localStorage.getItem(`agent-thread:${caseId}`) || null;
@@ -107,7 +111,7 @@ function dropUnknownSkill(state) {
 function restoreSkill(state, snapshot) {
   const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
   const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
-  if (skillId) state.selectedSkillId.value = skillId;
+  state.selectedSkillId.value = skillId || CASE_EDIT_SKILL_ID;
   if (state.catalog.value === "ready") dropUnknownSkill(state);
 }
 
@@ -115,12 +119,12 @@ async function loadCatalog(state, generation) {
   state.catalog.value = "loading";
   try {
     const catalog = await api.listSkills();
-    if (!isCurrent(state, generation)) return;
+    if (!isCatalogCurrent(state, generation)) return;
     state.skills.value = catalog || [];
     state.catalog.value = "ready";
     dropUnknownSkill(state);
   } catch {
-    if (isCurrent(state, generation)) state.catalog.value = "error";
+    if (isCatalogCurrent(state, generation)) state.catalog.value = "error";
   }
 }
 
@@ -300,7 +304,7 @@ function createState() {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
     skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID), catalog: ref("loading"),
-    generation: 0, disposed: false,
+    generation: 0, catalogGeneration: 0, disposed: false,
   };
 }
 
@@ -335,12 +339,18 @@ function reload(caseId, state) {
   return loadChat(caseId, state, state.generation);
 }
 
+function reloadCatalog(state) {
+  state.catalogGeneration += 1;
+  return loadCatalog(state, state.catalogGeneration);
+}
+
 function bindLifecycle(state, recover) {
   window.addEventListener("online", recover);
   onBeforeUnmount(() => {
     window.removeEventListener("online", recover);
     state.disposed = true;
     state.generation += 1;
+    state.catalogGeneration += 1;
     detachChat(state);
   });
 }
@@ -350,7 +360,7 @@ function exposedApi(caseId, state, at) {
     ...computedState(state), ...threadActions(caseId, state),
     loading: state.loading, error: state.error, settings: state.settings,
     skills: state.skills, selectedSkillId: state.selectedSkillId,
-    catalog: state.catalog, reloadCatalog: () => loadCatalog(state, at()),
+    catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
     textParts, send: (text) => sendChat(caseId, state, text, at()),
     stop: () => stopChat(caseId, state, at()),
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
@@ -367,6 +377,6 @@ export function useAgentChat(caseId) {
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
-  void loadCatalog(state, at());
+  void reloadCatalog(state);
   return exposedApi(caseId, state, at);
 }
