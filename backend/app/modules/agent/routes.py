@@ -34,13 +34,13 @@ from app.modules.agent.repository import (
     MessageNotFoundError,
     ThreadNotFoundError,
 )
-from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import case_edit_skill
+from app.modules.agent.skills import bound_skill_capability, domain_capability
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
 from app.modules.cases.service import get_case
+from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
 
 router = APIRouter(prefix="/api/cases", tags=["agent"])
@@ -136,8 +136,6 @@ def _submit_prompt(adapter: VercelAIAdapter) -> tuple[list[dict], dict, str, str
         raise HTTPException(status_code=422, detail="只支持发送新消息或重试")
     latest = _latest_message(adapter)
     skills = [_skill_id(part) for part in latest.parts]
-    if any(skill and skill != CASE_EDIT_SKILL.id for skill in skills):
-        raise HTTPException(status_code=422, detail="AI 能力不可用")
     if latest.role != "user" or any(
         not isinstance(part, (TextUIPart, DataUIPart)) for part in latest.parts
     ):
@@ -165,7 +163,7 @@ def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
     ]
     return RunPlan(
         parts=parts, metadata=message.metadata, prompt=prompt,
-        skills=[skill for skill in skills if skill == CASE_EDIT_SKILL.id],
+        skills=[skill for skill in skills if skill],
         history=load_history(repository, thread, max_seq=message.message_seq),
         retry_message_id=message.id,
     )
@@ -333,18 +331,32 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _validate_plan(database, case, _run_plan(repository, thread, adapter))
+    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
-    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease, worker_id)
+    run = _start_run(
+        repository, thread, user["id"], plan, assistant_id, lease, worker_id,
+        [bound.binding_record() for bound in bounds],
+    )
     context = _run_context(request, database, settings, user, case, repository, thread,
-                           adapter, plan, run, selection, lease, worker_id)
+                           adapter, plan, run, selection, lease, worker_id, bounds)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
 
 
+def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
+    bounds: list[BoundSkill] = []
+    for skill_id in dict.fromkeys(skill_ids):
+        try:
+            bounds.append(bind_published_skill(database, store, skill_id))
+        except SkillError as error:
+            raise HTTPException(status_code=422, detail="AI 能力不可用") from error
+    return tuple(bounds)
+
+
 def _run_context(request, database, settings, user, case, repository, thread, adapter,
-                 plan, run, selection, lease, worker_id):
+                 plan, run, selection, lease, worker_id, bounds=()):
     refs = retained_sources(database, case["id"])
     instructions = catalog_instructions(
         case.get("title") or "未命名案例", refs, plan.selected, plan.selections
@@ -361,7 +373,8 @@ def _run_context(request, database, settings, user, case, repository, thread, ad
         request.app.state.agent, buffer=LiveBuffer(),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
-        deps=deps, capabilities=[case_edit_skill()] if plan.skills else [],
+        deps=deps, bounds=bounds,
+        capabilities=[domain_capability()] + [bound_skill_capability(b) for b in bounds],
         instructions=instructions,
     )
 
@@ -385,9 +398,11 @@ def _lease(database, user_id: str, selection):
         raise HTTPException(status_code=429, detail=str(error)) from error
 
 
-def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id) -> AgentRun:
+def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+               skill_bindings: list[dict[str, str]]) -> AgentRun:
     try:
-        return _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id)
+        return _create_run(repository, thread, user_id, plan, assistant_id, lease,
+                           worker_id, skill_bindings)
     except ActiveRunError as error:
         if lease:
             lease.release()
@@ -400,18 +415,19 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
         raise
 
 
-def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id):
+def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+                skill_bindings: list[dict[str, str]]):
     quota_ids = lease.quota_ids if lease else ()
+    run_kwargs = {"owner_id": worker_id, "quota_ids": quota_ids,
+                  "skill_bindings": skill_bindings}
     if plan.retry_message_id:
         run = repository.retry_run(
-            thread, plan.retry_message_id, assistant_id,
-            owner_id=worker_id, quota_ids=quota_ids,
+            thread, plan.retry_message_id, assistant_id, **run_kwargs,
         )
     else:
         run = repository.start_run(
             thread, user_id, plan.parts, plan.metadata, assistant_id,
-            plan.client_request_id, owner_id=worker_id, quota_ids=quota_ids,
-            default_title=_default_title(plan.prompt),
+            plan.client_request_id, default_title=_default_title(plan.prompt), **run_kwargs,
         )
     _bind_lease(repository, run, lease, worker_id)
     return run

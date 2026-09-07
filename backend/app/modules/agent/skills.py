@@ -1,20 +1,19 @@
-"""Skill v2.1 运行时：Pydantic AI deferred capability 按需加载正文与工具。"""
+"""Run 能力装配：平台基础工具常驻，已发布 Skill 按需加载。"""
 
 from __future__ import annotations
 
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
-from pydantic_ai.tools import RunContext
+from pydantic_ai.tools import RunContext, Tool
 
 from app.modules.agent import artifacts
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.resources import CASE_EDIT_SKILL
 from app.modules.agent.search import search_corpus
 from app.modules.agent.models import SourceRef
 from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.cases.service import CaseError
+from app.modules.skills.service import BoundSkill, SkillError
 
-SKILL_ID = CASE_EDIT_SKILL.id
 
 
 async def read_source(ctx: RunContext[ToolDeps], source_type: str, source_id: str) -> dict:
@@ -65,17 +64,43 @@ def _artifact_view(artifact) -> dict:
         "quote": artifact.target.quote,
         "replacement": artifact.replacement,
         "reason": artifact.reason,
-        "sources": [item.model_dump(by_alias=True, exclude_none=True) for item in artifact.sources],
+        "sources": [item.model_dump(by_alias=True) for item in artifact.sources],
         "baseRevision": artifact.base_revision,
     }
 
 
-def case_edit_skill() -> Capability:
-    """固定版本 Skill：初始只暴露名称与描述，load_capability 后正文与工具可用。"""
+def domain_capability() -> Capability:
+    """平台基础能力立即常驻，不依赖是否选择 Skill。"""
+    return Capability(tools=[search_corpus, read_source, propose_revision])
+
+
+def bound_skill_capability(bound: BoundSkill) -> Capability:
+    """已发布 Skill 延迟加载正文与资源读取工具。"""
     return Capability(
-        id=SKILL_ID,
-        description="围绕目标段落检索平台资料，产出一条可核验的单段修订候选",
+        id=bound.skill_id, description=bound.description,
+        instructions=skill_instructions(bound), tools=[resource_tool(bound)],
         defer_loading=True,
-        instructions=CASE_EDIT_SKILL.read(),
-        tools=[search_corpus, read_source, propose_revision],
     )
+
+
+def skill_instructions(bound: BoundSkill) -> str:
+    listing = "\n".join(f"- `{file.path}`" for file in bound.files)
+    return f"{bound.body}\n\n## 资源文件（按需用工具 {resource_tool_name(bound)} 读取）\n{listing}"
+
+
+def resource_tool(bound: BoundSkill) -> Tool:
+    name = resource_tool_name(bound)
+
+    async def read_resource(ctx: RunContext[ToolDeps], path: str) -> dict:
+        """读取当前已加载 Skill 的资源文件。"""
+        try:
+            content = bound.read_resource(path)
+        except SkillError as error:
+            raise ModelRetry(f"{error.detail}；可用路径见资源清单") from error
+        return {"path": path, "content": content}
+
+    return Tool(read_resource, name=name)
+
+
+def resource_tool_name(bound: BoundSkill) -> str:
+    return f"read_skill_resource_{bound.skill_id.replace('-', '_')}"

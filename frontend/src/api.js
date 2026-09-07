@@ -94,6 +94,7 @@ export const api = {
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
+  listSkills: () => request("/api/skills"),
   agentThread: (caseId, threadId) => request(
     threadId
       ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`

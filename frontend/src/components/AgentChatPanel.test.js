@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(), listSources: vi.fn(), search: vi.fn(),
+    agentCancel: vi.fn(), listSources: vi.fn(), search: vi.fn(), listSkills: vi.fn(),
   },
 }));
 
@@ -62,6 +62,7 @@ beforeEach(() => {
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
   api.listSources.mockResolvedValue({ entries: [] });
+  api.listSkills.mockResolvedValue([]);
 });
 
 it("restores the server thread and sends one turn through the SDK transport", async () => {
@@ -97,8 +98,24 @@ it("sends selected sources and the current writing selection as data parts", asy
   await flushPromises();
   const body = JSON.parse(fetch.mock.calls[0][1].body);
   expect(body.messages.at(-1).parts.map((part) => part.type)).toEqual([
-    "text", "data-source", "data-selection", "data-skill",
+    "text", "data-source", "data-selection",
   ]);
+});
+
+it("sends the selected published Skill as a data part", async () => {
+  api.listSkills.mockResolvedValue([{ id: "skill-pub", name: "已发布修订", version: "v1" }]);
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get('[data-testid="skill-select"]').setValue("skill-pub");
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("选择能力");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.messages.at(-1).parts.at(-1)).toEqual({
+    type: "data-skill", data: { skillId: "skill-pub" },
+  });
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {
@@ -178,12 +195,12 @@ function tracerMessages() {
     id: "message-user", role: "user", metadata: {},
     parts: [
       { type: "text", text: "请结合平台资料修订第2段" },
-      { type: "data-skill", data: { skillId: "case-edit-skill" } },
+      { type: "data-skill", data: { skillId: "skill-pub" } },
     ],
   }, {
     id: "message-assistant", role: "assistant", metadata: {},
     parts: [
-      { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "case-edit-skill" }, output: { instructions: "SKILL" } },
+      { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "skill-pub" }, output: { instructions: "SKILL" } },
       { type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" }, output: { sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }] } },
       { type: "tool-propose_revision", toolCallId: "t3", state: "output-available", input: {}, output: { artifactId: "artifact-9" } },
       { type: "text", text: "已生成单段修订候选" },

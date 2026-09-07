@@ -287,6 +287,12 @@
 .agent-source-result button { position: static; width: auto; height: auto; padding: 3px 5px; font-size: 11px; }
 .agent-source-error, .agent-source-empty, .agent-selection-context { margin: 3px 0 0; color: var(--ink-3); font-size: 11px; }
 .agent-source-error { color: var(--danger, #b42318); }
+.assistant-skill-picker { display: flex; align-items: center; gap: 6px; padding: 0 12px 8px; color: var(--ink-3); font-size: 11px; }
+.assistant-skill-picker select { min-width: 0; max-width: 68%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink-2); font-size: 11px; }
+.skill-catalog-state { color: var(--ink-3); }
+.skill-catalog-state.error { color: var(--danger, #b42318); }
+.skill-catalog-retry { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--brand); font-size: 11px; }
+.ai-skill-chip { margin: 3px 0; color: var(--brand); font-size: 11px; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }
 .comment-list { display: grid; gap: 10px; margin: 0; padding: 12px; list-style: none; }
