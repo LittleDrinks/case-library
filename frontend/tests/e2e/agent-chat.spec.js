@@ -173,7 +173,7 @@ test("stop command cancels the active run without waiting for the provider", asy
   expect((await cancelResponse).status()).toBe(200);
   await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
     .toBe("cancelled");
-  await expect(page.locator(".ai-message-error")).toContainText("运行已取消");
+  await expect(page.getByTestId("agent-run-status")).toContainText("运行已取消");
   await expect(page.getByTestId("agent-stop")).toHaveCount(0);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 });
@@ -187,7 +187,7 @@ test("failed message can be retried as a new run that references the original", 
   await submitMessage(page, text);
   await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
     .toBe("failed");
-  await expect(page.locator(".ai-message-error")).toBeVisible();
+  await expect(page.getByTestId("agent-run-status").getByRole("alert")).toBeVisible();
   await page.getByTestId("agent-retry").click();
   const persisted = await expectCompletedProjection(page, created.id);
   const users = persisted.messages.filter((message) => message.role === "user");
