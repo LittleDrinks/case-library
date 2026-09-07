@@ -4,14 +4,27 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 
 from app.modules.agent.runtime import agent
-from tests.agent_tracer import REPLACEMENT, tracer_model
+from tests.agent_tracer import REPLACEMENT, tracer_model, tracer_response
 from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
 SKILL_BODY_MARK = "写作前至少通读一个范例"
+
+
+def test_tracer_reads_the_actual_search_result():
+    messages = [
+        ModelResponse(parts=[ToolCallPart("search_corpus", {"query": "科学家精神"})]),
+        ModelRequest(parts=[ToolReturnPart("search_corpus", {"sources": [
+            {"kind": "case", "id": "actual-published-case"},
+        ]})]),
+    ]
+    call = tracer_response(messages).parts[0]
+    assert call.tool_name == "read_source"
+    assert call.args_as_dict() == {"source_type": "case", "source_id": "actual-published-case"}
 
 
 class StubCatalog:

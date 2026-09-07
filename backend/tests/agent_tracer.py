@@ -11,7 +11,6 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
-SEARCH_SOURCE_ID = "c-42"
 TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
 TRACER_SELECTION = (11, 30)
@@ -33,6 +32,19 @@ def _tool_response(name: str, args: dict) -> ModelResponse:
     return ModelResponse(parts=[ToolCallPart(tool_name=name, args=args)])
 
 
+def _search_source(messages) -> dict:
+    for message in reversed(messages):
+        for part in getattr(message, "parts", []):
+            if part.part_kind != "tool-return" or part.tool_name != "search_corpus":
+                continue
+            sources = part.content["sources"]
+            source = next((item for item in sources if item["kind"] == "case"), None)
+            if source is None:
+                raise AssertionError("tracer requires a searchable case source")
+            return {"source_type": source["kind"], "source_id": source["id"]}
+    raise AssertionError("tracer requires a completed search before reading")
+
+
 def tracer_response(messages, _info=None, skill_id: str | None = None,
                     selection: tuple[int, int] | None = None) -> ModelResponse:
     """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
@@ -44,7 +56,7 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
     if "search_corpus" not in called:
         return _tool_response("search_corpus", {"query": SEARCH_QUERY})
     if "read_source" not in called:
-        return _tool_response("read_source", {"source_type": "case", "source_id": SEARCH_SOURCE_ID})
+        return _tool_response("read_source", _search_source(messages))
     if "propose_revision" not in called:
         start, end = selection or TRACER_SELECTION
         return _tool_response("propose_revision", {
