@@ -464,6 +464,7 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
 
   expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
   expect(wrapper.get('[data-testid="agent-skill-resource"]').text()).toContain("选题原则");
+  expect(wrapper.findAll('[data-testid="agent-skill-load"]')).toHaveLength(1);
   expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("科学家精神案例");
   const artifact = wrapper.get('[data-testid="agent-artifact"]');
   expect(artifact.attributes("data-artifact-status")).toBe("pending");
