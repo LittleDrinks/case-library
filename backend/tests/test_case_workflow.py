@@ -74,7 +74,8 @@ def publish_seed_case(client: TestClient) -> tuple[dict, dict]:
 def reopen_hidden_case(client: TestClient, admin: dict, approved: dict):
     case = approved["case"]
     hidden = _transition_json(client, case["id"], admin["csrfToken"], "hide", case)
-    return _transition(client, case["id"], admin["csrfToken"], "reopen", hidden["case"])
+    owner = login(client, "user", "user123").json()
+    return _transition(client, case["id"], owner["csrfToken"], "reopen", hidden["case"])
 
 
 def _seed_required_tag_group(client: TestClient) -> None:
@@ -272,6 +273,13 @@ def test_admin_can_hide_and_restore_the_same_published_version(
     assert restored["case"]["publishedVersionId"] == approved["version"]["id"]
 
 
+def test_admin_author_hidden_case_actions_are_unique(client: TestClient) -> None:
+    admin = login(client).json()
+    case = client.get("/api/cases/c-02").json()
+    hidden = _transition_json(client, case["id"], admin["csrfToken"], "hide", case)
+    assert hidden["case"]["availableActions"] == ["reopen", "restore"]
+
+
 def test_approval_ends_at_published_without_a_working_draft(
     client: TestClient,
 ) -> None:
@@ -284,7 +292,7 @@ def test_approval_ends_at_published_without_a_working_draft(
     assert case["availableActions"] == ["hide"]
     login(client, "user", "user123")
     view = client.get("/api/cases/c-draft-1").json()
-    assert view["availableActions"] == []
+    assert view["availableActions"] == ["reopen"]
     assert view["ownerId"] == "u-user-demo"
 
 
@@ -500,7 +508,7 @@ def test_submit_requires_nonempty_body_and_required_tag_groups(
     assert accepted["version"]["metadata"]["tagIds"] == ["tag-required-1"]
 
 
-def test_admin_reopens_a_hidden_case_without_exposing_the_working_copy(
+def test_owner_reopens_a_hidden_case_without_exposing_the_working_copy(
     client: TestClient,
 ) -> None:
     admin, approved = publish_seed_case(client)
@@ -509,14 +517,25 @@ def test_admin_reopens_a_hidden_case_without_exposing_the_working_copy(
     assert reopened.json()["case"]["workflowStatus"] == "draft"
     assert reopened.json()["case"]["publicationStatus"] == "hidden"
     assert reopened.json()["case"]["submittedVersionId"] is None
-    retry = _transition(
-        client,
-        approved["case"]["id"],
-        admin["csrfToken"],
-        "restore",
-        reopened.json()["case"],
-    )
-    assert retry.status_code == 409
+
+
+def test_owner_reopens_public_case_and_republishes_a_new_default(client: TestClient) -> None:
+    admin, first = publish_seed_case(client)
+    assert _transition(client, first["case"]["id"], admin["csrfToken"], "reopen", first["case"]).status_code == 409
+    owner = login(client, "user", "user123").json()
+    reopened = _transition_json(client, first["case"]["id"], owner["csrfToken"], "reopen", first["case"])
+    assert reopened["case"]["publishedVersionId"] == first["version"]["id"]
+    assert client.get("/api/cases/c-draft-1/public").json()["title"] == first["version"]["title"]
+    saved = _save_title(client, owner, reopened["case"], "第二版标题")
+    submitted = _transition_json(client, first["case"]["id"], owner["csrfToken"], "submit", saved)
+    assert client.get("/api/cases/c-draft-1/public").json()["title"] == first["version"]["title"]
+    admin = login(client).json()
+    started = _transition_json(client, first["case"]["id"], admin["csrfToken"], "start", submitted["case"])
+    assert client.get("/api/cases/c-draft-1/public").json()["title"] == first["version"]["title"]
+    approved = _transition_json(client, first["case"]["id"], admin["csrfToken"], "approve", started["case"], submittedVersionId=submitted["version"]["id"])
+    assert approved["case"]["publishedVersionId"] == submitted["version"]["id"]
+    assert approved["case"]["submittedVersionId"] is None
+    assert client.get("/api/cases/c-draft-1/public").json()["title"] == "第二版标题"
 
 
 def test_logout_revokes_the_session(client: TestClient) -> None:

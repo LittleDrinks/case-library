@@ -82,13 +82,28 @@ test("审核中作者可撤回，请求携带待审版本号", async () => {
   );
 });
 
-test("已发布作者不再看到工作区动作，仅保留公开页入口", async () => {
+test("已发布作者可另开新稿并保留公开页入口", async () => {
   const wrapper = await renderCase({
     workflowStatus: "published", publicationStatus: "public",
-    publishedVersionId: "cv-2", availableActions: [],
+    publishedVersionId: "cv-2", availableActions: ["reopen"],
   });
   expect(wrapper.text()).toContain("查看公开页");
-  expect(wrapper.find(".lifecycle-action").exists()).toBe(false);
+  expect(wrapper.find('button[aria-label="另开新稿"]').exists()).toBe(true);
+});
+
+test("未知工作流状态不伪装成草稿", async () => {
+  const wrapper = await renderCase({ workflowStatus: "future", availableActions: [] });
+  expect(wrapper.get(".case-status").text()).toBe("未知状态");
+});
+
+test("审核工作台保留管理员下线隐藏版本动作", async () => {
+  state.route.name = "case-review";
+  state.user = { id: "admin-1", role: "admin" };
+  const wrapper = await renderCase({
+    ownerId: "user-1", workflowStatus: "published", publicationStatus: "hidden",
+    availableActions: ["reopen", "restore"],
+  });
+  expect(wrapper.find('button[aria-label="下线编辑"]').exists()).toBe(true);
 });
 
 test("公开响应的 publishedVersionId 固定来源版本", async () => {

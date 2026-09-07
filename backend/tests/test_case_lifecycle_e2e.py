@@ -131,10 +131,6 @@ def _restore(admin, csrf: str, case_id: str, case: dict) -> dict:
     return _transition_ok(admin, csrf, case_id, "restore", case)
 
 
-def _reopen(admin, csrf: str, case_id: str, case: dict) -> dict:
-    return _transition_ok(admin, csrf, case_id, "reopen", case)
-
-
 def _withdraw(owner, csrf: str, case_id: str, case: dict) -> dict:
     return _transition_ok(owner, csrf, case_id, "withdraw", case)
 
@@ -233,21 +229,20 @@ def test_admin_hides_and_restores_the_published_snapshot() -> None:
     assert public["document"] == submitted["version"]["document"]
 
 
-def test_admin_reopens_only_a_hidden_published_case() -> None:
+def test_owner_reopens_only_a_hidden_published_case() -> None:
     owner, case, _submitted, approved = publish_case(f"reopen-{uuid.uuid4().hex}")
     admin, csrf = login("admin", "admin123")
     hidden = _hide(admin, csrf, case["id"], approved["case"])
-    reopened = _reopen(admin, csrf, case["id"], hidden["case"])
+    owner_csrf = request(owner, "GET", "/api/auth/session")[1]["csrfToken"]
+    status, reopened = transition(
+        owner, owner_csrf, case["id"], _command("reopen", hidden["case"]["revision"])
+    )
+    assert status == 200
     assert reopened["case"]["workflowStatus"] == "draft"
     assert reopened["case"]["publicationStatus"] == "hidden"
-    owner_csrf = request(owner, "GET", "/api/auth/session")[1]["csrfToken"]
     edited = patch_title(owner, owner_csrf, reopened["case"], "重开后修改")
     assert edited["title"] == "重开后修改"
     assert request(build_opener(), "GET", f"/api/cases/{case['id']}")[0] == 404
-    assert (
-        _transition_status(admin, csrf, case["id"], "restore", edited["revision"])
-        == 409
-    )
 
 
 def test_owner_withdraws_even_after_review_starts() -> None:

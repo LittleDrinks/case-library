@@ -30,14 +30,6 @@ function isReturned(item) {
   return item.workflowStatus === "draft" && Boolean(item.lastReview);
 }
 
-function itemStatus(item) {
-  return isReturned(item) ? "退回修改" : statusLabels[item.workflowStatus];
-}
-
-function itemAction(item) {
-  return isReturned(item) ? "处理退回意见" : actionLabels[item.workflowStatus];
-}
-
 function returnReason(item) {
   const review = item.lastReview;
   if (!review) return "";
@@ -56,8 +48,23 @@ const groupedCases = computed(() => groups.map((group) => ({
 const returnedCases = computed(() => cases.value.filter(isReturned));
 
 function caseDestination(item) {
-  const name = item.workflowStatus === "published" ? "case-public" : "workbench";
+  const publiclyReadable = item.workflowStatus === "published"
+    && item.publicationStatus === "public";
+  const name = publiclyReadable ? "case-public" : "workbench";
   return { name, params: { id: item.id } };
+}
+
+function cardStatus(item) {
+  if (isReturned(item)) return "退回修改";
+  if (item.publicationStatus === "hidden") return "已隐藏";
+  const base = statusLabels[item.workflowStatus] || "未知状态";
+  return item.publicationStatus === "public" && item.workflowStatus !== "published"
+    ? `${base} · 旧版公开中` : base;
+}
+
+function cardAction(item) {
+  if (isReturned(item)) return "处理退回意见";
+  return item.publicationStatus === "hidden" ? "继续处理" : actionLabels[item.workflowStatus];
 }
 
 async function loadCases() {
@@ -65,6 +72,9 @@ async function loadCases() {
   error.value = "";
   try {
     cases.value = await api.listCases("mine");
+    if (cases.value.some((item) => !Object.hasOwn(statusLabels, item.workflowStatus))) {
+      throw new Error("部分案例状态异常，请重新加载。");
+    }
   } catch (reason) {
     error.value = reason.message || "案例加载失败";
   } finally {
@@ -129,8 +139,8 @@ onMounted(loadCases);
               :key="item.id"
               :case-record="item"
               :destination="caseDestination(item)"
-              :status="itemStatus(item)"
-              :action-label="itemAction(item)"
+              :status="cardStatus(item)"
+              :action-label="cardAction(item)"
               :notice="returnReason(item)"
             />
           </div>
