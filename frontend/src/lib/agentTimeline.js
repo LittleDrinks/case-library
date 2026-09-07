@@ -47,7 +47,8 @@ export function toolParamSummary(part) {
   }
   if (toolName(part) === "read_source") return `来源：${input.source_type || ""} ${input.source_id || ""}`;
   if (toolName(part) === "propose_revision") {
-    return Number.isInteger(input.paragraph_index) ? `目标：第 ${input.paragraph_index + 1} 段` : "";
+    return Number.isInteger(input.start) && Number.isInteger(input.end)
+      ? `目标：${input.start}–${input.end}` : "";
   }
   if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
   return "";

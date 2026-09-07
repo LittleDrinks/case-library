@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } fro
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
+import AddSourceToCase from "../components/AddSourceToCase.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -16,8 +17,10 @@ import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { session } from "../session.js";
 
 const route = useRoute();
+const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
 const caseRecord = ref(null);
+const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
 const title = ref("");
 const titleInput = ref(null);
 const canvasEditor = ref(null);
@@ -38,6 +41,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const sources = ref([]);
 const candidatePreviews = ref([]);
 const candidateInvalidation = ref(0);
 const candidateBatchSnapshotId = ref("");
@@ -53,34 +57,77 @@ const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
 const isOwner = computed(() => caseRecord.value?.ownerId === session.user?.id);
 const historyAvailable = computed(() => Boolean(
-  session.user && (isOwner.value || session.user.role === "admin"),
+  !readerMode.value && session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
+  !readerMode.value && publicationStatus.value === "public"
     ? caseId() : ""
 ));
 const editable = computed(() => (
-  isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
+  !readerMode.value && isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
   && !busyAction.value && !contentMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
-  session.user && (
+  !readerMode.value && session.user && (
     (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
     || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
   ),
 ));
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
+  if (readerMode.value) return `发布版本 v${caseRecord.value?.versionNumber || 1} · 只读`;
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
-  ] || "草稿";
+  ] || "未知状态";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
-const lifecycleActions = computed(() => availableActions());
-const submissionTodo = computed(() => tagCatalog.value
-  .filter((group) => group.requiredForSubmission && group.enabled !== false)
-  .filter((group) => !group.tags.some((tag) => tagIds.value.includes(tag.id)))
-  .map((group) => `选择${group.name}标签`));
+const lifecycleActions = computed(() => {
+  if (readerMode.value) return [];
+  const area = reviewMode.value ? "review" : "author";
+  return (caseRecord.value?.availableActions || [])
+    .filter((command) => LIFECYCLE_META[command]?.area === area
+      || (command === "reopen" && reviewMode.value))
+    .map((command) => ({
+      command,
+      ...LIFECYCLE_META[command],
+      ...(command === "reopen" && reviewMode.value ? { label: "下线编辑" } : {}),
+    }));
+});
+const lastReview = computed(() => (
+  workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
+));
+const lastReviewLabel = computed(() => (
+  lastReview.value?.action === "supplement" ? "要求补充" : "退回修改"
+));
+const LIFECYCLE_META = {
+  submit: { label: "提交审核", primary: true, area: "author" },
+  withdraw: { label: "撤回提交", primary: false, area: "author" },
+  start: { label: "开始审核", primary: true, area: "review" },
+  approve: { label: "通过发布", primary: true, area: "review" },
+  reject: { label: "退回修改", primary: false, area: "review" },
+  supplement: { label: "要求补充", primary: false, area: "review" },
+  hide: { label: "暂时隐藏", primary: false, area: "review" },
+  restore: { label: "恢复公开", primary: false, area: "review" },
+  reopen: { label: "另开新稿", primary: true, area: "author" },
+};
+const submissionTodo = computed(() => {
+  const missing = [];
+  if (!title.value.trim()) missing.push("填写案例标题");
+  if (!documentHasText(document.value)) missing.push("填写正文");
+  tagCatalog.value
+    .filter((group) => group.requiredForSubmission && group.enabled !== false)
+    .filter((group) => !group.tags.some((tag) => tagIds.value.includes(tag.id)))
+    .forEach((group) => missing.push(`选择${group.name}标签`));
+  return missing;
+});
+
+function documentHasText(node) {
+  return Boolean(node?.text?.trim() || node?.content?.some(documentHasText));
+}
 
 const autosave = createAutosave({
   save: persist,
@@ -149,7 +196,7 @@ function applyCase(value, invalidate = true) {
 }
 
 async function loadAnnotations() {
-  if (!session.user) {
+  if (!session.user || readerMode.value) {
     annotations.value = [];
     return;
   }
@@ -157,9 +204,21 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
+const sourcesLoading = ref(false);
+const sourcesError = ref("");
+
+async function loadSources() {
+  sourcesLoading.value = true;
+  sourcesError.value = "";
+  try { sources.value = (await api.listSources(caseId(), readerVersion.value)).entries; }
+  catch (error) { sources.value = []; sourcesError.value = error.message || "来源加载失败"; }
+  finally { sourcesLoading.value = false; }
+}
+
 function applyAttachmentCase(value) {
   expireCandidates();
   syncCaseRevision(value);
+  void loadSources();
 }
 
 function syncCaseRevision(value) {
@@ -175,19 +234,25 @@ function recoverCrashDraft(value) {
   void nextTick(resizeTitle);
 }
 
+async function fetchCase() {
+  const versionId = String(route.query?.versionId || "");
+  return readerMode.value
+    ? api.getPublicCase(caseId(), versionId || undefined) : api.getCase(caseId());
+}
+
 async function loadCase() {
   const initial = !caseRecord.value;
   loading.value = true;
   loadError.value = "";
   try {
-    const current = await api.getCase(caseId());
+    const current = await fetchCase();
     if (candidateRecoveryBlocked.value) {
       candidateRecoveryBlocked.value = false;
       contentMutationBusy.value = false;
       autosave.reconcile(current.revision);
     }
     applyCase(current, !initial);
-    await loadAnnotations();
+    await Promise.all([loadAnnotations(), loadSources()]);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -241,47 +306,8 @@ function locateHeading(order) {
 }
 
 function selectTool(tool) {
-  activeTool.value = tool;
+  activeTool.value = readerMode.value && ["chat", "comments"].includes(tool) ? "ai" : tool;
   drawerOpen.value = true;
-}
-
-function reviewActions() {
-  if (workflowStatus.value === "pending") {
-    return [{ command: "start", label: "开始审核", primary: true }];
-  }
-  if (workflowStatus.value === "reviewing") {
-    return [
-      { command: "reject", label: "退回修改", primary: false },
-      { command: "supplement", label: "要求补充", primary: false },
-      { command: "approve", label: "通过发布", primary: true },
-    ];
-  }
-  return null;
-}
-
-function publicationActions() {
-  if (!reviewMode.value || workflowStatus.value !== "published") return null;
-  if (publicationStatus.value === "public") {
-    return [{ command: "hide", label: "暂时隐藏", primary: false }];
-  }
-  return [
-    { command: "restore", label: "恢复公开", primary: false },
-    { command: "reopen", label: "下线编辑", primary: true },
-  ];
-}
-
-function availableActions() {
-  const review = reviewMode.value && reviewActions();
-  if (review) return review;
-  const publication = publicationActions();
-  if (publication) return publication;
-  if (isOwner.value && workflowStatus.value === "draft") {
-    return [{ command: "submit", label: "提交审核", primary: true }];
-  }
-  if (isOwner.value && workflowStatus.value === "pending") {
-    return [{ command: "withdraw", label: "撤回提交", primary: false }];
-  }
-  return [];
 }
 
 async function prepareLifecycle(command) {
@@ -321,10 +347,18 @@ async function performLifecycle(command, details = {}) {
     return true;
   } catch (error) {
     actionNotice.value = error.message || "操作失败";
+    if (error.status === 409) await refreshLifecycleState();
     return false;
   } finally {
     busyAction.value = "";
   }
+}
+
+async function refreshLifecycleState() {
+  if (autosave.state.value !== "saved") return;
+  try {
+    applyCase(await api.getCase(caseId()));
+  } catch { /* 保留错误提示，用户可手动重试 */ }
 }
 
 async function confirmDecision(details) {
@@ -454,11 +488,15 @@ async function rollbackCandidateBatch(snapshotId) {
 
 function startDownload() {
   const link = window.document.createElement("a");
-  link.href = `/api/cases/${encodeURIComponent(caseId())}/export.docx`;
+  const area = readerMode.value ? "/public" : "";
+  const version = readerMode.value && readerVersion.value
+    ? `?versionId=${encodeURIComponent(readerVersion.value)}` : "";
+  link.href = `/api/cases/${encodeURIComponent(caseId())}${area}/export.docx${version}`;
   link.click();
 }
 
 async function exportCase() {
+  if (readerMode.value) { startDownload(); return; }
   actionNotice.value = "";
   await autosave.flush();
   if (autosave.state.value !== "saved") {
@@ -471,14 +509,17 @@ async function exportCase() {
 watch(autosave.revision, (value) => {
   if (value != null) revision.value = value;
 });
+watch(readerMode, (value) => {
+  if (value && ["chat", "comments"].includes(activeTool.value)) activeTool.value = "ai";
+});
 onMounted(() => {
   loadCase();
-  loadTagCatalog();
+  if (!readerMode.value) loadTagCatalog();
 });
 onBeforeUnmount(() => {
-  crashDraft.flush();
+  if (!readerMode.value) crashDraft.flush();
   crashDraft.destroy();
-  void autosave.flush();
+  if (!readerMode.value) void autosave.flush();
   autosave.destroy();
 });
 </script>
@@ -495,6 +536,7 @@ onBeforeUnmount(() => {
         :save-state="autosave.state.value"
         :editable="editable"
         :review-mode="reviewMode"
+        :read-only="readerMode"
         :actions="lifecycleActions"
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
@@ -522,8 +564,20 @@ onBeforeUnmount(() => {
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
+          <AddSourceToCase
+            v-if="readerMode && session.user && readerVersion"
+            :source-case-id="caseId()"
+            :version-id="readerVersion"
+            :source-title="title"
+          />
           <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
             <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
+          </div>
+          <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
+            <AlertTriangle :size="17" aria-hidden="true" />
+            <span>
+              {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
+            </span>
           </div>
           <article class="document-paper">
             <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
@@ -545,6 +599,7 @@ onBeforeUnmount(() => {
               :annotatable="annotatable"
               :candidate-previews="candidatePreviews"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"
@@ -554,6 +609,11 @@ onBeforeUnmount(() => {
         </main>
         <AssistantRail
           :active="activeTool"
+          :read-only="readerMode"
+          :version-id="readerVersion"
+          :sources="sources"
+          :sources-loading="sourcesLoading"
+          :sources-error="sourcesError"
           :open="drawerOpen"
           :case-record="caseRecord"
           :case-title="title"
@@ -575,6 +635,7 @@ onBeforeUnmount(() => {
           @mutation-state="contentMutationBusy = $event"
           @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"
+          @sources-retry="loadSources"
         />
       </div>
     </template>

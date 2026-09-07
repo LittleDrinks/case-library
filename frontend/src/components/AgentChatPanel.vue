@@ -2,30 +2,32 @@
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
-import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
+import { useAgentChat } from "../composables/useAgentChat.js";
 import {
   sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
   toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
   runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
+import AgentResourceTrace from "./AgentResourceTrace.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
   open: { type: Boolean, default: true },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised"]);
 
-const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread,
   skills, selectedSkillId, catalog, reloadCatalog, skillReady,
-} = useAgentChat(props.caseRecord.id);
+} = useAgentChat(props.caseRecord.id, props.versionId);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -131,7 +133,6 @@ function toolTitle(part) {
 }
 
 function skillName(skillId) {
-  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
   return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
 }
 
@@ -311,6 +312,14 @@ async function acceptArtifact(artifactId) {
   }
 }
 
+function contextParts() {
+  const selection = props.writingContext;
+  const usable = selection?.sameBlock && Number.isInteger(selection.from)
+    && Number.isInteger(selection.to) && selection.to > selection.from;
+  if (!usable) return [];
+  return [{ type: "data-selection", data: { from: selection.from, to: selection.to } }];
+}
+
 async function rejectArtifact(artifactId) {
   decideError.value = "";
   try {
@@ -325,15 +334,6 @@ async function submit() {
   const text = draft.value.trim();
   draft.value = "";
   await send(text, contextParts());
-}
-
-function contextParts() {
-  const selection = props.writingContext;
-  if (!selection?.quote || !Number.isInteger(selection.from) || !Number.isInteger(selection.to)) return [];
-  return [{ type: "data-selection", data: {
-    from: selection.from, to: selection.to, quote: selection.quote,
-    quoteHash: selection.quoteHash, revision: selection.revision,
-  } }];
 }
 
 async function stopRun() {
@@ -406,7 +406,7 @@ async function retryRun() {
               </details>
               <p v-else-if="part.type === 'text' && part.text">{{ part.text }}</p>
               <p
-                v-else-if="part.type === 'data-skill'"
+                v-else-if="part.type === 'data-skill' && !readOnly"
                 class="ai-skill-chip"
                 data-testid="message-skill"
               >使用 Skill：{{ skillName(part.data?.skillId) }}</p>
@@ -415,6 +415,10 @@ async function retryRun() {
                 class="ai-skill-chip"
                 data-testid="message-selection"
               >正文选区：{{ part.data?.quote }}</p>
+              <AgentResourceTrace
+                v-else-if="part.type.startsWith('tool-read_skill_resource_')"
+                :part="{ ...part }"
+              />
               <details
                 v-else-if="part.type.startsWith('tool-')"
                 class="agent-tool-trace"
@@ -452,6 +456,7 @@ async function retryRun() {
                 :sending="sending"
                 :decide-error="decideError"
                 :source-state="sourceState"
+                :read-only="readOnly"
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
@@ -463,6 +468,7 @@ async function retryRun() {
               :sending="sending"
               :decide-error="decideError"
               :source-state="sourceState"
+              :read-only="readOnly"
               @accept="acceptArtifact"
               @reject="rejectArtifact"
             />
@@ -495,12 +501,13 @@ async function retryRun() {
           :sending="sending"
           :decide-error="decideError"
           :source-state="sourceState"
+          :read-only="readOnly"
           @accept="acceptArtifact"
           @reject="rejectArtifact"
         />
       </div>
       <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
-      <div class="assistant-skill-picker">
+      <div v-if="!readOnly" class="assistant-skill-picker">
         <label for="agent-skill-select">Skill</label>
         <select
           id="agent-skill-select"
@@ -509,7 +516,7 @@ async function retryRun() {
           data-testid="skill-select"
           :disabled="loading || sending || catalog === 'loading'"
         >
-          <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+          <option value="">不使用 Skill</option>
           <option v-for="skill in skills" :key="skill.id" :value="skill.id">
             {{ skillOptionLabel(skill) }}
           </option>

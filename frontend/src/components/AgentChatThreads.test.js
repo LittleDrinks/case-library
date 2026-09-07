@@ -33,7 +33,7 @@ function snapshotOf(id, title, messages = [], artifacts = []) {
 const pendingArtifact = {
   id: "artifact-1", caseId: "case-1", threadId: "thread-1", runId: "run-1",
   status: "pending", baseRevision: 1,
-  target: { paragraphIndex: 1, quote: "第二段原文" },
+  target: { from: 9, to: 14, quote: "第二段原文" },
   replacement: "替换后的第二段", reason: "补充评价依据", sources: [],
 };
 

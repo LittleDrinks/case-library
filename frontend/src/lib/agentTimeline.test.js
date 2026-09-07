@@ -25,8 +25,8 @@ describe("tool parameter summaries", () => {
   it("summarizes readable parameters per known tool", () => {
     expect(toolParamSummary({ type: "tool-search_corpus", input: { query: "科学家", kind: "case" } }))
       .toBe("检索词：科学家（范围：case）");
-    expect(toolParamSummary({ type: "tool-propose_revision", input: { paragraph_index: 1 } }))
-      .toBe("目标：第 2 段");
+    expect(toolParamSummary({ type: "tool-propose_revision", input: { start: 9, end: 13 } }))
+      .toBe("目标：9–13");
   });
 
   it("keeps unknown tool parameters out of the summary", () => {

@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
+from app.modules.agent import prosemirror
+from app.modules.agent.models import AgentRun
 from app.modules.agent.repository import AgentRepository
 
 
@@ -80,7 +82,7 @@ def test_first_message_titles_untitled_thread(client: TestClient) -> None:
     auth = _login(client)
     default_id = client.get(DEFAULT_PATH).json()["id"]
     created = _create_thread(client, auth)
-    with _agent().override(model=TestModel(custom_output_text="回答")):
+    with _agent().override(model=TestModel(custom_output_text="回答", call_tools=[])):
         assert _send(client, auth, created["id"], "首条消息成为标题", "m-1").status_code == 200
 
     titled = {item["id"]: item["title"] for item in client.get(THREADS_PATH).json()}
@@ -92,7 +94,7 @@ def test_first_message_titles_untitled_thread(client: TestClient) -> None:
 def test_first_message_titles_default_thread(client: TestClient) -> None:
     auth = _login(client)
     default_id = client.get(DEFAULT_PATH).json()["id"]
-    with _agent().override(model=TestModel(custom_output_text="回答")):
+    with _agent().override(model=TestModel(custom_output_text="回答", call_tools=[])):
         assert _send(client, auth, default_id, "默认对话首条消息", "m-1").status_code == 200
 
     snapshot = _snapshot(client, default_id)
@@ -156,7 +158,7 @@ def test_two_threads_keep_isolated_messages_runs_and_events(client: TestClient) 
     auth = _login(client)
     created = _create_thread(client, auth, "第二个对话")
     default_id = client.get(DEFAULT_PATH).json()["id"]
-    with _agent().override(model=TestModel(custom_output_text="回答")):
+    with _agent().override(model=TestModel(custom_output_text="回答", call_tools=[])):
         assert _send(client, auth, default_id, "默认对话问题", "m-default").status_code == 200
         assert _send(client, auth, created["id"], "第二对话问题", "m-second").status_code == 200
 
@@ -185,16 +187,30 @@ def test_list_marks_thread_with_active_run_as_running(client: TestClient) -> Non
 
 
 def _insert_artifact(database, thread_id: str, artifact_id: str) -> None:
+    run_id = _completed_artifact_run(database, thread_id, artifact_id)
+    case = database.cases.find_one({"id": "c-draft-1"})
+    document = case["document"]
+    block = prosemirror.text_blocks(document)[0]
     database.agent_artifacts.insert_one({
-        "id": artifact_id, "caseId": "c-draft-1", "threadId": thread_id, "runId": "run-x",
+        "id": artifact_id, "caseId": "c-draft-1", "threadId": thread_id, "runId": run_id,
         "status": "pending", "baseRevision": 1,
         "target": {
-            "paragraphIndex": 0,
-            "quote": "某高端制造团队长期依赖进口精密传感部件。假设国际贸易环境突变，关键部件供应中断，且短期内无法通过第三渠道获得。团队手头有一批处于不同研发阶段的国产替代方案，成熟度参差不齐。",
+            "from": block["start"], "to": block["end"],
+            "quote": prosemirror.text_between(document, block["start"], block["end"]),
         },
         "replacement": "替换", "reason": "", "sources": [],
         "createdAt": datetime.now(UTC),
     })
+
+
+def _completed_artifact_run(database, thread_id: str, artifact_id: str) -> str:
+    run = AgentRun(
+        id=f"run-{artifact_id}", thread_id=thread_id, user_id="u-user-demo",
+        user_message_id=f"user-{artifact_id}", assistant_message_id=f"assistant-{artifact_id}",
+        status="completed", started_at=datetime.now(UTC), finished_at=datetime.now(UTC),
+    )
+    database.agent_runs.insert_one(run.model_dump(by_alias=True, mode="python"))
+    return run.id
 
 
 def test_thread_snapshots_scope_artifacts_to_their_thread(client: TestClient) -> None:

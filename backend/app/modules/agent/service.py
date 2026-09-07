@@ -15,10 +15,11 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import CASE_EDIT_SKILL, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
+from app.modules.cases.published import version_readable_by_id
 
 
 RUN_HEARTBEAT_SECONDS = float(os.getenv("AGENT_RUN_HEARTBEAT_SECONDS", "5"))
@@ -43,6 +44,8 @@ class RunContext:
     token: CancellationToken | None = None
     deps: ToolDeps | None = None
     capabilities: list | None = None
+    bounds: tuple = ()
+    reader: bool = False
     cancelled: bool = False
     failed: bool = False
     lost: bool = False
@@ -55,7 +58,7 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
-        "instructions": case_instructions(context.case),
+        "instructions": case_instructions(context.case, context.reader),
         "user_prompt": context.prompt,
         "deps": context.deps,
         "cancellation_token": context.token,
@@ -140,16 +143,23 @@ def _assistant_parts(assistant) -> list[dict]:
     ]
 
 
-def _loaded_skill(parts: list[dict]) -> dict[str, str] | None:
-    if not any(part.get("type") == "tool-load_capability" for part in parts):
-        return None
-    return resource_record(CASE_EDIT_SKILL)
+def _loaded_capability_ids(parts: list[dict]) -> list[str]:
+    """从 load_capability 工具调用中提取模型实际加载的能力标识。"""
+    ids = []
+    for part in parts:
+        if part.get("type") != "tool-load_capability":
+            continue
+        data = part.get("input")
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            ids.append(data["id"])
+    return ids
 
 
-def _run_resources(parts: list[dict]) -> list[dict[str, str]]:
-    records = [resource_record(SYSTEM_PROMPT), resource_record(TASK_PROMPT)]
-    skill = _loaded_skill(parts)
-    return [*records, skill] if skill else records
+def _run_resources(parts: list[dict], bounds: tuple = (), reader=False) -> list[dict[str, str]]:
+    records = [resource_record(SYSTEM_PROMPT), resource_record(READER_PROMPT if reader else TASK_PROMPT)]
+    loaded = set(_loaded_capability_ids(parts))
+    records += [bound.resource_record() for bound in bounds if bound.skill_id in loaded]
+    return records
 
 
 def _assistant_ui(context: RunContext, result):
@@ -181,6 +191,9 @@ async def _drain(context: RunContext) -> None:
     try:
         async with aclosing(_adapter_stream(context)) as stream:
             async for chunk in stream:
+                if not _reader_accessible(context):
+                    _revoke_reader(context)
+                    return
                 await context.buffer.publish(chunk)
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
@@ -256,6 +269,9 @@ def _renew(context: RunContext) -> bool:
         if row is None:
             context.lost = True
             return False
+    if not _reader_accessible(context):
+        _revoke_reader(context)
+        return False
     _stop_if_requested(context, row)
     return _renew_lease(context)
 
@@ -297,11 +313,27 @@ def _complete(context: RunContext) -> None:
     if context.result is None:
         _terminal(context, context.repository.fail_run)
         return
+    artifact = context.deps.proposed if context.deps else None
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
-        resources=_run_resources(_assistant_parts_of(context)),
+        resources=_run_resources(_assistant_parts_of(context), context.bounds, context.reader),
+        reader_case_id=context.case["id"] if context.reader else None,
+        reader_version_id=context.case.get("versionId") if context.reader else None,
+        artifact=artifact,
     ):
         context.lost = True
+
+
+def _reader_accessible(context: RunContext) -> bool:
+    return not context.reader or version_readable_by_id(
+        context.repository.database, context.case["id"], context.case.get("versionId")
+    )
+
+
+def _revoke_reader(context: RunContext) -> None:
+    context.cancelled = True
+    if context.token:
+        context.token.cancel()
 
 
 def _terminal(context: RunContext, finish) -> None:

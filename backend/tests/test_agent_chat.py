@@ -185,7 +185,7 @@ def test_default_thread_snapshot_is_server_owned(client: TestClient) -> None:
 def test_public_production_assembly_stream_persists_message_and_run(client: TestClient) -> None:
     auth = _login(client)
 
-    with _agent().override(model=TestModel(custom_output_text="确定性回答")):
+    with _agent().override(model=TestModel(custom_output_text="确定性回答", call_tools=[])):
         response = _post(client, auth)
 
     assert response.status_code == 200
@@ -202,7 +202,7 @@ def test_public_production_assembly_stream_persists_message_and_run(client: Test
 
 def test_stream_persists_causal_thread_events_and_terminal_order(client: TestClient) -> None:
     auth = _login(client)
-    with _agent().override(model=TestModel(custom_output_text="事件回答")):
+    with _agent().override(model=TestModel(custom_output_text="事件回答", call_tools=[])):
         response = _post(client, auth, "事件问题", message_id="event-message")
 
     assert response.status_code == 200
@@ -220,7 +220,7 @@ def test_stream_persists_causal_thread_events_and_terminal_order(client: TestCli
 
 def test_duplicate_client_message_is_idempotently_rejected(client: TestClient) -> None:
     auth = _login(client)
-    with _agent().override(model=TestModel(custom_output_text="只处理一次")):
+    with _agent().override(model=TestModel(custom_output_text="只处理一次", call_tools=[])):
         first = _post(client, auth, "重试消息", message_id="retry-message")
         duplicate = _post(client, auth, "重试消息", message_id="retry-message")
 
@@ -234,7 +234,7 @@ def test_public_snapshot_orders_same_timestamp_messages_by_sequence(client: Test
     auth = _login(client)
     fixed = datetime(2026, 1, 1, tzinfo=UTC)
     with patch("app.modules.agent.repository._now", return_value=fixed):
-        with _agent().override(model=TestModel(custom_output_text="同一时刻回答")):
+        with _agent().override(model=TestModel(custom_output_text="同一时刻回答", call_tools=[])):
             response = _post(client, auth, "同一时刻问题")
 
     assert response.status_code == 200
@@ -304,7 +304,7 @@ def test_terminal_failure_persists_terminal_event_without_late_runtime_event(cli
 
 def test_terminal_run_rejects_late_event_without_advancing_snapshot(client: TestClient) -> None:
     auth = _login(client)
-    with _agent().override(model=TestModel(custom_output_text="终态回答")):
+    with _agent().override(model=TestModel(custom_output_text="终态回答", call_tools=[])):
         assert _post(client, auth, "终态问题", message_id="terminal-message").status_code == 200
 
     database = client.app.state.database
@@ -345,7 +345,7 @@ def test_agent_route_rechecks_case_editability(client: TestClient) -> None:
         {"id": "c-draft-1"}, {"$set": {"workflowStatus": "published"}}
     )
 
-    assert client.get(THREAD_PATH).status_code == 409
+    assert client.get(THREAD_PATH).status_code == 200
     response = client.post(
         f"{THREAD_PATH}/{thread_id}/stream",
         headers=_csrf(auth),
@@ -364,7 +364,8 @@ def test_agent_route_rejects_cross_case_thread_access(client: TestClient) -> Non
         json=_body("跨案例线程"),
     )
 
-    assert response.status_code == 403
+    # 读者上下文开放后，他案 Thread 标识按不可枚举语义拒绝。
+    assert response.status_code == 404
 
 
 def test_legacy_generic_chat_route_is_removed(client: TestClient) -> None:

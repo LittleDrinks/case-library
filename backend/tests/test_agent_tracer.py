@@ -1,4 +1,4 @@
-"""最小单段修订 tracer：生产 Agent + Skill 按需加载 + Artifact 领域路径。"""
+"""最小单段修订 tracer：生产 Agent + 已发布 Skill 按需加载 + Artifact 领域路径。"""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
-from app.modules.agent.resources import CASE_EDIT_SKILL
-from tests.agent_tracer import REPLACEMENT, SKILL_ID, tracer_model
+from tests.agent_tracer import REPLACEMENT, tracer_model
+from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
-SKILL_BODY_MARK = "单段修订工作流 v2.1"
+SKILL_BODY_MARK = "写作前至少通读一个范例"
 
 
 class StubCatalog:
@@ -64,7 +64,10 @@ def _thread_path(case_id: str) -> str:
 
 
 def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
-    parts = [{"type": "text", "text": text}]
+    parts = [{"type": "text", "text": text}, {
+        "type": "data-selection",
+        "data": {"from": SELECTION[0], "to": SELECTION[1]},
+    }]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
     return parts
@@ -72,7 +75,7 @@ def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
 
 def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
           skill_id: str | None = SKILL_ID):
-    with agent.override(model=model or tracer_model()):
+    with agent.override(model=model or _tracer()):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
             f"{_thread_path(case_id)}/{thread_id}/stream",
@@ -97,14 +100,53 @@ HIT = {
     "summary": "以科学家精神为主题的教学案例，含教学目标与评价量规。",
 }
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
+# Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
+SELECTION = (11, 30)
+
+
+def _seed_source_case(database) -> None:
+    """检索命中来源落库为真实已发布案例，供接受前证据复验。"""
+    database.cases.insert_one({
+        "id": HIT["id"], "ownerId": "u-source", "publicationStatus": "public",
+        "workflowStatus": "published", "publishedVersionId": "cv-hit-1",
+        "revision": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+    database.case_versions.insert_one({
+        "id": "cv-hit-1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+
+
+def _tracer():
+    return tracer_model(selection=SELECTION)
+
+
+def _publish_skill(client: TestClient) -> dict:
+    """管理员上传并发布 v2.1 用户包，返回版本凭据。"""
+    admin = _login(client, "admin", "admin123")
+    response = client.post(
+        "/api/admin/skills/packages", headers=_csrf(admin),
+        files={"file": ("skill.zip", build_package(), "application/zip")},
+    )
+    assert response.status_code == 201, response.text
+    version = response.json()["version"]
+    publish = client.post(
+        f"/api/admin/skills/{SKILL_ID}/publish", headers=_csrf(admin),
+        json={"versionId": version["id"]},
+    )
+    assert publish.status_code == 200, publish.text
+    return version
 
 
 @pytest.fixture
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    _seed_source_case(client.app.state.database)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    with agent.override(model=tracer_model()):
+    with agent.override(model=_tracer()):
         response = _send(client, auth, case["id"], "请结合平台资料修订第2段：补充评价依据")
     assert response.status_code == 200, response.text
     return case
@@ -116,7 +158,8 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     artifact = _artifact(database, thread_id)
     assert artifact["status"] == "pending"
     assert artifact["baseRevision"] == 1
-    assert artifact["target"]["paragraphIndex"] == 1
+    assert artifact["target"]["from"] == SELECTION[0]
+    assert artifact["target"]["to"] == SELECTION[1]
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
@@ -137,38 +180,33 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
+        "tool-load_capability", "tool-read_skill_resource_sizheng_case_generator",
+        "tool-search_corpus", "tool-propose_revision",
     ]
-    assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[2]["output"]["artifactId"]
+    assert tool_parts[1]["output"] == {"path": EXAMPLE_PATH, "content": EXAMPLE_TEXT}
+    assert tool_parts[2]["output"]["sources"][0]["id"] == HIT["id"]
+    assert tool_parts[3]["output"]["artifactId"]
 
 
-def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_case) -> None:
+def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
     database = client.app.state.database
     run = database.agent_runs.find_one({}, {"_id": 0})
+    version = database.skill_versions.find_one({"skillId": SKILL_ID}, {"_id": 0})
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert set(kinds) == {"system-prompt", "task-prompt", "skill"}
-    assert kinds["skill"]["id"] == SKILL_ID
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert kinds["skill"] == {
+        "kind": "skill", "id": SKILL_ID,
+        "version": version["version"], "contentHash": version["packageSha256"],
+    }
     assert kinds["system-prompt"]["contentHash"]
     timings = list(run["toolTimings"].values())
     assert {timing["toolName"] for timing in timings} == {
-        "load_capability", "search_corpus", "propose_revision",
+        "load_capability", "read_skill_resource_sizheng_case_generator",
+        "search_corpus", "propose_revision",
     }
     assert all(timing.get("startedAt") and timing.get("finishedAt") for timing in timings)
 
 
-def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
-    calls: list = []
-
-    def recorder(messages, info):
-        calls.append((messages, info.instructions or ""))
-
-    auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder))
-    assert response.status_code == 200, response.text
+def _assert_delayed_skill(calls: list) -> None:
     first_messages, first_instructions = calls[0]
     flattened = [str(part) for message in first_messages for part in message.parts]
     assert not any(SKILL_BODY_MARK in text for text in flattened)
@@ -178,6 +216,20 @@ def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
     assert len(calls) >= 3
 
+
+def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
+    calls: list = []
+
+    def recorder(messages, info):
+        calls.append((messages, info.instructions or ""))
+
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder, selection=SELECTION))
+    assert response.status_code == 200, response.text
+    _assert_delayed_skill(calls)
 
 def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
             thread_id: str | None = None):
@@ -284,12 +336,6 @@ def test_snapshot_restores_artifact_and_decision(client: TestClient, tracer_case
     assert snapshot["latestRun"]["status"] == "completed"
     resources = {row["kind"] for row in snapshot["latestRun"]["resources"]}
     assert resources == {"system-prompt", "task-prompt", "skill"}
-
-
-def test_skill_manifest_matches_registered_resource() -> None:
-    text = CASE_EDIT_SKILL.read()
-    assert text.startswith("---\nid: case-edit-skill\nversion: 2.1\n")
-    assert SKILL_BODY_MARK in text
 
 
 def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:

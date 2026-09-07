@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.cases.service import CaseError
+from app.modules.materials.service import campus_verified
 from app.modules.search.cursor import CursorState, decode_cursor, encode_cursor, scope_key
 from app.modules.search.meilisearch import (
     CatalogRequest,
@@ -10,9 +11,10 @@ from app.modules.search.meilisearch import (
     Principal,
     SearchUnavailable,
 )
-from app.modules.search.models import SearchQuery
+from app.modules.search.models import SearchQuery, TagExpression, TagLeaf
 from app.modules.search.outbox import CatalogTarget
 from app.modules.search.state import CatalogSnapshot
+from app.modules.tags.service import unknown_tag_ids
 
 MAX_SEARCH_ATTEMPTS = 3
 
@@ -47,6 +49,7 @@ class _CatalogSearchPlan:
             principal=_principal(self.search.user),
             mounted_filter=self.mounted_filter,
             excluded_keys=revoked,
+            tag_condition=query.condition(),
             include_metadata=self.cursor.page == 1,
         )
 
@@ -72,7 +75,7 @@ def _principal(user: dict | None) -> Principal:
     if not user:
         return Principal(None, "anonymous")
     role = "admin" if user["role"] == "admin" else "user"
-    return Principal(user["id"], role)
+    return Principal(user["id"], role, campus_verified(user))
 
 
 def _can_read(case: dict, user: dict) -> bool:
@@ -109,7 +112,11 @@ def _stable_search(state, catalog, plan: _CatalogSearchPlan, before: CatalogSnap
 
 def _scope(search: CatalogSearch, target: CatalogTarget, filters: dict) -> str:
     query = search.query
-    scoped = {**filters, "mountedInCaseId": query.mounted_case_id}
+    scoped = {
+        **filters,
+        "mountedInCaseId": query.mounted_case_id,
+        "tagCondition": _condition_dump(query.condition()),
+    }
     return scope_key(
         query.q,
         query.kind,
@@ -120,8 +127,32 @@ def _scope(search: CatalogSearch, target: CatalogTarget, filters: dict) -> str:
     )
 
 
+def _condition_dump(condition: TagExpression | None) -> dict | None:
+    return None if condition is None else condition.model_dump()
+
+
+def _condition_ids(condition) -> list[str]:
+    if condition is None:
+        return []
+    if isinstance(condition, TagLeaf):
+        return [condition.tagId]
+    return [
+        tag_id for child in condition.children for tag_id in _condition_ids(child)
+    ]
+
+
+def _assert_condition_tags(database, condition) -> None:
+    ids = _condition_ids(condition)
+    if not ids:
+        return
+    missing = unknown_tag_ids(database, ids)
+    if missing:
+        raise CaseError(422, f"标签不存在或已删除: {', '.join(missing)}")
+
+
 def _resolve_search(database, search: CatalogSearch, target: CatalogTarget):
     query = search.query
+    _assert_condition_tags(database, query.condition())
     filters = _clean_filters(query.filters())
     scope = _scope(search, target, filters)
     cursor = decode_cursor(query.cursor, scope, search.secret_path)
@@ -129,15 +160,40 @@ def _resolve_search(database, search: CatalogSearch, target: CatalogTarget):
     return _CatalogSearchPlan(search, target, cursor, filters, mounted, scope)
 
 
-def _response(plan: _CatalogSearchPlan, page) -> dict:
+def _tag_name_map(database, items: list[dict]) -> dict[str, str]:
+    ids = [
+        tag_id
+        for item in items
+        if item.get("kind") == "case"
+        for tag_id in item.get("tagIds") or []
+    ]
+    if not ids:
+        return {}
+    rows = database.tags.find({"id": {"$in": ids}}, {"id": 1, "name": 1})
+    return {row["id"]: row["name"] for row in rows}
+
+
+def _attach_tag_names(database, items: list[dict]) -> list[dict]:
+    """用当前标签目录把案例 tagIds 解析为名称：图谱共同主题的唯一事实。"""
+    names = _tag_name_map(database, items)
+    for item in items:
+        if item.get("kind") != "case" or not item.get("tagIds"):
+            continue
+        resolved = [names[tag_id] for tag_id in item["tagIds"] if tag_id in names]
+        item["tagNames"] = resolved
+    return items
+
+
+def _response(plan: _CatalogSearchPlan, page, database) -> dict:
     query = plan.search.query
     metadata = page.metadata if plan.cursor.page == 1 else None
     return {
         "query": query.q.strip(),
         "kind": query.kind,
+        "tagCondition": _condition_dump(query.condition()),
         "page": plan.cursor.page,
         "pageSize": query.page_size,
-        "items": page.items,
+        "items": _attach_tag_names(database, page.items),
         **_metadata_response(metadata),
         **_cursor_response(page, plan),
     }
@@ -176,4 +232,4 @@ def search_catalog(database, catalog, catalog_state, search: CatalogSearch) -> d
     before = catalog_state.read()
     plan = _resolve_search(database, search, before.target)
     page = _stable_search(catalog_state, catalog, plan, before)
-    return _response(plan, page)
+    return _response(plan, page, database)

@@ -176,6 +176,9 @@
 }
 .editor-toolbar button:hover:not(:disabled), .editor-toolbar button.active { border-color: var(--line); background: var(--paper); color: var(--brand); }
 .toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
+.citation-picker { max-width: 128px; height: 30px; border: 1px solid transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
+.citation-picker:disabled { opacity: .5; }
+.citation-mark { border-bottom: 2px dotted var(--brand); background: rgba(183, 126, 44, .08); }
 .annotation-trigger { position: absolute; z-index: 12; min-width: 62px; height: 30px; padding: 0 10px; border: 1px solid var(--brand); border-radius: 5px; background: #fff; color: var(--brand); box-shadow: var(--shadow); }
 .annotation-anchor { background: #fff1b8; box-shadow: inset 0 -2px 0 #c88700; }
 .assistant-rail {
@@ -211,6 +214,24 @@
 .panel-head { min-height: 50px; padding: 15px 14px; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
 .panel-scroll { flex: 1; min-height: 0; overflow: auto; }
 .panel-empty { display: grid; min-height: 190px; place-content: center; justify-items: center; gap: 10px; color: var(--ink-3); font-size: 13px; }
+.public-sources { margin: 16px 12px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.public-sources h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 9px; font-size: 14px; }
+.public-sources > p { margin: 0; color: var(--ink-3); font-size: 11px; }
+.public-sources ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.public-sources li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11px; }
+.public-sources li span { overflow-wrap: anywhere; }
+.public-sources li a { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: var(--brand); }
+.public-sources li small { grid-column: 2 / -1; display: flex; align-items: center; gap: 4px; color: var(--ink-3); }
+.public-source-error { display: grid; gap: 8px; color: var(--red); font-size: 11px; }
+.public-source-error button { width: fit-content; padding: 4px 8px; border: 1px solid currentColor; border-radius: 5px; background: #fff; color: inherit; }
+.source-collect { display: flex; width: 100%; height: 38px; align-items: center; justify-content: center; gap: 7px; margin-bottom: 12px; border: 1px solid var(--brand); border-radius: 7px; background: #fff; color: var(--brand); font: inherit; cursor: pointer; }
+.source-collect:hover { background: var(--brand-soft); }
+.collect-source-hint { margin: 0; color: var(--ink-3); font-size: 12px; }
+.collect-source-option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.collect-source-option:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.collect-source-done { display: grid; gap: 12px; padding: 20px; font-size: 13px; }
+.collect-source-done p { margin: 0; color: var(--ink-2); }
+.collect-source-done a { display: flex; height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: #fff; text-decoration: none; }
 .ai-status { display: flex; min-height: 38px; flex: none; align-items: center; gap: 7px; padding: 7px 12px; border-bottom: 1px solid var(--line-soft); color: var(--ink-3); font-size: 11px; }
 .ai-status > span:first-child:not(.ai-status-dot) { margin-right: auto; color: var(--ink-2); }
 .ai-status a { margin-left: auto; color: var(--brand); text-decoration: none; }
@@ -373,6 +394,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .version-list button:hover:not(:disabled) { border-color: var(--line); background: var(--paper); color: var(--brand); }
 .conflict-banner { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 7px 18px; border-bottom: 1px solid #edc5cb; background: var(--brand-soft); color: var(--brand-strong); font-size: 13px; }
 .conflict-banner button, .page-state button { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid currentColor; border-radius: 5px; background: #fff; color: inherit; }
+.review-return-banner { margin: 12px auto 0; max-width: 760px; border: 1px solid #edc5cb; border-radius: 6px; }
 .page-state { display: flex; min-height: calc(100vh - 58px); align-items: center; justify-content: center; gap: 10px; color: var(--ink-3); }
 .error-state { color: var(--red); }
 .review-decision-backdrop {
@@ -437,7 +459,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .review-decision-dialog footer .primary { border-color: var(--brand); background: var(--brand); color: #fff; }
 .review-decision-error { margin: 0; color: var(--red); font-size: 12px; }
 
-@media (max-width: 1220px) {
+@media (max-width: 1230px) {
   .canvas-workspace, .canvas-workspace.outline-collapsed { grid-template-columns: minmax(0, 1fr) 390px; }
   .outline-wrap { display: none; }
   .document-paper { padding: 62px 56px 82px; }

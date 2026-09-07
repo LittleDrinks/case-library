@@ -5,11 +5,17 @@ import {
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
+import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
 import WritingCandidatePanel from "./WritingCandidatePanel.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
+  readOnly: { type: Boolean, default: false },
+  versionId: { type: String, default: "" },
+  sources: { type: Array, default: () => [] },
+  sourcesLoading: { type: Boolean, default: false },
+  sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   caseTitle: { type: String, required: true },
@@ -26,7 +32,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "candidate-previews", "annotations",
+  "case-revised", "candidate-previews", "annotations", "sources-retry",
 ]);
 
 const tabs = [
@@ -48,6 +54,7 @@ function select(tab) {
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
+        v-show="!readOnly || !['chat', 'comments'].includes(tab.id)"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -59,8 +66,19 @@ function select(tab) {
       </button>
     </nav>
 
+    <AgentChatPanel
+      v-if="readOnly && active === 'ai' && user"
+      :key="versionId || 'draft'"
+      :case-record="caseRecord"
+      :version-id="versionId"
+      :read-only="readOnly"
+      @case-revised="emit('case-revised', $event)"
+    />
+    <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
+      <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
+    </div>
     <WritingCandidatePanel
-      v-if="active === 'ai'"
+      v-else-if="active === 'ai'"
       :case-title="caseTitle"
       :case-document="caseDocument"
       :case-id="caseRecord.id"
@@ -76,7 +94,7 @@ function select(tab) {
     />
 
     <AgentChatPanel
-      v-else-if="active === 'chat'"
+      v-else-if="!readOnly && active === 'chat'"
       :open="open"
       :case-record="caseRecord"
       :writing-context="writingContext"
@@ -84,13 +102,21 @@ function select(tab) {
     />
 
     <CommentPanel
-      v-else-if="active === 'comments'"
+      v-else-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"
       :user="user"
       :selection="selection"
       @annotations="emit('annotations', $event)"
     />
 
+    <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
+      <PublicSourceList
+        :sources="sources"
+        :loading="sourcesLoading"
+        :error="sourcesError"
+        @retry="emit('sources-retry')"
+      />
+    </div>
     <AttachmentPanel
       v-else-if="active === 'files'"
       :case-record="caseRecord"

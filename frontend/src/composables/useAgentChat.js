@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
-export const CASE_EDIT_SKILL_ID = "case-edit-skill";
+export const NO_SKILL_ID = "";
 
 function textParts(message) {
   return (message?.parts || [])
@@ -76,51 +76,62 @@ function isCatalogCurrent(state, generation) {
   return !state.disposed && state.catalogGeneration === generation;
 }
 
-function readPreference(caseId) {
+function preferenceKey(caseId, versionId) {
+  return versionId
+    ? `agent-thread:${session.user?.id || "anonymous"}:${caseId}:${versionId}`
+    : `agent-thread:${caseId}`;
+}
+
+function readPreference(key) {
   try {
-    return localStorage.getItem(`agent-thread:${caseId}`) || null;
+    return localStorage.getItem(key) || null;
   } catch {
     return null;
   }
 }
 
-function writePreference(caseId, threadId) {
+function writePreference(key, threadId) {
   try {
-    localStorage.setItem(`agent-thread:${caseId}`, threadId);
+    localStorage.setItem(key, threadId);
   } catch {
     // 选择偏好只是本地记录，写入失败不影响对话
   }
 }
 
-async function resolveSnapshot(caseId) {
-  const preferred = readPreference(caseId);
-  if (!preferred) return api.agentThread(caseId);
+function defaultThread(caseId, state) {
+  return state.versionId
+    ? api.agentThread(caseId, null, state.versionId) : api.agentThread(caseId);
+}
+
+async function resolveSnapshot(caseId, state) {
+  const preferred = readPreference(state.preferenceKey);
+  if (!preferred) return defaultThread(caseId, state);
   try {
     return await api.agentThread(caseId, preferred);
   } catch (error) {
     if (error.status !== 404) throw error;
-    return api.agentThread(caseId);
+    return defaultThread(caseId, state);
   }
 }
 
 function isSelectedSkillValid(state) {
   const skillId = state.selectedSkillId.value;
-  if (skillId === CASE_EDIT_SKILL_ID) return true;
+  if (!skillId) return true;
   return state.catalog.value === "ready"
     && state.skills.value.some((skill) => skill.id === skillId);
 }
 
 function dropUnknownSkill(state) {
   const skillId = state.selectedSkillId.value;
-  const known = skillId === CASE_EDIT_SKILL_ID
+  const known = !skillId
     || state.skills.value.some((skill) => skill.id === skillId);
-  if (!known) state.selectedSkillId.value = CASE_EDIT_SKILL_ID;
+  if (!known) state.selectedSkillId.value = NO_SKILL_ID;
 }
 
 function restoreSkill(state, snapshot) {
   const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
   const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
-  state.selectedSkillId.value = skillId || CASE_EDIT_SKILL_ID;
+  state.selectedSkillId.value = skillId || NO_SKILL_ID;
   if (state.catalog.value === "ready") dropUnknownSkill(state);
 }
 
@@ -196,7 +207,7 @@ async function settle(caseId, state, generation, threadId, { fresh = false } = {
 async function loadChat(caseId, state, generation) {
   state.loading.value = true;
   state.error.value = "";
-  const results = await Promise.allSettled([resolveSnapshot(caseId), api.aiSettings()]);
+  const results = await Promise.allSettled([resolveSnapshot(caseId, state), api.aiSettings()]);
   if (!isCurrent(state, generation)) return;
   const [threadResult, settingsResult] = results;
   if (threadResult.status === "fulfilled") {
@@ -222,7 +233,7 @@ async function selectThread(caseId, state, threadId) {
     state.threadId.value = snapshot.id;
     restoreSkill(state, snapshot);
     replaceChat(state, buildChat(caseId, snapshot, state));
-    writePreference(caseId, snapshot.id);
+    writePreference(state.preferenceKey, snapshot.id);
   } catch (requestError) {
     if (isCurrent(state, generation)) state.error.value = requestError.message || "对话加载失败";
   } finally {
@@ -231,14 +242,18 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
+function messageParts(state, text, contextParts) {
+  const parts = [{ type: "text", text }, ...contextParts];
+  const skillId = state.selectedSkillId.value;
+  if (!state.versionId && skillId) parts.push({ type: "data-skill", data: { skillId } });
+  return parts;
+}
+
 async function sendChat(caseId, state, text, generation, contextParts = []) {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    const parts = [{ type: "text", text }, ...contextParts];
-    const skillId = state.selectedSkillId.value;
-    if (skillId) parts.push({ type: "data-skill", data: { skillId } });
-    await state.chat.value.sendMessage({ parts });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
@@ -300,24 +315,32 @@ async function renameThread(caseId, state, threadId, title) {
 }
 
 async function createThread(caseId, state) {
-  const created = await api.agentCreateThread(caseId, null, session.csrfToken);
+  const created = state.versionId
+    ? await api.agentCreateThread(caseId, null, session.csrfToken, state.versionId)
+    : await api.agentCreateThread(caseId, null, session.csrfToken);
   await selectThread(caseId, state, created.id);
+}
+
+function listThreadSummaries(caseId, state) {
+  return state.versionId
+    ? api.agentThreads(caseId, state.versionId) : api.agentThreads(caseId);
 }
 
 function threadActions(caseId, state) {
   return {
-    listThreads: () => api.agentThreads(caseId),
+    listThreads: () => listThreadSummaries(caseId, state),
     selectThread: (threadId) => selectThread(caseId, state, threadId),
     createThread: () => createThread(caseId, state),
     renameThread: (threadId, title) => renameThread(caseId, state, threadId, title),
   };
 }
 
-function createState() {
+function createState(caseId, versionId) {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false), recovering: ref(false),
-    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID), catalog: ref("loading"),
+    skills: ref([]), selectedSkillId: ref(NO_SKILL_ID), catalog: ref("loading"),
+    versionId, preferenceKey: preferenceKey(caseId, versionId),
     generation: 0, catalogGeneration: 0, disposed: false,
   };
 }
@@ -378,7 +401,8 @@ function exposedApi(caseId, state, at) {
     loading: state.loading, error: state.error, settings: state.settings,
     skills: state.skills, selectedSkillId: state.selectedSkillId,
     catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
-    textParts, send: (text, contextParts = []) => sendChat(caseId, state, text, at(), contextParts),
+    textParts,
+    send: (text, contextParts = []) => sendChat(caseId, state, text, at(), contextParts),
     stop: () => stopChat(caseId, state, at()),
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
@@ -386,14 +410,14 @@ function exposedApi(caseId, state, at) {
   };
 }
 
-export function useAgentChat(caseId) {
-  const state = createState();
+export function useAgentChat(caseId, versionId = "") {
+  const state = createState(caseId, versionId);
   const at = () => state.generation;
   const recover = () => {
     if (state.snapshot.value?.activeRun) kickResume(caseId, state, at());
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
-  void reloadCatalog(state);
+  if (!versionId) void reloadCatalog(state);
   return exposedApi(caseId, state, at);
 }

@@ -6,6 +6,7 @@ defineProps({
   sending: { type: Boolean, default: false },
   decideError: { type: String, default: "" },
   sourceState: { type: Function, default: () => ({ state: "checking" }) },
+  readOnly: { type: Boolean, default: false },
 });
 const emit = defineEmits(["accept", "reject"]);
 </script>
@@ -17,7 +18,7 @@ const emit = defineEmits(["accept", "reject"]);
     :data-artifact-status="artifact.status"
     data-testid="agent-artifact"
   >
-    <b>修订候选（第 {{ artifact.target.paragraphIndex + 1 }} 段）</b>
+    <b>修订候选</b>
     <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
     <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
     <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
@@ -35,7 +36,7 @@ const emit = defineEmits(["accept", "reject"]);
       <p v-else class="agent-artifact-source" :data-source-ref="sourceRefId(source)">依据：{{ source.title || source.id }} · {{ sourceStatusLabel(sourceState(source)) }}</p>
     </template>
     <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
-    <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
+    <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
       <button type="button" data-testid="agent-accept" :disabled="sending" @click="emit('accept', artifact.id)">接受</button>
       <button type="button" data-testid="agent-reject" :disabled="sending" @click="emit('reject', artifact.id)">拒绝</button>
     </div>

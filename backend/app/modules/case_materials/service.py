@@ -3,8 +3,8 @@ from __future__ import annotations
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.attachments.service import _advance_revision, _run_transaction
-from app.modules.cases.service import CaseError
+from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.service import CaseError, advance_revision, run_transaction
 from app.modules.materials.service import can_read_material
 from app.modules.search.outbox import SearchOutbox
 
@@ -71,10 +71,12 @@ def list_case_materials(
     case = _case(database, case_id)
     _require_reader(case, user)
     rows = _material_rows(database, case, user, version_id)
-    if _is_internal(case, user):
+    if _internal_reader(case, user):
         return [material_view(row) for row in rows]
     return [
-        material_view(row) if can_read_material(row, user) else _restricted_view(row)
+        material_view(row)
+        if can_read_material(_material_row(database, row), user)
+        else _restricted_view(row)
         for row in rows
     ]
 
@@ -83,22 +85,23 @@ def _is_internal(case: dict, user: dict | None) -> bool:
     return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
 
 
+def _internal_reader(case: dict, user: dict | None) -> bool:
+    return _is_internal(case, user) and case["publicationStatus"] != "public"
+
+
 def _material_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id and _is_internal(case, user):
+    internal = _internal_reader(case, user)
+    if not version_id and internal:
         return snapshot_materials(database, case["id"], None)
     target_id = version_id or case.get("publishedVersionId")
-    return _version_materials(database, case, user, target_id)
+    return _version_materials(database, case, target_id, internal)
 
 
-def _version_materials(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id or (
-        version_id != case.get("publishedVersionId") and not _is_internal(case, user)
-    ):
+def _version_materials(database, case: dict, version_id: str | None, internal: bool):
+    if not version_id:
         raise CaseError(404, "素材版本不存在")
-    query = {"id": version_id, "caseId": case["id"]}
-    version = database.case_versions.find_one(query)
-    version = version or database.case_snapshots.find_one(query)
-    if not version:
+    version = find_version(database, case, version_id, internal)
+    if not version or not version_readable(database, case, version_id, version, internal):
         raise CaseError(404, "素材版本不存在")
     return version.get("materials", [])
 
@@ -107,8 +110,15 @@ def _mounted(case_id: str, material: dict) -> dict:
     return {**material_view(material), "caseId": case_id, "materialId": material["id"]}
 
 
+def _material_row(database, row: dict) -> dict:
+    if "createdBy" in row:
+        return row
+    live = database.materials.find_one({"id": row.get("materialId") or row["id"]})
+    return {**row, **(live or {})}
+
+
 def _insert(database, case_id, material, revision, user, session) -> dict:
-    _advance_revision(database, case_id, user, revision, session)
+    advance_revision(database, case_id, user, revision, session)
     mounted = _mounted(case_id, material)
     try:
         database.case_materials.insert_one(mounted, session=session)
@@ -131,7 +141,7 @@ def mount_material(
     material = database.materials.find_one({"id": material_id, "status": "active"})
     if not material or not can_read_material(material, user):
         raise CaseError(404, "素材不存在")
-    return _run_transaction(
+    return run_transaction(
         database,
         lambda session: _insert(database, case_id, material, revision, user, session),
     )
@@ -140,7 +150,7 @@ def mount_material(
 def unmount_material(
     database: Database, case_id: str, material_id: str, revision: int, user: dict
 ) -> None:
-    _run_transaction(
+    run_transaction(
         database,
         lambda session: _delete(
             database, case_id, material_id, revision, user, session
@@ -149,11 +159,14 @@ def unmount_material(
 
 
 def _delete(database, case_id, material_id, revision, user, session) -> None:
+    from app.modules.cases.citations import require_uncited
+
     query = {"caseId": case_id, "materialId": material_id}
     mounted = database.case_materials.find_one(query, session=session)
     if not mounted:
         raise CaseError(404, "素材未加入当前案例")
-    _advance_revision(database, case_id, user, revision, session)
+    require_uncited(database, case_id, "material", material_id, session)
+    advance_revision(database, case_id, user, revision, session)
     database.case_materials.delete_one({"_id": mounted["_id"]}, session=session)
     _record_materials(database, [material_id], session, [material_id])
 

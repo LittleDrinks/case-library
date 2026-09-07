@@ -18,7 +18,7 @@ ThreadEventType = Literal[
     "artifact.created",
     "artifact.decided",
 ]
-ArtifactStatus = Literal["pending", "accepted", "rejected"]
+ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
 ArtifactDecision = Literal["accepted", "rejected"]
 
 
@@ -28,6 +28,7 @@ class AgentThread(BaseModel):
     id: str
     case_id: str = Field(alias="caseId")
     owner_id: str = Field(alias="ownerId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     next_message_seq: int = Field(default=0, alias="nextMessageSeq")
@@ -61,6 +62,19 @@ class AgentRun(BaseModel):
     assistant_message_id: str = Field(alias="assistantMessageId")
     client_request_id: str | None = Field(default=None, alias="clientRequestId")
     status: RunStatus
+    skill_bindings: list[dict[str, str]] = Field(
+        default_factory=list, alias="skillBindings",
+        description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
+    )
+    read_only: bool = Field(default=False, alias="readOnly")
+    base_revision: int | None = Field(
+        default=None, alias="baseRevision", ge=1,
+        description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",
+    )
+    target: ArtifactTarget | None = Field(
+        default=None,
+        description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
+    )
     resources: list[dict[str, str]] = Field(default_factory=list)
     tool_timings: dict[str, dict[str, str]] = Field(default_factory=dict, alias="toolTimings")
     started_at: datetime = Field(alias="startedAt")
@@ -88,7 +102,8 @@ class SourceRef(BaseModel):
 class ArtifactTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
+    from_pos: int = Field(alias="from", ge=0)
+    to_pos: int = Field(alias="to", ge=0)
     quote: str
 
 
@@ -126,6 +141,7 @@ class AgentThreadSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     running: bool = False
@@ -139,6 +155,7 @@ class AgentSnapshot(BaseModel):
 
     id: str
     case_id: str = Field(alias="caseId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
