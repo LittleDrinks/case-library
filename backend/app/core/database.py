@@ -68,6 +68,12 @@ def _initialize_case_assets(database: Database) -> None:
     database.case_materials.create_index(
         [("materialId", ASCENDING), ("caseId", ASCENDING)]
     )
+    database.case_sources.create_index([("id", ASCENDING)], unique=True)
+    database.case_sources.create_index([("caseId", ASCENDING), ("createdAt", ASCENDING)])
+    database.case_sources.create_index(
+        [("caseId", ASCENDING), ("sourceCaseId", ASCENDING), ("versionId", ASCENDING)],
+        unique=True,
+    )
 
 
 def _initialize_materials(database: Database) -> None:
@@ -133,11 +139,13 @@ def _initialize_search_delivery(database: Database) -> None:
 
 
 def _initialize_agent_threads(database: Database) -> None:
-    if "ownerId_1_caseId_1_isDefault_1" in database.agent_threads.index_information():
-        database.agent_threads.drop_index("ownerId_1_caseId_1_isDefault_1")
+    information = database.agent_threads.index_information()
+    for legacy in ("ownerId_1_caseId_1_isDefault_1", "agent_one_default_thread"):
+        if legacy in information:
+            database.agent_threads.drop_index(legacy)
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     database.agent_threads.create_index(
-        [("ownerId", ASCENDING), ("caseId", ASCENDING)],
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("versionId", ASCENDING)],
         unique=True,
         partialFilterExpression={"isDefault": True},
         name="agent_one_default_thread",

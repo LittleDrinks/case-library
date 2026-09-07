@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.core.dependencies import get_blob_store, get_database
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
@@ -101,6 +101,8 @@ def content(
     user: dict | None = Depends(optional_user),
 ):
     material, chunks = download_material(database, store, material_id, user)
+    if chunks is None:
+        return RedirectResponse(material["sourceUrl"])
     filename = quote(material_filename(material), safe="")
     return StreamingResponse(
         chunks,

@@ -133,6 +133,43 @@ def test_material_detail_returns_content_metadata_without_storage_keys(
     assert not {"blobId", "sha256", "createdBy", "provenance"} & body.keys()
 
 
+def test_url_material_detail_and_content_redirect(client: TestClient) -> None:
+    material_id, _admin = _approved_material(client, "web.txt", b"ignored", "public")
+    url = "https://example.edu/article"
+    client.app.state.database.materials.update_one(
+        {"id": material_id},
+        {
+            "$set": {"sourceUrl": url},
+            "$unset": {"blobId": "", "filename": "", "mediaType": "", "size": ""},
+        },
+    )
+
+    detail = client.get(f"/api/materials/{material_id}")
+    response = client.get(
+        f"/api/materials/{material_id}/content", follow_redirects=False
+    )
+    assert detail.json()["contentAvailable"] is True
+    assert detail.json()["downloadAvailable"] is False
+    assert (response.status_code, response.headers["location"]) == (307, url)
+
+
+def test_missing_material_content_is_not_reported_as_available(
+    client: TestClient,
+) -> None:
+    material_id, _admin = _approved_material(
+        client, "missing.txt", b"ignored", "public"
+    )
+    client.app.state.database.materials.update_one(
+        {"id": material_id},
+        {"$unset": {"blobId": "", "filename": "", "mediaType": "", "size": ""}},
+    )
+
+    detail = client.get(f"/api/materials/{material_id}")
+    assert detail.json()["contentAvailable"] is False
+    assert detail.json()["downloadAvailable"] is False
+    assert client.get(f"/api/materials/{material_id}/content").status_code == 404
+
+
 def test_material_detail_and_download_hide_denied_inactive_and_missing_records(
     client: TestClient,
 ) -> None:

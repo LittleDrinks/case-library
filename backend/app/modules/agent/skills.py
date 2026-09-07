@@ -17,6 +17,17 @@ from app.modules.agent.search import search_corpus
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
+READER_CAPABILITY_ID = "platform-tools"
+
+
+def reader_capability() -> Capability:
+    """读者只读领域能力：仅注册检索工具，不注册任何写工具。"""
+    return Capability(
+        id=READER_CAPABILITY_ID,
+        description="检索平台公开资料辅助阅读讨论",
+        tools=[search_corpus],
+    )
+
 
 async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""

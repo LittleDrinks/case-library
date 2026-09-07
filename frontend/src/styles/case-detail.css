@@ -34,8 +34,18 @@
 .public-attachments li span { overflow-wrap: anywhere; }
 .public-attachments li a { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: var(--brand); }
 .public-attachments li small { grid-column: 2 / -1; display: flex; align-items: center; gap: 4px; color: var(--ink-3); }
+.case-detail-collect { width: 100%; margin-top: 8px; background: #fff; color: var(--brand); font: inherit; cursor: pointer; }
+.case-detail-collect:hover { background: var(--brand-soft); }
+.collect-source-hint { margin: 0; color: var(--ink-3); font-size: 12px; }
+.collect-source-option, .review-decision-dialog .collect-source-option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.collect-source-option:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.collect-source-done { display: grid; gap: 12px; padding: 20px; font-size: 13px; }
+.collect-source-done p { margin: 0; color: var(--ink-2); }
+.collect-source-done a { display: flex; height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: #fff; text-decoration: none; }
 .case-detail-workbench, .case-detail-export, .case-detail-state button { display: flex; height: 38px; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--brand); border-radius: 7px; background: var(--brand); color: #fff; text-decoration: none; }
 .case-detail-workbench { margin-bottom: 8px; background: #fff; color: var(--brand); }
+.version-pin-banner { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 6px; background: var(--brand-soft); color: var(--ink-2); font-size: 12px; }
+.version-pin-banner a { color: var(--brand); font-weight: 600; }
 .case-detail-state { display: flex; min-height: 500px; align-items: center; justify-content: center; gap: 9px; color: var(--ink-3); }
 .case-detail-state button { height: 34px; padding: 0 11px; }
 

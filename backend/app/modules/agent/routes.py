@@ -35,11 +35,16 @@ from app.modules.agent.repository import (
 )
 from app.modules.agent import prosemirror
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import bound_skill_capability, domain_capability
+from app.modules.agent.skills import bound_skill_capability, domain_capability, reader_capability
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
+from app.modules.cases.published import (
+    published_view,
+    version_readable,
+    version_readable_by_id,
+)
 from app.modules.cases.service import get_case
 
 
@@ -47,6 +52,15 @@ router = APIRouter(prefix="/api/cases", tags=["agent"])
 MAX_REQUEST_BYTES = 512 * 1024
 MAX_MESSAGE_CHARACTERS = 20_000
 MAX_THREAD_TITLE_CHARACTERS = 60
+
+
+@dataclass(slots=True)
+class Conversation:
+    """单次对话操作的服务端上下文：作者工作稿或读者绑定的已发布版本。"""
+
+    case: dict
+    version_id: str | None
+    reader: bool
 
 
 @dataclass(slots=True)
@@ -78,15 +92,95 @@ def _repository(database) -> AgentRepository:
     return AgentRepository(database)
 
 
+def _existing_case(database, case_id: str) -> dict:
+    case = database.cases.find_one({"id": case_id})
+    if not case:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    return case
+
+
+def _readable_case(case: dict, user: dict) -> bool:
+    return case.get("publicationStatus") == "public" or user["role"] == "admin"
+
+
+def _gate_case(database, case_id: str, user: dict) -> dict:
+    """case 级门禁先于任何 Thread 枚举：不可读 404；非作者可读但未公开保持 403。"""
+    case = _existing_case(database, case_id)
+    if case["ownerId"] == user["id"] or _readable_case(case, user):
+        if case["ownerId"] != user["id"] and case.get("publicationStatus") != "public":
+            raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
+        return case
+    raise HTTPException(status_code=404, detail="案例不存在")
+
+
+def _readable_version(database, case: dict, version_id: str) -> dict:
+    """读者对话只绑定真实已批准发布的版本；按当前身份即时重验可读性。"""
+    version = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
+    if not version or not version_readable(database, case, version_id, version, False):
+        raise HTTPException(status_code=404, detail="案例版本不存在")
+    return version
+
+
+def _conversation(database, case_id: str, user: dict, version_id: str | None) -> Conversation:
+    """versionId 缺省为作者工作稿上下文；给定则绑定实际可读的已发布版本。"""
+    if not version_id:
+        return Conversation(_author_case(database, case_id, user), None, False)
+    case = _gate_case(database, case_id, user)
+    version = _readable_version(database, case, version_id)
+    return Conversation(published_view(case, version), version_id, True)
+
+
+def _editable_conversation(database, case_id: str, user: dict, version_id: str | None):
+    conversation = _conversation(database, case_id, user, version_id)
+    if not conversation.reader:
+        _editable_case(conversation.case)
+    return conversation
+
+
+def _thread_conversation(
+    database, case_id: str, user: dict, repository: AgentRepository, thread_id: str,
+    version_id: str | None = None,
+) -> tuple[Conversation, AgentThread]:
+    """Thread 自身的绑定决定上下文；恢复/续跑/取消/事件全部即时重验可读性。"""
+    case = _gate_case(database, case_id, user)
+    thread = _thread(repository, thread_id, case_id, user["id"])
+    _check_thread_version(thread, version_id)
+    if thread.version_id is None:
+        if case["ownerId"] != user["id"]:
+            raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
+        return Conversation(case, None, False), thread
+    version = _readable_version(database, case, thread.version_id)
+    return Conversation(published_view(case, version), thread.version_id, True), thread
+
+
+def _editable_thread_conversation(
+    database, case_id: str, user: dict, repository: AgentRepository, thread_id: str,
+    version_id: str | None = None,
+):
+    conversation, thread = _thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
+    if not conversation.reader:
+        _editable_case(conversation.case)
+    return conversation, thread
+
+
+def _check_thread_version(thread: AgentThread, version_id: str | None) -> None:
+    if version_id is not None and version_id != thread.version_id:
+        raise HTTPException(status_code=409, detail="对话版本不匹配")
+
+
 @router.get("/{case_id}/agent/thread")
 def show_thread(
     case_id: str,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
-    _editable_case(_author_case(database, case_id, user))
+    conversation = _conversation(database, case_id, user, version_id)
     repository = _repository(database)
-    return repository.snapshot(repository.default_thread(case_id, user["id"]))
+    thread = repository.default_thread(case_id, user["id"], conversation.version_id)
+    return repository.snapshot(thread)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -213,6 +307,7 @@ def _thread(repository, thread_id: str, case_id: str, user_id: str) -> AgentThre
 def _summary(thread: AgentThread) -> AgentThreadSummary:
     return AgentThreadSummary(
         id=thread.id,
+        version_id=thread.version_id,
         title=thread.title,
         is_default=thread.is_default,
         running=thread.active_run_id is not None,
@@ -241,6 +336,7 @@ class ThreadCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
+    versionId: str | None = None
 
 
 class ThreadRenameBody(BaseModel):
@@ -252,11 +348,12 @@ class ThreadRenameBody(BaseModel):
 @router.get("/{case_id}/agent/threads")
 def list_threads(
     case_id: str,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> list[AgentThreadSummary]:
-    _editable_case(_author_case(database, case_id, user))
-    threads = _repository(database).list_threads(case_id, user["id"])
+    _conversation(database, case_id, user, version_id)
+    threads = _repository(database).list_threads(case_id, user["id"], version_id or None)
     return [_summary(thread) for thread in threads]
 
 
@@ -268,9 +365,11 @@ def create_thread(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> AgentThreadSummary:
-    _editable_case(_author_case(database, case_id, user))
+    conversation = _editable_conversation(database, case_id, user, body.versionId)
     repository = _repository(database)
-    thread = repository.create_thread(case_id, user["id"], _valid_title(body.title))
+    thread = repository.create_thread(
+        case_id, user["id"], _valid_title(body.title), conversation.version_id
+    )
     return _summary(thread)
 
 
@@ -278,12 +377,13 @@ def create_thread(
 def show_named_thread(
     case_id: str,
     thread_id: str,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
-    _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    return repository.snapshot(_thread(repository, thread_id, case_id, user["id"]))
+    _, thread = _thread_conversation(database, case_id, user, repository, thread_id, version_id)
+    return repository.snapshot(thread)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -291,12 +391,15 @@ def rename_thread(
     case_id: str,
     thread_id: str,
     body: ThreadRenameBody,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> AgentThreadSummary:
-    _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
+    _, thread = _editable_thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
     title = _valid_title(body.title)
     try:
         thread = repository.rename_thread(thread_id, case_id, user["id"], title)
@@ -310,40 +413,34 @@ async def send_message(
     case_id: str,
     thread_id: str,
     request: Request,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     settings=Depends(get_settings),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
-    return await _send_message(case_id, thread_id, request, database, settings, user)
+    return await _send_message(
+        case_id, thread_id, request, database, settings, user, version_id
+    )
 
 
-async def _send_message(case_id, thread_id, request, database, settings, user):
+async def _send_message(case_id, thread_id, request, database, settings, user, version_id=None):
     _request_size(request)
-    case = _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    conversation, thread = _editable_thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _run_plan(repository, thread, adapter)
-    bounds, selection, lease, worker_id, lock = _run_setup(
-        case, request, database, settings, user, plan
+    if conversation.reader and plan.skills:
+        raise HTTPException(status_code=422, detail="AI 能力不可用")
+    context = _start_context(
+        request, database, settings, user, conversation, repository, thread,
+        adapter, plan, assistant_id,
     )
-    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
-                     worker_id, [bound.binding_record() for bound in bounds], lock)
-    context = _run_context(request, database, settings, user, case, repository, thread,
-                           adapter, plan, run, selection, lease, worker_id, bounds)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
-
-
-def _run_setup(case, request, database, settings, user, plan):
-    plan.selections = _document_selections(case.get("document") or {}, plan.parts)
-    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
-    selection = _selection(database, settings, user["id"])
-    lease = _lease(database, user["id"], selection)
-    worker_id = request.app.state.agent_worker_id
-    return bounds, selection, lease, worker_id, _run_lock(case, plan)
 
 
 def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
@@ -359,22 +456,52 @@ def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, 
     return tuple(bounds)
 
 
-def _run_context(request, database, settings, user, case, repository, thread, adapter,
-                 plan, run, selection, lease, worker_id, bounds=()):
+def _start_context(
+    request, database, settings, user, conversation, repository, thread, adapter, plan,
+    assistant_id,
+):
+    lock = _run_lock_for(conversation, plan)
+    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
+    selection = _selection(database, settings, user["id"])
+    lease = _lease(database, user["id"], selection)
+    worker_id = request.app.state.agent_worker_id
+    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
+                     worker_id, [bound.binding_record() for bound in bounds], lock)
+    return _run_context(request, database, settings, user, conversation, repository,
+                        thread, adapter, plan, run, selection, lease, worker_id, bounds)
+
+
+def _run_lock_for(conversation: Conversation, plan: RunPlan):
+    if conversation.reader:
+        return None, None
+    plan.selections = _document_selections(
+        conversation.case.get("document") or {}, plan.parts
+    )
+    return _run_lock(conversation.case, plan)
+
+
+def _run_context(request, database, settings, user, conversation: Conversation,
+                 repository, thread, adapter, plan, run, selection, lease, worker_id, bounds):
+    capabilities = _capabilities(conversation, bounds)
     deps = ToolDeps(
-        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
-        user=user, catalog=request.app.state.search_catalog,
+        database=database, case_id=conversation.case["id"], thread_id=thread.id,
+        run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state,
         secret_path=settings.app_secret_file,
     )
     return RunContext(
-        repository, run, adapter, plan.history, plan.prompt, case,
+        repository, run, adapter, plan.history, plan.prompt, conversation.case,
         request.app.state.agent, buffer=LiveBuffer(),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
-        deps=deps, bounds=bounds,
-        capabilities=[domain_capability()] + [bound_skill_capability(b) for b in bounds],
+        deps=deps, bounds=bounds, capabilities=capabilities, reader=conversation.reader,
     )
+
+
+def _capabilities(conversation: Conversation, bounds) -> list:
+    if conversation.reader:
+        return [reader_capability()]
+    return [domain_capability()] + [bound_skill_capability(bound) for bound in bounds]
 
 
 def _selection(database, settings, user_id: str):
@@ -500,14 +627,15 @@ def cancel_thread_run(
     case_id: str,
     thread_id: str,
     request: Request,
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> dict:
-    """幂等取消：标记活动 Run 并触发本进程 cancellation token。"""
-    _author_case(database, case_id, user)
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    _, thread = _thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
     run = repository.active_run(thread.id)
     if run is None:
         return {"runId": None, "status": "idle"}
@@ -522,17 +650,26 @@ def thread_events(
     thread_id: str,
     request: Request,
     after_seq: int | None = Query(default=None, alias="afterSeq"),
+    version_id: str | None = Query(default=None, alias="versionId"),
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ):
     """恢复流：按 Thread 游标 afterSeq/Last-Event-ID 只补发增量。"""
-    _author_case(database, case_id, user)
     repository = _repository(database)
-    thread = _thread(repository, thread_id, case_id, user["id"])
+    conversation, thread = _thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
     cursor = after_seq if after_seq is not None else _last_event_id(request)
     if thread.active_run_id is None and cursor >= thread.event_seq:
         return Response(status_code=204)
-    return live_event_response(repository, thread, max(cursor, 0))
+    access_check = _event_access_check(database, conversation, thread)
+    return live_event_response(repository, thread, max(cursor, 0), access_check)
+
+
+def _event_access_check(database, conversation: Conversation, thread: AgentThread):
+    if not conversation.reader:
+        return None
+    return lambda: version_readable_by_id(database, thread.case_id, thread.version_id)
 
 
 def _last_event_id(request: Request) -> int:
@@ -542,9 +679,9 @@ def _last_event_id(request: Request) -> int:
         raise HTTPException(status_code=422, detail="事件游标无效") from error
 
 
-def live_event_response(repository, thread, after_seq: int):
+def live_event_response(repository, thread, after_seq: int, access_check=None):
     return StreamingResponse(
-        events_stream(repository, thread, after_seq),
+        events_stream(repository, thread, after_seq, access_check),
         media_type="text/event-stream",
         headers=sse_headers(),
     )

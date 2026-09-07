@@ -28,6 +28,7 @@ class AgentThread(BaseModel):
     id: str
     case_id: str = Field(alias="caseId")
     owner_id: str = Field(alias="ownerId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     next_message_seq: int = Field(default=0, alias="nextMessageSeq")
@@ -65,6 +66,7 @@ class AgentRun(BaseModel):
         default_factory=list, alias="skillBindings",
         description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
     )
+    read_only: bool = Field(default=False, alias="readOnly")
     base_revision: int | None = Field(
         default=None, alias="baseRevision", ge=1,
         description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",
@@ -138,6 +140,7 @@ class AgentThreadSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     running: bool = False
@@ -151,6 +154,7 @@ class AgentSnapshot(BaseModel):
 
     id: str
     case_id: str = Field(alias="caseId")
+    version_id: str | None = Field(default=None, alias="versionId")
     title: str | None = None
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
