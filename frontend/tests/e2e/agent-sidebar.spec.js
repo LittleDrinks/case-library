@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { SKILL_ID, teachingPackage } from "./skill-package.js";
+import { waitForCatalogSynced } from "./catalog-ready.js";
 
 const CASE_ID = "c-draft-1";
-const SEED_URL = new URL("../../../files/materials_seed.json", import.meta.url);
 const MATERIAL_COUNT = 15;
 const THINKING_TEXT = "先核对资料区与选区，再检索平台依据。";
 const THINKING_QUESTION = "请结合平台资料修订第2段（思考测试）：补充评价依据";
@@ -166,17 +165,25 @@ async function composerViewportBox(page) {
   });
 }
 
-function seedMaterialIds(count) {
-  const rows = JSON.parse(readFileSync(SEED_URL, "utf8"));
-  return rows.filter((row) => row.status === "正常" && row.level === 1)
-    .slice(0, count).map((row) => row.id);
+async function availableMaterialIds(page, count) {
+  await waitForCatalogSynced(page.context().request);
+  const response = await page.context().request.get("/api/search", {
+    params: { q: "", kind: "material", pageSize: 100 },
+  });
+  expect(response.ok()).toBe(true);
+  const rows = (await response.json()).items.filter((row) => row.contentAvailable !== false);
+  expect(rows.length).toBeGreaterThanOrEqual(count);
+  return rows.slice(0, count).map((row) => row.id);
 }
 
 async function mountMaterials(page, caseId, materialIds) {
   const headers = { "X-CSRF-Token": await csrfToken(page) };
   for (const materialId of materialIds) {
+    const current = await page.context().request.get(`/api/cases/${caseId}`);
+    expect(current.ok()).toBe(true);
+    const { revision } = await current.json();
     const response = await page.context().request.post(`/api/cases/${caseId}/materials`, {
-      headers, data: { materialId, revision: 1 },
+      headers, data: { materialId, revision },
     });
     expect(response.ok()).toBe(true);
   }
@@ -348,8 +355,7 @@ test("AI 侧栏固定布局、线程视图、移动端和 reduced motion", async
   await assertLayout(page, "test-results/agent-sidebar-mobile.png");
 });
 
-test("真实 HTTP 线程：新建、切换与刷新恢复", async ({ page }) => {
-  test.setTimeout(60_000);
+async function prepareThreadCase(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
   await configureProviderChat(page);
@@ -357,7 +363,12 @@ test("真实 HTTP 线程：新建、切换与刷新恢复", async ({ page }) => 
   await page.goto(`/#/workbench/${created.id}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await openChat(page);
+  return created;
+}
 
+test("真实 HTTP 线程：新建、切换与刷新恢复", async ({ page }) => {
+  test.setTimeout(60_000);
+  const created = await prepareThreadCase(page);
   await sendQuestion(page, FIRST_QUESTION);
   await expect(page.getByTestId("agent-thread-list-open")).toContainText(FIRST_QUESTION);
   await openThreadList(page);
@@ -390,17 +401,20 @@ test("工作台滚动到底后侧栏输入仍可见", async ({ page }) => {
   await page.screenshot({ path: "test-results/agent-sidebar-scrolled.png" });
 });
 
-test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async ({ page }) => {
-  test.setTimeout(60_000);
+async function prepareSelectedSources(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
   const created = await createCaseViaApi(page, `Sidebar Sources ${Date.now()}`, ["资料上下文验收正文"]);
-  await mountMaterials(page, created.id, seedMaterialIds(MATERIAL_COUNT));
+  await mountMaterials(page, created.id, await availableMaterialIds(page, MATERIAL_COUNT));
   await page.goto(`/#/workbench/${created.id}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await openChat(page);
   await selectAllSources(page);
+}
 
+test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async ({ page }) => {
+  test.setTimeout(60_000);
+  await prepareSelectedSources(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".agent-source-chips")).toBeVisible();
   const box = await composerGeometry(page);

@@ -686,7 +686,7 @@ services:
         condition: service_healthy
     networks:
       - e2e_test
-    command: ["npm", "run", "test:e2e", "--", "--project=agent"]
+    command: ["npm", "run", "test:e2e", "--", "--project=agent", "--project=sidebar"]
 
   agent-tracer-app:
     profiles: ["e2e"]
@@ -786,7 +786,7 @@ services:
         condition: service_healthy
     networks:
       - e2e_test
-    command: ["npm", "run", "test:e2e", "--", "--project=agent-tracer"]
+    command: ["npm", "run", "test:e2e", "--", "--project=agent-tracer", "--project=sidebar-tracer"]
 
   e2e-frontend:
     profiles: ["e2e"]
