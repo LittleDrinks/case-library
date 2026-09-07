@@ -292,10 +292,13 @@ def delete_attachment(
 def _delete(
     database, case_id: str, attachment_id: str, user: dict, revision: int, session
 ):
+    from app.modules.cases.citations import require_uncited
+
     query = {"id": attachment_id, "caseId": case_id}
     attachment = database.attachments.find_one(query, session=session)
     if not attachment:
         raise AttachmentError(404, "附件不存在")
+    require_uncited(database, case_id, "attachment", attachment_id, session)
     _advance_revision(database, case_id, user, revision, session)
     database.attachments.delete_one({"_id": attachment["_id"]}, session=session)
     query = {"attachments.blobId": attachment["blobId"]}

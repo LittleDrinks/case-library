@@ -91,9 +91,12 @@ def _require_submission_tags(database: Database, case: dict) -> None:
 
 
 def _submit(database: Database, case: dict, user: dict, session) -> dict:
+    from app.modules.cases.citations import citations_resolve
+
     _require_owner(case, user)
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可提交")
+    citations_resolve(database, case["id"], case["document"], session)
     _require_submission_tags(database, case)
     now = _now()
     attachments = snapshot_attachments(database, case["id"], session)

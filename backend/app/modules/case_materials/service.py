@@ -149,10 +149,13 @@ def unmount_material(
 
 
 def _delete(database, case_id, material_id, revision, user, session) -> None:
+    from app.modules.cases.citations import require_uncited
+
     query = {"caseId": case_id, "materialId": material_id}
     mounted = database.case_materials.find_one(query, session=session)
     if not mounted:
         raise CaseError(404, "素材未加入当前案例")
+    require_uncited(database, case_id, "material", material_id, session)
     _advance_revision(database, case_id, user, revision, session)
     database.case_materials.delete_one({"_id": mounted["_id"]}, session=session)
     _record_materials(database, [material_id], session, [material_id])

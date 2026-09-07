@@ -185,6 +185,11 @@ def update_case(database: Database, case_id: str, body: dict, user: dict) -> dic
         raise CaseError(403, "无权编辑该案例")
     if current["workflowStatus"] != "draft":
         raise CaseError(409, "案例当前不可编辑")
+    document = body.get("document")
+    if document is not None:
+        from app.modules.cases.citations import citations_resolve
+
+        citations_resolve(database, case_id, document, None)
     return _cas_update(database, case_id, body)
 
 

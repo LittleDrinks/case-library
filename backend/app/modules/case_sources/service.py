@@ -183,10 +183,13 @@ def _version_rows(database, case: dict, user: dict | None, version_id: str | Non
 
 
 def _delete(database, case_id, source_id, user, revision, session) -> None:
+    from app.modules.cases.citations import require_uncited
+
     query = {"caseId": case_id, "id": source_id}
     mounted = database.case_sources.find_one(query, session=session)
     if not mounted:
         raise CaseError(404, "案例来源未加入当前案例")
+    require_uncited(database, case_id, "case", source_id, session)
     _advance_revision(database, case_id, user, revision, session)
     database.case_sources.delete_one({"_id": mounted["_id"]}, session=session)
 

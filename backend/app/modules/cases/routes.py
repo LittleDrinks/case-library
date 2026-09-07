@@ -71,23 +71,37 @@ def sources(
 
 
 @router.get("/{case_id}/public/export.docx")
-def export_public_docx(case_id: str, database=Depends(get_database)):
-    return _docx_response(get_public_case(database, case_id), case_id)
+def export_public_docx(
+    case_id: str,
+    request: Request,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+):
+    _, record = _published_record(database, case_id)
+    entries = ordered_entries(database, record, None, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
 @router.get("/{case_id}/export.docx")
 def export_docx(
     case_id: str,
+    request: Request,
     database=Depends(get_database),
+    settings=Depends(get_settings),
     user: dict | None = Depends(optional_user),
 ):
-    return _docx_response(get_case(database, case_id, user), case_id)
+    case = _reader_case(database, case_id, user)
+    record = _internal_record(database, case, user) or _published_record(
+        database, case_id
+    )[1]
+    entries = ordered_entries(database, record, user, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
-def _docx_response(case: dict, case_id: str) -> Response:
+def _docx_response(case: dict, entries: list[dict], case_id: str) -> Response:
     headers = {"Content-Disposition": f'attachment; filename="case-{case_id}.docx"'}
     return Response(
-        build_case_docx(case),
+        build_case_docx(case, entries),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
     )
