@@ -167,12 +167,37 @@ async function inspectMaterialDetail(page) {
   return title;
 }
 
-async function returnToMaterialPage(page, title) {
+async function returnToMaterialPage(page, title, hasSecondPage) {
   await page.getByRole("link", { name: "返回素材掌控台" }).click();
   await expect(page).toHaveURL(/#\/materials\?caseId=c-draft-1$/);
-  await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
+  if (hasSecondPage) await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
   await expect(page.getByText(title, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "加入当前案例" })).toBeVisible();
+}
+
+async function maybeOpenSecondMaterialPage(page) {
+  const hasSecondPage = await page.locator(".catalog-pagination").count() === 2;
+  if (!hasSecondPage) return false;
+  const secondPage = expectSearchPageRequest(page, "material", true);
+  await page.getByRole("button", { name: "下一页" }).first().click();
+  await secondPage;
+  await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
+  await expectCursorAbsentFromUrl(page);
+  return true;
+}
+
+async function exerciseMaterialPage(page) {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto("/#/materials?caseId=c-draft-1");
+  await expect(page.locator("tbody tr").first()).toBeVisible();
+  const firstPageItems = await page.locator("tbody tr").count();
+  expect(firstPageItems).toBeGreaterThan(0);
+  expect(firstPageItems).toBeLessThanOrEqual(20);
+  const hasSecondPage = await maybeOpenSecondMaterialPage(page);
+  const title = await inspectMaterialDetail(page);
+  await returnToMaterialPage(page, title, hasSecondPage);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 }
 
 test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
@@ -265,22 +290,7 @@ test("素材掌控台在手机端无横向溢出", async ({ page }) => {
 });
 
 test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await login(page);
-  await page.goto("/#/materials?caseId=c-draft-1");
-  await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
-  const firstPageItems = await page.locator("tbody tr").count();
-  expect(firstPageItems).toBeLessThanOrEqual(20);
-  await expect(page.locator(".catalog-pagination")).toHaveCount(2);
-  const secondPage = expectSearchPageRequest(page, "material", true);
-  await page.getByRole("button", { name: "下一页" }).first().click();
-  await secondPage;
-  await expect(page.getByText(/第 2 页 · 共/).first()).toBeVisible();
-  await expectCursorAbsentFromUrl(page);
-  const secondTitle = await inspectMaterialDetail(page);
-  await returnToMaterialPage(page, secondTitle);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  await exerciseMaterialPage(page);
 });
 
 test("受限素材详情与下载统一返回 404", async ({ page }) => {

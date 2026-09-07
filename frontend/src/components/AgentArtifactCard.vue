@@ -1,10 +1,11 @@
 <script setup>
-import { artifactStatus, sourceHref, sourceRefId } from "../lib/agentTimeline.js";
+import { artifactStatus, sourceHref, sourceRefId, sourceStatusLabel } from "../lib/agentTimeline.js";
 
 defineProps({
   artifact: { type: Object, required: true },
   sending: { type: Boolean, default: false },
   decideError: { type: String, default: "" },
+  sourceState: { type: Function, default: () => ({ state: "checking" }) },
 });
 const emit = defineEmits(["accept", "reject"]);
 </script>
@@ -23,15 +24,15 @@ const emit = defineEmits(["accept", "reject"]);
     <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
     <template v-for="source in artifact.sources || []" :key="sourceRefId(source)">
       <a
-        v-if="sourceHref(source)"
+        v-if="sourceState(source).state === 'available' && (sourceState(source).url || sourceHref(source))"
         class="agent-artifact-source"
-        :href="sourceHref(source)"
+        :href="sourceState(source).url || sourceHref(source)"
         target="_blank"
         rel="noopener noreferrer"
         :data-source-ref="sourceRefId(source)"
-        :title="`在站内打开：${source.title || source.id}（以当前权限为准）`"
-      >依据：{{ source.title || source.id }}</a>
-      <p v-else class="agent-artifact-source" :data-source-ref="sourceRefId(source)">依据：{{ source.title || source.id }}</p>
+        :title="`在站内打开：${source.title || source.id}（已按当前权限核验）`"
+      >依据：{{ source.title || source.id }} · {{ sourceStatusLabel(sourceState(source)) }}</a>
+      <p v-else class="agent-artifact-source" :data-source-ref="sourceRefId(source)">依据：{{ source.title || source.id }} · {{ sourceStatusLabel(sourceState(source)) }}</p>
     </template>
     <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
     <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">

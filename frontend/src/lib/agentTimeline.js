@@ -12,6 +12,10 @@ export const ARTIFACT_STATUS_LABELS = {
 export const RUN_STATUS_LABELS = {
   active: "运行中", completed: "已完成", failed: "运行失败", cancelled: "已取消",
 };
+export const SOURCE_STATUS_LABELS = {
+  checking: "正在核验来源权限", available: "当前可读取", restricted: "当前权限不可读取",
+  unavailable: "来源已下线或不可读取",
+};
 
 export function toolName(part) {
   return part.type.slice(5);
@@ -64,7 +68,10 @@ export function toolResultSummary(part) {
 
 export function sourceHref(source) {
   const kind = source.kind || source.sourceType;
-  if (kind === "case") return `#/cases/${encodeURIComponent(source.id)}`;
+  if (kind === "case") {
+    const version = source.versionId ? `?versionId=${encodeURIComponent(source.versionId)}` : "";
+    return `#/cases/${encodeURIComponent(source.id)}${version}`;
+  }
   if (kind === "material") return `#/materials/${encodeURIComponent(source.id)}`;
   return "";
 }
@@ -74,7 +81,17 @@ export function artifactStatus(artifact) {
 }
 
 export function sourceRefId(source) {
-  return `${source.kind || source.sourceType || "unknown"}:${source.id}`;
+  const version = source.versionId ? `:${source.versionId}` : "";
+  return `${source.kind || source.sourceType || "unknown"}:${source.id}${version}`;
+}
+
+export function sourceEntryMatches(source, entry) {
+  if (entry.id === source.id) return true;
+  return Boolean(source.locator && (entry.id === source.locator || entry.url === source.locator));
+}
+
+export function sourceStatusLabel(state) {
+  return SOURCE_STATUS_LABELS[state?.state] || "无法核验来源状态";
 }
 
 export function durationText(seconds) {

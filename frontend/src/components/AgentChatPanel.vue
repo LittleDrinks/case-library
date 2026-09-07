@@ -1,11 +1,12 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { api } from "../api.js";
 import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
 import {
   durationText, sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
   toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
-  runAnchor, runError, runForMessage, runLabel,
+  runAnchor, runError, runForMessage, runLabel, sourceEntryMatches, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
 import AgentThreadList from "./AgentThreadList.vue";
@@ -40,6 +41,78 @@ const canSend = computed(() => Boolean(
     && !loading.value && !sending.value && !recovering.value,
 ));
 const decideError = ref("");
+const sourceStates = reactive(new Map());
+const sourceChecks = new Map();
+let sourceEntriesPromise = null;
+
+function sourceRefs() {
+  const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
+  const cards = artifacts.value.flatMap((artifact) => artifact.sources || []);
+  return [...new Map([...parts, ...cards].map((source) => [sourceRefId(source), source])).values()];
+}
+
+function sourceState(source) {
+  return sourceStates.get(sourceRefId(source)) || { state: "checking" };
+}
+
+function sourceTitle(source) {
+  return sourceState(source).title || source.title;
+}
+
+function sourceUrl(source) {
+  return sourceState(source).url || "";
+}
+
+async function directSource(source) {
+  const kind = source.kind || source.sourceType;
+  if (kind === "case") return api.getCase(source.id);
+  if (kind === "material") return api.getMaterial(source.id);
+  if (kind !== "knowledge") return null;
+  const result = await api.search(source.title || source.id, "knowledge", null, 100);
+  return result.items?.find((item) => item.id === source.id) || null;
+}
+
+function entryState(source, entry) {
+  const available = entry.contentAvailable === true;
+  return {
+    state: available ? "available" : "restricted", title: entry.title,
+    url: available ? entry.url || sourceHref(source) : "",
+  };
+}
+
+async function refreshSource(source, entries) {
+  const key = sourceRefId(source);
+  if (sourceChecks.has(key)) return sourceChecks.get(key);
+  const task = (async () => {
+    sourceStates.set(key, { state: "checking" });
+    const entry = entries.find((item) => sourceEntryMatches(source, item));
+    if (entry) return sourceStates.set(key, entryState(source, entry));
+    try {
+      const current = await directSource(source);
+      sourceStates.set(key, current ? { state: "available", url: sourceHref(source) } : { state: "unavailable" });
+    } catch {
+      sourceStates.set(key, { state: "unavailable" });
+    }
+    return sourceStates.get(key);
+  })();
+  sourceChecks.set(key, task);
+  return task.finally(() => sourceChecks.delete(key));
+}
+
+async function currentSourceEntries() {
+  if (!sourceEntriesPromise) {
+    sourceEntriesPromise = api.listSources(props.caseRecord.id, props.caseRecord.publishedVersionId)
+      .then((payload) => payload.entries || []).catch(() => []);
+  }
+  return sourceEntriesPromise;
+}
+
+async function refreshSources() {
+  const refs = sourceRefs();
+  if (!refs.length) return;
+  const entries = await currentSourceEntries();
+  await Promise.all(refs.map((source) => refreshSource(source, entries)));
+}
 
 function toolTitle(part) {
   if (toolName(part) !== "load_capability") return toolLabel(part);
@@ -140,9 +213,18 @@ async function scrollToLatest() {
 
 watch(messages, () => {
   trackToolTimers();
+  void refreshSources();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
-watch(artifacts, () => { if (nearBottom.value) void scrollToLatest(); }, { deep: true });
+watch(artifacts, () => {
+  void refreshSources();
+  if (nearBottom.value) void scrollToLatest();
+}, { deep: true });
+watch(threadId, () => {
+  sourceEntriesPromise = null;
+  sourceStates.clear();
+  sourceChecks.clear();
+});
 
 const THREADS_POLL_MS = 2000;
 let threadsTimer = null;
@@ -350,15 +432,15 @@ async function retryRun() {
                   :role="part.state === 'output-error' ? 'alert' : undefined"
                 >{{ toolResultSummary(part) }}</p>
                 <div v-if="sourcesOf(part).length" class="agent-sources" data-testid="agent-sources">
-                  <div v-for="source in sourcesOf(part)" :key="sourceRefId(source)" class="agent-source-item" data-testid="agent-source" :data-source-ref="sourceRefId(source)">
+                  <div v-for="source in sourcesOf(part)" :key="sourceRefId(source)" class="agent-source-item" data-testid="agent-source" :data-source-ref="sourceRefId(source)" :data-source-state="sourceState(source).state">
                     <a
-                      v-if="sourceHref(source)"
-                      :href="sourceHref(source)"
+                      v-if="sourceState(source).state === 'available' && sourceUrl(source)"
+                      :href="sourceUrl(source)"
                       target="_blank"
                       rel="noopener noreferrer"
-                      :title="`在站内打开：${source.title || source.id}（以当前权限为准）`"
-                    ><b>{{ source.title }}</b><span>{{ source.snippet }}</span></a>
-                    <p v-else><b>{{ source.title }}</b><span>{{ source.snippet }}</span></p>
+                      :title="`在站内打开：${sourceTitle(source)}（已按当前权限核验）`"
+                    ><b>{{ sourceTitle(source) }}</b><span>{{ source.snippet }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></a>
+                    <p v-else><b>{{ sourceTitle(source) }}</b><span>{{ source.snippet }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></p>
                   </div>
                 </div>
               </details>
@@ -367,6 +449,7 @@ async function retryRun() {
                 :artifact="linkedArtifact(part)"
                 :sending="sending"
                 :decide-error="decideError"
+                :source-state="sourceState"
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
@@ -377,6 +460,7 @@ async function retryRun() {
               :artifact="artifact"
               :sending="sending"
               :decide-error="decideError"
+              :source-state="sourceState"
               @accept="acceptArtifact"
               @reject="rejectArtifact"
             />
@@ -408,6 +492,7 @@ async function retryRun() {
           :artifact="artifact"
           :sending="sending"
           :decide-error="decideError"
+          :source-state="sourceState"
           @accept="acceptArtifact"
           @reject="rejectArtifact"
         />

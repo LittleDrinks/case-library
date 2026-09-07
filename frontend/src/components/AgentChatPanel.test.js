@@ -8,6 +8,7 @@ vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
     agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
+    listSources: vi.fn(), getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(),
   },
 }));
 
@@ -65,6 +66,10 @@ beforeEach(() => {
   api.listSkills.mockResolvedValue([
     { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
   ]);
+  api.listSources.mockResolvedValue({ entries: [] });
+  api.getCase.mockImplementation((id) => Promise.resolve({ id }));
+  api.getMaterial.mockImplementation((id) => Promise.resolve({ id }));
+  api.search.mockResolvedValue({ items: [] });
 });
 
 function sentRequest(fetch) {
@@ -443,7 +448,7 @@ function expectSourceCards(wrapper) {
   const links = wrapper.findAll('[data-testid="agent-source"] a');
   expect(links).toHaveLength(2);
   expect(links[0].attributes("href")).toBe("#/cases/c-42");
-  expect(links[0].attributes("title")).toContain("以当前权限为准");
+  expect(links[0].attributes("title")).toContain("已按当前权限核验");
   expect(links[1].attributes("href")).toBe("#/materials/m-7");
   expect(cards[1].text()).toContain("配套阅读材料");
 }
@@ -461,6 +466,23 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
   expectSourceCards(wrapper);
   const failed = wrapper.findAll('[data-testid="agent-skill-load"]')[1];
   expect(failed.text()).toContain("阅读来源 · 读取失败");
+});
+
+it("blocks an old source link when the current unified entry is restricted", async () => {
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [searchPartWithSources()];
+  api.listSources.mockResolvedValue({ entries: [
+    { id: "c-42", title: "已撤回案例", contentAvailable: false },
+    { id: "m-7", title: "配套阅读材料", contentAvailable: true, url: "#/materials/m-7" },
+  ] });
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await flushPromises();
+
+  expect(wrapper.find('[data-source-ref="case:c-42"] a').exists()).toBe(false);
+  expect(wrapper.find('[data-source-ref="case:c-42"]').text()).toContain("当前权限不可读取");
+  await vi.waitFor(() => expect(wrapper.find('[data-source-ref="material:m-7"] a').attributes("href")).toBe("#/materials/m-7"));
 });
 
 it("renders unknown tools by name without exposing raw arguments", async () => {
