@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import io
 
+from docx import Document
 from fastapi.testclient import TestClient
+
+CITATION = {"type": "citation", "attrs": {"sourceType": "case", "sourceId": ""}}
 
 
 def login(client: TestClient, username: str = "user", password: str = "user123") -> dict:
@@ -44,7 +47,22 @@ def upload_attachment(client: TestClient, auth: dict, access: str = "public") ->
     return response.json()
 
 
-def mount_material(client: TestClient, auth: dict, material_id: str) -> dict:
+def cite_document(client: TestClient, auth: dict, marks: list[dict]) -> object:
+    nodes = [
+        {"type": "text", "text": f"依据{index}", "marks": [mark]}
+        for index, mark in enumerate(marks, start=1)
+    ] or [{"type": "text", "text": "正文"}]
+    document = {"type": "doc", "content": [{"type": "paragraph", "content": nodes}]}
+    return client.patch(
+        "/api/cases/c-draft-1",
+        headers=headers(auth),
+        json={"document": document, "revision": revision(client)},
+    )
+
+
+def mount_material(
+    client: TestClient, auth: dict, material_id: str = "m-kcsz"
+) -> dict:
     response = client.post(
         "/api/cases/c-draft-1/materials",
         headers=headers(auth),
@@ -52,6 +70,24 @@ def mount_material(client: TestClient, auth: dict, material_id: str) -> dict:
     )
     assert response.status_code == 201
     return response.json()
+
+
+def cited_marks(source_id: str, attachment_id: str) -> list[dict]:
+    return [
+        {**CITATION, "attrs": {"sourceType": "case", "sourceId": source_id}},
+        {**CITATION, "attrs": {"sourceType": "material", "sourceId": "m-kcsz"}},
+        {**CITATION, "attrs": {"sourceType": "attachment", "sourceId": attachment_id}},
+    ]
+
+
+def delete_source(client: TestClient, auth: dict, path: str) -> object:
+    return client.delete(
+        path, params={"revision": revision(client)}, headers=headers(auth)
+    )
+
+
+def submit_case(client: TestClient, auth: dict) -> str:
+    return _submit_version(client, auth, "c-draft-1")["version"]["id"]
 
 
 def _submit_version(client: TestClient, auth: dict, case_id: str) -> dict:
@@ -62,6 +98,18 @@ def _submit_version(client: TestClient, auth: dict, case_id: str) -> dict:
     )
     assert response.status_code == 200, response.json()
     return response.json()
+
+
+def ordered_source_fixture(client: TestClient, auth: dict) -> tuple[dict, dict, dict]:
+    mount_material(client, auth)
+    source = mount_source(client, auth, "c-02").json()
+    cited, spare = upload_attachment(client, auth), upload_attachment(client, auth)
+    marks = [
+        {**CITATION, "attrs": {"sourceType": "attachment", "sourceId": cited["id"]}},
+        {**CITATION, "attrs": {"sourceType": "case", "sourceId": source["id"]}},
+    ]
+    assert cite_document(client, auth, marks).status_code == 200
+    return source, cited, spare
 
 
 def _admin_command(client: TestClient, case_id: str, command: str, **extra) -> object:
@@ -215,6 +263,26 @@ def test_removal_requires_owner_and_editable_draft(client: TestClient) -> None:
     assert client.get("/api/cases/c-draft-1/case-sources").json() == []
 
 
+def test_citation_save_rejects_dangling_sources(client: TestClient) -> None:
+    auth = login(client)
+    mark = {**CITATION, "attrs": {"sourceType": "case", "sourceId": "src-none"}}
+    assert cite_document(client, auth, [mark]).status_code == 422
+
+
+def test_cited_sources_cannot_be_removed(client: TestClient) -> None:
+    auth = login(client)
+    source = mount_source(client, auth, "c-02").json()
+    mount_material(client, auth)
+    attachment = upload_attachment(client, auth)
+    assert cite_document(client, auth, cited_marks(source["id"], attachment["id"])).status_code == 200
+    paths = [
+        f"/api/cases/c-draft-1/case-sources/{source['id']}",
+        "/api/cases/c-draft-1/materials/m-kcsz",
+        f"/api/cases/c-draft-1/attachments/{attachment['id']}",
+    ]
+    assert [delete_source(client, auth, path).status_code for path in paths] == [409] * 3
+
+
 def test_submit_freezes_case_sources(client: TestClient) -> None:
     auth = login(client)
     row = mount_source(client, auth, "c-02").json()
@@ -242,6 +310,26 @@ def test_sources_endpoint_lists_and_numbers_all_entries(client: TestClient) -> N
     assert case_entry["version"].startswith("v")
     attachment = next(entry for entry in entries if entry["sourceType"] == "attachment")
     assert "/attachments/" in attachment["url"]
+
+
+def test_sources_order_by_first_body_citation_and_pin_frozen_links(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    source, cited, spare = ordered_source_fixture(client, auth)
+    entries = client.get("/api/cases/c-draft-1/sources").json()["entries"]
+    assert [entry["id"] for entry in entries] == [
+        cited["id"], source["id"], "m-kcsz", spare["id"]
+    ]
+    assert [entry["number"] for entry in entries] == [1, 2, 3, 4]
+    version_id = submit_case(client, auth)
+    frozen = client.get(
+        "/api/cases/c-draft-1/sources", params={"versionId": version_id}
+    ).json()["entries"]
+    frozen_cited = next(entry for entry in frozen if entry["id"] == cited["id"])
+    assert frozen_cited["url"].endswith(
+        f"/api/cases/c-draft-1/attachments/{cited['id']}/content?versionId={version_id}"
+    )
 
 
 def test_material_source_url_uses_checked_content_redirect(client: TestClient) -> None:
@@ -334,6 +422,34 @@ def test_public_history_reads_v1_across_all_source_endpoints(client: TestClient)
     assert {row["sourceType"] for row in entries} == {"attachment", "material"}
     assert reader.get("/api/cases/c-draft-1/public").json()["title"] == "V2正文"
     assert v2["id"] != v1["id"]
+
+
+def _public_export(client: TestClient, case_id: str, version_id: str | None = None):
+    params = {"versionId": version_id} if version_id else None
+    return client.get(f"/api/cases/{case_id}/public/export.docx", params=params)
+
+
+def _assert_docx_title(response, title: str) -> None:
+    assert response.status_code == 200
+    assert Document(io.BytesIO(response.content)).core_properties.title == title
+
+
+def test_public_docx_export_pins_approved_versions_and_rejects_invalid_targets(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    v1, _, _ = _publish_first_version(client, auth)
+    _publish_second_version(client, auth)
+    reader = other_client(client)
+    _assert_docx_title(_public_export(reader, "c-draft-1"), "V2正文")
+    _assert_docx_title(_public_export(reader, "c-draft-1", v1["id"]), "V1正文")
+    assert _public_export(reader, "c-02", v1["id"]).status_code == 404
+    client.app.state.database.case_versions.insert_one(
+        {"id": "cv-unapproved-export", "caseId": "c-draft-1", "title": "未批准"}
+    )
+    assert _public_export(reader, "c-draft-1", "cv-unapproved-export").status_code == 404
+    _admin_command(client, "c-draft-1", "hide")
+    assert _public_export(reader, "c-draft-1", v1["id"]).status_code == 404
 
 
 def test_source_version_does_not_drift_on_republish(client: TestClient) -> None:

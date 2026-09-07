@@ -80,23 +80,38 @@ def sources(
 
 
 @router.get("/{case_id}/public/export.docx")
-def export_public_docx(case_id: str, database=Depends(get_database)):
-    return _docx_response(get_public_case(database, case_id), case_id)
+def export_public_docx(
+    case_id: str,
+    request: Request,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+):
+    _, record = _published_record(database, case_id, version_id)
+    entries = ordered_entries(database, record, None, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
 @router.get("/{case_id}/export.docx")
 def export_docx(
     case_id: str,
+    request: Request,
     database=Depends(get_database),
+    settings=Depends(get_settings),
     user: dict | None = Depends(optional_user),
 ):
-    return _docx_response(get_case(database, case_id, user), case_id)
+    case = _reader_case(database, case_id, user)
+    record = _internal_record(database, case, user) or _published_record(
+        database, case_id
+    )[1]
+    entries = ordered_entries(database, record, user, _origin(request, settings))
+    return _docx_response(record, entries, case_id)
 
 
-def _docx_response(case: dict, case_id: str) -> Response:
+def _docx_response(case: dict, entries: list[dict], case_id: str) -> Response:
     headers = {"Content-Disposition": f'attachment; filename="case-{case_id}.docx"'}
     return Response(
-        build_case_docx(case),
+        build_case_docx(case, entries),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
     )
@@ -154,13 +169,15 @@ def _internal_reader(case: dict, user: dict | None) -> bool:
     ) and case["publicationStatus"] != "public"
 
 
-def _published_record(database, case_id: str) -> tuple[dict, dict]:
+def _published_record(
+    database, case_id: str, version_id: str | None = None
+) -> tuple[dict, dict]:
     case = database.cases.find_one({"id": case_id})
-    version_id = (case or {}).get("publishedVersionId")
-    if not case or case.get("publicationStatus") != "public" or not version_id:
+    target_id = version_id or (case or {}).get("publishedVersionId")
+    if not case or case.get("publicationStatus") != "public" or not target_id:
         raise CaseError(404, "案例不存在")
-    version = find_version(database, case, version_id, False)
-    if not version or not version_readable(database, case, version_id, version, False):
+    version = find_version(database, case, target_id, False)
+    if not version or not version_readable(database, case, target_id, version, False):
         raise CaseError(404, "案例不存在")
     return case, version
 

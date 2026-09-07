@@ -7,6 +7,7 @@ from pymongo import DESCENDING, ReturnDocument
 from pymongo.database import Database
 
 from app.modules.cases.actions import available_actions
+from app.modules.cases.document_schema import citation_refs
 
 CASE_METADATA_FIELDS = (
     "typeId",
@@ -213,6 +214,8 @@ def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
 
 
 def create_case(database: Database, body: dict, user: dict) -> dict:
+    if citation_refs(body["document"]):
+        raise CaseError(422, "正文引用的来源不在资料区")
     now = _now()
     case = {
         "id": f"c-{secrets.token_hex(6)}",
@@ -239,6 +242,11 @@ def update_case(database: Database, case_id: str, body: dict, user: dict) -> dic
         raise CaseError(403, "无权编辑该案例")
     if current["workflowStatus"] != "draft":
         raise CaseError(409, "案例当前不可编辑")
+    document = body.get("document")
+    if document is not None:
+        from app.modules.cases.citations import citations_resolve
+
+        citations_resolve(database, case_id, document, None)
     updated = _cas_update(database, case_id, body)
     return internal_case_view(updated, user)
 

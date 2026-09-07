@@ -297,7 +297,7 @@ async function uploadWorkbenchEvidence(page) {
   await page.getByLabel("选择附件").setInputFiles({
     name: "课堂证据.txt", mimeType: "text/plain", buffer: Buffer.from("evidence"),
   });
-  await expect(page.getByText("课堂证据.txt")).toBeVisible();
+  await expect(page.getByText("课堂证据.txt", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "附件 1" })).toBeVisible();
   await expect(page.locator(".attachment-copy span")).toContainText("校内访问");
 }
@@ -549,7 +549,7 @@ test("附件请求在途锁定正文避免与自动保存竞争", async ({ page 
     await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
     await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
   } finally { held.release(); }
-  await expect(page.getByText("互斥验证.txt")).toBeVisible();
+  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
 });
 
 test("作者在草稿工作台上传、下载并删除附件", async ({ page }) => {
