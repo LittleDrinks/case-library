@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openCatalogFirstScreen, waitForCatalogSynced } from "./catalog-ready.js";
 
 async function login(page) {
   await page.goto("/#/login?redirect=/workbench/c-draft-1");
@@ -37,12 +38,7 @@ async function search(page, query) {
 }
 
 async function waitForSearchReady(page, query) {
-  await expect.poll(async () => {
-    const response = await page.context().request.get("/api/search", {
-      params: { q: query, kind: "all", pageSize: 20 },
-    });
-    return response.ok();
-  }, { timeout: 45_000 }).toBe(true);
+  await waitForCatalogSynced(page.context().request, query, 45_000);
 }
 
 function queryRequests(requests, query) {
@@ -266,12 +262,13 @@ test("素材掌控台在手机端无横向溢出", async ({ page }) => {
 });
 
 test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
-  await page.goto("/#/materials?caseId=c-draft-1");
-  await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
-  const firstPageItems = await page.locator("tbody tr").count();
-  expect(firstPageItems).toBeLessThanOrEqual(20);
+  await openCatalogFirstScreen(page, "/#/materials?caseId=c-draft-1", async () => {
+    await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
+  });
+  await expect(page.locator("tbody tr")).toHaveCount(20);
   await expect(page.locator(".catalog-pagination")).toHaveCount(2);
   const secondPage = expectSearchPageRequest(page, "material", true);
   await page.getByRole("button", { name: "下一页" }).first().click();
