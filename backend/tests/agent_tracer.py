@@ -12,6 +12,7 @@ from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, Functi
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
+SUMMARY_MARKER = "摘要测试"
 TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
 TRACER_SELECTION = (11, 30)
@@ -59,6 +60,16 @@ def _tool_response(name: str, args: dict) -> ModelResponse:
     return ModelResponse(parts=[ToolCallPart(tool_name=name, args=args)])
 
 
+def _summary_query(messages) -> str:
+    """摘要验收：带标记时从提问《》内提取唯一标题作检索词；默认检索词不变。"""
+    for message in reversed(messages):
+        for part in getattr(message, "parts", []):
+            prompt = getattr(part, "content", "")
+            if getattr(part, "part_kind", "") == "user-prompt" and SUMMARY_MARKER in prompt:
+                return prompt.split("《", 1)[1].split("》", 1)[0]
+    return SEARCH_QUERY
+
+
 def _search_source(messages) -> dict:
     for message in reversed(messages):
         for part in getattr(message, "parts", []):
@@ -78,11 +89,10 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
     called = _tool_calls(messages)
     if skill_id and "load_capability" not in called:
         return _load_capability_response(messages, skill_id)
-        return _tool_response("load_capability", {"id": skill_id})
     if skill_id and RESOURCE_TOOL not in called:
         return _tool_response(RESOURCE_TOOL, {"path": EXAMPLE_PATH})
     if "search_corpus" not in called:
-        return _tool_response("search_corpus", {"query": SEARCH_QUERY})
+        return _tool_response("search_corpus", {"query": _summary_query(messages)})
     if "read_source" not in called:
         return _tool_response("read_source", _search_source(messages))
     if "propose_revision" not in called:
