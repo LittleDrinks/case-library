@@ -22,6 +22,7 @@
 .published-document p { margin: 0 0 15px; text-align: justify; }
 .published-document ul, .published-document ol { margin: 0 0 15px; padding-left: 28px; }
 .published-document .citation-mark { border-bottom: 2px dotted var(--brand); background: rgba(183, 126, 44, .08); }
+.published-document .citation-number { margin-left: 2px; color: var(--brand); font-size: .72em; line-height: 0; }
 .case-detail-info dl { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px 8px; margin: 0; font-size: 12px; }
 .case-detail-info dt { color: var(--ink-3); }
 .case-detail-info dd { margin: 0; overflow-wrap: anywhere; color: var(--ink-2); }

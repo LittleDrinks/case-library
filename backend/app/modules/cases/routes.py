@@ -83,10 +83,11 @@ def sources(
 def export_public_docx(
     case_id: str,
     request: Request,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
     database=Depends(get_database),
     settings=Depends(get_settings),
 ):
-    _, record = _published_record(database, case_id)
+    _, record = _published_record(database, case_id, version_id)
     entries = ordered_entries(database, record, None, _origin(request, settings))
     return _docx_response(record, entries, case_id)
 
@@ -168,13 +169,15 @@ def _internal_reader(case: dict, user: dict | None) -> bool:
     ) and case["publicationStatus"] != "public"
 
 
-def _published_record(database, case_id: str) -> tuple[dict, dict]:
+def _published_record(
+    database, case_id: str, version_id: str | None = None
+) -> tuple[dict, dict]:
     case = database.cases.find_one({"id": case_id})
-    version_id = (case or {}).get("publishedVersionId")
-    if not case or case.get("publicationStatus") != "public" or not version_id:
+    target_id = version_id or (case or {}).get("publishedVersionId")
+    if not case or case.get("publicationStatus") != "public" or not target_id:
         raise CaseError(404, "案例不存在")
-    version = find_version(database, case, version_id, False)
-    if not version or not version_readable(database, case, version_id, version, False):
+    version = find_version(database, case, target_id, False)
+    if not version or not version_readable(database, case, target_id, version, False):
         raise CaseError(404, "案例不存在")
     return case, version
 

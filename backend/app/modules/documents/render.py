@@ -97,8 +97,7 @@ def _add_inlines(
         if key is None or runs_on:
             continue
         number = numbers.get(key)
-        if number is not None:
-            _add_citation_run(paragraph, number, font, size)
+        if number is not None: _add_citation_run(paragraph, number, font, size)
 
 
 def _add_title(document: DocxDocument, title: str) -> None:

@@ -8,6 +8,7 @@ from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
 from app.modules.case_sources.service import snapshot_case_sources
+from app.modules.cases.citations import citations_resolve
 from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
@@ -94,8 +95,6 @@ def _validate_submission(database: Database, case: dict) -> None:
 
 
 def _submit(database: Database, case: dict, user: dict, session) -> dict:
-    from app.modules.cases.citations import citations_resolve
-
     _require_owner(case, user)
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可提交")

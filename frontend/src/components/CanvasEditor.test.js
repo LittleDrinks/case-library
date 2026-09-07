@@ -105,12 +105,30 @@ it("可将选中文字关联资料并取消正文引用", async () => {
   const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
   await selectParagraph(wrapper);
-  await wrapper.get('[aria-label="正文引用资料"]').setValue("attachment:att-1");
+  const picker = wrapper.get('[aria-label="正文引用资料"]');
+  await picker.setValue("attachment:att-1");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toContainEqual({
     type: "citation", attrs: { sourceType: "attachment", sourceId: "att-1" },
   });
-  await wrapper.get('[aria-label="正文引用资料"]').setValue("remove");
+  await picker.setValue("remove");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toBeUndefined();
+  expect(picker.element.value).toBe("");
+  await picker.setValue("remove");
+  expect(picker.element.value).toBe("");
+});
+
+it("引用 HTML 粘贴往返保留资料属性", async () => {
+  const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  await selectParagraph(wrapper);
+  const picker = wrapper.get('[aria-label="正文引用资料"]');
+  await picker.setValue("attachment:att-1");
+  const html = wrapper.vm.editor.getHTML();
+  expect(html).toContain('data-citation-source="attachment:att-1"');
+  wrapper.vm.editor.commands.setContent(html, false);
+  expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toContainEqual({
+    type: "citation", attrs: { sourceType: "attachment", sourceId: "att-1" },
+  });
 });
 
 it("修订变化或手动编辑会立即清除旧选区", async () => {

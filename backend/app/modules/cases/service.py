@@ -7,6 +7,7 @@ from pymongo import DESCENDING, ReturnDocument
 from pymongo.database import Database
 
 from app.modules.cases.actions import available_actions
+from app.modules.cases.document_schema import citation_refs
 
 CASE_METADATA_FIELDS = (
     "typeId",
@@ -213,6 +214,8 @@ def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
 
 
 def create_case(database: Database, body: dict, user: dict) -> dict:
+    if citation_refs(body["document"]):
+        raise CaseError(422, "正文引用的来源不在资料区")
     now = _now()
     case = {
         "id": f"c-{secrets.token_hex(6)}",

@@ -26,13 +26,13 @@ function hasSelection(editor) {
 
 function applyCitation(event) {
   const value = event.target.value;
+  event.target.value = "";
   if (!hasSelection(props.editor)) return;
   if (value === "remove") return props.editor.chain().unsetMark("citation").run();
   const source = props.sources.find((row) => sourceKey(row) === value);
   if (source) props.editor.chain().setMark("citation", {
     sourceType: source.sourceType, sourceId: source.id,
   }).run();
-  event.target.value = "";
 }
 </script>
 

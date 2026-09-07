@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 
+from docx import Document
 from fastapi.testclient import TestClient
 
 CITATION = {"type": "citation", "attrs": {"sourceType": "case", "sourceId": ""}}
@@ -421,6 +422,34 @@ def test_public_history_reads_v1_across_all_source_endpoints(client: TestClient)
     assert {row["sourceType"] for row in entries} == {"attachment", "material"}
     assert reader.get("/api/cases/c-draft-1/public").json()["title"] == "V2正文"
     assert v2["id"] != v1["id"]
+
+
+def _public_export(client: TestClient, case_id: str, version_id: str | None = None):
+    params = {"versionId": version_id} if version_id else None
+    return client.get(f"/api/cases/{case_id}/public/export.docx", params=params)
+
+
+def _assert_docx_title(response, title: str) -> None:
+    assert response.status_code == 200
+    assert Document(io.BytesIO(response.content)).core_properties.title == title
+
+
+def test_public_docx_export_pins_approved_versions_and_rejects_invalid_targets(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    v1, _, _ = _publish_first_version(client, auth)
+    _publish_second_version(client, auth)
+    reader = other_client(client)
+    _assert_docx_title(_public_export(reader, "c-draft-1"), "V2正文")
+    _assert_docx_title(_public_export(reader, "c-draft-1", v1["id"]), "V1正文")
+    assert _public_export(reader, "c-02", v1["id"]).status_code == 404
+    client.app.state.database.case_versions.insert_one(
+        {"id": "cv-unapproved-export", "caseId": "c-draft-1", "title": "未批准"}
+    )
+    assert _public_export(reader, "c-draft-1", "cv-unapproved-export").status_code == 404
+    _admin_command(client, "c-draft-1", "hide")
+    assert _public_export(reader, "c-draft-1", v1["id"]).status_code == 404
 
 
 def test_source_version_does_not_drift_on_republish(client: TestClient) -> None:

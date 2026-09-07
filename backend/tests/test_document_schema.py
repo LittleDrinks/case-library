@@ -129,15 +129,14 @@ def test_current_tiptap_schema_is_accepted(client: TestClient) -> None:
     assert response.json()["document"] == valid_document()
 
 
-def test_citation_mark_is_persisted(client: TestClient) -> None:
+def test_create_rejects_dangling_citation(client: TestClient) -> None:
     document = {
         "type": "doc",
         "content": [_paragraph(_text("依据", [_citation()]))],
     }
     response = _create(client, _login_headers(client), document)
 
-    assert response.status_code == 200
-    assert response.json()["document"] == document
+    assert response.status_code == 422
 
 
 def test_citation_refs_keeps_first_occurrence_order() -> None:
