@@ -62,6 +62,10 @@ class AgentRun(BaseModel):
     assistant_message_id: str = Field(alias="assistantMessageId")
     client_request_id: str | None = Field(default=None, alias="clientRequestId")
     status: RunStatus
+    skill_bindings: list[dict[str, str]] = Field(
+        default_factory=list, alias="skillBindings",
+        description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
+    )
     read_only: bool = Field(default=False, alias="readOnly")
     base_revision: int | None = Field(
         default=None, alias="baseRevision", ge=1,

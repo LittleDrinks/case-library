@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { SKILL_ID, teachingPackage } from "./skill-package.js";
 
 const REQUEST_TEXT = "请结合平台资料修订第2段：补充评价依据";
 const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
@@ -56,12 +57,39 @@ async function waitSearchableCatalog(page) {
     .toBeGreaterThan(0);
 }
 
+async function publishTeachingSkill(playwright) {
+  const admin = await playwright.request.newContext();
+  const login = await admin.post(
+    "/api/auth/login", { data: { username: "admin", password: "admin123" } },
+  );
+  const headers = { "X-CSRF-Token": (await login.json()).csrfToken };
+  const uploaded = await admin.post("/api/admin/skills/packages", {
+    headers,
+    multipart: { file: { name: "skill.zip", mimeType: "application/zip", buffer: teachingPackage() } },
+  });
+  expect(uploaded.ok()).toBe(true);
+  const { version } = await uploaded.json();
+  const published = await admin.post(`/api/admin/skills/${SKILL_ID}/publish`, {
+    headers, data: { versionId: version.id },
+  });
+  expect(published.ok()).toBe(true);
+  await admin.dispose();
+}
+
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+}
+
+async function selectPublishedSkill(page) {
+  const picker = page.getByLabel("选择 Skill");
+  await expect(picker).toBeVisible();
+  await expect(picker.locator(`option[value="${SKILL_ID}"]`)).toHaveCount(1, { timeout: 30_000 });
+  await picker.selectOption(SKILL_ID);
+  await expect(picker).toHaveValue(SKILL_ID);
 }
 
 async function selectCanvasTarget(page) {
@@ -105,6 +133,7 @@ async function reloadRestoresTracer(page, caseId) {
   await page.reload();
   await openChat(page, caseId);
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");
   await expect(page.getByTestId("agent-source").first()).toBeVisible();
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
@@ -112,15 +141,23 @@ async function reloadRestoresTracer(page, caseId) {
   await expect(artifact).toContainText("原文：第二段：教学目标需要更明确的评价依据。");
 }
 
-test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全程真实 HTTP", async ({ page }) => {
+async function prepareTracer(page, playwright) {
+  await publishTeachingSkill(playwright);
   await login(page);
   await configureChat(page);
   await waitSearchableCatalog(page);
   const created = await createCase(page);
   await openChat(page, created.id);
+  await selectPublishedSkill(page);
+  return created;
+}
+
+test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全程真实 HTTP", async ({ page, playwright }) => {
+  const created = await prepareTracer(page, playwright);
 
   await sendRequest(page);
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");
   const sources = page.getByTestId("agent-source");
   await expect(sources.first()).toBeVisible();
   expect(await sources.count()).toBeGreaterThan(0);
