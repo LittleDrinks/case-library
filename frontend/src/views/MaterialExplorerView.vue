@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Check, LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
@@ -7,6 +7,7 @@ import CatalogPagination from "../components/CatalogPagination.vue";
 import MaterialDownloadAction from "../components/MaterialDownloadAction.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { rememberMaterialReturn, restoreMaterialReturn } from "../lib/materialNavigation.js";
+import { searchWithSyncRetry } from "../lib/searchSyncRetry.js";
 import { session } from "../session.js";
 
 const PAGE_SIZE = 20;
@@ -47,6 +48,14 @@ const editable = computed(() => Boolean(caseRecord.value
   && caseRecord.value.workflowStatus === "draft"));
 let searchGeneration = 0;
 
+function sameRouteQuery(nextQuery) {
+  return JSON.stringify(nextQuery) === JSON.stringify(route.query);
+}
+
+function invalidateSearch() {
+  searchGeneration += 1;
+}
+
 function facetCount(name, value) {
   return facets.value[name]?.find(row => row.value === value)?.count || 0;
 }
@@ -64,7 +73,11 @@ async function load(activeCursor = cursor.value) {
   const current = ++searchGeneration;
   error.value = "";
   try {
-    const payload = await api.search(query.value.trim(), "material", activeCursor, PAGE_SIZE, searchFilters());
+    const term = query.value.trim(); const filters = searchFilters();
+    const payload = await searchWithSyncRetry(
+      () => api.search(term, "material", activeCursor, PAGE_SIZE, filters),
+      () => current === searchGeneration,
+    );
     if (current !== searchGeneration) return;
     materials.value = payload.items;
     updateMetadata(payload);
@@ -99,7 +112,9 @@ function routeQuery(overrides = {}) {
 function updateRoute(overrides) {
   selected.value = [];
   cursor.value = "";
-  router.replace({ name: "materials", query: routeQuery(overrides) });
+  const nextQuery = routeQuery(overrides);
+  if (!sameRouteQuery(nextQuery)) invalidateSearch();
+  router.replace({ name: "materials", query: nextQuery });
 }
 
 function submitSearch() {
@@ -202,6 +217,8 @@ function syncSearchRoute() {
 
 watch(() => route.fullPath, syncSearchRoute, { immediate: true });
 watch(caseId, loadContext, { immediate: true });
+
+onBeforeUnmount(invalidateSearch);
 </script>
 
 <template>

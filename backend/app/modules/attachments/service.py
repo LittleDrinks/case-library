@@ -218,12 +218,18 @@ def download_attachment(
 ) -> tuple[dict, object]:
     case = _case(database, case_id)
     _require_reader(case, user)
-    rows = _attachment_rows(database, case, user, version_id)
+    rows = _download_rows(database, case, user, version_id)
     attachment = next((row for row in rows if row["id"] == attachment_id), None)
     if not attachment:
         raise AttachmentError(404, "附件不存在")
     _require_content_access(case, attachment, user)
     return attachment, store.open(attachment["blobId"])
+
+
+def _download_rows(database, case: dict, user: dict | None, version_id: str | None):
+    if version_id and _is_internal(case, user):
+        return _version_rows(database, case, version_id, True)
+    return _attachment_rows(database, case, user, version_id)
 
 
 def _require_content_access(case: dict, attachment: dict, user: dict | None) -> None:
@@ -257,10 +263,13 @@ def delete_attachment(
 def _delete(
     database, case_id: str, attachment_id: str, user: dict, revision: int, session
 ):
+    from app.modules.cases.citations import require_uncited
+
     query = {"id": attachment_id, "caseId": case_id}
     attachment = database.attachments.find_one(query, session=session)
     if not attachment:
         raise AttachmentError(404, "附件不存在")
+    require_uncited(database, case_id, "attachment", attachment_id, session)
     advance_revision(database, case_id, user, revision, session)
     database.attachments.delete_one({"_id": attachment["_id"]}, session=session)
     query = {"attachments.blobId": attachment["blobId"]}

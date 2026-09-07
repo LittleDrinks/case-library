@@ -1,8 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import SearchView from "./SearchView.vue";
 import SearchFilters from "../components/SearchFilters.vue";
-import { api } from "../api.js";
+import { api, ApiError } from "../api.js";
 
 const replace = vi.fn();
 const route = { query: { q: "游标目录", kind: "material" } };
@@ -34,6 +34,16 @@ const second = {
   metadataIncluded: false, nextCursor: null, previousCursor: "previous-token",
 };
 
+function apiError(status, message) {
+  return Object.assign(new ApiError(message), { status });
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 function render(options = {}) {
   return mount(SearchView, {
     ...options,
@@ -50,10 +60,13 @@ function revisionOf(wrapper) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  replace.mockReset();
   Element.prototype.scrollIntoView = vi.fn();
   route.query = { q: "游标目录", kind: "material" };
   api.search.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
 });
+
+afterEach(() => vi.useRealTimers());
 
 test("翻页将游标保存在内存并保留首屏检索元数据", async () => {
   const wrapper = render();
@@ -109,6 +122,29 @@ test("相同查询再次提交仍推进摘要修订", async () => {
   await flushPromises();
   expect(api.search).toHaveBeenCalledTimes(2);
   expect(revisionOf(wrapper)).toBe(2);
+});
+
+test("新搜索路由提交前旧结果不覆盖", async () => {
+  const pending = deferred();
+  api.search.mockReset().mockReturnValue(pending.promise);
+  const wrapper = render();
+  await flushPromises();
+  replace.mockReturnValue(new Promise(() => {}));
+  await wrapper.get("form.search-query input").setValue("新的查询");
+  await wrapper.get("form.search-query").trigger("submit");
+  pending.resolve(first);
+  await flushPromises();
+  expect(wrapper.text()).not.toContain("第一页");
+});
+
+test("离页后不再重试503搜索", async () => {
+  vi.useFakeTimers();
+  api.search.mockReset().mockRejectedValue(apiError(503, "目录同步中"));
+  const wrapper = render();
+  await flushPromises();
+  wrapper.unmount();
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(api.search).toHaveBeenCalledTimes(1);
 });
 
 test("检索失败不推进修订且 AI 区域随错误态隐藏", async () => {

@@ -11,6 +11,7 @@ from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_pac
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
+SKILL_BODY_MARK = "写作前至少通读一个范例"
 
 
 class StubCatalog:
@@ -229,6 +230,34 @@ def test_run_binds_selected_published_skill(client: TestClient) -> None:
                                      "versionId": version["id"], "version": version["version"]}]
     assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt", "skill"}
 
+
+def _assert_delayed_skill(calls: list) -> None:
+    first_messages, first_instructions = calls[0]
+    flattened = [str(part) for message in first_messages for part in message.parts]
+    assert not any(SKILL_BODY_MARK in text for text in flattened)
+    assert "load_capability" in first_instructions
+    later_messages = [str(part) for message in calls[-1][0] for part in message.parts]
+    assert any(SKILL_BODY_MARK in text for text in later_messages)
+    assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
+    assert len(calls) >= 3
+
+
+def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
+    calls: list = []
+
+    def recorder(messages, info):
+        calls.append((messages, info.instructions or ""))
+
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    response = _send(
+        client, auth, case["id"], "请修订第2段",
+        model=tracer_model(recorder, skill_id=SKILL_ID, selection=SELECTION),
+    )
+    assert response.status_code == 200, response.text
+    _assert_delayed_skill(calls)
 
 def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
             thread_id: str | None = None):

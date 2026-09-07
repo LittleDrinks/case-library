@@ -29,27 +29,27 @@ def _tool_calls(messages) -> list[str]:
     ]
 
 
+def _tool_response(name: str, args: dict) -> ModelResponse:
+    return ModelResponse(parts=[ToolCallPart(tool_name=name, args=args)])
+
+
 def tracer_response(messages, _info=None, skill_id: str | None = None,
                     selection: tuple[int, int] | None = None) -> ModelResponse:
     """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
     called = _tool_calls(messages)
     if skill_id and "load_capability" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": skill_id})])
+        return _tool_response("load_capability", {"id": skill_id})
     if skill_id and RESOURCE_TOOL not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name=RESOURCE_TOOL, args={"path": EXAMPLE_PATH})])
+        return _tool_response(RESOURCE_TOOL, {"path": EXAMPLE_PATH})
     if "search_corpus" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
+        return _tool_response("search_corpus", {"query": SEARCH_QUERY})
     if "read_source" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="read_source", args={
-            "source_type": "case", "source_id": SEARCH_SOURCE_ID,
-        })])
+        return _tool_response("read_source", {"source_type": "case", "source_id": SEARCH_SOURCE_ID})
     if "propose_revision" not in called:
         start, end = selection or TRACER_SELECTION
-        return ModelResponse(parts=[ToolCallPart(tool_name="propose_revision", args={
-            "start": start, "end": end,
-            "replacement": REPLACEMENT,
-            "reason": REASON,
-        })])
+        return _tool_response("propose_revision", {
+            "start": start, "end": end, "replacement": REPLACEMENT, "reason": REASON,
+        })
     return ModelResponse(parts=[TextPart(content="已生成单段修订候选，等待作者决定。")])
 
 

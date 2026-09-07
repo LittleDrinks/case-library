@@ -22,7 +22,11 @@ const sourcesVersionId = computed(() => (
   pinnedVersionId.value || caseRecord.value?.publishedVersionId || ""
 ));
 const outline = computed(() => documentOutline(caseRecord.value?.document));
-const exportUrl = computed(() => `/api/cases/${encodeURIComponent(caseId)}/public/export.docx`);
+const exportUrl = computed(() => {
+  const query = pinnedVersionId.value
+    ? `?versionId=${encodeURIComponent(pinnedVersionId.value)}` : "";
+  return `/api/cases/${encodeURIComponent(caseId)}/public/export.docx${query}`;
+});
 
 async function loadCase() {
   loading.value = true;
@@ -105,7 +109,7 @@ watch(pinnedVersionId, initialize);
               <h2>案例摘要</h2>
               <p>{{ caseRecord.summary }}</p>
             </section>
-            <PublishedDocument :document="caseRecord.document" />
+            <PublishedDocument :document="caseRecord.document" :sources="sources" />
           </article>
           <aside class="case-detail-info">
             <h2>案例信息</h2>

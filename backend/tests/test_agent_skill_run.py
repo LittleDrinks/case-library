@@ -347,6 +347,16 @@ def _revision_then_text_model() -> FunctionModel:
     return FunctionModel(stream_function=stream)
 
 
+def _assert_plain_chat_artifact(client: TestClient, case: dict) -> None:
+    database = client.app.state.database
+    artifact = database.agent_artifacts.find_one({"caseId": case["id"]}, {"_id": 0})
+    assert artifact["status"] == "pending"
+    assert artifact["target"] == {"from": 1, "to": 5, "quote": "第一段。"}
+    run = database.agent_runs.find_one({}, {"_id": 0})
+    assert run["skillBindings"] == []
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
+
+
 def test_plain_chat_without_skill_keeps_base_tools(client: TestClient) -> None:
     """平台普通对话与教学 Skill 分别表示：无 Skill 仍可用基础修订工具。"""
     teacher = _login(client, TEACHER)
@@ -356,16 +366,13 @@ def test_plain_chat_without_skill_keeps_base_tools(client: TestClient) -> None:
         response = client.post(
             f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/stream",
             headers=_csrf(teacher),
-            json=_submit_payload([{"type": "text", "text": "请修订第一段"}, SELECTION]),
+            json=_submit_payload([
+                {"type": "text", "text": "请修订第一段"},
+                {"type": "data-selection", "data": {"from": 1, "to": 5}},
+            ]),
         )
     assert response.status_code == 200, response.text
-    database = client.app.state.database
-    artifact = database.agent_artifacts.find_one({"caseId": case["id"]}, {"_id": 0})
-    assert artifact["status"] == "pending"
-    assert artifact["target"] == {"from": 1, "to": 5, "quote": "第一段。"}
-    run = database.agent_runs.find_one({}, {"_id": 0})
-    assert run["skillBindings"] == []
-    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
+    _assert_plain_chat_artifact(client, case)
 
 
 def test_bound_snapshot_reads_stored_package_bytes(client: TestClient) -> None:

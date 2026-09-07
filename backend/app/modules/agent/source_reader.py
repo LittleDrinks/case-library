@@ -26,11 +26,13 @@ class _BlobFile:
 
 
 def read_source(database, store, user: dict | None, case_id: str,
-                source_type: str, source_id: str) -> dict:
+                source_type: str, source_id: str, version_id: str | None = None) -> dict:
     readers = {
-        "attachment": lambda: _read_attachment(database, store, user, case_id, source_id),
+        "attachment": lambda: _read_attachment(
+            database, store, user, case_id, source_id, version_id
+        ),
         "material": lambda: _read_material(database, store, user, source_id),
-        "case": lambda: _read_case(database, user, case_id, source_id),
+        "case": lambda: _read_case(database, user, case_id, source_id, version_id),
         "knowledge": lambda: _read_knowledge(database, source_id),
     }
     try:
@@ -51,19 +53,21 @@ def _succeeded(ref: SourceRef, text: str) -> dict:
             "content": text[:MAX_SOURCE_CHARACTERS], "truncated": len(text) > MAX_SOURCE_CHARACTERS}
 
 
-def _area_row(database, case_id: str, kind: str, source_id: str) -> dict | None:
-    rows = area_rows(database, case_id)[kind]
+def _area_row(database, case_id: str, kind: str, source_id: str,
+              version_id: str | None = None) -> dict | None:
+    rows = area_rows(database, case_id, version_id)[kind]
     keys = ("materialId", "id") if kind == "material" else ("id",)
     return next((row for row in rows if any(row.get(key) == source_id for key in keys)), None)
 
 
-def _read_attachment(database, store, user, case_id: str, source_id: str) -> dict:
-    row = _area_row(database, case_id, "attachment", source_id)
+def _read_attachment(database, store, user, case_id: str, source_id: str,
+                     version_id: str | None = None) -> dict:
+    row = _area_row(database, case_id, "attachment", source_id, version_id)
     if not row:
         return _failed(UNAVAILABLE, "附件已删除或不在资料区")
     try:
         attachment, content = download_attachment(
-            database, store, case_id, source_id, user, None
+            database, store, case_id, source_id, user, version_id
         )
     except AttachmentError as error:
         status = NO_ACCESS if error.status_code == 403 else UNAVAILABLE
@@ -98,8 +102,9 @@ def _stream_text(content, row: dict) -> str:
     return extract_search_text(_BlobFile(data, row.get("mediaType") or "", row.get("name") or ""))
 
 
-def _read_case(database, user: dict | None, case_id: str, source_id: str) -> dict:
-    mounted = _area_row(database, case_id, "case", source_id)
+def _read_case(database, user: dict | None, case_id: str, source_id: str,
+               version_id: str | None = None) -> dict:
+    mounted = _area_row(database, case_id, "case", source_id, version_id)
     if mounted:
         return _read_pinned_case(database, user, mounted)
     return _read_published_case(database, source_id)
@@ -152,8 +157,21 @@ def _read_knowledge(database, source_id: str) -> dict:
 def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
     if ref.kind == "attachment":
         return _area_entry_available(database, user, case_id, ref)
+    if ref.kind == "case" and ref.version_id:
+        source_case_id = _location_case_id(ref.location)
+        if source_case_id:
+            return source_case_content_available(
+                database, source_case_id, user, ref.version_id, False
+            )
     result = read_source(database, None, user, case_id, ref.kind, ref.id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
+
+
+def _location_case_id(location: str | None) -> str | None:
+    if not location or not location.startswith("case:"):
+        return None
+    value = location[5:].split("@", 1)[0]
+    return value or None
 
 
 def _area_entry_available(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:

@@ -25,15 +25,11 @@ def _node_text(node: object) -> str:
     return "".join(_node_text(child) for child in node.get("content", []))
 
 
-def case_instructions(case: dict, extra: str = "") -> str:
+def case_instructions(case: dict, *, extra: str = "", reader: bool = False) -> str:
     title = str(case.get("title") or "未命名案例")
     text = _node_text(case.get("document"))[:12000]
-    base = "\n\n".join(
-        (
-            prompt_text("case-agent.md"),
-            prompt_text("revision-task.md"),
-            f"当前案例标题：{title}",
-            f"当前案例正文：{text}",
-        )
+    prompts = prompt_text("reader-agent.md") if reader else "\n\n".join(
+        (prompt_text("case-agent.md"), prompt_text("revision-task.md"))
     )
+    base = "\n\n".join((prompts, f"当前案例标题：{title}", f"当前案例正文：{text}"))
     return f"{base}\n\n{extra}" if extra else base

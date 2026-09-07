@@ -19,6 +19,17 @@ from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
+READER_CAPABILITY_ID = "platform-tools"
+
+
+def reader_capability() -> Capability:
+    """读者只读领域能力：注册检索与安全来源读取，不注册写工具。"""
+    return Capability(
+        id=READER_CAPABILITY_ID,
+        description="检索平台公开资料辅助阅读讨论",
+        tools=[search_corpus, read_source],
+    )
+
 
 async def read_source(ctx: RunContext[ToolDeps], source_type: str, source_id: str) -> dict:
     """按当前权限读取资料区或本次检索命中的来源，并记录实际证据。"""
@@ -26,7 +37,7 @@ async def read_source(ctx: RunContext[ToolDeps], source_type: str, source_id: st
         return {"status": "unavailable", "detail": "来源不在当前资料区或检索结果中"}
     result = read_domain_source(
         ctx.deps.database, ctx.deps.store, ctx.deps.user, ctx.deps.case_id,
-        source_type, source_id,
+        source_type, source_id, ctx.deps.version_id,
     )
     if result.get("status") == "ok":
         _record_evidence(ctx.deps, SourceRef.model_validate(result["usedSourceRef"]))

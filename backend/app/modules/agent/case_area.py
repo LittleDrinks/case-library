@@ -5,13 +5,17 @@ from __future__ import annotations
 from pymongo.database import Database
 
 from app.modules.agent.models import SourceRef
+from app.modules.cases.published import version_readable
 from app.modules.cases.sources import ordered_entries
 from app.modules.cases.service import CaseError
 
 SOURCE_TYPES = ("attachment", "material", "case")
 
 
-def area_rows(database: Database, case_id: str) -> dict[str, list[dict]]:
+def area_rows(database: Database, case_id: str, version_id: str | None = None) -> dict[str, list[dict]]:
+    if version_id:
+        version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+        return _embedded_rows(version or {})
     return {
         "attachment": list(database.attachments.find({"caseId": case_id}).sort("createdAt", 1)),
         "material": list(database.case_materials.find({"caseId": case_id}).sort("id", 1)),
@@ -19,15 +23,40 @@ def area_rows(database: Database, case_id: str) -> dict[str, list[dict]]:
     }
 
 
-def retained_sources(database: Database, case_id: str, user: dict | None = None) -> list[SourceRef]:
-    rows = area_rows(database, case_id)
-    refs = [_ref("attachment", row, case_id) for row in rows["attachment"]]
-    refs += [_ref("material", row, case_id) for row in rows["material"]]
-    refs += [_ref("case", row, case_id) for row in rows["case"]]
+def retained_sources(
+    database: Database, case_id: str, user: dict | None = None,
+    version_id: str | None = None,
+) -> list[SourceRef]:
+    record = _catalog_record(database, case_id, version_id)
+    refs = [_ref(kind, row, case_id) for kind in SOURCE_TYPES
+            for row in record.get(_field(kind), [])]
     by_key = {(ref.kind, ref.id): ref for ref in refs}
-    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
-    entries = ordered_entries(database, case, user, "")
+    entries = ordered_entries(database, record, user, "")
     return [by_key[(entry["sourceType"], entry["id"])] for entry in entries]
+
+
+def _field(kind: str) -> str:
+    return {"attachment": "attachments", "material": "materials", "case": "caseSources"}[kind]
+
+
+def _embedded_rows(record: dict) -> dict[str, list[dict]]:
+    return {"attachment": record.get("attachments", []),
+            "material": record.get("materials", []),
+            "case": record.get("caseSources", [])}
+
+
+def _catalog_record(database, case_id: str, version_id: str | None) -> dict:
+    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
+    if not version_id:
+        rows = area_rows(database, case_id)
+        return {**case, "attachments": rows["attachment"],
+                "materials": rows["material"], "caseSources": rows["case"]}
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    if not version or not version_readable(database, case, version_id, version, False):
+        return {"id": version_id, "caseId": case_id, "document": {},
+                "attachments": [], "materials": [], "caseSources": []}
+    return {"id": version_id, "caseId": case_id, "document": version.get("document", {}),
+            **_embedded_rows(version)}
 
 
 def _ref(kind: str, row: dict, case_id: str) -> SourceRef:
@@ -46,8 +75,10 @@ def _ref(kind: str, row: dict, case_id: str) -> SourceRef:
     )
 
 
-def selection_from_parts(database: Database, case_id: str, parts: list[dict]) -> list[dict]:
-    refs = retained_sources(database, case_id)
+def selection_from_parts(
+    database: Database, case_id: str, parts: list[dict], version_id: str | None = None
+) -> list[dict]:
+    refs = retained_sources(database, case_id, version_id=version_id)
     selected = []
     for part in parts:
         if part.get("type") != "data-source":

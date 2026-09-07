@@ -91,18 +91,12 @@ def test_selection_and_source_parts_are_persisted_structurally(client: TestClien
     assert message["parts"][1]["type"] == "data-selection"
 
 
-def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
-    database = client.app.state.database
-    _seed_source(database)
-    user = {"id": "u-user-demo", "role": "user"}
+def _evidence_artifact(database, user: dict):
     repository = AgentRepository(database)
     thread = repository.default_thread("c-draft-1", user["id"])
     case = database.cases.find_one({"id": "c-draft-1"})
     block = prosemirror.text_blocks(case["document"])[0]
-    target = ArtifactTarget(
-        from_pos=block["start"], to_pos=block["end"],
-        quote=prosemirror.text_between(case["document"], block["start"], block["end"]),
-    )
+    target = ArtifactTarget(from_pos=block["start"], to_pos=block["end"], quote=prosemirror.text_between(case["document"], block["start"], block["end"]))
     run = repository.start_run(
         thread, user["id"], [{"type": "text", "text": "修订"}], {}, "assistant-22",
         base_revision=case["revision"], target=target,
@@ -114,7 +108,15 @@ def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
         "替换", "理由", [ref], user,
     )
     database.agent_artifacts.insert_one(artifact.model_dump(by_alias=True, mode="python"))
-    database.agent_runs.update_one({"id": run.id}, {"$set": {"status": "completed"}})
+    return thread, artifact
+
+
+def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
+    database = client.app.state.database
+    _seed_source(database)
+    user = {"id": "u-user-demo", "role": "user"}
+    thread, artifact = _evidence_artifact(database, user)
+    database.agent_runs.update_one({"id": artifact.run_id}, {"$set": {"status": "completed"}})
     database.cases.update_one({"id": "c-source-22"}, {"$set": {"publicationStatus": "private"}})
     with pytest.raises(CaseError, match="依据当前不可读"):
         decide_artifact(database, "c-draft-1", thread.id, artifact.id, user, "accepted")

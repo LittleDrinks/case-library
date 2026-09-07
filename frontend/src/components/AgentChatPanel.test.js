@@ -412,6 +412,17 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(wrapper.text()).toContain("已生成单段修订候选");
 });
 
+it("renders failed resource reads from the UI tool protocol", async () => {
+  const failed = tracerSnapshot();
+  failed.messages[1].parts = [failed.messages[1].parts[0], {
+    type: "tool-read_skill_resource_skill_pub", toolCallId: "t-error", state: "output-error",
+    input: { path: "references/missing.md" }, errorText: "资源不存在：references/missing.md",
+  }];
+  api.agentThread.mockResolvedValue(failed);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
+});
 it("renders the expired artifact status after the case revision moved on", async () => {
   api.agentThread.mockResolvedValue(
     structuredClone({ ...tracerSnapshot(), artifacts: tracerArtifacts("expired") }),
@@ -424,18 +435,6 @@ it("renders the expired artifact status after the case revision moved on", async
   expect(artifact.text()).toContain("状态：已过期");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
   expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
-});
-
-it("renders failed resource reads from the UI tool protocol", async () => {
-  const failed = tracerSnapshot();
-  failed.messages[1].parts = [failed.messages[1].parts[0], {
-    type: "tool-read_skill_resource_skill_pub", toolCallId: "t-error", state: "output-error",
-    input: { path: "references/missing.md" }, errorText: "资源不存在：references/missing.md",
-  }];
-  api.agentThread.mockResolvedValue(failed);
-  const wrapper = mountPanel();
-  await flushPromises();
-  expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
 });
 
 function decideResult(decision) {
