@@ -298,3 +298,47 @@ test("自建案例来源链接可点，隐藏后 focus 撤下、重开显示受�
   await assertFocusWithdrawsCaseSource(page, caseId);
   await assertReopenMasksRun(page, draft.id, caseId);
 });
+
+async function prepareNonemptySummary(page, playwright) {
+  await publishTeachingSkill(playwright);
+  await login(page);
+  await configureChat(page);
+  const response = await page.context().request.get("/api/cases/c-02/public");
+  expect(response.ok()).toBe(true);
+  const source = await response.json();
+  expect(source.summary.trim().length).toBeGreaterThan(20);
+  await waitCaseSearchable(page, source.id, source.title);
+  const draft = await createCase(page);
+  await openChat(page, draft.id);
+  await selectPublishedSkill(page);
+  await sendSummaryRequest(page, source.title);
+  await expect(page.locator(".agent-chat-panel"))
+    .toHaveAttribute("data-run-status", "completed", { timeout: 60_000 });
+  await expandSearchTool(page);
+  await expect(summarySourceItem(page, source.id).locator("span")).toHaveText(source.summary);
+  return { source, draft };
+}
+
+async function restoreCase(playwright, caseId) {
+  const { admin, headers } = await adminSession(playwright);
+  try {
+    const response = await admin.get(`/api/cases/${caseId}`);
+    expect(response.ok()).toBe(true);
+    const current = await response.json();
+    if (current.publicationStatus === "public") return;
+    const restored = await adminLifecycle(admin, headers, caseId, "restore", current.revision);
+    expect(restored.publicationStatus).toBe("public");
+  } finally { await admin.dispose(); }
+}
+
+test("来源的非空摘要在下线后撤回，重开不恢复旧内容", async ({ page, playwright }) => {
+  test.setTimeout(180_000);
+  const { source, draft } = await prepareNonemptySummary(page, playwright);
+  try {
+    await hideCase(playwright, source.id);
+    await assertFocusWithdrawsSummary(page, source.id);
+    await expect(page.locator(".agent-chat-panel")).not.toContainText(source.summary);
+    await assertReopenMasksRun(page, draft.id, source.id);
+    await expect(page.locator(".agent-chat-panel")).not.toContainText(source.summary);
+  } finally { await restoreCase(playwright, source.id); }
+});
