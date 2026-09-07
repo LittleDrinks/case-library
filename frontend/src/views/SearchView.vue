@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
@@ -29,6 +29,15 @@ const items = computed(() => payload.value.items);
 const summarySnapshot = ref(null);
 let searchGeneration = 0;
 let summaryRevision = 0;
+
+function sameRouteQuery(nextQuery) {
+  return JSON.stringify(nextQuery) === JSON.stringify(route.query);
+}
+
+function invalidateSearch() {
+  searchGeneration += 1;
+  loading.value = false;
+}
 
 function tabLabel(kind, label) {
   return `${label} ${payload.value.counts[kind] || 0}`;
@@ -134,6 +143,7 @@ async function submitSearch() {
     cursor.value = "";
     return requestSearch(term, activeKind.value, null, filters.value);
   }
+  invalidateSearch();
   await router.replace({ name: "search", query: routeQuery({ term }) });
 }
 
@@ -149,9 +159,9 @@ function syncSearchRoute(values) {
 }
 
 function selectKind(kind) {
-  router.replace({
-    name: "search", query: routeQuery({ kind, filters: emptyFilters() }),
-  });
+  const nextQuery = routeQuery({ kind, filters: emptyFilters() });
+  if (!sameRouteQuery(nextQuery)) invalidateSearch();
+  router.replace({ name: "search", query: nextQuery });
 }
 
 function selectPage(nextCursor) {
@@ -161,7 +171,9 @@ function selectPage(nextCursor) {
 
 function selectFilters(next) {
   filters.value = next;
-  router.replace({ name: "search", query: routeQuery({ filters: next }) });
+  const nextQuery = routeQuery({ filters: next });
+  if (!sameRouteQuery(nextQuery)) invalidateSearch();
+  router.replace({ name: "search", query: nextQuery });
 }
 
 function searchRouteState() {
@@ -173,6 +185,8 @@ watch(searchRouteState, syncSearchRoute, { immediate: true });
 watch(() => route.query.view, (value) => {
   view.value = value === "graph" ? "graph" : "list";
 });
+
+onBeforeUnmount(invalidateSearch);
 </script>
 
 <template>

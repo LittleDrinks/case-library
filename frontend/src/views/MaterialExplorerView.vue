@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Check, LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
@@ -47,6 +47,14 @@ const editable = computed(() => Boolean(caseRecord.value
   && caseRecord.value.ownerId === session.user?.id
   && caseRecord.value.workflowStatus === "draft"));
 let searchGeneration = 0;
+
+function sameRouteQuery(nextQuery) {
+  return JSON.stringify(nextQuery) === JSON.stringify(route.query);
+}
+
+function invalidateSearch() {
+  searchGeneration += 1;
+}
 
 function facetCount(name, value) {
   return facets.value[name]?.find(row => row.value === value)?.count || 0;
@@ -104,7 +112,9 @@ function routeQuery(overrides = {}) {
 function updateRoute(overrides) {
   selected.value = [];
   cursor.value = "";
-  router.replace({ name: "materials", query: routeQuery(overrides) });
+  const nextQuery = routeQuery(overrides);
+  if (!sameRouteQuery(nextQuery)) invalidateSearch();
+  router.replace({ name: "materials", query: nextQuery });
 }
 
 function submitSearch() {
@@ -207,6 +217,8 @@ function syncSearchRoute() {
 
 watch(() => route.fullPath, syncSearchRoute, { immediate: true });
 watch(caseId, loadContext, { immediate: true });
+
+onBeforeUnmount(invalidateSearch);
 </script>
 
 <template>

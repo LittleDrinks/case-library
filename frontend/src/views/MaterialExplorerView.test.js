@@ -68,6 +68,12 @@ function apiError(status, message = "请求失败") {
   return Object.assign(new ApiError(message), { status });
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 test("受限素材不可选择且批量挂载只提交可访问项", async () => {
   const wrapper = render();
   await flushPromises();
@@ -201,6 +207,28 @@ test("切换筛选后旧素材重试不再发请求或覆盖结果", async () =>
   await vi.advanceTimersByTimeAsync(1000);
   expect(api.search).toHaveBeenCalledTimes(3);
   expect(wrapper.text()).toContain("受限素材");
+});
+
+test("异步路由提交前旧素材结果不覆盖", async () => {
+  const pending = deferred();
+  api.search.mockReset().mockReturnValue(pending.promise);
+  const wrapper = render();
+  await flushPromises();
+  replace.mockReturnValue(new Promise(() => {}));
+  await wrapper.findAll("input[name='authority']")[1].trigger("change");
+  pending.resolve(firstPage());
+  await flushPromises();
+  expect(wrapper.find("tbody tr").exists()).toBe(false);
+});
+
+test("离页后不再重试503素材请求", async () => {
+  vi.useFakeTimers();
+  api.search.mockReset().mockRejectedValue(apiError(503, "目录同步中"));
+  const wrapper = render();
+  await flushPromises();
+  wrapper.unmount();
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(api.search).toHaveBeenCalledTimes(1);
 });
 
 function firstPage() {
