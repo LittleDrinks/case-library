@@ -134,7 +134,7 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   const created = await createCase(page);
   await openChat(page, created.id);
   await sendChat(page, "当前问题");
-  const snapshot = await chatSnapshot(page, created.id);
+  const snapshot = await expectCompletedProjection(page, created.id);
   const assistant = snapshot.messages.at(-1);
   expect(assistant.id).toBe(snapshot.latestRun.assistantMessageId);
   expect(snapshot.eventSeq).toBe(4);
