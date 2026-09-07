@@ -1,13 +1,11 @@
-"""Run 能力装配：选中已发布 Skill 时延迟加载正文与资源。
+"""Run 能力装配：平台基础工具常驻，选中的已发布 Skill 按需延迟加载。
 
-能力仅在教师选择了 Skill 的 Run 注册，包含既有平台工具（检索、修订）
-与按需资源读取；正文与资源来自 Run 创建时固化的版本快照，发布变化
-不影响进行中的 Run，Skill 指令也不新增工具权限。
+平台普通对话始终注册基础工具（检索、修订）；教师从服务端目录选中的
+每个已发布 Skill 是一个独立的延迟能力，加载后补充正文与资源读取，
+读取闭包绑定 Run 创建时固化的版本快照，发布变化不影响进行中 Run。
 """
 
 from __future__ import annotations
-
-import hashlib
 
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
@@ -50,13 +48,18 @@ def _artifact_view(artifact) -> dict:
     }
 
 
+def domain_capability() -> Capability:
+    """平台基础能力：检索与修订工具立即常驻，不依赖是否选择 Skill。"""
+    return Capability(tools=[search_corpus, propose_revision])
+
+
 def bound_skill_capability(bound: BoundSkill) -> Capability:
-    """已发布 Skill 的延迟加载能力：描述进目录，加载后正文、工具与资源可用。"""
+    """已发布 Skill 的独立延迟能力：描述进目录，加载后正文与资源可用。"""
     return Capability(
         id=bound.skill_id,
         description=bound.description,
         instructions=skill_instructions(bound),
-        tools=[search_corpus, propose_revision, resource_tool(bound)],
+        tools=[resource_tool(bound)],
         defer_loading=True,
     )
 
@@ -86,5 +89,4 @@ def resource_tool(bound: BoundSkill) -> Tool:
 
 
 def resource_tool_name(bound: BoundSkill) -> str:
-    suffix = hashlib.sha256(bound.skill_id.encode("utf-8")).hexdigest()[:8]
-    return f"read_skill_resource_{suffix}"
+    return f"read_skill_resource_{bound.skill_id.replace('-', '_')}"

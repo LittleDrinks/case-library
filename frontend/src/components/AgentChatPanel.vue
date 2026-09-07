@@ -1,7 +1,7 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
+import { useAgentChat } from "../composables/useAgentChat.js";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -9,7 +9,6 @@ const props = defineProps({
 });
 const emit = defineEmits(["case-revised"]);
 
-const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
@@ -109,7 +108,6 @@ function toolParts(message) {
 }
 
 function skillName(skillId) {
-  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
   return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
 }
 
@@ -278,7 +276,7 @@ async function retryRun() {
           data-testid="skill-select"
           :disabled="loading || sending || catalog === 'loading'"
         >
-          <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+          <option value="">不使用 Skill</option>
           <option v-for="skill in skills" :key="skill.id" :value="skill.id">
             {{ skillOptionLabel(skill) }}
           </option>

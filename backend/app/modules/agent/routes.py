@@ -32,7 +32,7 @@ from app.modules.agent.repository import (
     ThreadNotFoundError,
 )
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import bound_skill_capability
+from app.modules.agent.skills import bound_skill_capability, domain_capability
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
@@ -333,7 +333,7 @@ def _run_context(request, database, settings, user, case, repository, thread, ad
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
         deps=deps, bounds=bounds,
-        capabilities=[bound_skill_capability(bound) for bound in bounds],
+        capabilities=[domain_capability()] + [bound_skill_capability(b) for b in bounds],
     )
 
 

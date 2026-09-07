@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
-export const CASE_EDIT_SKILL_ID = "case-edit-skill";
+export const NO_SKILL_ID = "";
 
 function textParts(message) {
   return (message?.parts || [])
@@ -96,22 +96,22 @@ async function resolveSnapshot(caseId) {
 
 function isSelectedSkillValid(state) {
   const skillId = state.selectedSkillId.value;
-  if (skillId === CASE_EDIT_SKILL_ID) return true;
+  if (!skillId) return true;
   return state.catalog.value === "ready"
     && state.skills.value.some((skill) => skill.id === skillId);
 }
 
 function dropUnknownSkill(state) {
   const skillId = state.selectedSkillId.value;
-  const known = skillId === CASE_EDIT_SKILL_ID
+  const known = !skillId
     || state.skills.value.some((skill) => skill.id === skillId);
-  if (!known) state.selectedSkillId.value = CASE_EDIT_SKILL_ID;
+  if (!known) state.selectedSkillId.value = NO_SKILL_ID;
 }
 
 function restoreSkill(state, snapshot) {
   const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
   const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
-  state.selectedSkillId.value = skillId || CASE_EDIT_SKILL_ID;
+  state.selectedSkillId.value = skillId || NO_SKILL_ID;
   if (state.catalog.value === "ready") dropUnknownSkill(state);
 }
 
@@ -303,7 +303,7 @@ function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
-    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID), catalog: ref("loading"),
+    skills: ref([]), selectedSkillId: ref(NO_SKILL_ID), catalog: ref("loading"),
     generation: 0, catalogGeneration: 0, disposed: false,
   };
 }

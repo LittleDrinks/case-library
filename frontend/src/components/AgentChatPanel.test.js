@@ -88,7 +88,7 @@ it("restores the server thread and sends one turn through the SDK transport", as
   expect(headers.get("X-CSRF-Token")).toBe("csrf");
   expect(body.trigger).toBe("submit-message");
   expect(body.messages.at(-1).parts[0].text).toBe("当前问题");
-  expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "case-edit-skill" } });
+  expect(body.messages.at(-1).parts).toHaveLength(1);
   expect(wrapper.text()).toContain("确定回答");
 });
 
@@ -99,6 +99,7 @@ it("carries the selected published skill id and shows the catalog options", asyn
   await flushPromises();
 
   const select = wrapper.get('[data-testid="skill-select"]');
+  expect(select.findAll("option").at(0).text()).toBe("不使用 Skill");
   expect(select.findAll("option").at(1).text()).toContain("思政案例生成（v1）");
   await select.setValue("skill-pub");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
@@ -181,7 +182,7 @@ it("keeps a delayed catalog alive while switching threads", async () => {
   expect(wrapper.get('[data-testid="skill-select"] option:nth-child(2)').text()).toContain("思政案例生成");
 });
 
-it("resets to the builtin skill for a thread without skill history", async () => {
+it("resets to plain chat for a thread without skill history", async () => {
   api.agentThreads.mockResolvedValue([{ id: "thread-empty", title: "空对话" }]);
   api.agentThread.mockImplementation((_, id) => Promise.resolve(
     id === "thread-empty" ? emptyThread("thread-empty") : restoredSnapshot(),
@@ -190,7 +191,7 @@ it("resets to the builtin skill for a thread without skill history", async () =>
   await flushPromises();
   expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
   await switchThread(wrapper);
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("case-edit-skill");
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("");
 });
 
 it("restores the target skill when switching between published skills", async () => {
@@ -218,12 +219,12 @@ it("reconciles a withdrawn skill when the catalog arrives before the thread", as
   expect(wrapper.find('[data-testid="skill-catalog-empty"]').exists()).toBe(true);
   resolve(restoredSnapshot());
   await flushPromises();
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("case-edit-skill");
+  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("当前问题");
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-  expect(sentRequest(fetch).body.messages.at(-1).parts[1].data.skillId).toBe("case-edit-skill");
+  expect(sentRequest(fetch).body.messages.at(-1).parts).toHaveLength(1);
 });
 
 it("keeps the server skill through a failed catalog and restores it on retry", async () => {
@@ -245,7 +246,7 @@ it("keeps the server skill through a failed catalog and restores it on retry", a
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
 });
 
-it("shows an empty catalog state and still sends with the builtin skill", async () => {
+it("shows an empty catalog state and still sends plain chat", async () => {
   api.listSkills.mockResolvedValue([]);
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
@@ -258,7 +259,7 @@ it("shows an empty catalog state and still sends with the builtin skill", async 
   await flushPromises();
 
   const body = JSON.parse(fetch.mock.calls[0][1].body);
-  expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "case-edit-skill" } });
+  expect(body.messages.at(-1).parts).toHaveLength(1);
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {
@@ -338,12 +339,12 @@ function tracerMessages() {
     id: "message-user", role: "user", metadata: {},
     parts: [
       { type: "text", text: "请结合平台资料修订第2段" },
-      { type: "data-skill", data: { skillId: "case-edit-skill" } },
+      { type: "data-skill", data: { skillId: "skill-pub" } },
     ],
   }, {
     id: "message-assistant", role: "assistant", metadata: {},
     parts: [
-      { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "case-edit-skill" }, output: { instructions: "SKILL" } },
+      { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "skill-pub" }, output: { instructions: "SKILL" } },
       { type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" }, output: { sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }] } },
       { type: "tool-propose_revision", toolCallId: "t3", state: "output-available", input: {}, output: { artifactId: "artifact-9" } },
       { type: "text", text: "已生成单段修订候选" },

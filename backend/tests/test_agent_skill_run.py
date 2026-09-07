@@ -305,6 +305,45 @@ def test_baseline_without_skill_selection_stays_intact(client: TestClient) -> No
     assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
 
 
+def _revision_then_text_model() -> FunctionModel:
+    """仅调用基础修订工具的确定性模型：验证无 Skill 普通对话的基础工具。"""
+    revision = ModelResponse(parts=[ToolCallPart(
+        tool_name="propose_revision",
+        args={"paragraph_index": 0, "replacement": "第一段已修订。", "reason": "补充评价依据"},
+    )])
+    issued: list[bool] = []
+
+    async def stream(_messages, _info):
+        if not issued:
+            issued.append(True)
+            async for delta in _stream_deltas(revision):
+                yield delta
+        else:
+            yield "已提交修订候选。"
+
+    return FunctionModel(stream_function=stream)
+
+
+def test_plain_chat_without_skill_keeps_base_tools(client: TestClient) -> None:
+    """平台普通对话与教学 Skill 分别表示：无 Skill 仍可用基础修订工具。"""
+    teacher = _login(client, TEACHER)
+    case = _create_case(client, teacher)
+    thread_id = client.get(f"{CASES_PATH}/{case['id']}/agent/thread").json()["id"]
+    with agent.override(model=_revision_then_text_model()):
+        response = client.post(
+            f"{CASES_PATH}/{case['id']}/agent/thread/{thread_id}/stream",
+            headers=_csrf(teacher),
+            json=_submit_payload([{"type": "text", "text": "请修订第一段"}]),
+        )
+    assert response.status_code == 200, response.text
+    database = client.app.state.database
+    artifact = database.agent_artifacts.find_one({"caseId": case["id"]}, {"_id": 0})
+    assert artifact["status"] == "pending" and artifact["target"]["paragraphIndex"] == 0
+    run = database.agent_runs.find_one({}, {"_id": 0})
+    assert run["skillBindings"] == []
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
+
+
 def test_bound_snapshot_reads_stored_package_bytes(client: TestClient) -> None:
     version = _upload_and_publish(client)
     bound = bind_published_skill(
