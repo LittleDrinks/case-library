@@ -155,5 +155,6 @@ def test_model_discovery_rate_limit_is_database_backed(client: TestClient) -> No
 def test_legacy_generic_route_is_absent_and_product_workflows_remain(client: TestClient) -> None:
     paths = client.app.openapi()["paths"]
     assert "/api/ai/chat" not in paths
-    assert "/api/cases/{case_id}/ai/chat" in paths
+    assert "/api/cases/{case_id}/ai/chat" not in paths
+    assert "/api/cases/{case_id}/agent/thread/{thread_id}/stream" in paths
     assert "/api/search/summary" in paths
