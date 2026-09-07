@@ -19,6 +19,7 @@ const saving = ref(false);
 const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
+let loadGeneration = 0;
 
 const canCompose = computed(() => Boolean(
   props.user && (
@@ -44,15 +45,18 @@ function replaceAnnotation(updated) {
 }
 
 async function loadAnnotations() {
+  const generation = ++loadGeneration;
   loading.value = true;
   error.value = "";
   try {
-    annotations.value = props.user ? await api.listAnnotations(props.caseRecord.id) : [];
+    const next = props.user ? await api.listAnnotations(props.caseRecord.id) : [];
+    if (generation !== loadGeneration) return;
+    annotations.value = next;
     announce();
   } catch (caught) {
-    error.value = caught.message || "批注加载失败";
+    if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
   } finally {
-    loading.value = false;
+    if (generation === loadGeneration) loading.value = false;
   }
 }
 
@@ -67,16 +71,17 @@ function createPayload() {
 
 async function addAnnotation() {
   if (!canCreate.value || !content.value.trim() || saving.value) return;
+  const caseId = props.caseRecord.id;
+  const payload = createPayload();
   saving.value = true;
   error.value = "";
   try {
-    annotations.value.push(await api.createAnnotation(
-      props.caseRecord.id, createPayload(), props.user.csrfToken,
-    ));
+    await api.createAnnotation(caseId, payload, props.user.csrfToken);
+    if (caseId !== props.caseRecord.id) return;
     content.value = "";
-    announce();
+    await loadAnnotations();
   } catch (caught) {
-    error.value = caught.message || "批注添加失败";
+    if (caseId === props.caseRecord.id) error.value = caught.message || "批注添加失败";
   } finally {
     saving.value = false;
   }
