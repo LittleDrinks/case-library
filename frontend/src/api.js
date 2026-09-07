@@ -157,7 +157,9 @@ export const api = {
     "/api/cases", jsonOptions("POST", caseRecord, csrfToken),
   ),
   getCase: (id) => request(`/api/cases/${encodeURIComponent(id)}`),
-  getPublicCase: (id) => request(`/api/cases/${encodeURIComponent(id)}/public`),
+  getPublicCase: (id, versionId) => request(
+    `/api/cases/${encodeURIComponent(id)}/public${versionQuery(versionId)}`,
+  ),
   saveCase: (id, snapshot, csrfToken) => request(
     `/api/cases/${encodeURIComponent(id)}`,
     jsonOptions("PATCH", snapshot, csrfToken),

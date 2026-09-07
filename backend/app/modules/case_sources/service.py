@@ -7,6 +7,7 @@ from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
 from app.modules.attachments.service import _advance_revision, _run_transaction
+from app.modules.cases.published import version_readable
 from app.modules.cases.service import CaseError
 from app.modules.cases.sources import source_case_content_available, source_case_url
 
@@ -57,7 +58,7 @@ def source_view(database: Database, row: dict, user: dict | None, origin: str) -
         "sourceUrl": source_case_url(origin, row["sourceCaseId"], row["versionId"]),
         "publishedAt": source.get("publishedAt"),
         "contentAvailable": source_case_content_available(
-            database, row["sourceCaseId"], user
+            database, row["sourceCaseId"], user, row["versionId"]
         ),
         "createdAt": row["createdAt"],
     }
@@ -73,15 +74,15 @@ def _draft_case(database: Database, case_id: str, user: dict) -> dict:
 
 
 def _pinned_version(database: Database, source_case: dict, version_id: str | None) -> dict:
-    published = source_case.get("publishedVersionId")
-    if source_case.get("publicationStatus") != "public" or not published:
+    if source_case.get("publicationStatus") != "public":
         raise CaseError(409, "案例来源必须固定到已发布版本")
-    if version_id and version_id != published:
+    version_id = version_id or source_case.get("publishedVersionId")
+    if not version_id:
         raise CaseError(409, "案例来源必须固定到已发布版本")
     version = database.case_versions.find_one(
-        {"id": published, "caseId": source_case["id"]}
+        {"id": version_id, "caseId": source_case["id"]}
     )
-    if not version:
+    if not version_readable(database, source_case, version_id, version, False):
         raise CaseError(404, "案例版本不存在")
     return version
 
@@ -170,14 +171,13 @@ def _source_rows(database, case: dict, user: dict | None, version_id: str | None
 
 
 def _version_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id or (
-        version_id != case.get("publishedVersionId") and not _is_internal(case, user)
-    ):
-        raise CaseError(404, "案例来源版本不存在")
+    internal = _is_internal(case, user)
     query = {"id": version_id, "caseId": case["id"]}
     version = database.case_versions.find_one(query)
     version = version or database.case_snapshots.find_one(query)
-    if not version:
+    if not version_id or not version_readable(
+        database, case, version_id, version, internal
+    ):
         raise CaseError(404, "案例来源版本不存在")
     return version.get("caseSources", [])
 

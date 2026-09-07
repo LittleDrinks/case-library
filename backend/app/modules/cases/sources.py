@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pymongo.database import Database
 
+from app.modules.cases.published import version_readable
 from app.modules.materials.service import can_read_material
 
 
@@ -13,14 +14,23 @@ def is_internal(record: dict, user: dict | None) -> bool:
 
 
 def source_case_content_available(
-    database: Database, source_case_id: str, user: dict | None
+    database: Database, source_case_id: str, user: dict | None,
+    version_id: str | None = None,
 ) -> bool:
     source = database.cases.find_one({"id": source_case_id})
     if not source:
         return False
+    internal = bool(
+        user and (user["role"] == "admin" or source["ownerId"] == user["id"])
+    )
+    if version_id:
+        version = database.case_versions.find_one(
+            {"id": version_id, "caseId": source_case_id}
+        )
+        return version_readable(database, source, version_id, version, internal)
     if source.get("publicationStatus") == "public":
         return True
-    return bool(user and (user["role"] == "admin" or source["ownerId"] == user["id"]))
+    return internal
 
 
 def source_case_url(origin: str, source_case_id: str, version_id: str) -> str:
@@ -99,7 +109,9 @@ def _content_available(
     database: Database, source_type: str, row: dict, user: dict | None, internal: bool
 ) -> bool:
     if source_type == "case":
-        return source_case_content_available(database, row["sourceCaseId"], user)
+        return source_case_content_available(
+            database, row["sourceCaseId"], user, row["versionId"]
+        )
     if source_type == "material":
         return can_read_material(_material_row(database, row), user)
     return internal or _attachment_readable(row, user)
