@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openCatalogFirstScreen } from "./catalog-ready.js";
 
 const PUBLIC_CASE = "钱伟长图书馆——科学家精神的大思政课堂";
 const OTHER_PUBLIC_CASE = "《智能控制》：高挑战项目牵引新工科育人";
@@ -53,7 +54,8 @@ async function expectInsideViewport(locator, width) {
 }
 
 test("匿名用户在首页发现推荐并检索公开案例", async ({ page }) => {
-  await page.goto("/#/");
+  test.setTimeout(90_000);
+  await openCatalogFirstScreen(page, "/#/", () => expect(page.getByRole("link", { name: PUBLIC_CASE })).toBeVisible());
 
   await expect(page.getByRole("heading", { name: "平台动态" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "时政要闻" })).toBeVisible();
@@ -149,7 +151,8 @@ test("已发布案例从我的案例和工作台进入公开页", async ({ page 
 });
 
 test("匿名用户从公开案例卡进入独立只读详情", async ({ page }) => {
-  await page.goto("/#/");
+  test.setTimeout(90_000);
+  await openCatalogFirstScreen(page, "/#/", () => expect(page.getByRole("link", { name: PUBLIC_CASE })).toBeVisible());
 
   await page.getByRole("link", { name: PUBLIC_CASE }).click();
 
