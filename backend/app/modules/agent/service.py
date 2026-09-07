@@ -121,6 +121,7 @@ def _assistant_parts(assistant) -> list[dict]:
 
 
 def _loaded_capability_ids(parts: list[dict]) -> list[str]:
+    """从 load_capability 工具调用中提取模型实际加载的能力标识。"""
     ids = []
     for part in parts:
         if part.get("type") != "tool-load_capability":

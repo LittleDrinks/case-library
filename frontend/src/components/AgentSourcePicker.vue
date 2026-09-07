@@ -48,7 +48,6 @@ const visibleEntries = computed(() => {
 });
 
 async function load() {
-  if (!api.listSources) return;
   try {
     entries.value = (await api.listSources(props.caseId)).entries || [];
   } catch {
@@ -57,7 +56,7 @@ async function load() {
 }
 
 async function search() {
-  if (!query.value.trim() || !api.search) return;
+  if (!query.value.trim()) return;
   loading.value = true;
   error.value = "";
   try {

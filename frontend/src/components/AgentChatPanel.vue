@@ -3,6 +3,7 @@ import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue"
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import AgentSourcePicker from "./AgentSourcePicker.vue";
+import AgentResourceTrace from "./AgentResourceTrace.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -125,6 +126,10 @@ function skillLoadLabel(part) {
 
 function skillParts(message) {
   return (message.parts || []).filter((part) => part.type === "data-skill");
+}
+
+function resourceParts(message) {
+  return toolParts(message).filter((part) => part.type.startsWith("tool-read_skill_resource_"));
 }
 
 function sourcesOf(part) {
@@ -264,6 +269,11 @@ async function retryRun() {
               class="agent-tool-trace"
               data-testid="agent-source-read"
             >{{ part.state === "output-available" && part.output?.status === "ok" ? "已读取并固定来源证据" : "来源当前不可读" }}</p>
+            <AgentResourceTrace
+              v-for="part in resourceParts(message)"
+              :key="part.toolCallId"
+              :part="part"
+            />
           </template>
         </template>
         <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>

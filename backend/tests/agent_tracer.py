@@ -1,4 +1,4 @@
-"""确定性 tracer 模型：FunctionModel 驱动生产 Agent 走完整修订链路。"""
+"""确定性 tracer 模型：FunctionModel 驱动生产 Agent 走检索-修订链路。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from pydantic_ai import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
-from tests.skill_packages import SKILL_ID
+from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
 SEARCH_SOURCE_ID = "c-42"
@@ -17,6 +17,7 @@ TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要
 TRACER_SELECTION = (11, 30)
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
+RESOURCE_TOOL = f"read_skill_resource_{SKILL_ID.replace('-', '_')}"
 
 
 def _tool_calls(messages) -> list[str]:
@@ -34,6 +35,8 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
     called = _tool_calls(messages)
     if skill_id and "load_capability" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": skill_id})])
+    if skill_id and RESOURCE_TOOL not in called:
+        return ModelResponse(parts=[ToolCallPart(tool_name=RESOURCE_TOOL, args={"path": EXAMPLE_PATH})])
     if "search_corpus" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
     if "read_source" not in called:

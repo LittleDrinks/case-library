@@ -53,6 +53,7 @@ class BoundSkill:
         }
 
     def binding_record(self) -> dict[str, str]:
+        """Run 创建时固化的凭据：以不可变 versionId 标识版本，不新增摘要计算。"""
         return {
             "kind": "skill", "id": self.skill_id,
             "versionId": self.version_id, "version": self.version,
@@ -121,6 +122,7 @@ def published_catalog(database: Database) -> list[dict]:
 
 
 def bind_published_skill(database: Database, store: BlobStore, skill_id: str) -> BoundSkill:
+    """把 Skill 当前已发布版本固化为 Run 用的不可变快照。"""
     return _published_bound(database, store, skill_id)
 
 

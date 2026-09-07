@@ -97,7 +97,9 @@ it("sends selected sources and the current writing selection as data parts", asy
   api.listSources.mockResolvedValue({ entries: [{ sourceType: "case", id: "src-1", title: "来源一" }] });
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
-  const wrapper = mountPanel({ writingContext: { from: 1, to: 4, quote: "第二段" } });
+  const wrapper = mountPanel({ writingContext: {
+    from: 1, to: 4, quote: "第二段", sameBlock: true,
+  } });
   await flushPromises();
   await wrapper.get(".agent-source-picker-toggle").trigger("click");
   await wrapper.get(".agent-source-option input").setValue(true);
@@ -116,6 +118,7 @@ it("carries the selected published skill id and shows the catalog options", asyn
   const wrapper = mountPanel();
   await flushPromises();
   const select = wrapper.get('[data-testid="skill-select"]');
+  expect(select.findAll("option").at(0).text()).toBe("不使用 Skill");
   expect(select.findAll("option").at(1).text()).toContain("思政案例生成（v1）");
   await select.setValue("skill-pub");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
@@ -198,7 +201,7 @@ it("keeps a delayed catalog alive while switching threads", async () => {
   expect(wrapper.get('[data-testid="skill-select"] option:nth-child(2)').text()).toContain("思政案例生成");
 });
 
-it("resets to no Skill for a thread without skill history", async () => {
+it("resets to plain chat for a thread without skill history", async () => {
   api.agentThreads.mockResolvedValue([{ id: "thread-empty", title: "空对话" }]);
   api.agentThread.mockImplementation((_, id) => Promise.resolve(
     id === "thread-empty" ? emptyThread("thread-empty") : restoredSnapshot(),
@@ -264,7 +267,7 @@ it("keeps the server skill through a failed catalog and restores it on retry", a
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
 });
 
-it("shows an empty catalog state and sends without a Skill", async () => {
+it("shows an empty catalog state and still sends plain chat", async () => {
   api.listSkills.mockResolvedValue([]);
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
@@ -363,6 +366,7 @@ function tracerMessages() {
     id: "message-assistant", role: "assistant", metadata: {},
     parts: [
       { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "skill-pub" }, output: { instructions: "SKILL" } },
+      { type: "tool-read_skill_resource_skill_pub", toolCallId: "t-resource", state: "output-available", input: { path: "references/模板规范.md" }, output: { path: "references/模板规范.md", content: "选题原则、结构模块" } },
       { type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" }, output: { sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }] } },
       { type: "tool-propose_revision", toolCallId: "t3", state: "output-available", input: {}, output: { artifactId: "artifact-9" } },
       { type: "text", text: "已生成单段修订候选" },
@@ -398,6 +402,7 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   await flushPromises();
 
   expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
+  expect(wrapper.get('[data-testid="agent-skill-resource"]').text()).toContain("选题原则");
   expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("科学家精神案例");
   const artifact = wrapper.get('[data-testid="agent-artifact"]');
   expect(artifact.attributes("data-artifact-status")).toBe("pending");
@@ -419,6 +424,18 @@ it("renders the expired artifact status after the case revision moved on", async
   expect(artifact.text()).toContain("状态：已过期");
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
   expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
+});
+
+it("renders failed resource reads from the UI tool protocol", async () => {
+  const failed = tracerSnapshot();
+  failed.messages[1].parts = [failed.messages[1].parts[0], {
+    type: "tool-read_skill_resource_skill_pub", toolCallId: "t-error", state: "output-error",
+    input: { path: "references/missing.md" }, errorText: "资源不存在：references/missing.md",
+  }];
+  api.agentThread.mockResolvedValue(failed);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
 });
 
 function decideResult(decision) {
