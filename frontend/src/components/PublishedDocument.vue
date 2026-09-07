@@ -2,6 +2,7 @@
 import { watch } from "vue";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
+import { CitationMark } from "../lib/citation.js";
 
 const props = defineProps({
   document: { type: Object, required: true },
@@ -15,7 +16,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  })],
+  }), CitationMark],
   editorProps: { attributes: { class: "published-document" } },
 });
 

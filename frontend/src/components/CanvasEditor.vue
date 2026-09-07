@@ -6,6 +6,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { hashQuote } from "../lib/annotationAnchor.js";
+import { CitationMark } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
 const props = defineProps({
@@ -15,6 +16,7 @@ const props = defineProps({
   annotatable: { type: Boolean, default: false },
   candidatePreviews: { type: Array, default: () => [] },
   annotations: { type: Array, default: () => [] },
+  sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
 const selection = ref(null);
@@ -232,7 +234,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), candidateExtension, annotationExtension],
+  }), CitationMark, candidateExtension, annotationExtension],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: captureSelection,
@@ -323,7 +325,7 @@ defineExpose({ applyCandidate, recaptureSelection });
 </script>
 
 <template>
-  <EditorToolbar v-if="editable" :editor="editor" />
+  <EditorToolbar v-if="editable" :editor="editor" :sources="sources" />
   <button
     v-if="selection"
     class="annotation-trigger"

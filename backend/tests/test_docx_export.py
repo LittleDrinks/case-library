@@ -21,6 +21,7 @@ WORD_DRAWING_NS = (
 CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 NS = {"w": WORD_NS}
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+CASE_VERSION_URL = "https://case.test/#/cases/source-1?versionId=version-2"
 
 
 def w(name: str) -> str:
@@ -329,6 +330,56 @@ def test_docx_export_preserves_blockquote_paragraphs(client: TestClient) -> None
     quotes = [item for item in root.iter(w("p")) if paragraph_style(item) == "Quote"]
 
     assert [paragraph_text(item) for item in quotes] == ["引用第一段", "引用第二段"]
+
+
+def citation(source_type: str, source_id: str) -> dict:
+    return {"type": "citation", "attrs": {"sourceType": source_type, "sourceId": source_id}}
+
+
+def cited_document() -> dict:
+    first, second = citation("material", "image-1"), citation("case", "source-1")
+    content = [
+        {"type": "text", "text": "加粗依据", "marks": [{"type": "bold"}, first]},
+        {"type": "text", "text": "斜体依据", "marks": [{"type": "italic"}, first]},
+        {"type": "text", "text": "后续正文"},
+        {"type": "text", "text": "再次引用", "marks": [second]},
+    ]
+    return {"type": "doc", "content": [{"type": "paragraph", "content": content}]}
+
+
+def cited_entries() -> list[dict]:
+    return [
+        {"sourceType": "material", "id": "image-1", "number": 1, "title": "图片资料", "source": "图像库", "url": "https://case.test/api/materials/image-1/content"},
+        {"sourceType": "case", "id": "source-1", "number": 2, "title": "引用案例", "source": "上海大学", "version": "v2", "url": CASE_VERSION_URL},
+        {"sourceType": "attachment", "id": "unused-1", "number": 3, "title": "未用附件", "url": "https://case.test/api/cases/c-1/attachments/unused-1/content?versionId=version-2"},
+    ]
+
+
+def docx_xml_and_links(data: bytes) -> tuple[Element, set[str]]:
+    with ZipFile(BytesIO(data)) as package:
+        root = parse_xml(package.read("word/document.xml"))
+        relationships = parse_xml(package.read("word/_rels/document.xml.rels"))
+        return root, {
+            item.get("Target") for item in relationships if item.get("TargetMode") == "External"
+        }
+
+
+def test_docx_export_numbers_citations_and_links_all_retained_sources() -> None:
+    case = {"title": "引用导出", "document": cited_document()}
+    root, targets = docx_xml_and_links(build_case_docx(case, cited_entries()))
+    texts = [paragraph_text(item) for item in root.iter(w("p"))]
+    assert "加粗依据斜体依据〔1〕后续正文再次引用〔2〕" in texts
+    references = [text for text in texts if text.startswith("〔")]
+    assert references == [
+        "〔1〕 图片资料．图像库．链接",
+        "〔2〕 引用案例．上海大学．v2．链接",
+        "〔3〕 未用附件．链接",
+    ]
+    assert targets == {
+        "https://case.test/api/materials/image-1/content",
+        CASE_VERSION_URL,
+        "https://case.test/api/cases/c-1/attachments/unused-1/content?versionId=version-2",
+    }
 
 
 def test_docx_export_preserves_the_required_case_structure(client: TestClient) -> None:

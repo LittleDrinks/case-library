@@ -4,6 +4,8 @@ import io
 
 from fastapi.testclient import TestClient
 
+CITATION = {"type": "citation", "attrs": {"sourceType": "case", "sourceId": ""}}
+
 
 def login(client: TestClient, username: str = "user", password: str = "user123") -> dict:
     response = client.post(
@@ -42,6 +44,63 @@ def upload_attachment(client: TestClient, auth: dict, access: str = "public") ->
     )
     assert response.status_code == 201
     return response.json()
+
+
+def cite_document(client: TestClient, auth: dict, marks: list[dict]) -> object:
+    nodes = [
+        {"type": "text", "text": f"依据{index}", "marks": [mark]}
+        for index, mark in enumerate(marks, start=1)
+    ] or [{"type": "text", "text": "正文"}]
+    document = {"type": "doc", "content": [{"type": "paragraph", "content": nodes}]}
+    return client.patch(
+        "/api/cases/c-draft-1",
+        headers=headers(auth),
+        json={"document": document, "revision": revision(client)},
+    )
+
+
+def mount_material(client: TestClient, auth: dict) -> object:
+    return client.post(
+        "/api/cases/c-draft-1/materials",
+        headers=headers(auth),
+        json={"materialId": "m-kcsz", "revision": revision(client)},
+    )
+
+
+def cited_marks(source_id: str, attachment_id: str) -> list[dict]:
+    return [
+        {**CITATION, "attrs": {"sourceType": "case", "sourceId": source_id}},
+        {**CITATION, "attrs": {"sourceType": "material", "sourceId": "m-kcsz"}},
+        {**CITATION, "attrs": {"sourceType": "attachment", "sourceId": attachment_id}},
+    ]
+
+
+def delete_source(client: TestClient, auth: dict, path: str) -> object:
+    return client.delete(
+        path, params={"revision": revision(client)}, headers=headers(auth)
+    )
+
+
+def submit_case(client: TestClient, auth: dict) -> str:
+    response = client.post(
+        "/api/cases/c-draft-1/lifecycle",
+        headers=headers(auth),
+        json={"command": "submit", "revision": revision(client)},
+    )
+    assert response.status_code == 200
+    return response.json()["version"]["id"]
+
+
+def ordered_source_fixture(client: TestClient, auth: dict) -> tuple[dict, dict, dict]:
+    assert mount_material(client, auth).status_code == 201
+    source = mount_source(client, auth, "c-02").json()
+    cited, spare = upload_attachment(client, auth), upload_attachment(client, auth)
+    marks = [
+        {**CITATION, "attrs": {"sourceType": "attachment", "sourceId": cited["id"]}},
+        {**CITATION, "attrs": {"sourceType": "case", "sourceId": source["id"]}},
+    ]
+    assert cite_document(client, auth, marks).status_code == 200
+    return source, cited, spare
 
 
 def _admin_command(client: TestClient, case_id: str, command: str, **extra) -> object:
@@ -133,6 +192,27 @@ def test_removal_requires_owner_and_editable_draft(client: TestClient) -> None:
     assert client.get("/api/cases/c-draft-1/case-sources").json() == []
 
 
+def test_citation_save_rejects_dangling_sources(client: TestClient) -> None:
+    auth = login(client)
+    mark = {**CITATION, "attrs": {"sourceType": "case", "sourceId": "src-none"}}
+    assert cite_document(client, auth, [mark]).status_code == 422
+
+
+def test_cited_sources_cannot_be_removed(client: TestClient) -> None:
+    auth = login(client)
+    source = mount_source(client, auth, "c-02").json()
+    material = mount_material(client, auth)
+    attachment = upload_attachment(client, auth)
+    assert material.status_code == 201
+    assert cite_document(client, auth, cited_marks(source["id"], attachment["id"])).status_code == 200
+    paths = [
+        f"/api/cases/c-draft-1/case-sources/{source['id']}",
+        "/api/cases/c-draft-1/materials/m-kcsz",
+        f"/api/cases/c-draft-1/attachments/{attachment['id']}",
+    ]
+    assert [delete_source(client, auth, path).status_code for path in paths] == [409] * 3
+
+
 def test_submit_freezes_case_sources(client: TestClient) -> None:
     auth = login(client)
     row = mount_source(client, auth, "c-02").json()
@@ -160,6 +240,26 @@ def test_sources_endpoint_lists_and_numbers_all_entries(client: TestClient) -> N
     assert case_entry["version"].startswith("v")
     attachment = next(entry for entry in entries if entry["sourceType"] == "attachment")
     assert "/attachments/" in attachment["url"]
+
+
+def test_sources_order_by_first_body_citation_and_pin_frozen_links(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    source, cited, spare = ordered_source_fixture(client, auth)
+    entries = client.get("/api/cases/c-draft-1/sources").json()["entries"]
+    assert [entry["id"] for entry in entries] == [
+        cited["id"], source["id"], "m-kcsz", spare["id"]
+    ]
+    assert [entry["number"] for entry in entries] == [1, 2, 3, 4]
+    version_id = submit_case(client, auth)
+    frozen = client.get(
+        "/api/cases/c-draft-1/sources", params={"versionId": version_id}
+    ).json()["entries"]
+    frozen_cited = next(entry for entry in frozen if entry["id"] == cited["id"])
+    assert frozen_cited["url"].endswith(
+        f"/api/cases/c-draft-1/attachments/{cited['id']}/content?versionId={version_id}"
+    )
 
 
 def test_offline_source_case_keeps_entry_but_locks_content(client: TestClient) -> None:
