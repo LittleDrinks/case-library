@@ -99,14 +99,14 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
             yield part.content
         elif isinstance(part, ThinkingPart):
             for piece in thinking_pieces(part.content):
-                yield {0: DeltaThinkingPart(content=piece)}
+                yield {index: DeltaThinkingPart(content=piece)}
                 await asyncio.sleep(0.8)
         elif isinstance(part, ToolCallPart):
             delta = DeltaToolCall(
                 name=part.tool_name, json_args=json.dumps(part.args_as_dict()),
                 tool_call_id=part.tool_call_id or f"tracer-{index}",
             )
-            yield {0: delta}
+            yield {index: delta}
 
 
 def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,

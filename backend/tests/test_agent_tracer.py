@@ -41,7 +41,7 @@ def _thinking_stream_items(marker_text: str) -> tuple[list, float]:
     async def _collect() -> tuple[list, float]:
         items, started = [], None
         async for item in model.stream_function(messages, None):
-            delta = item[0] if isinstance(item, dict) else None
+            delta = next(iter(item.values())) if isinstance(item, dict) else None
             if isinstance(delta, DeltaThinkingPart):
                 if started is None:
                     started = monotonic()
@@ -60,7 +60,7 @@ def test_stream_emits_slow_thinking_delta_then_load_capability():
                 if isinstance(item, dict) and isinstance(item.get(0), DeltaThinkingPart)]
     assert thinking == thinking_pieces(THINKING_TEXT)
     assert gap >= 0.5
-    call = items[-1][0]
+    call = items[-1][1]
     assert call.name == "load_capability"
     assert json.loads(call.json_args) == {"id": SKILL_ID}
 
@@ -277,6 +277,24 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
     assert tool_parts[3]["output"]["usedSourceRef"]["id"] == HIT["id"]
     assert tool_parts[3]["output"]["content"] == "平台资料正文"
     assert tool_parts[4]["output"]["artifactId"]
+
+
+def test_thinking_stream_completes_through_production_agent(client: TestClient) -> None:
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _seed_source_case(client.app.state.database)
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    response = _send(client, auth, case["id"], f"请修订第2段（{THINKING_MARKER}）")
+    assert response.status_code == 200
+    snapshot = client.get(_thread_path(case["id"])).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    parts = [part for message in snapshot["messages"] for part in message["parts"]]
+    reasoning = next(index for index, part in enumerate(parts) if part["type"] == "reasoning")
+    tool = next(index for index, part in enumerate(parts) if part["type"] == "tool-load_capability")
+    assert reasoning < tool
+    assert parts[reasoning]["text"] == THINKING_TEXT
+    _assert_pending_artifact(client, case)
 
 
 def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
