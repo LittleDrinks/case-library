@@ -179,6 +179,16 @@ def _hold_thread_write(database, thread_id: str):
     return session
 
 
+def _hold_run_terminal(database, run_id: str):
+    """未提交事务冻结 run 文档：complete_run 事务冲突重试，activeRunId 保持占用。"""
+    session = database.client.start_session()
+    session.start_transaction()
+    database.agent_runs.update_one(
+        {"id": run_id}, {"$set": {"probe": uuid.uuid4().hex}}, session=session
+    )
+    return session
+
+
 def _start_profile(database) -> None:
     database.command("profile", 0, filter={})
     database.command(
@@ -438,12 +448,19 @@ def _overlap(holder, holder_csrf, challenger, challenger_csrf, case, database):
     thread_id = _thread(holder, case["id"])["id"]
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
-            _send, holder, holder_csrf, case["id"], "并发慢请求", "real-holder"
+            _send, holder, holder_csrf, case["id"], "并发慢速测试", "real-holder",
+            thread_id=thread_id,
         )
         run = _await_active(database, thread_id)
-        conflict = _send(
-            challenger, challenger_csrf, case["id"], "并发冲突请求", "real-challenger"
-        )
+        gate = _hold_run_terminal(database, run["id"])
+        try:
+            conflict = _send(
+                challenger, challenger_csrf, case["id"], "并发冲突请求",
+                "real-challenger", thread_id=thread_id,
+            )
+        finally:
+            gate.abort_transaction()
+            gate.end_session()
         response = future.result(timeout=15)
     return thread_id, run, conflict, response
 
