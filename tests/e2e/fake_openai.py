@@ -7,14 +7,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 API_KEY = "e2e-api-key"
 MODELS = ["e2e-model-a", "e2e-model-b"]
 ANSWER = "隔离模型回答：已依据当前可见资源完成分析。"
-CANDIDATE = {
-    "text": "候选修订正文：教学目标、课堂任务与评价依据保持一致。",
-    "reason": "让教学目标与课堂任务形成对应关系",
-}
-CANDIDATE_SECOND = {
-    "text": "第二条候选正文：课堂任务、评价量规与教学目标逐项对应。",
-    "reason": "补充可观察的课堂评价依据",
-}
 
 
 def _json(handler, status: int, payload: dict) -> None:
@@ -44,13 +36,7 @@ def _pieces(payload: dict) -> tuple[list[str], float]:
     prompt = json.dumps(payload, ensure_ascii=False)
     slow = "慢速测试" in prompt
     cancel = "取消测试" in prompt
-    candidate = CANDIDATE_SECOND if "第二条" in prompt else CANDIDATE
-    answer = (
-        json.dumps(candidate, ensure_ascii=False)
-        if "writing_candidate" in prompt
-        else ANSWER
-    )
-    return list(answer), 1.0 if cancel else 0.12 if slow else 0.005
+    return list(ANSWER), 1.0 if cancel else 0.12 if slow else 0.005
 
 
 def _interrupted(payload: dict) -> bool:
@@ -87,22 +73,6 @@ def _stream(handler, payload: dict) -> None:
         return
 
 
-def _structured(handler, payload: dict) -> None:
-    schema = json.dumps(payload.get("response_format", {}), ensure_ascii=False)
-    if "annotation_candidates" in schema:
-        content = {"kind": "annotation_candidates", "items": [{
-            "quote": "原文", "section": "小节", "content": "建议", "category": "theory"
-        }]}
-    else:
-        candidate = CANDIDATE_SECOND if "第二条" in json.dumps(payload, ensure_ascii=False) else CANDIDATE
-        content = {"kind": "writing_candidate", **candidate}
-    _json(handler, 200, {"id": "structured-id", "object": "chat.completion", "created": 1,
-        "model": payload.get("model", ""), "choices": [{"index": 0, "message": {
-            "role": "assistant", "content": json.dumps(content, ensure_ascii=False), "refusal": None
-        }, "logprobs": None, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
-
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -125,8 +95,6 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 400, {"error": "invalid request"})
         if payload.get("model") not in MODELS:
             return _json(self, 422, {"error": "invalid request"})
-        if payload.get("response_format"):
-            return _structured(self, payload)
         if payload.get("stream") is not True:
             return _json(self, 422, {"error": "invalid request"})
         _stream(self, payload)

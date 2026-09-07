@@ -1,13 +1,10 @@
 <script setup>
-import {
-  ChevronDown, ChevronUp, MessageCircle, MessageSquareText, Paperclip, Sparkles,
-} from "@lucide/vue";
+import { ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
 import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
-import WritingCandidatePanel from "./WritingCandidatePanel.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
@@ -18,26 +15,20 @@ const props = defineProps({
   sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
-  caseTitle: { type: String, required: true },
-  caseDocument: { type: Object, required: true },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
   beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
-  applyCandidate: { type: Function, required: true },
-  rollbackCandidateBatch: { type: Function, required: true },
-  candidateInvalidation: { type: Number, default: 0 },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "candidate-previews", "annotations", "sources-retry",
+  "case-revised", "annotations", "sources-retry",
 ]);
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
-  { id: "chat", label: "对话", icon: MessageSquareText },
   { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
@@ -54,7 +45,7 @@ function select(tab) {
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
-        v-show="!readOnly || !['chat', 'comments'].includes(tab.id)"
+        v-show="!readOnly || tab.id !== 'comments'"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -67,39 +58,17 @@ function select(tab) {
     </nav>
 
     <AgentChatPanel
-      v-if="readOnly && active === 'ai' && user"
+      v-if="active === 'ai' && (!readOnly || user)"
       :key="versionId || 'draft'"
       :case-record="caseRecord"
       :version-id="versionId"
       :read-only="readOnly"
+      :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
     </div>
-    <WritingCandidatePanel
-      v-else-if="active === 'ai'"
-      :case-title="caseTitle"
-      :case-document="caseDocument"
-      :case-id="caseRecord.id"
-      :revision="caseRecord.revision"
-      :user="user"
-      :editable="editable"
-      :selection="selection"
-      :writing-context="writingContext"
-      :apply-candidate="applyCandidate"
-      :rollback-candidate-batch="rollbackCandidateBatch"
-      :candidate-invalidation="candidateInvalidation"
-      @candidate-previews="emit('candidate-previews', $event)"
-    />
-
-    <AgentChatPanel
-      v-else-if="!readOnly && active === 'chat'"
-      :case-record="caseRecord"
-      :writing-context="writingContext"
-      @case-revised="emit('case-revised', $event)"
-    />
-
     <CommentPanel
       v-else-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"

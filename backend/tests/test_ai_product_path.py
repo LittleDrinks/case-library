@@ -53,23 +53,6 @@ def _text_deltas(response) -> str:
     )
 
 
-def test_case_ai_uses_production_agent_and_vercel_stream(client: TestClient) -> None:
-    auth = _login(client)
-    payload = _body(
-        "请给出课堂建议",
-        mode="chat",
-        instruction="请给出课堂建议",
-        context={"revision": 1},
-    )
-    with _agent().override(model=_model("工作台回答")):
-        response = client.post(
-            "/api/cases/c-draft-1/ai/chat", headers=_headers(auth), json=payload
-        )
-    assert response.status_code == 200
-    assert response.headers["x-vercel-ai-ui-message-stream"] == "v1"
-    assert _text_deltas(response) == "工作台回答"
-
-
 def test_search_summary_uses_production_agent_and_vercel_stream(client: TestClient) -> None:
     auth = _login(client)
     payload = _body(
@@ -84,17 +67,3 @@ def test_search_summary_uses_production_agent_and_vercel_stream(client: TestClie
     assert response.status_code == 200
     assert response.headers["x-vercel-ai-ui-message-stream"] == "v1"
     assert _text_deltas(response) == "检索摘要"
-
-
-def test_product_ai_requires_the_latest_message_to_match_request(client: TestClient) -> None:
-    auth = _login(client)
-    payload = _body(
-        "其他问题",
-        mode="chat",
-        instruction="请求问题",
-        context={"revision": 1},
-    )
-    response = client.post(
-        "/api/cases/c-draft-1/ai/chat", headers=_headers(auth), json=payload
-    )
-    assert response.status_code == 422
