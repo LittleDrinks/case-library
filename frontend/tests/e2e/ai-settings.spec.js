@@ -96,7 +96,7 @@ test("未配置 AI 时工作台提供设置入口且正文保持不变", async (
   await page.goto("/#/workbench/c-draft-1");
   const title = await page.getByLabel("案例标题").inputValue();
 
-  await expect(page.getByText("AI 服务尚未配置")).toBeVisible();
+  await expect(page.getByLabel("向 AI 提问")).toHaveAttribute("placeholder", "请先配置 AI 模型");
   await expect(page.getByRole("link", { name: "配置 AI 模型" })).toBeVisible();
   await expect(page.getByLabel("向 AI 提问")).toBeDisabled();
   await expect(page.getByLabel("案例标题")).toHaveValue(title);
@@ -144,9 +144,9 @@ test("上游失败时工作台显示明确错误", async ({ page }) => {
     await page.goto("/#/workbench/c-draft-1");
     await page.getByLabel("向 AI 提问").fill("上游中断测试");
     await page.getByRole("button", { name: "发送", exact: true }).click();
-    const answer = page.locator(".ai-message.assistant").last();
-    await expect(answer.getByRole("alert")).toHaveText("AI 服务暂不可用");
-    await expect(answer.locator(".spin")).toHaveCount(0);
+    const panel = page.getByTestId("agent-chat-panel");
+    await expect(panel.getByRole("alert")).toHaveText("AI 服务暂不可用");
+    await expect(panel.locator(".spin")).toHaveCount(0);
   } finally {
     await saveUserSettings(page, { mode: "automatic" });
   }
