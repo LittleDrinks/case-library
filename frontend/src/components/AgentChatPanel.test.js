@@ -437,6 +437,39 @@ it("renders failed resource reads from the UI tool protocol", async () => {
   await flushPromises();
   expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
 });
+function resourceFeed() {
+  let controller;
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream({ start(value) { controller = value; } }), {
+    headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+  });
+  return { response, send: (data) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)),
+    close: () => controller.close() };
+}
+
+async function beginResourceRead(wrapper, feed) {
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("读取资源");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  feed.send({ type: "start", messageId: "resource-message" });
+  feed.send({ type: "tool-input-start", toolCallId: "read-1", toolName: "read_skill_resource_skill_pub" });
+  await flushPromises();
+}
+
+it("updates a mounted resource trace when the SDK receives its result", async () => {
+  const feed = resourceFeed();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(feed.response));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await beginResourceRead(wrapper, feed);
+  expect(wrapper.get('[data-testid="agent-skill-resource"]').text()).toContain("正在读取资源");
+  feed.send({ type: "tool-input-available", toolCallId: "read-1", toolName: "read_skill_resource_skill_pub", input: { path: "references/example.txt" } });
+  feed.send({ type: "tool-output-available", toolCallId: "read-1", output: { path: "references/example.txt", content: "真实流资源正文" } });
+  feed.send({ type: "finish", finishReason: "stop" });
+  feed.close();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-skill-resource"]').text()).toContain("真实流资源正文");
+});
+
 it("renders the expired artifact status after the case revision moved on", async () => {
   api.agentThread.mockResolvedValue(
     structuredClone({ ...tracerSnapshot(), artifacts: tracerArtifacts("expired") }),
