@@ -81,10 +81,20 @@ def _event(case: dict, user: dict, version: dict, now: str, action: str) -> dict
     }
 
 
+def _require_submission_tags(database: Database, case: dict) -> None:
+    from app.modules.tags.service import validate_submission_tags
+
+    missing = validate_submission_tags(database, case.get("tagIds") or [])
+    if missing:
+        reasons = "；".join(f"必填标签组未选择标签：{group['name']}" for group in missing)
+        raise CaseError(422, reasons)
+
+
 def _submit(database: Database, case: dict, user: dict, session) -> dict:
     _require_owner(case, user)
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可提交")
+    _require_submission_tags(database, case)
     now = _now()
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)

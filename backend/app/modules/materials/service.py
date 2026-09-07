@@ -17,6 +17,13 @@ from app.modules.materials.models import AccessLevel
 from app.modules.materials.models import CandidateDecision
 from app.modules.search.outbox import SearchOutbox
 
+MATERIAL_DETAIL_FIELDS = (
+    "id", "title", "summary", "excerpt", "source", "sourceUrl", "tags",
+    "publishedAt", "collectedAt", "createdAt", "updatedAt", "materialType",
+    "authority", "accessLevel", "citedCount", "lastCitedAt", "filename",
+    "mediaType", "size",
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -163,22 +170,36 @@ def _clean(record: dict) -> dict:
 
 
 def can_read_material(material: dict, user: dict | None) -> bool:
-    if material["accessLevel"] == "public":
+    if material.get("accessLevel") == "public":
         return True
-    if material["accessLevel"] == "campus":
+    if material.get("accessLevel") == "campus":
         return bool(user)
     return bool(
         user and (user["role"] == "admin" or material.get("createdBy") == user["id"])
     )
 
 
-def download_material(database, store, material_id: str, user: dict | None):
+def _readable_material(database, material_id: str, user: dict | None) -> dict:
     material = database.materials.find_one({"id": material_id, "status": "active"})
-    if (
-        not material
-        or not material.get("blobId")
-        or not can_read_material(material, user)
-    ):
+    if not material or not can_read_material(material, user):
+        raise MaterialImportError(404, "素材不存在")
+    return material
+
+
+def _detail_view(material: dict) -> dict:
+    view = {key: material.get(key) for key in MATERIAL_DETAIL_FIELDS}
+    view.update({"hasFile": bool(material.get("blobId")), "contentAvailable": True})
+    view["downloadAvailable"] = view["hasFile"]
+    return view
+
+
+def get_material_detail(database, material_id: str, user: dict | None) -> dict:
+    return _detail_view(_readable_material(database, material_id, user))
+
+
+def download_material(database, store, material_id: str, user: dict | None):
+    material = _readable_material(database, material_id, user)
+    if not material.get("blobId"):
         raise MaterialImportError(404, "素材不存在")
     return material, store.open(material["blobId"])
 

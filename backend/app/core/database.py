@@ -108,6 +108,17 @@ def _initialize_knowledge(database: Database) -> None:
     )
 
 
+def _initialize_tags(database: Database) -> None:
+    database.tag_groups.create_index([("id", ASCENDING)], unique=True)
+    database.tag_groups.create_index([("name", ASCENDING)], unique=True)
+    database.tags.create_index([("id", ASCENDING)], unique=True)
+    database.tags.create_index(
+        [("groupId", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    database.cases.create_index("tagIds")
+    database.case_versions.create_index("metadata.tagIds")
+
+
 def _initialize_search_delivery(database: Database) -> None:
     database.search_outbox.create_index(
         [
@@ -128,10 +139,17 @@ def _initialize_search_delivery(database: Database) -> None:
 
 
 def _initialize_agent_threads(database: Database) -> None:
+    if "ownerId_1_caseId_1_isDefault_1" in database.agent_threads.index_information():
+        database.agent_threads.drop_index("ownerId_1_caseId_1_isDefault_1")
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     database.agent_threads.create_index(
-        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("isDefault", ASCENDING)],
+        [("ownerId", ASCENDING), ("caseId", ASCENDING)],
         unique=True,
+        partialFilterExpression={"isDefault": True},
+        name="agent_one_default_thread",
+    )
+    database.agent_threads.create_index(
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("updatedAt", DESCENDING)]
     )
 
 
@@ -139,6 +157,14 @@ def _initialize_agent_messages(database: Database) -> None:
     database.agent_messages.create_index([("id", ASCENDING)], unique=True)
     database.agent_messages.create_index(
         [("threadId", ASCENDING), ("messageSeq", ASCENDING)], unique=True
+    )
+
+
+def _initialize_skills(database: Database) -> None:
+    database.skills.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index([("id", ASCENDING)], unique=True)
+    database.skill_versions.create_index(
+        [("skillId", ASCENDING), ("version", ASCENDING)], unique=True
     )
 
 
@@ -201,5 +227,7 @@ def initialize(database: Database) -> None:
     _initialize_case_assets(database)
     _initialize_materials(database)
     _initialize_knowledge(database)
+    _initialize_tags(database)
     _initialize_search_delivery(database)
     _initialize_agent(database)
+    _initialize_skills(database)

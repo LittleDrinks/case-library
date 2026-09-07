@@ -39,7 +39,7 @@ function render(options = {}) {
     ...options,
     global: { stubs: {
       SiteHeader: true, SearchGraph: true, SearchAIAnswer: SearchAIAnswerStub,
-      SearchFilters: true, RouterLink: true,
+      SearchFilters: true, RouterLink: { template: "<a><slot /></a>" },
     } },
   });
 }
