@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from pymongo.database import Database
 
-from app.modules.agent.models import SourceRef
+from app.modules.agent.models import AgentArtifact, SourceRef
 
 
 @dataclass(slots=True)
@@ -20,3 +20,4 @@ class ToolDeps:
     catalog_state: object
     secret_path: str
     sources: list[SourceRef] = field(default_factory=list)
+    proposed: AgentArtifact | None = None

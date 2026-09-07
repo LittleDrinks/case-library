@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -18,6 +18,8 @@ from app.modules.agent.models import (
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
+
+    ArtifactTarget,
 )
 from app.modules.agent.recovery import (
     LiveBuffer,
@@ -31,6 +33,7 @@ from app.modules.agent.repository import (
     MessageNotFoundError,
     ThreadNotFoundError,
 )
+from app.modules.agent import prosemirror
 from app.modules.agent.service import RunContext, load_history
 from app.modules.agent.skills import bound_skill_capability, domain_capability
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
@@ -55,6 +58,7 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+    selections: list[dict] = field(default_factory=list)
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -114,8 +118,10 @@ def _skill_id(part) -> str | None:
 def _canonical_parts(parts) -> tuple[list[dict], list[str]]:
     skills, canonical = [], []
     for part in parts:
-        if isinstance(part, DataUIPart):
+        if isinstance(part, DataUIPart) and part.type == "data-skill":
             skills.append(_skill_id(part))
+        elif isinstance(part, DataUIPart) and part.type == "data-selection":
+            canonical.append(part.model_dump(by_alias=True, mode="json", exclude_none=True))
         elif isinstance(part, TextUIPart):
             canonical.append(part.model_dump(by_alias=True, mode="json", exclude_none=True))
         else:
@@ -320,16 +326,24 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _run_plan(repository, thread, adapter)
-    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
-    selection = _selection(database, settings, user["id"])
-    lease = _lease(database, user["id"], selection)
-    worker_id = request.app.state.agent_worker_id
+    bounds, selection, lease, worker_id, lock = _run_setup(
+        case, request, database, settings, user, plan
+    )
     run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
-                     worker_id, [bound.binding_record() for bound in bounds])
+                     worker_id, [bound.binding_record() for bound in bounds], lock)
     context = _run_context(request, database, settings, user, case, repository, thread,
                            adapter, plan, run, selection, lease, worker_id, bounds)
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
+
+
+def _run_setup(case, request, database, settings, user, plan):
+    plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    bounds = _resolve_skills(database, request.app.state.blob_store, plan.skills)
+    selection = _selection(database, settings, user["id"])
+    lease = _lease(database, user["id"], selection)
+    worker_id = request.app.state.agent_worker_id
+    return bounds, selection, lease, worker_id, _run_lock(case, plan)
 
 
 def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
@@ -382,12 +396,50 @@ def _lease(database, user_id: str, selection):
         raise HTTPException(status_code=429, detail=str(error)) from error
 
 
-def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
-               skill_bindings: list[dict[str, str]]) -> AgentRun:
-    """创建 Run 即固化已发布 Skill 版本凭据，先于提供方执行；失败/取消不丢失。"""
+def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
+    """Run 创建即锁定 baseRevision；仅当恰好一个非空选区时锁定目标范围。
+
+    无选区不锁目标，提议修订将被拒绝，不由模型推断或自动锁定段落。
+    """
+    if len(plan.selections) != 1:
+        return case.get("revision"), None
+    row = plan.selections[0]
+    return case.get("revision"), ArtifactTarget(
+        from_pos=row["from"], to_pos=row["to"], quote=row["quote"],
+    )
+
+
+def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
+    """解析 data-selection 部分：位置须落在同一文本块内，原文服务端重算。"""
+    return [_resolve_selection(document, part.get("data")) for part in parts
+            if part.get("type") == "data-selection"]
+
+
+def _resolve_selection(document: dict, data: object) -> dict:
+    from_pos = data.get("from") if isinstance(data, dict) else None
+    to_pos = data.get("to") if isinstance(data, dict) else None
+    if not isinstance(from_pos, int) or not isinstance(to_pos, int):
+        raise HTTPException(status_code=422, detail="正文选区格式无效")
     try:
-        return _create_run(repository, thread, user_id, plan, assistant_id, lease,
-                           worker_id, skill_bindings)
+        prosemirror.selection_block(document, from_pos, to_pos)
+    except prosemirror.ParagraphNotFoundError as error:
+        raise HTTPException(
+            status_code=422, detail="正文选区为空或跨越段落，请重新选择"
+        ) from error
+    return {
+        "from": from_pos, "to": to_pos,
+        "quote": prosemirror.text_between(document, from_pos, to_pos),
+    }
+
+
+def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+               skill_bindings: list[dict[str, str]],
+               lock: tuple[int | None, ArtifactTarget | None] = (None, None)) -> AgentRun:
+    try:
+        return _create_run(
+            repository, thread, user_id, plan, assistant_id, lease, worker_id,
+            skill_bindings, lock,
+        )
     except ActiveRunError as error:
         if lease:
             lease.release()
@@ -401,10 +453,9 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 
 
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
-                skill_bindings: list[dict[str, str]]):
-    quota_ids = lease.quota_ids if lease else ()
-    run_kwargs = {"owner_id": worker_id, "quota_ids": quota_ids,
-                  "skill_bindings": skill_bindings}
+                skill_bindings: list[dict[str, str]],
+                lock: tuple[int | None, ArtifactTarget | None] = (None, None)):
+    run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock)
     if plan.retry_message_id:
         run = repository.retry_run(
             thread, plan.retry_message_id, assistant_id, **run_kwargs,
@@ -417,6 +468,16 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
         )
     _bind_lease(repository, run, lease, worker_id)
     return run
+
+
+def _run_fields(lease, worker_id, skill_bindings, lock):
+    quota_ids = lease.quota_ids if lease else ()
+    base_revision, target = lock
+    return {
+        "owner_id": worker_id, "quota_ids": quota_ids,
+        "skill_bindings": skill_bindings,
+        "base_revision": base_revision, "target": target,
+    }
 
 
 def _bind_lease(repository, run, lease, worker_id) -> None:

@@ -11,6 +11,7 @@ from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_pac
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
+SKILL_BODY_MARK = "写作前至少通读一个范例"
 
 
 class StubCatalog:
@@ -63,7 +64,10 @@ def _thread_path(case_id: str) -> str:
 
 
 def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
-    parts = [{"type": "text", "text": text}]
+    parts = [{"type": "text", "text": text}, {
+        "type": "data-selection",
+        "data": {"from": SELECTION[0], "to": SELECTION[1]},
+    }]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
     return parts
@@ -71,7 +75,7 @@ def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
 
 def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
           skill_id: str | None = SKILL_ID):
-    with agent.override(model=model or tracer_model()):
+    with agent.override(model=model or _tracer()):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
             f"{_thread_path(case_id)}/{thread_id}/stream",
@@ -96,6 +100,26 @@ HIT = {
     "summary": "以科学家精神为主题的教学案例，含教学目标与评价量规。",
 }
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
+# Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
+SELECTION = (11, 30)
+
+
+def _seed_source_case(database) -> None:
+    """检索命中来源落库为真实已发布案例，供接受前证据复验。"""
+    database.cases.insert_one({
+        "id": HIT["id"], "ownerId": "u-source", "publicationStatus": "public",
+        "workflowStatus": "published", "publishedVersionId": "cv-hit-1",
+        "revision": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+    database.case_versions.insert_one({
+        "id": "cv-hit-1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
+        "document": {"type": "doc", "content": []},
+    })
+
+
+def _tracer():
+    return tracer_model(selection=SELECTION)
 
 
 def _publish_skill(client: TestClient) -> dict:
@@ -119,9 +143,10 @@ def _publish_skill(client: TestClient) -> dict:
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
     _publish_skill(client)
+    _seed_source_case(client.app.state.database)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    with agent.override(model=tracer_model()):
+    with agent.override(model=_tracer()):
         response = _send(client, auth, case["id"], "请结合平台资料修订第2段：补充评价依据")
     assert response.status_code == 200, response.text
     return case
@@ -133,7 +158,8 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     artifact = _artifact(database, thread_id)
     assert artifact["status"] == "pending"
     assert artifact["baseRevision"] == 1
-    assert artifact["target"]["paragraphIndex"] == 1
+    assert artifact["target"]["from"] == SELECTION[0]
+    assert artifact["target"]["to"] == SELECTION[1]
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
@@ -173,6 +199,31 @@ def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> No
     }
     assert kinds["system-prompt"]["contentHash"]
 
+
+def _assert_delayed_skill(calls: list) -> None:
+    first_messages, first_instructions = calls[0]
+    flattened = [str(part) for message in first_messages for part in message.parts]
+    assert not any(SKILL_BODY_MARK in text for text in flattened)
+    assert "load_capability" in first_instructions
+    later_messages = [str(part) for message in calls[-1][0] for part in message.parts]
+    assert any(SKILL_BODY_MARK in text for text in later_messages)
+    assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
+    assert len(calls) >= 3
+
+
+def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
+    calls: list = []
+
+    def recorder(messages, info):
+        calls.append((messages, info.instructions or ""))
+
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder, selection=SELECTION))
+    assert response.status_code == 200, response.text
+    _assert_delayed_skill(calls)
 
 def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
             thread_id: str | None = None):
