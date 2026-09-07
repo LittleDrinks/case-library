@@ -13,6 +13,7 @@ const loading = ref(true);
 const creating = ref(false);
 const error = ref("");
 const groups = [
+  { title: "退回修改", returned: true },
   { title: "进行中", statuses: ["draft"] },
   { title: "审核中", statuses: ["pending", "reviewing"] },
   { title: "已发布", statuses: ["published"] },
@@ -24,10 +25,35 @@ const actionLabels = {
   reviewing: "查看审核",
   published: "查看公开页",
 };
+
+function isReturned(item) {
+  return item.workflowStatus === "draft" && Boolean(item.lastReview);
+}
+
+function itemStatus(item) {
+  return isReturned(item) ? "退回修改" : statusLabels[item.workflowStatus];
+}
+
+function itemAction(item) {
+  return isReturned(item) ? "处理退回意见" : actionLabels[item.workflowStatus];
+}
+
+function returnReason(item) {
+  const review = item.lastReview;
+  if (!review) return "";
+  return `${review.reasonType}${review.summary ? `：${review.summary}` : ""}`;
+}
+
+function inGroup(group, item) {
+  if (group.returned) return isReturned(item);
+  return group.statuses.includes(item.workflowStatus) && !isReturned(item);
+}
+
 const groupedCases = computed(() => groups.map((group) => ({
   ...group,
-  cases: cases.value.filter((item) => group.statuses.includes(item.workflowStatus)),
+  cases: cases.value.filter((item) => inGroup(group, item)),
 })));
+const returnedCases = computed(() => cases.value.filter(isReturned));
 
 function caseDestination(item) {
   const name = item.workflowStatus === "published" ? "case-public" : "workbench";
@@ -81,6 +107,20 @@ onMounted(loadCases);
         <button type="button" @click="loadCases"><RefreshCw :size="15" />重试</button>
       </div>
       <div v-else class="my-case-groups">
+        <section
+          v-if="returnedCases.length"
+          class="my-case-group return-todo"
+          aria-label="退回待办"
+        >
+          <header><h2>退回待办</h2><span>{{ returnedCases.length }}</span></header>
+          <ul class="return-todo-list">
+            <li v-for="item in returnedCases" :key="item.id">
+              <RouterLink :to="caseDestination(item)"><b>{{ item.title }}</b></RouterLink>
+              <span>{{ returnReason(item) }}</span>
+              <em v-if="item.pendingAnnotationCount">待处理批注 {{ item.pendingAnnotationCount }} 条</em>
+            </li>
+          </ul>
+        </section>
         <section v-for="group in groupedCases" :key="group.title" class="my-case-group">
           <header><h2>{{ group.title }}</h2><span>{{ group.cases.length }}</span></header>
           <div v-if="group.cases.length" class="case-grid">
@@ -89,8 +129,9 @@ onMounted(loadCases);
               :key="item.id"
               :case-record="item"
               :destination="caseDestination(item)"
-              :status="statusLabels[item.workflowStatus]"
-              :action-label="actionLabels[item.workflowStatus]"
+              :status="itemStatus(item)"
+              :action-label="itemAction(item)"
+              :notice="returnReason(item)"
             />
           </div>
           <div v-else class="catalog-empty">暂无案例</div>
