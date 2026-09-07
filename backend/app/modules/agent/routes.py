@@ -519,7 +519,7 @@ def _run_context(request, database, settings, user, conversation: Conversation,
     refs = retained_sources(database, conversation.case["id"], user, conversation.version_id)
     instructions = catalog_instructions(
         conversation.case.get("title") or "未命名案例", refs,
-        plan.selected, plan.selections,
+        plan.selected, plan.selections, conversation.reader,
     )
     deps = _run_deps(
         request, database, settings, user, conversation, thread, run, refs, plan

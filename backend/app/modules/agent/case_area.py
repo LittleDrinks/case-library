@@ -100,18 +100,28 @@ def _selected_ref(refs: list[SourceRef], data: object) -> dict:
 
 
 def catalog_instructions(title: str, refs: list[SourceRef], selected: list[dict],
-                         selections: list[dict]) -> str:
+                         selections: list[dict], reader: bool = False) -> str:
     lines = [f"## 当前案例资料区（{title}）", "按需调用 read_source 读取以下保留来源："]
     lines += [f"- [{ref.kind}] {ref.title}（id: {ref.id}）" for ref in refs]
     chosen = ", ".join(item["id"] for item in selected) or "无"
-    lines += [f"本条消息点选来源：{chosen}", _selection_line(selections)]
+    lines += [f"本条消息点选来源：{chosen}", _selection_line(selections, reader)]
     return "\n".join(lines)
 
 
-def _selection_line(selections: list[dict]) -> str:
+def _selection_line(selections: list[dict], reader: bool = False) -> str:
     if not selections:
         return "本条消息没有正文选区。"
-    return "本条消息正文选区：" + "；".join(item["quote"] for item in selections)
+    items = "；".join(
+        f"from={item['from']}，to={item['to']}，原文：{item['quote']}"
+        for item in selections
+    )
+    if reader:
+        return f"本条消息正文选区（服务端已按当前正文验证的原生位置）：{items}。"
+    return (
+        f"本条消息正文选区（服务端已按当前正文验证的原生位置）：{items}。"
+        "作者没有指明其他段落时，调用 propose_revision 须把上述 from、to 原样"
+        "作为 start、end，不得自行计算或调整位置，也不得要求作者填写字符位置。"
+    )
 
 
 def ref_view(ref: SourceRef) -> dict:
