@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from pydantic_ai import CancellationToken
 from pydantic_ai.exceptions import RunCancelled
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
@@ -46,6 +47,7 @@ class RunContext:
     failed: bool = False
     lost: bool = False
     lease_released: bool = False
+    tool_timings: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def _run_kwargs(context: RunContext, model=None) -> dict:
@@ -65,11 +67,31 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
     return values
 
 
+def _record_tool_event(context: RunContext, event) -> None:
+    if isinstance(event, FunctionToolCallEvent):
+        part = event.part
+        timing = {"toolCallId": part.tool_call_id, "toolName": part.tool_name,
+                  "startedAt": datetime.now(UTC).isoformat()}
+        context.tool_timings[part.tool_call_id] = timing
+    elif isinstance(event, FunctionToolResultEvent):
+        part = event.part
+        timing = context.tool_timings.get(part.tool_call_id)
+        if timing:
+            timing["finishedAt"] = (part.timestamp or datetime.now(UTC)).isoformat()
+    else:
+        return
+    if context.tool_timings.get(event.part.tool_call_id):
+        context.repository.record_tool_timing(
+            context.run.id, context.tool_timings[event.part.tool_call_id], context.worker_id
+        )
+
+
 async def _native_events(context: RunContext):
     try:
         async with _model_context(context) as model:
             async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
                 async for event in events:
+                    _record_tool_event(context, event)
                     yield event
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True

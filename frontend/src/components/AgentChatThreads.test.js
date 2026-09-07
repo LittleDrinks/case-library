@@ -13,7 +13,6 @@ vi.mock("../api.js", () => ({
     agentDecide: vi.fn(),
     agentCancel: vi.fn(),
     aiSettings: vi.fn(),
-    listSources: vi.fn(),
     getCase: vi.fn(),
     getMaterial: vi.fn(),
     search: vi.fn(),
@@ -69,7 +68,6 @@ beforeEach(() => {
   ));
   api.agentThreads.mockResolvedValue(structuredClone(threadRows));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
-  api.listSources.mockResolvedValue({ entries: [] });
   api.getCase.mockImplementation((id) => Promise.resolve({ id }));
   api.getMaterial.mockImplementation((id) => Promise.resolve({ id }));
   api.search.mockResolvedValue({ items: [] });

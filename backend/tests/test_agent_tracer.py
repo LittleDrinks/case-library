@@ -152,6 +152,11 @@ def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_cas
     assert kinds["skill"]["version"] == "2.1"
     assert len(kinds["skill"]["contentHash"]) == 64
     assert kinds["system-prompt"]["contentHash"]
+    timings = list(run["toolTimings"].values())
+    assert {timing["toolName"] for timing in timings} == {
+        "load_capability", "search_corpus", "propose_revision",
+    }
+    assert all(timing.get("startedAt") and timing.get("finishedAt") for timing in timings)
 
 
 def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:

@@ -8,7 +8,7 @@ vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
     agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
-    listSources: vi.fn(), getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(),
+    getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(),
   },
 }));
 
@@ -50,9 +50,9 @@ function answerResponse() {
   ]);
 }
 
-function mountPanel() {
+function mountPanel(overrides = {}) {
   return mount(AgentChatPanel, {
-    props: { caseRecord: { id: "case-1" } },
+    props: { caseRecord: { id: "case-1" }, ...overrides },
     global: { stubs: { RouterLink: true } },
   });
 }
@@ -66,7 +66,6 @@ beforeEach(() => {
   api.listSkills.mockResolvedValue([
     { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
   ]);
-  api.listSources.mockResolvedValue({ entries: [] });
   api.getCase.mockImplementation((id) => Promise.resolve({ id }));
   api.getMaterial.mockImplementation((id) => Promise.resolve({ id }));
   api.search.mockResolvedValue({ items: [] });
@@ -471,10 +470,10 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
 it("blocks an old source link when the current unified entry is restricted", async () => {
   const tracer = tracerSnapshot();
   tracer.messages[1].parts = [searchPartWithSources()];
-  api.listSources.mockResolvedValue({ entries: [
-    { id: "c-42", title: "已撤回案例", contentAvailable: false },
-    { id: "m-7", title: "配套阅读材料", contentAvailable: true, url: "#/materials/m-7" },
-  ] });
+  api.getCase.mockResolvedValue({ id: "c-42", title: "已撤回案例", contentAvailable: false });
+  api.getMaterial.mockResolvedValue({
+    id: "m-7", title: "配套阅读材料", contentAvailable: true, summary: "当前材料摘要",
+  });
   api.agentThread.mockResolvedValue(structuredClone(tracer));
   const wrapper = mountPanel();
   await flushPromises();
@@ -483,6 +482,41 @@ it("blocks an old source link when the current unified entry is restricted", asy
   expect(wrapper.find('[data-source-ref="case:c-42"] a').exists()).toBe(false);
   expect(wrapper.find('[data-source-ref="case:c-42"]').text()).toContain("当前权限不可读取");
   await vi.waitFor(() => expect(wrapper.find('[data-source-ref="material:m-7"] a').attributes("href")).toBe("#/materials/m-7"));
+  expect(wrapper.find('[data-source-ref="case:c-42"]').text()).not.toContain("以科学家精神为例");
+});
+
+it("revalidates source permission when the window returns", async () => {
+  let available = true;
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [searchPartWithSources()];
+  api.getCase.mockImplementation(() => Promise.resolve({
+    id: "c-42", title: "科学家精神案例", summary: "当前摘要", contentAvailable: available,
+  }));
+  api.getMaterial.mockResolvedValue({ id: "m-7", title: "配套阅读材料", contentAvailable: true });
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+  available = false;
+  window.dispatchEvent(new Event("focus"));
+  await flushPromises();
+  expect(wrapper.find('[data-source-ref="case:c-42"] a').exists()).toBe(false);
+  expect(wrapper.find('[data-source-ref="case:c-42"]').text()).not.toContain("当前摘要");
+});
+
+it("revalidates source permission when the chat panel reopens", async () => {
+  let available = true;
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [searchPartWithSources()];
+  api.getCase.mockImplementation(() => Promise.resolve({ id: "c-42", contentAvailable: available }));
+  api.getMaterial.mockResolvedValue({ id: "m-7", contentAvailable: true });
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel({ open: true });
+  await flushPromises();
+  available = false;
+  await wrapper.setProps({ open: false });
+  await wrapper.setProps({ open: true });
+  await flushPromises();
+  expect(wrapper.find('[data-source-ref="case:c-42"] a').exists()).toBe(false);
 });
 
 it("renders unknown tools by name without exposing raw arguments", async () => {
@@ -522,22 +556,27 @@ function toolStreamChunks() {
   ];
 }
 
-it("measures real elapsed time for tools observed running in the live session", async () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-09-07T10:00:00Z"));
-  try {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(toolStreamChunks())));
-    const wrapper = mountPanel();
-    await flushPromises();
-    await wrapper.get('[aria-label="向 AI 提问"]').setValue("查资料");
-    await wrapper.get('[aria-label="发送"]').trigger("click");
-    await flushPromises();
-    vi.setSystemTime(new Date("2026-09-07T10:00:03Z"));
-    await flushPromises();
-    expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
-  } finally {
-    vi.useRealTimers();
-  }
+it("does not invent tool duration from streamed UI events", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(toolStreamChunks())));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("查资料");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).not.toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
+});
+
+it("renders persisted tool duration by tool call id", async () => {
+  const tracer = tracerSnapshot();
+  tracer.latestRun.toolTimings = {
+    t2: { toolCallId: "t2", toolName: "search_corpus", startedAt: "2026-09-07T10:00:00Z", finishedAt: "2026-09-07T10:00:02.5Z" },
+  };
+  api.agentThread.mockResolvedValue(tracer);
+  const wrapper = mountPanel();
+  await flushPromises();
+  const searchTrace = wrapper.findAll('[data-testid="agent-skill-load"]')
+    .find((trace) => trace.text().includes("检索案例"));
+  expect(searchTrace.text()).toContain("检索案例 · 已完成 · 2.5s");
 });
 
 it("shows real finished-run duration from backend timestamps", async () => {
@@ -652,6 +691,9 @@ it("rejecting the artifact records the decision without touching the case", asyn
 });
 
 it("restores skill load, sources and decided artifact from a reloaded thread snapshot", async () => {
+  api.getCase.mockResolvedValue({
+    id: "c-42", title: "科学家精神案例", summary: "以科学家精神为例", contentAvailable: true,
+  });
   api.agentThread.mockResolvedValue(
     structuredClone({ ...tracerSnapshot(), artifacts: tracerArtifacts("accepted") }),
   );

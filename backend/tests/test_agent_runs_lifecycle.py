@@ -118,6 +118,18 @@ def _await_active(database, thread_id: str, deadline: float = 10) -> dict:
     raise AssertionError("run did not become active")
 
 
+def _await_terminal_event(database, thread_id: str, run_id: str, deadline: float = 10) -> dict:
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        event = database.agent_thread_events.find_one(
+            {"threadId": thread_id, "runId": run_id, "type": "run.cancelled"}, {"_id": 0}
+        )
+        if event:
+            return event
+        Event().wait(0.02)
+    raise AssertionError("terminal event did not appear")
+
+
 def _await_thread_with_active(client: TestClient) -> str:
     database = client.app.state.database
     end = time.monotonic() + 10
@@ -263,6 +275,7 @@ def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) 
             thread_id = _stop_active_run(client, auth)
             database = client.app.state.database
             run = _await_run(database, thread_id)
+            _await_terminal_event(database, thread_id, run["id"])
             assert run["status"] == "cancelled", run
             assert run["error"] == "运行已取消"
             assert _events(database, thread_id)[-1]["type"] == "run.cancelled"

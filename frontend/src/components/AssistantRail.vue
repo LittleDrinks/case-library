@@ -77,6 +77,7 @@ function select(tab) {
 
     <AgentChatPanel
       v-else-if="active === 'chat'"
+      :open="open"
       :case-record="caseRecord"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"

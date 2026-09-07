@@ -85,11 +85,6 @@ export function sourceRefId(source) {
   return `${source.kind || source.sourceType || "unknown"}:${source.id}${version}`;
 }
 
-export function sourceEntryMatches(source, entry) {
-  if (entry.id === source.id) return true;
-  return Boolean(source.locator && (entry.id === source.locator || entry.url === source.locator));
-}
-
 export function sourceStatusLabel(state) {
   return SOURCE_STATUS_LABELS[state?.state] || "无法核验来源状态";
 }

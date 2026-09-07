@@ -1,18 +1,19 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
 import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
 import {
-  durationText, sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
+  sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
   toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
-  runAnchor, runError, runForMessage, runLabel, sourceEntryMatches, sourceStatusLabel,
+  runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  open: { type: Boolean, default: true },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised"]);
@@ -43,7 +44,7 @@ const canSend = computed(() => Boolean(
 const decideError = ref("");
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
-let sourceEntriesPromise = null;
+let sourceGeneration = 0;
 
 function sourceRefs() {
   const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
@@ -63,6 +64,10 @@ function sourceUrl(source) {
   return sourceState(source).url || "";
 }
 
+function sourceSnippet(source) {
+  return sourceState(source).state === "available" ? sourceState(source).snippet || "" : "";
+}
+
 async function directSource(source) {
   const kind = source.kind || source.sourceType;
   if (kind === "case") return api.getCase(source.id);
@@ -72,25 +77,28 @@ async function directSource(source) {
   return result.items?.find((item) => item.id === source.id) || null;
 }
 
-function entryState(source, entry) {
-  const available = entry.contentAvailable === true;
+function sourceView(source, current) {
+  const available = current.contentAvailable !== false;
   return {
-    state: available ? "available" : "restricted", title: entry.title,
-    url: available ? entry.url || sourceHref(source) : "",
+    state: available ? "available" : "restricted",
+    title: current.title || source.title,
+    snippet: available ? String(current.summary ?? current.excerpt ?? "") : "",
+    url: available ? sourceHref(source) : "",
   };
 }
 
-async function refreshSource(source, entries) {
+async function refreshSource(source, generation) {
   const key = sourceRefId(source);
   if (sourceChecks.has(key)) return sourceChecks.get(key);
   const task = (async () => {
+    if (generation !== sourceGeneration) return;
     sourceStates.set(key, { state: "checking" });
-    const entry = entries.find((item) => sourceEntryMatches(source, item));
-    if (entry) return sourceStates.set(key, entryState(source, entry));
     try {
       const current = await directSource(source);
-      sourceStates.set(key, current ? { state: "available", url: sourceHref(source) } : { state: "unavailable" });
+      if (generation !== sourceGeneration) return;
+      sourceStates.set(key, current ? sourceView(source, current) : { state: "unavailable" });
     } catch {
+      if (generation !== sourceGeneration) return;
       sourceStates.set(key, { state: "unavailable" });
     }
     return sourceStates.get(key);
@@ -99,19 +107,21 @@ async function refreshSource(source, entries) {
   return task.finally(() => sourceChecks.delete(key));
 }
 
-async function currentSourceEntries() {
-  if (!sourceEntriesPromise) {
-    sourceEntriesPromise = api.listSources(props.caseRecord.id, props.caseRecord.publishedVersionId)
-      .then((payload) => payload.entries || []).catch(() => []);
-  }
-  return sourceEntriesPromise;
-}
-
-async function refreshSources() {
+async function refreshSources(generation = sourceGeneration) {
   const refs = sourceRefs();
   if (!refs.length) return;
-  const entries = await currentSourceEntries();
-  await Promise.all(refs.map((source) => refreshSource(source, entries)));
+  await Promise.all(refs.map((source) => refreshSource(source, generation)));
+}
+
+function refreshSourcePermissions() {
+  sourceGeneration += 1;
+  sourceStates.clear();
+  sourceChecks.clear();
+  void refreshSources(sourceGeneration);
+}
+
+function refreshOnVisible() {
+  if (document.visibilityState === "visible") refreshSourcePermissions();
 }
 
 function toolTitle(part) {
@@ -129,26 +139,9 @@ function skillOptionLabel(skill) {
   return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
 }
 
-const toolTimers = new Map();
-
-function trackToolTimers() {
-  for (const message of messages.value) {
-    for (const part of message.parts || []) {
-      if (!part.type.startsWith("tool-") || !part.toolCallId) continue;
-      const timer = toolTimers.get(part.toolCallId);
-      if (toolRunning(part)) {
-        if (!timer) toolTimers.set(part.toolCallId, { startedAt: Date.now() });
-      } else if (timer && timer.elapsedMs === undefined) {
-        timer.elapsedMs = Date.now() - timer.startedAt;
-      }
-    }
-  }
-}
-
-function toolDurationText(part) {
-  const timer = toolTimers.get(part.toolCallId);
-  if (!timer || timer.elapsedMs === undefined) return "";
-  return durationText(timer.elapsedMs / 1000);
+function toolDurationText(part, run) {
+  const timing = run?.toolTimings?.[part.toolCallId];
+  return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, Date.now()) : "";
 }
 
 function runDurationText(run = threadState.value?.latestRun) {
@@ -212,7 +205,6 @@ async function scrollToLatest() {
 }
 
 watch(messages, () => {
-  trackToolTimers();
   void refreshSources();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
@@ -221,9 +213,15 @@ watch(artifacts, () => {
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 watch(threadId, () => {
-  sourceEntriesPromise = null;
-  sourceStates.clear();
-  sourceChecks.clear();
+  refreshSourcePermissions();
+});
+watch(() => props.open, (open, wasOpen) => {
+  if (open && !wasOpen) refreshSourcePermissions();
+});
+
+onMounted(() => {
+  window.addEventListener("focus", refreshSourcePermissions);
+  document.addEventListener("visibilitychange", refreshOnVisible);
 });
 
 const THREADS_POLL_MS = 2000;
@@ -260,7 +258,11 @@ function closeThreads() {
   mode.value = "chat";
 }
 
-onBeforeUnmount(stopThreadsPolling);
+onBeforeUnmount(() => {
+  stopThreadsPolling();
+  window.removeEventListener("focus", refreshSourcePermissions);
+  document.removeEventListener("visibilitychange", refreshOnVisible);
+});
 
 function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
@@ -422,7 +424,7 @@ async function retryRun() {
               >
                 <summary>
                   <LoaderCircle v-if="toolRunning(part)" class="spin" :size="13" />
-                  <span>{{ toolTitle(part) }} · {{ toolState(part) }}<template v-if="toolDurationText(part)"> · {{ toolDurationText(part) }}</template></span>
+                  <span>{{ toolTitle(part) }} · {{ toolState(part) }}<template v-if="toolDurationText(part, messageRun(message))"> · {{ toolDurationText(part, messageRun(message)) }}</template></span>
                   <i v-if="sourcesOf(part).length">{{ sourcesOf(part).length }} 条来源</i>
                 </summary>
                 <p v-if="toolParamSummary(part)" class="agent-tool-line">{{ toolParamSummary(part) }}</p>
@@ -439,8 +441,8 @@ async function retryRun() {
                       target="_blank"
                       rel="noopener noreferrer"
                       :title="`在站内打开：${sourceTitle(source)}（已按当前权限核验）`"
-                    ><b>{{ sourceTitle(source) }}</b><span>{{ source.snippet }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></a>
-                    <p v-else><b>{{ sourceTitle(source) }}</b><span>{{ source.snippet }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></p>
+                    ><b>{{ sourceTitle(source) }}</b><span>{{ sourceSnippet(source) }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></a>
+                    <p v-else><b>{{ sourceTitle(source) }}</b><span>{{ sourceSnippet(source) }}</span><small>{{ sourceStatusLabel(sourceState(source)) }}</small></p>
                   </div>
                 </div>
               </details>

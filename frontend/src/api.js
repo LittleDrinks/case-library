@@ -62,10 +62,6 @@ function materialRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/materials`;
 }
 
-function sourcesRoot(id) {
-  return `/api/cases/${encodeURIComponent(id)}/sources`;
-}
-
 function appendSearchFilters(params, filters) {
   Object.entries(filters).forEach(([name, raw]) => {
     const values = Array.isArray(raw) ? raw : [raw];
@@ -145,9 +141,6 @@ export const api = {
   listSkills: () => request("/api/skills"),
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,
-  ),
-  listSources: (id, versionId) => request(
-    `${sourcesRoot(id)}${versionQuery(versionId)}`,
   ),
   mountCaseMaterial: (id, materialId, revision, csrfToken) => request(
     materialRoot(id), jsonOptions("POST", { materialId, revision }, csrfToken),

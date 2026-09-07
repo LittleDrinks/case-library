@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  artifactStatus, durationText, elapsedBetween, sourceEntryMatches, sourceHref, sourceRefId,
+  artifactStatus, durationText, elapsedBetween, sourceHref, sourceRefId,
   toolParamSummary, toolResultSummary, toolRunning, toolState,
 } from "./agentTimeline.js";
 
@@ -63,8 +63,6 @@ describe("stable references", () => {
     expect(sourceRefId({ kind: "case", id: "c-42" })).toBe("case:c-42");
     expect(sourceRefId({ sourceType: "attachment", id: "a-1" })).toBe("attachment:a-1");
     expect(sourceRefId({ kind: "case", id: "c-42", versionId: "v-1" })).toBe("case:c-42:v-1");
-    expect(sourceEntryMatches({ id: "src-1", locator: "src-1" }, { id: "src-1" })).toBe(true);
-    expect(sourceEntryMatches({ id: "src-2" }, { id: "src-1" })).toBe(false);
   });
 });
 

@@ -62,6 +62,7 @@ class AgentRun(BaseModel):
     client_request_id: str | None = Field(default=None, alias="clientRequestId")
     status: RunStatus
     resources: list[dict[str, str]] = Field(default_factory=list)
+    tool_timings: dict[str, dict[str, str]] = Field(default_factory=dict, alias="toolTimings")
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str | None = None
