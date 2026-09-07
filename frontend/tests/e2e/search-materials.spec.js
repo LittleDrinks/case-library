@@ -270,8 +270,7 @@ test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", a
   await login(page);
   await page.goto("/#/materials?caseId=c-draft-1");
   await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
-  const firstPageItems = await page.locator("tbody tr").count();
-  expect(firstPageItems).toBeLessThanOrEqual(20);
+  await expect(page.locator("tbody tr")).toHaveCount(20);
   await expect(page.locator(".catalog-pagination")).toHaveCount(2);
   const secondPage = expectSearchPageRequest(page, "material", true);
   await page.getByRole("button", { name: "下一页" }).first().click();
