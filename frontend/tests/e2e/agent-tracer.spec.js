@@ -71,8 +71,6 @@ async function selectCanvasTarget(page) {
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
     .toBe(TARGET_TEXT);
   await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  await expect(page.getByRole("button", { name: "改写选区" })).toBeEnabled();
-  await page.locator(".assistant-tabs").getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByLabel("向 AI 提问")).toBeVisible();
 }
 

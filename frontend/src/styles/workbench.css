@@ -240,34 +240,6 @@
 .agent-thread-running { color: var(--brand); }
 .agent-thread-rename { display: grid; width: 26px; height: 26px; padding: 0; flex: none; place-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
 .agent-thread-rename:hover { background: var(--brand-soft); color: var(--brand); }
-.candidate-targets { display: flex; align-items: center; gap: 5px; padding: 8px 12px 0; border-top: 1px solid var(--line-soft); }
-.candidate-targets button { height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 11px; }
-.candidate-targets button.active { border-color: var(--brand); color: var(--brand); }
-.candidate-targets span { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.candidate-blocked { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 12px 0; padding: 7px 9px; border-left: 2px solid var(--amber); background: var(--amber-soft); color: var(--amber); font-size: 11px; }
-.candidate-blocked button { flex: 0 0 auto; border: 0; background: transparent; color: var(--brand); font-size: 11px; font-weight: 700; }
-.writing-candidate { display: grid; gap: 9px; margin: 7px -4px -4px; padding: 10px; border: 1px solid #ead1d2; border-radius: 5px; background: #fff; }
-.writing-candidate header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
-.writing-candidate header b { color: var(--brand); font-size: 12px; }
-.writing-candidate header span { overflow: hidden; color: var(--ink-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.candidate-modes { display: flex; flex-wrap: wrap; gap: 4px; }
-.candidate-modes button { min-height: 27px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink-3); font-size: 10px; }
-.candidate-modes button.active { border-color: var(--brand); color: var(--brand); }
-.candidate-diff { max-height: 180px; margin: 0; padding: 8px; overflow: auto; border-radius: 4px; background: var(--paper); overflow-wrap: anywhere; white-space: pre-wrap; }
-.candidate-diff del, .candidate-inline-removed { background: #fde7e9; color: #8e1b22; text-decoration-color: #ba1c22; }
-.candidate-diff ins, .candidate-inline-preview ins { background: #e2f3e8; color: #17633d; text-decoration: none; }
-.candidate-reason { display: grid; gap: 2px; margin: 0; color: var(--ink-2); font-size: 11px; }
-.candidate-reason b { color: var(--ink-3); font-size: 10px; }
-.candidate-actions, .candidate-resolution { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.candidate-actions button, .candidate-resolution button { display: flex; min-height: 29px; align-items: center; gap: 4px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink-2); font-size: 11px; }
-.candidate-actions button.primary { border-color: var(--brand); background: var(--brand); color: #fff; }
-.candidate-resolution span { margin-right: auto; color: var(--green); font-size: 11px; }
-.candidate-inline-preview { display: block; margin: 6px 0 15px; border-left: 2px solid var(--green); background: #f7fbf8; }
-.candidate-inline-preview ins { display: block; padding: 5px 8px; line-height: 2; white-space: pre-wrap; }
-.candidate-inline-preview small { display: block; padding: 5px 8px; border-top: 1px solid #d7e9dd; color: var(--ink-3); font: 11px/1.5 var(--sans); }
-.ai-tools { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; padding: 8px 10px; border-top: 1px solid var(--line-soft); }
-.ai-tools button { display: grid; height: 48px; padding: 5px 1px; place-content: center; justify-items: center; gap: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); font-size: 10px; }
-.ai-tools button:hover:not(:disabled) { background: var(--brand-soft); color: var(--brand); }
 .ai-message .ai-skill-chip { margin: 4px 0 0; color: var(--brand); font-size: 11px; }
 .assistant-skill-picker { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
 .assistant-skill-picker label { flex: none; color: var(--ink-3); font-size: 11px; }
@@ -444,6 +416,5 @@
   .assistant-tabs { min-height: 49px; padding: 3px 5px 0; }
   .assistant-tabs button { flex: 1; min-width: 0; height: 45px; padding: 0 5px; }
   .assistant-tabs .drawer-toggle { display: grid; flex: 0 0 38px; place-items: center; }
-  .ai-tools { grid-template-columns: repeat(6, 1fr); padding: 6px 8px; }
   .panel-head { min-height: 42px; padding: 11px 12px; }
 }
