@@ -8,7 +8,7 @@ vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
     agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
-    getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
+    getCase: vi.fn(), getPublicCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
   },
 }));
 
@@ -19,6 +19,7 @@ const snapshot = {
     id: "message-1", role: "assistant", metadata: {},
     parts: [{ type: "text", text: "历史回答" }],
   }],
+  artifacts: [],
   activeRun: null,
   latestRun: null,
 };
@@ -70,6 +71,39 @@ beforeEach(() => {
   api.getCase.mockImplementation((id) => Promise.resolve({ id }));
   api.getMaterial.mockImplementation((id) => Promise.resolve({ id }));
   api.search.mockResolvedValue({ items: [] });
+});
+
+it("passes the reader version and readonly flag to the source picker", async () => {
+  const wrapper = mountPanel({ versionId: "v-reader-1", readOnly: true });
+  await flushPromises();
+  const picker = wrapper.findComponent({ name: "AgentSourcePicker" });
+  expect(picker.props("versionId")).toBe("v-reader-1");
+  expect(picker.props("readOnly")).toBe(true);
+});
+
+const artifactSnapshot = () => ({
+  ...structuredClone(snapshot),
+  artifacts: [{
+    id: "artifact-1", status: "pending",
+    target: { from: 1, to: 4, quote: "原文" },
+    replacement: "替换文本", reason: "理由", sources: [
+      { kind: "case", id: "src-entry-9", sourceCaseId: "c-real-9", versionId: "v-9", version: "v1", title: "真实案例" },
+      { kind: "case", id: "src-old", title: "旧格式来源", versionId: "v-old" },
+      { kind: "material", id: "mat-1", title: "素材来源" },
+    ],
+  }],
+});
+
+it("links artifact sources to the fixed public version of the real case", async () => {
+  api.agentThread.mockResolvedValue(artifactSnapshot());
+  api.getPublicCase.mockResolvedValue({ title: "真实案例", contentAvailable: true });
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(wrapper.get('[data-source-ref="case:src-entry-9:v-9"]').attributes("href"))
+    .toBe("#/cases/c-real-9?versionId=v-9"));
+  expect(api.getPublicCase).toHaveBeenCalledWith("c-real-9", "v-9");
+  expect(wrapper.get('[data-source-ref="case:src-old:v-old"]').element.tagName).toBe("P");
+  expect(wrapper.text()).toContain("旧格式来源");
+  expect(wrapper.text()).toContain("素材来源");
 });
 
 function sentRequest(fetch) {

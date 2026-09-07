@@ -28,9 +28,11 @@ def _snippet(item: dict) -> str:
 
 def source_ref(item: dict) -> SourceRef:
     """从检索服务实际返回的条目重建来源引用，忽略模型提供的任何出处。"""
+    kind = item["kind"]
     return SourceRef(
-        kind=item["kind"], id=str(item["id"]), title=str(item.get("title") or ""),
+        kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item),
+        source_case_id=str(item["id"]) if kind == "case" else None,
     )
 
 

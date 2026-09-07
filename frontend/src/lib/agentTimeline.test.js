@@ -54,7 +54,8 @@ describe("tool result summaries", () => {
 describe("stable references", () => {
   it("builds in-site links only from stable business ids", () => {
     expect(sourceHref({ kind: "case", id: "c-42" })).toBe("#/cases/c-42");
-    expect(sourceHref({ kind: "case", id: "c-42", versionId: "v-1" })).toBe("#/cases/c-42?versionId=v-1");
+    expect(sourceHref({ kind: "case", id: "mounted-1", sourceCaseId: "c-42", versionId: "v-1" })).toBe("#/cases/c-42?versionId=v-1");
+    expect(sourceHref({ kind: "case", id: "mounted-1", versionId: "v-1" })).toBe("");
     expect(sourceHref({ sourceType: "material", id: "m-7" })).toBe("#/materials/m-7");
     expect(sourceHref({ url: "https://evil.example/x" })).toBe("");
   });

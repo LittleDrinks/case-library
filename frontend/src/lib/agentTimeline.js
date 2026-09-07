@@ -73,8 +73,9 @@ export function toolResultSummary(part) {
 export function sourceHref(source) {
   const kind = source.kind || source.sourceType;
   if (kind === "case") {
+    if (source.versionId && !source.sourceCaseId) return "";
     const version = source.versionId ? `?versionId=${encodeURIComponent(source.versionId)}` : "";
-    return `#/cases/${encodeURIComponent(source.id)}${version}`;
+    return `#/cases/${encodeURIComponent(source.sourceCaseId || source.id)}${version}`;
   }
   if (kind === "material") return `#/materials/${encodeURIComponent(source.id)}`;
   return "";

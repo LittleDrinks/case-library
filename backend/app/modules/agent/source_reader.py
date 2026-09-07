@@ -139,6 +139,7 @@ def _case_result(case: dict, version: dict, source_id: str | None = None) -> dic
     text = "\n".join(row["quote"] for row in paragraphs(version.get("document") or {}))
     ref = SourceRef(kind="case", id=source_id or case["id"], title=version.get("title") or "",
                     version=f"v{version['number']}", version_id=version["id"],
+                    source_case_id=case["id"],
                     location=f"case:{case['id']}@{version['id']}")
     return _succeeded(ref, text)
 
@@ -158,7 +159,7 @@ def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -
     if ref.kind == "attachment":
         return _area_entry_available(database, user, case_id, ref)
     if ref.kind == "case" and ref.version_id:
-        source_case_id = _location_case_id(ref.location)
+        source_case_id = ref.source_case_id or _location_case_id(ref.location)
         if source_case_id:
             return source_case_content_available(
                 database, source_case_id, user, ref.version_id, False

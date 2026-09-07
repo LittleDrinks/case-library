@@ -177,7 +177,8 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
         "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": "",
-        "version": "v1", "versionId": "hit-v1", "location": "case:c-42@hit-v1",
+        "version": "v1", "versionId": "hit-v1", "sourceCaseId": HIT["id"],
+        "location": "case:c-42@hit-v1",
     }]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)

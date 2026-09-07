@@ -77,6 +77,9 @@ async function directSource(source, area) {
   const row = area.find((item) => item.id === source.id && item.sourceType === kind);
   if (row) return row;
   if (source.fromCaseArea) return null;
+  if (kind === "case" && source.versionId) {
+    return source.sourceCaseId ? api.getPublicCase(source.sourceCaseId, source.versionId) : null;
+  }
   if (kind === "case") return api.getCase(source.id);
   if (kind === "material") return api.getMaterial(source.id);
   if (kind !== "knowledge") return null;
@@ -561,9 +564,10 @@ async function retryRun() {
       </div>
       <div class="assistant-composer">
         <AgentSourcePicker
-          v-if="!readOnly"
           :case-id="caseRecord.id"
           :revision="caseRecord.revision"
+          :version-id="versionId"
+          :read-only="readOnly"
           :selected="selectedSources"
           :disabled="loading || sending"
           @update:selected="selectedSources = $event"
