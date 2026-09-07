@@ -105,9 +105,6 @@ async function selectCanvasTarget(page) {
   await target.selectText();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
     .toBe(TARGET_TEXT);
-  await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  await expect(page.getByRole("button", { name: "改写选区" })).toBeEnabled();
-  await page.locator(".assistant-tabs").getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByLabel("向 AI 提问")).toBeVisible();
 }
 
@@ -117,6 +114,7 @@ async function sendSelection(page) {
   ));
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const payload = (await requestPromise).postDataJSON();
+  expect(payload.messages[0].parts).toContainEqual({ type: "data-skill", data: { skillId: SKILL_ID } });
   const selection = payload.messages[0].parts.find((part) => part.type === "data-selection")?.data;
   expect(selection).toEqual(expect.objectContaining({ from: expect.any(Number), to: expect.any(Number) }));
   expect(selection.to).toBeGreaterThan(selection.from);
