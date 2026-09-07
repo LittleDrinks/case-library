@@ -159,6 +159,46 @@ function restoredSnapshot() {
   return restored;
 }
 
+it("renders mounted sources in message order using the current fixed-version entry", async () => {
+  const restored = restoredSnapshot();
+  restored.messages[0].parts.splice(1, 0, { type: "data-source", data: { sourceType: "case", id: "mounted-1" } });
+  api.listSources.mockResolvedValue({ entries: [{ sourceType: "case", id: "mounted-1",
+    title: "固定版本来源", contentAvailable: true, url: "#/cases/c-42?versionId=v-1" }] });
+  api.agentThread.mockResolvedValue(restored);
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(wrapper.get('[data-testid="message-source"] a').attributes("href"))
+    .toBe("#/cases/c-42?versionId=v-1"));
+  const text = wrapper.get(".ai-message.user").text();
+  expect(text.indexOf("生成一个案例")).toBeLessThan(text.indexOf("固定版本来源"));
+  expect(text.indexOf("固定版本来源")).toBeLessThan(text.indexOf("使用 Skill"));
+  api.listSources.mockResolvedValue({ entries: [] });
+  window.dispatchEvent(new Event("focus"));
+  await vi.waitFor(() => expect(wrapper.find('[data-testid="message-source"] a').exists()).toBe(false));
+  expect(api.getCase).not.toHaveBeenCalledWith("mounted-1");
+});
+
+it.each(["input-available", "output-error"])("does not label a %s Skill load as completed", async (state) => {
+  const tracer = tracerPartsSnapshot();
+  tracer.messages[1].parts[2].state = state;
+  api.agentThread.mockResolvedValue(tracer);
+  const wrapper = mountPanel();
+  await flushPromises();
+  const trace = wrapper.get('[data-testid="agent-skill-load"]');
+  expect(trace.text()).not.toContain("已加载 Skill");
+  expect(trace.text()).toContain(state === "output-error" ? "加载 Skill 失败" : "加载 Skill");
+});
+
+it("folds completed Skill resources with a user-expandable summary", async () => {
+  api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
+  const wrapper = mountPanel();
+  await flushPromises();
+  const resource = wrapper.get('[data-testid="agent-skill-resource"]');
+  expect(resource.element.tagName).toBe("DETAILS");
+  expect(resource.attributes("open")).toBeUndefined();
+  expect(resource.get("summary").text()).toContain("已读取资源");
+  expect(resource.get("pre").text()).toContain("选题原则");
+});
+
 it("restores the selected skill from the thread snapshot after reload", async () => {
   api.agentThread.mockResolvedValue(restoredSnapshot());
   const wrapper = mountPanel();
@@ -501,7 +541,7 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
   const wrapper = mountPanel();
   await flushPromises();
 
-  expectSourceCards(wrapper);
+  await vi.waitFor(() => expectSourceCards(wrapper));
   const failed = wrapper.get('[data-testid="agent-source-read"]');
   expect(failed.text()).toContain("阅读来源 · 读取失败");
 });
@@ -519,7 +559,7 @@ it("blocks an old source link when the current unified entry is restricted", asy
   await flushPromises();
 
   expect(wrapper.find('[data-source-ref="case:c-42"] a').exists()).toBe(false);
-  expect(wrapper.find('[data-source-ref="case:c-42"]').text()).toContain("当前权限不可读取");
+  await vi.waitFor(() => expect(wrapper.find('[data-source-ref="case:c-42"]').text()).toContain("当前权限不可读取"));
   await vi.waitFor(() => expect(wrapper.find('[data-source-ref="material:m-7"] a').attributes("href")).toBe("#/materials/m-7"));
   expect(wrapper.find('[data-source-ref="case:c-42"]').text()).not.toContain("以科学家精神为例");
 });
@@ -820,7 +860,7 @@ it("restores skill load, sources and decided artifact from a reloaded thread sna
   await flushPromises();
 
   expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
-  expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("以科学家精神为例");
+  await vi.waitFor(() => expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("以科学家精神为例"));
   const artifact = wrapper.get('[data-testid="agent-artifact"]');
   expect(artifact.attributes("data-artifact-status")).toBe("accepted");
   expect(artifact.text()).toContain("状态：已接受");

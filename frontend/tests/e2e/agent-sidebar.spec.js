@@ -11,7 +11,7 @@ async function login(page) {
 }
 
 async function openChat(page) {
-  await page.getByLabel("辅助面板").getByRole("button", { name: "对话", exact: true }).click();
+  await page.locator(".workspace-actions").getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
   await expect.poll(() => page.locator(".assistant-rail").evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(300);
 }

@@ -61,7 +61,7 @@ function sourceState(source) {
 }
 
 function sourceTitle(source) {
-  return sourceState(source).title || source.title;
+  return sourceState(source).title || source.title || source.id;
 }
 
 function sourceUrl(source) {
@@ -72,8 +72,11 @@ function sourceSnippet(source) {
   return sourceState(source).state === "available" ? sourceState(source).snippet || "" : "";
 }
 
-async function directSource(source) {
+async function directSource(source, area) {
   const kind = source.kind || source.sourceType;
+  const row = area.find((item) => item.id === source.id && item.sourceType === kind);
+  if (row) return row;
+  if (source.fromCaseArea) return null;
   if (kind === "case") return api.getCase(source.id);
   if (kind === "material") return api.getMaterial(source.id);
   if (kind !== "knowledge") return null;
@@ -87,18 +90,18 @@ function sourceView(source, current) {
     state: available ? "available" : "restricted",
     title: current.title || source.title,
     snippet: available ? String(current.summary ?? current.excerpt ?? "") : "",
-    url: available ? sourceHref(source) : "",
+    url: available ? current.url || sourceHref(source) : "",
   };
 }
 
-async function refreshSource(source, generation) {
+async function refreshSource(source, generation, area) {
   const key = sourceRefId(source);
   if (sourceChecks.has(key)) return sourceChecks.get(key);
   const task = (async () => {
     if (generation !== sourceGeneration) return;
     sourceStates.set(key, { state: "checking" });
     try {
-      const current = await directSource(source);
+      const current = await directSource(source, area);
       if (generation !== sourceGeneration) return;
       sourceStates.set(key, current ? sourceView(source, current) : { state: "unavailable" });
     } catch {
@@ -114,7 +117,17 @@ async function refreshSource(source, generation) {
 async function refreshSources(generation = sourceGeneration) {
   const refs = sourceRefs();
   if (!refs.length) return;
-  await Promise.all(refs.map((source) => refreshSource(source, generation)));
+  const area = await currentSourceArea();
+  if (generation !== sourceGeneration) return;
+  await Promise.all(refs.map((source) => refreshSource(source, generation, area)));
+}
+
+async function currentSourceArea() {
+  try {
+    return (await api.listSources(props.caseRecord.id, props.versionId || undefined)).entries || [];
+  } catch {
+    return [];
+  }
 }
 
 function refreshSourcePermissions() {
@@ -131,7 +144,9 @@ function refreshOnVisible() {
 function toolTitle(part) {
   if (toolName(part) !== "load_capability") return toolLabel(part);
   const id = part.output?.name || part.output?.skillId || part.input?.id || "";
-  return id ? `已加载 Skill：${skillName(id)}` : "已加载 Skill";
+  const loaded = part.state === "output-available";
+  const label = loaded ? "已加载 Skill" : part.state === "output-error" ? "加载 Skill 失败" : "加载 Skill";
+  return id ? `${label}：${skillName(id)}` : label;
 }
 
 function skillName(skillId) {
@@ -422,9 +437,16 @@ async function retryRun() {
                 class="ai-skill-chip"
                 data-testid="message-selection"
               >正文选区：{{ part.data?.quote }}</p>
+              <p v-else-if="part.type === 'data-source'" class="ai-source-chip" data-testid="message-source">
+                <template v-for="source in sourcesOf(part)" :key="sourceRefId(source)">
+                  <a v-if="sourceState(source).state === 'available' && sourceUrl(source)" :href="sourceUrl(source)" target="_blank" rel="noopener noreferrer">来源：{{ sourceTitle(source) }}</a>
+                  <span v-else>来源：{{ sourceTitle(source) }} · {{ sourceStatusLabel(sourceState(source)) }}</span>
+                </template>
+              </p>
               <AgentResourceTrace
                 v-else-if="part.type.startsWith('tool-read_skill_resource_')"
                 :part="{ ...part }"
+                :duration="toolDurationText(part, messageRun(message))"
               />
               <details
                 v-else-if="part.type.startsWith('tool-')"

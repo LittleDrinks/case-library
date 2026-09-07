@@ -297,14 +297,13 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-thread-rename { display: grid; width: 26px; height: 26px; padding: 0; flex: none; place-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
 .agent-thread-rename:hover { background: var(--brand-soft); color: var(--brand); }
 .ai-message .ai-skill-chip { margin: 4px 0 0; color: var(--brand); font-size: 11px; }
-.assistant-skill-picker { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.assistant-skill-picker { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; }
 .assistant-skill-picker label { flex: none; color: var(--ink-3); font-size: 11px; }
-.assistant-skill-picker select { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-2); font-size: 12px; }
+.assistant-skill-picker select { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-2); font-size: 12px; }
 .assistant-skill-picker select:disabled { color: var(--ink-3); }
 .skill-catalog-state { flex: none; color: var(--ink-3); font-size: 11px; }
 .skill-catalog-state.error { color: var(--red); }
 .skill-catalog-retry { flex: none; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 11px; }
-.assistant-skill-picker { flex: none; }
 .assistant-composer, .comment-composer { position: relative; display: grid; gap: 6px; flex: none; padding: 0 12px 12px; }
 .assistant-composer textarea, .comment-composer textarea { width: 100%; min-height: 72px; padding: 10px 42px 10px 11px; border: 1px solid var(--line); border-radius: 6px; resize: none; }
 .assistant-context-summary { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -325,12 +324,8 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-source-result button { position: static; width: auto; height: auto; padding: 3px 5px; font-size: 11px; }
 .agent-source-error, .agent-source-empty, .agent-selection-context { margin: 3px 0 0; color: var(--ink-3); font-size: 11px; }
 .agent-source-error { color: var(--danger, #b42318); }
-.assistant-skill-picker { display: flex; align-items: center; gap: 6px; padding: 0 12px 8px; color: var(--ink-3); font-size: 11px; }
-.assistant-skill-picker select { min-width: 0; max-width: 68%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink-2); font-size: 11px; }
-.skill-catalog-state { color: var(--ink-3); }
-.skill-catalog-state.error { color: var(--danger, #b42318); }
-.skill-catalog-retry { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--brand); font-size: 11px; }
 .ai-skill-chip { margin: 3px 0; color: var(--brand); font-size: 11px; }
+.ai-source-chip { margin: 3px 0; font-size: 11px; overflow-wrap: anywhere; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }
 .comment-list { display: grid; gap: 10px; margin: 0; padding: 12px; list-style: none; }

@@ -36,6 +36,9 @@ export function toolState(part) {
 }
 
 export function sourcesOf(part) {
+  if (part.type === "data-source" && part.data?.id) {
+    return [{ ...part.data, kind: part.data.sourceType, fromCaseArea: true }];
+  }
   return part.state === "output-available" ? part.output?.sources || [] : [];
 }
 
