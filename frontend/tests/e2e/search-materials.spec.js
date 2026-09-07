@@ -217,13 +217,17 @@ async function assertMaterialAttached(page, title) {
   await expect(page.getByText(title, { exact: true })).toBeVisible();
 }
 
-test("作者从工作台进入带案例上下文的素材掌控台", async ({ page }) => {
-  test.setTimeout(90_000);
+async function enterCatalogFromWorkbench(page) {
   await login(page);
   await clearMaterials(page.context().request);
   await page.reload();
   await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   await page.getByRole("link", { name: "打开素材掌控台" }).click();
+}
+
+test("作者从工作台进入带案例上下文的素材掌控台", async ({ page }) => {
+  test.setTimeout(90_000);
+  await enterCatalogFromWorkbench(page);
   await expect(page).toHaveURL(/#\/materials\?caseId=c-draft-1$/);
   await expect(page.getByRole("heading", { name: "素材掌控台" })).toBeVisible();
   await expect(page.getByRole("group", { name: "来源权威性" })).toBeVisible();
