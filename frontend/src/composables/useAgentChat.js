@@ -177,13 +177,14 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
-async function sendChat(caseId, state, text, generation) {
+async function sendChat(caseId, state, text, parts, generation) {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
     await state.chat.value.sendMessage({
       parts: [
         { type: "text", text },
+        ...parts,
         { type: "data-skill", data: { skillId: CASE_EDIT_SKILL_ID } },
       ],
     });
@@ -312,7 +313,7 @@ function bindLifecycle(state, recover) {
 export function useAgentChat(caseId) {
   const state = createState();
   const at = () => state.generation;
-  const send = (text) => sendChat(caseId, state, text, at());
+  const send = (text, parts = []) => sendChat(caseId, state, text, parts, at());
   const stop = () => stopChat(caseId, state, at());
   const retry = (messageId) => retryChat(caseId, state, at(), messageId);
   const decide = (artifactId, decision) => decideArtifact(caseId, state, at(), artifactId, decision);

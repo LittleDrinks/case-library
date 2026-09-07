@@ -32,6 +32,7 @@ class RunContext:
     prompt: str
     case: dict
     agent: object
+    instructions: str = ""
     buffer: object = None
     supervisor: object = None
     selection: object | None = None
@@ -53,7 +54,7 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
-        "instructions": case_instructions(context.case),
+        "instructions": case_instructions(context.case, context.instructions),
         "user_prompt": context.prompt,
         "deps": context.deps,
         "cancellation_token": context.token,

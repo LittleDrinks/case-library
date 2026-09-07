@@ -2,12 +2,14 @@
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useAgentChat } from "../composables/useAgentChat.js";
+import AgentSourcePicker from "./AgentSourcePicker.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised"]);
+const emit = defineEmits(["case-revised", "case-refreshed"]);
 
 const draft = ref("");
 const {
@@ -20,6 +22,7 @@ const sending = computed(() => ["submitted", "streaming"].includes(status.value)
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
 const canSend = computed(() => Boolean(draft.value.trim() && configured.value && !loading.value && !sending.value));
 const decideError = ref("");
+const selectedSources = ref([]);
 
 const mode = ref("chat");
 const threads = ref([]);
@@ -108,6 +111,17 @@ function sourcesOf(part) {
   return part.state === "output-available" ? part.output?.sources || [] : [];
 }
 
+function contextParts() {
+  const parts = selectedSources.value.map((source) => ({
+    type: "data-source", data: { sourceType: source.sourceType, id: source.id },
+  }));
+  const selection = props.writingContext;
+  if (selection?.quote?.trim()) {
+    parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to, quote: selection.quote } });
+  }
+  return parts;
+}
+
 async function acceptArtifact(artifactId) {
   decideError.value = "";
   try {
@@ -131,7 +145,7 @@ async function submit() {
   if (!canSend.value) return;
   const text = draft.value.trim();
   draft.value = "";
-  await send(text);
+  await send(text, contextParts());
 }
 
 async function stopRun() {
@@ -212,6 +226,12 @@ async function retryRun() {
                 <b>{{ source.title }}</b><span>{{ source.snippet }}</span>
               </p>
             </div>
+            <p
+              v-for="part in toolParts(message).filter((item) => item.type === 'tool-read_source')"
+              :key="part.toolCallId"
+              class="agent-tool-trace"
+              data-testid="agent-source-read"
+            >{{ part.state === "output-available" && part.output?.status === "ok" ? "已读取并固定来源证据" : "来源当前不可读" }}</p>
           </template>
         </template>
         <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>
@@ -242,6 +262,17 @@ async function retryRun() {
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
       <div class="assistant-composer">
+        <AgentSourcePicker
+          :case-id="caseRecord.id"
+          :revision="caseRecord.revision"
+          :selected="selectedSources"
+          :disabled="loading || sending"
+          @update:selected="selectedSources = $event"
+          @case-refreshed="emit('case-refreshed', $event)"
+        />
+        <p v-if="writingContext?.quote" class="agent-selection-context" data-testid="agent-selection-context">
+          正文选区：{{ writingContext.quote }}
+        </p>
         <textarea
           v-model="draft"
           aria-label="向 AI 提问"

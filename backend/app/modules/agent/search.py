@@ -34,6 +34,12 @@ def source_ref(item: dict) -> SourceRef:
     )
 
 
+def _record_hits(deps: ToolDeps, refs: list[SourceRef]) -> None:
+    for ref in refs:
+        if not any(item.identity() == ref.identity() for item in deps.hits):
+            deps.hits.append(ref)
+
+
 def search_platform(deps: ToolDeps, query: str) -> CorpusResult:
     """按当前用户权限检索平台资料，返回服务端构造的固定 SourceRef。"""
     search = CatalogSearch(
@@ -49,5 +55,5 @@ def search_platform(deps: ToolDeps, query: str) -> CorpusResult:
 async def search_corpus(ctx: RunContext[ToolDeps], query: str) -> dict:
     """模型可见的 search_corpus 工具：结果记录到本次 Run 的服务端状态。"""
     result = search_platform(ctx.deps, query)
-    ctx.deps.sources = result.sources
-    return {"sources": [item.model_dump(by_alias=True) for item in result.sources]}
+    _record_hits(ctx.deps, result.sources)
+    return {"sources": [item.model_dump(by_alias=True, exclude_none=True) for item in result.sources]}

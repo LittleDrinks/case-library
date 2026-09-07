@@ -59,6 +59,17 @@ def _create_case(client: TestClient, auth: dict, *paragraphs: str) -> dict:
     return response.json()
 
 
+def _seed_hit(database) -> None:
+    database.cases.insert_one({
+        "id": HIT["id"], "ownerId": "other", "publicationStatus": "public",
+        "workflowStatus": "published", "publishedVersionId": "hit-v1",
+    })
+    database.case_versions.insert_one({
+        "id": "hit-v1", "caseId": HIT["id"], "number": 1,
+        "title": HIT["title"], "document": _document("平台资料正文"),
+    })
+
+
 def _thread_path(case_id: str) -> str:
     return f"{CASES_PATH}/{case_id}/agent/thread"
 
@@ -104,6 +115,7 @@ def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
+    _seed_hit(client.app.state.database)
     with agent.override(model=tracer_model()):
         response = _send(client, auth, case["id"], "请结合平台资料修订第2段：补充评价依据")
     assert response.status_code == 200, response.text
@@ -120,7 +132,8 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
-        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": HIT["summary"],
+        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": "",
+        "version": "v1", "versionId": "hit-v1", "location": "case:c-42@hit-v1",
     }]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)
@@ -137,10 +150,10 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
+        "tool-load_capability", "tool-search_corpus", "tool-read_source", "tool-propose_revision",
     ]
     assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[2]["output"]["artifactId"]
+    assert tool_parts[3]["output"]["artifactId"]
 
 
 def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_case) -> None:

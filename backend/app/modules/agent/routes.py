@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -11,6 +11,9 @@ from starlette.responses import StreamingResponse
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
+from app.modules.agent import prosemirror
+from app.modules.agent.case_area import catalog_instructions, retained_sources, selection_from_parts
+from app.modules.agent.source_reader import source_readable
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import (
     AgentRun,
@@ -55,6 +58,8 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+    selected: list[dict] = field(default_factory=list)
+    selections: list[dict] = field(default_factory=list)
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -74,6 +79,15 @@ def _repository(database) -> AgentRepository:
     return AgentRepository(database)
 
 
+def _visible_snapshot(database, snapshot: AgentSnapshot, user: dict) -> AgentSnapshot:
+    for artifact in snapshot.artifacts:
+        artifact.sources = [
+            ref for ref in artifact.sources
+            if source_readable(database, user, snapshot.case_id, ref)
+        ]
+    return snapshot
+
+
 @router.get("/{case_id}/agent/thread")
 def show_thread(
     case_id: str,
@@ -82,7 +96,8 @@ def show_thread(
 ) -> AgentSnapshot:
     _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    return repository.snapshot(repository.default_thread(case_id, user["id"]))
+    snapshot = repository.snapshot(repository.default_thread(case_id, user["id"]))
+    return _visible_snapshot(database, snapshot, user)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -164,6 +179,25 @@ def _run_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
         parts=parts, metadata=metadata, prompt=prompt, skills=skills,
         history=load_history(repository, thread), client_request_id=client_request_id,
     )
+
+
+def _validate_plan(database, case: dict, plan: RunPlan) -> RunPlan:
+    plan.selected = selection_from_parts(database, case["id"], plan.parts)
+    plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    return plan
+
+
+def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
+    rows = prosemirror.paragraphs(document)
+    return [_selection_part(rows, part.get("data")) for part in parts if part.get("type") == "data-selection"]
+
+
+def _selection_part(rows: list[dict], data: object) -> dict:
+    quote = data.get("quote") if isinstance(data, dict) else None
+    matches = [row["paragraphIndex"] for row in rows if row["quote"] == quote]
+    if not isinstance(quote, str) or not quote or len(matches) != 1:
+        raise HTTPException(status_code=422, detail="正文选区与当前案例不匹配")
+    return {"paragraphIndex": matches[0], "quote": quote}
 
 
 def _request_size(request: Request) -> None:
@@ -255,7 +289,8 @@ def show_named_thread(
 ) -> AgentSnapshot:
     _editable_case(_author_case(database, case_id, user))
     repository = _repository(database)
-    return repository.snapshot(_thread(repository, thread_id, case_id, user["id"]))
+    snapshot = repository.snapshot(_thread(repository, thread_id, case_id, user["id"]))
+    return _visible_snapshot(database, snapshot, user)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -297,7 +332,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
     thread = _thread(repository, thread_id, case_id, user["id"])
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    plan = _run_plan(repository, thread, adapter)
+    plan = _validate_plan(database, case, _run_plan(repository, thread, adapter))
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
@@ -310,11 +345,16 @@ async def _send_message(case_id, thread_id, request, database, settings, user):
 
 def _run_context(request, database, settings, user, case, repository, thread, adapter,
                  plan, run, selection, lease, worker_id):
+    refs = retained_sources(database, case["id"])
+    instructions = catalog_instructions(
+        case.get("title") or "未命名案例", refs, plan.selected, plan.selections
+    )
     deps = ToolDeps(
         database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
         user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state,
-        secret_path=settings.app_secret_file,
+        secret_path=settings.app_secret_file, store=request.app.state.blob_store,
+        sources=refs, selected=plan.selected, selections=plan.selections,
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, case,
@@ -322,6 +362,7 @@ def _run_context(request, database, settings, user, case, repository, thread, ad
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
         deps=deps, capabilities=[case_edit_skill()] if plan.skills else [],
+        instructions=instructions,
     )
 
 

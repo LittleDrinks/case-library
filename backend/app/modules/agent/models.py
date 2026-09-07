@@ -20,6 +20,7 @@ ThreadEventType = Literal[
 ]
 ArtifactStatus = Literal["pending", "accepted", "rejected"]
 ArtifactDecision = Literal["accepted", "rejected"]
+SourceKind = Literal["case", "knowledge", "material", "attachment"]
 
 
 class AgentThread(BaseModel):
@@ -78,10 +79,16 @@ class SourceRef(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["case", "knowledge", "material"]
+    kind: SourceKind
     id: str
     title: str
     snippet: str = ""
+    version: str | None = None
+    version_id: str | None = Field(default=None, alias="versionId")
+    location: str | None = None
+
+    def identity(self) -> tuple[str, str, str]:
+        return (self.kind, self.id, self.version_id or self.version or "")
 
 
 class ArtifactTarget(BaseModel):

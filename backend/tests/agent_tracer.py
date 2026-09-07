@@ -13,6 +13,7 @@ from app.modules.agent.resources import CASE_EDIT_SKILL
 
 SKILL_ID = CASE_EDIT_SKILL.id
 SEARCH_QUERY = "科学家精神"
+SEARCH_SOURCE_ID = "c-42"
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
 
@@ -38,12 +39,16 @@ def _paragraph_index(messages) -> int:
 
 
 def tracer_response(messages, _info=None) -> ModelResponse:
-    """按已发生的工具调用推进：加载 Skill → 检索 → 提议 → 结束。"""
+    """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议 → 结束。"""
     called = _tool_calls(messages)
     if "load_capability" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": SKILL_ID})])
     if "search_corpus" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
+    if "read_source" not in called:
+        return ModelResponse(parts=[ToolCallPart(tool_name="read_source", args={
+            "source_type": "case", "source_id": SEARCH_SOURCE_ID,
+        })])
     if "propose_revision" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="propose_revision", args={
             "paragraph_index": _paragraph_index(messages),

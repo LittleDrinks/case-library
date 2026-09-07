@@ -17,6 +17,7 @@ from app.modules.agent.models import (
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
 from app.modules.agent.repository import AgentRepository, transaction
+from app.modules.agent.source_reader import revalidate_sources
 from app.modules.cases.service import CaseError, case_view
 from app.modules.cases.snapshots import record_snapshot
 
@@ -67,7 +68,7 @@ def _artifact_document(
 
 def _insert_artifact(database: Database, artifact: AgentArtifact, session) -> None:
     database.agent_artifacts.insert_one(
-        artifact.model_dump(by_alias=True, mode="python"), session=session
+        artifact.model_dump(by_alias=True, mode="python", exclude_none=True), session=session
     )
     _append_event(database, artifact.thread_id, "artifact.created", artifact.run_id,
                   {"artifactId": artifact.id}, session)
@@ -106,6 +107,8 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
         return artifact, case
     _verify_writer(case, user)
     if decision == "accepted":
+        if not revalidate_sources(database, user, case_id, artifact.sources):
+            raise CaseError(409, "修订依据当前不可读，候选已过期")
         case = _apply_revision(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
 
