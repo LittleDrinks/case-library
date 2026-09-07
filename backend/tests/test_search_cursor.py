@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
+from app.modules.search.cursor import principal_key
 from app.modules.search.meilisearch import CatalogMetadata, CatalogPage
 
 
@@ -149,6 +150,37 @@ def test_cursor_is_bound_to_the_catalog_generation(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_principal_key_separates_verification_states() -> None:
+    user = {"role": "user", "id": "u-1", "campus_verified": False}
+    unverified = principal_key(user)
+    user["campus_verified"] = True
+    assert principal_key(user) != unverified
+    assert principal_key({"role": "admin", "id": "u-1"}).endswith(":verified")
+    assert principal_key(None) == "anonymous"
+
+
+def test_cursor_binds_the_principal_verification_state(client: TestClient) -> None:
+    _catalog(client, 11)
+    _login(client, "user", "user123")
+    cursor = _get(client, q="素材", kind="material", pageSize=10)["nextCursor"]
+    _set_campus_verified(client, False)
+    flipped = client.get(
+        "/api/search",
+        params={"q": "素材", "kind": "material", "pageSize": 10, "cursor": cursor},
+    )
+    assert flipped.status_code == 422
+    _set_campus_verified(client, True)
+    assert _get(client, q="素材", kind="material", pageSize=10, cursor=cursor)[
+        "page"
+    ] == 2
+
+
+def _set_campus_verified(client: TestClient, verified: bool) -> None:
+    client.app.state.database.users.update_one(
+        {"username": "user"}, {"$set": {"campus_verified": verified}}
+    )
 
 
 def _login(client: TestClient, username: str, password: str) -> None:

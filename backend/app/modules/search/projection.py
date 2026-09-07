@@ -68,7 +68,7 @@ def _case_fields(version: dict, publication: dict) -> dict:
         "summary": version.get("summary", ""),
         "publishedAt": publication.get("publishedAt", ""),
         **{field: metadata.get(field) for field in CASE_FIELDS},
-        "tags": metadata.get("theoryPoints", []),
+        "tagIds": metadata.get("tagIds", []),
         "createdBy": publication["ownerId"],
     }
 
@@ -94,7 +94,6 @@ def _case_searchable(fields: dict, version: dict) -> str:
         fields["summary"],
         fields["course"],
         fields["author"],
-        fields["tags"],
         _document_text(version["document"]),
         _attachment_names(version),
     )

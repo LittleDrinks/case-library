@@ -30,6 +30,7 @@ def authenticate(database: Database, username: str, password: str) -> dict | Non
 def user_view(user: dict) -> dict:
     view = {key: user[key] for key in ("id", "username", "name", "role")}
     view["mustChangePassword"] = user["must_change_password"]
+    view["campusVerified"] = bool(user.get("campus_verified"))
     return view
 
 

@@ -13,6 +13,7 @@ from app.modules.search.meilisearch import (
     Principal,
     SearchUnavailable,
 )
+from app.modules.search.models import TagLeaf
 
 
 class FakeReader:
@@ -347,7 +348,16 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
     ("principal", "expected"),
     [
         (Principal(None, "anonymous"), 'docClass = "case-public"'),
-        (Principal("u-1", "user"), 'docClass = "case-private"'),
+        (
+            Principal("u-1", "user"),
+            '(docClass = "case-public" AND createdBy != "u-1" OR '
+            'docClass = "case-private" AND createdBy = "u-1")',
+        ),
+        (
+            Principal("u-1", "user", verified=True),
+            '(docClass = "case-private" AND createdBy = "u-1" OR '
+            'docClass = "case-campus" AND createdBy != "u-1")',
+        ),
         (Principal("u-admin", "admin"), 'docClass = "case-private"'),
     ],
 )
@@ -358,5 +368,43 @@ def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
     MeilisearchCatalog(client).search(request)
 
     case_filter = client.batches[0][0]["filter"]
-    assert expected in case_filter
+    assert case_filter == f'kind = "case" AND {expected}'
     assert ("createdBy" in case_filter) is (principal.role == "user")
+
+
+def test_count_plan_applies_business_and_tag_conditions() -> None:
+    from app.modules.search.meilisearch import _full_count_plan
+
+    request = _anonymous_request(
+        filters={"typeName": ("人物传记类",)},
+        tag_condition=TagLeaf(tagId="tag-1"),
+        include_metadata=True,
+    )
+    full = _full_count_plan(request, "idx")
+    assert full.payload["facets"] == ["kind"]
+    assert 'typeName IN ["人物传记类"]' in full.payload["filter"]
+    assert 'tagIds = "tag-1"' in full.payload["filter"]
+    assert 'kind = "material"' not in full.payload["filter"]
+    assert "knowledge" not in full.payload["filter"]
+
+
+def test_restricted_count_plan_respects_the_tag_condition() -> None:
+    from app.modules.search.meilisearch import _restricted_count_plan
+
+    request = _anonymous_request(
+        tag_condition=TagLeaf(tagId="tag-1"), include_metadata=True
+    )
+    restricted = _restricted_count_plan(request, "idx")
+    assert restricted.payload["filter"] == 'catalogId = "__no_matching_document__"'
+
+
+def test_kind_counts_follow_business_filters_per_kind() -> None:
+    from app.modules.search.meilisearch import _full_count_plan
+
+    request = _anonymous_request(
+        filters={"authority": ("original",)}, include_metadata=True
+    )
+    full = _full_count_plan(request, "idx")
+    assert 'kind = "case"' not in full.payload["filter"]
+    assert 'authority IN ["original"]' in full.payload["filter"]
+    assert 'docClass = "material-full"' in full.payload["filter"]
