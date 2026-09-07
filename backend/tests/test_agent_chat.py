@@ -345,7 +345,7 @@ def test_agent_route_rechecks_case_editability(client: TestClient) -> None:
         {"id": "c-draft-1"}, {"$set": {"workflowStatus": "published"}}
     )
 
-    assert client.get(THREAD_PATH).status_code == 409
+    assert client.get(THREAD_PATH).status_code == 200
     response = client.post(
         f"{THREAD_PATH}/{thread_id}/stream",
         headers=_csrf(auth),
@@ -364,7 +364,8 @@ def test_agent_route_rejects_cross_case_thread_access(client: TestClient) -> Non
         json=_body("跨案例线程"),
     )
 
-    assert response.status_code == 403
+    # 读者上下文开放后，他案 Thread 标识按不可枚举语义拒绝。
+    assert response.status_code == 404
 
 
 def test_legacy_generic_chat_route_is_removed(client: TestClient) -> None:

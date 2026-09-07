@@ -136,19 +136,25 @@ def _event_chunks(repository: AgentRepository, event: AgentThreadEvent) -> list[
 
 
 async def events_stream(
-    repository: AgentRepository, thread: AgentThread, after_seq: int
+    repository: AgentRepository, thread: AgentThread, after_seq: int, access_check=None
 ):
     """按 Thread 游标重放增量，无活动 Run 且无未读事件后以 [DONE] 收尾。"""
     cursor = after_seq
     while True:
+        if access_check and not access_check():
+            return
         for event in repository.events_after(thread.id, cursor):
+            if access_check and not access_check():
+                return
             cursor = event.event_seq
             for chunk in _event_chunks(repository, event):
                 yield sse_data(chunk)
-        current = repository.thread_by_id(thread.id)
-        if current is None or (
-            current.active_run_id is None and cursor >= current.event_seq
-        ):
+        if _stream_finished(repository, thread, cursor):
             yield sse_data("[DONE]")
             return
         await asyncio.sleep(STREAM_POLL_SECONDS)
+
+
+def _stream_finished(repository: AgentRepository, thread: AgentThread, cursor: int) -> bool:
+    current = repository.thread_by_id(thread.id)
+    return current is None or current.active_run_id is None and cursor >= current.event_seq
