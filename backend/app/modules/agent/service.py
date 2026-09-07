@@ -170,7 +170,6 @@ async def _drain(context: RunContext) -> None:
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
     except Exception:
-        import traceback; traceback.print_exc()
         context.failed = True
 
 
