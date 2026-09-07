@@ -311,11 +311,11 @@ async function prepareNonemptySummary(page, playwright) {
   const draft = await createCase(page);
   await openChat(page, draft.id);
   await selectPublishedSkill(page);
-  await sendSummaryRequest(page, source.title);
+  await sendSourceRequest(page, source.title);
   await expect(page.locator(".agent-chat-panel"))
     .toHaveAttribute("data-run-status", "completed", { timeout: 60_000 });
   await expandSearchTool(page);
-  await expect(summarySourceItem(page, source.id).locator("span")).toHaveText(source.summary);
+  await expect(sourceItem(page, source.id).locator("span")).toHaveText(source.summary);
   return { source, draft };
 }
 
@@ -336,7 +336,7 @@ test("来源的非空摘要在下线后撤回，重开不恢复旧内容", async
   const { source, draft } = await prepareNonemptySummary(page, playwright);
   try {
     await hideCase(playwright, source.id);
-    await assertFocusWithdrawsSummary(page, source.id);
+    await assertFocusWithdrawsCaseSource(page, source.id);
     await expect(page.locator(".agent-chat-panel")).not.toContainText(source.summary);
     await assertReopenMasksRun(page, draft.id, source.id);
     await expect(page.locator(".agent-chat-panel")).not.toContainText(source.summary);
