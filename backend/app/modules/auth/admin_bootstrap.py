@@ -36,6 +36,7 @@ def _admin_record(username: str, name: str, password: str) -> dict:
         "role": "admin",
         "status": "active",
         "must_change_password": False,
+        "campus_verified": True,
         "token_version": 0,
         "createdAt": now,
         "updatedAt": now,

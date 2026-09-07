@@ -5,13 +5,13 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 from fastapi import UploadFile
-from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.attachments.models import AccessLevel
 from app.modules.attachments.storage import BlobStore
 from app.modules.attachments.text import extract_search_text
-from app.modules.cases.service import CaseError, RevisionConflict
+from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.service import CaseError, advance_revision, run_transaction
 
 MAX_ATTACHMENT_BYTES = 128 * 1024 * 1024
 SNAPSHOT_FIELDS = (
@@ -119,7 +119,7 @@ def _search_text(upload: UploadFile) -> str:
 def _persist_attachment(database, store, attachment, upload, user, revision) -> None:
     _put(store, attachment, upload)
     try:
-        _run_transaction(
+        run_transaction(
             database,
             lambda session: _insert(database, attachment, user, revision, session),
         )
@@ -148,42 +148,9 @@ def _remove_safely(store: BlobStore, blob_id: str) -> None:
         pass
 
 
-def _run_transaction(database: Database, callback):
-    with database.client.start_session() as session:
-        return session.with_transaction(callback)
-
-
 def _insert(database, attachment: dict, user: dict, revision: int, session) -> None:
-    _advance_revision(database, attachment["caseId"], user, revision, session)
+    advance_revision(database, attachment["caseId"], user, revision, session)
     database.attachments.insert_one(attachment, session=session)
-
-
-def _advance_revision(
-    database, case_id: str, user: dict, revision: int, session
-) -> None:
-    query = {
-        "id": case_id,
-        "ownerId": user["id"],
-        "workflowStatus": "draft",
-        "revision": revision,
-    }
-    updated = database.cases.find_one_and_update(
-        query,
-        {"$set": {"updatedAt": _now()}, "$inc": {"revision": 1}},
-        session=session,
-        return_document=ReturnDocument.AFTER,
-    )
-    if updated:
-        return
-    _raise_mutation_conflict(database, case_id, user, session)
-
-
-def _raise_mutation_conflict(database, case_id: str, user: dict, session) -> None:
-    case = database.cases.find_one({"id": case_id}, session=session)
-    if not case:
-        raise AttachmentError(404, "案例不存在")
-    _require_author_draft(case, user)
-    raise RevisionConflict(case["revision"])
 
 
 def _attachment_record(
@@ -219,26 +186,24 @@ def _is_internal(case: dict, user: dict | None) -> bool:
     return bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
 
 
+def _internal_reader(case: dict, user: dict | None) -> bool:
+    return _is_internal(case, user) and case["publicationStatus"] != "public"
+
+
 def _attachment_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if version_id:
-        return _version_rows(database, case, user, version_id)
-    if _is_internal(case, user):
+    internal = _internal_reader(case, user)
+    if not version_id and internal:
         return list(
             database.attachments.find({"caseId": case["id"]}).sort("createdAt", 1)
         )
-    return _version_rows(database, case, user, case.get("publishedVersionId"))
+    return _version_rows(database, case, version_id or case.get("publishedVersionId"), internal)
 
 
-def _version_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id or (
-        version_id != case.get("publishedVersionId") and not _is_internal(case, user)
-    ):
+def _version_rows(database, case: dict, version_id: str | None, internal: bool):
+    if not version_id:
         raise AttachmentError(404, "附件版本不存在")
-    version = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
-    version = version or database.case_snapshots.find_one(
-        {"id": version_id, "caseId": case["id"]}
-    )
-    if not version:
+    version = find_version(database, case, version_id, internal)
+    if not version or not version_readable(database, case, version_id, version, internal):
         raise AttachmentError(404, "附件版本不存在")
     return version.get("attachments", [])
 
@@ -279,7 +244,7 @@ def delete_attachment(
     revision: int,
 ) -> None:
     _require_author_draft(_case(database, case_id), user)
-    attachment, remove_blob = _run_transaction(
+    attachment, remove_blob = run_transaction(
         database,
         lambda session: _delete(
             database, case_id, attachment_id, user, revision, session
@@ -299,7 +264,7 @@ def _delete(
     if not attachment:
         raise AttachmentError(404, "附件不存在")
     require_uncited(database, case_id, "attachment", attachment_id, session)
-    _advance_revision(database, case_id, user, revision, session)
+    advance_revision(database, case_id, user, revision, session)
     database.attachments.delete_one({"_id": attachment["_id"]}, session=session)
     query = {"attachments.blobId": attachment["blobId"]}
     referenced = database.case_versions.find_one(query, {"_id": 1}, session=session)

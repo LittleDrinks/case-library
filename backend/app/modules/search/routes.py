@@ -12,7 +12,7 @@ from app.core.dependencies import (
     get_settings,
 )
 from app.modules.auth.dependencies import optional_user
-from app.modules.search.models import SearchQuery
+from app.modules.search.models import SearchQuery, SearchRequest, SearchResponse
 from app.modules.search.service import CatalogSearch, search_catalog
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -23,7 +23,16 @@ SettingsDependency = Annotated[Settings, Depends(get_settings)]
 UserDependency = Annotated[dict | None, Depends(optional_user)]
 
 
-@router.get("")
+def _respond(query, database, catalog, catalog_state, settings, user):
+    return search_catalog(
+        database,
+        catalog,
+        catalog_state,
+        CatalogSearch(query, user, settings.app_secret_file),
+    )
+
+
+@router.get("", response_model=SearchResponse, response_model_exclude_unset=True)
 def search(
     query: Annotated[SearchQuery, Query()],
     database: DatabaseDependency,
@@ -32,10 +41,16 @@ def search(
     settings: SettingsDependency,
     user: UserDependency,
 ):
-    catalog_search = CatalogSearch(query, user, settings.app_secret_file)
-    return search_catalog(
-        database,
-        catalog,
-        catalog_state,
-        catalog_search,
-    )
+    return _respond(query, database, catalog, catalog_state, settings, user)
+
+
+@router.post("", response_model=SearchResponse, response_model_exclude_unset=True)
+def search_documents(
+    body: SearchRequest,
+    database: DatabaseDependency,
+    catalog: CatalogDependency,
+    catalog_state: CatalogStateDependency,
+    settings: SettingsDependency,
+    user: UserDependency,
+):
+    return _respond(body, database, catalog, catalog_state, settings, user)

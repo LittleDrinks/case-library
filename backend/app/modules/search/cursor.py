@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.modules.cases.service import CaseError
+from app.modules.materials.service import campus_verified
 
 KEY_CONTEXT = b"case-library:search-cursor:v1"
 
@@ -19,7 +20,11 @@ class CursorState:
 
 
 def principal_key(user: dict | None) -> str:
-    return "anonymous" if not user else f"{user['role']}:{user['id']}"
+    """游标作用域绑定角色、身份与验证态：验证状态变化即旧游标失效。"""
+    if not user:
+        return "anonymous"
+    verified = "verified" if campus_verified(user) else "basic"
+    return f"{user['role']}:{user['id']}:{verified}"
 
 
 def _scope_filters(filters: dict) -> dict:

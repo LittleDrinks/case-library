@@ -23,21 +23,28 @@ class PublishedCaseReader:
         self.database = database
 
     def get(self, case: dict) -> dict:
+        version_id = case.get("publishedVersionId")
         version = self.database.case_versions.find_one(
-            {"id": case.get("publishedVersionId"), "caseId": case["id"]}
+            {"id": version_id, "caseId": case["id"]}
         )
-        if not version or case.get("publicationStatus") != "public":
+        if not version_readable(self.database, case, version_id, version, False):
             raise CaseError(404, "案例不存在")
         return _published_view(case, version)
 
     def read_public_version(self, case: dict, version_id: str) -> dict:
         """公共阅读固定版本：即使 admin/owner 也按读者权限判定。"""
-        version = self.database.case_versions.find_one(
-            {"id": version_id, "caseId": case["id"]}
-        )
+        version = find_version(self.database, case, version_id, False)
         if not version_readable(self.database, case, version_id, version, False):
             raise CaseError(404, "案例版本不存在")
         return _published_view(case, version)
+
+
+def find_version(database: Database, case: dict, version_id: str, internal: bool) -> dict | None:
+    query = {"id": version_id, "caseId": case["id"]}
+    version = database.case_versions.find_one(query)
+    if version or not internal:
+        return version
+    return database.case_snapshots.find_one(query)
 
 
 def version_readable(

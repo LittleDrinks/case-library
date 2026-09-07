@@ -59,12 +59,16 @@ def cite_document(client: TestClient, auth: dict, marks: list[dict]) -> object:
     )
 
 
-def mount_material(client: TestClient, auth: dict) -> object:
-    return client.post(
+def mount_material(
+    client: TestClient, auth: dict, material_id: str = "m-kcsz"
+) -> dict:
+    response = client.post(
         "/api/cases/c-draft-1/materials",
         headers=headers(auth),
-        json={"materialId": "m-kcsz", "revision": revision(client)},
+        json={"materialId": material_id, "revision": revision(client)},
     )
+    assert response.status_code == 201
+    return response.json()
 
 
 def cited_marks(source_id: str, attachment_id: str) -> list[dict]:
@@ -82,17 +86,21 @@ def delete_source(client: TestClient, auth: dict, path: str) -> object:
 
 
 def submit_case(client: TestClient, auth: dict) -> str:
+    return _submit_version(client, auth, "c-draft-1")["version"]["id"]
+
+
+def _submit_version(client: TestClient, auth: dict, case_id: str) -> dict:
     response = client.post(
-        "/api/cases/c-draft-1/lifecycle",
+        f"/api/cases/{case_id}/lifecycle",
         headers=headers(auth),
-        json={"command": "submit", "revision": revision(client)},
+        json={"command": "submit", "revision": revision(client, case_id)},
     )
-    assert response.status_code == 200
-    return response.json()["version"]["id"]
+    assert response.status_code == 200, response.json()
+    return response.json()
 
 
 def ordered_source_fixture(client: TestClient, auth: dict) -> tuple[dict, dict, dict]:
-    assert mount_material(client, auth).status_code == 201
+    mount_material(client, auth)
     source = mount_source(client, auth, "c-02").json()
     cited, spare = upload_attachment(client, auth), upload_attachment(client, auth)
     marks = [
@@ -128,16 +136,78 @@ def _published_source(client: TestClient, owner: dict, title: str) -> str:
 
 
 def _submit_and_approve(client: TestClient, owner: dict, case_id: str) -> str:
-    submitted = client.post(
-        f"/api/cases/{case_id}/lifecycle",
-        headers=headers(owner),
-        json={"command": "submit", "revision": revision(client, case_id)},
-    )
-    assert submitted.status_code == 200, submitted.json()
-    version_id = submitted.json()["version"]["id"]
+    submitted = _submit_version(client, owner, case_id)
+    version_id = submitted["version"]["id"]
     _admin_command(client, case_id, "start")
     _admin_command(client, case_id, "approve", submittedVersionId=version_id)
     return version_id
+
+
+def _version_requests(client: TestClient, case_id: str, version_id: str) -> dict:
+    params = {"versionId": version_id}
+    return {
+        "body": client.get(f"/api/cases/{case_id}/public", params=params),
+        "attachments": client.get(f"/api/cases/{case_id}/attachments", params=params),
+        "materials": client.get(f"/api/cases/{case_id}/materials", params=params),
+        "sources": client.get(f"/api/cases/{case_id}/sources", params=params),
+    }
+
+
+def _assert_version_rejected(client: TestClient, case_id: str, version_id: str) -> None:
+    assert all(response.status_code == 404 for response in _version_requests(
+        client, case_id, version_id
+    ).values())
+
+
+def _publish_first_version(client: TestClient, auth: dict) -> tuple[dict, dict, dict]:
+    saved = client.patch(
+        "/api/cases/c-draft-1", headers=headers(auth),
+        json={"title": "V1正文", "revision": revision(client)},
+    )
+    assert saved.status_code == 200
+    attachment = upload_attachment(client, auth)
+    material = mount_material(client, auth, "m-kcsz")
+    version = _submit_version(client, auth, "c-draft-1")["version"]
+    _admin_command(client, "c-draft-1", "start")
+    _admin_command(client, "c-draft-1", "approve", submittedVersionId=version["id"])
+    return version, attachment, material
+
+
+def _publish_second_version(client: TestClient, auth: dict) -> dict:
+    _admin_command(client, "c-draft-1", "hide")
+    _admin_command(client, "c-draft-1", "reopen")
+    saved = client.patch(
+        "/api/cases/c-draft-1", headers=headers(auth),
+        json={"title": "V2正文", "revision": revision(client)},
+    )
+    assert saved.status_code == 200
+    version = _submit_version(client, auth, "c-draft-1")["version"]
+    _admin_command(client, "c-draft-1", "start")
+    _admin_command(client, "c-draft-1", "approve", submittedVersionId=version["id"])
+    return version
+
+
+def _assert_published_source_access(client: TestClient, attachment_id: str) -> None:
+    reader = other_client(client)
+    entries = reader.get("/api/cases/c-draft-1/sources").json()["entries"]
+    by_type = {entry["sourceType"]: entry for entry in entries}
+    assert by_type["case"]["contentAvailable"] is False
+    assert by_type["attachment"]["contentAvailable"] is False
+    admin, admin_auth = _admin_session(client)
+    entries = admin.get(
+        "/api/cases/c-draft-1/sources", headers=headers(admin_auth)
+    ).json()["entries"]
+    assert next(row for row in entries if row["sourceType"] == "case")["contentAvailable"] is False
+    assert next(row for row in entries if row["sourceType"] == "attachment")["contentAvailable"] is True
+    denied = reader.get(f"/api/cases/c-draft-1/attachments/{attachment_id}/content")
+    assert denied.status_code == 403
+
+
+def _assert_public_snapshot_rejected(client: TestClient, auth: dict, snapshot: str) -> None:
+    _submit_and_approve(client, auth, "c-draft-1")
+    admin, _ = _admin_session(client)
+    for public_reader in (other_client(client), client, admin):
+        _assert_version_rejected(public_reader, "c-draft-1", snapshot)
 
 
 def test_mount_pins_the_current_published_version(client: TestClient) -> None:
@@ -203,7 +273,6 @@ def test_cited_sources_cannot_be_removed(client: TestClient) -> None:
     source = mount_source(client, auth, "c-02").json()
     material = mount_material(client, auth)
     attachment = upload_attachment(client, auth)
-    assert material.status_code == 201
     assert cite_document(client, auth, cited_marks(source["id"], attachment["id"])).status_code == 200
     paths = [
         f"/api/cases/c-draft-1/case-sources/{source['id']}",
@@ -283,15 +352,24 @@ def test_published_sources_visible_but_unauthorized_links_locked(
     mount_source(client, auth, "c-02")
     private = upload_attachment(client, auth, "private")
     _submit_and_approve(client, auth, "c-draft-1")
+    _admin_command(client, "c-02", "hide")
+    _assert_published_source_access(client, private["id"])
+
+
+def test_public_history_reads_v1_across_all_source_endpoints(client: TestClient) -> None:
+    auth = login(client)
+    v1, attachment, material = _publish_first_version(client, auth)
+    v2 = _publish_second_version(client, auth)
     reader = other_client(client)
-    entries = reader.get("/api/cases/c-draft-1/sources").json()["entries"]
-    by_type = {entry["sourceType"]: entry for entry in entries}
-    assert by_type["case"]["contentAvailable"] is True
-    assert by_type["attachment"]["contentAvailable"] is False
-    denied = reader.get(
-        f"/api/cases/c-draft-1/attachments/{private['id']}/content"
-    )
-    assert denied.status_code == 403
+    responses = _version_requests(reader, "c-draft-1", v1["id"])
+    assert responses["body"].json()["title"] == "V1正文"
+    assert responses["attachments"].json()[0]["id"] == attachment["id"]
+    assert responses["materials"].json()[0]["id"] == material["id"]
+    entries = responses["sources"].json()["entries"]
+    assert [row["number"] for row in entries] == [1, 2]
+    assert {row["sourceType"] for row in entries} == {"attachment", "material"}
+    assert reader.get("/api/cases/c-draft-1/public").json()["title"] == "V2正文"
+    assert v2["id"] != v1["id"]
 
 
 def test_source_version_does_not_drift_on_republish(client: TestClient) -> None:
@@ -356,6 +434,7 @@ def test_public_pinned_read_rejects_unapproved_and_offline(client: TestClient) -
     assert reader.get(
         "/api/cases/c-draft-1/public", params={"versionId": snap}
     ).status_code == 404
+    _assert_public_snapshot_rejected(client, auth, snap)
 
 
 def test_mount_defaults_to_newest_published_version_after_republish(

@@ -17,7 +17,7 @@ from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
     case_metadata,
-    case_view,
+    internal_case_view,
 )
 
 
@@ -95,7 +95,7 @@ def create_snapshot(database: Database, case: dict, user: dict, session) -> dict
     case_sources = snapshot_case_sources(database, case["id"], session)
     snapshot = _record(locked, user, attachments, materials, case_sources, "manual")
     database.case_snapshots.insert_one(snapshot, session=session)
-    return {"case": case_view(locked), "snapshot": _clean(snapshot)}
+    return {"case": internal_case_view(locked, user), "snapshot": _clean(snapshot)}
 
 
 def record_snapshot(database: Database, case: dict, user: dict, kind: str, session) -> dict:
@@ -169,7 +169,7 @@ def rollback_snapshot(
     _restore_attachments(database, case["id"], target, session)
     restore_materials(database, case["id"], target, session)
     restore_case_sources(database, case["id"], target, session)
-    return {"case": case_view(restored), "snapshot": _clean(before)}
+    return {"case": internal_case_view(restored, user), "snapshot": _clean(before)}
 
 
 def list_snapshots(database: Database, case_id: str) -> list[dict]:

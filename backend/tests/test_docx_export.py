@@ -12,6 +12,8 @@ from docx import Document as open_docx
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.modules.documents import build_case_docx
+
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
