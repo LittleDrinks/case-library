@@ -1,4 +1,4 @@
-"""最小单段修订 tracer：生产 Agent + Skill 按需加载 + Artifact 领域路径。"""
+"""最小单段修订 tracer：生产 Agent + 领域工具 + Artifact 领域路径。"""
 
 from __future__ import annotations
 
@@ -6,12 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
-from app.modules.agent.resources import CASE_EDIT_SKILL
-from tests.agent_tracer import REPLACEMENT, SKILL_ID, tracer_model
+from tests.agent_tracer import REPLACEMENT, tracer_model
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
-SKILL_BODY_MARK = "单段修订工作流 v2.1"
 
 
 class StubCatalog:
@@ -63,7 +61,7 @@ def _thread_path(case_id: str) -> str:
     return f"{CASES_PATH}/{case_id}/agent/thread"
 
 
-def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
+def _message_parts(text: str, skill_id: str | None = None) -> list[dict]:
     parts = [{"type": "text", "text": text}]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
@@ -71,7 +69,7 @@ def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
 
 
 def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
-          skill_id: str | None = SKILL_ID):
+          skill_id: str | None = None):
     with agent.override(model=model or tracer_model()):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
@@ -137,41 +135,18 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
+        "tool-search_corpus", "tool-propose_revision",
     ]
-    assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[2]["output"]["artifactId"]
+    assert tool_parts[0]["output"]["sources"][0]["id"] == HIT["id"]
+    assert tool_parts[1]["output"]["artifactId"]
 
 
-def test_run_records_resource_id_version_and_hash(client: TestClient, tracer_case) -> None:
+def test_run_records_resource_hash_without_skill(client: TestClient, tracer_case) -> None:
     database = client.app.state.database
     run = database.agent_runs.find_one({}, {"_id": 0})
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert set(kinds) == {"system-prompt", "task-prompt", "skill"}
-    assert kinds["skill"]["id"] == SKILL_ID
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert set(kinds) == {"system-prompt", "task-prompt"}
     assert kinds["system-prompt"]["contentHash"]
-
-
-def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
-    calls: list = []
-
-    def recorder(messages, info):
-        calls.append((messages, info.instructions or ""))
-
-    auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder))
-    assert response.status_code == 200, response.text
-    first_messages, first_instructions = calls[0]
-    flattened = [str(part) for message in first_messages for part in message.parts]
-    assert not any(SKILL_BODY_MARK in text for text in flattened)
-    assert "load_capability" in first_instructions
-    later_messages = [str(part) for message in calls[-1][0] for part in message.parts]
-    assert any(SKILL_BODY_MARK in text for text in later_messages)
-    assert all(SKILL_BODY_MARK not in instructions for _messages, instructions in calls)
-    assert len(calls) >= 3
 
 
 def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str):
@@ -272,13 +247,7 @@ def test_snapshot_restores_artifact_and_decision(client: TestClient, tracer_case
     assert snapshot["artifacts"][0]["status"] == "accepted"
     assert snapshot["latestRun"]["status"] == "completed"
     resources = {row["kind"] for row in snapshot["latestRun"]["resources"]}
-    assert resources == {"system-prompt", "task-prompt", "skill"}
-
-
-def test_skill_manifest_matches_registered_resource() -> None:
-    text = CASE_EDIT_SKILL.read()
-    assert text.startswith("---\nid: case-edit-skill\nversion: 2.1\n")
-    assert SKILL_BODY_MARK in text
+    assert resources == {"system-prompt", "task-prompt"}
 
 
 def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:

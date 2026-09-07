@@ -74,10 +74,7 @@ def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Res
             "messages": [{
                 "id": "client-message",
                 "role": "user",
-                "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
-                ],
+                "parts": [{"type": "text", "text": text}],
             }],
         },
     )
@@ -146,11 +143,9 @@ def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, 
     return case["id"], run, artifact
 
 
-def _assert_skill_loaded(run: dict) -> None:
-    kinds = {record["kind"]: record for record in run["resources"]}
-    assert kinds["skill"]["id"] == "case-edit-skill"
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+def _assert_run_resources(run: dict) -> None:
+    kinds = {record["kind"] for record in run["resources"]}
+    assert kinds == {"system-prompt", "task-prompt"}
 
 
 def test_tracer_run_builds_pending_artifact_with_server_sources():
@@ -159,7 +154,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
     try:
         database = mongo.get_default_database()
         case_id, run, artifact = _tracer_case(client, csrf, database)
-        _assert_skill_loaded(run)
+        _assert_run_resources(run)
         assert artifact["status"] == "pending"
         assert artifact["baseRevision"] == 1
         assert artifact["target"]["paragraphIndex"] == 1

@@ -1,4 +1,4 @@
-"""确定性 tracer 模型：FunctionModel 驱动生产 Agent 走完整修订链路。"""
+"""确定性 tracer 模型：FunctionModel 驱动生产 Agent 走检索-修订链路。"""
 
 from __future__ import annotations
 
@@ -9,9 +9,6 @@ from collections.abc import AsyncIterator, Callable
 from pydantic_ai import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
-from app.modules.agent.resources import CASE_EDIT_SKILL
-
-SKILL_ID = CASE_EDIT_SKILL.id
 SEARCH_QUERY = "科学家精神"
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
@@ -38,10 +35,8 @@ def _paragraph_index(messages) -> int:
 
 
 def tracer_response(messages, _info=None) -> ModelResponse:
-    """按已发生的工具调用推进：加载 Skill → 检索 → 提议 → 结束。"""
+    """按已发生的工具调用推进：检索 → 提议 → 结束。"""
     called = _tool_calls(messages)
-    if "load_capability" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": SKILL_ID})])
     if "search_corpus" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
     if "propose_revision" not in called:
@@ -66,7 +61,7 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
 
 
 def tracer_model(recorder: Callable | None = None) -> FunctionModel:
-    """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
+    """同一生产 Agent 使用的确定性模型装配，依次调用检索与提议。
 
     recorder 每次模型请求收到 (messages, info)，供测试断言消息与 instructions 通道。
     """
