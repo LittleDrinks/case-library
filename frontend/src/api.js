@@ -40,6 +40,12 @@ function materialImportForm(files, accessLevel) {
   return body;
 }
 
+function skillPackageForm(file) {
+  const body = new FormData();
+  body.append("file", file);
+  return body;
+}
+
 function attachmentRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/attachments`;
 }
@@ -122,6 +128,17 @@ export const api = {
   saveAdminAISettings: (settings, csrfToken) => request(
     "/api/admin/ai/settings", jsonOptions("PUT", settings, csrfToken),
   ),
+  listAdminSkills: () => request("/api/admin/skills"),
+  uploadSkillPackage: (file, csrfToken) => request("/api/admin/skills/packages", {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+    body: skillPackageForm(file),
+  }),
+  publishSkillVersion: (id, versionId, csrfToken) => request(
+    `/api/admin/skills/${encodeURIComponent(id)}/publish`,
+    jsonOptions("POST", { versionId }, csrfToken),
+  ),
+  listSkills: () => request("/api/skills"),
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,
   ),
@@ -146,6 +163,19 @@ export const api = {
     jsonOptions("POST", command, csrfToken),
   ),
   caseHistory: (id) => request(`/api/cases/${encodeURIComponent(id)}/history`),
+  listTagGroups: () => request("/api/tag-groups"),
+  createTagGroup: (group, csrfToken) => request(
+    "/api/tag-groups", jsonOptions("POST", group, csrfToken),
+  ),
+  updateTagGroup: (id, patch, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  createTag: (groupId, tag, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(groupId)}/tags`, jsonOptions("POST", tag, csrfToken),
+  ),
+  updateTag: (id, patch, csrfToken) => request(
+    `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
   listAnnotations: (id) => request(annotationRoot(id)),
   createAnnotation: (id, annotation, csrfToken) => request(
     annotationRoot(id), jsonOptions("POST", annotation, csrfToken),
@@ -196,4 +226,5 @@ export const api = {
     `${attachmentRoot(id)}/${encodeURIComponent(attachmentId)}/content${versionQuery(versionId)}`
   ),
   materialContentUrl: (id) => `/api/materials/${encodeURIComponent(id)}/content`,
+  getMaterial: (id) => request(`/api/materials/${encodeURIComponent(id)}`),
 };

@@ -4,10 +4,13 @@ import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
+import AdminSkillsView from "./views/AdminSkillsView.vue";
+import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
 import CaseDetailView from "./views/CaseDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
+import MaterialDetailView from "./views/MaterialDetailView.vue";
 import MaterialExplorerView from "./views/MaterialExplorerView.vue";
 import MyCasesView from "./views/MyCasesView.vue";
 import SearchView from "./views/SearchView.vue";
@@ -28,6 +31,11 @@ const routes = [
     name: "materials",
     component: MaterialExplorerView,
     meta: { requiresAuth: true },
+  },
+  {
+    path: "/materials/:id",
+    name: "material-detail",
+    component: MaterialDetailView,
   },
   {
     path: "/my-cases",
@@ -73,9 +81,21 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
+    path: "/admin/tag-catalog",
+    name: "admin-tag-catalog",
+    component: AdminTagCatalogView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: "/admin/ai-settings",
     name: "admin-ai-settings",
     component: AdminAISettingsView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/skills",
+    name: "admin-skills",
+    component: AdminSkillsView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   { path: "/:pathMatch(.*)*", redirect: "/" },

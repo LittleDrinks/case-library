@@ -1,106 +1,118 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { useAgentChat } from "../composables/useAgentChat.js";
+import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
+import {
+  durationText, sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
+  toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
+  runAnchor, runError, runForMessage, runLabel,
+} from "../lib/agentTimeline.js";
+import AgentArtifactCard from "./AgentArtifactCard.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised"]);
 
-const TOOL_LABELS = {
-  load_capability: "加载 Skill", search_corpus: "检索案例", list_tag_catalog: "查询标签",
-  read_source: "阅读来源", propose_revision: "生成修订建议",
-};
-const TOOL_STATUS_LABELS = {
-  ok: "已完成", pending: "待确认", unavailable: "无法读取", not_found: "未找到",
-  no_access: "当前身份无权限读取", empty: "内容为空", error: "读取失败",
-};
-const ARTIFACT_STATUS_LABELS = { accepted: "已接受", rejected: "已拒绝", expired: "已过期", pending: "待确认" };
-const BUILTIN_SKILL_NAMES = { "case-edit-skill": "单段修订工作流" };
-
+const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
-  messages, status, chatError, loading, error, settings, send, stop, retry,
+  messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread,
+  skills, selectedSkillId, catalog, reloadCatalog, skillReady,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
-const canSend = computed(() => Boolean(draft.value.trim() && configured.value && !loading.value && !sending.value));
+const globalError = computed(() => {
+  const runStatus = threadState.value?.latestRun?.status;
+  return error.value || (["failed", "cancelled"].includes(runStatus) ? "" : chatError.value);
+});
+const runStatusAttr = computed(() => (
+  sending.value || threadState.value?.activeRun
+    ? "active" : threadState.value?.latestRun?.status || "none"
+));
+const canSend = computed(() => Boolean(
+  draft.value.trim() && configured.value && skillReady.value
+    && !loading.value && !sending.value && !recovering.value,
+));
 const decideError = ref("");
 
-function toolName(part) {
-  return part.type.slice(5);
-}
-
-function toolLabel(part) {
-  return TOOL_LABELS[toolName(part)] || toolName(part);
-}
-
-function toolRunning(part) {
-  return part.state !== "output-available" && part.state !== "output-error";
-}
-
-function toolState(part) {
-  if (part.state === "output-error") return part.errorText || "执行失败";
-  if (part.state !== "output-available") return "进行中";
-  return TOOL_STATUS_LABELS[part.output?.status] || "已完成";
-}
-
-function skillDisplayName(skillId) {
-  return BUILTIN_SKILL_NAMES[skillId] || skillId || "";
-}
-
-function skillLoadLabel(part) {
-  const id = part.output?.name || part.output?.skillId || part.input?.id || "";
-  return id ? `已加载 Skill：${skillDisplayName(id)}` : "已加载 Skill";
-}
-
 function toolTitle(part) {
-  return toolName(part) === "load_capability" ? skillLoadLabel(part) : toolLabel(part);
+  if (toolName(part) !== "load_capability") return toolLabel(part);
+  const id = part.output?.name || part.output?.skillId || part.input?.id || "";
+  return id ? `已加载 Skill：${skillName(id)}` : "已加载 Skill";
 }
 
-function toolParamSummary(part) {
-  const input = part.input || {};
-  if (toolName(part) === "search_corpus") {
-    const scope = input.kind && input.kind !== "all" ? `（范围：${input.kind}）` : "";
-    return `检索词：${input.query ?? ""}${scope}`;
+function skillName(skillId) {
+  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
+  return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
+}
+
+function skillOptionLabel(skill) {
+  return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
+}
+
+const toolTimers = new Map();
+
+function trackToolTimers() {
+  for (const message of messages.value) {
+    for (const part of message.parts || []) {
+      if (!part.type.startsWith("tool-") || !part.toolCallId) continue;
+      const timer = toolTimers.get(part.toolCallId);
+      if (toolRunning(part)) {
+        if (!timer) toolTimers.set(part.toolCallId, { startedAt: Date.now() });
+      } else if (timer && timer.elapsedMs === undefined) {
+        timer.elapsedMs = Date.now() - timer.startedAt;
+      }
+    }
   }
-  if (toolName(part) === "read_source") return `来源：${input.source_type || ""} ${input.source_id || ""}`;
-  if (toolName(part) === "propose_revision") {
-    return Number.isInteger(input.paragraph_index) ? `目标：第 ${input.paragraph_index + 1} 段` : "";
-  }
-  if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
-  return "";
 }
 
-function toolResultSummary(part) {
-  if (part.state === "output-error") return part.errorText || "执行失败";
-  if (part.state !== "output-available") return "";
-  const output = part.output || {};
-  if (output.artifactId) return "已创建修订候选，等待决定";
-  if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
-  if (typeof output.status === "string" && output.status !== "ok") {
-    return TOOL_STATUS_LABELS[output.status] || output.status;
-  }
-  return "";
+function toolDurationText(part) {
+  const timer = toolTimers.get(part.toolCallId);
+  if (!timer || timer.elapsedMs === undefined) return "";
+  return durationText(timer.elapsedMs / 1000);
 }
 
-function sourcesOf(part) {
-  return part.state === "output-available" ? part.output?.sources || [] : [];
+function runDurationText(run = threadState.value?.latestRun) {
+  if (!run) return "";
+  return elapsedBetween(run.startedAt, run.finishedAt, Date.now());
 }
 
-function sourceHref(source) {
-  const kind = source.kind || source.sourceType;
-  if (kind === "case") return `#/cases/${encodeURIComponent(source.id)}`;
-  return "";
+function messageRun(message) {
+  return runForMessage(message, threadRuns.value);
 }
 
-function artifactStatus(artifact) {
-  return ARTIFACT_STATUS_LABELS[artifact.status] || artifact.status;
+function showRunStatus(message) {
+  const run = messageRun(message);
+  return runAnchor(message, run, messages.value);
+}
+
+function linkedArtifact(part) {
+  const artifactId = part.output?.artifactId;
+  return artifactId ? artifacts.value.find((artifact) => artifact.id === artifactId) : null;
+}
+
+function linkedArtifactIds() {
+  return new Set(messages.value.flatMap((message) => (message.parts || [])
+    .map((part) => part.output?.artifactId).filter(Boolean)));
+}
+
+function messageArtifacts(message) {
+  const run = messageRun(message);
+  if (!run) return [];
+  const linked = linkedArtifactIds();
+  return artifacts.value.filter((artifact) => artifact.runId === run.id && !linked.has(artifact.id));
+}
+
+function tailArtifacts() {
+  const linked = linkedArtifactIds();
+  const placed = new Set(messages.value.flatMap(messageArtifacts).map((artifact) => artifact.id));
+  return artifacts.value.filter((artifact) => !linked.has(artifact.id) && !placed.has(artifact.id));
 }
 
 const mode = ref("chat");
@@ -110,6 +122,10 @@ const conversation = ref(null);
 const nearBottom = ref(true);
 const scrollPositions = new Map();
 const currentTitle = computed(() => threadState.value?.title || "未命名对话");
+const threadRuns = computed(() => {
+  const runs = threadState.value?.runs || [];
+  return runs.length ? runs : [threadState.value?.latestRun].filter(Boolean);
+});
 
 function trackScroll() {
   const node = conversation.value;
@@ -122,7 +138,10 @@ async function scrollToLatest() {
   nearBottom.value = true;
 }
 
-watch(messages, () => { if (nearBottom.value) void scrollToLatest(); }, { deep: true });
+watch(messages, () => {
+  trackToolTimers();
+  if (nearBottom.value) void scrollToLatest();
+}, { deep: true });
 watch(artifacts, () => { if (nearBottom.value) void scrollToLatest(); }, { deep: true });
 
 const THREADS_POLL_MS = 2000;
@@ -192,6 +211,7 @@ async function applyRename(id, title) {
 }
 
 function statusText() {
+  if (recovering.value) return "正在恢复连接";
   if (loading.value) return "正在加载对话";
   if (sending.value) return "正在生成";
   return settings.value?.effectiveModel || "对话助手";
@@ -220,7 +240,16 @@ async function submit() {
   if (!canSend.value) return;
   const text = draft.value.trim();
   draft.value = "";
-  await send(text);
+  await send(text, contextParts());
+}
+
+function contextParts() {
+  const selection = props.writingContext;
+  if (!selection?.quote || !Number.isInteger(selection.from) || !Number.isInteger(selection.to)) return [];
+  return [{ type: "data-selection", data: {
+    from: selection.from, to: selection.to, quote: selection.quote,
+    quoteHash: selection.quoteHash, revision: selection.revision,
+  } }];
 }
 
 async function stopRun() {
@@ -245,7 +274,7 @@ async function retryRun() {
     class="assistant-panel ai-panel agent-chat-panel"
     :data-event-seq="threadState?.eventSeq ?? 0"
     :data-run-id="threadState?.latestRun?.id || ''"
-    :data-run-status="threadState?.activeRun ? 'active' : threadState?.latestRun?.status || 'none'"
+    :data-run-status="runStatusAttr"
   >
     <template v-if="mode === 'chat'">
       <div class="agent-thread-header">
@@ -261,9 +290,9 @@ async function retryRun() {
           <ChevronDown :size="13" aria-hidden="true" />
         </button>
       </div>
-      <div class="ai-status" role="status" :aria-busy="sending">
-        <LoaderCircle v-if="loading || sending" class="spin" :size="14" />
-        <span>{{ statusText() }}</span>
+      <div class="ai-status" role="status" :aria-busy="sending || recovering">
+        <LoaderCircle v-if="loading || sending || recovering" class="spin" :size="14" />
+        <span>{{ statusText() }}<template v-if="runDurationText()"> · 耗时 {{ runDurationText() }}</template></span>
         <button
           v-if="sending"
           type="button"
@@ -296,7 +325,12 @@ async function retryRun() {
                 v-else-if="part.type === 'data-skill'"
                 class="ai-skill-chip"
                 data-testid="message-skill"
-              >使用 Skill：{{ skillDisplayName(part.data?.skillId) }}</p>
+              >使用 Skill：{{ skillName(part.data?.skillId) }}</p>
+              <p
+                v-else-if="part.type === 'data-selection'"
+                class="ai-skill-chip"
+                data-testid="message-selection"
+              >正文选区：{{ part.data?.quote }}</p>
               <details
                 v-else-if="part.type.startsWith('tool-')"
                 class="agent-tool-trace"
@@ -306,72 +340,112 @@ async function retryRun() {
               >
                 <summary>
                   <LoaderCircle v-if="toolRunning(part)" class="spin" :size="13" />
-                  <span>{{ toolTitle(part) }} · {{ toolState(part) }}</span>
+                  <span>{{ toolTitle(part) }} · {{ toolState(part) }}<template v-if="toolDurationText(part)"> · {{ toolDurationText(part) }}</template></span>
                   <i v-if="sourcesOf(part).length">{{ sourcesOf(part).length }} 条来源</i>
                 </summary>
                 <p v-if="toolParamSummary(part)" class="agent-tool-line">{{ toolParamSummary(part) }}</p>
-                <p v-if="toolResultSummary(part)" class="agent-tool-line">{{ toolResultSummary(part) }}</p>
+                <p
+                  v-if="toolResultSummary(part)"
+                  class="agent-tool-line"
+                  :role="part.state === 'output-error' ? 'alert' : undefined"
+                >{{ toolResultSummary(part) }}</p>
                 <div v-if="sourcesOf(part).length" class="agent-sources" data-testid="agent-sources">
-                  <div v-for="source in sourcesOf(part)" :key="source.id" class="agent-source-item" data-testid="agent-source">
+                  <div v-for="source in sourcesOf(part)" :key="sourceRefId(source)" class="agent-source-item" data-testid="agent-source" :data-source-ref="sourceRefId(source)">
                     <a
                       v-if="sourceHref(source)"
                       :href="sourceHref(source)"
                       target="_blank"
                       rel="noopener noreferrer"
-                      :title="`在站内打开：${source.title || source.id}`"
+                      :title="`在站内打开：${source.title || source.id}（以当前权限为准）`"
                     ><b>{{ source.title }}</b><span>{{ source.snippet }}</span></a>
                     <p v-else><b>{{ source.title }}</b><span>{{ source.snippet }}</span></p>
                   </div>
                 </div>
               </details>
+              <AgentArtifactCard
+                v-if="part.type.startsWith('tool-') && linkedArtifact(part)"
+                :artifact="linkedArtifact(part)"
+                :sending="sending"
+                :decide-error="decideError"
+                @accept="acceptArtifact"
+                @reject="rejectArtifact"
+              />
             </template>
+            <AgentArtifactCard
+              v-for="artifact in messageArtifacts(message)"
+              :key="artifact.id"
+              :artifact="artifact"
+              :sending="sending"
+              :decide-error="decideError"
+              @accept="acceptArtifact"
+              @reject="rejectArtifact"
+            />
+            <div
+              v-if="showRunStatus(message)"
+              class="agent-run-status"
+              :data-run-id="messageRun(message).id"
+              :data-run-status="messageRun(message).status"
+              data-testid="agent-run-status"
+            >
+              <LoaderCircle v-if="messageRun(message).status === 'active'" class="spin" :size="13" />
+              <span>{{ runLabel(messageRun(message)) }}</span>
+              <span v-if="runDurationText(messageRun(message))"> · 耗时 {{ runDurationText(messageRun(message)) }}</span>
+              <p v-if="runError(messageRun(message))" class="agent-run-error" role="alert">{{ runError(messageRun(message)) }}</p>
+            </div>
+            <button
+              v-if="message.id === retryableMessageId"
+              type="button"
+              class="agent-retry"
+              data-testid="agent-retry"
+              @click="retryRun"
+            >重试这条消息</button>
           </article>
         </template>
-        <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>
-        <button
-          v-if="retryableMessageId"
-          type="button"
-          data-testid="agent-retry"
-          @click="retryRun"
-        >重试</button>
-        <div
-          v-for="artifact in artifacts"
+        <p v-if="globalError" class="ai-message-error" role="alert">{{ displayError }}</p>
+        <AgentArtifactCard
+          v-for="artifact in tailArtifacts()"
           :key="artifact.id"
-          class="agent-artifact"
-          :data-artifact-id="artifact.id"
-          :data-artifact-status="artifact.status"
-          data-testid="agent-artifact"
-        >
-          <b>修订候选（第 {{ artifact.target.paragraphIndex + 1 }} 段）</b>
-          <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
-          <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
-          <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
-          <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
-          <template v-for="source in artifact.sources || []" :key="source.id">
-            <a
-              v-if="sourceHref(source)"
-              class="agent-artifact-source"
-              :href="sourceHref(source)"
-              target="_blank"
-              rel="noopener noreferrer"
-              :title="`在站内打开：${source.title || source.id}`"
-            >依据：{{ source.title || source.id }}</a>
-            <p v-else class="agent-artifact-source">依据：{{ source.title || source.id }}</p>
-          </template>
-          <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
-            <button type="button" data-testid="agent-accept" :disabled="sending" @click="acceptArtifact(artifact.id)">接受</button>
-            <button type="button" data-testid="agent-reject" :disabled="sending" @click="rejectArtifact(artifact.id)">拒绝</button>
-          </div>
-        </div>
-        <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
+          :artifact="artifact"
+          :sending="sending"
+          :decide-error="decideError"
+          @accept="acceptArtifact"
+          @reject="rejectArtifact"
+        />
       </div>
       <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
+      <div class="assistant-skill-picker">
+        <label for="agent-skill-select">Skill</label>
+        <select
+          id="agent-skill-select"
+          v-model="selectedSkillId"
+          aria-label="选择 Skill"
+          data-testid="skill-select"
+          :disabled="loading || sending || catalog === 'loading'"
+        >
+          <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+          <option v-for="skill in skills" :key="skill.id" :value="skill.id">
+            {{ skillOptionLabel(skill) }}
+          </option>
+        </select>
+        <span v-if="catalog === 'loading'" class="skill-catalog-state" data-testid="skill-catalog-loading">正在加载目录</span>
+        <template v-else-if="catalog === 'error'">
+          <span class="skill-catalog-state error" data-testid="skill-catalog-error">目录加载失败</span>
+          <button type="button" class="skill-catalog-retry" data-testid="skill-catalog-retry" @click="reloadCatalog">重试</button>
+        </template>
+        <span v-else-if="!skills.length" class="skill-catalog-state" data-testid="skill-catalog-empty">暂无已发布 Skill</span>
+      </div>
       <div class="assistant-composer">
+        <div
+          v-if="writingContext?.quote"
+          class="assistant-context-summary"
+          data-testid="composer-selection"
+          :title="`正文上下文：${writingContext.quote}`"
+        >正文上下文：{{ writingContext.quote }}</div>
         <textarea
           v-model="draft"
           aria-label="向 AI 提问"
           :placeholder="configured ? '输入问题' : '请先配置 AI 模型'"
-          :disabled="!configured || loading || sending"
+          :disabled="!configured || loading || sending || recovering"
           @keydown.enter.exact.prevent="submit"
         />
         <button type="button" title="发送" aria-label="发送" :disabled="!canSend" @click="submit">

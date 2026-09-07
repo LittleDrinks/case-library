@@ -8,6 +8,7 @@ from app.modules.auth.seed import reject_demo_accounts, seed_demo_users
 from app.modules.cases.seed import seed_demo_cases
 from app.modules.knowledge.seed import seed_knowledge
 from app.modules.materials.seed import seed_demo_materials
+from app.modules.tags.seed import seed_demo_tags
 
 
 def bootstrap(database: Database, settings: Settings) -> None:
@@ -19,3 +20,4 @@ def bootstrap(database: Database, settings: Settings) -> None:
         seed_demo_users(database)
         seed_demo_cases(database)
         seed_demo_materials(database)
+        seed_demo_tags(database)

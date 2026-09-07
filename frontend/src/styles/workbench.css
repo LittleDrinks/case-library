@@ -135,7 +135,25 @@
   overflow: hidden;
   field-sizing: content;
 }
-.document-byline { display: flex; justify-content: center; gap: 18px; margin-bottom: 42px; color: var(--ink-3); font-size: 12px; }
+.document-byline { display: flex; justify-content: center; gap: 18px; margin-bottom: 12px; color: var(--ink-3); font-size: 12px; }
+.case-tags { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-bottom: 34px; color: var(--ink-3); font-size: 12px; }
+.case-tag-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.case-tag-list li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); }
+.case-tag-list li button { display: grid; padding: 1px; place-items: center; border: 0; background: transparent; color: var(--ink-3); }
+.case-tag-list li button:hover { color: var(--brand); }
+.case-tags-state { display: inline-flex; align-items: center; gap: 5px; }
+.case-tags-state button { padding: 0; border: 0; background: transparent; color: var(--brand); }
+.case-tag-editor > button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px dashed var(--line-strong); border-radius: 999px; background: transparent; color: var(--ink-3); }
+.case-tag-editor > button:hover { border-color: var(--brand); color: var(--brand); }
+.case-tag-popover { position: absolute; z-index: 5; top: 100%; display: grid; width: 300px; max-height: min(480px, calc(100vh - 260px)); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); text-align: left; }
+.case-tag-popover fieldset { display: grid; gap: 4px; margin: 0; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line-soft); }
+.case-tag-popover fieldset:last-child { border-bottom: 0; }
+.case-tag-popover legend { padding: 0 0 4px; color: var(--ink-3); font-size: 12px; font-weight: 650; }
+.case-tag-popover legend b { margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--brand-soft); color: var(--brand); font-size: 11px; }
+.case-tag-popover label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; color: var(--ink-2); }
+.case-tag-popover > p { margin: 0; padding: 12px 14px; }
+.submission-todo { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
+.submission-todo ul { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; padding-left: 16px; }
 .canvas-editor { min-height: 600px; outline: 0; font: 16px/2 var(--serif); }
 .canvas-editor h1 { margin: 36px 0 16px; font-size: 24px; }
 .canvas-editor h2 { margin: 30px 0 14px; font-size: 21px; }
@@ -165,7 +183,8 @@
   top: 114px;
   display: flex;
   min-width: 0;
-  height: calc(100vh - 114px);
+  height: calc(100dvh - 114px);
+  min-height: 0;
   flex-direction: column;
   overflow: hidden;
   border-left: 1px solid var(--line);
@@ -188,7 +207,7 @@
 .assistant-tabs button.active { border-bottom-color: var(--brand); color: var(--brand); }
 .assistant-tabs button b { font-weight: 500; }
 .assistant-tabs .drawer-toggle { display: none; min-width: 38px; margin-left: auto; }
-.assistant-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.assistant-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
 .panel-head { min-height: 50px; padding: 15px 14px; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
 .panel-scroll { flex: 1; min-height: 0; overflow: auto; }
 .panel-empty { display: grid; min-height: 190px; place-content: center; justify-items: center; gap: 10px; color: var(--ink-3); font-size: 13px; }
@@ -196,7 +215,7 @@
 .ai-status > span:first-child:not(.ai-status-dot) { margin-right: auto; color: var(--ink-2); }
 .ai-status a { margin-left: auto; color: var(--brand); text-decoration: none; }
 .ai-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.ai-conversation { display: grid; align-content: start; gap: 12px; padding: 14px 12px; }
+.ai-conversation { display: grid; align-content: start; gap: 12px; padding: 14px 12px; overflow-x: hidden; overscroll-behavior: contain; }
 .ai-conversation .panel-empty { min-height: 175px; }
 .ai-message { display: grid; max-width: 92%; gap: 5px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
 .ai-message.user { justify-self: end; border-color: #ead1d2; background: var(--brand-soft); }
@@ -204,7 +223,6 @@
 .ai-message b { color: var(--ink-3); font-size: 10px; font-weight: 600; }
 .ai-message p { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .ai-message .ai-message-error { color: var(--red); }
-.ai-message .ai-skill-chip { color: var(--brand); font-size: 11px; }
 .agent-tool-trace pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; font-size: 11px; }
 .agent-tool-trace, .agent-reasoning { margin: 8px 0; color: var(--ink-2); font-size: 12px; }
 .agent-tool-trace summary, .agent-reasoning summary { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -222,6 +240,12 @@
   .agent-reasoning.streaming > summary, .agent-tool-trace .spin, .agent-reasoning .spin { animation: none; }
 }
 .agent-reasoning p { white-space: pre-wrap; line-height: 1.7; }
+.agent-run-status { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--ink-3); font-size: 11px; }
+.agent-run-status .agent-run-error { flex-basis: 100%; color: var(--red); }
+.agent-retry { justify-self: start; padding: 5px 12px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink-2); font-size: 12px; }
+.agent-retry:hover { border-color: var(--brand); color: var(--brand); }
+.ai-message .agent-artifact { margin: 8px 0 0; }
+.ai-message .agent-retry { margin-top: 4px; }
 .agent-latest { align-self: center; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); background: white; border-radius: 4px; font-size: 12px; }
 .agent-artifact { margin: 12px 0; padding: 12px; border-left: 3px solid var(--brand); background: #f8f9fa; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .agent-artifact p { margin: 8px 0; }
@@ -279,8 +303,18 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .ai-tools { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; padding: 8px 10px; border-top: 1px solid var(--line-soft); }
 .ai-tools button { display: grid; height: 48px; padding: 5px 1px; place-content: center; justify-items: center; gap: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); font-size: 10px; }
 .ai-tools button:hover:not(:disabled) { background: var(--brand-soft); color: var(--brand); }
-.assistant-composer, .comment-composer { position: relative; padding: 0 12px 12px; }
+.ai-message .ai-skill-chip { margin: 4px 0 0; color: var(--brand); font-size: 11px; }
+.assistant-skill-picker { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.assistant-skill-picker label { flex: none; color: var(--ink-3); font-size: 11px; }
+.assistant-skill-picker select { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-2); font-size: 12px; }
+.assistant-skill-picker select:disabled { color: var(--ink-3); }
+.skill-catalog-state { flex: none; color: var(--ink-3); font-size: 11px; }
+.skill-catalog-state.error { color: var(--red); }
+.skill-catalog-retry { flex: none; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 11px; }
+.assistant-skill-picker { flex: none; }
+.assistant-composer, .comment-composer { position: relative; display: grid; gap: 6px; flex: none; padding: 0 12px 12px; }
 .assistant-composer textarea, .comment-composer textarea { width: 100%; min-height: 72px; padding: 10px 42px 10px 11px; border: 1px solid var(--line); border-radius: 6px; resize: none; }
+.assistant-context-summary { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-composer button { position: absolute; right: 20px; bottom: 20px; display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: var(--brand); color: #fff; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }

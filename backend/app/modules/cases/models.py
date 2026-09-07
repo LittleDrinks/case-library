@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -26,12 +26,17 @@ class CasePatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     document: dict[str, Any] | None = None
     revision: int = Field(ge=1)
+    tag_ids: list[Annotated[str, Field(min_length=1, max_length=100)]] | None = Field(
+        default=None,
+        max_length=50,
+        alias="tagIds",
+    )
 
     validate_document = field_validator("document")(validate_optional_document)
 
     @model_validator(mode="after")
     def require_change(self) -> CasePatch:
-        if self.title is None and self.document is None:
+        if self.title is None and self.document is None and self.tag_ids is None:
             raise ValueError("title 和 document 至少提供一项")
         return self
 

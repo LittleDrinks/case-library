@@ -283,6 +283,51 @@ it("binds the cancel command to the thread selected at click time", async () => 
   expect(api.agentCancel).toHaveBeenCalledWith("case-1", "thread-1", "csrf");
 });
 
+function cancelledThread() {
+  return { ...runningThread(), activeRun: null, latestRun: { id: "run-1", status: "cancelled" } };
+}
+
+function deliverCancelled(streams, encoder) {
+  streams[1].controller.enqueue(
+    encoder.encode('data: {"type":"abort","reason":"运行已取消"}\n\n'),
+  );
+  streams[1].controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+  streams[1].controller.close();
+}
+
+async function stopWhileActive() {
+  const streams = [];
+  const fetch = heldFetch(streams);
+  let snap = runningThread();
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(snap)));
+  api.agentCancel.mockResolvedValue({ runId: "run-1", status: "cancelling" });
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(streams).toHaveLength(1);
+  await wrapper.get('[data-testid="agent-stop"]').trigger("click");
+  await flushPromises();
+  return { wrapper, fetch, streams, setSnap: (value) => { snap = value; } };
+}
+
+it("settles a still-active run through the resumed stream after cancel ACK", async () => {
+  const { wrapper, fetch, streams, setSnap } = await stopWhileActive();
+  expect(api.agentCancel).toHaveBeenCalledWith("case-1", "thread-1", "csrf");
+  expect(eventCalls(fetch)).toHaveLength(2);
+  expect(fetch.mock.calls.filter(([url]) => url.includes("/stream"))).toHaveLength(0);
+  expect(wrapper.get(".agent-chat-panel").attributes("data-run-status")).toBe("active");
+  expect(wrapper.get('[data-testid="agent-stop"]').exists()).toBe(true);
+  setSnap(cancelledThread());
+  deliverCancelled(streams, new TextEncoder());
+  await flushPromises();
+  expect(wrapper.find('[data-testid="agent-stop"]').exists()).toBe(false);
+  expect(wrapper.get('textarea[aria-label="向 AI 提问"]').attributes("disabled")).toBeUndefined();
+  expect(wrapper.get('[role="alert"]').text()).toContain("运行已取消");
+  expect(wrapper.get(".agent-chat-panel").attributes("data-run-status")).toBe("cancelled");
+  expect(wrapper.findAll(".ai-message.user")).toHaveLength(1);
+  expect(wrapper.findAll(".ai-message.assistant")).toHaveLength(0);
+});
+
 function heldFetch(streams) {
   return vi.fn().mockImplementation(() => {
     const held = {};
