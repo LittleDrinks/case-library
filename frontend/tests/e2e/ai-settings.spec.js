@@ -144,7 +144,7 @@ test("上游失败时工作台显示明确错误", async ({ page }) => {
     await page.goto("/#/workbench/c-draft-1");
     await page.getByLabel("向 AI 提问").fill("上游中断测试");
     await page.getByRole("button", { name: "发送", exact: true }).click();
-    const panel = page.getByTestId("agent-chat-panel");
+    const panel = page.locator(".agent-chat-panel");
     await expect(panel.getByRole("alert")).toHaveText("AI 服务暂不可用");
     await expect(panel.locator(".spin")).toHaveCount(0);
   } finally {
