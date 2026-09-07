@@ -53,9 +53,7 @@ def version_readable(
 
 
 def published_view(case: dict, version: dict) -> dict:
-    metadata = {
-        field: version["metadata"].get(field) for field in PUBLIC_METADATA_FIELDS
-    }
+    metadata = {field: version["metadata"].get(field) for field in PUBLIC_METADATA_FIELDS}
     return {
         **metadata,
         "id": case["id"],
