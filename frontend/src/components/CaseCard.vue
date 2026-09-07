@@ -6,6 +6,7 @@ defineProps({
   destination: { type: Object, required: true },
   status: { type: String, default: "" },
   actionLabel: { type: String, default: "" },
+  notice: { type: String, default: "" },
 });
 
 function dateLabel(value) {
@@ -22,6 +23,7 @@ function dateLabel(value) {
       <strong v-if="status" :data-status="caseRecord.workflowStatus">{{ status }}</strong>
     </div>
     <h2><RouterLink :to="destination">{{ caseRecord.title }}</RouterLink></h2>
+    <p v-if="notice" class="case-card-notice" role="status">{{ notice }}</p>
     <p>{{ caseRecord.summary || "案例简介待补充" }}</p>
     <ul v-if="caseRecord.theoryPoints?.length" class="case-card-theory" aria-label="理论要点">
       <li v-for="point in caseRecord.theoryPoints.slice(0, 3)" :key="point">{{ point }}</li>
