@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
 from fastapi.testclient import TestClient
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
+from app.modules.agent import service
 from app.modules.agent.runtime import agent
 from app.modules.agent.skills import reader_capability
 
@@ -49,9 +55,15 @@ def _message(text: str, message_id: str = "reader-message", skills: list | None 
     return {"id": message_id, "role": "user", "parts": parts}
 
 
-def _send(client: TestClient, auth: dict, thread_id: str, text: str, skills: list | None = None):
+def _send(
+    client: TestClient, auth: dict, thread_id: str, text: str,
+    skills: list | None = None, version_id: str | None = None,
+):
+    path = f"{THREAD_PATH}/{thread_id}/stream"
+    if version_id:
+        path += f"?versionId={version_id}"
     return client.post(
-        f"{THREAD_PATH}/{thread_id}/stream",
+        path,
         headers=_csrf(auth),
         json={
             "id": "reader-chat", "trigger": "submit-message",
@@ -119,8 +131,10 @@ def test_author_draft_context_stays_author_only(client: TestClient) -> None:
     assert client.post(
         THREADS_PATH, headers=_csrf(reader), json={"title": "x"}
     ).status_code == 403
-    _login(client, {"username": "admin", "password": "admin123"})
-    assert client.get(THREAD_PATH).status_code == 409
+    owner = _login(client, {"username": "admin", "password": "admin123"})
+    snapshot = client.get(THREAD_PATH)
+    assert snapshot.status_code == 200
+    assert _send(client, owner, snapshot.json()["id"], "新 Run").status_code == 409
 
 
 def test_cross_reader_threads_are_not_enumerable(client: TestClient) -> None:
@@ -260,3 +274,102 @@ def test_historically_approved_versions_stay_readable(client: TestClient) -> Non
     with agent.override(model=TestModel(custom_output_text="旧版回答")):
         response = _send(client, auth, bound.json()["id"], "继续旧版讨论")
     assert response.status_code == 200
+
+
+def test_owner_history_stays_readable_while_new_runs_stay_blocked(client: TestClient) -> None:
+    for case_id, account in (
+        ("c-pending-1", READER), ("c-02", {"username": "admin", "password": "admin123"}),
+    ):
+        auth = _login(client, account)
+        path = f"/api/cases/{case_id}/agent/thread"
+        snapshot = client.get(path)
+        thread_id = snapshot.json()["id"]
+        assert snapshot.status_code == 200
+        assert client.get(f"{path}/{thread_id}/events").status_code == 204
+        assert client.post(
+            f"{path}/{thread_id}/cancel", headers=_csrf(auth)
+        ).json()["status"] == "idle"
+        assert client.post(
+            f"{path}/{thread_id}/stream", headers=_csrf(auth),
+            json={"id": "writer", "trigger": "submit-message", "messages": [_message("新 Run")]},
+        ).status_code == 409
+
+
+def _version_mismatch_requests(client: TestClient, auth: dict, thread_id: str, wrong: str):
+    return (
+        lambda: client.get(f"{THREADS_PATH}/{thread_id}", params={"versionId": wrong}),
+        lambda: client.patch(
+            f"{THREADS_PATH}/{thread_id}", params={"versionId": wrong},
+            headers=_csrf(auth), json={"title": "错配"},
+        ),
+        lambda: _send(client, auth, thread_id, "错配", version_id=wrong),
+        lambda: client.post(
+            f"{THREAD_PATH}/{thread_id}/stream?versionId={wrong}", headers=_csrf(auth),
+            json={"id": "retry", "trigger": "regenerate-message", "messageId": "missing", "messages": []},
+        ),
+        lambda: client.post(
+            f"{THREAD_PATH}/{thread_id}/cancel", params={"versionId": wrong}, headers=_csrf(auth),
+        ),
+        lambda: client.get(
+            f"{THREAD_PATH}/{thread_id}/events", params={"versionId": wrong},
+        ),
+    )
+
+
+def test_explicit_thread_version_mismatch_is_rejected(client: TestClient) -> None:
+    auth = _login(client, READER)
+    thread_id = _default_thread(client, auth)["id"]
+    requests = _version_mismatch_requests(client, auth, thread_id, "cv-mismatch")
+    assert [request().status_code for request in requests] == [409] * 6
+
+
+def _gated_reader_model(reached: Event, release: Event):
+    async def stream(_messages, _info):
+        yield "前半"
+        reached.set()
+        await asyncio.to_thread(release.wait, 10)
+        yield "后半"
+
+    return FunctionModel(stream_function=stream)
+
+
+def _reader_post_async(app, text: str, model):
+    def send():
+        with TestClient(app) as request_client:
+            auth = _login(request_client, READER)
+            with agent.override(model=model):
+                return _send(request_client, auth, _default_thread(request_client, auth)["id"], text)
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    return pool.submit(send), pool
+
+
+def _hide_case(client: TestClient, case_id: str) -> None:
+    admin = _login(client, {"username": "admin", "password": "admin123"})
+    case = client.get(f"/api/cases/{case_id}").json()
+    response = client.post(
+        f"/api/cases/{case_id}/lifecycle", headers=_csrf(admin),
+        json={"command": "hide", "revision": case["revision"]},
+    )
+    assert response.status_code == 200
+
+
+def test_reader_stream_is_cancelled_when_publication_is_hidden(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(service, "RUN_HEARTBEAT_SECONDS", 0.01)
+    auth = _login(client, READER)
+    thread_id = _default_thread(client, auth)["id"]
+    reached, release = Event(), Event()
+    future, pool = _reader_post_async(client.app, "撤权测试", _gated_reader_model(reached, release))
+    try:
+        assert reached.wait(10)
+        with TestClient(client.app) as admin_client:
+            _hide_case(admin_client, CASE)
+        release.set()
+        response = future.result(timeout=15)
+        run = client.app.state.database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
+        assert response.status_code == 200 and "后半" not in response.text
+        assert run["status"] == "cancelled"
+        assert client.app.state.database.agent_messages.count_documents({"threadId": thread_id, "role": "assistant"}) == 0
+    finally:
+        release.set()
+        pool.shutdown(wait=True)

@@ -24,6 +24,7 @@ from app.modules.agent.resources import (
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
+from app.modules.cases.published import version_readable_by_id
 
 
 RUN_HEARTBEAT_SECONDS = float(os.getenv("AGENT_RUN_HEARTBEAT_SECONDS", "5"))
@@ -166,6 +167,9 @@ async def _drain(context: RunContext) -> None:
     try:
         async with aclosing(_adapter_stream(context)) as stream:
             async for chunk in stream:
+                if not _reader_accessible(context):
+                    _revoke_reader(context)
+                    return
                 await context.buffer.publish(chunk)
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
@@ -241,6 +245,9 @@ def _renew(context: RunContext) -> bool:
         if row is None:
             context.lost = True
             return False
+    if not _reader_accessible(context):
+        _revoke_reader(context)
+        return False
     _stop_if_requested(context, row)
     return _renew_lease(context)
 
@@ -282,11 +289,27 @@ def _complete(context: RunContext) -> None:
     if context.result is None:
         _terminal(context, context.repository.fail_run)
         return
+    if not _reader_accessible(context):
+        _revoke_reader(context)
+        _terminal(context, context.repository.cancel_run)
+        return
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
         resources=_run_resources(_assistant_parts_of(context), context.reader),
     ):
         context.lost = True
+
+
+def _reader_accessible(context: RunContext) -> bool:
+    return not context.reader or version_readable_by_id(
+        context.repository.database, context.case["id"], context.case.get("versionId")
+    )
+
+
+def _revoke_reader(context: RunContext) -> None:
+    context.cancelled = True
+    if context.token:
+        context.token.cancel()
 
 
 def _terminal(context: RunContext, finish) -> None:

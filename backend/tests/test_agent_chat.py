@@ -345,7 +345,7 @@ def test_agent_route_rechecks_case_editability(client: TestClient) -> None:
         {"id": "c-draft-1"}, {"$set": {"workflowStatus": "published"}}
     )
 
-    assert client.get(THREAD_PATH).status_code == 409
+    assert client.get(THREAD_PATH).status_code == 200
     response = client.post(
         f"{THREAD_PATH}/{thread_id}/stream",
         headers=_csrf(auth),

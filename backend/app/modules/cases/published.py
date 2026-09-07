@@ -52,6 +52,16 @@ def version_readable(
     return bool(approved)
 
 
+def version_readable_by_id(database: Database, case_id: str, version_id: str | None) -> bool:
+    if not version_id:
+        return False
+    case = database.cases.find_one({"id": case_id})
+    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+    return bool(
+        case and version and version_readable(database, case, version_id, version, False)
+    )
+
+
 def published_view(case: dict, version: dict) -> dict:
     metadata = {field: version["metadata"].get(field) for field in PUBLIC_METADATA_FIELDS}
     return {
