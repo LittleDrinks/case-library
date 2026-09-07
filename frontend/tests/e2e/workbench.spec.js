@@ -329,9 +329,9 @@ async function publishCaseWithAttachments(page) {
 async function assertAnonymousAttachmentAccess(page) {
   await expect(page.getByText("公开材料.txt")).toBeVisible();
   await expect(page.getByText("内部材料.txt")).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载公开材料.txt" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载内部材料.txt" })).toHaveCount(0);
-  await expect(page.getByText("仅作者与管理员可下载")).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开来源公开材料.txt" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开来源内部材料.txt" })).toHaveCount(0);
+  await expect(page.getByText("内容按权限开放")).toBeVisible();
   await expect(page.getByLabel("选择附件")).toHaveCount(0);
   await expect(page.locator(".workspace-header")).toHaveCount(0);
 }
@@ -565,7 +565,7 @@ test("公开详情按作者和匿名权限展示私密附件", async ({ page }) 
   const created = await publishCaseWithAttachments(page);
   await login(page);
   await page.goto(`/#/cases/${created.id}`);
-  await expect(page.getByRole("link", { name: "下载内部材料.txt" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开来源内部材料.txt" })).toBeVisible();
   await logoutAndWait(page);
   await page.goto(`/#/cases/${created.id}`);
   await expect(page.getByRole("heading", { level: 1, name: created.title })).toBeVisible();
