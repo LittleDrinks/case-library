@@ -18,6 +18,11 @@ function pathOf(part) {
 function errorOf(part) {
   return part.errorText || "资源读取失败";
 }
+
+function labelOf(part) {
+  if (failed(part)) return "读取资源失败";
+  return part.state === "output-available" ? "已读取资源" : "正在读取资源";
+}
 </script>
 
 <template>
@@ -27,7 +32,7 @@ function errorOf(part) {
     :class="{ error: failed(props.part) }"
     :data-testid="failed(props.part) ? 'agent-skill-resource-error' : 'agent-skill-resource'"
   >
-    <p>{{ failed(props.part) ? "读取资源失败" : "已读取资源" }}：{{ pathOf(props.part) }}</p>
+    <p>{{ labelOf(props.part) }}：{{ pathOf(props.part) }}</p>
     <p v-if="failed(props.part)">{{ errorOf(props.part) }}</p>
     <pre v-else-if="props.part.output?.content">{{ props.part.output.content }}</pre>
   </div>

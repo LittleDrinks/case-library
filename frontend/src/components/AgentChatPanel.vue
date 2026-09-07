@@ -262,7 +262,7 @@ async function retryRun() {
             <AgentResourceTrace
               v-for="part in resourceParts(message)"
               :key="part.toolCallId"
-              :part="part"
+              :part="{ ...part }"
             />
           </template>
         </template>
