@@ -709,7 +709,7 @@ def thread_events(
 def _event_response(database, user, repository, conversation, thread, cursor):
     access_check = _event_access_check(database, conversation, thread)
     project = parts_projector(database, user, thread.case_id)
-    return live_event_response(repository, thread, max(cursor, 0), access_check, project)
+    return live_event_response(repository, thread, max(cursor, 0), access_check, project=project)
 
 
 def _event_access_check(database, conversation: Conversation, thread: AgentThread):
@@ -725,9 +725,9 @@ def _last_event_id(request: Request) -> int:
         raise HTTPException(status_code=422, detail="事件游标无效") from error
 
 
-def live_event_response(repository, thread, after_seq: int, access_check=None, project=None):
+def live_event_response(repository, thread, after_seq: int, access_check=None, *, project):
     return StreamingResponse(
-        events_stream(repository, thread, after_seq, access_check, project),
+        events_stream(repository, thread, after_seq, access_check, project=project),
         media_type="text/event-stream",
         headers=sse_headers(),
     )

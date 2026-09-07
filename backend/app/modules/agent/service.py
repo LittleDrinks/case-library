@@ -350,13 +350,13 @@ def _release_lease(context: RunContext) -> None:
 
 
 def _projected_parts(row: AgentMessage, project) -> list[dict]:
-    if project is None or row.role != "assistant":
+    if row.role != "assistant":
         return row.parts
     return project(row.parts)
 
 
-def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None,
-                 project=None) -> list:
+def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None, *,
+                 project) -> list:
     """模型历史与读取面共用同一来源权限投影，防止收紧后旧来源复述。"""
     rows = repository.messages(thread.id)
     rows = [row for row in rows if max_seq is None or row.message_seq <= max_seq]
@@ -366,7 +366,7 @@ def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None,
     return VercelAIAdapter.load_messages(messages)
 
 
-def _ui_message(row: AgentMessage, project=None) -> dict:
+def _ui_message(row: AgentMessage, project) -> dict:
     return {
         "id": row.id, "role": row.role, "metadata": row.metadata,
         "parts": _projected_parts(row, project),

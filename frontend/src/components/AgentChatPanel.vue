@@ -76,7 +76,7 @@ async function directSource(source, area) {
   const kind = source.kind || source.sourceType;
   const row = area.find((item) => item.id === source.id && item.sourceType === kind);
   if (row) return row;
-  if (source.fromCaseArea) return null;
+  if (source.fromCaseArea || (source.sourceCaseId && !source.versionId)) return null;
   if (kind === "case" && source.versionId) {
     return source.sourceCaseId ? api.getPublicCase(source.sourceCaseId, source.versionId) : null;
   }

@@ -89,6 +89,7 @@ const artifactSnapshot = () => ({
     replacement: "替换文本", reason: "理由", sources: [
       { kind: "case", id: "src-entry-9", sourceCaseId: "c-real-9", versionId: "v-9", version: "v1", title: "真实案例" },
       { kind: "case", id: "src-old", title: "旧格式来源", versionId: "v-old" },
+      { kind: "case", id: "src-no-version", sourceCaseId: "c-real-9", title: "无固定版本来源" },
       { kind: "material", id: "mat-1", title: "素材来源" },
     ],
   }],
@@ -102,6 +103,7 @@ it("links artifact sources to the fixed public version of the real case", async 
     .toBe("#/cases/c-real-9?versionId=v-9"));
   expect(api.getPublicCase).toHaveBeenCalledWith("c-real-9", "v-9");
   expect(wrapper.get('[data-source-ref="case:src-old:v-old"]').element.tagName).toBe("P");
+  expect(wrapper.get('[data-source-ref="case:src-no-version"]').element.tagName).toBe("P");
   expect(wrapper.text()).toContain("旧格式来源");
   expect(wrapper.text()).toContain("素材来源");
 });

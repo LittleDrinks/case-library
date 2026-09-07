@@ -158,21 +158,12 @@ def _read_knowledge(database, source_id: str) -> dict:
 def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
     if ref.kind == "attachment":
         return _area_entry_available(database, user, case_id, ref)
-    if ref.kind == "case" and ref.version_id:
-        source_case_id = ref.source_case_id or _location_case_id(ref.location)
-        if source_case_id:
-            return source_case_content_available(
-                database, source_case_id, user, ref.version_id, False
-            )
+    if ref.kind == "case" and ref.version_id and ref.source_case_id:
+        return source_case_content_available(
+            database, ref.source_case_id, user, ref.version_id, False
+        )
     result = read_source(database, None, user, case_id, ref.kind, ref.id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
-
-
-def _location_case_id(location: str | None) -> str | None:
-    if not location or not location.startswith("case:"):
-        return None
-    value = location[5:].split("@", 1)[0]
-    return value or None
 
 
 def _area_entry_available(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:

@@ -74,6 +74,7 @@ export function sourceHref(source) {
   const kind = source.kind || source.sourceType;
   if (kind === "case") {
     if (source.versionId && !source.sourceCaseId) return "";
+    if (source.sourceCaseId && !source.versionId) return "";
     const version = source.versionId ? `?versionId=${encodeURIComponent(source.versionId)}` : "";
     return `#/cases/${encodeURIComponent(source.sourceCaseId || source.id)}${version}`;
   }

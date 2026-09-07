@@ -102,7 +102,7 @@ def _evidence_artifact(database, user: dict):
         base_revision=case["revision"], target=target,
     )
     ref = SourceRef(kind="case", id="src-22", title="固定来源", version_id="v-source-22",
-                    location="case:c-source-22@v-source-22")
+                    source_case_id="c-source-22", location="case:c-source-22@v-source-22")
     artifact = propose_artifact(
         database, "c-draft-1", thread.id, run.id, target.from_pos, target.to_pos,
         "替换", "理由", [ref], user,
