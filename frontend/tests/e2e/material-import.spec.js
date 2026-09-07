@@ -184,7 +184,7 @@ async function mountApprovedMaterial(page, caseId, title) {
 async function downloadApprovedMaterial(page, caseId, title, filename, content) {
   await openApprovedMaterialSearch(page, caseId, title);
   const pending = page.waitForEvent("download");
-  await page.getByRole("link", { name: `打开来源${title}` }).click();
+  await page.getByRole("link", { name: `下载${title}` }).click();
   const download = await pending;
   expect(download.suggestedFilename()).toBe(filename);
   expect(await readFile(await download.path(), "utf8")).toBe(content);
@@ -247,7 +247,7 @@ async function publishDraft(page, caseId) {
 
 async function expectPublicDownload(page, title, content) {
   const pending = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${title}` }).click();
+  await page.getByRole("link", { name: `打开来源${title}` }).click();
   expect(await readFile(await (await pending).path(), "utf8")).toBe(content);
 }
 
