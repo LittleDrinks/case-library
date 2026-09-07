@@ -611,6 +611,31 @@ it("renders the retry action inside the failed user message", async () => {
   expect(wrapper.get(".ai-message.user [data-testid='agent-retry']").text()).toContain("重试这条消息");
 });
 
+function failedTurnResponse(_url, options) {
+  const latest = JSON.parse(options.body).messages.at(-1);
+  const failed = failedSnapshot();
+  failed.latestRun.clientRequestId = latest.id;
+  failed.runs = [failed.latestRun];
+  api.agentThread.mockResolvedValue(failed);
+  return Promise.resolve(streamResponse([
+    'data: {"type":"start","messageId":"failure-assistant"}\n\n',
+    'data: {"type":"error","errorText":"AI 服务暂不可用"}\n\n',
+    'data: {"type":"finish","finishReason":"error"}\n\n',
+    "data: [DONE]\n\n",
+  ]));
+}
+
+it("keeps retry on a newly failed turn with a server-assigned message id", async () => {
+  api.agentThread.mockResolvedValue({ ...snapshot, messages: [] });
+  vi.stubGlobal("fetch", vi.fn(failedTurnResponse));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("失败的问题");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.get(".ai-message.user [data-testid='agent-retry']").text()).toContain("重试这条消息");
+});
+
 function selectionContext() {
   return { from: 9, to: 13, quote: "第二段原文", quoteHash: "quote-hash", revision: 3 };
 }

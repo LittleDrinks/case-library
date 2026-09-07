@@ -19,10 +19,16 @@ function projectMessages(messages = []) {
   }));
 }
 
-function mergeTimelineMessages(messages = [], persisted = []) {
+function mergeTimelineMessages(messages = [], persisted = [], runs = []) {
   const saved = new Map(projectMessages(persisted).map((message) => [message.id, message]));
+  for (const run of runs) {
+    if (run.clientRequestId && saved.has(run.userMessageId)) {
+      saved.set(run.clientRequestId, saved.get(run.userMessageId));
+    }
+  }
   return messages.map((message) => saved.has(message.id)
-    ? { ...message, metadata: { ...message.metadata, ...saved.get(message.id).metadata } }
+    ? { ...message, id: saved.get(message.id).id,
+      metadata: { ...message.metadata, ...saved.get(message.id).metadata } }
     : message);
 }
 
@@ -335,7 +341,7 @@ function computedState(state) {
   return {
     messages: computed(() => mergeTimelineMessages(
       state.chat.value?.messages || state.snapshot.value?.messages || [],
-      state.snapshot.value?.messages || [],
+      state.snapshot.value?.messages || [], state.snapshot.value?.runs || [],
     )),
     artifacts: computed(() => state.snapshot.value?.artifacts || []),
     threadId: computed(() => state.threadId.value),
