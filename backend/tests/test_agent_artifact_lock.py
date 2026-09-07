@@ -1,20 +1,42 @@
-"""#37 Artifact 安全：Run 锁定目标/基线、决定门禁、过期展示与证据复验。"""
+"""#37 Artifact 安全：Run 锁定选区/基线、决定门禁、过期展示、证据复验与运行尾部可见性。"""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai.exceptions import ModelRetry
 
-from app.modules.agent import artifacts
+from app.modules.agent import artifacts, prosemirror
 from app.modules.agent.models import AgentMessage, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
+from app.modules.agent.skills import propose_revision
 from app.modules.cases.service import CaseError
 
 PARAGRAPHS = ("第一段保持不变。", "第二段需要修订。")
 REPLACEMENT = "第二段已按来源修订。"
-SELECTION = {"type": "data-selection", "data": {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}}
+
+
+def _range_of(texts: tuple[str, ...], index: int) -> tuple[int, int]:
+    start = 1 + sum(len(text) + 2 for text in texts[:index])
+    return start, start + len(texts[index])
+
+
+def _selection_data(texts: tuple[str, ...], index: int) -> dict:
+    from_pos, to_pos = _range_of(texts, index)
+    return {"type": "data-selection", "data": {"from": from_pos, "to": to_pos}}
+
+
+def _target_of(texts: tuple[str, ...], index: int) -> ArtifactTarget:
+    from_pos, to_pos = _range_of(texts, index)
+    return ArtifactTarget(from_pos=from_pos, to_pos=to_pos, quote=texts[index])
+
+
+SECOND = _target_of(PARAGRAPHS, 1)
+SELECTION = _selection_data(PARAGRAPHS, 1)
 
 
 def _login(client: TestClient) -> dict:
@@ -36,11 +58,9 @@ def _document(*paragraphs: str) -> dict:
     ]}
 
 
-def _create_case(client: TestClient, auth: dict, *paragraphs: str) -> dict:
-    response = client.post(
-        "/api/cases", headers=_csrf(auth),
-        json={"title": "锁目标案例", "document": _document(*paragraphs)},
-    )
+def _create_case(client: TestClient, auth: dict, document: dict | None = None) -> dict:
+    body = {"title": "锁目标案例", "document": document or _document(*PARAGRAPHS)}
+    response = client.post("/api/cases", headers=_csrf(auth), json=body)
     assert response.status_code == 200
     return response.json()
 
@@ -58,69 +78,111 @@ def _send(client: TestClient, auth: dict, case_id: str, parts: list[dict]) -> di
             json={"id": "browser", "trigger": "submit-message",
                   "messages": [{"id": "m1", "role": "user", "parts": parts}]},
         )
-    assert response.status_code == 200, response.text
     return response
 
 
 def _run_row(database, case_id: str) -> dict:
     thread_id = database.agent_threads.find_one({"caseId": case_id})["id"]
-    return database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
+    row = database.agent_runs.find_one(
+        {"threadId": thread_id}, {"_id": 0}, sort=[("startedAt", -1)]
+    )
+    return row
 
 
-# ---- Run 创建即锁定 baseRevision 与目标段 ----
+# ---- Run 创建即锁定 baseRevision；仅非空选区锁定目标范围 ----
 
 
-def test_run_locks_base_revision_and_selected_target(client: TestClient) -> None:
+def test_run_locks_selected_range_with_server_quote(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    _send(client, auth, case["id"], [
+    case = _create_case(client, auth)
+    response = _send(client, auth, case["id"], [
         {"type": "text", "text": "请修订选中的段落"}, SELECTION,
     ])
+    assert response.status_code == 200, response.text
     run = _run_row(client.app.state.database, case["id"])
     assert run["baseRevision"] == 1
-    assert run["target"] == {"paragraphIndex": 1, "quote": PARAGRAPHS[1]}
+    assert run["target"] == {"from": SECOND.from_pos, "to": SECOND.to_pos,
+                             "quote": PARAGRAPHS[1]}
 
 
-def test_single_paragraph_document_locks_that_paragraph(client: TestClient) -> None:
+def test_empty_or_cross_block_selection_is_refused(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, "唯一段落。")
-    _send(client, auth, case["id"], [{"type": "text", "text": "请修订"}])
-    run = _run_row(client.app.state.database, case["id"])
-    assert run["baseRevision"] == 1
-    assert run["target"] == {"paragraphIndex": 0, "quote": "唯一段落。"}
+    case = _create_case(client, auth)
+    first_from, first_to = _range_of(PARAGRAPHS, 0)
+    second_from, _second_to = _range_of(PARAGRAPHS, 1)
+    for data in ({"from": second_from, "to": second_from},
+                 {"from": first_from + 1, "to": second_from + 1}):
+        response = _send(client, auth, case["id"], [
+            {"type": "text", "text": "请修订"},
+            {"type": "data-selection", "data": data},
+        ])
+        assert response.status_code == 422
+    assert client.app.state.database.agent_runs.count_documents({}) == 0
 
 
-def test_multi_paragraph_without_selection_locks_no_target(client: TestClient) -> None:
+def test_without_selection_no_target_is_locked(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    _send(client, auth, case["id"], [{"type": "text", "text": "请修订"}])
+    case = _create_case(client, auth, _document("唯一段落。"))
+    response = _send(client, auth, case["id"], [{"type": "text", "text": "请修订"}])
+    assert response.status_code == 200, response.text
     run = _run_row(client.app.state.database, case["id"])
     assert run["baseRevision"] == 1
     assert run.get("target") is None
 
 
-# ---- 提议必须命中锁 ----
+def test_selection_inside_list_and_quote_blocks_locks(client: TestClient) -> None:
+    document = {"type": "doc", "content": [
+        {"type": "bulletList", "content": [
+            {"type": "listItem", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "列表要点。"}]},
+            ]},
+        ]},
+        {"type": "blockquote", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "引用原文。"}]},
+        ]},
+    ]}
+    auth = _login(client)
+    blocks = prosemirror.text_blocks(document)
+    for block in blocks:
+        _assert_block_locks(client, auth, document, block)
 
 
-def _locked_run(client: TestClient, auth: dict, case: dict, paragraph_index: int = 1):
-    """直接构造锁定 Run（保持 active，供各决定场景自行推进终态）。"""
+def _assert_block_locks(client: TestClient, auth: dict, document: dict, block: dict) -> None:
+    case = _create_case(client, auth, document)
+    selection = {"type": "data-selection", "data": {
+        "from": block["start"], "to": block["end"],
+    }}
+    response = _send(client, auth, case["id"], [
+        {"type": "text", "text": "请修订"}, selection,
+    ])
+    assert response.status_code == 200, response.text
+    quote = prosemirror.text_between(document, block["start"], block["end"])
+    assert _run_row(client.app.state.database, case["id"])["target"] == {
+        "from": block["start"], "to": block["end"], "quote": quote,
+    }
+
+
+# ---- 提议必须命中锁；工具期只暂存不落库 ----
+
+
+def _locked_run(client: TestClient, auth: dict, case: dict, target: ArtifactTarget):
+    """直接构造锁定 Run（保持 active，供各场景自行推进终态）。"""
     database = client.app.state.database
     repository = AgentRepository(database)
     thread = repository.default_thread(case["id"], auth["user"]["id"])
     run = repository.start_run(
         thread, auth["user"]["id"], [{"type": "text", "text": "修订"}], {},
-        "assistant-lock", base_revision=case["revision"],
-        target=ArtifactTarget(
-            paragraph_index=paragraph_index, quote=PARAGRAPHS[paragraph_index],
-        ),
+        "assistant-lock", base_revision=case["revision"], target=target,
     )
     return database, repository, thread, run
 
 
-def _propose(database, case: dict, run, paragraph_index: int = 1, sources=()):
+def _propose(database, case: dict, run, target: ArtifactTarget = SECOND,
+             sources=(), replacement: str = REPLACEMENT):
     return artifacts.propose_artifact(
-        database, case["id"], run.thread_id, run.id, paragraph_index,
-        REPLACEMENT, "依据来源", list(sources), _owner(database, case),
+        database, case["id"], run.thread_id, run.id,
+        target.from_pos, target.to_pos,
+        replacement, "依据来源", list(sources), _owner(database, case),
     )
 
 
@@ -129,10 +191,22 @@ def _owner(database, case: dict) -> dict:
     return {"id": row["ownerId"], "role": "user"}
 
 
+def _publish(database, repository, run, artifact=None) -> None:
+    """运行完成事务：助手消息、tool.result 与修订候选同时对外可见。"""
+    message = AgentMessage(
+        id=f"assistant-{run.id}", thread_id=run.thread_id, run_id=run.id,
+        role="assistant", parts=[{"type": "text", "text": "完成"}],
+        created_at=datetime.now(UTC),
+    )
+    assert repository.complete_run(
+        run.id, message, resources=[], artifact=artifact,
+    ) is True
+
+
 def test_propose_without_locked_target_is_refused(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, _repository, _thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
     database.agent_runs.update_one({"id": run.id}, {"$set": {"target": None}})
     with pytest.raises(CaseError) as excinfo:
         _propose(database, case, run)
@@ -140,20 +214,21 @@ def test_propose_without_locked_target_is_refused(client: TestClient) -> None:
     assert database.agent_artifacts.count_documents({}) == 0
 
 
-def test_propose_off_locked_paragraph_is_refused(client: TestClient) -> None:
+def test_propose_off_locked_range_is_refused(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, _repository, _thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
+    first = _target_of(PARAGRAPHS, 0)
     with pytest.raises(CaseError) as excinfo:
-        _propose(database, case, run, paragraph_index=0)
+        _propose(database, case, run, target=first)
     assert excinfo.value.status_code == 422
     assert database.agent_artifacts.count_documents({}) == 0
 
 
 def test_propose_after_baseline_revision_change_is_refused(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, _repository, _thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
     database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
     with pytest.raises(CaseError) as excinfo:
         _propose(database, case, run)
@@ -161,72 +236,72 @@ def test_propose_after_baseline_revision_change_is_refused(client: TestClient) -
     assert database.agent_artifacts.count_documents({}) == 0
 
 
+def test_second_proposal_in_same_run_is_refused() -> None:
+    ctx = SimpleNamespace(deps=SimpleNamespace(proposed=object()))
+    with pytest.raises(ModelRetry):
+        asyncio.run(propose_revision(ctx, SECOND.from_pos, SECOND.to_pos, "文本"))
+
+
+def test_proposal_publishes_only_with_completed_run(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    assert database.agent_artifacts.count_documents({}) == 0
+    assert database.agent_thread_events.count_documents(
+        {"type": "artifact.created"}
+    ) == 0
+    _publish(database, repository, run, artifact)
+    row = database.agent_artifacts.find_one({"id": artifact.id}, {"_id": 0})
+    assert row["status"] == "pending"
+    assert row["target"] == {"from": SECOND.from_pos, "to": SECOND.to_pos,
+                             "quote": PARAGRAPHS[1]}
+    types = [event["type"] for event in
+             database.agent_thread_events.find({"threadId": thread.id})]
+    assert types == ["message.created", "run.started", "message.created",
+                     "artifact.created", "run.completed"]
+
+
+def test_cancelled_run_leaves_no_artifact(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    assert repository.cancel_run(run.id) is True
+    assert database.agent_artifacts.count_documents({}) == 0
+    assert database.agent_thread_events.count_documents(
+        {"type": "artifact.created"}
+    ) == 0
+    with pytest.raises(CaseError) as excinfo:
+        artifacts.decide_artifact(
+            database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+        )
+    assert excinfo.value.status_code == 404
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+
+
 def test_only_one_proposal_per_run(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, _repository, _thread, run = _locked_run(client, auth, case)
-    first = _propose(database, case, run)
-    assert first.status == "pending"
+    case = _create_case(client, auth)
+    database, repository, _thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    assert artifact.status == "pending"
+    _publish(database, repository, run, artifact)
     with pytest.raises(CaseError) as excinfo:
         _propose(database, case, run)
     assert excinfo.value.status_code == 409
     assert database.agent_artifacts.count_documents({"runId": run.id}) == 1
 
 
-# ---- 决定门禁：运行终态、取消/失败、重复相反决定 ----
-
-
-def test_decide_refused_until_run_reaches_terminal(client: TestClient) -> None:
-    auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, repository, thread, run = _locked_run(client, auth, case)
-    artifact = _propose(database, case, run)
-    with pytest.raises(CaseError) as active_error:
-        artifacts.decide_artifact(
-            database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-        )
-    assert active_error.value.status_code == 409
-    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "pending"
-    assert repository.complete_run(run.id, _assistant_message(run), resources=[]) is True
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert result["artifact"].status == "accepted"
-    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
-
-
-def _assistant_message(run):
-    return AgentMessage(
-        id=f"assistant-{run.id}", thread_id=run.thread_id, run_id=run.id,
-        role="assistant", parts=[{"type": "text", "text": "完成"}],
-        created_at=datetime.now(UTC),
-    )
-
-
-def test_cancelled_run_proposal_cannot_be_accepted(client: TestClient) -> None:
-    auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, repository, thread, run = _locked_run(client, auth, case)
-    artifact = _propose(database, case, run)
-    assert repository.cancel_run(run.id) is True
-    with pytest.raises(CaseError) as excinfo:
-        artifacts.decide_artifact(
-            database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-        )
-    assert excinfo.value.status_code == 409
-    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
-    rejected = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "rejected",
-    )
-    assert rejected["artifact"].status == "rejected"
+# ---- 决定门禁、幂等、相反决定 ----
 
 
 def test_repeat_same_decision_replays_opposite_conflicts(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, _repository, thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
     artifact = _propose(database, case, run)
-    database.agent_runs.update_one({"id": run.id}, {"$set": {"status": "completed"}})
+    _publish(database, repository, run, artifact)
     first = artifacts.decide_artifact(
         database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
     )
@@ -242,15 +317,49 @@ def test_repeat_same_decision_replays_opposite_conflicts(client: TestClient) -> 
     assert database.cases.find_one({"id": case["id"]})["revision"] == 2
 
 
+# ---- 选区范围替换：子串生效且保留未选内容与标记 ----
+
+
+def test_accept_replaces_only_selected_range(client: TestClient) -> None:
+    document = {"type": "doc", "content": [{
+        "type": "paragraph",
+        "content": [
+            {"type": "text", "text": "保留前缀。"},
+            {"type": "text", "text": "旧目标文本", "marks": [{"type": "bold"}]},
+            {"type": "text", "text": "保留后缀。", "marks": [{"type": "bold"}]},
+        ],
+    }]}
+    auth = _login(client)
+    case = _create_case(client, auth, document)
+    block = prosemirror.text_blocks(document)[0]
+    target = ArtifactTarget(from_pos=block["start"] + 5, to_pos=block["start"] + 10,
+                            quote="旧目标文本")
+    database, repository, thread, run = _locked_run(client, auth, case, target)
+    artifact = _propose(database, case, run, target=target, replacement="已按来源修订。")
+    _publish(database, repository, run, artifact)
+    _assert_range_accepted(database, case, thread, artifact, auth)
+
+
+def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+    updated = database.cases.find_one({"id": case["id"]})["document"]
+    content = updated["content"][0]["content"]
+    assert [node["text"] for node in content] == ["保留前缀。", "已按来源修订。", "保留后缀。"]
+    assert "marks" not in content[1] and "marks" in content[2]
+
+
 # ---- 基线过期：读取侧展示 expired，接受被拒 ----
 
 
 def test_revision_change_marks_expired_and_blocks_accept(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, repository, thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
     artifact = _propose(database, case, run)
-    assert repository.complete_run(run.id, _assistant_message(run), resources=[]) is True
+    _publish(database, repository, run, artifact)
     database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
     snapshot = repository.snapshot(thread)
     assert snapshot.artifacts[0].status == "expired"
@@ -296,19 +405,28 @@ def _seed_material(database) -> None:
 
 def _seed_evidence_case(client: TestClient, auth: dict, sources: list[SourceRef]):
     """构造完成态 Run + 引用来源的 pending Artifact，供接受复验。"""
-    case = _create_case(client, auth, *PARAGRAPHS)
-    database, repository, thread, run = _locked_run(client, auth, case)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
     artifact = _propose(database, case, run, sources=sources)
-    assert repository.complete_run(run.id, _assistant_message(run), resources=[]) is True
+    _publish(database, repository, run, artifact)
     return database, case, thread, artifact
 
 
-def _refused_accept(database, case, thread, artifact, auth):
-    with pytest.raises(CaseError) as excinfo:
+def _assert_refused_accept(database, case, thread, artifact, auth) -> None:
+    with pytest.raises(CaseError) as denied:
         artifacts.decide_artifact(
             database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
         )
-    return excinfo
+    assert denied.value.status_code == 409
+    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "pending"
+
+
+def _assert_accepted(database, case, thread, artifact, auth) -> None:
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
 
 
 def test_accept_rechecks_case_source_permission_and_publication(client: TestClient) -> None:
@@ -325,20 +443,6 @@ def test_accept_rechecks_case_source_permission_and_publication(client: TestClie
     _assert_refused_accept(database, case, thread, artifact, auth)
     database.cases.update_one({"id": "c-src"}, {"$set": {"publishedVersionId": "cv-1"}})
     _assert_accepted(database, case, thread, artifact, auth)
-
-
-def _assert_refused_accept(database, case, thread, artifact, auth) -> None:
-    denied = _refused_accept(database, case, thread, artifact, auth)
-    assert denied.value.status_code == 409
-    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "pending"
-
-
-def _assert_accepted(database, case, thread, artifact, auth) -> None:
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert result["artifact"].status == "accepted"
-    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
 
 
 def test_accept_rechecks_knowledge_and_material_sources(client: TestClient) -> None:

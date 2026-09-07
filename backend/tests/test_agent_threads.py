@@ -189,10 +189,15 @@ def test_list_marks_thread_with_active_run_as_running(client: TestClient) -> Non
 def _insert_artifact(database, thread_id: str, artifact_id: str) -> None:
     run_id = _completed_artifact_run(database, thread_id, artifact_id)
     case = database.cases.find_one({"id": "c-draft-1"})
+    document = case["document"]
+    block = prosemirror.text_blocks(document)[0]
     database.agent_artifacts.insert_one({
         "id": artifact_id, "caseId": "c-draft-1", "threadId": thread_id, "runId": run_id,
         "status": "pending", "baseRevision": 1,
-        "target": prosemirror.paragraphs(case["document"])[0],
+        "target": {
+            "from": block["start"], "to": block["end"],
+            "quote": prosemirror.text_between(document, block["start"], block["end"]),
+        },
         "replacement": "替换", "reason": "", "sources": [],
         "createdAt": datetime.now(UTC),
     })

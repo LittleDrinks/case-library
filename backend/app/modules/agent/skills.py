@@ -16,27 +16,31 @@ SKILL_ID = CASE_EDIT_SKILL.id
 
 
 async def propose_revision(
-    ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str = ""
+    ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
-    """只为当前 baseRevision 的一个段落创建 pending Artifact，正文不变。"""
+    """为教师选定的正文范围构建修订候选；随运行完成事务统一提交。"""
+    if ctx.deps.proposed is not None:
+        raise ModelRetry("本次运行已提议过修订候选")
     try:
-        artifact = _propose(ctx, paragraph_index, replacement, reason)
+        artifact = _propose(ctx, start, end, replacement, reason)
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
+    ctx.deps.proposed = artifact
     return _artifact_view(artifact)
 
 
-def _propose(ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str):
+def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        paragraph_index, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
+        start, end, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
     )
 
 
 def _artifact_view(artifact) -> dict:
     return {
         "artifactId": artifact.id,
-        "paragraphIndex": artifact.target.paragraph_index,
+        "from": artifact.target.from_pos,
+        "to": artifact.target.to_pos,
         "quote": artifact.target.quote,
         "replacement": artifact.replacement,
         "reason": artifact.reason,

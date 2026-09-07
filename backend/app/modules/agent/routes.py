@@ -352,37 +352,39 @@ def _lease(database, user_id: str, selection):
 
 
 def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
-    """Run 创建即锁定 baseRevision 与教师选定目标段。
+    """Run 创建即锁定 baseRevision；仅当恰好一个非空选区时锁定目标范围。
 
-    恰好一个选区锁定该段；无选区且正文只有一段时允许该段；其余不锁，
-    提议修订将被拒绝，不由模型推断目标。
+    无选区不锁目标，提议修订将被拒绝，不由模型推断或自动锁定段落。
     """
-    rows = plan.selections or prosemirror.paragraphs(case.get("document") or {})
-    if len(rows) != 1:
+    if len(plan.selections) != 1:
         return case.get("revision"), None
-    row = rows[0]
+    row = plan.selections[0]
     return case.get("revision"), ArtifactTarget(
-        paragraph_index=row["paragraphIndex"], quote=row["quote"],
+        from_pos=row["from"], to_pos=row["to"], quote=row["quote"],
     )
 
 
 def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
-    """解析 data-selection 部分：引文须与当前正文段落一致，编号服务端解析。"""
-    rows = prosemirror.paragraphs(document)
-    return [_resolve_selection(rows, part.get("data")) for part in parts
+    """解析 data-selection 部分：位置须落在同一文本块内，原文服务端重算。"""
+    return [_resolve_selection(document, part.get("data")) for part in parts
             if part.get("type") == "data-selection"]
 
 
-def _resolve_selection(rows: list[dict], data: object) -> dict:
-    quote = data.get("quote") if isinstance(data, dict) else None
-    if not isinstance(quote, str) or not quote:
+def _resolve_selection(document: dict, data: object) -> dict:
+    from_pos = data.get("from") if isinstance(data, dict) else None
+    to_pos = data.get("to") if isinstance(data, dict) else None
+    if not isinstance(from_pos, int) or not isinstance(to_pos, int):
         raise HTTPException(status_code=422, detail="正文选区格式无效")
-    index = data.get("paragraphIndex")
-    matches = [row["paragraphIndex"] for row in rows if quote in row["quote"]
-               and (index is None or row["paragraphIndex"] == index)]
-    if len(matches) != 1:
-        raise HTTPException(status_code=422, detail="正文选区与当前案例不匹配")
-    return {"paragraphIndex": matches[0], "quote": quote}
+    try:
+        prosemirror.selection_block(document, from_pos, to_pos)
+    except prosemirror.ParagraphNotFoundError as error:
+        raise HTTPException(
+            status_code=422, detail="正文选区为空或跨越段落，请重新选择"
+        ) from error
+    return {
+        "from": from_pos, "to": to_pos,
+        "quote": prosemirror.text_between(document, from_pos, to_pos),
+    }
 
 
 def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,

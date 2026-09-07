@@ -370,16 +370,17 @@ class AgentRepository:
     def complete_run(
         self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
         resources: list[dict[str, str]] | None = None,
+        artifact: AgentArtifact | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._complete_run(
-                run_id, assistant, session, owner_id, resources
+                run_id, assistant, session, owner_id, resources, artifact
             ),
         )
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
-                      resources=None) -> bool:
+                      resources=None, artifact: AgentArtifact | None = None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
                 _active_query(run_id, owner_id), session=session
@@ -390,8 +391,21 @@ class AgentRepository:
             return False
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
+        if artifact is not None:
+            self._persist_artifact(run, artifact, session)
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
+
+    def _persist_artifact(self, run: AgentRun, artifact: AgentArtifact, session) -> None:
+        """修订候选与 tool.result、助手消息、事件尾部同事务对外可见。"""
+        self.database.agent_artifacts.insert_one(
+            artifact.model_dump(by_alias=True, mode="python"), session=session
+        )
+        if self._append_event(
+            run.thread_id, "artifact.created", run.id,
+            {"artifactId": artifact.id}, session,
+        ) is None:
+            raise RuntimeError("Thread 事件写入失败")
 
     def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
         self.database.agent_messages.insert_one(

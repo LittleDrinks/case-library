@@ -46,11 +46,12 @@ function sectionAt(document, position) {
 
 function writingContext(activeEditor, from, to) {
   const section = sectionAt(activeEditor.state.doc, from);
-  const quote = activeEditor.state.doc.textBetween(from, to, " ");
+  const quote = activeEditor.state.doc.textBetween(from, to, "\n", "\n");
   const sectionText = activeEditor.state.doc
     .textBetween(section.sectionFrom, section.sectionTo, "\n").trim();
   const paragraphIndex = activeEditor.state.doc.resolve(from).index(0);
-  return { ...section, quote, from, to, sectionText, paragraphIndex };
+  const sameBlock = activeEditor.state.doc.resolve(from).sameParent(activeEditor.state.doc.resolve(to));
+  return { ...section, quote, from, to, sectionText, paragraphIndex, sameBlock };
 }
 
 function positionTrigger(context) {

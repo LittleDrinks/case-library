@@ -115,11 +115,10 @@ function artifactStatus(artifact) {
 
 function contextParts() {
   const selection = props.writingContext;
-  if (!selection?.quote || !Number.isInteger(selection.paragraphIndex)) return [];
-  return [{
-    type: "data-selection",
-    data: { paragraphIndex: selection.paragraphIndex, quote: selection.quote },
-  }];
+  const usable = selection?.sameBlock && Number.isInteger(selection.from)
+    && Number.isInteger(selection.to) && selection.to > selection.from;
+  if (!usable) return [];
+  return [{ type: "data-selection", data: { from: selection.from, to: selection.to } }];
 }
 
 async function acceptArtifact(artifactId) {
@@ -243,7 +242,7 @@ async function retryRun() {
           :data-artifact-status="artifact.status"
           data-testid="agent-artifact"
         >
-          <b>修订候选（第 {{ artifact.target.paragraphIndex + 1 }} 段）</b>
+          <b>修订候选</b>
           <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
           <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
           <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>

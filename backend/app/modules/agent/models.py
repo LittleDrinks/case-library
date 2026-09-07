@@ -95,7 +95,8 @@ class SourceRef(BaseModel):
 class ArtifactTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
+    from_pos: int = Field(alias="from", ge=0)
+    to_pos: int = Field(alias="to", ge=0)
     quote: str
 
 

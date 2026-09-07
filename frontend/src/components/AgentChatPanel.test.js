@@ -177,7 +177,7 @@ function tracerArtifacts(status) {
   return [{
     id: "artifact-9", caseId: "case-1", threadId: "thread-tracer", runId: "run-1",
     status, baseRevision: 1,
-    target: { paragraphIndex: 1, quote: "第二段原文" },
+    target: { from: 9, to: 14, quote: "第二段原文" },
     replacement: "替换后的第二段", reason: "补充评价依据",
     sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }],
   }];
