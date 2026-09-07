@@ -64,7 +64,7 @@ async function openChat(page, caseId) {
 }
 
 async function expandSearchTool(page) {
-  const search = page.locator('[data-testid="agent-skill-load"]').filter({ hasText: "检索案例" });
+  const search = page.locator('[data-testid="agent-tool-trace"]').filter({ hasText: "检索案例" });
   await expect(search).toBeVisible();
   if (await search.getAttribute("open")) return;
   await search.locator("summary").click();
