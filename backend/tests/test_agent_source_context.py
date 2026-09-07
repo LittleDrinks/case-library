@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
-from app.modules.agent import agent
+from app.modules.agent import agent, prosemirror
 from app.modules.agent.artifacts import decide_artifact, propose_artifact
-from app.modules.agent.models import SourceRef
+from app.modules.agent.models import ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.source_reader import read_source
 from app.modules.cases.service import CaseError
@@ -95,10 +95,26 @@ def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
     database = client.app.state.database
     _seed_source(database)
     user = {"id": "u-user-demo", "role": "user"}
-    thread = AgentRepository(database).default_thread("c-draft-1", user["id"])
+    repository = AgentRepository(database)
+    thread = repository.default_thread("c-draft-1", user["id"])
+    case = database.cases.find_one({"id": "c-draft-1"})
+    block = prosemirror.text_blocks(case["document"])[0]
+    target = ArtifactTarget(
+        from_pos=block["start"], to_pos=block["end"],
+        quote=prosemirror.text_between(case["document"], block["start"], block["end"]),
+    )
+    run = repository.start_run(
+        thread, user["id"], [{"type": "text", "text": "修订"}], {}, "assistant-22",
+        base_revision=case["revision"], target=target,
+    )
     ref = SourceRef(kind="case", id="src-22", title="固定来源", version_id="v-source-22",
                     location="case:c-source-22@v-source-22")
-    artifact = propose_artifact(database, "c-draft-1", thread.id, "run-22", 0, "替换", "理由", [ref])
+    artifact = propose_artifact(
+        database, "c-draft-1", thread.id, run.id, target.from_pos, target.to_pos,
+        "替换", "理由", [ref], user,
+    )
+    database.agent_artifacts.insert_one(artifact.model_dump(by_alias=True, mode="python"))
+    database.agent_runs.update_one({"id": run.id}, {"$set": {"status": "completed"}})
     database.cases.update_one({"id": "c-source-22"}, {"$set": {"publicationStatus": "private"}})
     with pytest.raises(CaseError, match="依据当前不可读"):
         decide_artifact(database, "c-draft-1", thread.id, artifact.id, user, "accepted")

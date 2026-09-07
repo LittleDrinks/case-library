@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
-export const NO_SKILL_ID = "";
+export const CASE_EDIT_SKILL_ID = "case-edit-skill";
 
 function textParts(message) {
   return (message?.parts || [])
@@ -96,21 +96,22 @@ async function resolveSnapshot(caseId) {
 
 function isSelectedSkillValid(state) {
   const skillId = state.selectedSkillId.value;
-  return !skillId || state.catalog.value === "ready"
+  if (skillId === CASE_EDIT_SKILL_ID) return true;
+  return state.catalog.value === "ready"
     && state.skills.value.some((skill) => skill.id === skillId);
 }
 
 function dropUnknownSkill(state) {
   const skillId = state.selectedSkillId.value;
-  if (skillId && !state.skills.value.some((skill) => skill.id === skillId)) {
-    state.selectedSkillId.value = NO_SKILL_ID;
-  }
+  const known = skillId === CASE_EDIT_SKILL_ID
+    || state.skills.value.some((skill) => skill.id === skillId);
+  if (!known) state.selectedSkillId.value = CASE_EDIT_SKILL_ID;
 }
 
 function restoreSkill(state, snapshot) {
   const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
   const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
-  state.selectedSkillId.value = skillId || NO_SKILL_ID;
+  state.selectedSkillId.value = skillId || CASE_EDIT_SKILL_ID;
   if (state.catalog.value === "ready") dropUnknownSkill(state);
 }
 
@@ -216,14 +217,18 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
-async function sendChat(caseId, state, text, parts, generation) {
+function messageParts(state, text, contextParts) {
+  const parts = [{ type: "text", text }, ...contextParts];
+  const skillId = state.selectedSkillId.value;
+  if (skillId) parts.push({ type: "data-skill", data: { skillId } });
+  return parts;
+}
+
+async function sendChat(caseId, state, text, generation, contextParts = []) {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    const messageParts = [{ type: "text", text }, ...parts];
-    const skillId = state.selectedSkillId.value;
-    if (skillId) messageParts.push({ type: "data-skill", data: { skillId } });
-    await state.chat.value.sendMessage({ parts: messageParts });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
@@ -302,7 +307,7 @@ function createState() {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
-    skills: ref([]), selectedSkillId: ref(NO_SKILL_ID), catalog: ref("loading"),
+    skills: ref([]), selectedSkillId: ref(CASE_EDIT_SKILL_ID), catalog: ref("loading"),
     generation: 0, catalogGeneration: 0, disposed: false,
   };
 }
@@ -354,32 +359,29 @@ function bindLifecycle(state, recover) {
   });
 }
 
-function exposedApi(state, actions) {
+function exposedApi(caseId, state, at) {
   return {
     ...computedState(state), ...threadActions(actions.caseId, state),
     loading: state.loading, error: state.error, settings: state.settings,
     skills: state.skills, selectedSkillId: state.selectedSkillId,
-    catalog: state.catalog, reloadCatalog: actions.reloadCatalog,
-    textParts, send: actions.send, stop: actions.stop, retry: actions.retry,
-    decide: actions.decide, reload: actions.reload,
+    catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
+    textParts,
+    send: (text, contextParts = []) => sendChat(caseId, state, text, at(), contextParts),
+    stop: () => stopChat(caseId, state, at()),
+    retry: (messageId) => retryChat(caseId, state, at(), messageId),
+    decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
+    reload: () => reload(caseId, state),
   };
 }
 
 export function useAgentChat(caseId) {
   const state = createState();
   const at = () => state.generation;
-  const send = (text, parts = []) => sendChat(caseId, state, text, parts, at());
-  const stop = () => stopChat(caseId, state, at());
-  const retry = (messageId) => retryChat(caseId, state, at(), messageId);
-  const decide = (artifactId, decision) => decideArtifact(caseId, state, at(), artifactId, decision);
   const recover = () => {
     if (state.snapshot.value?.activeRun) kickResume(caseId, state, at());
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
   void reloadCatalog(state);
-  return exposedApi(state, {
-    caseId, send, stop, retry, decide,
-    reload: () => reload(caseId, state), reloadCatalog: () => reloadCatalog(state),
-  });
+  return exposedApi(caseId, state, at);
 }

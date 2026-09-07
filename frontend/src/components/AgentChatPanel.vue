@@ -131,13 +131,19 @@ function sourcesOf(part) {
   return part.state === "output-available" ? part.output?.sources || [] : [];
 }
 
+function artifactStatus(artifact) {
+  return ({ accepted: "已接受", rejected: "已拒绝", expired: "已过期", pending: "待确认" })[artifact.status] || artifact.status;
+}
+
 function contextParts() {
   const parts = selectedSources.value.map((source) => ({
     type: "data-source", data: { sourceType: source.sourceType, id: source.id },
   }));
   const selection = props.writingContext;
-  if (selection?.quote?.trim()) {
-    parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to, quote: selection.quote } });
+  const usable = selection?.sameBlock && Number.isInteger(selection.from)
+    && Number.isInteger(selection.to) && selection.to > selection.from;
+  if (usable) {
+    parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to } });
   }
   return parts;
 }
@@ -275,11 +281,16 @@ async function retryRun() {
           :data-artifact-status="artifact.status"
           data-testid="agent-artifact"
         >
-          <b>修订候选（第 {{ artifact.target.paragraphIndex + 1 }} 段）</b>
+          <b>修订候选</b>
           <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
           <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
           <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
-          <p class="agent-artifact-status">状态：{{ artifact.status === "accepted" ? "已接受" : artifact.status === "rejected" ? "已拒绝" : "待确认" }}</p>
+          <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
+          <p
+            v-for="source in artifact.sources || []"
+            :key="source.id"
+            class="agent-artifact-source"
+          >依据：{{ source.title || source.id }}</p>
           <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
             <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>

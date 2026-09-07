@@ -1,8 +1,11 @@
-"""服务端正文段落结构与修订范围校验：目标段落的解析、校验与替换。"""
+"""ProseMirror selection validation and native range replacement."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from prosemirror.model import Schema
+from prosemirror.transform import Transform
 
 from app.modules.cases.document_schema import validate_prosemirror_document
 
@@ -13,6 +16,36 @@ class ParagraphNotFoundError(Exception):
 
 class ParagraphChangedError(Exception):
     pass
+
+
+_SCHEMA = Schema({
+    "nodes": {
+        "doc": {"content": "block*"},
+        "paragraph": {"content": "inline*", "group": "block"},
+        "heading": {
+            "attrs": {"level": {"validate": "number"}},
+            "content": "inline*", "group": "block",
+        },
+        "blockquote": {"content": "block+", "group": "block"},
+        "bulletList": {"content": "listItem+", "group": "block"},
+        "orderedList": {
+            "attrs": {"start": {"default": 1, "validate": "number"}},
+            "content": "listItem+", "group": "block",
+        },
+        "listItem": {"content": "paragraph block*"},
+        "text": {"group": "inline"},
+        "hardBreak": {
+            "inline": True, "group": "inline", "selectable": False,
+            "leafText": lambda _node: "\n",
+        },
+    },
+    "marks": {"bold": {}, "italic": {}, "strike": {}},
+})
+
+
+def _document(value: dict[str, Any]):
+    validate_prosemirror_document(value)
+    return _SCHEMA.node_from_json(value)
 
 
 def _node_text(node: dict[str, Any]) -> str:
@@ -32,39 +65,51 @@ def paragraphs(document: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _match_target(document: dict[str, Any], paragraph_index: int, quote: str) -> dict:
-    rows = paragraphs(document)
-    if paragraph_index >= len(rows):
+def text_blocks(document: dict[str, Any]) -> list[dict[str, int]]:
+    """Return native ProseMirror content ranges for every text block."""
+    blocks: list[dict[str, int]] = []
+    _document(document).descendants(
+        lambda node, pos, _parent, _index: blocks.append(
+            {"start": pos + 1, "end": pos + 1 + node.content.size}
+        ) if node.is_textblock else None
+    )
+    return blocks
+
+
+def text_between(document: dict[str, Any], from_pos: int, to_pos: int) -> str:
+    """Read a native ProseMirror range, including hard breaks as newlines."""
+    return _document(document).text_between(from_pos, to_pos, leaf_text="\n")
+
+
+def selection_block(document: dict[str, Any], from_pos: int, to_pos: int) -> dict:
+    """Return the text block containing a non-empty range."""
+    if from_pos >= to_pos:
         raise ParagraphNotFoundError
-    target = rows[paragraph_index]
-    if target["quote"] != quote:
+    block = next(
+        (row for row in text_blocks(document)
+         if row["start"] <= from_pos and to_pos <= row["end"]),
+        None,
+    )
+    if block is None:
+        raise ParagraphNotFoundError
+    return block
+
+
+def check_target(document: dict[str, Any], from_pos: int, to_pos: int, quote: str) -> None:
+    """Recheck the native range and its original text."""
+    selection_block(document, from_pos, to_pos)
+    if text_between(document, from_pos, to_pos) != quote:
         raise ParagraphChangedError
-    return target
-
-
-def check_target(document: dict[str, Any], paragraph_index: int, quote: str) -> None:
-    """重验目标段落仍然存在且原文未变，否则抛出对应异常。"""
-    _match_target(document, paragraph_index, quote)
 
 
 def replaced_document(
-    document: dict[str, Any], paragraph_index: int, quote: str, replacement: str
+    document: dict[str, Any], from_pos: int, to_pos: int, quote: str, replacement: str
 ) -> dict[str, Any]:
-    """返回目标段落文本替换后的新文档，替换前重验编号与原文。"""
-    _match_target(document, paragraph_index, quote)
-    position, content = 0, list(document.get("content", []))
-    for index, node in enumerate(content):
-        if node.get("type") == "paragraph":
-            if position == paragraph_index:
-                content[index] = _replaced_node(node, replacement)
-                break
-            position += 1
-    updated = {**document, "content": content}
+    """Replace only a checked range with a native ProseMirror transform."""
+    check_target(document, from_pos, to_pos, quote)
+    content = _SCHEMA.text(replacement) if replacement else []
+    updated = Transform(_document(document)).replace_with(
+        from_pos, to_pos, content
+    ).doc.to_json()
     validate_prosemirror_document(updated)
     return updated
-
-
-def _replaced_node(node: dict[str, Any], replacement: str) -> dict[str, Any]:
-    if not replacement:
-        return {"type": "paragraph", "content": []}
-    return {"type": "paragraph", "content": [{"type": "text", "text": replacement}]}

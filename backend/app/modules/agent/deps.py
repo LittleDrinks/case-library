@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from pymongo.database import Database
 
-from app.modules.agent.models import SourceRef
+from app.modules.agent.models import AgentArtifact, SourceRef
 
 
 @dataclass(slots=True)
@@ -25,3 +25,4 @@ class ToolDeps:
     selections: list[dict] = field(default_factory=list)
     hits: list[SourceRef] = field(default_factory=list)
     evidence: list[SourceRef] = field(default_factory=list)
+    proposed: AgentArtifact | None = None
