@@ -3,7 +3,7 @@ const MAX_TOPICS = 6;
 
 function itemTopics(item) {
   const byKind = {
-    case: [item.typeName, item.course, ...(item.theoryPoints || [])],
+    case: [item.typeName, item.course, ...(item.tagNames || [])],
     knowledge: [item.chapter, item.unit, item.edition],
     material: [item.materialType, ...(item.tags || [])],
   };

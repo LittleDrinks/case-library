@@ -41,6 +41,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const sources = ref([]);
 const candidatePreviews = ref([]);
 const candidateInvalidation = ref(0);
 const candidateBatchSnapshotId = ref("");
@@ -194,7 +195,6 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
-const sources = ref([]);
 const sourcesLoading = ref(false);
 const sourcesError = ref("");
 
@@ -590,6 +590,7 @@ onBeforeUnmount(() => {
               :annotatable="annotatable"
               :candidate-previews="candidatePreviews"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"

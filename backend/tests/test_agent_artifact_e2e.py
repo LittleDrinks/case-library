@@ -12,6 +12,8 @@ import httpx
 import pytest
 from pymongo import MongoClient
 
+from tests.agent_tracer import TRACER_PARAGRAPHS, TRACER_SELECTION
+
 BASE_URL = os.environ.get("AGENT_TRACER_E2E_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
 SKILL_LOAD_MARK = "单段修订工作流"
@@ -42,7 +44,7 @@ def _document(*paragraphs: str) -> dict:
     }
 
 
-PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
+PARAGRAPHS = TRACER_PARAGRAPHS
 REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应"
 
 
@@ -62,24 +64,30 @@ def _thread(client: httpx.Client, case_id: str) -> dict:
     return response.json()
 
 
+def _send_payload(text: str) -> dict:
+    return {
+        "id": "browser-chat-id",
+        "trigger": "submit-message",
+        "messages": [{
+            "id": "client-message",
+            "role": "user",
+            "parts": [
+                {"type": "text", "text": text},
+                {"type": "data-selection",
+                 "data": {"from": TRACER_SELECTION[0], "to": TRACER_SELECTION[1]}},
+                {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
+            ],
+        }],
+    }
+
+
 def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Response:
     thread_id = _thread(client, case_id)["id"]
     return client.post(
         f"/api/cases/{case_id}/agent/thread/{thread_id}/stream",
         headers={"X-CSRF-Token": csrf},
         timeout=30,
-        json={
-            "id": "browser-chat-id",
-            "trigger": "submit-message",
-            "messages": [{
-                "id": "client-message",
-                "role": "user",
-                "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
-                ],
-            }],
-        },
+        json=_send_payload(text),
     )
 
 
@@ -164,7 +172,8 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
         _assert_skill_loaded(run)
         assert artifact["status"] == "pending"
         assert artifact["baseRevision"] == 1
-        assert artifact["target"]["paragraphIndex"] == 1
+        assert artifact["target"]["from"] == TRACER_SELECTION[0]
+        assert artifact["target"]["to"] == TRACER_SELECTION[1]
         assert artifact["target"]["quote"] == PARAGRAPHS[1]
         assert artifact["sources"], "tracer artifact must cite at least one server source"
         current = database.cases.find_one({"id": case_id}, {"_id": 0})

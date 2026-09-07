@@ -169,13 +169,26 @@ def _clean(record: dict) -> dict:
     return {key: value for key, value in record.items() if key != "_id"}
 
 
+def campus_verified(user: dict | None) -> bool:
+    """校内内容需要已确认的机构身份，登录本身不构成验证。"""
+    return bool(user and (user.get("campus_verified") or user.get("role") == "admin"))
+
+
 def can_read_material(material: dict, user: dict | None) -> bool:
     if material.get("accessLevel") == "public":
         return True
     if material.get("accessLevel") == "campus":
-        return bool(user)
+        return campus_verified(user)
     return bool(
         user and (user["role"] == "admin" or material.get("createdBy") == user["id"])
+    )
+
+
+def material_content_available(material: dict, user: dict | None) -> bool:
+    return bool(
+        material.get("status") == "active"
+        and can_read_material(material, user)
+        and (material.get("blobId") or material.get("sourceUrl"))
     )
 
 
@@ -188,7 +201,13 @@ def _readable_material(database, material_id: str, user: dict | None) -> dict:
 
 def _detail_view(material: dict) -> dict:
     view = {key: material.get(key) for key in MATERIAL_DETAIL_FIELDS}
-    view.update({"hasFile": bool(material.get("blobId")), "contentAvailable": True})
+    has_file = bool(material.get("blobId"))
+    view.update(
+        {
+            "hasFile": has_file,
+            "contentAvailable": bool(has_file or material.get("sourceUrl")),
+        }
+    )
     view["downloadAvailable"] = view["hasFile"]
     return view
 
@@ -199,9 +218,11 @@ def get_material_detail(database, material_id: str, user: dict | None) -> dict:
 
 def download_material(database, store, material_id: str, user: dict | None):
     material = _readable_material(database, material_id, user)
-    if not material.get("blobId"):
-        raise MaterialImportError(404, "素材不存在")
-    return material, store.open(material["blobId"])
+    if material.get("blobId"):
+        return material, store.open(material["blobId"])
+    if material.get("sourceUrl"):
+        return material, None
+    raise MaterialImportError(404, "素材不存在")
 
 
 def material_filename(material: dict) -> str:

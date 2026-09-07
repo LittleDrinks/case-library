@@ -66,6 +66,10 @@ function caseSourceRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/case-sources`;
 }
 
+function sourcesRoot(id) {
+  return `/api/cases/${encodeURIComponent(id)}/sources`;
+}
+
 function appendSearchFilters(params, filters) {
   Object.entries(filters).forEach(([name, raw]) => {
     const values = Array.isArray(raw) ? raw : [raw];
@@ -95,9 +99,6 @@ export const api = {
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
-  ),
-  listSources: (caseId, versionId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/sources${versionQuery(versionId)}`,
   ),
   agentThread: (caseId, threadId, versionId) => request(
     threadId
@@ -158,15 +159,25 @@ export const api = {
     `${materialRoot(id)}/${encodeURIComponent(materialId)}?revision=${revision}`,
     { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
   ),
+  listSources: (id, versionId) => request(
+    `${sourcesRoot(id)}${versionQuery(versionId)}`,
+  ),
+  listCaseSources: (id, versionId) => request(
+    `${caseSourceRoot(id)}${versionQuery(versionId)}`,
+  ),
+  addCaseSource: (id, payload, csrfToken) => request(
+    caseSourceRoot(id), jsonOptions("POST", payload, csrfToken),
+  ),
+  removeCaseSource: (id, sourceId, revision, csrfToken) => request(
+    `${caseSourceRoot(id)}/${encodeURIComponent(sourceId)}?revision=${revision}`,
+    { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
+  ),
   createCase: (caseRecord, csrfToken) => request(
     "/api/cases", jsonOptions("POST", caseRecord, csrfToken),
   ),
   getCase: (id) => request(`/api/cases/${encodeURIComponent(id)}`),
   getPublicCase: (id, versionId) => request(
     `/api/cases/${encodeURIComponent(id)}/public${versionQuery(versionId)}`,
-  ),
-  addCaseSource: (id, payload, csrfToken) => request(
-    caseSourceRoot(id), jsonOptions("POST", payload, csrfToken),
   ),
   saveCase: (id, snapshot, csrfToken) => request(
     `/api/cases/${encodeURIComponent(id)}`,

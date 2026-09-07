@@ -3,7 +3,15 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.modules.cases.document_schema import citation_refs
 from app.modules.documents import build_case_docx
+
+
+def _citation(source_type: str = "material", source_id: str = "m-kcsz") -> dict:
+    return {
+        "type": "citation",
+        "attrs": {"sourceType": source_type, "sourceId": source_id},
+    }
 
 
 def _text(value: str, marks: list[dict] | None = None) -> dict:
@@ -83,6 +91,24 @@ INVALID_DOCUMENTS = (
         {"type": "doc", "content": [{"type": "blockquote", "content": []}]},
     ),
     (
+        "citation-extra-field",
+        {
+            "type": "doc",
+            "content": [_paragraph(_text("x", [{**_citation(), "note": "多余"}]))],
+        },
+    ),
+    (
+        "citation-unknown-source-type",
+        {
+            "type": "doc",
+            "content": [_paragraph(_text("x", [_citation("knowledge")]))],
+        },
+    ),
+    (
+        "citation-empty-source-id",
+        {"type": "doc", "content": [_paragraph(_text("x", [_citation("case", "")]))]},
+    ),
+    (
         "text-with-content",
         {
             "type": "doc",
@@ -101,6 +127,34 @@ def test_current_tiptap_schema_is_accepted(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["document"] == valid_document()
+
+
+def test_create_rejects_dangling_citation(client: TestClient) -> None:
+    document = {
+        "type": "doc",
+        "content": [_paragraph(_text("依据", [_citation()]))],
+    }
+    response = _create(client, _login_headers(client), document)
+
+    assert response.status_code == 422
+
+
+def test_citation_refs_keeps_first_occurrence_order() -> None:
+    document = {
+        "type": "doc",
+        "content": [
+            _paragraph(
+                _text("甲", [_citation("case", "src-a")]),
+                _text("乙", [_citation("material", "m-1"), {"type": "bold"}]),
+                _text("丙", [_citation("case", "src-a")]),
+            )
+        ],
+    }
+
+    assert citation_refs(document) == [
+        {"sourceType": "case", "sourceId": "src-a"},
+        {"sourceType": "material", "sourceId": "m-1"},
+    ]
 
 
 def test_invalid_prosemirror_structure_returns_422(client: TestClient) -> None:
@@ -148,4 +202,4 @@ def test_docx_rejects_an_unknown_persisted_node() -> None:
     }
 
     with pytest.raises(ValueError, match="未知节点"):
-        build_case_docx(case)
+        build_case_docx(case, [])

@@ -6,6 +6,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { hashQuote } from "../lib/annotationAnchor.js";
+import { CitationMark } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
 const props = defineProps({
@@ -15,6 +16,7 @@ const props = defineProps({
   annotatable: { type: Boolean, default: false },
   candidatePreviews: { type: Array, default: () => [] },
   annotations: { type: Array, default: () => [] },
+  sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
 const selection = ref(null);
@@ -46,10 +48,12 @@ function sectionAt(document, position) {
 
 function writingContext(activeEditor, from, to) {
   const section = sectionAt(activeEditor.state.doc, from);
-  const quote = activeEditor.state.doc.textBetween(from, to, " ");
+  const quote = activeEditor.state.doc.textBetween(from, to, "\n", "\n");
   const sectionText = activeEditor.state.doc
     .textBetween(section.sectionFrom, section.sectionTo, "\n").trim();
-  return { ...section, quote, from, to, sectionText };
+  const paragraphIndex = activeEditor.state.doc.resolve(from).index(0);
+  const sameBlock = activeEditor.state.doc.resolve(from).sameParent(activeEditor.state.doc.resolve(to));
+  return { ...section, quote, from, to, sectionText, paragraphIndex, sameBlock };
 }
 
 function positionTrigger(context) {
@@ -232,7 +236,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), candidateExtension, annotationExtension],
+  }), CitationMark, candidateExtension, annotationExtension],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: captureSelection,
@@ -323,7 +327,7 @@ defineExpose({ applyCandidate, recaptureSelection });
 </script>
 
 <template>
-  <EditorToolbar v-if="editable" :editor="editor" />
+  <EditorToolbar v-if="editable" :editor="editor" :sources="sources" />
   <button
     v-if="selection"
     class="annotation-trigger"

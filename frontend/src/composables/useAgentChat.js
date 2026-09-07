@@ -228,19 +228,18 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
-function messageParts(text, state) {
-  const parts = [{ type: "text", text }];
-  if (!state.versionId && state.selectedSkillId.value) {
-    parts.push({ type: "data-skill", data: { skillId: state.selectedSkillId.value } });
-  }
+function messageParts(state, text, contextParts) {
+  const parts = [{ type: "text", text }, ...contextParts];
+  const skillId = state.selectedSkillId.value;
+  if (!state.versionId && skillId) parts.push({ type: "data-skill", data: { skillId } });
   return parts;
 }
 
-async function sendChat(caseId, state, text, generation) {
+async function sendChat(caseId, state, text, generation, contextParts = []) {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({ parts: messageParts(text, state) });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
@@ -385,7 +384,8 @@ function exposedApi(caseId, state, at) {
     loading: state.loading, error: state.error, settings: state.settings,
     skills: state.skills, selectedSkillId: state.selectedSkillId,
     catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
-    textParts, send: (text) => sendChat(caseId, state, text, at()),
+    textParts,
+    send: (text, contextParts = []) => sendChat(caseId, state, text, at(), contextParts),
     stop: () => stopChat(caseId, state, at()),
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
