@@ -265,6 +265,12 @@ def _stop_active_run(client: TestClient, auth: dict) -> str:
     return thread_id
 
 
+def _assert_cancelled_run(database, thread_id, run) -> None:
+    assert run["status"] == "cancelled", run
+    assert run["error"] == "运行已取消"
+    assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
+
+
 def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) -> None:
     auth = _login(client)
     release = Event()
@@ -276,9 +282,7 @@ def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) 
             database = client.app.state.database
             run = _await_run(database, thread_id)
             _await_terminal_event(database, thread_id, run["id"])
-            assert run["status"] == "cancelled", run
-            assert run["error"] == "运行已取消"
-            assert _events(database, thread_id)[-1]["type"] == "run.cancelled"
+            _assert_cancelled_run(database, thread_id, run)
             again = client.post(f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
             assert again.json() == {"runId": None, "status": "idle"}
         finally:
