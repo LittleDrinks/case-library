@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from time import monotonic
+
 import pytest
 from fastapi.testclient import TestClient
-from pydantic_ai import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
+from pydantic_ai import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.models.function import DeltaThinkingPart
 
 from app.modules.agent.runtime import agent
-from tests.agent_tracer import REPLACEMENT, tracer_model, tracer_response
+from tests.agent_tracer import (
+    REPLACEMENT, THINKING_MARKER, THINKING_TEXT, thinking_pieces, tracer_model, tracer_response,
+)
 from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
@@ -25,6 +32,74 @@ def test_tracer_reads_the_actual_search_result():
     call = tracer_response(messages).parts[0]
     assert call.tool_name == "read_source"
     assert call.args_as_dict() == {"source_type": "case", "source_id": "actual-published-case"}
+
+
+def _thinking_stream_items(marker_text: str) -> tuple[list, float]:
+    model = tracer_model(skill_id=SKILL_ID)
+    messages = [ModelRequest(parts=[UserPromptPart(content=marker_text)])]
+
+    async def _collect() -> tuple[list, float]:
+        items, started = [], None
+        async for item in model.stream_function(messages, None):
+            delta = item[0] if isinstance(item, dict) else None
+            if isinstance(delta, DeltaThinkingPart):
+                if started is None:
+                    started = monotonic()
+            elif delta is not None and started is not None:
+                items.append(item)
+                return items, monotonic() - started
+            items.append(item)
+        return items, 0.0
+
+    return asyncio.run(_collect())
+
+
+def test_stream_emits_slow_thinking_delta_then_load_capability():
+    items, gap = _thinking_stream_items(f"请修订第2段（{THINKING_MARKER}）：补充评价依据")
+    thinking = [item[0].content for item in items
+                if isinstance(item, dict) and isinstance(item.get(0), DeltaThinkingPart)]
+    assert thinking == thinking_pieces(THINKING_TEXT)
+    assert gap >= 0.5
+    call = items[-1][0]
+    assert call.name == "load_capability"
+    assert json.loads(call.json_args) == {"id": SKILL_ID}
+
+
+def _return_for(response: ModelResponse) -> ToolReturnPart:
+    call = response.parts[-1]
+    if call.tool_name == "search_corpus":
+        return ToolReturnPart(call.tool_name, {"sources": [{"kind": "case", "id": "hit-1"}]})
+    return ToolReturnPart(call.tool_name, {})
+
+
+def _drive_tracer_chain(marker_text: str) -> list[ModelResponse]:
+    history: list = [ModelRequest(parts=[UserPromptPart(content=marker_text)])]
+    responses: list[ModelResponse] = []
+    for _ in range(6):
+        response = tracer_response(history, skill_id=SKILL_ID)
+        responses.append(response)
+        history.append(response)
+        if response.parts[-1].part_kind == "text":
+            break
+        history.append(ModelRequest(parts=[_return_for(response)]))
+    return responses
+
+
+def test_thinking_marker_keeps_tracer_chain_intact():
+    responses = _drive_tracer_chain(f"请修订第2段（{THINKING_MARKER}）：补充评价依据")
+    assert [part.part_kind for part in responses[0].parts] == ["thinking", "tool-call"]
+    assert responses[0].parts[1].tool_name == "load_capability"
+    assert [response.parts[-1].tool_name for response in responses[1:-1]] == [
+        f"read_skill_resource_{SKILL_ID.replace('-', '_')}",
+        "search_corpus", "read_source", "propose_revision",
+    ]
+    assert responses[-1].parts[0].content == "已生成单段修订候选，等待作者决定。"
+
+
+def test_plain_marker_free_question_skips_thinking():
+    responses = _drive_tracer_chain("请结合平台资料修订第2段：补充评价依据")
+    assert [part.part_kind for part in responses[0].parts] == ["tool-call"]
+    assert responses[0].parts[0].tool_name == "load_capability"
 
 
 class StubCatalog:
