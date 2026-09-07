@@ -1,10 +1,12 @@
+import { reactive } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import MaterialExplorerView from "./MaterialExplorerView.vue";
-import { api } from "../api.js";
+import { api, ApiError } from "../api.js";
 
 const replace = vi.fn();
-const route = { query: { caseId: "case-1" }, fullPath: "/materials?caseId=case-1" };
+const route = reactive({ query: { caseId: "case-1" }, fullPath: "/materials?caseId=case-1" });
+const wrappers = [];
 
 vi.mock("vue-router", () => ({
   useRoute: () => route,
@@ -15,6 +17,7 @@ vi.mock("../api.js", () => ({
     search: vi.fn(), getCase: vi.fn(), listCaseMaterials: vi.fn(),
     mountCaseMaterial: vi.fn(),
   },
+  ApiError: class ApiError extends Error {},
 }));
 vi.mock("../session.js", () => ({
   session: { csrfToken: "csrf", user: { id: "teacher-1" } },
@@ -30,15 +33,20 @@ const restricted = {
 };
 
 function render() {
-  return mount(MaterialExplorerView, {
+  const wrapper = mount(MaterialExplorerView, {
     global: {
       stubs: { SiteHeader: true, RouterLink: { template: "<a><slot /></a>" }, CatalogPagination: true, MaterialDownloadAction: true },
     },
   });
+  wrappers.push(wrapper);
+  return wrapper;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  replace.mockReset();
+  route.query = { caseId: "case-1" };
+  route.fullPath = "/materials?caseId=case-1";
   sessionStorage.clear();
   api.search.mockResolvedValue({
     items: [available, restricted], facets: {}, total: 2, page: 1,
@@ -50,6 +58,15 @@ beforeEach(() => {
   api.listCaseMaterials.mockResolvedValue([]);
   api.mountCaseMaterial.mockResolvedValue({});
 });
+
+afterEach(() => {
+  wrappers.splice(0).forEach((wrapper) => wrapper.unmount());
+  vi.useRealTimers();
+});
+
+function apiError(status, message = "请求失败") {
+  return Object.assign(new ApiError(message), { status });
+}
 
 test("受限素材不可选择且批量挂载只提交可访问项", async () => {
   const wrapper = render();
@@ -128,3 +145,74 @@ test("筛选重置素材列表的分页状态和选择", async () => {
   });
   expect(wrapper.text()).toContain("已选择 0 条");
 });
+
+test("素材分页503后重试并显示成功结果", async () => {
+  vi.useFakeTimers();
+  api.search.mockReset().mockResolvedValueOnce(firstPage())
+    .mockRejectedValueOnce(apiError(503, "目录同步中"))
+    .mockResolvedValueOnce(secondPage());
+  const wrapper = render();
+  await flushPromises();
+  wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(1000);
+  await flushPromises();
+  expect(wrapper.text()).toContain("受限素材");
+});
+
+test("素材分页持续503在30秒窗口后失败", async () => {
+  vi.useFakeTimers();
+  api.search.mockReset().mockResolvedValueOnce(firstPage()).mockImplementation(() => Promise.reject(apiError(503, "目录同步中")));
+  const wrapper = render();
+  await flushPromises();
+  wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(30_000);
+  await flushPromises();
+  expect(api.search.mock.calls.length).toBe(31);
+  expect(wrapper.text()).toContain("目录同步中");
+});
+
+test("素材分页非503错误立即显示", async () => {
+  api.search.mockReset().mockResolvedValueOnce(firstPage()).mockRejectedValueOnce(apiError(500, "服务错误"));
+  const wrapper = render();
+  await flushPromises();
+  wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
+  await flushPromises();
+  expect(api.search).toHaveBeenCalledTimes(2);
+  expect(wrapper.text()).toContain("服务错误");
+});
+
+test("切换筛选后旧素材重试不再发请求或覆盖结果", async () => {
+  vi.useFakeTimers();
+  api.search.mockReset().mockResolvedValueOnce(firstPage())
+    .mockRejectedValueOnce(apiError(503, "目录同步中"))
+    .mockResolvedValueOnce({ ...firstPage(), items: [restricted] });
+  const wrapper = render();
+  await flushPromises();
+  wrapper.getComponent({ name: "CatalogPagination" }).vm.$emit("change", "next-token");
+  await flushPromises();
+  replace.mockImplementation(({ query }) => {
+    route.query = query;
+    route.fullPath = `/materials?${new URLSearchParams(query)}`;
+  });
+  await wrapper.findAll("input[name='authority']")[1].trigger("change");
+  await wrapper.vm.$nextTick(); await flushPromises();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(api.search).toHaveBeenCalledTimes(3);
+  expect(wrapper.text()).toContain("受限素材");
+});
+
+function firstPage() {
+  return {
+    items: [available], facets: {}, total: 2, page: 1,
+    metadataIncluded: true, nextCursor: "next-token", previousCursor: null,
+  };
+}
+
+function secondPage() {
+  return {
+    items: [restricted], facets: null, total: null, page: 2,
+    metadataIncluded: false, nextCursor: null, previousCursor: "previous-token",
+  };
+}

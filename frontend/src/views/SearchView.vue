@@ -2,13 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
-import { api, ApiError } from "../api.js";
+import { api } from "../api.js";
 import CatalogPagination from "../components/CatalogPagination.vue";
 import SearchAIAnswer from "../components/SearchAIAnswer.vue";
 import SearchGraph from "../components/SearchGraph.vue";
 import SearchFilters from "../components/SearchFilters.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { emptyFilters, filterQuery, filtersFromQuery } from "../lib/searchFilters.js";
+import { searchWithSyncRetry } from "../lib/searchSyncRetry.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -106,24 +107,15 @@ async function requestSearch(term, kind, activeCursor, searchFilters) {
   loading.value = true;
   error.value = "";
   try {
-    const result = await searchWithSyncRetry(term, kind, activeCursor, searchFilters, () => current === searchGeneration);
+    const result = await searchWithSyncRetry(
+      () => api.search(term, kind, activeCursor, 20, filterQuery(searchFilters, kind)),
+      () => current === searchGeneration,
+    );
     if (current === searchGeneration) applyResult(term, result);
   } catch (caught) {
     if (current === searchGeneration) error.value = caught.message || "检索失败";
   } finally {
     if (current === searchGeneration) loading.value = false;
-  }
-}
-
-async function searchWithSyncRetry(term, kind, cursor, filters, isLive) {
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    try {
-      return await api.search(term, kind, cursor, 20, filterQuery(filters, kind));
-    } catch (caught) {
-      if (!isLive() || !(caught instanceof ApiError) || caught.status !== 503 || Date.now() >= deadline) throw caught;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
   }
 }
 

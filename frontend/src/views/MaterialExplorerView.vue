@@ -7,6 +7,7 @@ import CatalogPagination from "../components/CatalogPagination.vue";
 import MaterialDownloadAction from "../components/MaterialDownloadAction.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { rememberMaterialReturn, restoreMaterialReturn } from "../lib/materialNavigation.js";
+import { searchWithSyncRetry } from "../lib/searchSyncRetry.js";
 import { session } from "../session.js";
 
 const PAGE_SIZE = 20;
@@ -64,7 +65,11 @@ async function load(activeCursor = cursor.value) {
   const current = ++searchGeneration;
   error.value = "";
   try {
-    const payload = await api.search(query.value.trim(), "material", activeCursor, PAGE_SIZE, searchFilters());
+    const term = query.value.trim(); const filters = searchFilters();
+    const payload = await searchWithSyncRetry(
+      () => api.search(term, "material", activeCursor, PAGE_SIZE, filters),
+      () => current === searchGeneration,
+    );
     if (current !== searchGeneration) return;
     materials.value = payload.items;
     updateMetadata(payload);
