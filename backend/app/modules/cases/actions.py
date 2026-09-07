@@ -18,7 +18,7 @@ def available_actions(case: dict, user: dict | None) -> list[str]:
         return []
     commands = list(_commands(case, user))
     commands.extend(_publication_commands(case, user))
-    return commands
+    return list(dict.fromkeys(commands))
 
 
 def _commands(case: dict, user: dict) -> tuple[str, ...]:

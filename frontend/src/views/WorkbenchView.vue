@@ -73,7 +73,7 @@ const statusLabel = computed(() => {
   if (publicationStatus.value === "hidden") return "已隐藏";
   const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
-  ] || "草稿";
+  ] || "未知状态";
   if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
     return `${base} · 旧版公开中`;
   }

@@ -272,6 +272,13 @@ def test_admin_can_hide_and_restore_the_same_published_version(
     assert restored["case"]["publishedVersionId"] == approved["version"]["id"]
 
 
+def test_admin_author_hidden_case_actions_are_unique(client: TestClient) -> None:
+    admin = login(client).json()
+    case = client.get("/api/cases/c-02").json()
+    hidden = _transition_json(client, case["id"], admin["csrfToken"], "hide", case)
+    assert hidden["case"]["availableActions"] == ["reopen", "restore"]
+
+
 def test_approval_ends_at_published_without_a_working_draft(
     client: TestClient,
 ) -> None:

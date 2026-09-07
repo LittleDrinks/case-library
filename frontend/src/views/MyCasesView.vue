@@ -30,14 +30,6 @@ function isReturned(item) {
   return item.workflowStatus === "draft" && Boolean(item.lastReview);
 }
 
-function itemStatus(item) {
-  return isReturned(item) ? "退回修改" : statusLabels[item.workflowStatus];
-}
-
-function itemAction(item) {
-  return isReturned(item) ? "处理退回意见" : actionLabels[item.workflowStatus];
-}
-
 function returnReason(item) {
   const review = item.lastReview;
   if (!review) return "";
@@ -65,7 +57,7 @@ function caseDestination(item) {
 function cardStatus(item) {
   if (isReturned(item)) return "退回修改";
   if (item.publicationStatus === "hidden") return "已隐藏";
-  const base = statusLabels[item.workflowStatus] || "草稿";
+  const base = statusLabels[item.workflowStatus] || "未知状态";
   return item.publicationStatus === "public" && item.workflowStatus !== "published"
     ? `${base} · 旧版公开中` : base;
 }

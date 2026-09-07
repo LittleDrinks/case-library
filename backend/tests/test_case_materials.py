@@ -2,6 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.modules.search.meilisearch import CatalogKey, CatalogPage
+
+
+class SearchProbe:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def search(self, request) -> CatalogPage:
+        self.requests.append(request)
+        return CatalogPage([], None, False, False)
+
 
 def login(client: TestClient) -> dict:
     response = client.post(
@@ -215,6 +226,18 @@ def publish_case_with_material(client: TestClient) -> tuple[dict, dict]:
     return mounted, approved
 
 
+def republish_without_material(client, owner: dict, old: dict) -> dict:
+    transition(client, owner, "reopen")
+    unmount(client, owner, old["id"])
+    mount(client, owner, "m-kcsz")
+    submitted = transition(client, owner, "submit")
+    admin = admin_login(client)
+    started = transition_with_case(client, admin, "start", submitted["case"])
+    return transition_with_case(
+        client, admin, "approve", started["case"], submittedVersionId=submitted["version"]["id"]
+    )
+
+
 def test_public_case_exposes_restricted_name_but_not_content(
     client: TestClient,
 ) -> None:
@@ -250,21 +273,24 @@ def test_publication_transitions_maintain_material_reference_count(client: TestC
 
 
 def test_republication_moves_material_reference_to_the_new_default(client: TestClient) -> None:
-    old, _approved = publish_case_with_material(client)
     database = client.app.state.database
-    owner = login(client)
-    _reopened = transition(client, owner, "reopen")
-    unmount(client, owner, old["id"])
-    mount(client, owner, "m-kcsz")
-    submitted = transition(client, owner, "submit")
-    admin = admin_login(client)
-    started = transition_with_case(client, admin, "start", submitted["case"])
-    transition_with_case(client, admin, "approve", started["case"], submittedVersionId=submitted["version"]["id"])
+    database.materials.update_one(
+        {"id": "m-zrjs"},
+        {"$set": {"accessLevel": "private", "createdBy": "u-user-demo"}},
+    )
+    old, _approved = publish_case_with_material(client)
+    republish_without_material(client, login(client), old)
     assert database.materials.find_one({"id": old["id"]})["publicReferenceCount"] == 0
     assert database.materials.find_one({"id": "m-kcsz"})["publicReferenceCount"] == 1
     sequence = outbox_sequence(client, "case:c-draft-1")
     assert outbox_sequence(client, f"material:{old['id']}") == sequence
     assert outbox_sequence(client, "material:m-kcsz") == sequence
+    assert revocation(client, f"material:{old['id']}")["sequence"] == sequence
+    probe = SearchProbe()
+    client.app.state.search_catalog = probe
+    response = client.get("/api/search", params={"kind": "material"})
+    assert response.status_code == 200
+    assert probe.requests[0].excluded_keys == (CatalogKey("material", old["id"]),)
 
 
 def transition_with_case(

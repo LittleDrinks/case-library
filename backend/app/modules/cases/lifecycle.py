@@ -328,12 +328,24 @@ def _move_material_references(database, removed, added: dict, session) -> None:
 def _record_publication(
     database, case_id, version, revoke, session, replaced: dict | None = None
 ) -> None:
-    keys = [f"case:{case_id}"] + [f"material:{mid}" for mid in _material_ids(version)]
+    current = _material_ids(version)
+    keys = [f"case:{case_id}"] + [f"material:{mid}" for mid in current]
     if replaced:
         keys += [f"material:{mid}" for mid in _material_ids(replaced)]
+    revoked = keys if revoke else _removed_material_keys(current, replaced)
     SearchOutbox(database).record(
-        list(dict.fromkeys(keys)), revoke=keys if revoke else (), session=session
+        list(dict.fromkeys(keys)), revoke=revoked, session=session
     )
+
+
+def _removed_material_keys(current: list[str], replaced: dict | None) -> list[str]:
+    if not replaced:
+        return []
+    return [
+        f"material:{mid}"
+        for mid in _material_ids(replaced)
+        if mid not in current
+    ]
 
 
 def _require_review_return(case: dict, body: dict) -> None:

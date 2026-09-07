@@ -88,6 +88,11 @@ test("已发布作者可另开新稿并保留公开页入口", async () => {
   expect(wrapper.find('button[aria-label="另开新稿"]').exists()).toBe(true);
 });
 
+test("未知工作流状态不伪装成草稿", async () => {
+  const wrapper = await renderCase({ workflowStatus: "future", availableActions: [] });
+  expect(wrapper.get(".case-status").text()).toBe("未知状态");
+});
+
 test("审核工作台保留管理员下线隐藏版本动作", async () => {
   state.route.name = "case-review";
   state.user = { id: "admin-1", role: "admin" };
