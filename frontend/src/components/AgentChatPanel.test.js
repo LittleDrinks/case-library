@@ -355,7 +355,7 @@ function tracerArtifacts(status) {
   return [{
     id: "artifact-9", caseId: "case-1", threadId: "thread-tracer", runId: "run-1",
     status, baseRevision: 1,
-    target: { paragraphIndex: 1, quote: "第二段原文" },
+    target: { from: 9, to: 14, quote: "第二段原文" },
     replacement: "替换后的第二段", reason: "补充评价依据",
     sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }],
   }];
@@ -384,7 +384,22 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(artifact.attributes("data-artifact-status")).toBe("pending");
   expect(artifact.text()).toContain("原文：第二段原文");
   expect(artifact.text()).toContain("替换为：替换后的第二段");
+  expect(artifact.text()).toContain("依据：科学家精神案例");
   expect(wrapper.text()).toContain("已生成单段修订候选");
+});
+
+it("renders the expired artifact status after the case revision moved on", async () => {
+  api.agentThread.mockResolvedValue(
+    structuredClone({ ...tracerSnapshot(), artifacts: tracerArtifacts("expired") }),
+  );
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const artifact = wrapper.get('[data-testid="agent-artifact"]');
+  expect(artifact.attributes("data-artifact-status")).toBe("expired");
+  expect(artifact.text()).toContain("状态：已过期");
+  expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
 });
 
 function decideResult(decision) {
