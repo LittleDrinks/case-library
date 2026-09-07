@@ -43,6 +43,7 @@ CASE_VERSION = {
         "purpose": "课堂教学",
         "likes": 7,
         "theoryPoints": ["科学家精神"],
+        "tagIds": ["tag-1"],
     },
 }
 CASE_PUBLICATION = {
@@ -65,7 +66,7 @@ CASE_DOCUMENT = {
     "purpose": "课堂教学",
     "likes": 7,
     "theoryPoints": ["科学家精神"],
-    "tags": ["科学家精神"],
+    "tagIds": ["tag-1"],
     "createdBy": "u-owner",
 }
 KNOWLEDGE_SOURCE = {
@@ -190,6 +191,17 @@ def test_case_projection_keeps_attachment_content_in_its_acl_layer() -> None:
     assert "校内山茶内容" in campus["searchableText"]
     assert "私密海棠内容" not in campus["searchableText"]
     assert "私密海棠内容" in private["searchableText"]
+
+
+def test_case_projection_keeps_native_tag_ids_and_skips_free_tags() -> None:
+    public, _campus, _private = project_catalog_documents(
+        "case",
+        CASE_VERSION,
+        CASE_PUBLICATION,
+    )
+    assert public["tagIds"] == ["tag-1"]
+    assert "tags" not in public
+    assert "科学家精神" not in public["searchableText"]
 
 
 def test_knowledge_source_and_section_share_catalog_kind() -> None:
