@@ -209,7 +209,7 @@ def test_propose_tool_guard_blocks_readers_and_published_cases(client: TestClien
     assert conflict.value.status_code == 409
 
 
-def test_reader_capability_exposes_search_only() -> None:
+def test_reader_capability_exposes_read_only_sources() -> None:
     capability = reader_capability()
 
     assert capability.defer_loading is False
@@ -217,7 +217,7 @@ def test_reader_capability_exposes_search_only() -> None:
         getattr(tool, "name", None) or getattr(tool, "__name__", None)
         for tool in capability.tools
     }
-    assert names == {"search_corpus"}
+    assert names == {"search_corpus", "read_source"}
 
 
 def _assert_blocked(client: TestClient, auth: dict, thread_id: str) -> None:

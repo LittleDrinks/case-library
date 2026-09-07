@@ -30,6 +30,7 @@ ADMIN = {"username": "admin", "password": "admin123"}
 TEACHER = {"username": "user", "password": "user123"}
 RESOURCE_PATH = EXAMPLE_PATH
 BODY_MARK = "写作前至少通读一个范例"
+SELECTION = {"type": "data-selection", "data": {"from": 1, "to": 5}}
 
 
 def _login(client: TestClient, account: dict) -> dict:

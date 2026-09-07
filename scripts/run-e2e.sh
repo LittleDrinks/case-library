@@ -109,11 +109,13 @@ start_agent_app() {
 }
 
 run_browser_tests() {
+  if test "$browser_spec" = "tests/e2e/agent-sidebar.spec.js"; then run_sidebar_browser_tests; return; fi
   set -- compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir:/app/test-results" e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   if test "$browser_spec" = "tests/e2e/agent-chat.spec.js" ||
-     test "$browser_spec" = "tests/e2e/agent-threads.spec.js"; then
+     test "$browser_spec" = "tests/e2e/agent-threads.spec.js" ||
+     test "$browser_spec" = "tests/e2e/agent-source-proof.spec.js"; then
     set -- compose --profile e2e run --rm \
       -v "$artifact_dir:/app/test-results" agent-e2e
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
@@ -131,6 +133,13 @@ run_agent_browser_tests() {
     -v "$artifact_dir:/app/test-results" agent-e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   "$@"
+}
+
+run_sidebar_browser_tests() {
+  compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" \
+    agent-e2e npm run test:e2e -- --project=sidebar
+  compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" \
+    agent-tracer npm run test:e2e -- --project=sidebar-tracer
 }
 
 run_tracer_browser_tests() {

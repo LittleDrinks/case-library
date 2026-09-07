@@ -14,7 +14,22 @@ function textParts(message) {
 }
 
 function projectMessages(messages = []) {
-  return messages.map(({ id, role, metadata, parts }) => ({ id, role, metadata, parts }));
+  return messages.map(({ id, role, metadata, parts, runId }) => ({
+    id, role, metadata: runId ? { ...metadata, agentRunId: runId } : metadata, parts,
+  }));
+}
+
+function mergeTimelineMessages(messages = [], persisted = [], runs = []) {
+  const saved = new Map(projectMessages(persisted).map((message) => [message.id, message]));
+  for (const run of runs) {
+    if (run.clientRequestId && saved.has(run.userMessageId)) {
+      saved.set(run.clientRequestId, saved.get(run.userMessageId));
+    }
+  }
+  return messages.map((message) => saved.has(message.id)
+    ? { ...message, id: saved.get(message.id).id,
+      metadata: { ...message.metadata, ...saved.get(message.id).metadata } }
+    : message);
 }
 
 function agentPath(caseId, threadId) {
@@ -174,8 +189,13 @@ async function resume(caseId, state, generation) {
   const chat = state.chat.value;
   const threadId = state.threadId.value;
   if (!chat || !state.snapshot.value?.activeRun || !chatIdle(chat)) return;
-  await chat.resumeStream();
-  if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation, threadId);
+  state.recovering.value = true;
+  try {
+    await chat.resumeStream();
+    if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation, threadId);
+  } finally {
+    if (isCurrent(state, generation)) state.recovering.value = false;
+  }
 }
 
 function kickResume(caseId, state, generation) {
@@ -324,7 +344,7 @@ function threadActions(caseId, state) {
 function createState(caseId, versionId) {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
-    threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false),
+    threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false), recovering: ref(false),
     skills: ref([]), selectedSkillId: ref(NO_SKILL_ID), catalog: ref("loading"),
     versionId, preferenceKey: preferenceKey(caseId, versionId),
     generation: 0, catalogGeneration: 0, disposed: false,
@@ -342,7 +362,10 @@ function retryMessageId(state) {
 
 function computedState(state) {
   return {
-    messages: computed(() => state.chat.value?.messages || state.snapshot.value?.messages || []),
+    messages: computed(() => mergeTimelineMessages(
+      state.chat.value?.messages || state.snapshot.value?.messages || [],
+      state.snapshot.value?.messages || [], state.snapshot.value?.runs || [],
+    )),
     artifacts: computed(() => state.snapshot.value?.artifacts || []),
     threadId: computed(() => state.threadId.value),
     status: computed(() => {
@@ -351,7 +374,7 @@ function computedState(state) {
     }),
     chatError: computed(() => snapshotError(state.snapshot.value) || state.chat.value?.error?.message || ""),
     threadState: computed(() => state.snapshot.value),
-    stopping: computed(() => Boolean(state.stopping.value)),
+    stopping: computed(() => Boolean(state.stopping.value)), recovering: computed(() => Boolean(state.recovering.value)),
     retryableMessageId: computed(() => retryMessageId(state)),
     skillReady: computed(() => isSelectedSkillValid(state)),
   };

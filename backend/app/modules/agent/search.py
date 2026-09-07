@@ -28,10 +28,17 @@ def _snippet(item: dict) -> str:
 
 def source_ref(item: dict) -> SourceRef:
     """从检索服务实际返回的条目重建来源引用，忽略模型提供的任何出处。"""
+    kind = item["kind"]
     return SourceRef(
-        kind=item["kind"], id=str(item["id"]), title=str(item.get("title") or ""),
+        kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item),
     )
+
+
+def _record_hits(deps: ToolDeps, refs: list[SourceRef]) -> None:
+    for ref in refs:
+        if not any(item.identity() == ref.identity() for item in deps.hits):
+            deps.hits.append(ref)
 
 
 def search_platform(deps: ToolDeps, query: str) -> CorpusResult:
@@ -49,5 +56,5 @@ def search_platform(deps: ToolDeps, query: str) -> CorpusResult:
 async def search_corpus(ctx: RunContext[ToolDeps], query: str) -> dict:
     """模型可见的 search_corpus 工具：结果记录到本次 Run 的服务端状态。"""
     result = search_platform(ctx.deps, query)
-    ctx.deps.sources = result.sources
-    return {"sources": [item.model_dump(by_alias=True) for item in result.sources]}
+    _record_hits(ctx.deps, result.sources)
+    return {"sources": [item.model_dump(by_alias=True, exclude_none=True) for item in result.sources]}

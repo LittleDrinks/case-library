@@ -111,12 +111,15 @@ def _tool_chunks(part: dict, index: int) -> list[dict]:
     ]
 
 
-def _message_chunks(repository: AgentRepository, event: AgentThreadEvent) -> list[dict]:
+def _message_chunks(
+    repository: AgentRepository, event: AgentThreadEvent, project,
+) -> list[dict]:
     message = repository.message(event.thread_id, str(event.payload.get("messageId")))
     if message is None or message.role != "assistant":
         return []
+    parts = project(message.parts)
     chunks = [{"type": "start", "messageId": message.id}]
-    for index, part in enumerate(message.parts):
+    for index, part in enumerate(parts):
         kind = str(part.get("type") or "")
         if kind == "text":
             chunks.extend(_text_chunks(part))
@@ -125,9 +128,9 @@ def _message_chunks(repository: AgentRepository, event: AgentThreadEvent) -> lis
     return chunks
 
 
-def _event_chunks(repository: AgentRepository, event: AgentThreadEvent) -> list[dict]:
+def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project) -> list[dict]:
     if event.event_type == "message.created":
-        return _message_chunks(repository, event)
+        return _message_chunks(repository, event, project)
     if event.event_type == "run.failed":
         return [_fail_chunk(event)]
     if event.event_type in TERMINAL_CHUNKS:
@@ -136,7 +139,8 @@ def _event_chunks(repository: AgentRepository, event: AgentThreadEvent) -> list[
 
 
 async def events_stream(
-    repository: AgentRepository, thread: AgentThread, after_seq: int, access_check=None
+    repository: AgentRepository, thread: AgentThread, after_seq: int,
+    access_check=None, *, project,
 ):
     """按 Thread 游标重放增量，无活动 Run 且无未读事件后以 [DONE] 收尾。"""
     cursor = after_seq
@@ -147,7 +151,7 @@ async def events_stream(
             if access_check and not access_check():
                 return
             cursor = event.event_seq
-            for chunk in _event_chunks(repository, event):
+            for chunk in _event_chunks(repository, event, project):
                 yield sse_data(chunk)
         if _stream_finished(repository, thread, cursor):
             yield sse_data("[DONE]")

@@ -42,7 +42,7 @@ def _headers(auth: dict) -> dict[str, str]:
 
 
 def _model(answer: str) -> TestModel:
-    return TestModel(custom_output_text=answer)
+    return TestModel(custom_output_text=answer, call_tools=[])
 
 
 def _text_deltas(response) -> str:

@@ -20,6 +20,7 @@ ThreadEventType = Literal[
 ]
 ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
 ArtifactDecision = Literal["accepted", "rejected"]
+SourceKind = Literal["case", "knowledge", "material", "attachment"]
 
 
 class AgentThread(BaseModel):
@@ -76,6 +77,7 @@ class AgentRun(BaseModel):
         description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
     )
     resources: list[dict[str, str]] = Field(default_factory=list)
+    tool_timings: dict[str, dict[str, str]] = Field(default_factory=dict, alias="toolTimings")
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str | None = None
@@ -92,10 +94,20 @@ class SourceRef(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["case", "knowledge", "material"]
+    kind: SourceKind
     id: str
     title: str
     snippet: str = ""
+    version: str | None = None
+    version_id: str | None = Field(default=None, alias="versionId")
+    source_case_id: str | None = Field(
+        default=None, alias="sourceCaseId",
+        description="kind=case 时的真实案例 ID；id 可能是资料区挂载条目 ID",
+    )
+    location: str | None = None
+
+    def identity(self) -> tuple[str, str, str]:
+        return (self.kind, self.id, self.version_id or self.version or "")
 
 
 class ArtifactTarget(BaseModel):

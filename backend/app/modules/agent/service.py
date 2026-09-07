@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from pydantic_ai import CancellationToken
 from pydantic_ai.exceptions import RunCancelled
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
@@ -44,11 +45,13 @@ class RunContext:
     deps: ToolDeps | None = None
     capabilities: list | None = None
     bounds: tuple = ()
+    instructions: str = ""
     reader: bool = False
     cancelled: bool = False
     failed: bool = False
     lost: bool = False
     lease_released: bool = False
+    tool_timings: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def _run_kwargs(context: RunContext, model=None) -> dict:
@@ -56,7 +59,9 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
-        "instructions": case_instructions(context.case, context.reader),
+        "instructions": case_instructions(
+            context.case, extra=context.instructions, reader=context.reader
+        ),
         "user_prompt": context.prompt,
         "deps": context.deps,
         "cancellation_token": context.token,
@@ -68,11 +73,31 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
     return values
 
 
+def _record_tool_event(context: RunContext, event) -> None:
+    if isinstance(event, FunctionToolCallEvent):
+        part = event.part
+        timing = {"toolCallId": part.tool_call_id, "toolName": part.tool_name,
+                  "startedAt": datetime.now(UTC).isoformat()}
+        context.tool_timings[part.tool_call_id] = timing
+    elif isinstance(event, FunctionToolResultEvent):
+        part = event.part
+        timing = context.tool_timings.get(part.tool_call_id)
+        if timing:
+            timing["finishedAt"] = (part.timestamp or datetime.now(UTC)).isoformat()
+    else:
+        return
+    if context.tool_timings.get(event.part.tool_call_id):
+        context.repository.record_tool_timing(
+            context.run.id, context.tool_timings[event.part.tool_call_id], context.worker_id
+        )
+
+
 async def _native_events(context: RunContext):
     try:
         async with _model_context(context) as model:
             async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
                 async for event in events:
+                    _record_tool_event(context, event)
                     yield event
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
@@ -136,8 +161,7 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
 def _run_resources(parts: list[dict], bounds: tuple = (), reader=False) -> list[dict[str, str]]:
     records = [resource_record(SYSTEM_PROMPT), resource_record(READER_PROMPT if reader else TASK_PROMPT)]
     loaded = set(_loaded_capability_ids(parts))
-    records += [bound.resource_record() for bound in bounds if bound.skill_id in loaded]
-    return records
+    return [*records, *[bound.resource_record() for bound in bounds if bound.skill_id in loaded]]
 
 
 def _assistant_ui(context: RunContext, result):
@@ -325,13 +349,25 @@ def _release_lease(context: RunContext) -> None:
         context.lease.release()
 
 
-def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None) -> list:
+def _projected_parts(row: AgentMessage, project) -> list[dict]:
+    if row.role != "assistant":
+        return row.parts
+    return project(row.parts)
+
+
+def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None, *,
+                 project) -> list:
+    """模型历史与读取面共用同一来源权限投影，防止收紧后旧来源复述。"""
     rows = repository.messages(thread.id)
     rows = [row for row in rows if max_seq is None or row.message_seq <= max_seq]
-    return VercelAIAdapter.load_messages(
-        [UIMessage.model_validate(_ui_message(row)) for row in rows]
-    )
+    messages = [
+        UIMessage.model_validate(_ui_message(row, project)) for row in rows
+    ]
+    return VercelAIAdapter.load_messages(messages)
 
 
-def _ui_message(row: AgentMessage) -> dict:
-    return {"id": row.id, "role": row.role, "metadata": row.metadata, "parts": row.parts}
+def _ui_message(row: AgentMessage, project) -> dict:
+    return {
+        "id": row.id, "role": row.role, "metadata": row.metadata,
+        "parts": _projected_parts(row, project),
+    }

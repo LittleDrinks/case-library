@@ -165,6 +165,18 @@ class AgentRepository:
         )
         return _without_id(row)
 
+    def record_tool_timing(
+        self, run_id: str, timing: dict[str, str], owner_id: str | None = None
+    ) -> bool:
+        row = self.database.agent_runs.find_one(_active_query(run_id, owner_id))
+        if row is None:
+            return False
+        timings = {**(row.get("toolTimings") or {}), timing["toolCallId"]: timing}
+        result = self.database.agent_runs.update_one(
+            _active_query(run_id, owner_id), {"$set": {"toolTimings": timings}}
+        )
+        return result.matched_count == 1
+
     def snapshot(self, thread: AgentThread) -> AgentSnapshot:
         return _transaction(self.database, lambda session: self._snapshot(thread, session))
 
@@ -277,7 +289,8 @@ class AgentRepository:
             raise ActiveRunError
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
-            skill_bindings, base_revision, target, session,
+            skill_bindings,
+            base_revision, target, session,
         )
 
     def _insert_retry_run(

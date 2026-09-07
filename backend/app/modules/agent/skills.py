@@ -14,6 +14,8 @@ from pydantic_ai.tools import RunContext, Tool
 from app.modules.agent import artifacts
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import search_corpus
+from app.modules.agent.models import SourceRef
+from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
@@ -21,12 +23,35 @@ READER_CAPABILITY_ID = "platform-tools"
 
 
 def reader_capability() -> Capability:
-    """读者只读领域能力：仅注册检索工具，不注册任何写工具。"""
+    """读者只读领域能力：注册检索与安全来源读取，不注册写工具。"""
     return Capability(
         id=READER_CAPABILITY_ID,
         description="检索平台公开资料辅助阅读讨论",
-        tools=[search_corpus],
+        tools=[search_corpus, read_source],
     )
+
+
+async def read_source(ctx: RunContext[ToolDeps], source_type: str, source_id: str) -> dict:
+    """按当前权限读取资料区或本次检索命中的来源，并记录实际证据。"""
+    if not _known_source(ctx.deps, source_type, source_id):
+        return {"status": "unavailable", "detail": "来源不在当前资料区或检索结果中"}
+    result = read_domain_source(
+        ctx.deps.database, ctx.deps.store, ctx.deps.user, ctx.deps.case_id,
+        source_type, source_id, ctx.deps.version_id,
+    )
+    if result.get("status") == "ok":
+        _record_evidence(ctx.deps, SourceRef.model_validate(result["usedSourceRef"]))
+    return result
+
+
+def _known_source(deps: ToolDeps, kind: str, source_id: str) -> bool:
+    return any(ref.kind == kind and ref.id == source_id
+               for ref in [*deps.sources, *deps.hits])
+
+
+def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
+    if not any(item.identity() == ref.identity() for item in deps.evidence):
+        deps.evidence.append(ref)
 
 
 async def propose_revision(
@@ -46,7 +71,7 @@ async def propose_revision(
 def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        start, end, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
+        start, end, replacement, reason, list(ctx.deps.evidence), ctx.deps.user,
     )
 
 
@@ -64,36 +89,29 @@ def _artifact_view(artifact) -> dict:
 
 
 def domain_capability() -> Capability:
-    """平台基础能力：检索与修订工具立即常驻，不依赖是否选择 Skill。"""
-    return Capability(tools=[search_corpus, propose_revision])
+    """平台基础能力立即常驻，不依赖是否选择 Skill。"""
+    return Capability(tools=[search_corpus, read_source, propose_revision])
 
 
 def bound_skill_capability(bound: BoundSkill) -> Capability:
-    """已发布 Skill 的独立延迟能力：描述进目录，加载后正文与资源可用。"""
+    """已发布 Skill 延迟加载正文与资源读取工具。"""
     return Capability(
-        id=bound.skill_id,
-        description=bound.description,
-        instructions=skill_instructions(bound),
-        tools=[resource_tool(bound)],
+        id=bound.skill_id, description=bound.description,
+        instructions=skill_instructions(bound), tools=[resource_tool(bound)],
         defer_loading=True,
     )
 
 
 def skill_instructions(bound: BoundSkill) -> str:
-    """SKILL.md 正文 + 资源清单；资源按需经读取工具获取，不预载进上下文。"""
     listing = "\n".join(f"- `{file.path}`" for file in bound.files)
-    tool = resource_tool_name(bound)
-    return (
-        f"{bound.body}\n\n## 资源文件（按需用工具 {tool} 读取，不要凭记忆改写）\n{listing}"
-    )
+    return f"{bound.body}\n\n## 资源文件（按需用工具 {resource_tool_name(bound)} 读取）\n{listing}"
 
 
 def resource_tool(bound: BoundSkill) -> Tool:
-    """读取工具闭包绑定 Run 开始时解析的版本快照，发布变化不影响本次运行。"""
     name = resource_tool_name(bound)
 
     async def read_resource(ctx: RunContext[ToolDeps], path: str) -> dict:
-        """读取当前已加载 Skill 的资源文件。path 必须是资源清单中的相对路径。"""
+        """读取当前已加载 Skill 的资源文件。"""
         try:
             content = bound.read_resource(path)
         except SkillError as error:

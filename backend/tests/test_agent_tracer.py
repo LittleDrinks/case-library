@@ -2,16 +2,104 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from time import monotonic
+
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.models.function import DeltaThinkingPart
 
 from app.modules.agent.runtime import agent
-from tests.agent_tracer import REPLACEMENT, tracer_model
+from tests.agent_tracer import (
+    REPLACEMENT, THINKING_MARKER, THINKING_TEXT, thinking_pieces, tracer_model, tracer_response,
+)
 from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
 SKILL_BODY_MARK = "写作前至少通读一个范例"
+
+
+def test_tracer_reads_the_actual_search_result():
+    messages = [
+        ModelResponse(parts=[ToolCallPart("search_corpus", {"query": "科学家精神"})]),
+        ModelRequest(parts=[ToolReturnPart("search_corpus", {"sources": [
+            {"kind": "case", "id": "actual-published-case"},
+        ]})]),
+    ]
+    call = tracer_response(messages).parts[0]
+    assert call.tool_name == "read_source"
+    assert call.args_as_dict() == {"source_type": "case", "source_id": "actual-published-case"}
+
+
+def _thinking_stream_items(marker_text: str) -> tuple[list, float]:
+    model = tracer_model(skill_id=SKILL_ID)
+    messages = [ModelRequest(parts=[UserPromptPart(content=marker_text)])]
+
+    async def _collect() -> tuple[list, float]:
+        items, started = [], None
+        async for item in model.stream_function(messages, None):
+            delta = next(iter(item.values())) if isinstance(item, dict) else None
+            if isinstance(delta, DeltaThinkingPart):
+                if started is None:
+                    started = monotonic()
+            elif delta is not None and started is not None:
+                items.append(item)
+                return items, monotonic() - started
+            items.append(item)
+        return items, 0.0
+
+    return asyncio.run(_collect())
+
+
+def test_stream_emits_slow_thinking_delta_then_load_capability():
+    items, gap = _thinking_stream_items(f"请修订第2段（{THINKING_MARKER}）：补充评价依据")
+    thinking = [item[0].content for item in items
+                if isinstance(item, dict) and isinstance(item.get(0), DeltaThinkingPart)]
+    assert thinking == thinking_pieces(THINKING_TEXT)
+    assert gap >= 0.5
+    call = items[-1][1]
+    assert call.name == "load_capability"
+    assert json.loads(call.json_args) == {"id": SKILL_ID}
+
+
+def _return_for(response: ModelResponse) -> ToolReturnPart:
+    call = response.parts[-1]
+    if call.tool_name == "search_corpus":
+        return ToolReturnPart(call.tool_name, {"sources": [{"kind": "case", "id": "hit-1"}]})
+    return ToolReturnPart(call.tool_name, {})
+
+
+def _drive_tracer_chain(marker_text: str) -> list[ModelResponse]:
+    history: list = [ModelRequest(parts=[UserPromptPart(content=marker_text)])]
+    responses: list[ModelResponse] = []
+    for _ in range(6):
+        response = tracer_response(history, skill_id=SKILL_ID)
+        responses.append(response)
+        history.append(response)
+        if response.parts[-1].part_kind == "text":
+            break
+        history.append(ModelRequest(parts=[_return_for(response)]))
+    return responses
+
+
+def test_thinking_marker_keeps_tracer_chain_intact():
+    responses = _drive_tracer_chain(f"请修订第2段（{THINKING_MARKER}）：补充评价依据")
+    assert [part.part_kind for part in responses[0].parts] == ["thinking", "tool-call"]
+    assert responses[0].parts[1].tool_name == "load_capability"
+    assert [response.parts[-1].tool_name for response in responses[1:-1]] == [
+        f"read_skill_resource_{SKILL_ID.replace('-', '_')}",
+        "search_corpus", "read_source", "propose_revision",
+    ]
+    assert responses[-1].parts[0].content == "已生成单段修订候选，等待作者决定。"
+
+
+def test_plain_marker_free_question_skips_thinking():
+    responses = _drive_tracer_chain("请结合平台资料修订第2段：补充评价依据")
+    assert [part.part_kind for part in responses[0].parts] == ["tool-call"]
+    assert responses[0].parts[0].tool_name == "load_capability"
 
 
 class StubCatalog:
@@ -108,18 +196,18 @@ def _seed_source_case(database) -> None:
     """检索命中来源落库为真实已发布案例，供接受前证据复验。"""
     database.cases.insert_one({
         "id": HIT["id"], "ownerId": "u-source", "publicationStatus": "public",
-        "workflowStatus": "published", "publishedVersionId": "cv-hit-1",
+        "workflowStatus": "published", "publishedVersionId": "hit-v1",
         "revision": 1, "title": HIT["title"],
         "document": {"type": "doc", "content": []},
     })
     database.case_versions.insert_one({
-        "id": "cv-hit-1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
-        "document": {"type": "doc", "content": []},
+        "id": "hit-v1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
+        "document": _document("平台资料正文"),
     })
 
 
 def _tracer():
-    return tracer_model(selection=SELECTION)
+    return tracer_model(skill_id=SKILL_ID, selection=SELECTION)
 
 
 def _publish_skill(client: TestClient) -> dict:
@@ -142,8 +230,8 @@ def _publish_skill(client: TestClient) -> dict:
 @pytest.fixture
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
-    _publish_skill(client)
     _seed_source_case(client.app.state.database)
+    _publish_skill(client)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
     with agent.override(model=_tracer()):
@@ -163,7 +251,9 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
-        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": HIT["summary"],
+        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": "",
+        "version": "v1", "versionId": "hit-v1", "sourceCaseId": HIT["id"],
+        "location": "case:c-42@hit-v1",
     }]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)
@@ -181,11 +271,30 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
     ]
     assert [part["type"] for part in tool_parts] == [
         "tool-load_capability", "tool-read_skill_resource_sizheng_case_generator",
-        "tool-search_corpus", "tool-propose_revision",
+        "tool-search_corpus", "tool-read_source", "tool-propose_revision",
     ]
     assert tool_parts[1]["output"] == {"path": EXAMPLE_PATH, "content": EXAMPLE_TEXT}
-    assert tool_parts[2]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[3]["output"]["artifactId"]
+    assert tool_parts[3]["output"]["usedSourceRef"]["id"] == HIT["id"]
+    assert tool_parts[3]["output"]["content"] == "平台资料正文"
+    assert tool_parts[4]["output"]["artifactId"]
+
+
+def test_thinking_stream_completes_through_production_agent(client: TestClient) -> None:
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _seed_source_case(client.app.state.database)
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    response = _send(client, auth, case["id"], f"请修订第2段（{THINKING_MARKER}）")
+    assert response.status_code == 200
+    snapshot = client.get(_thread_path(case["id"])).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    parts = [part for message in snapshot["messages"] for part in message["parts"]]
+    reasoning = next(index for index, part in enumerate(parts) if part["type"] == "reasoning")
+    tool = next(index for index, part in enumerate(parts) if part["type"] == "tool-load_capability")
+    assert reasoning < tool
+    assert parts[reasoning]["text"] == THINKING_TEXT
+    _assert_pending_artifact(client, case)
 
 
 def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
@@ -198,6 +307,41 @@ def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> No
         "version": version["version"], "contentHash": version["packageSha256"],
     }
     assert kinds["system-prompt"]["contentHash"]
+    timings = list(run["toolTimings"].values())
+    assert {timing["toolName"] for timing in timings} == {
+        "load_capability", "read_skill_resource_sizheng_case_generator",
+        "search_corpus", "read_source", "propose_revision",
+    }
+    assert all(timing.get("startedAt") and timing.get("finishedAt") for timing in timings)
+
+
+def test_reopen_redacts_sources_that_lost_access(client: TestClient, tracer_case) -> None:
+    database = client.app.state.database
+    database.cases.update_one({"id": HIT["id"]}, {"$set": {"publicationStatus": "private"}})
+    snapshot = client.get(_thread_path(tracer_case["id"])).json()
+    parts = [part for message in snapshot["messages"] for part in message["parts"]]
+    read = next(part for part in parts if part["type"] == "tool-read_source")
+    search = next(part for part in parts if part["type"] == "tool-search_corpus")
+    assert read["output"] == {"status": "no_access", "detail": "来源当前不可读"}
+    assert search["output"]["sources"] == []
+
+
+def test_run_binds_selected_published_skill(client: TestClient) -> None:
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    _seed_source_case(client.app.state.database)
+    response = _send(
+        client, auth, case["id"], "请使用能力修订第2段",
+        model=tracer_model(skill_id=SKILL_ID, selection=SELECTION), skill_id=SKILL_ID,
+    )
+    assert response.status_code == 200, response.text
+    run = client.app.state.database.agent_runs.find_one({}, {"_id": 0})
+    version = client.app.state.database.skill_versions.find_one({"skillId": SKILL_ID})
+    assert run["skillBindings"] == [{"kind": "skill", "id": SKILL_ID,
+                                     "versionId": version["id"], "version": version["version"]}]
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt", "skill"}
 
 
 def _assert_delayed_skill(calls: list) -> None:
@@ -221,7 +365,10 @@ def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     _publish_skill(client)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder, selection=SELECTION))
+    response = _send(
+        client, auth, case["id"], "请修订第2段",
+        model=tracer_model(recorder, skill_id=SKILL_ID, selection=SELECTION),
+    )
     assert response.status_code == 200, response.text
     _assert_delayed_skill(calls)
 

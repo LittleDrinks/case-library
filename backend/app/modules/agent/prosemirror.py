@@ -48,6 +48,23 @@ def _document(value: dict[str, Any]):
     return _SCHEMA.node_from_json(value)
 
 
+def _node_text(node: dict[str, Any]) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n"
+    if node.get("type") != "text":
+        return "".join(_node_text(child) for child in node.get("content", []))
+    return node.get("text", "")
+
+
+def paragraphs(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """按出现顺序返回正文顶层段落的编号与原文。"""
+    return [
+        {"paragraphIndex": index, "quote": _node_text(node)}
+        for index, node in enumerate(document.get("content", []))
+        if node.get("type") == "paragraph"
+    ]
+
+
 def text_blocks(document: dict[str, Any]) -> list[dict[str, int]]:
     """Return native ProseMirror content ranges for every text block."""
     blocks: list[dict[str, int]] = []

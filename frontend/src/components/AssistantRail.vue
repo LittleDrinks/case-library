@@ -60,11 +60,13 @@ function select(tab) {
     <AgentChatPanel
       v-if="active === 'ai' && (!readOnly || user)"
       :key="versionId || 'draft'"
+      :open="open"
       :case-record="caseRecord"
       :version-id="versionId"
       :read-only="readOnly"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
+      @case-refreshed="emit('case-refreshed', $event)"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>

@@ -11,14 +11,16 @@ from starlette.responses import StreamingResponse
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
+from app.modules.agent import prosemirror
+from app.modules.agent.case_area import catalog_instructions, retained_sources, selection_from_parts
 from app.modules.agent.deps import ToolDeps
+from app.modules.agent.visibility import parts_projector, visible_snapshot
 from app.modules.agent.models import (
     AgentRun,
     AgentSnapshot,
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
-
     ArtifactTarget,
 )
 from app.modules.agent.recovery import (
@@ -33,10 +35,12 @@ from app.modules.agent.repository import (
     MessageNotFoundError,
     ThreadNotFoundError,
 )
-from app.modules.agent import prosemirror
 from app.modules.agent.service import RunContext, load_history
-from app.modules.agent.skills import bound_skill_capability, domain_capability, reader_capability
-from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
+from app.modules.agent.skills import (
+    bound_skill_capability,
+    domain_capability,
+    reader_capability,
+)
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -46,6 +50,7 @@ from app.modules.cases.published import (
     version_readable_by_id,
 )
 from app.modules.cases.service import get_case
+from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
 
 router = APIRouter(prefix="/api/cases", tags=["agent"])
@@ -72,6 +77,7 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+    selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)
 
 
@@ -180,7 +186,8 @@ def show_thread(
     conversation = _conversation(database, case_id, user, version_id)
     repository = _repository(database)
     thread = repository.default_thread(case_id, user["id"], conversation.version_id)
-    return repository.snapshot(thread)
+    snapshot = repository.snapshot(thread)
+    return visible_snapshot(database, snapshot, user)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -202,7 +209,7 @@ def _skill_id(part) -> str | None:
     if not isinstance(part, DataUIPart):
         return None
     if part.type != "data-skill":
-        raise HTTPException(status_code=422, detail="AI 消息格式无效")
+        return None
     skill_id = part.data.get("skillId") if isinstance(part.data, dict) else None
     if not isinstance(skill_id, str) or not skill_id:
         raise HTTPException(status_code=422, detail="AI 能力格式无效")
@@ -212,10 +219,12 @@ def _skill_id(part) -> str | None:
 def _canonical_parts(parts) -> tuple[list[dict], list[str]]:
     skills, canonical = [], []
     for part in parts:
-        if isinstance(part, DataUIPart) and part.type == "data-skill":
-            skills.append(_skill_id(part))
-        elif isinstance(part, DataUIPart) and part.type == "data-selection":
-            canonical.append(part.model_dump(by_alias=True, mode="json", exclude_none=True))
+        if isinstance(part, DataUIPart):
+            skill_id = _skill_id(part)
+            if skill_id:
+                skills.append(skill_id)
+            else:
+                canonical.append(part.model_dump(by_alias=True, mode="json", exclude_none=True))
         elif isinstance(part, TextUIPart):
             canonical.append(part.model_dump(by_alias=True, mode="json", exclude_none=True))
         else:
@@ -261,8 +270,8 @@ def _submit_prompt(adapter: VercelAIAdapter) -> tuple[list[dict], dict, str, str
     return parts, {}, text, latest.id, skills
 
 
-def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
-    """重试：引用原用户消息创建新 Run，不产生新消息。"""
+def _retry_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
+    """重试：引用原用户消息创建新 Run，不产生新消息；历史同投影收敛。"""
     message_id = getattr(adapter.run_input, "message_id", None)
     message = repository.message(thread.id, message_id) if message_id else None
     if message is None or message.role != "user":
@@ -273,19 +282,33 @@ def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
     return RunPlan(
         parts=parts, metadata=message.metadata, prompt=prompt,
         skills=[skill for skill in skills if skill],
-        history=load_history(repository, thread, max_seq=message.message_seq),
+        history=load_history(repository, thread, max_seq=message.message_seq, project=project),
         retry_message_id=message.id,
     )
 
 
-def _run_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
+def _run_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
     if adapter.run_input.trigger == "regenerate-message":
-        return _retry_plan(repository, thread, adapter)
+        return _retry_plan(repository, thread, adapter, project)
     parts, metadata, prompt, client_request_id, skills = _submit_prompt(adapter)
     return RunPlan(
         parts=parts, metadata=metadata, prompt=prompt, skills=skills,
-        history=load_history(repository, thread), client_request_id=client_request_id,
+        history=load_history(repository, thread, project=project),
+        client_request_id=client_request_id,
     )
+
+
+def _validate_plan(
+    database, case: dict, plan: RunPlan, version_id: str | None = None
+) -> RunPlan:
+    plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
+    plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    return plan
+
+
+def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
+    return [_resolve_selection(document, part.get("data")) for part in parts
+            if part.get("type") == "data-selection"]
 
 
 def _request_size(request: Request) -> None:
@@ -382,8 +405,11 @@ def show_named_thread(
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
     repository = _repository(database)
-    _, thread = _thread_conversation(database, case_id, user, repository, thread_id, version_id)
-    return repository.snapshot(thread)
+    _, thread = _thread_conversation(
+        database, case_id, user, repository, thread_id, version_id
+    )
+    snapshot = repository.snapshot(thread)
+    return visible_snapshot(database, snapshot, user)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -419,20 +445,20 @@ async def send_message(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
+    _request_size(request)
     return await _send_message(
         case_id, thread_id, request, database, settings, user, version_id
     )
 
 
 async def _send_message(case_id, thread_id, request, database, settings, user, version_id=None):
-    _request_size(request)
     repository = _repository(database)
     conversation, thread = _editable_thread_conversation(
         database, case_id, user, repository, thread_id, version_id
     )
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    plan = _run_plan(repository, thread, adapter)
+    plan = _plan_for(repository, thread, adapter, database, user, conversation)
     if conversation.reader and plan.skills:
         raise HTTPException(status_code=422, detail="AI 能力不可用")
     context = _start_context(
@@ -443,12 +469,20 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     return live_response(context.buffer)
 
 
+def _plan_for(repository, thread, adapter, database, user, conversation):
+    project = parts_projector(database, user, conversation.case["id"])
+    return _validate_plan(
+        database, conversation.case, _run_plan(repository, thread, adapter, project),
+        conversation.version_id,
+    )
+
+
 def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
     """Run 创建前把所选 Skill 固化为已发布版本快照；未发布/未知一律拒绝。"""
     if len(skill_ids) > 1:
         raise HTTPException(status_code=422, detail="一次消息只能选择一个 Skill")
     bounds: list[BoundSkill] = []
-    for skill_id in skill_ids:
+    for skill_id in dict.fromkeys(skill_ids):
         try:
             bounds.append(bind_published_skill(database, store, skill_id))
         except SkillError as error:
@@ -482,19 +516,32 @@ def _run_lock_for(conversation: Conversation, plan: RunPlan):
 
 def _run_context(request, database, settings, user, conversation: Conversation,
                  repository, thread, adapter, plan, run, selection, lease, worker_id, bounds):
-    capabilities = _capabilities(conversation, bounds)
-    deps = ToolDeps(
-        database=database, case_id=conversation.case["id"], thread_id=thread.id,
-        run_id=run.id, user=user, catalog=request.app.state.search_catalog,
-        catalog_state=request.app.state.catalog_state,
-        secret_path=settings.app_secret_file,
+    refs = retained_sources(database, conversation.case["id"], user, conversation.version_id)
+    instructions = catalog_instructions(
+        conversation.case.get("title") or "未命名案例", refs,
+        plan.selected, plan.selections,
+    )
+    deps = _run_deps(
+        request, database, settings, user, conversation, thread, run, refs, plan
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, conversation.case,
         request.app.state.agent, buffer=LiveBuffer(),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
-        deps=deps, bounds=bounds, capabilities=capabilities, reader=conversation.reader,
+        deps=deps, bounds=bounds, capabilities=_capabilities(conversation, bounds),
+        reader=conversation.reader,
+        instructions=instructions,
+    )
+
+
+def _run_deps(request, database, settings, user, conversation, thread, run, refs, plan):
+    return ToolDeps(
+        database=database, case_id=conversation.case["id"], thread_id=thread.id,
+        run_id=run.id, user=user, catalog=request.app.state.search_catalog,
+        catalog_state=request.app.state.catalog_state, secret_path=settings.app_secret_file,
+        store=request.app.state.blob_store, version_id=conversation.version_id,
+        sources=refs, selected=plan.selected, selections=plan.selections,
     )
 
 
@@ -534,12 +581,6 @@ def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | N
     return case.get("revision"), ArtifactTarget(
         from_pos=row["from"], to_pos=row["to"], quote=row["quote"],
     )
-
-
-def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
-    """解析 data-selection 部分：位置须落在同一文本块内，原文服务端重算。"""
-    return [_resolve_selection(document, part.get("data")) for part in parts
-            if part.get("type") == "data-selection"]
 
 
 def _resolve_selection(document: dict, data: object) -> dict:
@@ -662,8 +703,13 @@ def thread_events(
     cursor = after_seq if after_seq is not None else _last_event_id(request)
     if thread.active_run_id is None and cursor >= thread.event_seq:
         return Response(status_code=204)
+    return _event_response(database, user, repository, conversation, thread, cursor)
+
+
+def _event_response(database, user, repository, conversation, thread, cursor):
     access_check = _event_access_check(database, conversation, thread)
-    return live_event_response(repository, thread, max(cursor, 0), access_check)
+    project = parts_projector(database, user, thread.case_id)
+    return live_event_response(repository, thread, max(cursor, 0), access_check, project=project)
 
 
 def _event_access_check(database, conversation: Conversation, thread: AgentThread):
@@ -679,9 +725,9 @@ def _last_event_id(request: Request) -> int:
         raise HTTPException(status_code=422, detail="事件游标无效") from error
 
 
-def live_event_response(repository, thread, after_seq: int, access_check=None):
+def live_event_response(repository, thread, after_seq: int, access_check=None, *, project):
     return StreamingResponse(
-        events_stream(repository, thread, after_seq, access_check),
+        events_stream(repository, thread, after_seq, access_check, project=project),
         media_type="text/event-stream",
         headers=sse_headers(),
     )
