@@ -289,13 +289,11 @@ def _complete(context: RunContext) -> None:
     if context.result is None:
         _terminal(context, context.repository.fail_run)
         return
-    if not _reader_accessible(context):
-        _revoke_reader(context)
-        _terminal(context, context.repository.cancel_run)
-        return
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
         resources=_run_resources(_assistant_parts_of(context), context.reader),
+        reader_case_id=context.case["id"] if context.reader else None,
+        reader_version_id=context.case.get("versionId") if context.reader else None,
     ):
         context.lost = True
 
