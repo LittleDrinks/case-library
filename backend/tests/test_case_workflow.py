@@ -79,23 +79,19 @@ def reopen_hidden_case(client: TestClient, admin: dict, approved: dict):
 
 def _seed_required_tag_group(client: TestClient) -> None:
     database = client.app.state.database
-    database.tag_groups.insert_one(
-        {
-            "id": "tgg-required-1",
-            "name": "投稿必填学科",
-            "requiredForSubmission": True,
-            "enabled": True,
-            "sortKey": 99,
-        }
-    )
-    database.tags.insert_one(
-        {
-            "id": "tag-required-1",
-            "groupId": "tgg-required-1",
-            "name": "自然辩证法",
-            "sortKey": 1,
-        }
-    )
+    database.tag_groups.insert_one({
+        "id": "tgg-required-1",
+        "name": "投稿必填学科",
+        "requiredForSubmission": True,
+        "enabled": True,
+        "sortKey": 99,
+    })
+    database.tags.insert_one({
+        "id": "tag-required-1",
+        "groupId": "tgg-required-1",
+        "name": "自然辩证法",
+        "sortKey": 1,
+    })
 
 
 def _submit_case(client, owner, case):
@@ -130,17 +126,22 @@ def _decide(client, admin, started, command, **extra):
     )
 
 
-def test_user_can_login_and_restore_session(client: TestClient) -> None:
-    response = login(client)
-
-    assert response.status_code == 200
-    assert response.json()["user"] == {
+def _expected_admin_view() -> dict:
+    return {
         "id": "u-admin-demo",
         "username": "admin",
         "name": "演示管理员",
         "role": "admin",
         "mustChangePassword": False,
+        "campusVerified": True,
     }
+
+
+def test_user_can_login_and_restore_session(client: TestClient) -> None:
+    response = login(client)
+
+    assert response.status_code == 200
+    assert response.json()["user"] == _expected_admin_view()
     assert response.json()["csrfToken"]
     assert "HttpOnly" in response.headers["set-cookie"]
     assert "SameSite=strict" in response.headers["set-cookie"]
