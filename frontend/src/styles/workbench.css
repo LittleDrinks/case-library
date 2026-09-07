@@ -315,7 +315,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-source-chips { display: flex; flex-wrap: wrap; gap: 4px; max-height: 84px; overflow-y: auto; }
 .agent-source-chip { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 2px 5px; border-radius: 4px; background: var(--brand-soft); font-size: 11px; }
 .agent-source-chip button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; }
-.agent-source-picker-body { display: grid; gap: 5px; margin-top: 7px; max-height: 220px; overflow-y: auto; }
+.agent-source-picker-body { display: grid; gap: 5px; margin-top: 7px; max-height: min(220px, 25dvh); overflow-y: auto; }
 .agent-source-search { display: flex; gap: 4px; }
 .agent-source-search input { min-width: 0; flex: 1; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; }
 .agent-source-search button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 0; border-radius: 5px; background: var(--brand); color: #fff; }
@@ -480,13 +480,13 @@ a.agent-artifact-source:hover { text-decoration: underline; }
   .workspace-actions button[disabled]:not(.lifecycle-action) { display: none; }
   .canvas-workspace, .canvas-workspace.outline-collapsed { display: block; }
   .canvas-column { padding: 12px 10px 82px; }
-  .canvas-workspace:has(.assistant-rail.open) .canvas-column { padding-bottom: 430px; }
+  .canvas-workspace:has(.assistant-rail.open) .canvas-column { padding-bottom: min(670px, calc(100dvh - 34px)); }
   .document-paper { min-height: 720px; padding: 54px 24px 72px; }
   .document-title { font-size: 24px; }
   .canvas-editor { font-size: 15px; line-height: 1.9; }
   .editor-toolbar { left: 16px; }
   .assistant-rail { position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 60; height: 50px; border-top: 1px solid var(--line); border-left: 0; box-shadow: 0 -8px 24px rgba(29,33,38,.08); transition: height .18s ease; }
-  .assistant-rail.open { height: 400px; }
+  .assistant-rail.open { height: min(640px, calc(100dvh - 64px)); }
   .assistant-rail:not(.open) .assistant-panel { display: none; }
   .assistant-tabs { min-height: 49px; padding: 3px 5px 0; }
   .assistant-tabs button { flex: 1; min-width: 0; height: 45px; padding: 0 5px; }
