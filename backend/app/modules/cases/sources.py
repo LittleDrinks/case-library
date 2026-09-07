@@ -8,7 +8,7 @@ from app.modules.case_sources.service import (
     source_case_content_available,
     source_case_url,
 )
-from app.modules.materials.service import can_read_material
+from app.modules.materials.service import material_content_available
 
 
 def is_internal(record: dict, user: dict | None) -> bool:
@@ -97,7 +97,7 @@ def _content_available(
             database, row["sourceCaseId"], user, row["versionId"], internal
         )
     if source_type == "material":
-        return can_read_material(_material_row(database, row), user)
+        return material_content_available(_material_row(database, row), user)
     return internal or _attachment_readable(database, row, user, record)
 
 

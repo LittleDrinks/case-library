@@ -331,6 +331,57 @@ def test_sources_order_by_first_body_citation_and_pin_frozen_links(
     )
 
 
+def test_material_source_url_uses_checked_content_redirect(client: TestClient) -> None:
+    auth = login(client)
+    mount_material(client, auth, "m-kcsz")
+    entry = next(
+        row
+        for row in client.get("/api/cases/c-draft-1/sources").json()["entries"]
+        if row["sourceType"] == "material"
+    )
+    response = client.get(entry["url"], follow_redirects=False)
+    source_url = client.app.state.database.materials.find_one({"id": "m-kcsz"})[
+        "sourceUrl"
+    ]
+    assert entry["contentAvailable"] is True
+    assert (response.status_code, response.headers["location"]) == (307, source_url)
+
+
+def test_material_source_entries_keep_missing_and_disabled_rows_locked(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    mount_material(client, auth, "m-kcsz")
+    mount_material(client, auth, "m-zrjs")
+    client.app.state.database.materials.update_one(
+        {"id": "m-kcsz"}, {"$set": {"status": "disabled"}}
+    )
+    entries = client.get("/api/cases/c-draft-1/sources").json()["entries"]
+    by_id = {row["id"]: row for row in entries if row["sourceType"] == "material"}
+    assert set(by_id) == {"m-kcsz", "m-zrjs"}
+    assert all(row["contentAvailable"] is False for row in by_id.values())
+
+
+def test_private_material_source_entry_is_locked_for_public_reader(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    client.app.state.database.materials.update_one(
+        {"id": "m-kcsz"},
+        {"$set": {"accessLevel": "private", "createdBy": auth["user"]["id"]}},
+    )
+    mount_material(client, auth, "m-kcsz")
+    _submit_and_approve(client, auth, "c-draft-1")
+    reader = other_client(client)
+    entry = next(
+        row
+        for row in reader.get("/api/cases/c-draft-1/sources").json()["entries"]
+        if row["sourceType"] == "material"
+    )
+    assert entry["contentAvailable"] is False
+    assert reader.get(entry["url"]).status_code == 404
+
+
 def test_offline_source_case_keeps_entry_but_locks_content(client: TestClient) -> None:
     auth = login(client)
     mount_source(client, auth, "c-05")
