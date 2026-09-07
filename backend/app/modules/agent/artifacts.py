@@ -1,4 +1,9 @@
-"""Artifact 领域服务：服务端重建来源、校验 target/revision、原子写入正文快照与决定。"""
+"""Artifact 领域服务：Run 锁定选区与基线，校验后暂存提议，随运行完成统一提交。
+
+提议目标只能来自 Run 创建时锁定的教师非空选区；工具调用期只构建不落库，
+Artifact 与助手消息、tool.result、事件尾部在 Run 完成事务内同时对外可见，
+失败或取消不留下可决定卡片；接受前复验来源可读性，基线越过时展示 expired。
+"""
 
 from __future__ import annotations
 
@@ -16,9 +21,14 @@ from app.modules.agent.models import (
     SourceRef,
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
-from app.modules.agent.repository import AgentRepository, transaction
+from app.modules.agent.repository import (
+    AgentRepository,
+    expired_artifact_view,
+    transaction,
+)
 from app.modules.cases.service import CaseError, case_view
 from app.modules.cases.snapshots import record_snapshot
+from app.modules.materials.service import can_read_material
 
 
 def _now() -> datetime:
@@ -27,36 +37,32 @@ def _now() -> datetime:
 
 def propose_artifact(
     database: Database, case_id: str, thread_id: str, run_id: str,
-    paragraph_index: int, replacement: str, reason: str,
+    start: int, end: int, replacement: str, reason: str,
     sources: list[SourceRef], user: dict,
 ) -> AgentArtifact:
-    """在当前 baseRevision 上创建单段落 pending Artifact 并记录 Thread 事件。"""
-    return transaction(
-        database,
-        lambda session: _propose(
-            database, case_id, thread_id, run_id, paragraph_index,
-            replacement, reason, sources, user, session,
-        ),
-    )
+    """校验 Run 锁定选区并构建 pending Artifact；不落库，随运行完成提交。
 
-
-def _propose(database, case_id, thread_id, run_id, paragraph_index,
-             replacement, reason, sources, user, session) -> AgentArtifact:
-    case = _current_case(database, case_id, session)
+    模型不得推断目标：提议必须与教师选定范围一致且基线未过期。
+    """
+    case = _current_case(database, case_id)
     _verify_writer(case, user)
-    artifact = _artifact_document(
-        case, thread_id, run_id, _target(case["document"], paragraph_index),
-        replacement, reason, sources,
-    )
-    _insert_artifact(database, artifact, session)
-    return artifact
+    target = _locked_target(database, run_id, case, start, end)
+    if database.agent_artifacts.find_one({"runId": run_id}):
+        raise CaseError(409, "本次运行已提议过修订候选")
+    return _artifact_document(case, thread_id, run_id, target, replacement, reason, sources)
 
 
-def _target(document: dict, paragraph_index: int) -> ArtifactTarget:
-    rows = prosemirror.paragraphs(document)
-    if paragraph_index < 0 or paragraph_index >= len(rows):
-        raise CaseError(422, "目标段落不存在")
-    return ArtifactTarget(paragraphIndex=paragraph_index, quote=rows[paragraph_index]["quote"])
+def _locked_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
+    """模型提议必须命中 Run 锁定的教师选区，且基线修订号未变。"""
+    run = database.agent_runs.find_one({"id": run_id})
+    lock = (run or {}).get("target")
+    if not lock or run.get("baseRevision") is None:
+        raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
+    if run["baseRevision"] != case["revision"]:
+        raise CaseError(409, "正文已更新，修订目标已过期，请重新选择段落")
+    if (lock["from"], lock["to"]) != (start, end):
+        raise CaseError(422, "修订目标必须与教师选定的范围一致")
+    return ArtifactTarget(from_pos=lock["from"], to_pos=lock["to"], quote=lock["quote"])
 
 
 def _current_case(database: Database, case_id: str, session=None) -> dict:
@@ -75,14 +81,6 @@ def _artifact_document(
         base_revision=case["revision"], target=target, replacement=replacement,
         reason=reason, sources=sources, created_at=_now(),
     )
-
-
-def _insert_artifact(database: Database, artifact: AgentArtifact, session) -> None:
-    database.agent_artifacts.insert_one(
-        artifact.model_dump(by_alias=True, mode="python"), session=session
-    )
-    _append_event(database, artifact.thread_id, "artifact.created", artifact.run_id,
-                  {"artifactId": artifact.id}, session)
 
 
 def _append_event(database, thread_id, event_type, run_id, payload, session) -> None:
@@ -107,7 +105,7 @@ def decide_artifact(
             database, case_id, thread_id, artifact_id, user, decision, session
         ),
     )
-    return {"artifact": artifact, "case": case_view(case)}
+    return {"artifact": expired_artifact_view(artifact, case.get("revision")), "case": case_view(case)}
 
 
 def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
@@ -115,11 +113,71 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
     artifact = _existing_artifact(database, case_id, thread_id, artifact_id, session)
     case = _current_case(database, case_id, session)
     if artifact.status != "pending":
+        if artifact.status != decision:
+            raise CaseError(409, "修订候选已决定，不能改变决定")
         return artifact, case
+    _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
     if decision == "accepted":
+        _validate_evidence(database, user, artifact)
         case = _apply_revision(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
+
+
+def _decidable_run(database, artifact: AgentArtifact, decision: ArtifactDecision,
+                   session) -> None:
+    """运行终态前不接受决定；已取消/失败的提议不能被接受。"""
+    run = database.agent_runs.find_one({"id": artifact.run_id}, session=session)
+    status = (run or {}).get("status")
+    if run is None or status == "active":
+        raise CaseError(409, "修订候选所在运行尚未结束，暂不能决定")
+    if decision == "accepted" and status in ("cancelled", "failed"):
+        raise CaseError(409, "运行已取消或失败，修订候选不能接受")
+
+
+def _validate_evidence(database, user, artifact: AgentArtifact) -> None:
+    """接受前复验每个来源：按当前身份仍可读且未下线，否则拒绝接受。"""
+    for ref in artifact.sources:
+        if not _evidence_readable(database, user, ref):
+            raise CaseError(409, "引用来源已不可读或已下线，修订候选不能接受")
+
+
+def _evidence_readable(database, user, ref: SourceRef) -> bool:
+    readers = {
+        "case": _case_evidence_readable,
+        "knowledge": _knowledge_evidence_readable,
+        "material": _material_evidence_readable,
+    }
+    return readers[ref.kind](database, user, ref)
+
+
+def _case_evidence_readable(database, user, ref: SourceRef) -> bool:
+    """案例证据按当前已发布版本复验：公开或内部身份，且发布版本仍存在。"""
+    case = database.cases.find_one({"id": ref.id})
+    internal = bool(case and user and (
+        user["role"] == "admin" or case.get("ownerId") == user["id"]
+    ))
+    if not case or (case.get("publicationStatus") != "public" and not internal):
+        return False
+    version_id = case.get("publishedVersionId")
+    return bool(version_id) and database.case_versions.find_one(
+        {"id": version_id, "caseId": case["id"]}
+    ) is not None
+
+
+def _knowledge_evidence_readable(database, user, ref: SourceRef) -> bool:
+    section = database.knowledge_sections.find_one({"id": ref.id})
+    if not section:
+        return False
+    source = database.knowledge_sources.find_one(
+        {"id": section.get("sourceId"), "status": "active"}
+    )
+    return source is not None
+
+
+def _material_evidence_readable(database, user, ref: SourceRef) -> bool:
+    material = database.materials.find_one({"id": ref.id, "status": "active"})
+    return material is not None and can_read_material(material, user)
 
 
 def _existing_thread(database, case_id, thread_id, user, session) -> None:
@@ -152,7 +210,7 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
     _recheck_target(case, artifact)
     record_snapshot(database, case, user, "pre_agent_decision", session)
     document = prosemirror.replaced_document(
-        case["document"], artifact.target.paragraph_index,
+        case["document"], artifact.target.from_pos, artifact.target.to_pos,
         artifact.target.quote, artifact.replacement,
     )
     updated = database.cases.find_one_and_update(
@@ -169,10 +227,11 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
 def _recheck_target(case: dict, artifact: AgentArtifact) -> None:
     try:
         prosemirror.check_target(
-            case["document"], artifact.target.paragraph_index, artifact.target.quote
+            case["document"], artifact.target.from_pos,
+            artifact.target.to_pos, artifact.target.quote,
         )
     except (ParagraphChangedError, ParagraphNotFoundError) as error:
-        raise CaseError(409, "目标段落原文已变化，修订候选已过期") from error
+        raise CaseError(409, "目标选区原文已变化，修订候选已过期") from error
 
 
 def _save_decision(database, artifact: AgentArtifact, user: dict,

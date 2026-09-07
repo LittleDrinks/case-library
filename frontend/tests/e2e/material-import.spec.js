@@ -247,8 +247,15 @@ async function publishDraft(page, caseId) {
 
 async function expectPublicDownload(page, title, content) {
   const pending = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${title}` }).click();
+  await page.getByRole("link", { name: `打开来源${title}` }).click();
   expect(await readFile(await (await pending).path(), "utf8")).toBe(content);
+}
+
+async function expectRestrictedSource(page, title) {
+  const restricted = page.locator(".public-sources li").filter({ hasText: title });
+  await expect(restricted).toBeVisible();
+  await expect(restricted.getByRole("link")).toHaveCount(0);
+  await expect(restricted).toContainText("内容按权限开放");
 }
 
 test("管理员批量导入资料并识别重复内容", async ({ page }) => {
@@ -324,7 +331,5 @@ test("发布案例公开文件可匿名下载且校内文件保持受限", async
   await publishDraft(page, draft.id);
   await page.goto(`/#/cases/${draft.id}`);
   await expectPublicDownload(page, publicTitle, `public-bytes-${marker}`);
-  await expect(page.getByText(campusTitle, { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: `下载${campusTitle}` })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: `${campusTitle}内容受限` })).toBeDisabled();
+  await expectRestrictedSource(page, campusTitle);
 });

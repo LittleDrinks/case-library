@@ -15,6 +15,7 @@ from app.modules.agent.models import (
     AgentSnapshot,
     AgentThreadEvent,
     AgentThread,
+    ArtifactTarget,
     TerminalRunStatus,
     ThreadEventType,
 )
@@ -181,11 +182,18 @@ class AgentRepository:
             title=current.title,
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
-            artifacts=self.artifacts(current.id, session),
+            artifacts=self._snapshot_artifacts(current, session),
             runs=self.runs(current.id, session),
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
         )
+
+    def _snapshot_artifacts(self, thread: AgentThread, session) -> list[AgentArtifact]:
+        revision = _case_revision(self.database, thread.case_id, session)
+        return [
+            expired_artifact_view(artifact, revision)
+            for artifact in self.artifacts(thread.id, session)
+        ]
 
     def events_after(
         self, thread_id: str, after_seq: int, limit: int = 200
@@ -206,11 +214,15 @@ class AgentRepository:
         metadata: dict[str, object], assistant_id: str,
         client_request_id: str | None = None, owner_id: str | None = None,
         quota_ids: tuple[str, ...] = (), default_title: str | None = None,
+
+        base_revision: int | None = None, target: ArtifactTarget | None = None,
     ) -> AgentRun:
         try:
             run = _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, session, default_title,
+
+                base_revision, target,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -218,13 +230,15 @@ class AgentRepository:
 
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id,
-        owner_id, quota_ids, session, default_title=None
+        owner_id, quota_ids, session, default_title=None,
+        base_revision=None, target=None,
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session, default_title)
         message, run = _new_run_documents(
             thread, user_id, parts, metadata, assistant_id, message_seq,
             client_request_id, run_id, message_id, owner_id, quota_ids,
+            base_revision, target,
         )
         self._insert_start_records(message, run, session)
         self._append_start_events(thread.id, run, message.id, session)
@@ -237,17 +251,20 @@ class AgentRepository:
         assistant_id: str,
         owner_id: str | None = None,
         quota_ids: tuple[str, ...] = (),
+        base_revision: int | None = None, target: ArtifactTarget | None = None,
     ) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
             return _transaction(self.database, lambda session: self._retry_run(
-                thread, user_message_id, assistant_id, owner_id, quota_ids, session,
+                thread, user_message_id, assistant_id, owner_id, quota_ids,
+                base_revision, target, session,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
 
     def _retry_run(
-        self, thread, user_message_id, assistant_id, owner_id, quota_ids, session
+        self, thread, user_message_id, assistant_id, owner_id, quota_ids,
+        base_revision, target, session,
     ) -> AgentRun:
         message = self.database.agent_messages.find_one(
             {"threadId": thread.id, "id": user_message_id, "role": "user"},
@@ -259,13 +276,18 @@ class AgentRepository:
         if self._reserve_active(thread, run_id, session, bump=False) is None:
             raise ActiveRunError
         return self._insert_retry_run(
-            thread, message, assistant_id, run_id, owner_id, quota_ids, session
+            thread, message, assistant_id, run_id, owner_id, quota_ids,
+            base_revision, target, session,
         )
 
     def _insert_retry_run(
-        self, thread, message, assistant_id, run_id, owner_id, quota_ids, session
+        self, thread, message, assistant_id, run_id, owner_id, quota_ids,
+        base_revision, target, session,
     ) -> AgentRun:
-        run = _new_retry_run(thread, message, assistant_id, run_id, owner_id, quota_ids)
+        run = _new_retry_run(
+            thread, message, assistant_id, run_id, owner_id, quota_ids,
+            base_revision, target,
+        )
         self.database.agent_runs.insert_one(_run_document(run), session=session)
         self._append_event(
             thread.id, "run.started", run.id,
@@ -355,17 +377,20 @@ class AgentRepository:
         self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
         resources: list[dict[str, str]] | None = None,
         reader_case_id: str | None = None, reader_version_id: str | None = None,
+        artifact: AgentArtifact | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
                 reader_case_id, reader_version_id,
+                artifact,
             ),
         )
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
-                      resources=None, reader_case_id=None, reader_version_id=None) -> bool:
+                      resources=None, reader_case_id=None, reader_version_id=None,
+                      artifact: AgentArtifact | None = None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
                 _active_query(run_id, owner_id), session=session
@@ -380,11 +405,13 @@ class AgentRepository:
             return self._finish_transaction(
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
             )
-        return self._complete_records(run, assistant, session, owner_id, resources)
+        return self._complete_records(run, assistant, session, owner_id, resources, artifact)
 
-    def _complete_records(self, run, assistant, session, owner_id, resources) -> bool:
+    def _complete_records(self, run, assistant, session, owner_id, resources, artifact=None) -> bool:
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
+        if artifact is not None:
+            self._persist_artifact(run, artifact, session)
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
 
@@ -401,6 +428,17 @@ class AgentRepository:
                 self.database, case, version_id, version, False, session=session
             )
         )
+
+    def _persist_artifact(self, run: AgentRun, artifact: AgentArtifact, session) -> None:
+        """修订候选与 tool.result、助手消息、事件尾部同事务对外可见。"""
+        self.database.agent_artifacts.insert_one(
+            artifact.model_dump(by_alias=True, mode="python"), session=session
+        )
+        if self._append_event(
+            run.thread_id, "artifact.created", run.id,
+            {"artifactId": artifact.id}, session,
+        ) is None:
+            raise RuntimeError("Thread 事件写入失败")
 
     def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
         self.database.agent_messages.insert_one(
@@ -581,13 +619,14 @@ def _new_run_documents(
     thread: AgentThread, user_id, parts, metadata, assistant_id, message_seq: int,
     client_request_id: str | None, run_id: str, message_id: str,
     owner_id: str | None, quota_ids: tuple[str, ...],
+    base_revision: int | None = None, target: ArtifactTarget | None = None,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     return (
         _new_user_message(thread, run_id, message_id, parts, metadata, message_seq, now),
         _new_active_run(
             thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
-            owner_id, quota_ids,
+            owner_id, quota_ids, base_revision, target,
         ),
     )
 
@@ -604,6 +643,7 @@ def _new_user_message(
 def _new_retry_run(
     thread, message: dict, assistant_id: str, run_id: str,
     owner_id: str | None, quota_ids: tuple[str, ...],
+    base_revision: int | None = None, target: ArtifactTarget | None = None,
 ) -> AgentRun:
     now = _now()
     return AgentRun(
@@ -611,6 +651,7 @@ def _new_retry_run(
         user_message_id=message["id"], assistant_message_id=assistant_id,
         status="active", started_at=now,
         read_only=thread.version_id is not None,
+        base_revision=base_revision, target=target,
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
         quota_ids=quota_ids,
@@ -619,13 +660,14 @@ def _new_retry_run(
 
 def _new_active_run(
     thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
-    owner_id, quota_ids,
+    owner_id, quota_ids, base_revision=None, target=None,
 ) -> AgentRun:
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
         assistant_message_id=assistant_id, client_request_id=client_request_id,
         status="active", started_at=now,
         read_only=thread.version_id is not None,
+        base_revision=base_revision, target=target,
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
         quota_ids=quota_ids,
@@ -704,3 +746,18 @@ def _transaction(database, callback):
 def transaction(database, callback):
     """在真实 replica set 事务中执行回调；测试替身下等价于直接调用。"""
     return _transaction(database, callback)
+
+
+def _case_revision(database, case_id: str, session) -> int | None:
+    case = database.cases.find_one({"id": case_id}, {"revision": 1}, session=session)
+    return case.get("revision") if case else None
+
+
+def expired_artifact_view(artifact: AgentArtifact, revision: int | None) -> AgentArtifact:
+    """正文修订号已越过候选基线时，读取侧展示 expired；不回写存储状态。"""
+    if (
+        artifact.status == "pending" and revision is not None
+        and revision != artifact.base_revision
+    ):
+        return artifact.model_copy(update={"status": "expired"})
+    return artifact

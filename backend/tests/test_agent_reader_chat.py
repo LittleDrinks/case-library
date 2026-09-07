@@ -201,11 +201,11 @@ def test_propose_tool_guard_blocks_readers_and_published_cases(client: TestClien
     database = client.app.state.database
     reader = _login(client, READER)["user"]
     with pytest.raises(CaseError) as forbidden:
-        propose_artifact(database, CASE, "t1", "r1", 0, "x", "", [], reader)
+        propose_artifact(database, CASE, "t1", "r1", 0, 1, "x", "", [], reader)
     assert forbidden.value.status_code == 403
     owner = _login(client, {"username": "admin", "password": "admin123"})["user"]
     with pytest.raises(CaseError) as conflict:
-        propose_artifact(database, CASE, "t1", "r1", 0, "x", "", [], owner)
+        propose_artifact(database, CASE, "t1", "r1", 0, 1, "x", "", [], owner)
     assert conflict.value.status_code == 409
 
 

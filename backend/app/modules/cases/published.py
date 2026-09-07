@@ -23,12 +23,49 @@ class PublishedCaseReader:
         self.database = database
 
     def get(self, case: dict) -> dict:
+        version_id = case.get("publishedVersionId")
         version = self.database.case_versions.find_one(
-            {"id": case.get("publishedVersionId"), "caseId": case["id"]}
+            {"id": version_id, "caseId": case["id"]}
         )
-        if not version or case.get("publicationStatus") != "public":
+        if not version_readable(self.database, case, version_id, version, False):
             raise CaseError(404, "案例不存在")
         return published_view(case, version)
+
+    def read_public_version(self, case: dict, version_id: str) -> dict:
+        """公共阅读固定版本：即使 admin/owner 也按读者权限判定。"""
+        version = find_version(self.database, case, version_id, False)
+        if not version_readable(self.database, case, version_id, version, False):
+            raise CaseError(404, "案例版本不存在")
+        return _published_view(case, version)
+
+
+def find_version(database: Database, case: dict, version_id: str, internal: bool) -> dict | None:
+    query = {"id": version_id, "caseId": case["id"]}
+    version = database.case_versions.find_one(query)
+    if version or not internal:
+        return version
+    return database.case_snapshots.find_one(query)
+
+
+def version_readable(
+    database: Database,
+    case: dict,
+    version_id: str,
+    version: dict | None,
+    internal: bool,
+) -> bool:
+    """已批准历史版本对普通读者可读；草稿与快照仅内部可见。"""
+    if internal:
+        return version is not None
+    if case.get("publicationStatus") != "public" or version is None:
+        return False
+    if version_id == case.get("publishedVersionId"):
+        return True
+    approved = database.lifecycle_events.find_one(
+        {"caseId": case["id"], "action": "approve", "versionId": version_id},
+        {"_id": 1},
+    )
+    return bool(approved)
 
 
 def version_readable(

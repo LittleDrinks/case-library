@@ -76,6 +76,31 @@ class RevisionConflict(CaseError):
         self.current_revision = current_revision
 
 
+def run_transaction(database: Database, callback):
+    with database.client.start_session() as session:
+        return session.with_transaction(callback)
+
+
+def advance_revision(database, case_id: str, user: dict, revision: int, session) -> None:
+    query = {"id": case_id, "ownerId": user["id"], "workflowStatus": "draft", "revision": revision}
+    updated = database.cases.find_one_and_update(
+        query,
+        {"$set": {"updatedAt": _now()}, "$inc": {"revision": 1}},
+        session=session,
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated:
+        return
+    current = database.cases.find_one({"id": case_id}, session=session)
+    if not current:
+        raise CaseError(404, "案例不存在")
+    if current["ownerId"] != user["id"]:
+        raise CaseError(403, "仅案例作者可编辑案例")
+    if current["workflowStatus"] != "draft":
+        raise CaseError(409, "案例当前不可编辑")
+    raise RevisionConflict(current["revision"])
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 

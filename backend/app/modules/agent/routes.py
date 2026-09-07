@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -18,6 +18,8 @@ from app.modules.agent.models import (
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
+
+    ArtifactTarget,
 )
 from app.modules.agent.recovery import (
     LiveBuffer,
@@ -32,6 +34,7 @@ from app.modules.agent.repository import (
     ThreadNotFoundError,
 )
 from app.modules.agent.resources import CASE_EDIT_SKILL
+from app.modules.agent import prosemirror
 from app.modules.agent.service import RunContext, load_history
 from app.modules.agent.skills import case_edit_skill, reader_capability
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
@@ -69,6 +72,7 @@ class RunPlan:
     history: list
     client_request_id: str | None = None
     retry_message_id: str | None = None
+    selections: list[dict] = field(default_factory=list)
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -407,14 +411,35 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     plan = _run_plan(repository, thread, adapter)
     if conversation.reader and plan.skills:
         raise HTTPException(status_code=422, detail="AI 能力不可用")
+    context = _start_context(
+        request, database, settings, user, conversation, repository, thread,
+        adapter, plan, assistant_id,
+    )
+    request.app.state.run_supervisor.start(context)
+    return live_response(context.buffer)
+
+
+def _start_context(
+    request, database, settings, user, conversation, repository, thread, adapter, plan,
+    assistant_id,
+):
+    lock = _run_lock_for(conversation, plan)
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
     worker_id = request.app.state.agent_worker_id
-    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease, worker_id)
-    context = _run_context(request, database, settings, user, conversation, repository,
-                           thread, adapter, plan, run, selection, lease, worker_id)
-    request.app.state.run_supervisor.start(context)
-    return live_response(context.buffer)
+    run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
+                     worker_id, lock)
+    return _run_context(request, database, settings, user, conversation, repository,
+                        thread, adapter, plan, run, selection, lease, worker_id)
+
+
+def _run_lock_for(conversation: Conversation, plan: RunPlan):
+    if conversation.reader:
+        return None, None
+    plan.selections = _document_selections(
+        conversation.case.get("document") or {}, plan.parts
+    )
+    return _run_lock(conversation.case, plan)
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
@@ -460,9 +485,48 @@ def _lease(database, user_id: str, selection):
         raise HTTPException(status_code=429, detail=str(error)) from error
 
 
-def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id) -> AgentRun:
+def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
+    """Run 创建即锁定 baseRevision；仅当恰好一个非空选区时锁定目标范围。
+
+    无选区不锁目标，提议修订将被拒绝，不由模型推断或自动锁定段落。
+    """
+    if len(plan.selections) != 1:
+        return case.get("revision"), None
+    row = plan.selections[0]
+    return case.get("revision"), ArtifactTarget(
+        from_pos=row["from"], to_pos=row["to"], quote=row["quote"],
+    )
+
+
+def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
+    """解析 data-selection 部分：位置须落在同一文本块内，原文服务端重算。"""
+    return [_resolve_selection(document, part.get("data")) for part in parts
+            if part.get("type") == "data-selection"]
+
+
+def _resolve_selection(document: dict, data: object) -> dict:
+    from_pos = data.get("from") if isinstance(data, dict) else None
+    to_pos = data.get("to") if isinstance(data, dict) else None
+    if not isinstance(from_pos, int) or not isinstance(to_pos, int):
+        raise HTTPException(status_code=422, detail="正文选区格式无效")
     try:
-        return _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id)
+        prosemirror.selection_block(document, from_pos, to_pos)
+    except prosemirror.ParagraphNotFoundError as error:
+        raise HTTPException(
+            status_code=422, detail="正文选区为空或跨越段落，请重新选择"
+        ) from error
+    return {
+        "from": from_pos, "to": to_pos,
+        "quote": prosemirror.text_between(document, from_pos, to_pos),
+    }
+
+
+def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+               lock: tuple[int | None, ArtifactTarget | None] = (None, None)) -> AgentRun:
+    try:
+        return _create_run(
+            repository, thread, user_id, plan, assistant_id, lease, worker_id, lock,
+        )
     except ActiveRunError as error:
         if lease:
             lease.release()
@@ -475,18 +539,21 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
         raise
 
 
-def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id):
+def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
+                lock: tuple[int | None, ArtifactTarget | None] = (None, None)):
     quota_ids = lease.quota_ids if lease else ()
+    base_revision, target = lock
     if plan.retry_message_id:
         run = repository.retry_run(
             thread, plan.retry_message_id, assistant_id,
-            owner_id=worker_id, quota_ids=quota_ids,
+            owner_id=worker_id, quota_ids=quota_ids, base_revision=base_revision, target=target,
         )
     else:
         run = repository.start_run(
             thread, user_id, plan.parts, plan.metadata, assistant_id,
             plan.client_request_id, owner_id=worker_id, quota_ids=quota_ids,
             default_title=_default_title(plan.prompt),
+            base_revision=base_revision, target=target,
         )
     _bind_lease(repository, run, lease, worker_id)
     return run
