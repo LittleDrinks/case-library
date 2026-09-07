@@ -136,7 +136,7 @@ async function assertUnmountHidesLink(page, caseId, materialId) {
 
 test("选中来源消息按 part 顺序渲染，卸载后重开撤下链接并显示来源不可用", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   const material = await firstAvailableMaterial(page.context().request);
   const created = await createCaseViaApi(page, `Source Proof ${Date.now()}`);
