@@ -6,6 +6,8 @@ import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
 });
 const emit = defineEmits(["case-revised"]);
 
@@ -14,7 +16,7 @@ const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread,
-} = useAgentChat(props.caseRecord.id);
+} = useAgentChat(props.caseRecord.id, props.versionId);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -234,7 +236,7 @@ async function retryRun() {
           <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
           <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
           <p class="agent-artifact-status">状态：{{ artifact.status === "accepted" ? "已接受" : artifact.status === "rejected" ? "已拒绝" : "待确认" }}</p>
-          <div v-if="artifact.status === 'pending'" class="agent-artifact-actions">
+          <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
             <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
           </div>

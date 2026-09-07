@@ -5,7 +5,6 @@ import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
 import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
-import CaseDetailView from "./views/CaseDetailView.vue";
 import HomeView from "./views/HomeView.vue";
 import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
@@ -60,7 +59,7 @@ const routes = [
     component: WorkbenchView,
     meta: { requiresAuth: true },
   },
-  { path: "/cases/:id", name: "case-public", component: CaseDetailView },
+  { path: "/cases/:id", name: "case-public", component: WorkbenchView },
   {
     path: "/admin",
     name: "admin-dashboard",

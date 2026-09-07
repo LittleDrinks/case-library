@@ -14,6 +14,16 @@ it("loads the persistent thread through the JSON snapshot seam", async () => {
   expect(fetch.mock.calls[0][0]).toBe("/api/cases/case%2F1/agent/thread");
 });
 
+it("binds reader threads and public cases to the requested version", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetch);
+
+  await api.agentThread("case-1", null, "version-2");
+  expect(fetch.mock.calls[0][0]).toBe("/api/cases/case-1/agent/thread?versionId=version-2");
+  await api.getPublicCase("case-1", "version-2");
+  expect(fetch.mock.calls[1][0]).toBe("/api/cases/case-1/public?versionId=version-2");
+});
+
 it("does not expose the retired token-stream client helpers", () => {
   expect(api.streamAI).toBeUndefined();
   expect(api.chat).toBeUndefined();

@@ -49,9 +49,9 @@ function answerResponse() {
   ]);
 }
 
-function mountPanel() {
+function mountPanel(overrides = {}) {
   return mount(AgentChatPanel, {
-    props: { caseRecord: { id: "case-1" } },
+    props: { caseRecord: { id: "case-1" }, ...overrides },
     global: { stubs: { RouterLink: true } },
   });
 }
@@ -81,6 +81,19 @@ it("restores the server thread and sends one turn through the SDK transport", as
   expect(body.trigger).toBe("submit-message");
   expect(body.messages.at(-1).parts[0].text).toBe("当前问题");
   expect(wrapper.text()).toContain("确定回答");
+});
+
+it("reader discussion binds its version and does not send an edit Skill", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({ versionId: "version-2", readOnly: true });
+  await flushPromises();
+  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2");
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("只读问题");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "只读问题" }]);
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {
