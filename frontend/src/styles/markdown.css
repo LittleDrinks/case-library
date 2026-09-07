@@ -23,5 +23,5 @@
 .markdown-body pre code { padding: 0; background: none; }
 .markdown-body .md-table-scroll { max-width: 100%; overflow-x: auto; }
 .markdown-body table { border-collapse: collapse; }
-.markdown-body th, .markdown-body td { padding: 4px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown-body th, .markdown-body td { min-width: 5em; padding: 4px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .markdown-body th { background: var(--paper); }

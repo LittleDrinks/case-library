@@ -431,7 +431,6 @@ async function retryRun() {
                 <p>{{ part.text }}</p>
               </details>
               <p v-else-if="part.type === 'text' && part.text && message.role === 'user'">{{ part.text }}</p>
-              <!-- eslint-disable-next-line vue/no-v-html -- 内容经 markdown-it 关闭 HTML 并过滤危险协议后输出 -->
               <div
                 v-else-if="part.type === 'text' && part.text"
                 class="markdown-body agent-answer"

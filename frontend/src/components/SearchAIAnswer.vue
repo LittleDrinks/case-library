@@ -4,7 +4,7 @@ import { DefaultChatTransport } from "ai";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ChevronDown, LoaderCircle, RotateCcw } from "@lucide/vue";
 import { api } from "../api.js";
-import { CITATION_PATTERN, renderAnswerMarkdown } from "../lib/markdown.js";
+import { renderAnswer } from "../lib/markdown.js";
 import { session } from "../session.js";
 
 const props = defineProps({
@@ -42,13 +42,14 @@ function resolveMarker(raw) {
   return item ? { item, order: contextItems.value.indexOf(item) + 1 } : null;
 }
 
-const answerHtml = computed(() => renderAnswerMarkdown(text.value, resolveMarker)
+const answer = computed(() => renderAnswer(text.value, resolveMarker));
+const answerHtml = computed(() => answer.value.html
   + (state.value === "streaming" ? '<span class="stream-caret" aria-hidden="true"></span>' : ""));
 const citedSources = computed(() => {
   const cited = new Map();
-  for (const match of (text.value || "").matchAll(CITATION_PATTERN)) {
-    const resolved = resolveMarker(match[1] ?? match[2]);
-    if (resolved) cited.set(`${resolved.item.kind}:${resolved.item.id}`, resolved);
+  for (const resolved of answer.value.citations) {
+    const key = `${resolved.item.kind}:${resolved.item.id}`;
+    if (!cited.has(key)) cited.set(key, resolved);
   }
   return [...cited.values()];
 });
@@ -122,7 +123,6 @@ onBeforeUnmount(() => retire("idle"));
     </div>
     <p v-else-if="state === 'checking'" class="ai-progress"><LoaderCircle class="spin" :size="16" />检查模型配置</p>
     <template v-else-if="state === 'streaming' || state === 'complete'">
-      <!-- eslint-disable-next-line vue/no-v-html -- 内容经 markdown-it 关闭 HTML 并过滤危险协议后输出 -->
       <div class="ai-answer-text markdown-body" :class="{ collapsed: !expanded }" v-html="answerHtml" @click="onAnswerClick" />
       <button type="button" class="ai-answer-toggle" :aria-expanded="expanded" @click="expanded = !expanded">
         {{ expanded ? "收起" : "展开全文" }}

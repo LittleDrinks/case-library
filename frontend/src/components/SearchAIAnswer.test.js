@@ -255,6 +255,19 @@ test("流式过程中未完成的 Markdown 不破坏页面且与完成态一致"
   expect(wrapper.get(".ai-answer-text .md-table-scroll table").exists()).toBe(true);
 });
 
+test("来源列表仅来自实际渲染的引用标记，代码与链接内标记不计数", async () => {
+  const answer = "见〔1〕与[2](https://example.org)，代码`〔1〕`。";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse(answer)));
+  const wrapper = mountAnswer();
+  await flushPromises();
+  expect(wrapper.get(".ai-answer-text").findAll(".ai-marker")).toHaveLength(1);
+  expect(wrapper.get(".ai-answer-text").get("a").attributes("href")).toBe("https://example.org");
+  const sources = wrapper.get(".ai-answer-sources").findAll("button");
+  expect(sources.map((source) => source.text())).toEqual(["〔1〕 重复标题"]);
+  await wrapper.get(".ai-marker").trigger("click");
+  expect(wrapper.emitted("locate")[0]).toEqual([{ kind: "case", id: "c-05" }]);
+});
+
 test("已解析引用与来源行按稳定 kind+id 定位精确结果卡片", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse("依据[2]与〔kn-1〕。")));
   const wrapper = mountAnswer();
