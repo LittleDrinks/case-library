@@ -72,6 +72,9 @@ async function loadCases() {
   error.value = "";
   try {
     cases.value = await api.listCases("mine");
+    if (cases.value.some((item) => !Object.hasOwn(statusLabels, item.workflowStatus))) {
+      throw new Error("部分案例状态异常，请重新加载。");
+    }
   } catch (reason) {
     error.value = reason.message || "案例加载失败";
   } finally {
