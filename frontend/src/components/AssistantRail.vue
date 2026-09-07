@@ -14,6 +14,8 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
   sources: { type: Array, default: () => [] },
+  sourcesLoading: { type: Boolean, default: false },
+  sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   caseTitle: { type: String, required: true },
@@ -30,7 +32,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "candidate-previews", "annotations",
+  "case-revised", "candidate-previews", "annotations", "sources-retry",
 ]);
 
 const tabs = [
@@ -106,7 +108,12 @@ function select(tab) {
     />
 
     <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
-      <PublicSourceList :sources="sources" />
+      <PublicSourceList
+        :sources="sources"
+        :loading="sourcesLoading"
+        :error="sourcesError"
+        @retry="emit('sources-retry')"
+      />
     </div>
     <AttachmentPanel
       v-else-if="active === 'files'"

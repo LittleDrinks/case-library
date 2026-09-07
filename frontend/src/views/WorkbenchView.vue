@@ -20,7 +20,7 @@ const route = useRoute();
 const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
 const caseRecord = ref(null);
-const readerVersion = computed(() => readerMode.value ? caseRecord.value?.versionId || "" : "");
+const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
 const title = ref("");
 const titleInput = ref(null);
 const canvasEditor = ref(null);
@@ -195,10 +195,15 @@ async function loadAnnotations() {
 }
 
 const sources = ref([]);
+const sourcesLoading = ref(false);
+const sourcesError = ref("");
 
 async function loadSources() {
-  try { sources.value = (await api.listSources(caseId(), readerVersion.value)).entries || []; }
-  catch { sources.value = []; }
+  sourcesLoading.value = true;
+  sourcesError.value = "";
+  try { sources.value = (await api.listSources(caseId(), readerVersion.value)).entries; }
+  catch (error) { sources.value = []; sourcesError.value = error.message || "来源加载失败"; }
+  finally { sourcesLoading.value = false; }
 }
 
 function applyAttachmentCase(value) {
@@ -595,6 +600,8 @@ onBeforeUnmount(() => {
           :read-only="readerMode"
           :version-id="readerVersion"
           :sources="sources"
+          :sources-loading="sourcesLoading"
+          :sources-error="sourcesError"
           :open="drawerOpen"
           :case-record="caseRecord"
           :case-title="title"
@@ -616,6 +623,7 @@ onBeforeUnmount(() => {
           @mutation-state="contentMutationBusy = $event"
           @candidate-previews="candidatePreviews = $event"
           @annotations="annotations = $event"
+          @sources-retry="loadSources"
         />
       </div>
     </template>

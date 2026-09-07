@@ -1,7 +1,12 @@
 <script setup>
 import { BookOpen, ExternalLink, LockKeyhole } from "@lucide/vue";
 
-defineProps({ sources: { type: Array, default: () => [] } });
+defineProps({
+  sources: { type: Array, default: () => [] },
+  loading: { type: Boolean, default: false },
+  error: { type: String, default: "" },
+});
+defineEmits(["retry"]);
 
 function sourceMeta(row) {
   const parts = [];
@@ -12,9 +17,13 @@ function sourceMeta(row) {
 </script>
 
 <template>
-  <section class="public-attachments public-sources" aria-labelledby="public-sources-title">
+  <section class="public-sources" aria-labelledby="public-sources-title">
     <h2 id="public-sources-title"><BookOpen :size="16" />来源</h2>
-    <p v-if="!sources.length">暂无来源</p>
+    <p v-if="loading">正在加载来源</p>
+    <div v-else-if="error" class="public-source-error" role="alert">
+      <span>{{ error }}</span><button type="button" @click="$emit('retry')">重试</button>
+    </div>
+    <p v-else-if="!sources.length">暂无来源</p>
     <ul v-else>
       <li v-for="(row, index) in sources" :key="row.id">
         <BookOpen :size="16" aria-hidden="true" />

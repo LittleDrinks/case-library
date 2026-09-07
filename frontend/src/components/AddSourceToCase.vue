@@ -74,7 +74,7 @@ async function confirm() {
 </script>
 
 <template>
-  <button class="case-detail-collect" type="button" @click="openDialog">
+  <button class="source-collect" type="button" @click="openDialog">
     <BookMarked :size="16" aria-hidden="true" />加入我的案例
   </button>
   <Teleport to="body">

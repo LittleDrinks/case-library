@@ -20,3 +20,11 @@ test("没有资料时显示空态", () => {
   const wrapper = mount(PublicSourceList, { props: { sources: [] } });
   expect(wrapper.text()).toContain("暂无来源");
 });
+
+test("来源请求失败显示错误而不是空态", async () => {
+  const wrapper = mount(PublicSourceList, { props: { error: "来源加载失败" } });
+  expect(wrapper.text()).toContain("来源加载失败");
+  expect(wrapper.text()).not.toContain("暂无来源");
+  await wrapper.get("button").trigger("click");
+  expect(wrapper.emitted("retry")).toHaveLength(1);
+});

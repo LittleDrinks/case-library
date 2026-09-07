@@ -16,7 +16,7 @@ function render() {
 }
 
 async function openDialog(wrapper) {
-  await wrapper.get(".case-detail-collect").trigger("click");
+  await wrapper.get(".source-collect").trigger("click");
   await flushPromises();
 }
 

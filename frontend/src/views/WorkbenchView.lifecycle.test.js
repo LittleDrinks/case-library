@@ -16,9 +16,11 @@ vi.mock("../session.js", () => ({
 vi.mock("../api.js", () => ({
   api: {
     getCase: vi.fn(),
+    getPublicCase: vi.fn(),
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    listSources: vi.fn().mockResolvedValue({ entries: [] }),
   },
 }));
 
@@ -55,6 +57,7 @@ async function renderCase(overrides) {
 beforeEach(() => {
   vi.clearAllMocks();
   state.route.name = "workbench";
+  state.route.query = {};
   state.user = { id: "user-1", role: "user" };
 });
 
@@ -86,6 +89,18 @@ test("已发布作者不再看到工作区动作，仅保留公开页入口", as
   });
   expect(wrapper.text()).toContain("查看公开页");
   expect(wrapper.find(".lifecycle-action").exists()).toBe(false);
+});
+
+test("公开响应的 publishedVersionId 固定来源版本", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(caseFixture({
+    workflowStatus: "published", publicationStatus: "public", ownerId: "user-9",
+    publishedVersionId: "published-2", versionId: undefined,
+  }));
+  const wrapper = render();
+  await flushPromises();
+  expect(api.listSources).toHaveBeenCalledWith("case-1", "published-2");
+  expect(wrapper.findComponent({ name: "AssistantRail" }).props("versionId")).toBe("published-2");
 });
 
 test("退回草稿展示最近审核意见", async () => {
