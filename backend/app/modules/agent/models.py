@@ -67,7 +67,7 @@ class AgentRun(BaseModel):
     )
     target: ArtifactTarget | None = Field(
         default=None,
-        description="Run 创建时锁定的教师选定目标段；唯一段落可自动锁定，其余必须显式选区",
+        description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
     )
     resources: list[dict[str, str]] = Field(default_factory=list)
     started_at: datetime = Field(alias="startedAt")

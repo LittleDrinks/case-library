@@ -100,7 +100,8 @@ HIT = {
     "summary": "以科学家精神为主题的教学案例，含教学目标与评价量规。",
 }
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
-SELECTION = (1 + len(PARAGRAPHS[0]) + 2, 1 + len(PARAGRAPHS[0]) + 2 + len(PARAGRAPHS[1]))
+# Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
+SELECTION = (11, 30)
 
 
 def _seed_source_case(database) -> None:

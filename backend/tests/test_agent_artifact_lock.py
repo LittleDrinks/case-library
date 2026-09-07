@@ -18,25 +18,27 @@ from app.modules.cases.service import CaseError
 
 PARAGRAPHS = ("第一段保持不变。", "第二段需要修订。")
 REPLACEMENT = "第二段已按来源修订。"
+RICH_DOCUMENT = {
+    "type": "doc", "content": [
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "保留", "marks": [{"type": "bold"}]},
+            {"type": "hardBreak"},
+            {"type": "text", "text": "目标后", "marks": [{"type": "italic"}]},
+        ]},
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "列表"}]},
+        ]}]},
+        {"type": "blockquote", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "引用"}]},
+        ]},
+    ],
+}
 
 
-def _range_of(texts: tuple[str, ...], index: int) -> tuple[int, int]:
-    start = 1 + sum(len(text) + 2 for text in texts[:index])
-    return start, start + len(texts[index])
-
-
-def _selection_data(texts: tuple[str, ...], index: int) -> dict:
-    from_pos, to_pos = _range_of(texts, index)
-    return {"type": "data-selection", "data": {"from": from_pos, "to": to_pos}}
-
-
-def _target_of(texts: tuple[str, ...], index: int) -> ArtifactTarget:
-    from_pos, to_pos = _range_of(texts, index)
-    return ArtifactTarget(from_pos=from_pos, to_pos=to_pos, quote=texts[index])
-
-
-SECOND = _target_of(PARAGRAPHS, 1)
-SELECTION = _selection_data(PARAGRAPHS, 1)
+# Native Tiptap/ProseMirror positions for these two paragraphs are 1..9 and 11..19.
+FIRST = ArtifactTarget(from_pos=1, to_pos=9, quote=PARAGRAPHS[0])
+SECOND = ArtifactTarget(from_pos=11, to_pos=19, quote=PARAGRAPHS[1])
+SELECTION = {"type": "data-selection", "data": {"from": 11, "to": 19}}
 
 
 def _login(client: TestClient) -> dict:
@@ -108,8 +110,8 @@ def test_run_locks_selected_range_with_server_quote(client: TestClient) -> None:
 def test_empty_or_cross_block_selection_is_refused(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
-    first_from, first_to = _range_of(PARAGRAPHS, 0)
-    second_from, _second_to = _range_of(PARAGRAPHS, 1)
+    first_from = FIRST.from_pos
+    second_from = SECOND.from_pos
     for data in ({"from": second_from, "to": second_from},
                  {"from": first_from + 1, "to": second_from + 1}):
         response = _send(client, auth, case["id"], [
@@ -218,7 +220,7 @@ def test_propose_off_locked_range_is_refused(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
-    first = _target_of(PARAGRAPHS, 0)
+    first = FIRST
     with pytest.raises(CaseError) as excinfo:
         _propose(database, case, run, target=first)
     assert excinfo.value.status_code == 422
@@ -347,8 +349,30 @@ def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
     assert result["artifact"].status == "accepted"
     updated = database.cases.find_one({"id": case["id"]})["document"]
     content = updated["content"][0]["content"]
-    assert [node["text"] for node in content] == ["保留前缀。", "已按来源修订。", "保留后缀。"]
-    assert "marks" not in content[1] and "marks" in content[2]
+    assert "".join(node["text"] for node in content) == "保留前缀。已按来源修订。保留后缀。"
+    assert "marks" not in content[0] and content[-1]["marks"] == [{"type": "bold"}]
+
+
+def test_utf16_selection_preserves_following_text() -> None:
+    document = _document("A😀B")
+    updated = prosemirror.replaced_document(document, 2, 4, "😀", "X")
+    assert updated["content"][0]["content"][0]["text"] == "AXB"
+
+
+def test_native_transform_preserves_rich_nodes() -> None:
+    block = prosemirror.text_blocks(RICH_DOCUMENT)[0]
+    updated = prosemirror.replaced_document(
+        RICH_DOCUMENT, block["start"] + 3, block["end"] - 1, "目标", "新"
+    )
+    content = updated["content"]
+    assert content[0]["content"][0]["marks"] == [{"type": "bold"}]
+    assert content[0]["content"][1]["type"] == "hardBreak"
+    assert content[0]["content"][-2] == {"type": "text", "text": "新"}
+    assert content[0]["content"][-1] == {
+        "type": "text", "text": "后", "marks": [{"type": "italic"}],
+    }
+    assert [node["type"] for node in content[1:]] == ["bulletList", "blockquote"]
+    assert block == {"start": 1, "end": 7}
 
 
 # ---- 基线过期：读取侧展示 expired，接受被拒 ----

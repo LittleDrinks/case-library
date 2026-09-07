@@ -13,10 +13,8 @@ from app.modules.agent.resources import CASE_EDIT_SKILL
 SKILL_ID = CASE_EDIT_SKILL.id
 SEARCH_QUERY = "科学家精神"
 TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
-TRACER_SELECTION = (
-    1 + len(TRACER_PARAGRAPHS[0]) + 2,
-    1 + len(TRACER_PARAGRAPHS[0]) + 2 + len(TRACER_PARAGRAPHS[1]),
-)
+# Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
+TRACER_SELECTION = (11, 30)
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
 
