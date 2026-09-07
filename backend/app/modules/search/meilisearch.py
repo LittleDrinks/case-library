@@ -4,7 +4,9 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Union
+
+from app.modules.search.models import TagExpression, TagLeaf
 
 Kind = Literal["all", "case", "knowledge", "material"]
 Role = Literal["anonymous", "user", "admin"]
@@ -15,13 +17,13 @@ STOP_WORDS = re.compile(
     r"如何|怎么|怎样|请问|是否|可以|能够|通过|把|将|融入|结合|用于|有关|关于|相关|以及|进行|实现"
 )
 FACETS = {
-    "all": ("tag", "publishedWithin"),
-    "case": ("typeName", "audience", "tag", "publishedWithin"),
+    "all": ("tagCatalog", "tag", "publishedWithin"),
+    "case": ("typeName", "audience", "tagCatalog", "publishedWithin"),
     "knowledge": (),
     "material": ("authority", "materialType", "tag", "publishedWithin", "accessLevel"),
 }
 FILTER_FIELDS = {
-    "case": {"typeName": "typeName", "audience": "audience", "tag": "tags"},
+    "case": {"typeName": "typeName", "audience": "audience"},
     "knowledge": {},
     "material": {
         "authority": "authority",
@@ -30,6 +32,7 @@ FILTER_FIELDS = {
         "accessLevel": "accessLevel",
     },
 }
+FACET_FIELDS = {"tag": "tags", "tagCatalog": "tagIds"}
 PERIOD_DAYS = {"7d": 7, "30d": 30, "365d": 365}
 CASE_FIELDS = (
     "id",
@@ -46,6 +49,7 @@ CASE_FIELDS = (
     "audience",
     "purpose",
     "likes",
+    "tagIds",
 )
 KNOWLEDGE_FIELDS = (
     "id",
@@ -89,6 +93,7 @@ class SearchUnavailable(RuntimeError):
 class Principal:
     user_id: str | None
     role: Role
+    verified: bool = False
 
     def __post_init__(self) -> None:
         if self.role not in {"anonymous", "user", "admin"}:
@@ -137,6 +142,7 @@ class CatalogRequest:
     principal: Principal
     mounted_filter: MountedFilter | None = None
     excluded_keys: tuple[CatalogKey, ...] = ()
+    tag_condition: Union[TagExpression, TagLeaf, None] = None
     include_metadata: bool = True
 
     def __post_init__(self) -> None:
@@ -237,6 +243,22 @@ def _filter_clause(field: str, name: str, values: tuple[str, ...]) -> str:
     return _in(field, values)
 
 
+def _tag_filter(condition: TagExpression | TagLeaf) -> str:
+    """把嵌套混合条件编译为显式括号的 Meilisearch 布尔表达式。"""
+    if isinstance(condition, TagLeaf):
+        return f"tagIds = {_quote(condition.tagId)}"
+    clauses = [_tag_filter(child) for child in condition.children]
+    joined = f" {condition.op.upper()} ".join(clauses)
+    return f"({joined})" if len(clauses) > 1 else joined
+
+
+def _tag_clause(request: CatalogRequest, kind: str) -> str:
+    """原生标签只属于案例：其他类型分支直接不可匹配。"""
+    if request.tag_condition is None:
+        return ""
+    return _tag_filter(request.tag_condition) if kind == "case" else NEVER
+
+
 def _business_clause(request: CatalogRequest, kind: str, skipped: str = "") -> str:
     clauses = []
     for name in request.filters:
@@ -248,7 +270,7 @@ def _business_clause(request: CatalogRequest, kind: str, skipped: str = "") -> s
         if not field:
             return NEVER
         clauses.append(_filter_clause(field, name, values))
-    return _and(*clauses, _mount_clause(request, kind))
+    return _and(*clauses, _tag_clause(request, kind), _mount_clause(request, kind))
 
 
 def _mount_clause(request: CatalogRequest, kind: str) -> str:
@@ -265,10 +287,14 @@ def _allowed(principal: Principal) -> str:
         return ""
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
-    private = _and(
+    levels = '["public", "campus"]' if principal.verified else '["public"]'
+    return _or(f"accessLevel IN {levels}", _own_private(principal))
+
+
+def _own_private(principal: Principal) -> str:
+    return _and(
         'accessLevel = "private"', f"createdBy = {_quote(principal.user_id)}"
     )
-    return _or('accessLevel IN ["public", "campus"]', private)
 
 
 def _denied(principal: Principal) -> str:
@@ -276,7 +302,10 @@ def _denied(principal: Principal) -> str:
         return NEVER
     if principal.role == "anonymous":
         return 'accessLevel IN ["campus", "private"]'
-    return _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
+    denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
+    if not principal.verified:
+        denied = _or('accessLevel = "campus"', denied)
+    return denied
 
 
 def _case_access(principal: Principal) -> str:
@@ -285,6 +314,12 @@ def _case_access(principal: Principal) -> str:
     if principal.role == "admin":
         return 'docClass = "case-private"'
     own = _and('docClass = "case-private"', f"createdBy = {_quote(principal.user_id)}")
+    if not principal.verified:
+        public = _and(
+            'docClass = "case-public"',
+            f"createdBy != {_quote(principal.user_id)}",
+        )
+        return _or(public, own)
     others = _and(
         'docClass = "case-campus"', f"createdBy != {_quote(principal.user_id)}"
     )
@@ -318,6 +353,8 @@ def _knowledge_level(request: CatalogRequest) -> str:
 def _restricted_business(request: CatalogRequest, skipped: str = "") -> str:
     compatible = {"accessLevel", "publishedWithin"}
     incompatible = set(request.filters) - compatible
+    if request.tag_condition is not None:
+        return NEVER
     if any(_values(request.filters, name) for name in incompatible):
         return NEVER
     clauses = []
@@ -379,38 +416,35 @@ def _count_plans(request: CatalogRequest, index_uid: str) -> list[_Plan]:
     return [full, restricted]
 
 
+def _count_knowledge_branch(request: CatalogRequest) -> str:
+    if _business_clause(request, "knowledge") == NEVER:
+        return NEVER
+    return _knowledge_level(request)
+
+
 def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
+    """分类计数与结果页同条件：q、业务筛选、标签条件与可见性全部生效。"""
     full_filter = _or(
-        _count_case_branch(request),
-        _count_material_branch(request),
-        _knowledge_level(request),
+        _full_branch(request, "case"),
+        _full_branch(request, "material"),
+        _count_knowledge_branch(request),
     )
     payload = _payload(index_uid, request.q, full_filter)
     payload["facets"] = ["kind"]
     return _Plan("count-full", payload)
 
 
-def _count_case_branch(request: CatalogRequest) -> str:
-    return _and(
-        'kind = "case"', _case_access(request.principal), _excluded(request, "case")
-    )
-
-
-def _count_material_branch(request: CatalogRequest) -> str:
-    return _and(
-        'docClass = "material-full"',
-        _allowed(request.principal),
-        _excluded(request, "material"),
-    )
-
-
 def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
-    denied = _and(
-        'docClass = "material-restricted"',
-        _denied(request.principal),
-        "publicReferenceCount > 0",
-        _excluded(request, "material"),
-    )
+    business = _restricted_business(request)
+    denied = NEVER
+    if business != NEVER:
+        denied = _and(
+            'docClass = "material-restricted"',
+            _denied(request.principal),
+            "publicReferenceCount > 0",
+            business,
+            _excluded(request, "material"),
+        )
     payload = _payload(index_uid, request.q, denied)
     payload["attributesToSearchOn"] = ["title"]
     return _Plan("count-restricted", payload)
@@ -422,14 +456,16 @@ def _facet_payload(
     index_uid: str,
     period: str = "",
 ) -> dict:
-    branch = _full_scope(request, name)
+    """标签目录计数使用完整当前条件，其余维度仍跳过自身维度。"""
+    skip = "" if name == "tagCatalog" else name
+    branch = _full_scope(request, skip)
     if period:
-        restricted = _restricted_branch(request, name)
+        restricted = _restricted_branch(request, skip)
         branch = _or(branch, restricted) if restricted != NEVER else branch
         branch = _and(branch, f"publishedAt >= {_quote(_cutoff(period))}")
     payload = _payload(index_uid, request.q, branch)
     if not period:
-        payload["facets"] = ["tags" if name == "tag" else name]
+        payload["facets"] = [FACET_FIELDS.get(name, name)]
     return payload
 
 
@@ -512,8 +548,6 @@ def _full_item(hit: dict, query: str) -> dict:
         "material": MATERIAL_FIELDS,
     }.get(kind, ("id", "kind", "title"))
     item = _present_fields(hit, fields)
-    if kind == "case" and "theoryPoints" not in item:
-        item["theoryPoints"] = list(hit.get("tags") or [])
     if kind == "material":
         item.update({"contentAvailable": True, "hasFile": bool(hit.get("hasFile"))})
     item["score"] = _score(hit, query)
@@ -567,7 +601,7 @@ def _time_rows(responses: dict[str, dict]) -> list[dict]:
 
 
 def _facet_values(responses: dict[str, dict], name: str) -> dict[str, int]:
-    field = "tags" if name == "tag" else name
+    field = FACET_FIELDS.get(name, name)
     values = dict(
         responses[f"facet-{name}-full"].get("facetDistribution", {}).get(field, {})
     )

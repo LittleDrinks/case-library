@@ -23,6 +23,7 @@ class UserView(BaseModel):
     name: str
     role: str
     mustChangePassword: bool
+    campusVerified: bool = False
 
 
 class SessionView(BaseModel):
