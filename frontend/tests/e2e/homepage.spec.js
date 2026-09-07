@@ -160,7 +160,7 @@ test("匿名用户从公开案例卡进入独立只读详情", async ({ page }) 
   await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);
   await expect(page.locator(".workspace-header")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "辅助面板" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "素材", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "来源", exact: true })).toBeVisible();
 });
 
 test("390px 首页无水平溢出且主导航可用", async ({ page }) => {

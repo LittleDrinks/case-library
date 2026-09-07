@@ -381,6 +381,20 @@ def _snapshot_id(client: TestClient, auth: dict) -> str:
     return response.json()["snapshot"]["id"]
 
 
+def test_owner_keeps_private_attachment_history_after_publication(client: TestClient) -> None:
+    auth = login(client)
+    attachment = upload_attachment(client, auth, "private")
+    snapshot = _snapshot_id(client, auth)
+    _submit_and_approve(client, auth, "c-draft-1")
+    url = f"/api/cases/c-draft-1/attachments/{attachment['id']}/content"
+    params = {"versionId": snapshot}
+    assert client.get(url, params=params).content == b"attach"
+    admin, _ = _admin_session(client)
+    assert admin.get(url, params=params).content == b"attach"
+    assert other_client(client).get(url, params=params).status_code == 404
+    _assert_version_rejected(client, "c-draft-1", snapshot)
+
+
 def test_public_pinned_read_rejects_unapproved_and_offline(client: TestClient) -> None:
     auth = login(client)
     mounted = mount_source(client, auth, "c-02").json()
