@@ -216,7 +216,7 @@ def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> No
     timings = list(run["toolTimings"].values())
     assert {timing["toolName"] for timing in timings} == {
         "load_capability", "read_skill_resource_sizheng_case_generator",
-        "search_corpus", "propose_revision",
+        "search_corpus", "read_source", "propose_revision",
     }
     assert all(timing.get("startedAt") and timing.get("finishedAt") for timing in timings)
 
