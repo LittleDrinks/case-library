@@ -1,7 +1,8 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
+import { useAgentChat } from "../composables/useAgentChat.js";
+import AgentResourceTrace from "./AgentResourceTrace.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -12,7 +13,6 @@ const props = defineProps({
 });
 const emit = defineEmits(["case-revised"]);
 
-const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
@@ -112,7 +112,6 @@ function toolParts(message) {
 }
 
 function skillName(skillId) {
-  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
   return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
 }
 
@@ -127,6 +126,10 @@ function skillLoadLabel(part) {
 
 function skillParts(message) {
   return (message.parts || []).filter((part) => part.type === "data-skill");
+}
+
+function resourceParts(message) {
+  return toolParts(message).filter((part) => part.type.startsWith("tool-read_skill_resource_"));
 }
 
 function sourcesOf(part) {
@@ -256,6 +259,11 @@ async function retryRun() {
                 <b>{{ source.title }}</b><span>{{ source.snippet }}</span>
               </p>
             </div>
+            <AgentResourceTrace
+              v-for="part in resourceParts(message)"
+              :key="part.toolCallId"
+              :part="{ ...part }"
+            />
           </template>
         </template>
         <p v-if="status === 'error' || error" class="ai-message-error" role="alert">{{ displayError }}</p>
@@ -299,7 +307,7 @@ async function retryRun() {
           data-testid="skill-select"
           :disabled="loading || sending || catalog === 'loading'"
         >
-          <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+          <option value="">不使用 Skill</option>
           <option v-for="skill in skills" :key="skill.id" :value="skill.id">
             {{ skillOptionLabel(skill) }}
           </option>

@@ -14,13 +14,7 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import (
-    CASE_EDIT_SKILL,
-    READER_PROMPT,
-    SYSTEM_PROMPT,
-    TASK_PROMPT,
-    resource_record,
-)
+from app.modules.agent.resources import READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -49,6 +43,7 @@ class RunContext:
     token: CancellationToken | None = None
     deps: ToolDeps | None = None
     capabilities: list | None = None
+    bounds: tuple = ()
     reader: bool = False
     cancelled: bool = False
     failed: bool = False
@@ -126,16 +121,23 @@ def _assistant_parts(assistant) -> list[dict]:
     ]
 
 
-def _loaded_skill(parts: list[dict]) -> dict[str, str] | None:
-    if not any(part.get("type") == "tool-load_capability" for part in parts):
-        return None
-    return resource_record(CASE_EDIT_SKILL)
+def _loaded_capability_ids(parts: list[dict]) -> list[str]:
+    """从 load_capability 工具调用中提取模型实际加载的能力标识。"""
+    ids = []
+    for part in parts:
+        if part.get("type") != "tool-load_capability":
+            continue
+        data = part.get("input")
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            ids.append(data["id"])
+    return ids
 
 
-def _run_resources(parts: list[dict], reader: bool = False) -> list[dict[str, str]]:
+def _run_resources(parts: list[dict], bounds: tuple = (), reader=False) -> list[dict[str, str]]:
     records = [resource_record(SYSTEM_PROMPT), resource_record(READER_PROMPT if reader else TASK_PROMPT)]
-    skill = _loaded_skill(parts)
-    return [*records, skill] if skill else records
+    loaded = set(_loaded_capability_ids(parts))
+    records += [bound.resource_record() for bound in bounds if bound.skill_id in loaded]
+    return records
 
 
 def _assistant_ui(context: RunContext, result):
@@ -292,7 +294,7 @@ def _complete(context: RunContext) -> None:
     artifact = context.deps.proposed if context.deps else None
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
-        resources=_run_resources(_assistant_parts_of(context), context.reader),
+        resources=_run_resources(_assistant_parts_of(context), context.bounds, context.reader),
         reader_case_id=context.case["id"] if context.reader else None,
         reader_version_id=context.case.get("versionId") if context.reader else None,
         artifact=artifact,
