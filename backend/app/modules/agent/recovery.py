@@ -112,12 +112,12 @@ def _tool_chunks(part: dict, index: int) -> list[dict]:
 
 
 def _message_chunks(
-    repository: AgentRepository, event: AgentThreadEvent, project=None,
+    repository: AgentRepository, event: AgentThreadEvent, project,
 ) -> list[dict]:
     message = repository.message(event.thread_id, str(event.payload.get("messageId")))
     if message is None or message.role != "assistant":
         return []
-    parts = project(message.parts) if project else message.parts
+    parts = project(message.parts)
     chunks = [{"type": "start", "messageId": message.id}]
     for index, part in enumerate(parts):
         kind = str(part.get("type") or "")
@@ -128,7 +128,7 @@ def _message_chunks(
     return chunks
 
 
-def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project=None) -> list[dict]:
+def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project) -> list[dict]:
     if event.event_type == "message.created":
         return _message_chunks(repository, event, project)
     if event.event_type == "run.failed":
@@ -140,7 +140,7 @@ def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project=
 
 async def events_stream(
     repository: AgentRepository, thread: AgentThread, after_seq: int,
-    access_check=None, project=None,
+    access_check=None, *, project,
 ):
     """按 Thread 游标重放增量，无活动 Run 且无未读事件后以 [DONE] 收尾。"""
     cursor = after_seq

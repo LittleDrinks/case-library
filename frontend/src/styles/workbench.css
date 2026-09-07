@@ -299,7 +299,7 @@
 .skill-catalog-retry { flex: none; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 11px; }
 .assistant-composer, .comment-composer { position: relative; padding: 0 12px 12px; }
 .assistant-composer textarea, .comment-composer textarea { width: 100%; min-height: 72px; padding: 10px 42px 10px 11px; border: 1px solid var(--line); border-radius: 6px; resize: none; }
-.assistant-composer > button, .comment-composer button { position: absolute; right: 20px; bottom: 20px; display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: var(--brand); color: #fff; }
+.assistant-composer > button { position: absolute; right: 20px; bottom: 20px; display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: var(--brand); color: #fff; }
 .agent-source-picker { margin-bottom: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .agent-source-picker-head { display: flex; align-items: center; gap: 8px; }
 .agent-source-picker-toggle { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 12px; }

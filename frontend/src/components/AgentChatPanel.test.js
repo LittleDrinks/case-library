@@ -90,6 +90,7 @@ const artifactSnapshot = () => ({
     replacement: "替换文本", reason: "理由", sources: [
       { kind: "case", id: "src-entry-9", sourceCaseId: "c-real-9", versionId: "v-9", version: "v1", title: "真实案例" },
       { kind: "case", id: "src-old", title: "旧格式来源", versionId: "v-old" },
+      { kind: "case", id: "src-nover", sourceCaseId: "c-real-9", title: "无固定版本来源" },
       { kind: "material", id: "mat-1", title: "素材来源" },
     ],
   }],
@@ -105,12 +106,11 @@ it("links artifact sources to the fixed public version of the real case", async 
   const links = wrapper.findAll('[data-testid="agent-artifact-source-link"]');
   expect(links).toHaveLength(1);
   const target = JSON.parse(links[0].attributes("data-to"));
-  expect(target).toEqual({
-    name: "case-public", params: { id: "c-real-9" }, query: { versionId: "v-9" },
-  });
+  expect(target).toEqual({ name: "case-public", params: { id: "c-real-9" }, query: { versionId: "v-9" } });
   expect(links[0].text()).toContain("真实案例");
   const statuses = wrapper.findAll('[data-testid="agent-artifact-source-status"]');
-  expect(statuses).toHaveLength(2);
+  expect(statuses).toHaveLength(3);
+  expect(wrapper.text()).toContain("无固定版本来源");
   expect(wrapper.text()).toContain("旧格式来源");
   expect(wrapper.text()).toContain("素材来源");
 });

@@ -139,11 +139,11 @@ function sourcesOf(part) {
 }
 
 function artifactSourceLink(source) {
-  if (source.kind !== "case" || !source.sourceCaseId) return null;
+  if (source.kind !== "case" || !source.sourceCaseId || !source.versionId) return null;
   return {
     name: "case-public",
     params: { id: source.sourceCaseId },
-    query: source.versionId ? { versionId: source.versionId } : {},
+    query: { versionId: source.versionId },
   };
 }
 
