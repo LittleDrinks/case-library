@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
+import AddSourceToCase from "../components/AddSourceToCase.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -16,8 +17,10 @@ import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { session } from "../session.js";
 
 const route = useRoute();
+const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
 const caseRecord = ref(null);
+const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
 const title = ref("");
 const titleInput = ref(null);
 const document = ref(normalizeDocument());
@@ -37,6 +40,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const sources = ref([]);
 const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
@@ -46,34 +50,45 @@ const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
 const isOwner = computed(() => caseRecord.value?.ownerId === session.user?.id);
 const historyAvailable = computed(() => Boolean(
-  session.user && (isOwner.value || session.user.role === "admin"),
+  !readerMode.value && session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
+  !readerMode.value && publicationStatus.value === "public"
     ? caseId() : ""
 ));
 const editable = computed(() => (
-  isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
+  !readerMode.value && isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
   && !busyAction.value && !contentMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
-  session.user && (
+  !readerMode.value && session.user && (
     (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
     || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
   ),
 ));
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
+  if (readerMode.value) return `发布版本 v${caseRecord.value?.versionNumber || 1} · 只读`;
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
-  ] || "草稿";
+  ] || "未知状态";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
 const lifecycleActions = computed(() => {
+  if (readerMode.value) return [];
   const area = reviewMode.value ? "review" : "author";
   return (caseRecord.value?.availableActions || [])
-    .filter((command) => LIFECYCLE_META[command]?.area === area)
-    .map((command) => ({ command, ...LIFECYCLE_META[command] }));
+    .filter((command) => LIFECYCLE_META[command]?.area === area
+      || (command === "reopen" && reviewMode.value))
+    .map((command) => ({
+      command,
+      ...LIFECYCLE_META[command],
+      ...(command === "reopen" && reviewMode.value ? { label: "下线编辑" } : {}),
+    }));
 });
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
@@ -90,7 +105,7 @@ const LIFECYCLE_META = {
   supplement: { label: "要求补充", primary: false, area: "review" },
   hide: { label: "暂时隐藏", primary: false, area: "review" },
   restore: { label: "恢复公开", primary: false, area: "review" },
-  reopen: { label: "下线编辑", primary: true, area: "review" },
+  reopen: { label: "另开新稿", primary: true, area: "author" },
 };
 const submissionTodo = computed(() => {
   const missing = [];
@@ -163,7 +178,7 @@ function applyCase(value, invalidate = true) {
 }
 
 async function loadAnnotations() {
-  if (!session.user) {
+  if (!session.user || readerMode.value) {
     annotations.value = [];
     return;
   }
@@ -171,9 +186,21 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
+const sourcesLoading = ref(false);
+const sourcesError = ref("");
+
+async function loadSources() {
+  sourcesLoading.value = true;
+  sourcesError.value = "";
+  try { sources.value = (await api.listSources(caseId(), readerVersion.value)).entries; }
+  catch (error) { sources.value = []; sourcesError.value = error.message || "来源加载失败"; }
+  finally { sourcesLoading.value = false; }
+}
+
 function applyAttachmentCase(value) {
   invalidateSelection();
   syncCaseRevision(value);
+  void loadSources();
 }
 
 function syncCaseRevision(value) {
@@ -189,14 +216,20 @@ function recoverCrashDraft(value) {
   void nextTick(resizeTitle);
 }
 
+async function fetchCase() {
+  const versionId = String(route.query?.versionId || "");
+  return readerMode.value
+    ? api.getPublicCase(caseId(), versionId || undefined) : api.getCase(caseId());
+}
+
 async function loadCase() {
   const initial = !caseRecord.value;
   loading.value = true;
   loadError.value = "";
   try {
-    const current = await api.getCase(caseId());
+    const current = await fetchCase();
     applyCase(current, !initial);
-    await loadAnnotations();
+    await Promise.all([loadAnnotations(), loadSources()]);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -249,7 +282,7 @@ function locateHeading(order) {
 }
 
 function selectTool(tool) {
-  activeTool.value = tool;
+  activeTool.value = readerMode.value && tool === "comments" ? "ai" : tool;
   drawerOpen.value = true;
 }
 
@@ -324,11 +357,15 @@ async function prepareContentMutation() {
 
 function startDownload() {
   const link = window.document.createElement("a");
-  link.href = `/api/cases/${encodeURIComponent(caseId())}/export.docx`;
+  const area = readerMode.value ? "/public" : "";
+  const version = readerMode.value && readerVersion.value
+    ? `?versionId=${encodeURIComponent(readerVersion.value)}` : "";
+  link.href = `/api/cases/${encodeURIComponent(caseId())}${area}/export.docx${version}`;
   link.click();
 }
 
 async function exportCase() {
+  if (readerMode.value) { startDownload(); return; }
   actionNotice.value = "";
   await autosave.flush();
   if (autosave.state.value !== "saved") {
@@ -341,14 +378,17 @@ async function exportCase() {
 watch(autosave.revision, (value) => {
   if (value != null) revision.value = value;
 });
+watch(readerMode, (value) => {
+  if (value && activeTool.value === "comments") activeTool.value = "ai";
+});
 onMounted(() => {
   loadCase();
-  loadTagCatalog();
+  if (!readerMode.value) loadTagCatalog();
 });
 onBeforeUnmount(() => {
-  crashDraft.flush();
+  if (!readerMode.value) crashDraft.flush();
   crashDraft.destroy();
-  void autosave.flush();
+  if (!readerMode.value) void autosave.flush();
   autosave.destroy();
 });
 </script>
@@ -365,6 +405,7 @@ onBeforeUnmount(() => {
         :save-state="autosave.state.value"
         :editable="editable"
         :review-mode="reviewMode"
+        :read-only="readerMode"
         :actions="lifecycleActions"
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
@@ -392,6 +433,12 @@ onBeforeUnmount(() => {
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
+          <AddSourceToCase
+            v-if="readerMode && session.user && readerVersion"
+            :source-case-id="caseId()"
+            :version-id="readerVersion"
+            :source-title="title"
+          />
           <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
             <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
           </div>
@@ -419,6 +466,7 @@ onBeforeUnmount(() => {
               :editable="editable"
               :annotatable="annotatable"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"
@@ -428,6 +476,11 @@ onBeforeUnmount(() => {
         </main>
         <AssistantRail
           :active="activeTool"
+          :read-only="readerMode"
+          :version-id="readerVersion"
+          :sources="sources"
+          :sources-loading="sourcesLoading"
+          :sources-error="sourcesError"
           :open="drawerOpen"
           :case-record="caseRecord"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
@@ -443,6 +496,7 @@ onBeforeUnmount(() => {
           @case-revised="applyCase"
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
+          @sources-retry="loadSources"
         />
       </div>
     </template>

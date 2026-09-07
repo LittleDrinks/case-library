@@ -297,7 +297,7 @@ async function uploadWorkbenchEvidence(page) {
   await page.getByLabel("选择附件").setInputFiles({
     name: "课堂证据.txt", mimeType: "text/plain", buffer: Buffer.from("evidence"),
   });
-  await expect(page.getByText("课堂证据.txt")).toBeVisible();
+  await expect(page.getByText("课堂证据.txt", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "附件 1" })).toBeVisible();
   await expect(page.locator(".attachment-copy span")).toContainText("校内访问");
 }
@@ -329,11 +329,12 @@ async function publishCaseWithAttachments(page) {
 async function assertAnonymousAttachmentAccess(page) {
   await expect(page.getByText("公开材料.txt")).toBeVisible();
   await expect(page.getByText("内部材料.txt")).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载公开材料.txt" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载内部材料.txt" })).toHaveCount(0);
-  await expect(page.getByText("仅作者与管理员可下载")).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开来源公开材料.txt" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开来源内部材料.txt" })).toHaveCount(0);
+  await expect(page.getByText("内容按权限开放")).toBeVisible();
   await expect(page.getByLabel("选择附件")).toHaveCount(0);
-  await expect(page.locator(".workspace-header")).toHaveCount(0);
+  await expect(page.locator(".workspace-header")).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
 }
 
 test("无自有案例的账号登录后从首页进入我的案例", async ({ page }) => {
@@ -549,7 +550,7 @@ test("附件请求在途锁定正文避免与自动保存竞争", async ({ page 
     await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
     await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
   } finally { held.release(); }
-  await expect(page.getByText("互斥验证.txt")).toBeVisible();
+  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
 });
 
 test("作者在草稿工作台上传、下载并删除附件", async ({ page }) => {
@@ -565,10 +566,12 @@ test("公开详情按作者和匿名权限展示私密附件", async ({ page }) 
   const created = await publishCaseWithAttachments(page);
   await login(page);
   await page.goto(`/#/cases/${created.id}`);
-  await expect(page.getByRole("link", { name: "下载内部材料.txt" })).toBeVisible();
+  await openAttachments(page);
+  await expect(page.getByRole("link", { name: "打开来源内部材料.txt" })).toBeVisible();
   await logoutAndWait(page);
   await page.goto(`/#/cases/${created.id}`);
-  await expect(page.getByRole("heading", { level: 1, name: created.title })).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
+  await openAttachments(page);
   await assertAnonymousAttachmentAccess(page);
 });
 

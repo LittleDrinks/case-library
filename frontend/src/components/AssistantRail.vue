@@ -3,10 +3,16 @@ import { ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles } from "@luc
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
+import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
+  readOnly: { type: Boolean, default: false },
+  versionId: { type: String, default: "" },
+  sources: { type: Array, default: () => [] },
+  sourcesLoading: { type: Boolean, default: false },
+  sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
@@ -18,7 +24,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "annotations",
+  "case-revised", "annotations", "sources-retry",
 ]);
 
 const tabs = [
@@ -39,6 +45,7 @@ function select(tab) {
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
+        v-show="!readOnly || tab.id !== 'comments'"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -51,20 +58,33 @@ function select(tab) {
     </nav>
 
     <AgentChatPanel
-      v-if="active === 'ai'"
+      v-if="active === 'ai' && (!readOnly || user)"
+      :key="versionId || 'draft'"
       :case-record="caseRecord"
+      :version-id="versionId"
+      :read-only="readOnly"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
     />
-
+    <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
+      <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
+    </div>
     <CommentPanel
-      v-else-if="active === 'comments'"
+      v-else-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"
       :user="user"
       :selection="selection"
       @annotations="emit('annotations', $event)"
     />
 
+    <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
+      <PublicSourceList
+        :sources="sources"
+        :loading="sourcesLoading"
+        :error="sourcesError"
+        @retry="emit('sources-retry')"
+      />
+    </div>
     <AttachmentPanel
       v-else-if="active === 'files'"
       :case-record="caseRecord"

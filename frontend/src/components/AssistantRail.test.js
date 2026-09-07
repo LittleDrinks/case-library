@@ -14,7 +14,7 @@ function render(overrides = {}) {
     global: { stubs: {
       AgentChatPanel: true,
       CommentPanel: true, AttachmentPanel: true,
-      VersionPanel: true, RouterLink: true,
+      PublicSourceList: true, VersionPanel: true, RouterLink: true,
     } },
   });
 }
@@ -32,4 +32,16 @@ it("keeps comments and attachments on the same assistant rail", async () => {
   expect(wrapper.emitted("select")).toEqual([["ai"]]);
   await wrapper.setProps({ active: "files" });
   expect(wrapper.text()).toContain("附件");
+});
+
+it("uses the read-only rail for public discussion and资料", () => {
+  const wrapper = render({ readOnly: true, user: { id: "user-1" }, active: "ai" });
+  expect(wrapper.findComponent({ name: "AgentChatPanel" }).props("readOnly")).toBe(true);
+  expect(wrapper.find(".assistant-tabs button:nth-child(2)").isVisible()).toBe(false);
+});
+
+it("requires login before opening a private reader discussion", () => {
+  const wrapper = render({ readOnly: true, active: "ai" });
+  expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(false);
+  expect(wrapper.findComponent({ name: "RouterLink" }).exists()).toBe(true);
 });

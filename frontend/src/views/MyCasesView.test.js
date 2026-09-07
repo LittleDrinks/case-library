@@ -68,3 +68,14 @@ test("普通草稿不显示退回意见", async () => {
   expect(wrapper.find(".case-card-notice").exists()).toBe(false);
   expect(wrapper.text()).toContain("普通稿");
 });
+
+test("未知状态明确报错，重试后恢复案例列表", async () => {
+  const wrapper = await renderCases([card({ workflowStatus: "unrecognized" })]);
+  expect(wrapper.get('[role="alert"]').text()).toContain("部分案例状态异常");
+  expect(wrapper.find(".my-case-groups").exists()).toBe(false);
+  api.listCases.mockResolvedValue([card({ title: "恢复的案例" })]);
+  await wrapper.get('[role="alert"] button').trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  expect(wrapper.text()).toContain("恢复的案例");
+});
