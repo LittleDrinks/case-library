@@ -21,6 +21,7 @@ from app.modules.agent.models import (
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
+    SourceRef,
 )
 from app.modules.agent.recovery import (
     LiveBuffer,
@@ -85,7 +86,33 @@ def _visible_snapshot(database, snapshot: AgentSnapshot, user: dict) -> AgentSna
             ref for ref in artifact.sources
             if source_readable(database, user, snapshot.case_id, ref)
         ]
+    for message in snapshot.messages:
+        for part in message.parts:
+            _redact_source_part(database, user, snapshot.case_id, part)
     return snapshot
+
+
+def _redact_source_part(database, user, case_id: str, part: dict) -> None:
+    output = part.get("output")
+    if not isinstance(output, dict):
+        return
+    if part.get("type") == "tool-read_source":
+        ref = output.get("usedSourceRef")
+        if ref and not _source_visible(database, user, case_id, ref):
+            part["output"] = {"status": "no_access", "detail": "来源当前不可读"}
+    elif part.get("type") == "tool-search_corpus":
+        output["sources"] = [
+            ref for ref in output.get("sources", [])
+            if _source_visible(database, user, case_id, ref)
+        ]
+
+
+def _source_visible(database, user, case_id: str, raw: object) -> bool:
+    try:
+        ref = SourceRef.model_validate(raw)
+    except ValidationError:
+        return False
+    return source_readable(database, user, case_id, ref)
 
 
 @router.get("/{case_id}/agent/thread")
@@ -357,7 +384,7 @@ def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, 
 
 def _run_context(request, database, settings, user, case, repository, thread, adapter,
                  plan, run, selection, lease, worker_id, bounds=()):
-    refs = retained_sources(database, case["id"])
+    refs = retained_sources(database, case["id"], user)
     instructions = catalog_instructions(
         case.get("title") or "未命名案例", refs, plan.selected, plan.selections
     )

@@ -168,7 +168,7 @@ def reject_command(case: dict) -> dict:
     }
 
 
-def assert_rejected(returned: dict, case: dict, annotation: dict) -> None:
+def assert_rejected(returned: dict, case: dict, annotation: dict | None) -> None:
     assert returned["case"]["workflowStatus"] == "draft"
     assert returned["case"]["publicationStatus"] == "none"
     assert returned["case"]["submittedVersionId"] is None
@@ -176,23 +176,31 @@ def assert_rejected(returned: dict, case: dict, annotation: dict) -> None:
     assert returned["event"]["versionId"] == case["submittedVersionId"]
     assert returned["event"]["reasonType"] == "教学目标不清晰"
     assert returned["event"]["summary"] == "请依据批注修改后重新提交。"
-    assert returned["event"]["annotationIds"] == [annotation["id"]]
+    expected_ids = [annotation["id"]] if annotation else []
+    assert returned["event"]["annotationIds"] == expected_ids
 
 
-def test_admin_cannot_reject_without_current_version_annotation(
-    client: TestClient,
-) -> None:
+def test_admin_can_reject_without_a_review_annotation(client: TestClient) -> None:
+    """退回原因必须，正文批注可选；带批注时事件记录批注 ID。"""
     author, admin, started = reviewing_case(client)
     case, command = started["case"], reject_command(started["case"])
-    blocked = client.post(
-        f"/api/cases/{case['id']}/lifecycle",
-        headers={"X-CSRF-Token": admin["csrfToken"]},
-        json=command,
-    )
-    annotation = create_annotation(client, admin, case)
     returned = lifecycle(client, admin["csrfToken"], case["id"], command)
 
-    assert blocked.status_code == 409
+    assert returned["event"]["annotationIds"] == []
+    assert_rejected(returned, case, None)
+    login(client, "user", "user123")
+    assert client.get(f"/api/cases/{case['id']}/annotations").json() == []
+    assert author["user"]["id"] == returned["case"]["ownerId"]
+
+
+def test_reject_event_records_current_version_annotations(client: TestClient) -> None:
+    author, admin, started = reviewing_case(client)
+    case = started["case"]
+    annotation = create_annotation(client, admin, case)
+    returned = lifecycle(
+        client, admin["csrfToken"], case["id"], reject_command(started["case"])
+    )
+
     assert_rejected(returned, case, annotation)
     login(client, "user", "user123")
     assert client.get(f"/api/cases/{case['id']}/annotations").json() == [annotation]

@@ -9,6 +9,8 @@ from collections.abc import AsyncIterator, Callable
 from pydantic_ai import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from tests.skill_packages import SKILL_ID
+
 SEARCH_QUERY = "科学家精神"
 SEARCH_SOURCE_ID = "c-42"
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
@@ -35,9 +37,11 @@ def _paragraph_index(messages) -> int:
     return 0
 
 
-def tracer_response(messages, _info=None) -> ModelResponse:
+def tracer_response(messages, _info=None, skill_id: str | None = None) -> ModelResponse:
     """按已发生的工具调用推进：检索 → 读源 → 提议 → 结束。"""
     called = _tool_calls(messages)
+    if skill_id and "load_capability" not in called:
+        return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": skill_id})])
     if "search_corpus" not in called:
         return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
     if "read_source" not in called:
@@ -65,7 +69,7 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
             yield {0: delta}
 
 
-def tracer_model(recorder: Callable | None = None) -> FunctionModel:
+def tracer_model(recorder: Callable | None = None, skill_id: str | None = None) -> FunctionModel:
     """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
 
     recorder 每次模型请求收到 (messages, info)，供测试断言消息与 instructions 通道。
@@ -74,7 +78,7 @@ def tracer_model(recorder: Callable | None = None) -> FunctionModel:
     async def stream(messages, info):
         if recorder:
             recorder(messages, info)
-        async for delta in _stream_deltas(tracer_response(messages, info)):
+        async for delta in _stream_deltas(tracer_response(messages, info, skill_id)):
             yield delta
 
     return FunctionModel(stream_function=stream)

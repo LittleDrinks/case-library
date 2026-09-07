@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
-from tests.agent_tracer import REPLACEMENT, tracer_model
+from tests.agent_tracer import REPLACEMENT, SKILL_ID, tracer_model
+from tests.skill_packages import build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
@@ -55,6 +56,21 @@ def _create_case(client: TestClient, auth: dict, *paragraphs: str) -> dict:
     )
     assert response.status_code == 200
     return response.json()
+
+
+def _publish_skill(client: TestClient) -> None:
+    admin = _login(client, "admin", "admin123")
+    uploaded = client.post(
+        "/api/admin/skills/packages", headers=_csrf(admin),
+        files={"file": ("skill.zip", build_package(), "application/zip")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    version = uploaded.json()["version"]
+    response = client.post(
+        f"/api/admin/skills/{SKILL_ID}/publish", headers=_csrf(admin),
+        json={"versionId": version["id"]},
+    )
+    assert response.status_code == 200, response.text
 
 
 def _seed_hit(database) -> None:
@@ -160,6 +176,35 @@ def test_run_records_platform_resources(client: TestClient, tracer_case) -> None
     kinds = {record["kind"]: record for record in run["resources"]}
     assert set(kinds) == {"system-prompt", "task-prompt"}
     assert kinds["system-prompt"]["contentHash"]
+
+
+def test_reopen_redacts_sources_that_lost_access(client: TestClient, tracer_case) -> None:
+    database = client.app.state.database
+    database.cases.update_one({"id": HIT["id"]}, {"$set": {"publicationStatus": "private"}})
+    snapshot = client.get(_thread_path(tracer_case["id"])).json()
+    parts = [part for message in snapshot["messages"] for part in message["parts"]]
+    read = next(part for part in parts if part["type"] == "tool-read_source")
+    search = next(part for part in parts if part["type"] == "tool-search_corpus")
+    assert read["output"] == {"status": "no_access", "detail": "来源当前不可读"}
+    assert search["output"]["sources"] == []
+
+
+def test_run_binds_selected_published_skill(client: TestClient) -> None:
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    _seed_hit(client.app.state.database)
+    response = _send(
+        client, auth, case["id"], "请使用能力修订第2段",
+        model=tracer_model(skill_id=SKILL_ID), skill_id=SKILL_ID,
+    )
+    assert response.status_code == 200, response.text
+    run = client.app.state.database.agent_runs.find_one({}, {"_id": 0})
+    version = client.app.state.database.skill_versions.find_one({"skillId": SKILL_ID})
+    assert run["skillBindings"] == [{"kind": "skill", "id": SKILL_ID,
+                                     "versionId": version["id"], "version": version["version"]}]
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt", "skill"}
 
 
 def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,

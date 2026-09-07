@@ -46,6 +46,18 @@ class BoundSkill:
     root: str
     files: tuple[PackageFile, ...]
 
+    def resource_record(self) -> dict[str, str]:
+        return {
+            "kind": "skill", "id": self.skill_id,
+            "version": self.version, "contentHash": self.package_sha256,
+        }
+
+    def binding_record(self) -> dict[str, str]:
+        return {
+            "kind": "skill", "id": self.skill_id,
+            "versionId": self.version_id, "version": self.version,
+        }
+
     def read_resource(self, path: str) -> str:
         for file in self.files:
             if file.path == path:
@@ -106,6 +118,10 @@ def published_catalog(database: Database) -> list[dict]:
         if version:
             skills.append(catalog_view(skill, version))
     return skills
+
+
+def bind_published_skill(database: Database, store: BlobStore, skill_id: str) -> BoundSkill:
+    return _published_bound(database, store, skill_id)
 
 
 def get_published_version(database: Database, skill_id: str) -> dict | None:

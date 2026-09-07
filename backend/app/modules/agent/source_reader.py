@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import io
 
+from app.modules.attachments.service import AttachmentError, download_attachment
 from app.modules.agent.case_area import area_rows
+from app.modules.cases.sources import ordered_entries
 from app.modules.agent.models import SourceRef
 from app.modules.agent.prosemirror import paragraphs
 from app.modules.attachments.text import extract_search_text
-from app.modules.cases.published import version_readable
+from app.modules.case_sources.service import source_case_content_available
 from app.modules.materials.service import can_read_material
 
 MAX_SOURCE_CHARACTERS = 6000
@@ -59,19 +61,17 @@ def _read_attachment(database, store, user, case_id: str, source_id: str) -> dic
     row = _area_row(database, case_id, "attachment", source_id)
     if not row:
         return _failed(UNAVAILABLE, "附件已删除或不在资料区")
-    if not _attachment_accessible(database, case_id, row, user):
-        return _failed(NO_ACCESS, "当前身份无权读取该附件内容")
-    text = row.get("searchText") or _blob_text(store, row)
+    try:
+        attachment, content = download_attachment(
+            database, store, case_id, source_id, user, None
+        )
+    except AttachmentError as error:
+        status = NO_ACCESS if error.status_code == 403 else UNAVAILABLE
+        return _failed(status, error.detail)
+    text = attachment.get("searchText") or _stream_text(content, attachment)
     ref = SourceRef(kind="attachment", id=row["id"], title=row.get("name") or "",
                     location=f"attachment:{case_id}/{row['id']}")
     return _succeeded(ref, text)
-
-
-def _attachment_accessible(database, case_id: str, row: dict, user: dict | None) -> bool:
-    case = database.cases.find_one({"id": case_id}) or {}
-    internal = bool(user and (user["role"] == "admin" or case.get("ownerId") == user["id"]))
-    level = row.get("accessLevel", "public")
-    return internal or level == "public" or (level == "campus" and bool(user))
 
 
 def _read_material(database, store, user: dict | None, source_id: str) -> dict:
@@ -93,21 +93,28 @@ def _blob_text(store, row: dict) -> str:
     return extract_search_text(upload)
 
 
+def _stream_text(content, row: dict) -> str:
+    data = b"".join(content)
+    return extract_search_text(_BlobFile(data, row.get("mediaType") or "", row.get("name") or ""))
+
+
 def _read_case(database, user: dict | None, case_id: str, source_id: str) -> dict:
     mounted = _area_row(database, case_id, "case", source_id)
     if mounted:
-        return _read_pinned_case(database, mounted)
+        return _read_pinned_case(database, user, mounted)
     return _read_published_case(database, source_id)
 
 
-def _read_pinned_case(database, row: dict) -> dict:
+def _read_pinned_case(database, user: dict | None, row: dict) -> dict:
     case = database.cases.find_one({"id": row.get("sourceCaseId")})
     version = database.case_versions.find_one({"id": row.get("versionId"), "caseId": row.get("sourceCaseId")})
     if not case:
         return _failed(UNAVAILABLE, "来源案例已删除")
     if not version:
         return _failed(UNAVAILABLE, "来源版本已不可用")
-    if not version_readable(database, case, version["id"], version, False):
+    if not source_case_content_available(
+        database, row.get("sourceCaseId"), user, version["id"], False
+    ):
         return _failed(NO_ACCESS, "来源案例内容当前不可读")
     return _case_result(case, version, row["id"])
 
@@ -118,7 +125,7 @@ def _read_published_case(database, source_id: str) -> dict:
     version = database.case_versions.find_one({"id": version_id, "caseId": source_id}) if version_id else None
     if not case or not version:
         return _failed(UNAVAILABLE, "来源案例暂无已发布版本")
-    if not version_readable(database, case, version_id, version, False):
+    if not source_case_content_available(database, source_id, None, version_id, False):
         return _failed(NO_ACCESS, "来源案例内容当前不可读")
     return _case_result(case, version)
 
@@ -143,8 +150,17 @@ def _read_knowledge(database, source_id: str) -> dict:
 
 
 def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
+    if ref.kind == "attachment":
+        return _area_entry_available(database, user, case_id, ref)
     result = read_source(database, None, user, case_id, ref.kind, ref.id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
+
+
+def _area_entry_available(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
+    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
+    entry = next((item for item in ordered_entries(database, case, user, "")
+                  if item["sourceType"] == ref.kind and item["id"] == ref.id), None)
+    return bool(entry and entry.get("contentAvailable"))
 
 
 def revalidate_sources(database, user: dict | None, case_id: str,

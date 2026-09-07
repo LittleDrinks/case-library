@@ -46,7 +46,7 @@ def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict])
     thread = client.get(f"/api/cases/{case_id}/agent/thread").json()["id"]
     body = {"id": "source-context", "trigger": "submit-message",
             "messages": [{"id": "source-message", "role": "user", "parts": parts}]}
-    with agent.override(model=TestModel(custom_output_text="完成")):
+    with agent.override(model=TestModel(custom_output_text="完成", call_tools=[])):
         return client.post(f"/api/cases/{case_id}/agent/thread/{thread}/stream",
                            headers=_csrf(auth), json=body)
 

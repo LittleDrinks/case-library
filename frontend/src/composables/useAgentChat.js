@@ -354,6 +354,17 @@ function bindLifecycle(state, recover) {
   });
 }
 
+function exposedApi(state, actions) {
+  return {
+    ...computedState(state), ...threadActions(actions.caseId, state),
+    loading: state.loading, error: state.error, settings: state.settings,
+    skills: state.skills, selectedSkillId: state.selectedSkillId,
+    catalog: state.catalog, reloadCatalog: actions.reloadCatalog,
+    textParts, send: actions.send, stop: actions.stop, retry: actions.retry,
+    decide: actions.decide, reload: actions.reload,
+  };
+}
+
 export function useAgentChat(caseId) {
   const state = createState();
   const at = () => state.generation;
@@ -367,11 +378,8 @@ export function useAgentChat(caseId) {
   bindLifecycle(state, recover);
   void reload(caseId, state);
   void reloadCatalog(state);
-  return {
-    ...computedState(state), ...threadActions(caseId, state),
-    loading: state.loading, error: state.error, settings: state.settings,
-    skills: state.skills, selectedSkillId: state.selectedSkillId,
-    catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
-    textParts, send, stop, retry, decide, reload: () => reload(caseId, state),
-  };
+  return exposedApi(state, {
+    caseId, send, stop, retry, decide,
+    reload: () => reload(caseId, state), reloadCatalog: () => reloadCatalog(state),
+  });
 }

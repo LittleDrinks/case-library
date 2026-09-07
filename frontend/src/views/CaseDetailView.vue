@@ -4,8 +4,6 @@ import { AlertTriangle, BookMarked, Download, FilePenLine, LoaderCircle, Refresh
 import { useRoute } from "vue-router";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
 import PublishedDocument from "../components/PublishedDocument.vue";
-import PublicAttachmentList from "../components/PublicAttachmentList.vue";
-import PublicMaterialList from "../components/PublicMaterialList.vue";
 import PublicSourceList from "../components/PublicSourceList.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
@@ -51,7 +49,8 @@ async function loadSources() {
     return;
   }
   try {
-    sources.value = await api.listCaseSources(caseId, sourcesVersionId.value);
+    const result = await api.listSources(caseId, sourcesVersionId.value);
+    sources.value = result.entries;
   } catch {
     sources.value = [];
   }
@@ -120,8 +119,6 @@ watch(pinnedVersionId, initialize);
             <ul v-if="caseRecord.theoryPoints?.length" class="case-detail-tags">
               <li v-for="point in caseRecord.theoryPoints" :key="point">{{ point }}</li>
             </ul>
-            <PublicAttachmentList :case-id="caseId" :version-id="sourcesVersionId" :is-owner="canOpenWorkbench" />
-            <PublicMaterialList :case-id="caseId" :version-id="sourcesVersionId" />
             <PublicSourceList :sources="sources" />
             <AddSourceToCase
               v-if="session.user"

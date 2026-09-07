@@ -15,7 +15,6 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 
-
 async def read_source(ctx: RunContext[ToolDeps], source_type: str, source_id: str) -> dict:
     """按当前权限读取资料区或本次检索命中的来源，并记录实际证据。"""
     if not _known_source(ctx.deps, source_type, source_id):

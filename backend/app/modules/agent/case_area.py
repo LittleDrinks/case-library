@@ -5,6 +5,7 @@ from __future__ import annotations
 from pymongo.database import Database
 
 from app.modules.agent.models import SourceRef
+from app.modules.cases.sources import ordered_entries
 from app.modules.cases.service import CaseError
 
 SOURCE_TYPES = ("attachment", "material", "case")
@@ -18,12 +19,15 @@ def area_rows(database: Database, case_id: str) -> dict[str, list[dict]]:
     }
 
 
-def retained_sources(database: Database, case_id: str) -> list[SourceRef]:
+def retained_sources(database: Database, case_id: str, user: dict | None = None) -> list[SourceRef]:
     rows = area_rows(database, case_id)
     refs = [_ref("attachment", row, case_id) for row in rows["attachment"]]
     refs += [_ref("material", row, case_id) for row in rows["material"]]
     refs += [_ref("case", row, case_id) for row in rows["case"]]
-    return sorted(refs, key=lambda ref: ref.location or "")
+    by_key = {(ref.kind, ref.id): ref for ref in refs}
+    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
+    entries = ordered_entries(database, case, user, "")
+    return [by_key[(entry["sourceType"], entry["id"])] for entry in entries]
 
 
 def _ref(kind: str, row: dict, case_id: str) -> SourceRef:

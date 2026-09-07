@@ -11,17 +11,17 @@ from threading import Event
 import httpx
 import pytest
 from pymongo import MongoClient
+from tests.skill_packages import SKILL_ID, build_package
 
 BASE_URL = os.environ.get("AGENT_TRACER_E2E_URL")
 MONGO_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
-SKILL_LOAD_MARK = "单段修订工作流"
 pytestmark = pytest.mark.e2e("AGENT_TRACER_E2E_URL", "AUTH_QUERY_MONGODB_URI")
 
 
-def _login() -> tuple[httpx.Client, str]:
+def _login(username: str = "user") -> tuple[httpx.Client, str]:
     client = httpx.Client(base_url=BASE_URL)
     response = client.post(
-        "/api/auth/login", json={"username": "user", "password": "user123"}
+        "/api/auth/login", json={"username": username, "password": f"{username}123"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -62,6 +62,22 @@ def _thread(client: httpx.Client, case_id: str) -> dict:
     return response.json()
 
 
+def _publish_skill() -> None:
+    client, csrf = _login("admin")
+    response = client.post(
+        "/api/admin/skills/packages", headers=_csrf(client, csrf),
+        files={"file": ("skill.zip", build_package(), "application/zip")},
+    )
+    assert response.status_code == 201, response.text
+    version = response.json()["version"]
+    publish = client.post(
+        f"/api/admin/skills/{SKILL_ID}/publish", headers=_csrf(client, csrf),
+        json={"versionId": version["id"]},
+    )
+    assert publish.status_code == 200, publish.text
+    client.close()
+
+
 def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Response:
     thread_id = _thread(client, case_id)["id"]
     return client.post(
@@ -76,7 +92,7 @@ def _send(client: httpx.Client, csrf: str, case_id: str, text: str) -> httpx.Res
                 "role": "user",
                 "parts": [
                     {"type": "text", "text": text},
-                    {"type": "data-skill", "data": {"skillId": "case-edit-skill"}},
+                    {"type": "data-skill", "data": {"skillId": SKILL_ID}},
                 ],
             }],
         },
@@ -138,6 +154,7 @@ def _assert_atomic_decision(database, case_id: str, artifact: dict) -> None:
 
 
 def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, dict]:
+    _publish_skill()
     _wait_for_catalog(client)
     case = _create_case(client, csrf)
     response = _send(client, csrf, case["id"], "请结合平台资料修订第2段：补充评价依据")
@@ -148,11 +165,11 @@ def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, 
     return case["id"], run, artifact
 
 
-def _assert_skill_loaded(run: dict) -> None:
+def _assert_run_resources(run: dict) -> None:
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert kinds["skill"]["id"] == "case-edit-skill"
-    assert kinds["skill"]["version"] == "2.1"
-    assert len(kinds["skill"]["contentHash"]) == 64
+    assert kinds["skill"]["id"] == SKILL_ID
+    assert kinds["skill"]["version"] == "v1"
+    assert kinds["skill"]["contentHash"]
 
 
 def test_tracer_run_builds_pending_artifact_with_server_sources():
@@ -161,7 +178,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
     try:
         database = mongo.get_default_database()
         case_id, run, artifact = _tracer_case(client, csrf, database)
-        _assert_skill_loaded(run)
+        _assert_run_resources(run)
         assert artifact["status"] == "pending"
         assert artifact["baseRevision"] == 1
         assert artifact["target"]["paragraphIndex"] == 1

@@ -38,10 +38,6 @@ function remove(source) {
   emit("update:selected", props.selected.filter((item) => sourceKey(item) !== sourceKey(source)));
 }
 
-function candidateSource(item) {
-  return { sourceType: item.kind, id: item.id, title: item.title || item.name || item.id };
-}
-
 function sourceLabel(source) {
   return source.title || source.id;
 }
