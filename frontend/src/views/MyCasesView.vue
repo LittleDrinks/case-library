@@ -30,8 +30,21 @@ const groupedCases = computed(() => groups.map((group) => ({
 })));
 
 function caseDestination(item) {
-  const name = item.workflowStatus === "published" ? "case-public" : "workbench";
+  const publiclyReadable = item.workflowStatus === "published"
+    && item.publicationStatus === "public";
+  const name = publiclyReadable ? "case-public" : "workbench";
   return { name, params: { id: item.id } };
+}
+
+function cardStatus(item) {
+  if (item.publicationStatus === "hidden") return "已隐藏";
+  const base = statusLabels[item.workflowStatus] || "草稿";
+  return item.publicationStatus === "public" && item.workflowStatus !== "published"
+    ? `${base} · 旧版公开中` : base;
+}
+
+function cardAction(item) {
+  return item.publicationStatus === "hidden" ? "继续处理" : actionLabels[item.workflowStatus];
 }
 
 async function loadCases() {
@@ -89,8 +102,8 @@ onMounted(loadCases);
               :key="item.id"
               :case-record="item"
               :destination="caseDestination(item)"
-              :status="statusLabels[item.workflowStatus]"
-              :action-label="actionLabels[item.workflowStatus]"
+              :status="cardStatus(item)"
+              :action-label="cardAction(item)"
             />
           </div>
           <div v-else class="catalog-empty">暂无案例</div>

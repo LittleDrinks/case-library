@@ -249,6 +249,24 @@ def test_publication_transitions_maintain_material_reference_count(client: TestC
     assert outbox_sequence(client, f"material:{mounted['id']}") == restored_sequence
 
 
+def test_republication_moves_material_reference_to_the_new_default(client: TestClient) -> None:
+    old, _approved = publish_case_with_material(client)
+    database = client.app.state.database
+    owner = login(client)
+    _reopened = transition(client, owner, "reopen")
+    unmount(client, owner, old["id"])
+    mount(client, owner, "m-kcsz")
+    submitted = transition(client, owner, "submit")
+    admin = admin_login(client)
+    started = transition_with_case(client, admin, "start", submitted["case"])
+    transition_with_case(client, admin, "approve", started["case"], submittedVersionId=submitted["version"]["id"])
+    assert database.materials.find_one({"id": old["id"]})["publicReferenceCount"] == 0
+    assert database.materials.find_one({"id": "m-kcsz"})["publicReferenceCount"] == 1
+    sequence = outbox_sequence(client, "case:c-draft-1")
+    assert outbox_sequence(client, f"material:{old['id']}") == sequence
+    assert outbox_sequence(client, "material:m-kcsz") == sequence
+
+
 def transition_with_case(
     client: TestClient, auth: dict, command: str, case: dict, **extra
 ) -> dict:

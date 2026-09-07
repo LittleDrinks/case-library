@@ -56,8 +56,7 @@ const historyAvailable = computed(() => Boolean(
   session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
-    ? caseId() : ""
+  publicationStatus.value === "public" ? caseId() : ""
 ));
 const editable = computed(() => (
   isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
@@ -72,9 +71,13 @@ const annotatable = computed(() => Boolean(
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
   ] || "草稿";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
 const lifecycleActions = computed(() => availableActions());
 const submissionTodo = computed(() => tagCatalog.value
@@ -260,13 +263,16 @@ function reviewActions() {
 }
 
 function publicationActions() {
-  if (!reviewMode.value || workflowStatus.value !== "published") return null;
+  if (workflowStatus.value !== "published") return null;
+  if (!reviewMode.value && isOwner.value) {
+    return [{ command: "reopen", label: "另开新稿", primary: true }];
+  }
+  if (!reviewMode.value) return null;
   if (publicationStatus.value === "public") {
     return [{ command: "hide", label: "暂时隐藏", primary: false }];
   }
   return [
     { command: "restore", label: "恢复公开", primary: false },
-    { command: "reopen", label: "下线编辑", primary: true },
   ];
 }
 
