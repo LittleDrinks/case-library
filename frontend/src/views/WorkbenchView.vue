@@ -38,6 +38,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const sources = ref([]);
 const candidatePreviews = ref([]);
 const candidateInvalidation = ref(0);
 const candidateBatchSnapshotId = ref("");
@@ -56,8 +57,7 @@ const historyAvailable = computed(() => Boolean(
   session.user && (isOwner.value || session.user.role === "admin"),
 ));
 const publicCaseId = computed(() => (
-  workflowStatus.value === "published" && publicationStatus.value === "public"
-    ? caseId() : ""
+  publicationStatus.value === "public" ? caseId() : ""
 ));
 const editable = computed(() => (
   isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
@@ -72,15 +72,24 @@ const annotatable = computed(() => Boolean(
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
   if (publicationStatus.value === "hidden") return "已隐藏";
-  return ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
+  const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
-  ] || "草稿";
+  ] || "未知状态";
+  if (publicationStatus.value === "public" && workflowStatus.value !== "published") {
+    return `${base} · 旧版公开中`;
+  }
+  return base;
 });
 const lifecycleActions = computed(() => {
   const area = reviewMode.value ? "review" : "author";
   return (caseRecord.value?.availableActions || [])
-    .filter((command) => LIFECYCLE_META[command]?.area === area)
-    .map((command) => ({ command, ...LIFECYCLE_META[command] }));
+    .filter((command) => LIFECYCLE_META[command]?.area === area
+      || (command === "reopen" && reviewMode.value))
+    .map((command) => ({
+      command,
+      ...LIFECYCLE_META[command],
+      ...(command === "reopen" && reviewMode.value ? { label: "下线编辑" } : {}),
+    }));
 });
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
@@ -97,7 +106,7 @@ const LIFECYCLE_META = {
   supplement: { label: "要求补充", primary: false, area: "review" },
   hide: { label: "暂时隐藏", primary: false, area: "review" },
   restore: { label: "恢复公开", primary: false, area: "review" },
-  reopen: { label: "下线编辑", primary: true, area: "review" },
+  reopen: { label: "另开新稿", primary: true, area: "author" },
 };
 const submissionTodo = computed(() => {
   const missing = [];
@@ -189,9 +198,15 @@ async function loadAnnotations() {
   catch { annotations.value = []; }
 }
 
+async function loadSources() {
+  try { sources.value = (await api.listSources(caseId())).entries || []; }
+  catch { sources.value = []; }
+}
+
 function applyAttachmentCase(value) {
   expireCandidates();
   syncCaseRevision(value);
+  void loadSources();
 }
 
 function syncCaseRevision(value) {
@@ -219,7 +234,7 @@ async function loadCase() {
       autosave.reconcile(current.revision);
     }
     applyCase(current, !initial);
-    await loadAnnotations();
+    await Promise.all([loadAnnotations(), loadSources()]);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -552,6 +567,7 @@ onBeforeUnmount(() => {
               :annotatable="annotatable"
               :candidate-previews="candidatePreviews"
               :annotations="annotations"
+              :sources="sources"
               @change="changeDocument"
               @selection="annotationSelection = $event"
               @writing-context="writingContext = $event"

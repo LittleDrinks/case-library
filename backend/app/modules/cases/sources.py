@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pymongo.database import Database
 
+from app.modules.cases.citations import citation_ranks
 from app.modules.case_sources.service import (
     source_case_content_available,
     source_case_url,
@@ -20,10 +21,11 @@ def is_internal(record: dict, user: dict | None) -> bool:
 def ordered_entries(
     database: Database, record: dict, user: dict | None, origin: str
 ) -> list[dict]:
-    """附件、素材与案例来源合并为资料区条目，按加入时间稳定排序编号。"""
+    """附件、素材与案例来源合并为资料区条目；正文首次引用优先，其余按加入顺序编号。"""
     internal = is_internal(record, user)
+    ranks = citation_ranks(record.get("document"))
     entries = [
-        _entry(database, source_type, row, user, origin, internal, record)
+        _entry(database, source_type, row, user, origin, internal, record, ranks)
         for source_type, row in _source_rows(database, record)
     ]
     entries.sort(key=lambda item: item["_sort"])
@@ -55,7 +57,7 @@ def _live_embedded(database: Database, case_id: str) -> dict:
     }
 
 
-def _base_entry(row: dict) -> dict:
+def _base_entry(row: dict, rank: int) -> dict:
     entry_id = row.get("materialId") or row["id"]
     return {
         "sourceType": "attachment",
@@ -65,15 +67,16 @@ def _base_entry(row: dict) -> dict:
         "version": None,
         "url": "",
         "contentAvailable": False,
-        "_sort": (row.get("createdAt") or "", entry_id),
+        "_sort": (rank, row.get("createdAt") or "", entry_id),
     }
 
 
 def _entry(
     database: Database, source_type: str, row: dict, user: dict | None,
-    origin: str, internal: bool, record: dict,
+    origin: str, internal: bool, record: dict, ranks: dict,
 ) -> dict:
-    entry = _base_entry(row)
+    entry_id = row.get("materialId") or row["id"]
+    entry = _base_entry(row, ranks.get((source_type, entry_id), len(ranks)))
     entry["sourceType"] = source_type
     entry["url"] = _entry_url(database, source_type, row, origin, record)
     entry["contentAvailable"] = _content_available(
