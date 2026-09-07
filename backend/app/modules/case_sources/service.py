@@ -6,10 +6,8 @@ from datetime import UTC, datetime
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.attachments.service import _advance_revision, _run_transaction
-from app.modules.cases.published import version_readable
-from app.modules.cases.service import CaseError
-from app.modules.cases.sources import source_case_content_available, source_case_url
+from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.service import CaseError, advance_revision, run_transaction
 
 STORAGE_FIELDS = (
     "id",
@@ -46,7 +44,31 @@ def _source_case_info(database: Database, source_case_id: str) -> dict:
     return source or {}
 
 
-def source_view(database: Database, row: dict, user: dict | None, origin: str) -> dict:
+def source_case_url(origin: str, source_case_id: str, version_id: str) -> str:
+    return f"{origin}/#/cases/{source_case_id}?versionId={version_id}"
+
+
+def source_case_content_available(
+    database: Database, source_case_id: str, user: dict | None,
+    version_id: str | None = None, internal: bool = False,
+) -> bool:
+    source = database.cases.find_one({"id": source_case_id})
+    if not source:
+        return False
+    source_internal = internal and bool(
+        user and (user["role"] == "admin" or user["id"] == source["ownerId"])
+    )
+    if version_id:
+        version = find_version(database, source, version_id, source_internal)
+        return bool(version and version_readable(
+            database, source, version_id, version, source_internal
+        ))
+    return source.get("publicationStatus") == "public" or source_internal
+
+
+def source_view(
+    database, row: dict, user: dict | None, origin: str, internal: bool = False
+) -> dict:
     source = _source_case_info(database, row["sourceCaseId"])
     return {
         "id": row["id"],
@@ -58,7 +80,7 @@ def source_view(database: Database, row: dict, user: dict | None, origin: str) -
         "sourceUrl": source_case_url(origin, row["sourceCaseId"], row["versionId"]),
         "publishedAt": source.get("publishedAt"),
         "contentAvailable": source_case_content_available(
-            database, row["sourceCaseId"], user, row["versionId"]
+            database, row["sourceCaseId"], user, row["versionId"], internal
         ),
         "createdAt": row["createdAt"],
     }
@@ -102,7 +124,7 @@ def _mounted(case_id: str, source_case: dict, version: dict) -> dict:
 
 
 def _insert(database, case_id, source_case, version, user, revision, session) -> dict:
-    _advance_revision(database, case_id, user, revision, session)
+    advance_revision(database, case_id, user, revision, session)
     mounted = _mounted(case_id, source_case, version)
     try:
         database.case_sources.insert_one(mounted, session=session)
@@ -134,7 +156,7 @@ def mount_case_source(
 ) -> dict:
     case, source_case = _mount_inputs(database, case_id, source_case_id, user)
     version = _pinned_version(database, source_case, version_id)
-    mounted = _run_transaction(
+    mounted = run_transaction(
         database,
         lambda session: _insert(
             database, case["id"], source_case, version, user, revision, session
@@ -148,8 +170,9 @@ def list_case_sources(
 ) -> list[dict]:
     case = _case(database, case_id)
     _require_source_reader(case, user)
-    rows = _source_rows(database, case, user, version_id)
-    return [source_view(database, row, user, origin) for row in rows]
+    internal = _internal_reader(case, user)
+    rows = _source_rows(database, case, internal, version_id)
+    return [source_view(database, row, user, origin, internal) for row in rows]
 
 
 def _require_source_reader(case: dict, user: dict | None) -> None:
@@ -164,17 +187,18 @@ def _is_internal(case: dict, user: dict | None) -> bool:
     return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
 
 
-def _source_rows(database, case: dict, user: dict | None, version_id: str | None):
-    if not version_id and _is_internal(case, user):
+def _internal_reader(case: dict, user: dict | None) -> bool:
+    return _is_internal(case, user) and case["publicationStatus"] != "public"
+
+
+def _source_rows(database, case: dict, internal: bool, version_id: str | None):
+    if not version_id and internal:
         return list(database.case_sources.find({"caseId": case["id"]}).sort("id", 1))
-    return _version_rows(database, case, user, version_id or case.get("publishedVersionId"))
+    return _version_rows(database, case, version_id or case.get("publishedVersionId"), internal)
 
 
-def _version_rows(database, case: dict, user: dict | None, version_id: str | None):
-    internal = _is_internal(case, user)
-    query = {"id": version_id, "caseId": case["id"]}
-    version = database.case_versions.find_one(query)
-    version = version or database.case_snapshots.find_one(query)
+def _version_rows(database, case: dict, version_id: str | None, internal: bool):
+    version = find_version(database, case, version_id, internal) if version_id else None
     if not version_id or not version_readable(
         database, case, version_id, version, internal
     ):
@@ -187,7 +211,7 @@ def _delete(database, case_id, source_id, user, revision, session) -> None:
     mounted = database.case_sources.find_one(query, session=session)
     if not mounted:
         raise CaseError(404, "案例来源未加入当前案例")
-    _advance_revision(database, case_id, user, revision, session)
+    advance_revision(database, case_id, user, revision, session)
     database.case_sources.delete_one({"_id": mounted["_id"]}, session=session)
 
 
@@ -195,7 +219,7 @@ def unmount_case_source(
     database: Database, case_id: str, source_id: str, revision: int, user: dict
 ) -> None:
     _draft_case(database, case_id, user)
-    _run_transaction(
+    run_transaction(
         database,
         lambda session: _delete(database, case_id, source_id, user, revision, session),
     )

@@ -8,7 +8,7 @@ from app.core.dependencies import get_database, get_settings
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
 from app.modules.cases.lifecycle import execute_lifecycle, get_history
 from app.modules.cases.models import CaseCreate, CasePatch, LifecycleCommand
-from app.modules.cases.published import PublishedCaseReader, version_readable
+from app.modules.cases.published import PublishedCaseReader, find_version, version_readable
 from app.modules.cases.service import (
     CaseError,
     create_case,
@@ -144,8 +144,14 @@ def _reader_case(database, case_id: str, user: dict | None) -> dict:
 
 
 def _internal_record(database, case: dict, user: dict | None) -> dict | None:
-    internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
+    internal = _internal_reader(case, user)
     return case if internal else None
+
+
+def _internal_reader(case: dict, user: dict | None) -> bool:
+    return bool(
+        user and (user["role"] == "admin" or case["ownerId"] == user["id"])
+    ) and case["publicationStatus"] != "public"
 
 
 def _published_record(database, case_id: str) -> tuple[dict, dict]:
@@ -153,8 +159,8 @@ def _published_record(database, case_id: str) -> tuple[dict, dict]:
     version_id = (case or {}).get("publishedVersionId")
     if not case or case.get("publicationStatus") != "public" or not version_id:
         raise CaseError(404, "案例不存在")
-    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
-    if not version:
+    version = find_version(database, case, version_id, False)
+    if not version or not version_readable(database, case, version_id, version, False):
         raise CaseError(404, "案例不存在")
     return case, version
 
@@ -168,10 +174,8 @@ def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
 
 
 def _version_record(database, case: dict, version_id: str, user) -> dict:
-    internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
-    query = {"id": version_id, "caseId": case["id"]}
-    found = database.case_versions.find_one(query)
-    found = found or database.case_snapshots.find_one(query)
+    internal = _internal_reader(case, user)
+    found = find_version(database, case, version_id, internal)
     if not found or not version_readable(database, case, version_id, found, internal):
         raise CaseError(404, "案例版本不存在")
     return found
