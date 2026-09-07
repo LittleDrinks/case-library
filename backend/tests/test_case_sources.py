@@ -59,6 +59,15 @@ def _admin_session(client: TestClient) -> tuple[TestClient, dict]:
     return admin, login(admin, "admin", "admin123")
 
 
+def _published_source(client: TestClient, owner: dict, title: str) -> str:
+    """走真实提审流创建已发布来源案例，保证 approve 事件存在。"""
+    created = client.post("/api/cases", headers=headers(owner), json={"title": title})
+    assert created.status_code == 200
+    case_id = created.json()["id"]
+    _submit_and_approve(client, owner, case_id)
+    return case_id
+
+
 def _submit_and_approve(client: TestClient, owner: dict, case_id: str) -> str:
     submitted = client.post(
         f"/api/cases/{case_id}/lifecycle",
@@ -92,7 +101,19 @@ def test_mount_rejects_duplicate_or_invalid_sources(client: TestClient) -> None:
     assert mount_source(client, auth, "c-draft-1").status_code == 409
     assert mount_source(client, auth, "c-pending-1").status_code == 409
     assert mount_source(client, auth, "c-missing").status_code == 404
-    assert mount_source(client, auth, "c-05", versionId="cv-not-real").status_code == 409
+    assert mount_source(client, auth, "c-05", versionId="cv-not-real").status_code == 404
+
+
+def test_mount_rejects_unapproved_versions_and_snapshots(client: TestClient) -> None:
+    auth = login(client)
+    database = client.app.state.database
+    database.case_versions.insert_one(
+        {"id": "cv-unapproved", "caseId": "c-02", "number": 9, "title": "未批准"}
+    )
+    pending = mount_source(client, auth, "c-02", versionId="cv-unapproved")
+    assert pending.status_code == 404
+    snap = _snapshot_id(client, auth)
+    assert mount_source(client, auth, "c-02", versionId=snap).status_code == 404
 
 
 def test_removal_requires_owner_and_editable_draft(client: TestClient) -> None:
@@ -175,18 +196,66 @@ def test_published_sources_visible_but_unauthorized_links_locked(
 
 def test_source_version_does_not_drift_on_republish(client: TestClient) -> None:
     auth = login(client)
-    mounted = mount_source(client, auth, "c-02").json()
-    assert mounted["versionNumber"] == 1
-    _admin_command(client, "c-02", "hide")
-    _admin_command(client, "c-02", "reopen")
-    admin, admin_auth = _admin_session(client)
-    _submit_and_approve(admin, admin_auth, "c-02")
+    source_id = _published_source(client, auth, "来源案例甲")
+    mounted = mount_source(client, auth, source_id).json()
+    v1 = mounted["versionId"]
+    _admin_command(client, source_id, "hide")
+    _admin_command(client, source_id, "reopen")
+    _submit_and_approve(client, auth, source_id)
     sources = client.get("/api/cases/c-draft-1/case-sources").json()
     assert [row["versionNumber"] for row in sources] == [1]
-    assert sources[0]["versionId"] == mounted["versionId"]
-    assert client.get("/api/cases/c-02/public").json()["publishedVersionId"] != (
-        mounted["versionId"]
+    assert sources[0]["versionId"] == v1
+    assert sources[0]["contentAvailable"] is True
+    reader = other_client(client)
+    pinned = reader.get(f"/api/cases/{source_id}/public", params={"versionId": v1})
+    assert pinned.status_code == 200
+    assert pinned.json()["publishedVersionId"] == v1
+    assert pinned.json()["title"] == "来源案例甲"
+    current = reader.get(f"/api/cases/{source_id}/public").json()["publishedVersionId"]
+    assert current != v1
+
+
+def test_mount_allows_approved_historical_version(client: TestClient) -> None:
+    auth = login(client)
+    source_id = _published_source(client, auth, "来源案例乙")
+    v1 = client.get(f"/api/cases/{source_id}").json()["publishedVersionId"]
+    _admin_command(client, source_id, "hide")
+    _admin_command(client, source_id, "reopen")
+    _submit_and_approve(client, auth, source_id)
+    historical = mount_source(client, auth, source_id, versionId=v1)
+    assert historical.status_code == 201
+    assert historical.json()["versionNumber"] == 1
+    latest = mount_source(client, auth, source_id)
+    assert latest.status_code == 201
+    assert latest.json()["versionNumber"] == 2
+
+
+def _snapshot_id(client: TestClient, auth: dict) -> str:
+    response = client.post(
+        "/api/cases/c-draft-1/lifecycle",
+        headers=headers(auth),
+        json={"command": "snapshot", "revision": revision(client)},
     )
+    return response.json()["snapshot"]["id"]
+
+
+def test_public_pinned_read_rejects_unapproved_and_offline(client: TestClient) -> None:
+    auth = login(client)
+    mounted = mount_source(client, auth, "c-02").json()
+    _admin_command(client, "c-02", "hide")
+    reader = other_client(client)
+    offline = reader.get(
+        "/api/cases/c-02/public", params={"versionId": mounted["versionId"]}
+    )
+    assert offline.status_code == 404
+    _admin_command(client, "c-02", "restore")
+    snap = _snapshot_id(client, auth)
+    assert reader.get(
+        "/api/cases/c-02/public", params={"versionId": snap}
+    ).status_code == 404
+    assert reader.get(
+        "/api/cases/c-draft-1/public", params={"versionId": snap}
+    ).status_code == 404
 
 
 def test_mount_defaults_to_newest_published_version_after_republish(

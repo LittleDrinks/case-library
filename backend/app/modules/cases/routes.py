@@ -8,6 +8,7 @@ from app.core.dependencies import get_database, get_settings
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
 from app.modules.cases.lifecycle import execute_lifecycle, get_history
 from app.modules.cases.models import CaseCreate, CasePatch, LifecycleCommand
+from app.modules.cases.published import PublishedCaseReader, version_readable
 from app.modules.cases.service import (
     CaseError,
     create_case,
@@ -51,8 +52,16 @@ def detail(
 
 
 @router.get("/{case_id}/public")
-def public_detail(case_id: str, database=Depends(get_database)):
-    return get_public_case(database, case_id)
+def public_detail(
+    case_id: str,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    user: dict | None = Depends(optional_user),
+):
+    if not version_id:
+        return get_public_case(database, case_id)
+    case = _reader_case(database, case_id, user)
+    return PublishedCaseReader(database).read_public_version(case, version_id)
 
 
 @router.get("/{case_id}/sources")
@@ -174,15 +183,10 @@ def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
 
 def _version_record(database, case: dict, version_id: str, user) -> dict:
     internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
-    published = case.get("publishedVersionId")
-    if not internal and (
-        version_id != published or case.get("publicationStatus") != "public"
-    ):
-        raise CaseError(404, "案例版本不存在")
     query = {"id": version_id, "caseId": case["id"]}
-    version = database.case_versions.find_one(query)
-    found = version or database.case_snapshots.find_one(query)
-    if not found:
+    found = database.case_versions.find_one(query)
+    found = found or database.case_snapshots.find_one(query)
+    if not found or not version_readable(database, case, version_id, found, internal):
         raise CaseError(404, "案例版本不存在")
     return found
 

@@ -44,6 +44,8 @@
 .collect-source-done a { display: flex; height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: #fff; text-decoration: none; }
 .case-detail-workbench, .case-detail-export, .case-detail-state button { display: flex; height: 38px; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--brand); border-radius: 7px; background: var(--brand); color: #fff; text-decoration: none; }
 .case-detail-workbench { margin-bottom: 8px; background: #fff; color: var(--brand); }
+.version-pin-banner { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 6px; background: var(--brand-soft); color: var(--ink-2); font-size: 12px; }
+.version-pin-banner a { color: var(--brand); font-weight: 600; }
 .case-detail-state { display: flex; min-height: 500px; align-items: center; justify-content: center; gap: 9px; color: var(--ink-3); }
 .case-detail-state button { height: 34px; padding: 0 11px; }
 
