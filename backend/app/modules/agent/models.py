@@ -99,6 +99,10 @@ class SourceRef(BaseModel):
     snippet: str = ""
     version: str | None = None
     version_id: str | None = Field(default=None, alias="versionId")
+    source_case_id: str | None = Field(
+        default=None, alias="sourceCaseId",
+        description="kind=case 时的真实案例 ID；id 可能是资料区挂载条目 ID",
+    )
     location: str | None = None
 
     def identity(self) -> tuple[str, str, str]:

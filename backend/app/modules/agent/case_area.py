@@ -71,6 +71,7 @@ def _ref(kind: str, row: dict, case_id: str) -> SourceRef:
         kind=kind, id=row["id"], title=row.get("title") or "",
         version=f"v{row['versionNumber']}" if row.get("versionNumber") else None,
         version_id=row.get("versionId"),
+        source_case_id=row.get("sourceCaseId"),
         location=f"case:{row.get('sourceCaseId')}@{row.get('versionId')}",
     )
 

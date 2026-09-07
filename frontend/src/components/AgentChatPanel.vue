@@ -138,6 +138,15 @@ function sourcesOf(part) {
   return part.state === "output-available" ? part.output?.sources || [] : [];
 }
 
+function artifactSourceLink(source) {
+  if (source.kind !== "case" || !source.sourceCaseId) return null;
+  return {
+    name: "case-public",
+    params: { id: source.sourceCaseId },
+    query: source.versionId ? { versionId: source.versionId } : {},
+  };
+}
+
 function artifactStatus(artifact) {
   return ({ accepted: "已接受", rejected: "已拒绝", expired: "已过期", pending: "待确认" })[artifact.status] || artifact.status;
 }
@@ -301,9 +310,12 @@ async function retryRun() {
           <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
           <p
             v-for="source in artifact.sources || []"
-            :key="source.id"
+            :key="`${source.kind}:${source.id}:${source.versionId || ''}`"
             class="agent-artifact-source"
-          >依据：{{ source.title || source.id }}</p>
+          >
+            <template v-if="artifactSourceLink(source)">依据：<RouterLink :to="artifactSourceLink(source)" data-testid="agent-artifact-source-link">{{ source.title || source.id }}</RouterLink></template>
+            <template v-else>依据：{{ source.title || source.id }}<span class="agent-artifact-source-status" data-testid="agent-artifact-source-status">（公开版本当前不可读）</span></template>
+          </p>
           <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
             <button type="button" data-testid="agent-accept" @click="acceptArtifact(artifact.id)">接受</button>
             <button type="button" data-testid="agent-reject" @click="rejectArtifact(artifact.id)">拒绝</button>
@@ -336,6 +348,8 @@ async function retryRun() {
         <AgentSourcePicker
           :case-id="caseRecord.id"
           :revision="caseRecord.revision"
+          :version-id="versionId"
+          :read-only="readOnly"
           :selected="selectedSources"
           :disabled="loading || sending"
           @update:selected="selectedSources = $event"

@@ -18,8 +18,14 @@ const snapshot = {
     id: "message-1", role: "assistant", metadata: {},
     parts: [{ type: "text", text: "历史回答" }],
   }],
+  artifacts: [],
   activeRun: null,
   latestRun: null,
+};
+
+const RouterLinkStub = {
+  props: ["to"],
+  template: '<a class="router-link-stub" :data-to="JSON.stringify(to)"><slot /></a>',
 };
 
 function streamResponse(chunks) {
@@ -66,6 +72,47 @@ beforeEach(() => {
   api.listSkills.mockResolvedValue([
     { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
   ]);
+});
+
+it("passes the reader version and readonly flag to the source picker", async () => {
+  const wrapper = mountPanel({ versionId: "v-reader-1", readOnly: true });
+  await flushPromises();
+  const picker = wrapper.findComponent({ name: "AgentSourcePicker" });
+  expect(picker.props("versionId")).toBe("v-reader-1");
+  expect(picker.props("readOnly")).toBe(true);
+});
+
+const artifactSnapshot = () => ({
+  ...structuredClone(snapshot),
+  artifacts: [{
+    id: "artifact-1", status: "pending",
+    target: { from: 1, to: 4, quote: "原文" },
+    replacement: "替换文本", reason: "理由", sources: [
+      { kind: "case", id: "src-entry-9", sourceCaseId: "c-real-9", versionId: "v-9", version: "v1", title: "真实案例" },
+      { kind: "case", id: "src-old", title: "旧格式来源", versionId: "v-old" },
+      { kind: "material", id: "mat-1", title: "素材来源" },
+    ],
+  }],
+});
+
+it("links artifact sources to the fixed public version of the real case", async () => {
+  api.agentThread.mockResolvedValue(artifactSnapshot());
+  const wrapper = mount(AgentChatPanel, {
+    props: { caseRecord: { id: "case-1", revision: 1 } },
+    global: { stubs: { RouterLink: RouterLinkStub } },
+  });
+  await flushPromises();
+  const links = wrapper.findAll('[data-testid="agent-artifact-source-link"]');
+  expect(links).toHaveLength(1);
+  const target = JSON.parse(links[0].attributes("data-to"));
+  expect(target).toEqual({
+    name: "case-public", params: { id: "c-real-9" }, query: { versionId: "v-9" },
+  });
+  expect(links[0].text()).toContain("真实案例");
+  const statuses = wrapper.findAll('[data-testid="agent-artifact-source-status"]');
+  expect(statuses).toHaveLength(2);
+  expect(wrapper.text()).toContain("旧格式来源");
+  expect(wrapper.text()).toContain("素材来源");
 });
 
 function sentRequest(fetch) {

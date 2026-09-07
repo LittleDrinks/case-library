@@ -13,15 +13,14 @@ from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
 from app.modules.agent import prosemirror
 from app.modules.agent.case_area import catalog_instructions, retained_sources, selection_from_parts
-from app.modules.agent.source_reader import source_readable
 from app.modules.agent.deps import ToolDeps
+from app.modules.agent.visibility import parts_projector, visible_snapshot
 from app.modules.agent.models import (
     AgentRun,
     AgentSnapshot,
     AgentThread,
     AgentThreadSummary,
     ArtifactDecision,
-    SourceRef,
     ArtifactTarget,
 )
 from app.modules.agent.recovery import (
@@ -99,39 +98,6 @@ def _repository(database) -> AgentRepository:
     return AgentRepository(database)
 
 
-def _visible_snapshot(database, snapshot: AgentSnapshot, user: dict) -> AgentSnapshot:
-    for artifact in snapshot.artifacts:
-        artifact.sources = [
-            ref for ref in artifact.sources
-            if source_readable(database, user, snapshot.case_id, ref)
-        ]
-    for message in snapshot.messages:
-        for part in message.parts:
-            _redact_source_part(database, user, snapshot.case_id, part)
-    return snapshot
-
-
-def _redact_source_part(database, user, case_id: str, part: dict) -> None:
-    output = part.get("output")
-    if not isinstance(output, dict):
-        return
-    if part.get("type") == "tool-read_source":
-        ref = output.get("usedSourceRef")
-        if ref and not _source_visible(database, user, case_id, ref):
-            part["output"] = {"status": "no_access", "detail": "来源当前不可读"}
-    elif part.get("type") == "tool-search_corpus":
-        output["sources"] = [
-            ref for ref in output.get("sources", [])
-            if _source_visible(database, user, case_id, ref)
-        ]
-
-
-def _source_visible(database, user, case_id: str, raw: object) -> bool:
-    try:
-        ref = SourceRef.model_validate(raw)
-    except ValidationError:
-        return False
-    return source_readable(database, user, case_id, ref)
 def _existing_case(database, case_id: str) -> dict:
     case = database.cases.find_one({"id": case_id})
     if not case:
@@ -221,7 +187,7 @@ def show_thread(
     repository = _repository(database)
     thread = repository.default_thread(case_id, user["id"], conversation.version_id)
     snapshot = repository.snapshot(thread)
-    return _visible_snapshot(database, snapshot, user)
+    return visible_snapshot(database, snapshot, user)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -304,8 +270,8 @@ def _submit_prompt(adapter: VercelAIAdapter) -> tuple[list[dict], dict, str, str
     return parts, {}, text, latest.id, skills
 
 
-def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
-    """重试：引用原用户消息创建新 Run，不产生新消息。"""
+def _retry_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
+    """重试：引用原用户消息创建新 Run，不产生新消息；历史同投影收敛。"""
     message_id = getattr(adapter.run_input, "message_id", None)
     message = repository.message(thread.id, message_id) if message_id else None
     if message is None or message.role != "user":
@@ -316,18 +282,19 @@ def _retry_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
     return RunPlan(
         parts=parts, metadata=message.metadata, prompt=prompt,
         skills=[skill for skill in skills if skill],
-        history=load_history(repository, thread, max_seq=message.message_seq),
+        history=load_history(repository, thread, max_seq=message.message_seq, project=project),
         retry_message_id=message.id,
     )
 
 
-def _run_plan(repository, thread, adapter: VercelAIAdapter) -> RunPlan:
+def _run_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
     if adapter.run_input.trigger == "regenerate-message":
-        return _retry_plan(repository, thread, adapter)
+        return _retry_plan(repository, thread, adapter, project)
     parts, metadata, prompt, client_request_id, skills = _submit_prompt(adapter)
     return RunPlan(
         parts=parts, metadata=metadata, prompt=prompt, skills=skills,
-        history=load_history(repository, thread), client_request_id=client_request_id,
+        history=load_history(repository, thread, project=project),
+        client_request_id=client_request_id,
     )
 
 
@@ -442,7 +409,7 @@ def show_named_thread(
         database, case_id, user, repository, thread_id, version_id
     )
     snapshot = repository.snapshot(thread)
-    return _visible_snapshot(database, snapshot, user)
+    return visible_snapshot(database, snapshot, user)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -491,10 +458,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     )
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
-    plan = _validate_plan(
-        database, conversation.case, _run_plan(repository, thread, adapter),
-        conversation.version_id,
-    )
+    plan = _plan_for(repository, thread, adapter, database, user, conversation)
     if conversation.reader and plan.skills:
         raise HTTPException(status_code=422, detail="AI 能力不可用")
     context = _start_context(
@@ -503,6 +467,14 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     )
     request.app.state.run_supervisor.start(context)
     return live_response(context.buffer)
+
+
+def _plan_for(repository, thread, adapter, database, user, conversation):
+    project = parts_projector(database, user, conversation.case["id"])
+    return _validate_plan(
+        database, conversation.case, _run_plan(repository, thread, adapter, project),
+        conversation.version_id,
+    )
 
 
 def _resolve_skills(database, store, skill_ids: list[str]) -> tuple[BoundSkill, ...]:
@@ -731,8 +703,13 @@ def thread_events(
     cursor = after_seq if after_seq is not None else _last_event_id(request)
     if thread.active_run_id is None and cursor >= thread.event_seq:
         return Response(status_code=204)
+    return _event_response(database, user, repository, conversation, thread, cursor)
+
+
+def _event_response(database, user, repository, conversation, thread, cursor):
     access_check = _event_access_check(database, conversation, thread)
-    return live_event_response(repository, thread, max(cursor, 0), access_check)
+    project = parts_projector(database, user, thread.case_id)
+    return live_event_response(repository, thread, max(cursor, 0), access_check, project)
 
 
 def _event_access_check(database, conversation: Conversation, thread: AgentThread):
@@ -748,9 +725,9 @@ def _last_event_id(request: Request) -> int:
         raise HTTPException(status_code=422, detail="事件游标无效") from error
 
 
-def live_event_response(repository, thread, after_seq: int, access_check=None):
+def live_event_response(repository, thread, after_seq: int, access_check=None, project=None):
     return StreamingResponse(
-        events_stream(repository, thread, after_seq, access_check),
+        events_stream(repository, thread, after_seq, access_check, project),
         media_type="text/event-stream",
         headers=sse_headers(),
     )

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { LoaderCircle, Plus, Search, X } from "@lucide/vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
@@ -7,6 +7,8 @@ import { session } from "../session.js";
 const props = defineProps({
   caseId: { type: String, required: true },
   revision: { type: Number, default: 1 },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
   selected: { type: Array, default: () => [] },
   disabled: { type: Boolean, default: false },
 });
@@ -48,15 +50,25 @@ const visibleEntries = computed(() => {
 });
 
 async function load() {
+  if (props.readOnly && !props.versionId) return;
   try {
-    entries.value = (await api.listSources(props.caseId)).entries || [];
+    const scope = props.readOnly ? props.versionId : "";
+    entries.value = (await api.listSources(props.caseId, scope)).entries || [];
   } catch {
     error.value = "资料区加载失败";
   }
 }
 
+watch(() => props.versionId, () => {
+  emit("update:selected", []);
+  entries.value = [];
+  results.value = [];
+  query.value = "";
+  void load();
+});
+
 async function search() {
-  if (!query.value.trim()) return;
+  if (props.readOnly || !query.value.trim()) return;
   loading.value = true;
   error.value = "";
   try {
@@ -69,7 +81,7 @@ async function search() {
 }
 
 function addable(item) {
-  return ["case", "material"].includes(item.kind) && props.revision > 0;
+  return !props.readOnly && ["case", "material"].includes(item.kind) && props.revision > 0;
 }
 
 async function addCandidate(item) {
@@ -101,14 +113,14 @@ onMounted(load);
       </button>
       <span v-if="selected.length" class="agent-source-summary">已选 {{ selected.length }} 条</span>
     </div>
-    <div v-if="selected.length" class="agent-source-chips" aria-label="已选来源">
-      <span v-for="source in selected" :key="sourceKey(source)" class="agent-source-chip">
-        {{ sourceLabel(source) }}
-        <button type="button" :aria-label="`移除${sourceLabel(source)}`" @click="remove(source)"><X :size="12" /></button>
-      </span>
-    </div>
     <div v-if="open" class="agent-source-picker-body">
-      <div class="agent-source-search">
+      <div v-if="selected.length" class="agent-source-chips" aria-label="已选来源">
+        <span v-for="source in selected" :key="sourceKey(source)" class="agent-source-chip">
+          {{ sourceLabel(source) }}
+          <button type="button" :aria-label="`移除${sourceLabel(source)}`" @click="remove(source)"><X :size="12" /></button>
+        </span>
+      </div>
+      <div v-if="!readOnly" class="agent-source-search">
         <input v-model="query" aria-label="检索资料" placeholder="检索资料区或平台来源" @keydown.enter="search" />
         <button type="button" aria-label="检索资料" :disabled="disabled || loading" @click="search">
           <LoaderCircle v-if="loading" class="spin" :size="14" /><Search v-else :size="14" />
