@@ -32,7 +32,6 @@ def source_ref(item: dict) -> SourceRef:
     return SourceRef(
         kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item),
-        source_case_id=str(item["id"]) if kind == "case" else None,
     )
 
 
