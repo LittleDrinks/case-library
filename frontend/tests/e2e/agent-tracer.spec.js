@@ -108,6 +108,7 @@ async function reloadRestoresTracer(page, caseId) {
   await page.reload();
   await openChat(page, caseId);
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");
   await expect(page.getByTestId("agent-source").first()).toBeVisible();
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
@@ -131,6 +132,7 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
 
   await sendRequest(page);
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
+  await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");
   const sources = page.getByTestId("agent-source");
   await expect(sources.first()).toBeVisible();
   expect(await sources.count()).toBeGreaterThan(0);

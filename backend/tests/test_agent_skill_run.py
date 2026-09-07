@@ -201,7 +201,7 @@ def _submit_payload(parts: list[dict]) -> dict:
 
 def _send_message(
     client: TestClient, auth: dict, case_id: str, skill_id: str | None,
-    model: FunctionModel | None = None,
+    model: FunctionModel | None = None, parts: list[dict] | None = None,
 ):
     thread_id = client.get(f"{CASES_PATH}/{case_id}/agent/thread").json()["id"]
     if model is None:
@@ -211,7 +211,7 @@ def _send_message(
     with agent.override(model=model):
         return client.post(
             f"{CASES_PATH}/{case_id}/agent/thread/{thread_id}/stream",
-            headers=_csrf(auth), json=_submit_payload(_skill_parts(skill_id)),
+            headers=_csrf(auth), json=_submit_payload(parts or _skill_parts(skill_id)),
         )
 
 
@@ -256,6 +256,28 @@ def test_published_skill_drives_run_and_records_version_hash(client: TestClient)
     assert load["input"]["id"] == SKILL_ID
     assert reader["output"]["content"] == EXAMPLE_TEXT
     assert reader["output"]["path"] == RESOURCE_PATH
+
+
+def test_skill_part_is_canonical_and_single(client: TestClient) -> None:
+    _upload_and_publish(client)
+    teacher = _login(client, TEACHER)
+    case = _create_case(client, teacher)
+    parts = _skill_parts(SKILL_ID)
+    parts[-1]["data"]["label"] = "ignored"
+    response = _send_message(client, teacher, case["id"], SKILL_ID, parts=parts)
+    assert response.status_code == 200, response.text
+    message = client.app.state.database.agent_messages.find_one({"role": "user"})
+    assert message["parts"] == _skill_parts(SKILL_ID)
+
+
+def test_multiple_skill_parts_are_rejected(client: TestClient) -> None:
+    _upload_and_publish(client)
+    teacher = _login(client, TEACHER)
+    case = _create_case(client, teacher)
+    for extra in (SKILL_ID, "other-skill"):
+        duplicate = _skill_parts(SKILL_ID) + [{"type": "data-skill", "data": {"skillId": extra}}]
+        response = _send_message(client, teacher, case["id"], SKILL_ID, parts=duplicate)
+        assert response.status_code == 422
 
 
 def _tool_parts(client: TestClient, case_id: str) -> tuple[dict, dict]:

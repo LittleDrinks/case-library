@@ -345,6 +345,7 @@ function tracerMessages() {
     id: "message-assistant", role: "assistant", metadata: {},
     parts: [
       { type: "tool-load_capability", toolCallId: "t1", state: "output-available", input: { id: "skill-pub" }, output: { instructions: "SKILL" } },
+      { type: "tool-read_skill_resource_skill_pub", toolCallId: "t-resource", state: "output-available", input: { path: "references/模板规范.md" }, output: { path: "references/模板规范.md", content: "选题原则、结构模块" } },
       { type: "tool-search_corpus", toolCallId: "t2", state: "output-available", input: { query: "科学家精神" }, output: { sources: [{ kind: "case", id: "c-42", title: "科学家精神案例", snippet: "以科学家精神为例" }] } },
       { type: "tool-propose_revision", toolCallId: "t3", state: "output-available", input: {}, output: { artifactId: "artifact-9" } },
       { type: "text", text: "已生成单段修订候选" },
@@ -380,12 +381,25 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   await flushPromises();
 
   expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
+  expect(wrapper.get('[data-testid="agent-skill-resource"]').text()).toContain("选题原则");
   expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("科学家精神案例");
   const artifact = wrapper.get('[data-testid="agent-artifact"]');
   expect(artifact.attributes("data-artifact-status")).toBe("pending");
   expect(artifact.text()).toContain("原文：第二段原文");
   expect(artifact.text()).toContain("替换为：替换后的第二段");
   expect(wrapper.text()).toContain("已生成单段修订候选");
+});
+
+it("renders failed resource reads from the UI tool protocol", async () => {
+  const failed = tracerSnapshot();
+  failed.messages[1].parts = [failed.messages[1].parts[0], {
+    type: "tool-read_skill_resource_skill_pub", toolCallId: "t-error", state: "output-error",
+    input: { path: "references/missing.md" }, errorText: "资源不存在：references/missing.md",
+  }];
+  api.agentThread.mockResolvedValue(failed);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
 });
 
 function decideResult(decision) {

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
 from tests.agent_tracer import REPLACEMENT, tracer_model
-from tests.skill_packages import SKILL_ID, build_package
+from tests.skill_packages import EXAMPLE_PATH, EXAMPLE_TEXT, SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
@@ -154,10 +154,12 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
+        "tool-load_capability", "tool-read_skill_resource_sizheng_case_generator",
+        "tool-search_corpus", "tool-propose_revision",
     ]
-    assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[2]["output"]["artifactId"]
+    assert tool_parts[1]["output"] == {"path": EXAMPLE_PATH, "content": EXAMPLE_TEXT}
+    assert tool_parts[2]["output"]["sources"][0]["id"] == HIT["id"]
+    assert tool_parts[3]["output"]["artifactId"]
 
 
 def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
