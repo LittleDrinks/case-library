@@ -1,7 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { TextSelection } from "@tiptap/pm/state";
 import { nextTick } from "vue";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import CanvasEditor from "./CanvasEditor.vue";
 
 const caseDocument = {
@@ -21,12 +21,7 @@ async function setup(options = {}) {
   return { wrapper, context };
 }
 
-async function selectParagraph(wrapper, length = 4) {
-  const editor = wrapper.vm.editor;
-  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(
-    editor.state.doc, 9, 9 + length,
-  )));
-  const textNode = wrapper.get(".canvas-editor p").element.firstChild;
+function selectDomRange(textNode, length) {
   const range = globalThis.document.createRange();
   range.setStart(textNode, 0);
   range.setEnd(textNode, length);
@@ -34,9 +29,20 @@ async function selectParagraph(wrapper, length = 4) {
   browserSelection.removeAllRanges();
   browserSelection.addRange(range);
   globalThis.document.dispatchEvent(new Event("selectionchange"));
+}
+
+async function selectParagraph(wrapper, length = 4) {
+  // captureSelection 异步 emit；等待本轮新增的非空 selection 事件，避免 CI 调度竞态。
+  const emitted = () => wrapper.emitted("selection")?.filter((event) => event[0]) ?? [];
+  const known = emitted().length;
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(
+    editor.state.doc, 9, 9 + length,
+  )));
+  selectDomRange(wrapper.get(".canvas-editor p").element.firstChild, length);
   await wrapper.vm.recaptureSelection();
+  await vi.waitUntil(() => emitted().length > known, { interval: 20 });
   await nextTick();
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function candidate(context, mode, text = "候选正文") {
