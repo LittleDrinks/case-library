@@ -147,6 +147,7 @@ async function expectSearchPageRequest(page, kind, hasCursor) {
   const response = await page.waitForResponse((candidate) => {
     const url = new URL(candidate.url());
     return url.pathname === "/api/search"
+      && candidate.status() !== 503
       && url.searchParams.get("kind") === kind
       && url.searchParams.has("cursor") === hasCursor;
   });
