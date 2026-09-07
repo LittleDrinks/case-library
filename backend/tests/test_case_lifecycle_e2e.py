@@ -165,8 +165,10 @@ def _rollback(owner, csrf: str, case_id: str, case: dict, target_id: str) -> dic
 def assert_lifecycle_history(owner, case_id: str) -> None:
     history = request(owner, "GET", f"/api/cases/{case_id}/history")[1]
     assert [version["number"] for version in history["versions"]] == [1, 2]
+    # 审核结论前撤回：首轮 submit→start 后作者 withdraw，再重投并重新开始审核。
     assert [event["action"] for event in history["events"]] == [
         "submit",
+        "start",
         "withdraw",
         "submit",
         "start",

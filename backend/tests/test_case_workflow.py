@@ -344,6 +344,52 @@ def test_reviewer_returns_without_annotations_and_owner_sees_reason(
     assert view["availableActions"] == ["submit", "snapshot", "rollback"]
 
 
+def _review_annotation(client, admin, case):
+    response = client.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": admin["csrfToken"]},
+        json={
+            "quote": "供应中断周期不明",
+            "section": "情境设定与前提假设",
+            "content": "请明确对应的课程目标。",
+            "source": "admin",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def _mine_card(client, case_id):
+    rows = client.get("/api/cases?scope=mine").json()
+    return next(row for row in rows if row["id"] == case_id)
+
+
+def test_mine_list_surfaces_return_feedback_until_resubmit(client: TestClient) -> None:
+    _admin, case, _submitted, started = _review_round(client)
+    admin = _relogin(client, "admin", "admin123")
+    _review_annotation(client, admin, started["case"])
+    _decide(client, admin, started, "reject", reasonType="证据不足")
+    owner = _relogin(client)
+    card = _mine_card(client, case["id"])
+    assert card["lastReview"]["action"] == "reject"
+    assert card["lastReview"]["reasonType"] == "证据不足"
+    assert card["pendingAnnotationCount"] == 1
+    owner = _relogin(client)
+    current = client.get(f"/api/cases/{case['id']}").json()
+    _submit_case(client, owner, current)
+    card = _mine_card(client, case["id"])
+    assert card["lastReview"] is None
+    assert card["pendingAnnotationCount"] == 0
+
+
+def test_public_views_never_expose_review_feedback(client: TestClient) -> None:
+    _admin, approved = publish_seed_case(client)
+    public = client.get("/api/cases/c-draft-1/public").json()
+    assert "lastReview" not in public
+    assert "pendingAnnotationCount" not in public
+    assert approved["case"]["workflowStatus"] == "published"
+
+
 def test_whitespace_only_return_reason_is_rejected(client: TestClient) -> None:
     _admin, case, submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")

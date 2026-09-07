@@ -156,11 +156,28 @@ def _list_public_cases(database: Database) -> list[dict]:
     return [case_card(_reader_view(database, case, None)) for case in rows]
 
 
+def _pending_annotation_count(database: Database, last_review: dict | None) -> int:
+    ids = (last_review or {}).get("annotationIds") or []
+    if not ids:
+        return 0
+    query = {"id": {"$in": ids}, "status": "pending"}
+    return database.annotations.count_documents(query)
+
+
+def _my_case_card(database: Database, case: dict, user: dict) -> dict:
+    """作者自己的卡片：退回意见与待处理批注仅在此列表可见，公开视图不带。"""
+    card = case_card(case, include_owner=True, user=user)
+    last_review = case.get("lastReview")
+    card["lastReview"] = last_review
+    card["pendingAnnotationCount"] = _pending_annotation_count(database, last_review)
+    return card
+
+
 def _list_my_cases(database: Database, user: dict | None) -> list[dict]:
     if not user:
         raise CaseError(401, "请先登录")
     rows = database.cases.find({"ownerId": user["id"]}).sort("updatedAt", DESCENDING)
-    return [case_card(case, include_owner=True, user=user) for case in rows]
+    return [_my_case_card(database, case, user) for case in rows]
 
 
 def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
