@@ -1,9 +1,8 @@
-"""Run 能力装配：平台领域工具常驻，已发布 Skill 按需补充指令与资源读取。
+"""Run 能力装配：选中已发布 Skill 时延迟加载正文与资源。
 
-检索与修订等领域工具始终可用，与是否选择 Skill 无关；管理员发布的
-Skill 通过 bound_skill_capability 延迟加载正文与资源，读取工具闭包
-绑定 Run 创建时解析的版本快照，发布变化不影响进行中的 Run，Skill
-指令也不新增工具权限。
+能力仅在教师选择了 Skill 的 Run 注册，包含既有平台工具（检索、修订）
+与按需资源读取；正文与资源来自 Run 创建时固化的版本快照，发布变化
+不影响进行中的 Run，Skill 指令也不新增工具权限。
 """
 
 from __future__ import annotations
@@ -19,8 +18,6 @@ from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import search_corpus
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
-
-DOMAIN_CAPABILITY_ID = "platform-tools"
 
 
 async def propose_revision(
@@ -53,18 +50,13 @@ def _artifact_view(artifact) -> dict:
     }
 
 
-def domain_capability() -> Capability:
-    """平台领域能力：检索与修订工具常驻，不依赖是否选择 Skill。"""
-    return Capability(id=DOMAIN_CAPABILITY_ID, tools=[search_corpus, propose_revision])
-
-
 def bound_skill_capability(bound: BoundSkill) -> Capability:
-    """已发布 Skill 的延迟加载能力：描述进目录，正文与资源加载后可见。"""
+    """已发布 Skill 的延迟加载能力：描述进目录，加载后正文、工具与资源可用。"""
     return Capability(
         id=bound.skill_id,
         description=bound.description,
         instructions=skill_instructions(bound),
-        tools=[resource_tool(bound)],
+        tools=[search_corpus, propose_revision, resource_tool(bound)],
         defer_loading=True,
     )
 

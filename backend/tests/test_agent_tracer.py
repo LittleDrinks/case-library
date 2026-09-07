@@ -1,4 +1,4 @@
-"""最小单段修订 tracer：生产 Agent + 领域工具 + Artifact 领域路径。"""
+"""最小单段修订 tracer：生产 Agent + 已发布 Skill 按需加载 + Artifact 领域路径。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.modules.agent.runtime import agent
 from tests.agent_tracer import REPLACEMENT, tracer_model
+from tests.skill_packages import SKILL_ID, build_package
 from app.modules.search.meilisearch import CatalogPage
 
 CASES_PATH = "/api/cases"
@@ -61,7 +62,7 @@ def _thread_path(case_id: str) -> str:
     return f"{CASES_PATH}/{case_id}/agent/thread"
 
 
-def _message_parts(text: str, skill_id: str | None = None) -> list[dict]:
+def _message_parts(text: str, skill_id: str | None = SKILL_ID) -> list[dict]:
     parts = [{"type": "text", "text": text}]
     if skill_id:
         parts.append({"type": "data-skill", "data": {"skillId": skill_id}})
@@ -69,7 +70,7 @@ def _message_parts(text: str, skill_id: str | None = None) -> list[dict]:
 
 
 def _send(client: TestClient, auth: dict, case_id: str, text: str, model=None,
-          skill_id: str | None = None):
+          skill_id: str | None = SKILL_ID):
     with agent.override(model=model or tracer_model()):
         thread_id = client.get(_thread_path(case_id)).json()["id"]
         return client.post(
@@ -97,9 +98,27 @@ HIT = {
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
 
 
+def _publish_skill(client: TestClient) -> dict:
+    """管理员上传并发布 v2.1 用户包，返回版本凭据。"""
+    admin = _login(client, "admin", "admin123")
+    response = client.post(
+        "/api/admin/skills/packages", headers=_csrf(admin),
+        files={"file": ("skill.zip", build_package(), "application/zip")},
+    )
+    assert response.status_code == 201, response.text
+    version = response.json()["version"]
+    publish = client.post(
+        f"/api/admin/skills/{SKILL_ID}/publish", headers=_csrf(admin),
+        json={"versionId": version["id"]},
+    )
+    assert publish.status_code == 200, publish.text
+    return version
+
+
 @pytest.fixture
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
     with agent.override(model=tracer_model()):
@@ -135,17 +154,21 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
         if part["type"].startswith("tool-")
     ]
     assert [part["type"] for part in tool_parts] == [
-        "tool-search_corpus", "tool-propose_revision",
+        "tool-load_capability", "tool-search_corpus", "tool-propose_revision",
     ]
-    assert tool_parts[0]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[1]["output"]["artifactId"]
+    assert tool_parts[1]["output"]["sources"][0]["id"] == HIT["id"]
+    assert tool_parts[2]["output"]["artifactId"]
 
 
-def test_run_records_resource_hash_without_skill(client: TestClient, tracer_case) -> None:
+def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
     database = client.app.state.database
     run = database.agent_runs.find_one({}, {"_id": 0})
+    version = database.skill_versions.find_one({"skillId": SKILL_ID}, {"_id": 0})
     kinds = {record["kind"]: record for record in run["resources"]}
-    assert set(kinds) == {"system-prompt", "task-prompt"}
+    assert kinds["skill"] == {
+        "kind": "skill", "id": SKILL_ID,
+        "version": version["version"], "contentHash": version["packageSha256"],
+    }
     assert kinds["system-prompt"]["contentHash"]
 
 
@@ -253,7 +276,7 @@ def test_snapshot_restores_artifact_and_decision(client: TestClient, tracer_case
     assert snapshot["artifacts"][0]["status"] == "accepted"
     assert snapshot["latestRun"]["status"] == "completed"
     resources = {row["kind"] for row in snapshot["latestRun"]["resources"]}
-    assert resources == {"system-prompt", "task-prompt"}
+    assert resources == {"system-prompt", "task-prompt", "skill"}
 
 
 def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:
