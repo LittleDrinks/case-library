@@ -123,6 +123,21 @@ it("案例切换后忽略旧案例的批注加载结果", async () => {
   expect(wrapper.text()).not.toContain("旧案例批注");
 });
 
+it("创建成功后刷新失败仍显示已保存批注且不能重复提交空输入", async () => {
+  api.listAnnotations.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("批注加载失败"));
+  const wrapper = await mountPanel();
+  await wrapper.get('[aria-label="批注内容"]').setValue("请补充依据");
+  const addButton = wrapper.findAll("button").find((button) => button.text() === "添加批注");
+  await addButton.trigger("click");
+  await flushPromises();
+  expect(wrapper.findAll(".comment-card")).toHaveLength(1);
+  expect(wrapper.text()).toContain("原始批注");
+  expect(wrapper.text()).toContain("批注加载失败");
+  expect(wrapper.get('[aria-label="批注内容"]').element.value).toBe("");
+  await addButton.trigger("click");
+  expect(api.createAnnotation).toHaveBeenCalledTimes(1);
+});
+
 it("作者可以编辑并删除自己的未解决批注", async () => {
   api.listAnnotations.mockResolvedValue([annotation]);
   const wrapper = await mountPanel();

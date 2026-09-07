@@ -69,6 +69,12 @@ function createPayload() {
   };
 }
 
+function showCreated(annotation) {
+  annotations.value = [...annotations.value.filter((row) => row.id !== annotation.id), annotation];
+  content.value = "";
+  announce();
+}
+
 async function addAnnotation() {
   if (!canCreate.value || !content.value.trim() || saving.value) return;
   const caseId = props.caseRecord.id;
@@ -76,9 +82,9 @@ async function addAnnotation() {
   saving.value = true;
   error.value = "";
   try {
-    await api.createAnnotation(caseId, payload, props.user.csrfToken);
+    const created = await api.createAnnotation(caseId, payload, props.user.csrfToken);
     if (caseId !== props.caseRecord.id) return;
-    content.value = "";
+    showCreated(created);
     await loadAnnotations();
   } catch (caught) {
     if (caseId === props.caseRecord.id) error.value = caught.message || "批注添加失败";
