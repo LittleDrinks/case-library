@@ -1,7 +1,7 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { useAgentChat } from "../composables/useAgentChat.js";
+import { CASE_EDIT_SKILL_ID, useAgentChat } from "../composables/useAgentChat.js";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -10,16 +10,20 @@ const props = defineProps({
 });
 const emit = defineEmits(["case-revised"]);
 
+const BUILTIN_SKILL_LABEL = "单段修订工作流 v2.1";
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, textParts, send, stop, retry,
   decide, artifacts, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread,
+  skills, selectedSkillId, catalog, reloadCatalog, skillReady,
 } = useAgentChat(props.caseRecord.id);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
-const canSend = computed(() => Boolean(draft.value.trim() && configured.value && !loading.value && !sending.value));
+const canSend = computed(() => Boolean(
+  draft.value.trim() && configured.value && skillReady.value && !loading.value && !sending.value,
+));
 const decideError = ref("");
 
 const mode = ref("chat");
@@ -103,6 +107,24 @@ function statusText() {
 
 function toolParts(message) {
   return (message.parts || []).filter((part) => part.type.startsWith("tool-"));
+}
+
+function skillName(skillId) {
+  if (skillId === CASE_EDIT_SKILL_ID) return BUILTIN_SKILL_LABEL;
+  return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
+}
+
+function skillOptionLabel(skill) {
+  return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
+}
+
+function skillLoadLabel(part) {
+  const id = part.output?.name || part.output?.skillId || part.input?.id || "";
+  return id ? `已加载 Skill：${skillName(id)}` : "已加载 Skill";
+}
+
+function skillParts(message) {
+  return (message.parts || []).filter((part) => part.type === "data-skill");
 }
 
 function sourcesOf(part) {
@@ -207,13 +229,19 @@ async function retryRun() {
             <b>{{ message.role === "user" ? "我" : "AI" }}</b>
             <p v-if="textParts(message)">{{ textParts(message) }}</p>
           </article>
+          <p
+            v-for="(part, index) in skillParts(message)"
+            :key="`${message.id}-skill-${index}`"
+            class="ai-skill-chip"
+            data-testid="message-skill"
+          >使用 Skill：{{ skillName(part.data?.skillId) }}</p>
           <template v-if="message.role === 'assistant'">
             <p
               v-for="part in toolParts(message).filter((item) => item.type === 'tool-load_capability')"
               :key="part.toolCallId"
               class="agent-tool-trace"
               data-testid="agent-skill-load"
-            >已加载 Skill：单段修订工作流 v2.1</p>
+            >{{ skillLoadLabel(part) }}</p>
             <div
               v-for="part in toolParts(message).filter((item) => item.type === 'tool-search_corpus')"
               :key="part.toolCallId"
@@ -258,6 +286,27 @@ async function retryRun() {
           </div>
         </div>
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
+      </div>
+      <div class="assistant-skill-picker">
+        <label for="agent-skill-select">Skill</label>
+        <select
+          id="agent-skill-select"
+          v-model="selectedSkillId"
+          aria-label="选择 Skill"
+          data-testid="skill-select"
+          :disabled="loading || sending || catalog === 'loading'"
+        >
+          <option :value="CASE_EDIT_SKILL_ID">平台内置（单段修订）</option>
+          <option v-for="skill in skills" :key="skill.id" :value="skill.id">
+            {{ skillOptionLabel(skill) }}
+          </option>
+        </select>
+        <span v-if="catalog === 'loading'" class="skill-catalog-state" data-testid="skill-catalog-loading">正在加载目录</span>
+        <template v-else-if="catalog === 'error'">
+          <span class="skill-catalog-state error" data-testid="skill-catalog-error">目录加载失败</span>
+          <button type="button" class="skill-catalog-retry" data-testid="skill-catalog-retry" @click="reloadCatalog">重试</button>
+        </template>
+        <span v-else-if="!skills.length" class="skill-catalog-state" data-testid="skill-catalog-empty">暂无已发布 Skill</span>
       </div>
       <div class="assistant-composer">
         <textarea
