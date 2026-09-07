@@ -20,6 +20,7 @@ def _account(row: dict[str, str]) -> dict:
         "role": row["role"],
         "status": row["status"],
         "must_change_password": row["must_change_password"] == "true",
+        "campus_verified": row.get("campus_verified", "false") == "true",
         "token_version": 0,
     }
 
