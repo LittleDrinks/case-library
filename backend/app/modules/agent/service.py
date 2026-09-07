@@ -45,6 +45,7 @@ class RunContext:
     deps: ToolDeps | None = None
     capabilities: list | None = None
     bounds: tuple = ()
+    instructions: str = ""
     reader: bool = False
     cancelled: bool = False
     failed: bool = False
@@ -58,7 +59,9 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
-        "instructions": case_instructions(context.case, context.reader),
+        "instructions": case_instructions(
+            context.case, extra=context.instructions, reader=context.reader
+        ),
         "user_prompt": context.prompt,
         "deps": context.deps,
         "cancellation_token": context.token,
@@ -158,8 +161,7 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
 def _run_resources(parts: list[dict], bounds: tuple = (), reader=False) -> list[dict[str, str]]:
     records = [resource_record(SYSTEM_PROMPT), resource_record(READER_PROMPT if reader else TASK_PROMPT)]
     loaded = set(_loaded_capability_ids(parts))
-    records += [bound.resource_record() for bound in bounds if bound.skill_id in loaded]
-    return records
+    return [*records, *[bound.resource_record() for bound in bounds if bound.skill_id in loaded]]
 
 
 def _assistant_ui(context: RunContext, result):

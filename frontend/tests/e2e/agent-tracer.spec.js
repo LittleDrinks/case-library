@@ -85,7 +85,7 @@ async function openChat(page, caseId) {
 }
 
 async function expandSearchTool(page) {
-  const search = page.locator('[data-testid="agent-skill-load"]').filter({ hasText: "检索案例" });
+  const search = page.locator('[data-testid="agent-tool-trace"]').filter({ hasText: "检索案例" });
   await expect(search).toBeVisible();
   if (await search.getAttribute("open")) return;
   await search.locator("summary").click();
@@ -112,6 +112,7 @@ async function sendSelection(page) {
   const requestPromise = page.waitForRequest((request) => (
     request.method() === "POST" && new URL(request.url()).pathname.endsWith("/stream")
   ));
+  await page.getByLabel("向 AI 提问").fill(REQUEST_TEXT);
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const payload = (await requestPromise).postDataJSON();
   expect(payload.messages[0].parts).toContainEqual({ type: "data-skill", data: { skillId: SKILL_ID } });
@@ -122,7 +123,6 @@ async function sendSelection(page) {
 
 async function sendRequest(page) {
   await selectCanvasTarget(page);
-  await page.getByLabel("向 AI 提问").fill(REQUEST_TEXT);
   await sendSelection(page);
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toBeVisible({ timeout: 30_000 });
@@ -139,7 +139,6 @@ async function acceptedViaApi(page, caseId) {
 async function reloadRestoresTracer(page, caseId) {
   await page.reload();
   await openChat(page, caseId);
-  await expect(page.getByTestId("agent-skill-load")).toBeVisible();
   await expect(page.getByTestId("agent-skill-load")).toBeVisible();
   await expandSearchTool(page);
   await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");

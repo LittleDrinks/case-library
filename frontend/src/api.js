@@ -100,6 +100,7 @@ export const api = {
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
+  listSkills: () => request("/api/skills"),
   agentThread: (caseId, threadId, versionId) => request(
     threadId
       ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
@@ -148,7 +149,6 @@ export const api = {
     `/api/admin/skills/${encodeURIComponent(id)}/publish`,
     jsonOptions("POST", { versionId }, csrfToken),
   ),
-  listSkills: () => request("/api/skills"),
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,
   ),

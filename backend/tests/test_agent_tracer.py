@@ -108,18 +108,18 @@ def _seed_source_case(database) -> None:
     """检索命中来源落库为真实已发布案例，供接受前证据复验。"""
     database.cases.insert_one({
         "id": HIT["id"], "ownerId": "u-source", "publicationStatus": "public",
-        "workflowStatus": "published", "publishedVersionId": "cv-hit-1",
+        "workflowStatus": "published", "publishedVersionId": "hit-v1",
         "revision": 1, "title": HIT["title"],
         "document": {"type": "doc", "content": []},
     })
     database.case_versions.insert_one({
-        "id": "cv-hit-1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
-        "document": {"type": "doc", "content": []},
+        "id": "hit-v1", "caseId": HIT["id"], "number": 1, "title": HIT["title"],
+        "document": _document("平台资料正文"),
     })
 
 
 def _tracer():
-    return tracer_model(selection=SELECTION)
+    return tracer_model(skill_id=SKILL_ID, selection=SELECTION)
 
 
 def _publish_skill(client: TestClient) -> dict:
@@ -142,8 +142,8 @@ def _publish_skill(client: TestClient) -> dict:
 @pytest.fixture
 def tracer_case(client: TestClient) -> dict:
     client.app.state.search_catalog = StubCatalog([HIT])
-    _publish_skill(client)
     _seed_source_case(client.app.state.database)
+    _publish_skill(client)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
     with agent.override(model=_tracer()):
@@ -163,7 +163,8 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
-        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": HIT["summary"],
+        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": "",
+        "version": "v1", "versionId": "hit-v1", "location": "case:c-42@hit-v1",
     }]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)
@@ -181,11 +182,12 @@ def test_tracer_creates_pending_artifact_without_touching_body(client: TestClien
     ]
     assert [part["type"] for part in tool_parts] == [
         "tool-load_capability", "tool-read_skill_resource_sizheng_case_generator",
-        "tool-search_corpus", "tool-propose_revision",
+        "tool-search_corpus", "tool-read_source", "tool-propose_revision",
     ]
     assert tool_parts[1]["output"] == {"path": EXAMPLE_PATH, "content": EXAMPLE_TEXT}
-    assert tool_parts[2]["output"]["sources"][0]["id"] == HIT["id"]
-    assert tool_parts[3]["output"]["artifactId"]
+    assert tool_parts[3]["output"]["usedSourceRef"]["id"] == HIT["id"]
+    assert tool_parts[3]["output"]["content"] == "平台资料正文"
+    assert tool_parts[4]["output"]["artifactId"]
 
 
 def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> None:
@@ -204,6 +206,35 @@ def test_run_records_resource_id_and_hash(client: TestClient, tracer_case) -> No
         "search_corpus", "propose_revision",
     }
     assert all(timing.get("startedAt") and timing.get("finishedAt") for timing in timings)
+
+
+def test_reopen_redacts_sources_that_lost_access(client: TestClient, tracer_case) -> None:
+    database = client.app.state.database
+    database.cases.update_one({"id": HIT["id"]}, {"$set": {"publicationStatus": "private"}})
+    snapshot = client.get(_thread_path(tracer_case["id"])).json()
+    parts = [part for message in snapshot["messages"] for part in message["parts"]]
+    read = next(part for part in parts if part["type"] == "tool-read_source")
+    search = next(part for part in parts if part["type"] == "tool-search_corpus")
+    assert read["output"] == {"status": "no_access", "detail": "来源当前不可读"}
+    assert search["output"]["sources"] == []
+
+
+def test_run_binds_selected_published_skill(client: TestClient) -> None:
+    client.app.state.search_catalog = StubCatalog([HIT])
+    _publish_skill(client)
+    auth = _login(client)
+    case = _create_case(client, auth, *PARAGRAPHS)
+    _seed_source_case(client.app.state.database)
+    response = _send(
+        client, auth, case["id"], "请使用能力修订第2段",
+        model=tracer_model(skill_id=SKILL_ID, selection=SELECTION), skill_id=SKILL_ID,
+    )
+    assert response.status_code == 200, response.text
+    run = client.app.state.database.agent_runs.find_one({}, {"_id": 0})
+    version = client.app.state.database.skill_versions.find_one({"skillId": SKILL_ID})
+    assert run["skillBindings"] == [{"kind": "skill", "id": SKILL_ID,
+                                     "versionId": version["id"], "version": version["version"]}]
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt", "skill"}
 
 
 def _assert_delayed_skill(calls: list) -> None:
@@ -227,7 +258,10 @@ def test_skill_body_enters_context_only_after_load(client: TestClient) -> None:
     _publish_skill(client)
     auth = _login(client)
     case = _create_case(client, auth, *PARAGRAPHS)
-    response = _send(client, auth, case["id"], "请修订第2段", model=tracer_model(recorder, selection=SELECTION))
+    response = _send(
+        client, auth, case["id"], "请修订第2段",
+        model=tracer_model(recorder, skill_id=SKILL_ID, selection=SELECTION),
+    )
     assert response.status_code == 200, response.text
     _assert_delayed_skill(calls)
 

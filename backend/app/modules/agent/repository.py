@@ -289,7 +289,8 @@ class AgentRepository:
             raise ActiveRunError
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
-            skill_bindings, base_revision, target, session,
+            skill_bindings,
+            base_revision, target, session,
         )
 
     def _insert_retry_run(

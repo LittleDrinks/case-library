@@ -11,6 +11,7 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
+SEARCH_SOURCE_ID = "c-42"
 TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
 TRACER_SELECTION = (11, 30)
@@ -28,22 +29,27 @@ def _tool_calls(messages) -> list[str]:
     ]
 
 
-def tracer_response(messages, _info=None, selection: tuple[int, int] | None = None) -> ModelResponse:
-    """按已发生的工具调用推进：加载 Skill → 检索 → 提议 → 结束。"""
+def _tool_response(name: str, args: dict) -> ModelResponse:
+    return ModelResponse(parts=[ToolCallPart(tool_name=name, args=args)])
+
+
+def tracer_response(messages, _info=None, skill_id: str | None = None,
+                    selection: tuple[int, int] | None = None) -> ModelResponse:
+    """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
     called = _tool_calls(messages)
-    if "load_capability" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="load_capability", args={"id": SKILL_ID})])
-    if RESOURCE_TOOL not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name=RESOURCE_TOOL, args={"path": EXAMPLE_PATH})])
+    if skill_id and "load_capability" not in called:
+        return _tool_response("load_capability", {"id": skill_id})
+    if skill_id and RESOURCE_TOOL not in called:
+        return _tool_response(RESOURCE_TOOL, {"path": EXAMPLE_PATH})
     if "search_corpus" not in called:
-        return ModelResponse(parts=[ToolCallPart(tool_name="search_corpus", args={"query": SEARCH_QUERY})])
+        return _tool_response("search_corpus", {"query": SEARCH_QUERY})
+    if "read_source" not in called:
+        return _tool_response("read_source", {"source_type": "case", "source_id": SEARCH_SOURCE_ID})
     if "propose_revision" not in called:
         start, end = selection or TRACER_SELECTION
-        return ModelResponse(parts=[ToolCallPart(tool_name="propose_revision", args={
-            "start": start, "end": end,
-            "replacement": REPLACEMENT,
-            "reason": REASON,
-        })])
+        return _tool_response("propose_revision", {
+            "start": start, "end": end, "replacement": REPLACEMENT, "reason": REASON,
+        })
     return ModelResponse(parts=[TextPart(content="已生成单段修订候选，等待作者决定。")])
 
 
@@ -59,9 +65,9 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
             yield {0: delta}
 
 
-def tracer_model(recorder: Callable | None = None,
+def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,
                  selection: tuple[int, int] | None = None) -> FunctionModel:
-    """同一生产 Agent 使用的确定性模型装配，依次加载 Skill、检索与提议。
+    """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
 
     recorder 每次模型请求收到 (messages, info)，供测试断言消息与 instructions 通道。
     """
@@ -69,7 +75,9 @@ def tracer_model(recorder: Callable | None = None,
     async def stream(messages, info):
         if recorder:
             recorder(messages, info)
-        async for delta in _stream_deltas(tracer_response(messages, info, selection)):
+        async for delta in _stream_deltas(
+            tracer_response(messages, info, skill_id, selection)
+        ):
             yield delta
 
     return FunctionModel(stream_function=stream)

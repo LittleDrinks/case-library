@@ -21,14 +21,10 @@ from app.modules.agent.models import (
     SourceRef,
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
-from app.modules.agent.repository import (
-    AgentRepository,
-    expired_artifact_view,
-    transaction,
-)
+from app.modules.agent.repository import AgentRepository, expired_artifact_view, transaction
+from app.modules.agent.source_reader import revalidate_sources
 from app.modules.cases.service import CaseError, case_view
 from app.modules.cases.snapshots import record_snapshot
-from app.modules.materials.service import can_read_material
 
 
 def _now() -> datetime:
@@ -119,7 +115,8 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
     _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
     if decision == "accepted":
-        _validate_evidence(database, user, artifact)
+        if not revalidate_sources(database, user, case_id, artifact.sources):
+            raise CaseError(409, "修订依据当前不可读，候选已过期")
         case = _apply_revision(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
 
@@ -133,51 +130,6 @@ def _decidable_run(database, artifact: AgentArtifact, decision: ArtifactDecision
         raise CaseError(409, "修订候选所在运行尚未结束，暂不能决定")
     if decision == "accepted" and status in ("cancelled", "failed"):
         raise CaseError(409, "运行已取消或失败，修订候选不能接受")
-
-
-def _validate_evidence(database, user, artifact: AgentArtifact) -> None:
-    """接受前复验每个来源：按当前身份仍可读且未下线，否则拒绝接受。"""
-    for ref in artifact.sources:
-        if not _evidence_readable(database, user, ref):
-            raise CaseError(409, "引用来源已不可读或已下线，修订候选不能接受")
-
-
-def _evidence_readable(database, user, ref: SourceRef) -> bool:
-    readers = {
-        "case": _case_evidence_readable,
-        "knowledge": _knowledge_evidence_readable,
-        "material": _material_evidence_readable,
-    }
-    return readers[ref.kind](database, user, ref)
-
-
-def _case_evidence_readable(database, user, ref: SourceRef) -> bool:
-    """案例证据按当前已发布版本复验：公开或内部身份，且发布版本仍存在。"""
-    case = database.cases.find_one({"id": ref.id})
-    internal = bool(case and user and (
-        user["role"] == "admin" or case.get("ownerId") == user["id"]
-    ))
-    if not case or (case.get("publicationStatus") != "public" and not internal):
-        return False
-    version_id = case.get("publishedVersionId")
-    return bool(version_id) and database.case_versions.find_one(
-        {"id": version_id, "caseId": case["id"]}
-    ) is not None
-
-
-def _knowledge_evidence_readable(database, user, ref: SourceRef) -> bool:
-    section = database.knowledge_sections.find_one({"id": ref.id})
-    if not section:
-        return False
-    source = database.knowledge_sources.find_one(
-        {"id": section.get("sourceId"), "status": "active"}
-    )
-    return source is not None
-
-
-def _material_evidence_readable(database, user, ref: SourceRef) -> bool:
-    material = database.materials.find_one({"id": ref.id, "status": "active"})
-    return material is not None and can_read_material(material, user)
 
 
 def _existing_thread(database, case_id, thread_id, user, session) -> None:

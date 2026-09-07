@@ -8,7 +8,7 @@ vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
     agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
-    getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(),
+    getCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
   },
 }));
 
@@ -52,7 +52,7 @@ function answerResponse() {
 
 function mountPanel(overrides = {}) {
   return mount(AgentChatPanel, {
-    props: { caseRecord: { id: "case-1" }, ...overrides },
+    props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
     global: { stubs: { RouterLink: true } },
   });
 }
@@ -63,6 +63,7 @@ beforeEach(() => {
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
+  api.listSources.mockResolvedValue({ entries: [] });
   api.listSkills.mockResolvedValue([
     { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
   ]);
@@ -92,8 +93,27 @@ it("restores the server thread and sends one turn through the SDK transport", as
   expect(headers.get("X-CSRF-Token")).toBe("csrf");
   expect(body.trigger).toBe("submit-message");
   expect(body.messages.at(-1).parts[0].text).toBe("当前问题");
-  expect(body.messages.at(-1).parts).toHaveLength(1);
+  expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "当前问题" }]);
   expect(wrapper.text()).toContain("确定回答");
+});
+
+it("sends selected sources and the current writing selection as data parts", async () => {
+  api.listSources.mockResolvedValue({ entries: [{ sourceType: "case", id: "src-1", title: "来源一" }] });
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({ writingContext: {
+    from: 1, to: 4, quote: "第二段", sameBlock: true,
+  } });
+  await flushPromises();
+  await wrapper.get(".agent-source-picker-toggle").trigger("click");
+  await wrapper.get(".agent-source-option input").setValue(true);
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("结合来源");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.messages.at(-1).parts.map((part) => part.type)).toEqual([
+    "text", "data-source", "data-selection",
+  ]);
 });
 
 it("reader discussion binds its version and does not send an edit Skill", async () => {
@@ -115,7 +135,6 @@ it("carries the selected published skill id and shows the catalog options", asyn
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountPanel();
   await flushPromises();
-
   const select = wrapper.get('[data-testid="skill-select"]');
   expect(select.findAll("option").at(0).text()).toBe("不使用 Skill");
   expect(select.findAll("option").at(1).text()).toContain("思政案例生成（v1）");
@@ -242,7 +261,9 @@ it("reconciles a withdrawn skill when the catalog arrives before the thread", as
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-  expect(sentRequest(fetch).body.messages.at(-1).parts).toHaveLength(1);
+  expect(sentRequest(fetch).body.messages.at(-1).parts).toEqual([
+    { type: "text", text: "当前问题" },
+  ]);
 });
 
 it("keeps the server skill through a failed catalog and restores it on retry", async () => {
@@ -277,7 +298,7 @@ it("shows an empty catalog state and still sends plain chat", async () => {
   await flushPromises();
 
   const body = JSON.parse(fetch.mock.calls[0][1].body);
-  expect(body.messages.at(-1).parts).toHaveLength(1);
+  expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "当前问题" }]);
 });
 
 it("shows SDK request errors without a client stop or reconnect control", async () => {
@@ -433,7 +454,7 @@ it("renders assistant parts in structural order with running tools expanded", as
   expect(text.indexOf("思考中")).toBeLessThan(text.indexOf("检索案例 · 进行中"));
   expect(text.indexOf("检索案例 · 进行中")).toBeLessThan(text.indexOf("已加载 Skill"));
   expect(text.indexOf("已加载 Skill")).toBeLessThan(text.indexOf("结论"));
-  const traces = wrapper.findAll('[data-testid="agent-skill-load"]');
+  const traces = wrapper.findAll(".agent-tool-trace");
   expect(traces[0].classes()).toContain("running");
   expect(traces[0].attributes("open")).toBeDefined();
   expect(traces[1].attributes("open")).toBeUndefined();
@@ -481,7 +502,7 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
   await flushPromises();
 
   expectSourceCards(wrapper);
-  const failed = wrapper.findAll('[data-testid="agent-skill-load"]')[1];
+  const failed = wrapper.get('[data-testid="agent-source-read"]');
   expect(failed.text()).toContain("阅读来源 · 读取失败");
 });
 
@@ -547,7 +568,7 @@ it("renders unknown tools by name without exposing raw arguments", async () => {
   const wrapper = mountPanel();
   await flushPromises();
 
-  const trace = wrapper.get('[data-testid="agent-skill-load"]');
+  const trace = wrapper.get('[data-testid="agent-tool-trace"]');
   expect(trace.text()).toContain("future_tool · 已完成");
   expect(trace.text()).not.toContain("内部参数");
   expect(trace.find("pre").exists()).toBe(false);
@@ -558,7 +579,7 @@ it("hides tool duration for restored snapshots without live timing", async () =>
   const wrapper = mountPanel();
   await flushPromises();
 
-  const summaries = wrapper.findAll('[data-testid="agent-skill-load"] summary span');
+  const summaries = wrapper.findAll(".agent-tool-trace summary span");
   for (const summary of summaries) expect(summary.text()).not.toMatch(/\d+(\.\d+)?s/);
 });
 
@@ -581,7 +602,7 @@ it("does not invent tool duration from streamed UI events", async () => {
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("查资料");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).not.toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
+  expect(wrapper.get('[data-testid="agent-tool-trace"]').text()).not.toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
 });
 
 it("renders persisted tool duration by tool call id", async () => {
@@ -592,7 +613,7 @@ it("renders persisted tool duration by tool call id", async () => {
   api.agentThread.mockResolvedValue(tracer);
   const wrapper = mountPanel();
   await flushPromises();
-  const searchTrace = wrapper.findAll('[data-testid="agent-skill-load"]')
+  const searchTrace = wrapper.findAll('[data-testid="agent-tool-trace"]')
     .find((trace) => trace.text().includes("检索案例"));
   expect(searchTrace.text()).toContain("检索案例 · 已完成 · 2.5s");
 });
@@ -698,7 +719,6 @@ it("renders failed resource reads from the UI tool protocol", async () => {
   await flushPromises();
   expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
 });
-
 function resourceFeed() {
   let controller;
   const encoder = new TextEncoder();

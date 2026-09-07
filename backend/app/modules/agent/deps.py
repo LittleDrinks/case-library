@@ -19,5 +19,11 @@ class ToolDeps:
     catalog: object
     catalog_state: object
     secret_path: str
+    store: object = None
+    version_id: str | None = None
     sources: list[SourceRef] = field(default_factory=list)
+    selected: list[dict] = field(default_factory=list)
+    selections: list[dict] = field(default_factory=list)
+    hits: list[SourceRef] = field(default_factory=list)
+    evidence: list[SourceRef] = field(default_factory=list)
     proposed: AgentArtifact | None = None

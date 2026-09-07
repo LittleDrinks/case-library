@@ -10,6 +10,7 @@ import {
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
 import AgentResourceTrace from "./AgentResourceTrace.vue";
+import AgentSourcePicker from "./AgentSourcePicker.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 
 const props = defineProps({
@@ -19,7 +20,7 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised"]);
+const emit = defineEmits(["case-revised", "case-refreshed"]);
 
 const draft = ref("");
 const {
@@ -44,6 +45,7 @@ const canSend = computed(() => Boolean(
     && !loading.value && !sending.value && !recovering.value,
 ));
 const decideError = ref("");
+const selectedSources = ref([]);
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
@@ -313,11 +315,16 @@ async function acceptArtifact(artifactId) {
 }
 
 function contextParts() {
+  const parts = selectedSources.value.map((source) => ({
+    type: "data-source", data: { sourceType: source.sourceType, id: source.id },
+  }));
   const selection = props.writingContext;
   const usable = selection?.sameBlock && Number.isInteger(selection.from)
     && Number.isInteger(selection.to) && selection.to > selection.from;
-  if (!usable) return [];
-  return [{ type: "data-selection", data: { from: selection.from, to: selection.to } }];
+  if (usable) {
+    parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to } });
+  }
+  return parts;
 }
 
 async function rejectArtifact(artifactId) {
@@ -423,7 +430,9 @@ async function retryRun() {
                 v-else-if="part.type.startsWith('tool-')"
                 class="agent-tool-trace"
                 :class="{ running: toolRunning(part) }"
-                data-testid="agent-skill-load"
+                :data-testid="part.type === 'tool-load_capability'
+                  ? 'agent-skill-load'
+                  : part.type === 'tool-read_source' ? 'agent-source-read' : 'agent-tool-trace'"
                 :open="toolRunning(part) || undefined"
               >
                 <summary>
@@ -529,6 +538,15 @@ async function retryRun() {
         <span v-else-if="!skills.length" class="skill-catalog-state" data-testid="skill-catalog-empty">暂无已发布 Skill</span>
       </div>
       <div class="assistant-composer">
+        <AgentSourcePicker
+          v-if="!readOnly"
+          :case-id="caseRecord.id"
+          :revision="caseRecord.revision"
+          :selected="selectedSources"
+          :disabled="loading || sending"
+          @update:selected="selectedSources = $event"
+          @case-refreshed="emit('case-refreshed', $event)"
+        />
         <div
           v-if="writingContext?.quote"
           class="assistant-context-summary"
