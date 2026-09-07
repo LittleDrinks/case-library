@@ -79,6 +79,7 @@ def _format_marks(run: Run, node: dict) -> None:
     run.font.strike = "strike" in marks
 
 
+# 相邻同引用属性的文本（即使加粗/斜体不同）只产生一个上标标记。
 def _add_inlines(
     paragraph: Paragraph, nodes: list[dict], font: str, size: int, numbers: dict
 ) -> None:
@@ -92,12 +93,12 @@ def _add_inlines(
         run = paragraph.add_run(text)
         set_run_font(run, font, size)
         _format_marks(run, node)
-        # 相邻同引用属性的文本（即使加粗/斜体不同）只产生一个上标标记。
         runs_on = index + 1 < len(atoms) and atoms[index + 1][2] == key
         if key is None or runs_on:
             continue
         number = numbers.get(key)
-        if number is not None: _add_citation_run(paragraph, number, font, size)
+        if number is not None:
+            _add_citation_run(paragraph, number, font, size)
 
 
 def _add_title(document: DocxDocument, title: str) -> None:
