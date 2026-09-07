@@ -18,6 +18,7 @@ from app.modules.agent.models import (
     TerminalRunStatus,
     ThreadEventType,
 )
+from app.modules.cases.published import version_readable
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -353,16 +354,18 @@ class AgentRepository:
     def complete_run(
         self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
         resources: list[dict[str, str]] | None = None,
+        reader_case_id: str | None = None, reader_version_id: str | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._complete_run(
-                run_id, assistant, session, owner_id, resources
+                run_id, assistant, session, owner_id, resources,
+                reader_case_id, reader_version_id,
             ),
         )
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
-                      resources=None) -> bool:
+                      resources=None, reader_case_id=None, reader_version_id=None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
                 _active_query(run_id, owner_id), session=session
@@ -371,10 +374,33 @@ class AgentRepository:
         )
         if not run:
             return False
+        if reader_case_id and not self._reader_completion_allowed(
+            reader_case_id, reader_version_id, run_id, session
+        ):
+            return self._finish_transaction(
+                run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
+            )
+        return self._complete_records(run, assistant, session, owner_id, resources)
+
+    def _complete_records(self, run, assistant, session, owner_id, resources) -> bool:
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
+
+    def _reader_completion_allowed(self, case_id, version_id, run_id, session) -> bool:
+        case = self.database.cases.find_one_and_update(
+            {"id": case_id}, {"$set": {"_readerCompletionFence": run_id}},
+            return_document=ReturnDocument.AFTER, session=session,
+        )
+        version = self.database.case_versions.find_one(
+            {"id": version_id, "caseId": case_id}, session=session
+        ) if case and version_id else None
+        return bool(
+            case and version and version_readable(
+                self.database, case, version_id, version, False, session=session
+            )
+        )
 
     def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
         self.database.agent_messages.insert_one(

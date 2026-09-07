@@ -32,11 +32,8 @@ class PublishedCaseReader:
 
 
 def version_readable(
-    database: Database,
-    case: dict,
-    version_id: str,
-    version: dict | None,
-    internal: bool,
+    database: Database, case: dict, version_id: str, version: dict | None,
+    internal: bool, session=None,
 ) -> bool:
     """已发布历史版本对普通读者可读；草稿与快照仅内部可见。"""
     if internal:
@@ -48,6 +45,7 @@ def version_readable(
     approved = database.lifecycle_events.find_one(
         {"caseId": case["id"], "action": "approve", "versionId": version_id},
         {"_id": 1},
+        session=session,
     )
     return bool(approved)
 

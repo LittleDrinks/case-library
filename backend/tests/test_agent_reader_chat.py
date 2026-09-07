@@ -11,6 +11,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from app.modules.agent import service
+from app.modules.agent.repository import AgentRepository
 from app.modules.agent.runtime import agent
 from app.modules.agent.skills import reader_capability
 
@@ -354,6 +355,25 @@ def _hide_case(client: TestClient, case_id: str) -> None:
     assert response.status_code == 200
 
 
+def _paused_completion(original, entered: Event, release: Event):
+    def paused(self, *args, **kwargs):
+        assert kwargs["reader_case_id"] == CASE
+        assert kwargs["reader_version_id"] == VERSION
+        entered.set()
+        assert release.wait(10)
+        return original(self, *args, **kwargs)
+
+    return paused
+
+
+def _assert_reader_completion_cancelled(client: TestClient, future) -> None:
+    response = future.result(timeout=15)
+    run = client.app.state.database.agent_runs.find_one({}, {"_id": 0})
+    assert response.status_code == 200 and run["status"] == "cancelled"
+    assert client.app.state.database.agent_messages.count_documents({"role": "assistant"}) == 0
+    assert not client.app.state.database.agent_thread_events.find_one({"type": "run.completed"})
+
+
 def test_reader_stream_is_cancelled_when_publication_is_hidden(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(service, "RUN_HEARTBEAT_SECONDS", 0.01)
     auth = _login(client, READER)
@@ -370,6 +390,22 @@ def test_reader_stream_is_cancelled_when_publication_is_hidden(client: TestClien
         assert response.status_code == 200 and "后半" not in response.text
         assert run["status"] == "cancelled"
         assert client.app.state.database.agent_messages.count_documents({"threadId": thread_id, "role": "assistant"}) == 0
+    finally:
+        release.set()
+        pool.shutdown(wait=True)
+
+
+def test_reader_completion_rechecks_visibility_after_final_check(client, monkeypatch) -> None:
+    entered, release = Event(), Event()
+    original = AgentRepository.complete_run
+    monkeypatch.setattr(AgentRepository, "complete_run", _paused_completion(original, entered, release))
+    future, pool = _reader_post_async(client.app, "尾部撤权测试", TestModel(custom_output_text="回答"))
+    try:
+        assert entered.wait(10)
+        with TestClient(client.app) as admin_client:
+            _hide_case(admin_client, CASE)
+        release.set()
+        _assert_reader_completion_cancelled(client, future)
     finally:
         release.set()
         pool.shutdown(wait=True)
