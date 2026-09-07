@@ -21,6 +21,15 @@ CARD_FIELDS = {
     "purpose",
     "likes",
     "theoryPoints",
+    "availableActions",
+}
+
+
+MINE_CARD_FIELDS = CARD_FIELDS | {
+    "ownerId",
+    "availableActions",
+    "lastReview",
+    "pendingAnnotationCount",
 }
 
 
@@ -63,7 +72,8 @@ def test_my_list_requires_login_and_returns_only_owned_card_summaries(
     rows = response.json()
     assert [row["id"] for row in rows] == ["c-pending-1", "c-draft-1"]
     assert all(row["ownerId"] == "u-user-demo" for row in rows)
-    assert all(row["summary"] and set(row) == CARD_FIELDS | {"ownerId"} for row in rows)
+    assert all(row["summary"] and set(row) == MINE_CARD_FIELDS for row in rows)
+    assert all(row["lastReview"] is None for row in rows)
 
 
 def test_case_list_requires_an_explicit_scope(client: TestClient) -> None:
