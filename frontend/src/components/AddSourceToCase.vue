@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from "vue";
 import { BookMarked, LoaderCircle, X } from "@lucide/vue";
+import { ref } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
@@ -44,12 +44,12 @@ async function resolveRevision(id, revision) {
 }
 
 async function resolveTarget() {
-  if (target.value !== NEW_DRAFT) {
-    const draft = drafts.value.find((item) => item.id === target.value);
-    return { id: draft.id, revision: await resolveRevision(draft.id, draft.revision) };
+  if (target.value === NEW_DRAFT) {
+    const created = await api.createCase({ title: "未命名案例" }, session.csrfToken);
+    return { id: created.id, revision: await resolveRevision(created.id, created.revision) };
   }
-  const created = await api.createCase({ title: "未命名案例" }, session.csrfToken);
-  return { id: created.id, revision: await resolveRevision(created.id, created.revision) };
+  const draft = drafts.value.find((item) => item.id === target.value);
+  return { id: draft.id, revision: await resolveRevision(draft.id, draft.revision) };
 }
 
 async function confirm() {
@@ -74,28 +74,19 @@ async function confirm() {
 </script>
 
 <template>
-  <button class="case-detail-export case-detail-collect" type="button" @click="openDialog">
+  <button class="source-collect" type="button" @click="openDialog">
     <BookMarked :size="16" aria-hidden="true" />加入我的案例
   </button>
   <Teleport to="body">
     <div v-if="open" class="review-decision-backdrop" @mousedown.self="close" @keydown.esc="close">
-      <section
-        class="review-decision-dialog collect-source-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="collect-source-title"
-      >
+      <section class="review-decision-dialog collect-source-dialog" role="dialog" aria-modal="true" aria-labelledby="collect-source-title">
         <header>
           <h2 id="collect-source-title">加入我的案例</h2>
-          <button type="button" title="关闭" aria-label="关闭" :disabled="busy" @click="close">
-            <X :size="18" />
-          </button>
+          <button type="button" title="关闭" aria-label="关闭" :disabled="busy" @click="close"><X :size="18" /></button>
         </header>
         <div v-if="addedCaseId" class="collect-source-done">
           <p>已将「{{ sourceTitle }}」的固定版本加入资料区来源。</p>
-          <RouterLink :to="{ name: 'workbench', params: { id: addedCaseId } }">
-            前往工作台继续编辑
-          </RouterLink>
+          <RouterLink :to="{ name: 'workbench', params: { id: addedCaseId } }">前往工作台继续编辑</RouterLink>
         </div>
         <form v-else @submit.prevent="confirm">
           <p class="collect-source-hint">只加入来源条目，不复制来源正文与私人对话。</p>

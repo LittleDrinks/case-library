@@ -47,7 +47,8 @@ async function expectHomeBrand(page) {
 
 async function expectCaseDetailBrand(page) {
   await page.goto("/#/cases/c-02");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator(".workspace-header")).toBeVisible();
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
   await expectBrand(page);
 }
 
@@ -84,29 +85,27 @@ async function expectMobileLoginVisual(page) {
 
 async function openCaseDetail(page) {
   await page.goto("/#/cases/c-02");
-  await expect(page.locator(".case-detail-paper")).toBeVisible();
+  await expect(page.locator(".document-paper")).toBeVisible();
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
   await expectBrand(page);
 }
 
 async function expectDesktopCaseDetail(page) {
   await openCaseDetail(page);
   await expectDesktopHeader(page);
-  await expect(page.locator(".case-detail-outline")).toBeVisible();
-  await expectStyles(page.locator(".case-detail-layout"), {
-    columnGap: "22px", display: "grid",
-  });
-  await expectStyles(page.locator(".case-detail-paper"), {
-    backgroundColor: DEMO.card, borderRadius: "8px", padding: "56px 66px 80px",
+  await expect(page.locator(".outline-wrap")).toBeVisible();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
+  await expectStyles(page.locator(".document-paper"), {
+    borderRadius: "6px", padding: "70px 78px 92px",
   });
 }
 
 async function expectMobileCaseDetail(page) {
   await openCaseDetail(page);
   await expectMobileHeader(page);
-  await expect(page.locator(".case-detail-outline")).toBeHidden();
-  await expectStyles(page.locator(".case-detail-paper"), {
-    padding: "42px 24px 60px",
-  });
+  await expect(page.locator(".outline-wrap")).toBeHidden();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "block" });
+  await expectStyles(page.locator(".assistant-rail"), { position: "fixed" });
   await expectNoOverflow(page, 390);
 }
 

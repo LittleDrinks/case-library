@@ -101,17 +101,19 @@ export const api = {
     searchPath(query, kind, cursor, pageSize, filters),
   ),
   listSkills: () => request("/api/skills"),
-  agentThread: (caseId, threadId) => request(
+  agentThread: (caseId, threadId, versionId) => request(
     threadId
       ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
-      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread${versionQuery(versionId)}`,
   ),
-  agentThreads: (caseId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+  agentThreads: (caseId, versionId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads${versionQuery(versionId)}`,
   ),
-  agentCreateThread: (caseId, title, csrfToken) => request(
+  agentCreateThread: (caseId, title, csrfToken, versionId) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
-    jsonOptions("POST", title ? { title } : {}, csrfToken),
+    jsonOptions("POST", {
+      ...(title ? { title } : {}), ...(versionId ? { versionId } : {}),
+    }, csrfToken),
   ),
   agentRenameThread: (caseId, threadId, title, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`,
