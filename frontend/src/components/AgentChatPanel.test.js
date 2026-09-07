@@ -386,6 +386,7 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   await flushPromises();
 
   expect(wrapper.get('[data-testid="agent-skill-load"]').text()).toContain("已加载 Skill");
+  expect(wrapper.findAll('[data-testid="agent-skill-load"]')).toHaveLength(1);
   expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("科学家精神案例");
   const artifact = wrapper.get('[data-testid="agent-artifact"]');
   expect(artifact.attributes("data-artifact-status")).toBe("pending");
@@ -415,7 +416,7 @@ it("renders assistant parts in structural order with running tools expanded", as
   expect(text.indexOf("思考中")).toBeLessThan(text.indexOf("检索案例 · 进行中"));
   expect(text.indexOf("检索案例 · 进行中")).toBeLessThan(text.indexOf("已加载 Skill"));
   expect(text.indexOf("已加载 Skill")).toBeLessThan(text.indexOf("结论"));
-  const traces = wrapper.findAll('[data-testid="agent-skill-load"]');
+  const traces = wrapper.findAll('.agent-tool-trace');
   expect(traces[0].classes()).toContain("running");
   expect(traces[0].attributes("open")).toBeDefined();
   expect(traces[1].attributes("open")).toBeUndefined();
@@ -463,7 +464,7 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
   await flushPromises();
 
   expectSourceCards(wrapper);
-  const failed = wrapper.findAll('[data-testid="agent-skill-load"]')[1];
+  const failed = wrapper.findAll('.agent-tool-trace')[1];
   expect(failed.text()).toContain("阅读来源 · 读取失败");
 });
 
@@ -529,7 +530,7 @@ it("renders unknown tools by name without exposing raw arguments", async () => {
   const wrapper = mountPanel();
   await flushPromises();
 
-  const trace = wrapper.get('[data-testid="agent-skill-load"]');
+  const trace = wrapper.get('[data-testid="agent-tool-trace"]');
   expect(trace.text()).toContain("future_tool · 已完成");
   expect(trace.text()).not.toContain("内部参数");
   expect(trace.find("pre").exists()).toBe(false);
@@ -540,7 +541,7 @@ it("hides tool duration for restored snapshots without live timing", async () =>
   const wrapper = mountPanel();
   await flushPromises();
 
-  const summaries = wrapper.findAll('[data-testid="agent-skill-load"] summary span');
+  const summaries = wrapper.findAll('.agent-tool-trace summary span');
   for (const summary of summaries) expect(summary.text()).not.toMatch(/\d+(\.\d+)?s/);
 });
 
@@ -563,7 +564,7 @@ it("does not invent tool duration from streamed UI events", async () => {
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("查资料");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-  expect(wrapper.get('[data-testid="agent-skill-load"]').text()).not.toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
+  expect(wrapper.get('[data-testid="agent-tool-trace"]').text()).not.toMatch(/检索案例 · 已完成 · \d+(\.\d+)?s/);
 });
 
 it("renders persisted tool duration by tool call id", async () => {
@@ -574,7 +575,7 @@ it("renders persisted tool duration by tool call id", async () => {
   api.agentThread.mockResolvedValue(tracer);
   const wrapper = mountPanel();
   await flushPromises();
-  const searchTrace = wrapper.findAll('[data-testid="agent-skill-load"]')
+  const searchTrace = wrapper.findAll('[data-testid="agent-tool-trace"]')
     .find((trace) => trace.text().includes("检索案例"));
   expect(searchTrace.text()).toContain("检索案例 · 已完成 · 2.5s");
 });

@@ -419,7 +419,7 @@ async function retryRun() {
                 v-else-if="part.type.startsWith('tool-')"
                 class="agent-tool-trace"
                 :class="{ running: toolRunning(part) }"
-                data-testid="agent-skill-load"
+                :data-testid="part.type === 'tool-load_capability' ? 'agent-skill-load' : 'agent-tool-trace'"
                 :open="toolRunning(part) || undefined"
               >
                 <summary>
