@@ -103,6 +103,21 @@ test("公开响应的 publishedVersionId 固定来源版本", async () => {
   expect(wrapper.findComponent({ name: "AssistantRail" }).props("versionId")).toBe("published-2");
 });
 
+test("历史阅读导出携带固定版本并使用公开接口", async () => {
+  state.route.name = "case-public";
+  state.route.query = { versionId: "published-1" };
+  api.getPublicCase.mockResolvedValue(caseFixture({ publishedVersionId: "published-1" }));
+  const wrapper = render();
+  await flushPromises();
+  let href;
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+    href = this.getAttribute("href");
+  });
+  await wrapper.get('button[aria-label="导出 DOCX"]').trigger("click");
+  expect(href).toBe("/api/cases/case-1/public/export.docx?versionId=published-1");
+  click.mockRestore();
+});
+
 test("退回草稿展示最近审核意见", async () => {
   const lastReview = {
     action: "reject", reasonType: "事实待核实", summary: "第三节数据来源需标注",

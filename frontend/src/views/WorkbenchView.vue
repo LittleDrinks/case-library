@@ -479,8 +479,10 @@ async function rollbackCandidateBatch(snapshotId) {
 
 function startDownload() {
   const link = window.document.createElement("a");
-  const version = readerVersion.value ? `/versions/${encodeURIComponent(readerVersion.value)}` : "";
-  link.href = `/api/cases/${encodeURIComponent(caseId())}${version}/export.docx`;
+  const area = readerMode.value ? "/public" : "";
+  const version = readerMode.value && readerVersion.value
+    ? `?versionId=${encodeURIComponent(readerVersion.value)}` : "";
+  link.href = `/api/cases/${encodeURIComponent(caseId())}${area}/export.docx${version}`;
   link.click();
 }
 
