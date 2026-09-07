@@ -140,7 +140,10 @@ test("已发布案例从我的案例和工作台进入公开页", async ({ page 
 
   await published.getByRole("link", { name: "查看公开页" }).click();
   await expect(page).toHaveURL(/#\/cases\/c-02$/);
-  await expect(page.getByRole("link", { name: "进入工作台" })).toBeVisible();
+  await expect(page.locator(".workspace-header")).toBeVisible();
+  await expect(page.locator(".case-status")).toContainText("只读");
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
+  await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);
   await page.goto("/#/workbench/c-02");
   const publicLink = page.locator(".workspace-header").getByRole("link", { name: "查看公开页" });
   await expect(publicLink).toBeVisible();
@@ -154,12 +157,15 @@ test("匿名用户从公开案例卡进入独立只读详情", async ({ page }) 
   await page.getByRole("link", { name: PUBLIC_CASE }).click();
 
   await expect(page).toHaveURL(/#\/cases\/c-02$/);
-  await expect(page.getByRole("heading", { level: 1, name: PUBLIC_CASE })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "案例信息" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "导出 DOCX" })).toBeVisible();
+  await expect(page.locator(".workspace-header")).toBeVisible();
+  await expect(page.locator(".case-status")).toContainText("只读");
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
+  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
+  await expect(page.getByRole("link", { name: "登录后讨论本案例" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "导出 DOCX" })).toBeVisible();
   await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);
-  await expect(page.locator(".workspace-header")).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "辅助面板" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "辅助面板" })).toBeVisible();
+  await page.locator(".workspace-actions").getByRole("button", { name: "附件" }).click();
   await expect(page.getByRole("heading", { name: "来源", exact: true })).toBeVisible();
 });
 
