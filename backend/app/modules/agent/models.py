@@ -18,7 +18,7 @@ ThreadEventType = Literal[
     "artifact.created",
     "artifact.decided",
 ]
-ArtifactStatus = Literal["pending", "accepted", "rejected"]
+ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
 ArtifactDecision = Literal["accepted", "rejected"]
 
 
@@ -61,6 +61,14 @@ class AgentRun(BaseModel):
     assistant_message_id: str = Field(alias="assistantMessageId")
     client_request_id: str | None = Field(default=None, alias="clientRequestId")
     status: RunStatus
+    base_revision: int | None = Field(
+        default=None, alias="baseRevision", ge=1,
+        description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",
+    )
+    target: ArtifactTarget | None = Field(
+        default=None,
+        description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
+    )
     resources: list[dict[str, str]] = Field(default_factory=list)
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
@@ -87,7 +95,8 @@ class SourceRef(BaseModel):
 class ArtifactTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    paragraph_index: int = Field(alias="paragraphIndex", ge=0)
+    from_pos: int = Field(alias="from", ge=0)
+    to_pos: int = Field(alias="to", ge=0)
     quote: str
 
 
