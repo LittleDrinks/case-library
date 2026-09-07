@@ -139,9 +139,11 @@ async function assertThreadsIsolatedViaApi(page, caseId) {
   expect(listResponse.ok()).toBe(true);
   const threads = await listResponse.json();
   expect(threads).toHaveLength(2);
-  const [first, second] = await Promise.all(
+  const snapshots = await Promise.all(
     threads.map((row) => threadSnapshot(page, caseId, row.id)),
   );
+  const first = snapshots.find((row) => userTexts(row).includes(FIRST_QUESTION));
+  const second = snapshots.find((row) => userTexts(row).includes(SECOND_QUESTION));
   expect(userTexts(first)).toEqual([FIRST_QUESTION]);
   expect(userTexts(second)).toEqual([SECOND_QUESTION]);
   expect(first.latestRun.id).not.toBe(second.latestRun.id);
@@ -200,6 +202,17 @@ async function selectAllSources(page) {
 
 function intersects(a, b) {
   return a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+}
+
+async function expectCollapsedSources(page) {
+  await page.locator(".agent-source-picker-toggle").click();
+  await expect(page.locator(".agent-source-chips")).toHaveCount(0);
+  await expect(page.locator(".agent-source-summary")).toContainText(`已选 ${MATERIAL_COUNT} 条`);
+  const height = await page.locator(".ai-conversation").evaluate((node) => node.clientHeight);
+  expect(height).toBeGreaterThanOrEqual(120);
+  const box = await composerViewportBox(page);
+  expect(box.bottom).toBeLessThanOrEqual(box.viewport + 1);
+  await page.screenshot({ path: "test-results/agent-sidebar-mobile-sources-collapsed.png" });
 }
 
 async function composerGeometry(page) {
@@ -428,6 +441,7 @@ test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async (
     expect(intersects(chip, box.send)).toBe(false);
   }
   await page.screenshot({ path: "test-results/agent-sidebar-mobile-sources.png" });
+  await expectCollapsedSources(page);
 });
 
 test("真实运行：Thinking 流式展开、完成后与工具一起折叠", async ({ page, playwright }) => {
