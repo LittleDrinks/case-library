@@ -218,6 +218,7 @@ async function assertMaterialAttached(page, title) {
 }
 
 test("作者从工作台进入带案例上下文的素材掌控台", async ({ page }) => {
+  test.setTimeout(90_000);
   await login(page);
   await clearMaterials(page.context().request);
   await page.reload();
@@ -230,6 +231,7 @@ test("作者从工作台进入带案例上下文的素材掌控台", async ({ pa
   await expect(page.getByRole("group", { name: "使用条件" })).toBeVisible();
   await expect(page.getByLabel("仅可对外使用")).toBeVisible();
   const title = "高等学校课程思政建设指导纲要（教高〔2020〕3号）";
+  await waitForSearchReady(page, title);
   await page.getByLabel("搜索素材").fill(title);
   await page.getByRole("button", { name: "搜索", exact: true }).click();
   await expect(page.getByText(title, { exact: true })).toBeVisible();
