@@ -160,7 +160,31 @@ def _resolve_search(database, search: CatalogSearch, target: CatalogTarget):
     return _CatalogSearchPlan(search, target, cursor, filters, mounted, scope)
 
 
-def _response(plan: _CatalogSearchPlan, page) -> dict:
+def _tag_name_map(database, items: list[dict]) -> dict[str, str]:
+    ids = [
+        tag_id
+        for item in items
+        if item.get("kind") == "case"
+        for tag_id in item.get("tagIds") or []
+    ]
+    if not ids:
+        return {}
+    rows = database.tags.find({"id": {"$in": ids}}, {"id": 1, "name": 1})
+    return {row["id"]: row["name"] for row in rows}
+
+
+def _attach_tag_names(database, items: list[dict]) -> list[dict]:
+    """用当前标签目录把案例 tagIds 解析为名称：图谱共同主题的唯一事实。"""
+    names = _tag_name_map(database, items)
+    for item in items:
+        if item.get("kind") != "case" or not item.get("tagIds"):
+            continue
+        resolved = [names[tag_id] for tag_id in item["tagIds"] if tag_id in names]
+        item["tagNames"] = resolved
+    return items
+
+
+def _response(plan: _CatalogSearchPlan, page, database) -> dict:
     query = plan.search.query
     metadata = page.metadata if plan.cursor.page == 1 else None
     return {
@@ -169,7 +193,7 @@ def _response(plan: _CatalogSearchPlan, page) -> dict:
         "tagCondition": _condition_dump(query.condition()),
         "page": plan.cursor.page,
         "pageSize": query.page_size,
-        "items": page.items,
+        "items": _attach_tag_names(database, page.items),
         **_metadata_response(metadata),
         **_cursor_response(page, plan),
     }
@@ -208,4 +232,4 @@ def search_catalog(database, catalog, catalog_state, search: CatalogSearch) -> d
     before = catalog_state.read()
     plan = _resolve_search(database, search, before.target)
     page = _stable_search(catalog_state, catalog, plan, before)
-    return _response(plan, page)
+    return _response(plan, page, database)

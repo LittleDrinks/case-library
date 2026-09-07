@@ -32,7 +32,7 @@ def _respond(query, database, catalog, catalog_state, settings, user):
     )
 
 
-@router.get("", response_model=SearchResponse)
+@router.get("", response_model=SearchResponse, response_model_exclude_unset=True)
 def search(
     query: Annotated[SearchQuery, Query()],
     database: DatabaseDependency,
@@ -44,7 +44,7 @@ def search(
     return _respond(query, database, catalog, catalog_state, settings, user)
 
 
-@router.post("", response_model=SearchResponse)
+@router.post("", response_model=SearchResponse, response_model_exclude_unset=True)
 def search_documents(
     body: SearchRequest,
     database: DatabaseDependency,

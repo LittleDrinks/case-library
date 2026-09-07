@@ -126,6 +126,7 @@ class SearchItem(BaseModel):
     purpose: str | None = None
     likes: int | None = None
     tagIds: list[str] | None = None
+    tagNames: list[str] | None = None
     edition: str | None = None
     chapterCount: int | None = None
     sectionCount: int | None = None

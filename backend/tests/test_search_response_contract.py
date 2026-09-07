@@ -49,7 +49,7 @@ class RecordingCatalog:
     def _metadata(self, request):
         if not request.include_metadata:
             return None
-        counts = {"all": 2, "case": 1, "knowledge": 0, "material": 1}
+        counts = {"all": 3, "case": 1, "knowledge": 0, "material": 2}
         facets = {
             "tagCatalog": [{"value": TAG_A, "count": 1}, {"value": TAG_B, "count": 1}],
         }
@@ -57,7 +57,7 @@ class RecordingCatalog:
 
 
 def _catalog_items() -> list[dict]:
-    return [_case_item(), _material_item()]
+    return [_case_item(), _material_item(), _restricted_item()]
 
 
 def _case_item() -> dict:
@@ -81,6 +81,18 @@ def _material_item() -> dict:
         "contentAvailable": True,
         "hasFile": True,
         "score": 4,
+    }
+
+
+def _restricted_item() -> dict:
+    return {
+        "id": "m-r",
+        "kind": "material",
+        "title": "受限素材",
+        "accessLevel": "campus",
+        "contentAvailable": False,
+        "hasFile": True,
+        "score": 2,
     }
 
 
@@ -121,12 +133,12 @@ def _get_tagged_page(client: TestClient) -> dict:
 
 
 def _assert_summary(payload: dict) -> None:
-    assert payload["total"] == 2 and payload["metadataIncluded"] is True
+    assert payload["total"] == 3 and payload["metadataIncluded"] is True
     assert payload["counts"] == {
-        "all": 2,
+        "all": 3,
         "case": 1,
         "knowledge": 0,
-        "material": 1,
+        "material": 2,
     }
     assert payload["facets"]["tagCatalog"] == [
         {"value": TAG_A, "count": 1},
@@ -148,6 +160,31 @@ def test_get_response_carries_the_full_contract(client: TestClient) -> None:
     assert case_item["kind"] == "case" and case_item["tagIds"] == [TAG_A]
     assert {"id", "kind", "title", "score"} <= set(case_item)
     assert payload["items"][1]["contentAvailable"] is True
+
+
+def test_restricted_items_keep_field_absence_contract(client: TestClient) -> None:
+    _use(client)
+    _login(client)
+    payload = _get_tagged_page(client)
+    assert payload["items"][2] == {
+        "id": "m-r",
+        "kind": "material",
+        "title": "受限素材",
+        "accessLevel": "campus",
+        "contentAvailable": False,
+        "hasFile": True,
+        "score": 2,
+    }
+    assert "summary" not in payload["items"][1]
+
+
+def test_case_items_resolve_tag_names_from_catalog(client: TestClient) -> None:
+    _use(client)
+    _login(client)
+    payload = _get_tagged_page(client)
+    assert payload["items"][0]["tagNames"] == ["科学家精神"]
+    assert "tagNames" not in payload["items"][1]
+    assert "tagNames" not in payload["items"][2]
 
 
 def test_post_response_echoes_nested_tag_condition(client: TestClient) -> None:
