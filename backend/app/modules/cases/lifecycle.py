@@ -53,6 +53,10 @@ SUBMISSION_FIELDS = ("submittedVersionId", "submittedAt", "reviewStartedAt")
 
 
 def _authorize(case: dict, user: dict, command: str) -> None:
+    if command == "reopen":
+        if case["ownerId"] == user["id"]:
+            return
+        return _require_admin(user)
     if command in {"submit", "withdraw", "snapshot", "rollback"}:
         _require_owner(case, user)
     else:
@@ -240,18 +244,13 @@ def _approve(database, case: dict, body: dict, user: dict, session) -> dict:
     version, now = _submitted_version(database, case, session), _now()
     event = _event(case, user, version, now, "approve")
     database.lifecycle_events.insert_one(event, session=session)
-    updated = _change_status(
+    updated = _publish_approved_version(
         database,
         case,
-        "reviewing",
-        _publication_changes(version, now),
+        version,
+        now,
         session,
-        consume=True,
     )
-    if not updated:
-        raise CaseError(409, "案例状态已变化")
-    _adjust_material_references(database, version, 1, session)
-    _record_publication(database, case["id"], version, False, session)
     return _result(updated, version, event, user)
 
 
@@ -275,6 +274,23 @@ def _publication_changes(version: dict, now: str) -> dict:
     }
 
 
+def _publish_approved_version(database, case, version, now, session):
+    replaced = _replaced_version(database, case, session)
+    updated = _change_status(
+        database,
+        case,
+        "reviewing",
+        _publication_changes(version, now),
+        session,
+        consume=True,
+    )
+    if not updated:
+        raise CaseError(409, "案例状态已变化")
+    _move_material_references(database, replaced, version, session)
+    _record_publication(database, case["id"], version, False, session, replaced)
+    return updated
+
+
 def _adjust_material_references(database, version: dict, amount: int, session) -> None:
     material_ids = _material_ids(version)
     if not material_ids:
@@ -290,11 +306,44 @@ def _material_ids(version: dict) -> list[str]:
     return list(dict.fromkeys(row["id"] for row in version.get("materials", [])))
 
 
-def _record_publication(database, case_id, version, revoke, session) -> None:
-    keys = [f"case:{case_id}"] + [
-        f"material:{material_id}" for material_id in _material_ids(version)
+def _replaced_version(database, case: dict, session) -> dict | None:
+    previous = case.get("publishedVersionId")
+    if case.get("publicationStatus") != "public" or not previous:
+        return None
+    if previous == case.get("submittedVersionId"):
+        return None
+    return database.case_versions.find_one(
+        {"id": previous, "caseId": case["id"]}, session=session
+    )
+
+
+def _move_material_references(database, removed, added: dict, session) -> None:
+    if removed:
+        _adjust_material_references(database, removed, -1, session)
+    _adjust_material_references(database, added, 1, session)
+
+
+def _record_publication(
+    database, case_id, version, revoke, session, replaced: dict | None = None
+) -> None:
+    current = _material_ids(version)
+    keys = [f"case:{case_id}"] + [f"material:{mid}" for mid in current]
+    if replaced:
+        keys += [f"material:{mid}" for mid in _material_ids(replaced)]
+    revoked = keys if revoke else _removed_material_keys(current, replaced)
+    SearchOutbox(database).record(
+        list(dict.fromkeys(keys)), revoke=revoked, session=session
+    )
+
+
+def _removed_material_keys(current: list[str], replaced: dict | None) -> list[str]:
+    if not replaced:
+        return []
+    return [
+        f"material:{mid}"
+        for mid in _material_ids(replaced)
+        if mid not in current
     ]
-    SearchOutbox(database).record(keys, revoke=keys if revoke else (), session=session)
 
 
 def _require_review_return(case: dict, body: dict) -> None:
@@ -372,7 +421,7 @@ def _return_for_revision(database, case: dict, body: dict, user: dict, session) 
 
 def _publication_change(database, case: dict, user: dict, action: str, session) -> dict:
     expected, target = _publication_states(action)
-    if case["workflowStatus"] != "published" or case["publicationStatus"] != expected:
+    if case["publicationStatus"] != expected:
         raise CaseError(409, "案例当前不能执行该发布操作")
     version, now = _published_version(database, case, session), _now()
     updated = _set_publication(database, case, version, expected, target, now, session)
@@ -395,7 +444,6 @@ def _published_query(case: dict, version: dict, status: str) -> dict:
     return {
         "id": case["id"],
         "revision": case["revision"],
-        "workflowStatus": "published",
         "publicationStatus": status,
         "publishedVersionId": version["id"],
     }
@@ -414,7 +462,9 @@ def _set_publication(database, case, version, expected, target, now, session) ->
 
 
 def _reopen(database, case: dict, user: dict, session) -> dict:
-    if case["workflowStatus"] != "published" or case["publicationStatus"] != "hidden":
+    if case["workflowStatus"] != "published":
+        raise CaseError(409, "仅已发布案例可另起新稿")
+    if case["ownerId"] != user["id"] and case["publicationStatus"] != "hidden":
         raise CaseError(409, "仅已隐藏案例可下线编辑")
     version, now = _published_version(database, case, session), _now()
     updated = _mark_reopened(database, case, version, now, session)
@@ -428,15 +478,11 @@ def _reopen(database, case: dict, user: dict, session) -> dict:
 def _mark_reopened(database, case: dict, version: dict, now: str, session) -> dict:
     update = {
         "$set": {"workflowStatus": "draft", "updatedAt": now},
-        "$unset": {"submittedVersionId": "", "submittedAt": "", "reviewStartedAt": ""},
+        "$unset": {field: "" for field in SUBMISSION_FIELDS},
         "$inc": {"revision": 1},
     }
-    return database.cases.find_one_and_update(
-        _published_query(case, version, "hidden"),
-        update,
-        session=session,
-        return_document=ReturnDocument.AFTER,
-    )
+    query = _published_query(case, version, case["publicationStatus"])
+    return _write_case(database, query, update, session)
 
 
 def _admin_action(database, case: dict, body: dict, user: dict, session) -> dict:
@@ -444,8 +490,6 @@ def _admin_action(database, case: dict, body: dict, user: dict, session) -> dict
         return _return_for_revision(database, case, body, user, session)
     if body["command"] in {"hide", "restore"}:
         return _publication_change(database, case, user, body["command"], session)
-    if body["command"] == "reopen":
-        return _reopen(database, case, user, session)
     return _approve(database, case, body, user, session)
 
 
@@ -465,6 +509,8 @@ def _execute(database, case_id: str, body: dict, user: dict, session) -> dict:
         return create_snapshot(database, case, user, session)
     if body["command"] == "rollback":
         return rollback_snapshot(database, case, user, body.get("targetId"), session)
+    if body["command"] == "reopen":
+        return _reopen(database, case, user, session)
     return _admin_action(database, case, body, user, session)
 
 
