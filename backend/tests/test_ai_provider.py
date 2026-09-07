@@ -9,7 +9,25 @@ import httpx
 import httpx2
 import pytest
 
-from app.modules.ai import provider, transport
+from app.modules.ai import provider, transport, thinking
+
+
+def test_thinking_settings_follow_official_qwen_protocol() -> None:
+    enabled = thinking.thinking_settings("qwen-plus")
+    assert enabled is not None
+    assert enabled["extra_body"] == {"enable_thinking": True}
+    for model in (
+        "qwen-plus-latest", "qwen-plus-2025-04-28", "qwen-turbo", "qwen-flash",
+        "qwen3-max", "qwen3-max-preview", "qwen3.5-plus", "qwen3.7-flash-2026-07-15",
+    ):
+        assert thinking.thinking_settings(model) is not None, model
+    for model in ("qwen-max", "qwen2.5-72b-instruct", "gpt-4o", "deepseek-r1", ""):
+        assert thinking.thinking_settings(model) is None, model
+
+
+def test_thinking_history_profile_disables_send_back() -> None:
+    profile = thinking.thinking_history_profile
+    assert profile["openai_chat_send_back_thinking_parts"] is False
 
 
 def public_dns(*_args, **_kwargs):

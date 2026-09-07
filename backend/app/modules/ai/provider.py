@@ -11,6 +11,7 @@ from openai import OpenAI
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from app.modules.ai.thinking import thinking_history_profile, thinking_settings
 from app.modules.ai.transport import (
     ProviderError,
     RestrictedProviderTransport,
@@ -138,8 +139,20 @@ class OpenAIModelDiscovery:
                 client.close()
 
 
+def _chat_model(selection, provider, thinking: bool) -> OpenAIChatModel:
+    """装配聊天模型；思考参数与历史协议见 ai.thinking。"""
+    return OpenAIChatModel(
+        selection.model,
+        provider=provider,
+        settings=thinking_settings(selection.model) if thinking else None,
+        profile=thinking_history_profile,
+    )
+
+
 @asynccontextmanager
-async def open_model(selection, allow_internal: bool) -> AsyncIterator[OpenAIChatModel]:
+async def open_model(
+    selection, allow_internal: bool, thinking: bool = False,
+) -> AsyncIterator[OpenAIChatModel]:
     client = httpx2.AsyncClient(
         transport=RestrictedProviderTransport(
             selection.base_url, selection.timeout_seconds, allow_internal
@@ -150,6 +163,6 @@ async def open_model(selection, allow_internal: bool) -> AsyncIterator[OpenAICha
         provider = OpenAIProvider(
             base_url=selection.base_url, api_key=selection.api_key, http_client=client
         )
-        yield OpenAIChatModel(selection.model, provider=provider)
+        yield _chat_model(selection, provider, thinking)
     finally:
         await client.aclose()
