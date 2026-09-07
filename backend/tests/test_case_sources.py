@@ -272,7 +272,7 @@ def test_citation_save_rejects_dangling_sources(client: TestClient) -> None:
 def test_cited_sources_cannot_be_removed(client: TestClient) -> None:
     auth = login(client)
     source = mount_source(client, auth, "c-02").json()
-    material = mount_material(client, auth)
+    mount_material(client, auth)
     attachment = upload_attachment(client, auth)
     assert cite_document(client, auth, cited_marks(source["id"], attachment["id"])).status_code == 200
     paths = [
