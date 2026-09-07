@@ -58,18 +58,20 @@ class AgentRepository:
     def __init__(self, database) -> None:
         self.database = database
 
-    def default_thread(self, case_id: str, owner_id: str) -> AgentThread:
+    def default_thread(self, case_id: str, owner_id: str, version_id: str | None = None) -> AgentThread:
         try:
             row = self.database.agent_threads.find_one_and_update(
-                {"caseId": case_id, "ownerId": owner_id, "isDefault": True},
-                _default_thread_update(case_id, owner_id),
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True,
+                 "versionId": version_id},
+                _default_thread_update(case_id, owner_id, version_id),
                 upsert=True,
                 return_document=ReturnDocument.AFTER,
             )
         except DuplicateKeyError:
             # 并发首建竞争：部分唯一索引拒绝败者插入，回读胜者文档。
             row = self.database.agent_threads.find_one(
-                {"caseId": case_id, "ownerId": owner_id, "isDefault": True}
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True,
+                 "versionId": version_id}
             )
         return _model_view(row, AgentThread)
 
@@ -81,19 +83,21 @@ class AgentRepository:
             raise ThreadNotFoundError
         return _model_view(row, AgentThread)
 
-    def list_threads(self, case_id: str, owner_id: str) -> list[AgentThread]:
+    def list_threads(self, case_id: str, owner_id: str, version_id: str | None = None) -> list[AgentThread]:
         rows = self.database.agent_threads.find(
-            {"caseId": case_id, "ownerId": owner_id}
+            {"caseId": case_id, "ownerId": owner_id, "versionId": version_id}
         ).sort([("updatedAt", DESCENDING), ("id", DESCENDING)])
         return [_model_view(row, AgentThread) for row in rows]
 
     def create_thread(
-        self, case_id: str, owner_id: str, title: str | None = None
+        self, case_id: str, owner_id: str, title: str | None = None,
+        version_id: str | None = None,
     ) -> AgentThread:
         now = _now()
         thread = AgentThread(
             id=new_id("thread"), case_id=case_id, owner_id=owner_id,
-            title=title, is_default=False, created_at=now, updated_at=now,
+            version_id=version_id, title=title, is_default=False,
+            created_at=now, updated_at=now,
         )
         self.database.agent_threads.insert_one(
             thread.model_dump(by_alias=True, mode="python", exclude_none=True)
@@ -172,6 +176,7 @@ class AgentRepository:
         return AgentSnapshot(
             id=current.id,
             case_id=current.case_id,
+            version_id=current.version_id,
             title=current.title,
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
@@ -513,9 +518,12 @@ class AgentRepository:
         )
 
 
-def _default_thread_update(case_id: str, owner_id: str) -> dict:
+def _default_thread_update(case_id: str, owner_id: str, version_id: str | None) -> dict:
     now = _now()
-    return {"$setOnInsert": _default_thread(case_id, owner_id, now), "$set": {"updatedAt": now}}
+    return {
+        "$setOnInsert": _default_thread(case_id, owner_id, now, version_id),
+        "$set": {"updatedAt": now},
+    }
 
 
 def _start_fields(run_id: str, thread: AgentThread, default_title: str | None) -> dict:
@@ -532,12 +540,15 @@ def _reservation_query(thread: AgentThread) -> dict:
     }
 
 
-def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
-    return {
+def _default_thread(case_id: str, owner_id: str, now: datetime, version_id: str | None) -> dict:
+    document = {
         "id": new_id("thread"), "caseId": case_id, "ownerId": owner_id,
         "isDefault": True, "nextMessageSeq": 0, "eventSeq": 0, "activeRunId": None,
         "lastRunId": None, "createdAt": now,
     }
+    if version_id is not None:
+        document["versionId"] = version_id
+    return document
 
 
 def _new_run_documents(
@@ -573,6 +584,7 @@ def _new_retry_run(
         id=run_id, thread_id=thread.id, user_id=thread.owner_id,
         user_message_id=message["id"], assistant_message_id=assistant_id,
         status="active", started_at=now,
+        read_only=thread.version_id is not None,
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
         quota_ids=quota_ids,
@@ -587,6 +599,7 @@ def _new_active_run(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
         assistant_message_id=assistant_id, client_request_id=client_request_id,
         status="active", started_at=now,
+        read_only=thread.version_id is not None,
         owner_id=owner_id,
         owner_expires_at=now + _owner_delta() if owner_id else None,
         quota_ids=quota_ids,

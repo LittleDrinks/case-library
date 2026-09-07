@@ -28,15 +28,27 @@ def _now() -> datetime:
 def propose_artifact(
     database: Database, case_id: str, thread_id: str, run_id: str,
     paragraph_index: int, replacement: str, reason: str,
-    sources: list[SourceRef],
+    sources: list[SourceRef], user: dict,
 ) -> AgentArtifact:
     """在当前 baseRevision 上创建单段落 pending Artifact 并记录 Thread 事件。"""
-    case = _current_case(database, case_id)
+    return transaction(
+        database,
+        lambda session: _propose(
+            database, case_id, thread_id, run_id, paragraph_index,
+            replacement, reason, sources, user, session,
+        ),
+    )
+
+
+def _propose(database, case_id, thread_id, run_id, paragraph_index,
+             replacement, reason, sources, user, session) -> AgentArtifact:
+    case = _current_case(database, case_id, session)
+    _verify_writer(case, user)
     artifact = _artifact_document(
         case, thread_id, run_id, _target(case["document"], paragraph_index),
         replacement, reason, sources,
     )
-    transaction(database, lambda session: _insert_artifact(database, artifact, session))
+    _insert_artifact(database, artifact, session)
     return artifact
 
 

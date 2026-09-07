@@ -28,16 +28,39 @@ class PublishedCaseReader:
         )
         if not version or case.get("publicationStatus") != "public":
             raise CaseError(404, "案例不存在")
-        return _published_view(case, version)
+        return published_view(case, version)
 
 
-def _published_view(case: dict, version: dict) -> dict:
+def version_readable(
+    database: Database,
+    case: dict,
+    version_id: str,
+    version: dict | None,
+    internal: bool,
+) -> bool:
+    """已发布历史版本对普通读者可读；草稿与快照仅内部可见。"""
+    if internal:
+        return version is not None
+    if case.get("publicationStatus") != "public" or version is None:
+        return False
+    if version_id == case.get("publishedVersionId"):
+        return True
+    approved = database.lifecycle_events.find_one(
+        {"caseId": case["id"], "action": "approve", "versionId": version_id},
+        {"_id": 1},
+    )
+    return bool(approved)
+
+
+def published_view(case: dict, version: dict) -> dict:
     metadata = {
         field: version["metadata"].get(field) for field in PUBLIC_METADATA_FIELDS
     }
     return {
         **metadata,
         "id": case["id"],
+        "versionId": version["id"],
+        "versionNumber": version["number"],
         "title": version["title"],
         "summary": version.get("summary", ""),
         "document": version["document"],

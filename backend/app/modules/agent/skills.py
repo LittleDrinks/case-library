@@ -13,6 +13,16 @@ from app.modules.agent.search import search_corpus
 from app.modules.cases.service import CaseError
 
 SKILL_ID = CASE_EDIT_SKILL.id
+READER_CAPABILITY_ID = "platform-tools"
+
+
+def reader_capability() -> Capability:
+    """读者只读领域能力：仅注册检索工具，不注册任何写工具。"""
+    return Capability(
+        id=READER_CAPABILITY_ID,
+        description="检索平台公开资料辅助阅读讨论",
+        tools=[search_corpus],
+    )
 
 
 async def propose_revision(
@@ -29,7 +39,7 @@ async def propose_revision(
 def _propose(ctx: RunContext[ToolDeps], paragraph_index: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        paragraph_index, replacement, reason, list(ctx.deps.sources),
+        paragraph_index, replacement, reason, list(ctx.deps.sources), ctx.deps.user,
     )
 
 
