@@ -20,6 +20,7 @@ const error = ref("");
 const loading = ref(false);
 const adding = ref("");
 const open = ref(false);
+let loadToken = 0;
 
 function sourceKey(source) {
   return `${source.sourceType}:${source.id}`;
@@ -51,11 +52,16 @@ const visibleEntries = computed(() => {
 
 async function load() {
   if (props.readOnly && !props.versionId) return;
+  const token = ++loadToken;
+  const scope = props.readOnly ? props.versionId : "";
   try {
-    const scope = props.readOnly ? props.versionId : "";
-    entries.value = (await api.listSources(props.caseId, scope)).entries || [];
+    const list = (await api.listSources(props.caseId, scope)).entries || [];
+    if (token === loadToken) {
+      entries.value = list;
+      error.value = "";
+    }
   } catch {
-    error.value = "资料区加载失败";
+    if (token === loadToken) error.value = "资料区加载失败";
   }
 }
 

@@ -90,3 +90,33 @@ it("keeps the closed picker to a compact count for many sources", async () => {
   await wrapper.get(".agent-source-picker-toggle").trigger("click");
   expect(wrapper.findAll(".agent-source-chip")).toHaveLength(15);
 });
+
+it("ignores a stale fixed-version response after the version changes", async () => {
+  let resolveFirst;
+  api.listSources.mockImplementationOnce(
+    () => new Promise((resolve) => { resolveFirst = resolve; }),
+  );
+  const wrapper = mountPicker([], { versionId: "v-1", readOnly: true });
+  await flushPromises();
+  api.listSources.mockResolvedValueOnce({
+    entries: [{ sourceType: "case", id: "src-2", title: "新版来源" }],
+  });
+  await wrapper.setProps({ versionId: "v-2" });
+  await flushPromises();
+  resolveFirst({ entries: [{ sourceType: "case", id: "src-stale", title: "旧版来源" }] });
+  await flushPromises();
+  await wrapper.get(".agent-source-picker-toggle").trigger("click");
+  expect(wrapper.text()).toContain("新版来源");
+  expect(wrapper.text()).not.toContain("旧版来源");
+});
+
+it("clears a load error on a successful reload", async () => {
+  api.listSources.mockRejectedValueOnce(new Error("boom"));
+  const wrapper = mountPicker();
+  await flushPromises();
+  await wrapper.get(".agent-source-picker-toggle").trigger("click");
+  expect(wrapper.get(".agent-source-error").text()).toContain("资料区加载失败");
+  await wrapper.setProps({ versionId: "v-2" });
+  await flushPromises();
+  expect(wrapper.find(".agent-source-error").exists()).toBe(false);
+});
