@@ -86,8 +86,10 @@ async function openChat(page, caseId) {
 
 async function selectPublishedSkill(page) {
   const picker = page.getByLabel("选择 Skill");
-  await expect(picker.locator(`option[value="${SKILL_ID}"]`)).toBeVisible({ timeout: 30_000 });
+  await expect(picker).toBeVisible();
+  await expect(picker.locator(`option[value="${SKILL_ID}"]`)).toHaveCount(1, { timeout: 30_000 });
   await picker.selectOption(SKILL_ID);
+  await expect(picker).toHaveValue(SKILL_ID);
 }
 
 async function selectCanvasTarget(page) {
