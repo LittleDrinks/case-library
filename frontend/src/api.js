@@ -86,15 +86,29 @@ export const api = {
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
-  agentThread: (caseId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  agentThread: (caseId, threadId) => request(
+    threadId
+      ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
+      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread`,
+  ),
+  agentThreads: (caseId) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+  ),
+  agentCreateThread: (caseId, title, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
+    jsonOptions("POST", title ? { title } : {}, csrfToken),
+  ),
+  agentRenameThread: (caseId, threadId, title, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`,
+    jsonOptions("PATCH", { title }, csrfToken),
   ),
   agentCancel: (caseId, threadId, csrfToken) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}/cancel`,
     jsonOptions("POST", {}, csrfToken),
   ),
-  agentDecide: (caseId, artifactId, decision, csrfToken) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/artifacts/${encodeURIComponent(artifactId)}/decision`,
+  agentDecide: (caseId, threadId, artifactId, decision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),
   ),
   aiSettings: () => request("/api/ai/settings"),
@@ -132,6 +146,19 @@ export const api = {
     jsonOptions("POST", command, csrfToken),
   ),
   caseHistory: (id) => request(`/api/cases/${encodeURIComponent(id)}/history`),
+  listTagGroups: () => request("/api/tag-groups"),
+  createTagGroup: (group, csrfToken) => request(
+    "/api/tag-groups", jsonOptions("POST", group, csrfToken),
+  ),
+  updateTagGroup: (id, patch, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
+  createTag: (groupId, tag, csrfToken) => request(
+    `/api/tag-groups/${encodeURIComponent(groupId)}/tags`, jsonOptions("POST", tag, csrfToken),
+  ),
+  updateTag: (id, patch, csrfToken) => request(
+    `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
+  ),
   listAnnotations: (id) => request(annotationRoot(id)),
   createAnnotation: (id, annotation, csrfToken) => request(
     annotationRoot(id), jsonOptions("POST", annotation, csrfToken),

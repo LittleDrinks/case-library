@@ -59,17 +59,54 @@ class AgentRepository:
         self.database = database
 
     def default_thread(self, case_id: str, owner_id: str) -> AgentThread:
-        row = self.database.agent_threads.find_one_and_update(
-            {"caseId": case_id, "ownerId": owner_id, "isDefault": True},
-            _default_thread_update(case_id, owner_id),
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
+        try:
+            row = self.database.agent_threads.find_one_and_update(
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True},
+                _default_thread_update(case_id, owner_id),
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # 并发首建竞争：部分唯一索引拒绝败者插入，回读胜者文档。
+            row = self.database.agent_threads.find_one(
+                {"caseId": case_id, "ownerId": owner_id, "isDefault": True}
+            )
         return _model_view(row, AgentThread)
 
     def thread(self, thread_id: str, case_id: str, owner_id: str) -> AgentThread:
         row = self.database.agent_threads.find_one(
             {"id": thread_id, "caseId": case_id, "ownerId": owner_id}
+        )
+        if not row:
+            raise ThreadNotFoundError
+        return _model_view(row, AgentThread)
+
+    def list_threads(self, case_id: str, owner_id: str) -> list[AgentThread]:
+        rows = self.database.agent_threads.find(
+            {"caseId": case_id, "ownerId": owner_id}
+        ).sort([("updatedAt", DESCENDING), ("id", DESCENDING)])
+        return [_model_view(row, AgentThread) for row in rows]
+
+    def create_thread(
+        self, case_id: str, owner_id: str, title: str | None = None
+    ) -> AgentThread:
+        now = _now()
+        thread = AgentThread(
+            id=new_id("thread"), case_id=case_id, owner_id=owner_id,
+            title=title, is_default=False, created_at=now, updated_at=now,
+        )
+        self.database.agent_threads.insert_one(
+            thread.model_dump(by_alias=True, mode="python", exclude_none=True)
+        )
+        return thread
+
+    def rename_thread(
+        self, thread_id: str, case_id: str, owner_id: str, title: str
+    ) -> AgentThread:
+        row = self.database.agent_threads.find_one_and_update(
+            {"id": thread_id, "caseId": case_id, "ownerId": owner_id},
+            {"$set": {"title": title}},
+            return_document=ReturnDocument.AFTER,
         )
         if not row:
             raise ThreadNotFoundError
@@ -135,6 +172,7 @@ class AgentRepository:
         return AgentSnapshot(
             id=current.id,
             case_id=current.case_id,
+            title=current.title,
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
             artifacts=self.artifacts(current.id, session),
@@ -161,13 +199,13 @@ class AgentRepository:
         self, thread: AgentThread, user_id: str, parts: list[dict[str, object]],
         metadata: dict[str, object], assistant_id: str,
         client_request_id: str | None = None, owner_id: str | None = None,
-        quota_ids: tuple[str, ...] = (),
+        quota_ids: tuple[str, ...] = (), default_title: str | None = None,
         skill_bindings: list[dict[str, str]] | None = None,
     ) -> AgentRun:
         try:
             run = _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
-                owner_id, quota_ids, skill_bindings, session,
+                owner_id, quota_ids, skill_bindings, session, default_title,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -175,10 +213,10 @@ class AgentRepository:
 
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id,
-        owner_id, quota_ids, skill_bindings, session
+        owner_id, quota_ids, skill_bindings, session, default_title=None
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
-        message_seq = self._reserve_start(thread, run_id, client_request_id, session)
+        message_seq = self._reserve_start(thread, run_id, client_request_id, session, default_title)
         message, run = _new_run_documents(
             thread, user_id, parts, metadata, assistant_id, message_seq,
             client_request_id, run_id, message_id, owner_id, quota_ids, skill_bindings,
@@ -259,11 +297,17 @@ class AgentRepository:
         )
 
     def _reserve_start(
-        self, thread: AgentThread, run_id: str, client_request_id: str | None, session
+        self, thread: AgentThread, run_id: str, client_request_id: str | None, session,
+        default_title: str | None = None,
     ) -> int:
         if self._client_request_exists(thread.id, client_request_id, session):
             raise ActiveRunError
-        current = self._reserve_active(thread, run_id, session)
+        current = self.database.agent_threads.find_one_and_update(
+            _reservation_query(thread),
+            {"$inc": {"nextMessageSeq": 1}, "$set": _start_fields(run_id, thread, default_title)},
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
         if current is None:
             raise ActiveRunError
         return current["nextMessageSeq"]
@@ -275,12 +319,7 @@ class AgentRepository:
         if bump:
             update["$inc"] = {"nextMessageSeq": 1}
         return self.database.agent_threads.find_one_and_update(
-            {
-                "id": thread.id,
-                "activeRunId": None,
-                "eventSeq": thread.event_seq,
-                "nextMessageSeq": thread.next_message_seq,
-            },
+            _reservation_query(thread),
             update,
             return_document=ReturnDocument.AFTER,
             session=session,
@@ -485,6 +524,20 @@ class AgentRepository:
 def _default_thread_update(case_id: str, owner_id: str) -> dict:
     now = _now()
     return {"$setOnInsert": _default_thread(case_id, owner_id, now), "$set": {"updatedAt": now}}
+
+
+def _start_fields(run_id: str, thread: AgentThread, default_title: str | None) -> dict:
+    fields: dict = {"activeRunId": run_id, "updatedAt": _now()}
+    if default_title is not None and thread.title is None:
+        fields["title"] = default_title
+    return fields
+
+
+def _reservation_query(thread: AgentThread) -> dict:
+    return {
+        "id": thread.id, "activeRunId": None,
+        "eventSeq": thread.event_seq, "nextMessageSeq": thread.next_message_seq,
+    }
 
 
 def _default_thread(case_id: str, owner_id: str, now: datetime) -> dict:
