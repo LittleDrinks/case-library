@@ -61,6 +61,7 @@ def _published_version() -> dict:
     ]
     return {
         "id": "v-content",
+        "number": 1,
         "caseId": "c-content",
         "title": "聚合检索案例",
         "summary": "发布摘要",

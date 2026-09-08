@@ -47,12 +47,29 @@ function searchKind(value) {
   return ["case", "knowledge", "material"].includes(value) ? value : "all";
 }
 
+function detailQuery(overrides = {}) {
+  return { ...route.query, from: "search", ...overrides };
+}
+
 function destination(item) {
-  if (item.kind === "case") return { name: "case-public", params: { id: item.id } };
-  if (item.kind === "material") {
-    return { name: "material-detail", params: { id: item.id }, query: { ...route.query, from: "search" } };
+  if (item.kind === "case") return { name: "case-public", params: { id: item.id }, query: detailQuery() };
+  if (item.kind === "knowledge") {
+    return { name: "knowledge-detail", params: { id: item.id }, query: detailQuery() };
   }
-  return "";
+  return { name: "material-detail", params: { id: item.id }, query: detailQuery() };
+}
+
+function targetLocation(item) {
+  if (item.kind === "case" && item.versionId) {
+    return {
+      ...destination(item), query: detailQuery({ versionId: item.versionId }),
+    };
+  }
+  return destination(item);
+}
+
+function targetHref(item) {
+  return router.resolve(targetLocation(item)).href;
 }
 
 function kindLabel(item) {
@@ -99,16 +116,6 @@ function applySummarySnapshot(term) {
     revision: summaryRevision, query: term,
     items: Object.freeze(visible.map((item) => Object.freeze({ ...item }))),
   });
-}
-
-function anchorId(target) {
-  return `result-${target.kind}-${target.id}`;
-}
-
-function locateResult(target) {
-  const card = window.document.getElementById(anchorId(target));
-  card?.scrollIntoView({ behavior: "smooth", block: "center" });
-  card?.focus({ preventScroll: true });
 }
 
 async function requestSearch(term, kind, activeCursor, searchFilters) {
@@ -208,7 +215,7 @@ onBeforeUnmount(invalidateSearch);
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
       <template v-else-if="view === 'list'">
         <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
-        <SearchAIAnswer v-if="summarySnapshot" :snapshot="summarySnapshot" @locate="locateResult" />
+        <SearchAIAnswer v-if="summarySnapshot" :snapshot="summarySnapshot" :href-for="targetHref" />
         <div class="result-toolbar">
           <div class="result-tabs" role="tablist" aria-label="资源类型">
             <button v-for="tab in [['all','全部'],['case','案例'],['knowledge','知识'],['material','素材']]" :key="tab[0]" type="button" role="tab" :aria-selected="activeKind === tab[0]" @click="selectKind(tab[0])">
@@ -218,9 +225,9 @@ onBeforeUnmount(invalidateSearch);
           <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
         </div>
         <section class="mixed-results" aria-label="检索结果">
-          <article v-for="item in items" :key="`${item.kind}-${item.id}`" :id="anchorId(item)" class="mixed-result" tabindex="-1">
+          <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">
             <span>{{ kindLabel(item) }}</span>
-            <h2><RouterLink v-if="item.kind === 'case'" :to="destination(item)">{{ item.title }}</RouterLink><RouterLink v-else-if="item.kind === 'material'" :to="destination(item)">{{ item.title }}</RouterLink><span v-else>{{ item.title }}</span></h2>
+            <h2><RouterLink :to="targetLocation(item)">{{ item.title }}</RouterLink></h2>
             <p>{{ item.summary || "暂无摘要" }}</p>
             <small>{{ metaLine(item) }}</small>
           </article>

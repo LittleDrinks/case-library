@@ -503,7 +503,6 @@ async function retryRun() {
                 v-if="part.type === 'reasoning'"
                 class="agent-reasoning"
                 :class="{ streaming: part.state === 'streaming' }"
-                :open="part.state === 'streaming' || undefined"
               >
                 <summary><LoaderCircle v-if="part.state === 'streaming'" class="spin" :size="13" /><span>{{ part.state === "streaming" ? "思考中" : "思考过程" }}</span></summary>
                 <p>{{ part.text }}</p>

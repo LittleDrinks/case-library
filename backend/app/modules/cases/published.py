@@ -14,6 +14,7 @@ PUBLIC_METADATA_FIELDS = (
     "audience",
     "purpose",
     "theoryPoints",
+    "tagIds",
     "likes",
 )
 

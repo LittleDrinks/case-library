@@ -92,22 +92,6 @@ def _block_texts(document: dict) -> list[str]:
     return [node["content"][0]["text"] for node in document["content"]]
 
 
-def _case_revision(database, case_id: str) -> int:
-    return database.cases.find_one({"id": case_id})["revision"]
-
-
-def _document_types(database, case_id: str) -> list[str]:
-    document = database.cases.find_one({"id": case_id})["document"]
-    return [node["type"] for node in document["content"]]
-
-
-def _decide(database, case_id: str, thread_id: str, artifact_id: str, auth: dict,
-            decision: str):
-    return artifacts.decide_artifact(
-        database, case_id, thread_id, artifact_id, auth["user"], decision,
-    )
-
-
 def _undo(database, case_id: str, thread_id: str, write_id: str, auth: dict) -> dict:
     return writes.undo_write(database, case_id, thread_id, write_id, auth["user"])
 

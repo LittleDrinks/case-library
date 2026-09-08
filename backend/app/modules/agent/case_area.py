@@ -101,7 +101,13 @@ def _selected_ref(refs: list[SourceRef], data: object) -> dict:
 
 def catalog_instructions(title: str, refs: list[SourceRef], selected: list[dict],
                          selections: list[dict], reader: bool = False) -> str:
-    lines = [f"## 当前案例资料区（{title}）", "按需调用 read_source 读取以下保留来源："]
+    lines = [
+        f"## 当前案例资料区（{title}）",
+        "资料边界：search_corpus 是平台检索，不是联网检索、网页抓取或外部核验。",
+        "read_source 返回 status=ok 只表示本次读取到了该来源返回的内容，不表示来源内所有事实都已核实。",
+        "只能使用 read_source 返回内容明确支持的事实；缺少的数字、日期、引语和书目不得补写。",
+        "按需调用 read_source 读取以下保留来源：",
+    ]
     lines += [f"- [{ref.kind}] {ref.title}（id: {ref.id}）" for ref in refs]
     chosen = ", ".join(item["id"] for item in selected) or "无"
     lines += [f"本条消息点选来源：{chosen}", _selection_line(selections, reader)]
@@ -110,7 +116,7 @@ def catalog_instructions(title: str, refs: list[SourceRef], selected: list[dict]
 
 def _selection_line(selections: list[dict], reader: bool = False) -> str:
     if not selections:
-        return "本条消息没有正文选区。"
+        return "本条消息没有正文选区；不得把整篇正文当作默认修订目标。"
     items = "；".join(
         f"from={item['from']}，to={item['to']}，原文：{item['quote']}"
         for item in selections
@@ -121,6 +127,7 @@ def _selection_line(selections: list[dict], reader: bool = False) -> str:
         f"本条消息正文选区（服务端已按当前正文验证的原生位置）：{items}。"
         "作者没有指明其他段落时，调用 propose_revision 须把上述 from、to 原样"
         "作为 start、end，不得自行计算或调整位置，也不得要求作者填写字符位置。"
+        "局部请求只能处理上述选区，不能扩展为整篇正文。"
     )
 
 

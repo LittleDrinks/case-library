@@ -11,9 +11,12 @@ openExternalLinks(parser);
 // text token，代码、链接等语境天然跳过。env.resolve 提供来源解析，
 // env.citations 收集与实际渲染按钮同源的引用列表。
 parser.core.ruler.after("inline", "citations", resolveCitations);
+// 引用指向站内路由目标：href 由组件按检索结果白名单生成后挂在 token 属性上，
+// renderAttrs 负责转义；渲染为真链接以支持键盘与浏览器新标签页。
 parser.renderer.rules.citation = (tokens, index) => {
-  const order = Number(tokens[index].content);
-  return `<button type="button" class="ai-marker" data-citation-order="${order}">〔${order}〕</button>`;
+  const token = tokens[index];
+  const order = Number(token.content);
+  return `<a${parser.renderer.renderAttrs(token)} class="ai-marker" data-citation-order="${order}">〔${order}〕</a>`;
 };
 
 function resolveCitations(state) {
@@ -45,7 +48,7 @@ function appendTextWithCitations(next, token, state, resolve) {
     const resolved = resolve((match[1] ?? match[2]).trim());
     if (!resolved) continue;
     if (match.index > last) next.push(plainToken(state, value.slice(last, match.index)));
-    next.push(citationToken(state, resolved.order));
+    next.push(citationToken(state, resolved));
     state.env.citations?.push(resolved);
     last = match.index + match[0].length;
   }
@@ -60,9 +63,14 @@ function plainToken(state, value) {
   return token;
 }
 
-function citationToken(state, order) {
+function citationToken(state, resolved) {
   const token = new state.Token("citation", "", 0);
-  token.content = String(order);
+  token.content = String(resolved.order);
+  if (resolved.href) {
+    token.attrSet("href", resolved.href);
+    token.attrSet("target", "_blank");
+    token.attrSet("rel", "noopener noreferrer");
+  }
   return token;
 }
 

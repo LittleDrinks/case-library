@@ -7,6 +7,7 @@ import AdminDashboardView from "./views/AdminDashboardView.vue";
 import AdminSkillsView from "./views/AdminSkillsView.vue";
 import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
 import HomeView from "./views/HomeView.vue";
+import KnowledgeDetailView from "./views/KnowledgeDetailView.vue";
 import LoginView from "./views/LoginView.vue";
 import MaterialImportView from "./views/MaterialImportView.vue";
 import MaterialDetailView from "./views/MaterialDetailView.vue";
@@ -35,6 +36,11 @@ const routes = [
     path: "/materials/:id",
     name: "material-detail",
     component: MaterialDetailView,
+  },
+  {
+    path: "/knowledge/:id",
+    name: "knowledge-detail",
+    component: KnowledgeDetailView,
   },
   {
     path: "/my-cases",

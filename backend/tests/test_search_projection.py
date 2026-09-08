@@ -3,6 +3,8 @@ from __future__ import annotations
 from app.modules.search.projection import project_catalog_documents
 
 CASE_VERSION = {
+    "id": "cv-01",
+    "number": 2,
     "caseId": "c-01",
     "title": "科学报国",
     "summary": "案例摘要",
@@ -56,6 +58,8 @@ CASE_DOCUMENT = {
     "title": "科学报国",
     "summary": "案例摘要",
     "publishedAt": CASE_PUBLICATION["publishedAt"],
+    "versionId": "cv-01",
+    "versionNumber": 2,
     "typeName": "人物传记类",
     "typeId": "ct-person",
     "course": "中国近现代史纲要",

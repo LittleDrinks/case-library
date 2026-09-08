@@ -184,6 +184,7 @@ export const api = {
   getPublicCase: (id, versionId) => request(
     `/api/cases/${encodeURIComponent(id)}/public${versionQuery(versionId)}`,
   ),
+  getKnowledge: (id) => request(`/api/knowledge/${encodeURIComponent(id)}`),
   saveCase: (id, snapshot, csrfToken) => request(
     `/api/cases/${encodeURIComponent(id)}`,
     jsonOptions("PATCH", snapshot, csrfToken),
