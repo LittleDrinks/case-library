@@ -180,6 +180,7 @@ def _draft_case() -> dict:
 def _published_version() -> dict:
     return {
         "id": "v-public",
+        "number": 1,
         "caseId": "c-public",
         "title": "公开案例",
         "summary": "摘要",

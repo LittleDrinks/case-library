@@ -48,6 +48,8 @@ def _materials() -> list[dict]:
 
 def _case(case_id: str, title: str) -> dict:
     version = {
+        "id": f"version-{case_id}",
+        "number": 1,
         "caseId": case_id,
         "title": title,
         "summary": "依托场馆实践与专业课程建设思政课堂",
