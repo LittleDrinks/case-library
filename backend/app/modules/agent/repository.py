@@ -182,12 +182,7 @@ class AgentRepository:
         return _transaction(self.database, lambda session: self._snapshot(thread, session))
 
     def _snapshot(self, thread: AgentThread, session) -> AgentSnapshot:
-        current = _model_view(
-            self.database.agent_threads.find_one({"id": thread.id}, session=session),
-            AgentThread,
-        )
-        if current is None:
-            raise ThreadNotFoundError
+        current = self._snapshot_thread(thread.id, session)
         return AgentSnapshot(
             id=current.id,
             case_id=current.case_id,
@@ -201,6 +196,15 @@ class AgentRepository:
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
         )
+
+    def _snapshot_thread(self, thread_id: str, session) -> AgentThread:
+        current = _model_view(
+            self.database.agent_threads.find_one({"id": thread_id}, session=session),
+            AgentThread,
+        )
+        if current is None:
+            raise ThreadNotFoundError
+        return current
 
     def write_views(self, thread_id: str, session=None) -> list:
         """线程写入记录视图：撤销状态回显的服务端真源。"""
@@ -667,6 +671,24 @@ def _new_user_message(
     )
 
 
+def _run_common_fields(
+    thread, now, owner_id, quota_ids,
+    skill_bindings: list[dict[str, str]] | None = None,
+    base_revision=None, target=None, write_authorized: bool = False,
+) -> dict:
+    """活跃运行共享字段：只读、授权、基线与 owner 会话到期时间。"""
+    return {
+        "status": "active", "started_at": now,
+        "skill_bindings": list(skill_bindings or []),
+        "read_only": thread.version_id is not None,
+        "write_authorized": write_authorized,
+        "base_revision": base_revision, "target": target,
+        "owner_id": owner_id,
+        "owner_expires_at": now + _owner_delta() if owner_id else None,
+        "quota_ids": quota_ids,
+    }
+
+
 def _new_retry_run(
     thread, message: dict, assistant_id: str, run_id: str,
     owner_id: str | None, quota_ids: tuple[str, ...],
@@ -675,17 +697,14 @@ def _new_retry_run(
     write_authorized: bool = False,
 ) -> AgentRun:
     now = _now()
+    fields = _run_common_fields(
+        thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
+        write_authorized,
+    )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=thread.owner_id,
         user_message_id=message["id"], assistant_message_id=assistant_id,
-        status="active", started_at=now,
-        skill_bindings=list(skill_bindings or []),
-        read_only=thread.version_id is not None,
-        write_authorized=write_authorized,
-        base_revision=base_revision, target=target,
-        owner_id=owner_id,
-        owner_expires_at=now + _owner_delta() if owner_id else None,
-        quota_ids=quota_ids,
+        **fields,
     )
 
 
@@ -694,17 +713,14 @@ def _new_active_run(
     owner_id, quota_ids, skill_bindings: list[dict[str, str]] | None = None,
     base_revision=None, target=None, write_authorized: bool = False,
 ) -> AgentRun:
+    fields = _run_common_fields(
+        thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
+        write_authorized,
+    )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
         assistant_message_id=assistant_id, client_request_id=client_request_id,
-        status="active", started_at=now,
-        skill_bindings=list(skill_bindings or []),
-        read_only=thread.version_id is not None,
-        write_authorized=write_authorized,
-        base_revision=base_revision, target=target,
-        owner_id=owner_id,
-        owner_expires_at=now + _owner_delta() if owner_id else None,
-        quota_ids=quota_ids,
+        **fields,
     )
 
 

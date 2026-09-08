@@ -55,11 +55,7 @@ def propose_document_artifact(
     """为空草稿或模板构建整篇初稿候选；已有正文时拒绝整篇提议。"""
     case = _current_case(database, case_id)
     _verify_writer(case, user)
-    _verify_run_baseline(database, run_id, case)
-    _ensure_no_artifact(database, run_id)
-    if not blocks.document_rewritable(case["document"]):
-        raise CaseError(422, "正文已有内容，整篇候选只适用于空草稿或模板；请先澄清要修改的范围")
-    normalized = blocks.validate_blocks(blocks_input)
+    normalized = _document_candidate(database, run_id, case, blocks_input)
     return AgentArtifact(
         id=new_id("artifact"), case_id=case["id"], thread_id=thread_id,
         run_id=run_id, base_revision=case["revision"], kind="document",
@@ -67,6 +63,15 @@ def propose_document_artifact(
         replacement="", blocks=normalized, reason=reason, sources=sources,
         created_at=_now(),
     )
+
+
+def _document_candidate(database, run_id: str, case: dict, blocks_input: object) -> list:
+    """整篇候选前提：运行基线未越、未重复提议、正文确为空草稿或模板。"""
+    _verify_run_baseline(database, run_id, case)
+    _ensure_no_artifact(database, run_id)
+    if not blocks.document_rewritable(case["document"]):
+        raise CaseError(422, "正文已有内容，整篇候选只适用于空草稿或模板；请先澄清要修改的范围")
+    return blocks.validate_blocks(blocks_input)
 
 
 def _run_row(database, run_id: str) -> dict:

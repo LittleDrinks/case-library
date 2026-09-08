@@ -117,6 +117,16 @@ def apply_write(
 
 
 def _apply(database, case_id, run_id, scope, normalized, user, summary, session) -> dict:
+    case, run, document = _write_guards(
+        database, case_id, run_id, scope, normalized, user, session,
+    )
+    record_snapshot(database, case, user, "pre_agent_write", session)
+    write = _new_write_record(case, run, scope, normalized, user, summary, document)
+    return _commit_write(database, case_id, user, run, write, scope, session)
+
+
+def _write_guards(database, case_id, run_id, scope, normalized, user, session) -> tuple:
+    """写入守卫：作者授权、一次运行一次写入、基线未越，并解析目标文档。"""
     case = _writable_case(database, case_id, user, session)
     run = _writable_run(database, run_id, case_id, user, session)
     if database.agent_writes.find_one({"runId": run_id}, session=session):
@@ -127,26 +137,33 @@ def _apply(database, case_id, run_id, scope, normalized, user, summary, session)
         document = _document_scope(case, normalized)
     else:
         document = _selection_scope(case, normalized, run)
-    record_snapshot(database, case, user, "pre_agent_write", session)
+    return case, run, document
+
+
+def _new_write_record(case, run, scope, normalized, user, summary, document) -> dict:
     record = AgentWrite(
-        id=new_id("write"), case_id=case_id, thread_id=run["threadId"],
-        run_id=run_id, scope=scope, summary=summary, blocks=normalized,
+        id=new_id("write"), case_id=case["id"], thread_id=run["threadId"],
+        run_id=run["id"], scope=scope, summary=summary, blocks=normalized,
         before_document=case["document"], document=document,
         base_revision=case["revision"], result_revision=case["revision"] + 1,
         created_by=user["id"], created_at=_now(),
     )
-    write = record.model_dump(by_alias=True, mode="python")
+    return record.model_dump(by_alias=True, mode="python")
+
+
+def _commit_write(database, case_id, user, run, write, scope, session) -> dict:
+    """CAS 落库：正文修订 +1，写入记录与线程事件同事务可见。"""
     updated = database.cases.find_one_and_update(
-        {"id": case_id, "revision": case["revision"], "ownerId": user["id"],
+        {"id": case_id, "revision": write["baseRevision"], "ownerId": user["id"],
          "workflowStatus": "draft"},
-        {"$set": {"document": document, "updatedAt": _now().isoformat()},
+        {"$set": {"document": write["document"], "updatedAt": _now().isoformat()},
          "$inc": {"revision": 1}},
         return_document=ReturnDocument.AFTER, session=session,
     )
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.agent_writes.insert_one(write, session=session)
-    _append_event(database, run["threadId"], "document.written", run_id,
+    _append_event(database, run["threadId"], "document.written", run["id"],
                   {"writeId": write["id"], "scope": scope}, session)
     return write
 
@@ -182,6 +199,21 @@ def undo_write(
 
 
 def _undo(database, case_id, thread_id, write_id, user, session) -> dict:
+    write = _undo_target(database, case_id, thread_id, write_id, user, session)
+    case = _writable_case(database, case_id, user, session)
+    if write["status"] == "undone":
+        return {"write": write, "case": case}
+    if case["revision"] != write["resultRevision"]:
+        raise CaseError(409, "正文已更新，不能撤销此写入")
+    updated = _restore_document(database, case_id, write, user, session)
+    row = _mark_undone(database, write_id, user, session)
+    _append_event(database, thread_id, "document.undone", write["runId"],
+                  {"writeId": write_id}, session)
+    return {"write": row or write, "case": updated}
+
+
+def _undo_target(database, case_id, thread_id, write_id, user, session) -> dict:
+    """撤销目标存在性：Thread 绑定该案例且属当前用户，写入记录必须存在。"""
     thread = database.agent_threads.find_one(
         {"id": thread_id, "caseId": case_id, "ownerId": user["id"]}, session=session
     )
@@ -192,13 +224,13 @@ def _undo(database, case_id, thread_id, write_id, user, session) -> dict:
     )
     if not write:
         raise CaseError(404, "写入记录不存在")
-    case = _writable_case(database, case_id, user, session)
-    if write["status"] == "undone":
-        return {"write": write, "case": case}
-    if case["revision"] != write["resultRevision"]:
-        raise CaseError(409, "正文已更新，不能撤销此写入")
+    return write
+
+
+def _restore_document(database, case_id, write, user, session) -> dict:
+    """CAS 恢复写入前正文；正文修订号未再前进才允许撤销。"""
     updated = database.cases.find_one_and_update(
-        {"id": case_id, "revision": case["revision"], "ownerId": user["id"],
+        {"id": case_id, "revision": write["resultRevision"], "ownerId": user["id"],
          "workflowStatus": "draft"},
         {"$set": {"document": write["beforeDocument"], "updatedAt": _now().isoformat()},
          "$inc": {"revision": 1}},
@@ -206,14 +238,15 @@ def _undo(database, case_id, thread_id, write_id, user, session) -> dict:
     )
     if not updated:
         raise CaseError(409, "案例状态已变化")
-    row = database.agent_writes.find_one_and_update(
+    return updated
+
+
+def _mark_undone(database, write_id, user, session) -> dict | None:
+    return database.agent_writes.find_one_and_update(
         {"id": write_id, "status": "written"},
         {"$set": {"status": "undone", "undoneBy": user["id"], "undoneAt": _now()}},
         return_document=ReturnDocument.AFTER, session=session,
     )
-    _append_event(database, thread_id, "document.undone", write["runId"],
-                  {"writeId": write_id}, session)
-    return {"write": row or write, "case": updated}
 
 
 def _writable_case(database, case_id, user, session) -> dict:
