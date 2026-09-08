@@ -303,7 +303,7 @@ async function expectThinkingStreaming(page) {
   const thinking = page.locator(".agent-reasoning").first();
   await expect(thinking).toHaveClass(/streaming/, { timeout: 15_000 });
   await expect(thinking.locator("summary")).toContainText("思考中");
-  await expect(thinking).toHaveAttribute("open", "");
+  await expect(thinking).not.toHaveAttribute("open", "");
   await expect(page.locator("[data-testid='agent-skill-load'], .agent-tool-trace")).toHaveCount(0);
 }
 
@@ -444,7 +444,7 @@ test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async (
   await expectCollapsedSources(page);
 });
 
-test("真实运行：Thinking 流式展开、完成后与工具一起折叠", async ({ page, playwright }) => {
+test("真实运行：Thinking 流式与完成后默认折叠", async ({ page, playwright }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepareThinkingRun(page, playwright);
