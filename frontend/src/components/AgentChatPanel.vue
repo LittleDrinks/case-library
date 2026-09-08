@@ -357,6 +357,11 @@ function writtenWriteIds() {
     .map((part) => part.output.writeId);
 }
 
+function writeRunInFlight() {
+  return Boolean(threadState.value.activeRun)
+    || threadState.value.latestRun?.status === "active";
+}
+
 function writeState(part) {
   const writeId = part.output?.writeId;
   const server = writes.value.find((row) => row.id === writeId);
@@ -371,13 +376,13 @@ function syncWrittenDocuments() {
     hydratedWriteThread = threadId.value;
     [...writes.value.map((row) => row.id), ...ids]
       .forEach((writeId) => syncedWrites.add(writeId));
+    pendingWriteSync = Boolean(ids.length && writeRunInFlight());
     return;
   }
   const fresh = ids.filter((writeId) => !syncedWrites.has(writeId));
   fresh.forEach((writeId) => syncedWrites.add(writeId));
   if (!fresh.length) return;
-  const waitingForTerminal = threadState.value.latestRun?.status === "active"
-    && !sending.value;
+  const waitingForTerminal = writeRunInFlight() && !sending.value;
   pendingWriteSync = waitingForTerminal;
   if (!waitingForTerminal) void refreshCaseAfterWrite();
 }

@@ -51,11 +51,13 @@ _QUESTIONS = (
 # 从句内出现即条件假设，尚未成为指令，不得授权。
 _CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话", "以后", "之后")
 # 直接写入作为名词被提及（功能/规则说明）而非指令时，不得授权。
-_MENTION_SUFFIXES = ("功能", "按钮", "规则", "模式", "选项", "机制", "说明",
-                     "是什么", "的意思", "的含义", "用法", "怎么用")
+_MENTION_SUFFIXES = (
+    "功能", "按钮", "规则", "模式", "选项", "机制", "说明", "是什么",
+    "的意思", "的含义", "用法", "怎么用", "的结果", "的内容", "结果", "内容",
+)
 _MENTION_PREFIXES = (
     "提示词", "需求", "验收", "文档", "说明", "解释", "含义", "意思", "介绍",
-    "理解",
+    "理解", "撤销", "取消", "回滚", "撤回", "展示", "查看", "显示",
 )
 _CLAUSE_COMMA = re.compile(r"[，,：:、]")
 
@@ -85,8 +87,7 @@ def _contains(clause: str, tokens) -> bool:
 
 def _negates_core(clause: str, match: re.Match) -> bool:
     prefix = clause[:match.start()]
-    local = _CLAUSE_COMMA.split(prefix)[-1] + clause[match.start():]
-    return _contains(local, _NEGATIONS)
+    return _contains(_CLAUSE_COMMA.split(prefix)[-1], _NEGATIONS)
 
 
 def _is_mention(clause: str) -> bool:

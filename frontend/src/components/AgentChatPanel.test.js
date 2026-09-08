@@ -39,6 +39,13 @@ function writeSnapshot(status = "written") {
   };
 }
 
+function activeWriteSnapshot() {
+  const running = writeSnapshot();
+  running.activeRun = { id: "run-1", status: "active" };
+  running.latestRun = { id: "run-1", status: "active" };
+  return running;
+}
+
 function streamResponse(chunks) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
@@ -95,6 +102,17 @@ it("hydrates an undone write from the server snapshot", async () => {
 
   expect(wrapper.get('[data-testid="agent-write-undone"]').text()).toBe("已撤销写入");
   expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
+});
+
+it("refreshes the case after an in-flight write is hydrated", async () => {
+  const completed = writeSnapshot();
+  completed.latestRun = { id: "run-1", status: "completed" };
+  api.agentThread.mockResolvedValueOnce(activeWriteSnapshot()).mockResolvedValueOnce(completed);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse()));
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(api.getCase).toHaveBeenCalledWith("case-1"));
+
+  expect(wrapper.emitted("case-revised")[0][0]).toEqual({ id: "case-1" });
 });
 
 it("refreshes the thread after undo so the write action is replaced", async () => {

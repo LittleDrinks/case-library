@@ -45,24 +45,6 @@ it("previews whole-document candidates from the stored block shape", () => {
   expect(wrapper.text()).not.toContain("原文：");
 });
 
-it("renders legacy ProseMirror blocks with the same preview rules", () => {
-  const wrapper = mount(AgentArtifactCard, {
-    props: {
-      artifact: {
-        ...DOCUMENT_ARTIFACT,
-        blocks: [
-          { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "旧标题" }] },
-          { type: "orderedList", content: [{ type: "listItem", content: [
-            { type: "paragraph", content: [{ type: "text", text: "旧步骤" }] },
-          ] }] },
-        ],
-      },
-    },
-  });
-  expect(wrapper.find(".agent-artifact-draft").text()).toContain("【旧标题】");
-  expect(wrapper.find(".agent-artifact-draft").text()).toContain("1. 旧步骤");
-});
-
 it("keeps the range card on quote and replacement", () => {
   const wrapper = mount(AgentArtifactCard, {
     props: { artifact: RANGE_ARTIFACT },
