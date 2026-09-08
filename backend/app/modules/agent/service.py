@@ -55,12 +55,13 @@ class RunContext:
 
 
 def _run_kwargs(context: RunContext, model=None) -> dict:
+    database = context.deps.database if context.deps else None
     values = {
         "message_history": context.history,
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
         "instructions": case_instructions(
-            context.case, extra=context.instructions, reader=context.reader
+            context.case, database=database, extra=context.instructions, reader=context.reader
         ),
         "user_prompt": context.prompt,
         "deps": context.deps,

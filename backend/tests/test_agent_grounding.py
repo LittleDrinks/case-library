@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime as DateTime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -23,9 +24,11 @@ def _csrf(auth: dict) -> dict:
     return {"X-CSRF-Token": auth["csrfToken"]}
 
 
-def _post(client: TestClient, auth: dict, text: str, parts: list[dict] | None = None,
-          seen: list[str] | None = None):
-    thread_id = client.get("/api/cases/c-draft-1/agent/thread").json()["id"]
+def _post(
+    client: TestClient, auth: dict, text: str, parts: list[dict] | None = None,
+    seen: list[str] | None = None, case_id: str = "c-draft-1",
+):
+    thread_id = client.get(f"/api/cases/{case_id}/agent/thread").json()["id"]
 
     async def stream(messages, info):
         if seen is not None:
@@ -34,7 +37,7 @@ def _post(client: TestClient, auth: dict, text: str, parts: list[dict] | None = 
 
     with agent.override(model=FunctionModel(stream_function=stream)):
         return client.post(
-            f"/api/cases/c-draft-1/agent/thread/{thread_id}/stream",
+            f"/api/cases/{case_id}/agent/thread/{thread_id}/stream",
             headers=_csrf(auth),
             json={
                 "id": "grounding-browser-message",
@@ -57,40 +60,68 @@ def _called(messages, name: str) -> bool:
     )
 
 
-def test_production_agent_receives_current_date_course_context_and_grounding(
+def test_production_agent_receives_beijing_date_seed_context_and_grounding(
     client: TestClient,
 ) -> None:
-    database = client.app.state.database
-    database.cases.update_one(
-        {"id": "c-draft-1"},
-        {"$set": {
-            "course": "自然辩证法概论",
-            "typeName": "思想实验类",
-            "stageText": "研究生",
-            "audience": "grad",
-            "purpose": "日常授课",
-            "theoryPoints": ["科技自立自强", "风险评价与决策"],
-        }},
-    )
     auth = _auth(client)
     seen: list[str] = []
 
-    with patch("app.modules.agent.runtime._current_date", return_value="2026-09-08"):
+    class CrossesUtcMidnight(DateTime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is not None
+            assert getattr(tz, "key", None) == "Asia/Shanghai"
+            return DateTime(2026, 9, 8, 16, 30, tzinfo=UTC).astimezone(tz)
+
+    with patch("app.modules.agent.runtime.datetime", CrossesUtcMidnight):
         response = _post(client, auth, "请结合当前课程回答", seen=seen)
 
     assert response.status_code == 200, response.text
     context = seen[0]
-    assert "系统当前日期（服务端提供）：2026-09-08" in context
+    assert "系统当前日期（北京时间，服务端提供）：2026-09-09" in context
     assert "课程：自然辩证法概论" in context
     assert "案例类型：思想实验类" in context
-    assert "适用阶段：研究生" in context
-    assert "理论/思政要点：科技自立自强、风险评价与决策" in context
-    assert "不得擅自扩写为“习近平文化思想”" in context
+    assert "适用对象：研究生" in context
+    assert "理论/思政要点：科技自立自强、科学技术创新观、风险评价与决策" in context
+    assert "课程简称或表述含糊时，不得擅自替换或扩写为其他课程" in context
     assert "search_corpus 是平台检索" in context
     assert "status=ok` 只证明本次成功读取" in context
-    assert "1260人次" in context and "98.6%" in context
-    assert "报道日期" in context and "书目" in context
+    assert "来源没有明确支持的数字、日期、引语和书目" in context
     assert "不能扩展为整篇正文" in context
+
+
+def test_new_case_context_resolves_tag_ids_by_existing_groups(client: TestClient) -> None:
+    auth = _auth(client)
+    created = client.post(
+        "/api/cases",
+        headers=_csrf(auth),
+        json={"title": "标签课程 grounding 案例"},
+    )
+    assert created.status_code == 200, created.text
+    case = created.json()
+    saved = client.patch(
+        f"/api/cases/{case['id']}",
+        headers=_csrf(auth),
+        json={
+            "revision": case["revision"],
+            "tagIds": ["tag-seed-1-4", "tag-seed-2-3", "tag-seed-3-1", "tag-seed-4-1"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["course"] is None
+    seen: list[str] = []
+
+    response = _post(
+        client, auth, "请按当前案例课程回答", seen=seen, case_id=case["id"]
+    )
+
+    assert response.status_code == 200, response.text
+    context = seen[0]
+    assert "当前案例 tagIds 按现有标签组解析的名称" in context
+    assert "学科：工学" in context
+    assert "课程：自然辩证法概论" in context
+    assert "案例类型：人物传记类" in context
+    assert "思政元素：科学家精神" in context
 
 
 def test_read_source_result_marks_reading_without_claiming_full_verification(
