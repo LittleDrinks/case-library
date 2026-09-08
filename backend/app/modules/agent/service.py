@@ -120,7 +120,7 @@ def _model_context(context: RunContext):
     if not context.selection:
         return _NoModel()
     allow_internal = context.settings.app_environment == "test"
-    return open_model(context.selection, allow_internal)
+    return open_model(context.selection, allow_internal, thinking=True)
 
 
 def _message_id(assistant_id: str, user_id: str):

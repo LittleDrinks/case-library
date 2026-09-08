@@ -36,6 +36,10 @@ class _ProviderHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
+        if self.server.seen[-1].get("enable_thinking"):
+            for text in ("先核对", "资料区与选区"):
+                self.wfile.write(_reasoning_chunk(text))
+                self.wfile.flush()
         for text in ("生产", "模型回答"):
             chunk = _chunk(text)
             self.wfile.write(chunk)
@@ -44,6 +48,11 @@ class _ProviderHandler(BaseHTTPRequestHandler):
 
 def _chunk(text: str) -> bytes:
     payload = {"choices": [{"index": 0, "delta": {"content": text}}]}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _reasoning_chunk(text: str) -> bytes:
+    payload = {"choices": [{"index": 0, "delta": {"reasoning_content": text}}]}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
@@ -78,20 +87,24 @@ def _login(client: TestClient) -> dict:
 
 
 def _configure(client: TestClient, auth: dict, base_url: str) -> None:
+    _configure_model(client, auth, base_url, "model-a")
+
+
+def _configure_model(client: TestClient, auth: dict, base_url: str, model: str) -> None:
     response = client.put(
         "/api/ai/settings",
         headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"mode": "custom", "baseUrl": base_url, "apiKey": "provider-key", "model": "model-a"},
+        json={"mode": "custom", "baseUrl": base_url, "apiKey": "provider-key", "model": model},
     )
     assert response.status_code == 200
 
 
-def _body(text: str) -> dict:
+def _body(text: str, message_id: str = "client-message") -> dict:
     return {
         "id": "browser-chat",
         "trigger": "submit-message",
         "messages": [{
-            "id": "client-message", "role": "user",
+            "id": message_id, "role": "user",
             "parts": [{"type": "text", "text": text}],
         }],
     }
@@ -138,3 +151,111 @@ def test_upstream_failure_is_a_stable_terminal_run(client: TestClient) -> None:
     assert run["error"] == "AI 服务暂不可用"
     assert events[-1]["type"] == "run.failed"
     assert database.ai_usage.count_documents({"token": {"$exists": True}}) == 0
+
+
+QWEN_REASONING = "先核对资料区与选区"
+
+
+def _thread_id(database) -> str:
+    return database.agent_threads.find_one({}, {"id": 1})["id"]
+
+
+def _stream_turn(client: TestClient, auth: dict, thread_id: str, text: str, message_id: str):
+    return client.post(
+        f"/api/cases/c-draft-1/agent/thread/{thread_id}/stream",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json=_body(text, message_id),
+    )
+
+
+def _reasoning_text(message: dict) -> str:
+    return "".join(
+        part.get("text", "") for part in message.get("parts", [])
+        if part.get("type") == "reasoning"
+    )
+
+
+def _assistant_messages(client: TestClient, database) -> list[dict]:
+    snapshot = client.get(
+        f"/api/cases/c-draft-1/agent/threads/{_thread_id(database)}"
+    ).json()
+    return [m for m in snapshot["messages"] if m["role"] == "assistant"]
+
+
+def _configure_qwen(client: TestClient, auth: dict, provider) -> dict:
+    _configure_model(client, auth, provider.base_url, "qwen-plus")
+    return client.app.state.database
+
+
+def test_qwen_plus_request_enables_official_thinking_parameter(
+    client: TestClient,
+) -> None:
+    """qwen-plus：按官方协议经 enable_thinking 开启思考，真实 reasoning 流出。"""
+    with _ProviderServer() as provider, override_allow_model_requests(True):
+        auth = _login(client)
+        database = _configure_qwen(client, auth, provider)
+        response = _send(client, auth)
+        assert response.status_code == 200
+        assert '"type":"reasoning-start"' in response.text
+        assert "先核对" in response.text and "资料区与选区" in response.text
+        assert provider.server.seen[0]["enable_thinking"] is True
+        message = database.agent_messages.find_one(
+            {"role": "assistant"}, {"_id": 0, "parts": 1}
+        )
+        assert _reasoning_text(message) == QWEN_REASONING
+
+
+def test_qwen_plus_history_keeps_reasoning_content_out_of_requests(
+    client: TestClient,
+) -> None:
+    """官方多轮协议：历史消息只回传 content，不回传 reasoning_content。"""
+    with _ProviderServer() as provider, override_allow_model_requests(True):
+        auth = _login(client)
+        database = _configure_qwen(client, auth, provider)
+        assert _send(client, auth).status_code == 200
+        followup = _stream_turn(
+            client, auth, _thread_id(database), "追问一轮", "followup-message"
+        )
+        assert followup.status_code == 200
+        assert provider.server.seen[1]["enable_thinking"] is True
+        assert all(
+            "reasoning_content" not in message
+            for message in provider.server.seen[1]["messages"]
+            if message.get("role") == "assistant"
+        )
+
+
+def test_qwen_plus_reasoning_replays_identically_in_history(
+    client: TestClient,
+) -> None:
+    """历史回放与流式一致：每轮快照中的思考与 provider 真实返回一致。"""
+    with _ProviderServer() as provider, override_allow_model_requests(True):
+        auth = _login(client)
+        database = _configure_qwen(client, auth, provider)
+        assert _send(client, auth).status_code == 200
+        followup = _stream_turn(
+            client, auth, _thread_id(database), "追问一轮", "followup-message"
+        )
+        assert followup.status_code == 200
+        messages = _assistant_messages(client, database)
+        assert len(messages) == 2
+        for message in messages:
+            assert _reasoning_text(message) == QWEN_REASONING
+
+
+def test_model_without_official_thinking_support_stays_untouched(
+    client: TestClient,
+) -> None:
+    """非思考模型不下发思考参数，也不伪造思考内容。"""
+    with _ProviderServer() as provider, override_allow_model_requests(True):
+        auth = _login(client)
+        _configure_model(client, auth, provider.base_url, "gpt-4o")
+        response = _send(client, auth)
+        assert response.status_code == 200
+        assert "reasoning" not in response.text
+        assert provider.server.seen[0].get("enable_thinking") is None
+        database = client.app.state.database
+        message = database.agent_messages.find_one(
+            {"role": "assistant"}, {"_id": 0, "parts": 1}
+        )
+        assert all(part.get("type") != "reasoning" for part in message["parts"])

@@ -10,6 +10,7 @@ from app.modules.attachments.routes import router as attachments_router
 from app.modules.cases.routes import router as cases_router
 from app.modules.case_materials.routes import router as case_materials_router
 from app.modules.case_sources.routes import router as case_sources_router
+from app.modules.knowledge.routes import router as knowledge_router
 from app.modules.materials.routes import candidate_router as material_candidates_router
 from app.modules.materials.routes import content_router as material_content_router
 from app.modules.materials.routes import router as materials_router
@@ -29,6 +30,7 @@ router.include_router(admin_ai_router)
 router.include_router(cases_router)
 router.include_router(case_materials_router)
 router.include_router(case_sources_router)
+router.include_router(knowledge_router)
 router.include_router(attachments_router)
 router.include_router(annotations_router)
 router.include_router(materials_router)
