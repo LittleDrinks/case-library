@@ -38,10 +38,6 @@ def _current_date() -> str:
     return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
 
 
-def _case_value(case: dict, field: str):
-    return case.get(field)
-
-
 def _context_value(value: object) -> str:
     if value is None or value == "" or value == []:
         return "未提供（不得推断）"
@@ -67,11 +63,9 @@ def _audience_label(value: object) -> object:
     return _AUDIENCE_LABELS.get(value, value) if isinstance(value, str) else value
 
 
-def _grounding_instructions(case: dict, database=None) -> str:
-    tag_groups = _tag_groups(database, case)
-    has_tag_ids = bool(case.get("tagIds"))
+def _context_fields(case: dict, tag_groups: dict, has_tag_ids: bool) -> dict:
     if has_tag_ids:
-        values = {
+        return {
             "course": tag_groups.get("课程"),
             "typeName": tag_groups.get("案例类型"),
             "stageText": case.get("stageText"),
@@ -79,26 +73,37 @@ def _grounding_instructions(case: dict, database=None) -> str:
             "purpose": case.get("purpose"),
             "theoryPoints": tag_groups.get("思政元素"),
         }
-    else:
-        # 旧种子案例仍以已有顶层字段展示；新案例的课程不走这条路径。
-        values = {
-            field: _case_value(case, field) for field, _label in _COURSE_CONTEXT_FIELDS
-        }
-        values["audience"] = _audience_label(values["audience"])
+    # 旧种子案例仍以已有顶层字段展示；新案例的课程不走这条路径。
+    values = {field: case.get(field) for field, _label in _COURSE_CONTEXT_FIELDS}
+    values["audience"] = _audience_label(values["audience"])
+    return values
+
+
+def _tag_context_lines(tag_groups: dict, has_tag_ids: bool) -> list[str]:
+    if tag_groups:
+        return [
+            "- 当前案例 tagIds 按现有标签组解析的名称：",
+            *(
+                f"- {group_name}：{_context_value(names)}"
+                for group_name, names in tag_groups.items()
+            ),
+        ]
+    if has_tag_ids:
+        return ["- 当前案例 tagIds 未返回可用标签名称；缺失标签不得推断。"]
+    return []
+
+
+def _grounding_instructions(case: dict, database=None) -> str:
+    tag_groups = _tag_groups(database, case)
+    has_tag_ids = bool(case.get("tagIds"))
+    values = _context_fields(case, tag_groups, has_tag_ids)
 
     lines = [
         "## 服务端运行上下文",
         f"- 系统当前日期（北京时间，服务端提供）：{_current_date()}",
         "- 以下课程与案例标签来自当前案例服务端上下文，优先于 Skill 主题或模型记忆：",
     ]
-    if tag_groups:
-        lines.append("- 当前案例 tagIds 按现有标签组解析的名称：")
-        lines.extend(
-            f"- {group_name}：{_context_value(names)}"
-            for group_name, names in tag_groups.items()
-        )
-    elif has_tag_ids:
-        lines.append("- 当前案例 tagIds 未返回可用标签名称；缺失标签不得推断。")
+    lines.extend(_tag_context_lines(tag_groups, has_tag_ids))
     lines.extend(
         f"- {label}：{_context_value(values[field])}"
         for field, label in _COURSE_CONTEXT_FIELDS
