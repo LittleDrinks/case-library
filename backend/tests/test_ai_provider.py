@@ -17,15 +17,28 @@ def test_thinking_settings_follow_official_qwen_protocol() -> None:
     assert enabled is not None
     assert enabled["extra_body"] == {"enable_thinking": True}
     for model in (
-        "qwen-plus-latest", "qwen-plus-2025-04-28", "qwen-turbo", "qwen-flash",
-        "qwen3-max", "qwen3-max-preview", "qwen3.5-plus", "qwen3.7-flash-2026-07-15",
+        "qwen-plus-latest", "qwen-plus-2025-04-28", "qwen-plus-2025-12-01",
+        "qwen-turbo", "qwen-flash", "qwen-flash-2025-07-28",
+        "qwen3-max", "qwen3-max-preview", "qwen3-max-2026-01-23", "qwen3.5-plus", "qwen3.8-max-0902",
     ):
         assert thinking.thinking_settings(model) is not None, model
-    for model in ("qwen-max", "qwen2.5-72b-instruct", "gpt-4o", "deepseek-r1", ""):
+    for model in (
+        # 旧快照、角色扮演后缀与未知未来命名不得误命中
+        "qwen-plus-2025-01-25", "qwen-turbo-2024-11-01", "qwen-flash-2025-06-30",
+        "qwen-plus-character", "qwen3.8-max-future",
+        # 仅思考模式无需传参；非思考模型不传参
+        "qwen3.7-max-preview", "qwen3.8-2.4t-a95b", "qwq-plus",
+        "qwen-max", "qwen2.5-72b-instruct", "gpt-4o", "deepseek-r1", "",
+    ):
         assert thinking.thinking_settings(model) is None, model
 
 
-def test_thinking_history_profile_disables_send_back() -> None:
+def test_official_thinking_models_own_the_reasoning_history_protocol() -> None:
+    """reasoning_content 历史协议仅适用于官方列出型号，不覆盖其他 provider。"""
+    for model in ("qwen-plus", "qwen-plus-2025-04-28", "qwq-plus", "qwen3.8-flash"):
+        assert thinking.official_thinking_model(model), model
+    for model in ("qwen-plus-2025-01-25", "qwen-plus-character", "gpt-4o", "deepseek-r1"):
+        assert not thinking.official_thinking_model(model), model
     profile = thinking.thinking_history_profile
     assert profile["openai_chat_send_back_thinking_parts"] is False
 

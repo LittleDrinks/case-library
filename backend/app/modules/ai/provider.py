@@ -11,7 +11,11 @@ from openai import OpenAI
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from app.modules.ai.thinking import thinking_history_profile, thinking_settings
+from app.modules.ai.thinking import (
+    official_thinking_model,
+    thinking_history_profile,
+    thinking_settings,
+)
 from app.modules.ai.transport import (
     ProviderError,
     RestrictedProviderTransport,
@@ -140,12 +144,12 @@ class OpenAIModelDiscovery:
 
 
 def _chat_model(selection, provider, thinking: bool) -> OpenAIChatModel:
-    """装配聊天模型；思考参数与历史协议见 ai.thinking。"""
+    """装配聊天模型；思考参数与历史协议仅对官方列出型号启用。"""
+    model = selection.model.strip()
+    settings = thinking_settings(model) if thinking else None
+    protocol = thinking_history_profile if official_thinking_model(model) else None
     return OpenAIChatModel(
-        selection.model,
-        provider=provider,
-        settings=thinking_settings(selection.model) if thinking else None,
-        profile=thinking_history_profile,
+        selection.model, provider=provider, settings=settings, profile=protocol,
     )
 
 
