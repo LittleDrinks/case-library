@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext, Tool
 
 from app.modules.agent import artifacts, writes
+from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.models import SourceRef, write_view
@@ -96,7 +99,7 @@ def _artifact_view(artifact) -> dict:
 
 
 async def propose_document(
-    ctx: RunContext[ToolDeps], blocks: list[dict], reason: str = ""
+    ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
     """为空草稿或模板提议整篇初稿候选；随运行完成事务统一提交，教师确认后才生效。"""
     if ctx.deps.proposed is not None:
@@ -116,7 +119,8 @@ async def propose_document(
 
 
 async def write_document(
-    ctx: RunContext[ToolDeps], scope: str, blocks: list[dict], summary: str = ""
+    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
+    blocks: DraftBlocks, summary: str = "",
 ) -> dict:
     """按教师明确的直接写入指令执行正文写入；服务端全部校验通过才返回 written。
 

@@ -73,12 +73,16 @@ class BlockquoteBlock(BaseModel):
     )
 
 
-_BLOCK_ADAPTER: TypeAdapter = TypeAdapter(
-    Annotated[
-        ParagraphBlock | HeadingBlock | BulletListBlock | OrderedListBlock | BlockquoteBlock,
-        Field(discriminator="type"),
-    ]
-)
+DraftBlock = Annotated[
+    ParagraphBlock | HeadingBlock | BulletListBlock | OrderedListBlock | BlockquoteBlock,
+    Field(discriminator="type"),
+]
+"""公共块联合：SDK 工具契约与服务端校验共用同一 type 判别形状。"""
+
+DraftBlocks = Annotated[list[DraftBlock], Field(min_length=1, max_length=MAX_BLOCKS)]
+"""工具参数的有界块列表：1-300 个块。"""
+
+_BLOCK_ADAPTER: TypeAdapter = TypeAdapter(DraftBlock)
 
 
 def validate_blocks(blocks: object) -> list[dict[str, Any]]:
