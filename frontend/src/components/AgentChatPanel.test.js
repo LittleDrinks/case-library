@@ -904,3 +904,37 @@ it("restores skill load, sources and decided artifact from a reloaded thread sna
   expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
   expect(wrapper.find('[data-testid="agent-reject"]').exists()).toBe(false);
 });
+
+it("renders assistant answers as markdown with scrollable tables", async () => {
+  const answer = structuredClone(snapshot);
+  answer.messages[0].parts = [{
+    type: "text",
+    text: "## 结论\n\n- **要点**一\n\n| 指标 | 数值 |\n| --- | --- |\n| 甲 | 12 |\n\n<script>alert(1)</script>",
+  }];
+  api.agentThread.mockResolvedValue(answer);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const answerBody = wrapper.get('[data-testid="agent-answer"]');
+  expect(answerBody.get("h2").text()).toBe("结论");
+  expect(answerBody.get("strong").text()).toBe("要点");
+  expect(answerBody.get(".md-table-scroll table").exists()).toBe(true);
+  expect(answerBody.element.innerHTML).not.toContain("<script");
+  expect(answerBody.text()).toContain("<script>");
+});
+
+it("keeps user messages as plain preformatted text", async () => {
+  const asked = structuredClone(snapshot);
+  asked.messages = [
+    { id: "message-1", role: "user", metadata: {}, parts: [{ type: "text", text: "# 生成案例\n带 换行" }] },
+    { id: "message-2", role: "assistant", metadata: {}, parts: [{ type: "text", text: "确定回答" }] },
+  ];
+  api.agentThread.mockResolvedValue(asked);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const user = wrapper.get(".ai-message.user");
+  expect(user.find("h1").exists()).toBe(false);
+  expect(user.get("p").text()).toBe("# 生成案例\n带 换行");
+  expect(wrapper.get('[data-testid="agent-answer"]').text()).toContain("确定回答");
+});

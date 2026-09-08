@@ -10,5 +10,6 @@ import "./styles/material-import.css";
 import "./styles/prototype-workbench-ai.css";
 import "./styles/search-materials.css";
 import "./styles/workbench.css";
+import "./styles/markdown.css";
 
 createApp(App).use(router).mount("#app");
