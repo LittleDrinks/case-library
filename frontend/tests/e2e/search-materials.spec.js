@@ -128,13 +128,19 @@ test("高级筛选支持页签分面、多选 chips 和清空", async ({ page })
   await assertMaterialFacets(page);
 });
 
-test("知识检索展示章节且不伪造外部链接", async ({ page }) => {
+test("知识检索展示章节并链接到内部可读详情", async ({ page }) => {
   await page.goto("/#/search?q=生成式人工智能");
   await page.getByRole("tab", { name: /知识/ }).click();
   const result = page.getByRole("region", { name: "检索结果" }).getByRole("article").first();
   await expect(result.locator(":scope > span")).toHaveText("知识");
   await expect(result.locator("small")).toContainText(/第[一二三四五六七八九十]+章/);
-  await expect(result.getByRole("link")).toHaveCount(0);
+  const detailTitle = await result.getByRole("heading").innerText();
+  const detailLink = result.getByRole("link");
+  await expect(detailLink).toHaveAttribute("href", /#\/knowledge\/[^?]+/);
+  await detailLink.click();
+  await expect(page).toHaveURL(/#\/knowledge\/[^?]+/);
+  await expect(page.getByRole("heading", { name: detailTitle })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "正文" })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toHaveCount(0);
   await expect(page.getByRole("group", { name: "更新时间" })).toHaveCount(0);
 });

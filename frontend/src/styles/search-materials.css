@@ -19,13 +19,14 @@
 .ai-answer-state a { color: var(--brand); font-weight: 650; text-decoration: none; }
 .ai-progress { display: flex; align-items: center; gap: 8px; color: var(--ink-3); }
 .ai-answer-text { overflow-wrap: anywhere; }
-.ai-answer-text .ai-marker { padding: 0; border: 0; background: none; color: var(--brand); font-weight: 650; cursor: pointer; }
+.ai-answer-text .ai-marker { padding: 0; border: 0; background: none; color: var(--brand); font-weight: 650; cursor: pointer; text-decoration: none; }
 .ai-answer-text.collapsed { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .ai-answer-toggle { display: inline-flex; align-items: center; gap: 4px; margin: 8px 0 0; padding: 0; border: 0; background: none; color: var(--brand); font-size: 13px; font-weight: 650; cursor: pointer; }
 .ai-answer-toggle svg { transition: transform .15s; }
 .ai-answer-toggle svg.flipped { transform: rotate(180deg); }
 .ai-answer-sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
 .ai-answer-sources li { max-width: 100%; }
+.ai-answer-sources a { display: block; max-width: 100%; padding: 3px 9px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-size: 12px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .ai-answer-sources button { display: block; max-width: 100%; padding: 3px 9px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .ai-answer-error { color: var(--red); }
 .stream-caret { display: inline-block; width: 2px; height: 1em; margin-left: 3px; background: var(--brand); vertical-align: -.1em; animation: stream-blink .8s step-end infinite; }
@@ -156,6 +157,10 @@
 .material-detail-state { display: flex; min-height: 420px; align-items: center; justify-content: center; gap: 9px; color: var(--ink-3); }
 .material-detail-state.error-state { color: var(--red); }
 .material-detail-state button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-2); }
+.knowledge-detail-main h2 { margin: 0 0 12px; font: 650 18px/1.5 var(--serif); }
+.knowledge-chapters { margin-top: 26px; }
+.knowledge-chapters ol { margin: 0; padding-left: 24px; color: var(--ink-2); line-height: 1.9; }
+.knowledge-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); line-height: 1.9; }
 
 @media (max-width: 760px) {
   .search-shell, .material-shell { padding: 16px 12px 36px; }

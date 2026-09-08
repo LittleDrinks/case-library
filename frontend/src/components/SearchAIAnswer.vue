@@ -9,8 +9,8 @@ import { session } from "../session.js";
 
 const props = defineProps({
   snapshot: { type: Object, required: true },
+  hrefFor: { type: Function, required: true },
 });
-const emit = defineEmits(["locate"]);
 const chat = shallowRef(null);
 const settings = ref(null);
 const override = ref("idle");
@@ -39,7 +39,9 @@ function resolveMarker(raw) {
   const marker = raw.trim();
   const ordered = /^\d+$/.test(marker) ? contextItems.value[Number(marker) - 1] : null;
   const item = ordered || contextItems.value.find((entry) => entry.id === marker);
-  return item ? { item, order: contextItems.value.indexOf(item) + 1 } : null;
+  return item
+    ? { item, order: contextItems.value.indexOf(item) + 1, href: props.hrefFor(item) }
+    : null;
 }
 
 const answer = computed(() => renderAnswer(text.value, resolveMarker));
@@ -53,17 +55,6 @@ const citedSources = computed(() => {
   }
   return [...cited.values()];
 });
-
-function onAnswerClick(event) {
-  const marker = event.target.closest(".ai-marker");
-  if (!marker) return;
-  const item = contextItems.value[Number(marker.dataset.citationOrder) - 1];
-  if (item) locate(item);
-}
-
-function locate(item) {
-  emit("locate", { kind: item.kind, id: item.id });
-}
 
 function newChat() {
   return new Chat({
@@ -123,7 +114,7 @@ onBeforeUnmount(() => retire("idle"));
     </div>
     <p v-else-if="state === 'checking'" class="ai-progress"><LoaderCircle class="spin" :size="16" />检查模型配置</p>
     <template v-else-if="state === 'streaming' || state === 'complete'">
-      <div class="ai-answer-text markdown-body" :class="{ collapsed: !expanded }" v-html="answerHtml" @click="onAnswerClick" />
+      <div class="ai-answer-text markdown-body" :class="{ collapsed: !expanded }" v-html="answerHtml" />
       <button type="button" class="ai-answer-toggle" :aria-expanded="expanded" @click="expanded = !expanded">
         {{ expanded ? "收起" : "展开全文" }}
         <ChevronDown :size="14" aria-hidden="true" :class="{ flipped: expanded }" />
@@ -133,7 +124,7 @@ onBeforeUnmount(() => retire("idle"));
     <p v-else class="ai-answer-state">当前结果不足以生成摘要。</p>
     <ol v-if="citedSources.length" class="ai-answer-sources" aria-label="AI 回答引用来源">
       <li v-for="cited in citedSources" :key="`${cited.item.kind}-${cited.item.id}`">
-        <button type="button" @click="locate(cited.item)">〔{{ cited.order }}〕 {{ cited.item.title }}</button>
+        <a :href="cited.href" target="_blank" rel="noopener noreferrer" :title="`打开来源：${cited.item.title}`">〔{{ cited.order }}〕 {{ cited.item.title }}</a>
       </li>
     </ol>
   </section>

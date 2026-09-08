@@ -116,6 +116,8 @@ class SearchItem(BaseModel):
     score: int
     summary: str | None = None
     publishedAt: str | None = None
+    versionId: str | None = None
+    versionNumber: int | None = None
     typeId: str | None = None
     typeName: str | None = None
     course: str | None = None
