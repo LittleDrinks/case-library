@@ -128,6 +128,11 @@ export const api = {
       + `/artifacts/${encodeURIComponent(artifactId)}/decision`,
     jsonOptions("POST", { decision }, csrfToken),
   ),
+  agentUndoWrite: (caseId, threadId, writeId, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/writes/${encodeURIComponent(writeId)}/undo`,
+    jsonOptions("POST", {}, csrfToken),
+  ),
   aiSettings: () => request("/api/ai/settings"),
   saveAISettings: (settings, csrfToken) => request(
     "/api/ai/settings", jsonOptions("PUT", settings, csrfToken),

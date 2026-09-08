@@ -13,7 +13,7 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.core.ids import new_id
-from app.modules.agent import prosemirror
+from app.modules.agent import blocks, prosemirror
 from app.modules.agent.models import (
     AgentArtifact,
     ArtifactDecision,
@@ -43,19 +43,67 @@ def propose_artifact(
     case = _current_case(database, case_id)
     _verify_writer(case, user)
     target = _locked_target(database, run_id, case, start, end)
-    if database.agent_artifacts.find_one({"runId": run_id}):
-        raise CaseError(409, "本次运行已提议过修订候选")
+    _ensure_no_artifact(database, run_id)
     return _artifact_document(case, thread_id, run_id, target, replacement, reason, sources)
 
 
-def _locked_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
-    """模型提议必须命中 Run 锁定的教师选区，且基线修订号未变。"""
+def propose_document_artifact(
+    database: Database, case_id: str, thread_id: str, run_id: str,
+    blocks_input: object, reason: str,
+    sources: list[SourceRef], user: dict,
+) -> AgentArtifact:
+    """为空草稿或模板构建整篇初稿候选；已有正文时拒绝整篇提议。"""
+    case = _current_case(database, case_id)
+    _verify_writer(case, user)
+    normalized = _document_candidate(database, run_id, case, blocks_input)
+    return AgentArtifact(
+        id=new_id("artifact"), case_id=case["id"], thread_id=thread_id,
+        run_id=run_id, base_revision=case["revision"], kind="document",
+        target=ArtifactTarget(from_pos=0, to_pos=0, quote=""),
+        replacement="", blocks=normalized, reason=reason, sources=sources,
+        created_at=_now(),
+    )
+
+
+def _document_candidate(database, run_id: str, case: dict, blocks_input: object) -> list:
+    """整篇候选前提：运行基线未越、未重复提议、正文确为空草稿或模板。"""
+    _verify_run_baseline(database, run_id, case)
+    _ensure_no_artifact(database, run_id)
+    if not blocks.document_rewritable(case["document"]):
+        raise CaseError(422, "正文已有内容，整篇候选只适用于空草稿或模板；请先澄清要修改的范围")
+    return blocks.validate_blocks(blocks_input)
+
+
+def _run_row(database, run_id: str) -> dict:
     run = database.agent_runs.find_one({"id": run_id})
-    lock = (run or {}).get("target")
-    if not lock or run.get("baseRevision") is None:
+    if run is None:
+        raise CaseError(422, "运行不存在或已结束，不能提议修订")
+    return run
+
+
+def _verify_run_baseline(database, run_id: str, case: dict) -> dict:
+    """作者运行创建时已锁定基线修订号；只读运行与基线越过均显式拒绝。"""
+    run = _run_row(database, run_id)
+    if run.get("readOnly"):
+        raise CaseError(403, "只读对话不能写入正文")
+    if run.get("baseRevision") is None:
         raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
     if run["baseRevision"] != case["revision"]:
         raise CaseError(409, "正文已更新，修订目标已过期，请重新选择段落")
+    return run
+
+
+def _ensure_no_artifact(database, run_id: str) -> None:
+    if database.agent_artifacts.find_one({"runId": run_id}):
+        raise CaseError(409, "本次运行已提议过修订候选")
+
+
+def _locked_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
+    """模型提议必须命中 Run 锁定的教师选区。"""
+    run = _verify_run_baseline(database, run_id, case)
+    lock = run.get("target")
+    if not lock:
+        raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
     if (lock["from"], lock["to"]) != (start, end):
         raise CaseError(422, "修订目标必须与教师选定的范围一致")
     return ArtifactTarget(from_pos=lock["from"], to_pos=lock["to"], quote=lock["quote"])
@@ -159,12 +207,8 @@ def _verify_writer(case: dict, user: dict) -> None:
 def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, session) -> dict:
     if case["revision"] != artifact.base_revision:
         raise CaseError(409, "正文已更新，修订候选已过期")
-    _recheck_target(case, artifact)
+    document = _resolved_document(case, artifact)
     record_snapshot(database, case, user, "pre_agent_decision", session)
-    document = prosemirror.replaced_document(
-        case["document"], artifact.target.from_pos, artifact.target.to_pos,
-        artifact.target.quote, artifact.replacement,
-    )
     updated = database.cases.find_one_and_update(
         {"id": case["id"], "revision": case["revision"]},
         {"$set": {"document": document, "updatedAt": _now().isoformat()},
@@ -174,6 +218,17 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
     if not updated:
         raise CaseError(409, "案例状态已变化")
     return updated
+
+
+def _resolved_document(case: dict, artifact: AgentArtifact) -> dict:
+    """范围候选按锁定选区替换；整篇候选由规范化块重建结构化文档。"""
+    if artifact.kind == "document":
+        return blocks.structured_document(artifact.blocks)
+    _recheck_target(case, artifact)
+    return prosemirror.replaced_document(
+        case["document"], artifact.target.from_pos, artifact.target.to_pos,
+        artifact.target.quote, artifact.replacement,
+    )
 
 
 def _recheck_target(case: dict, artifact: AgentArtifact) -> None:

@@ -32,8 +32,8 @@ class AgentResource:
         }
 
 
-SYSTEM_PROMPT = AgentResource("system-prompt", "agent/case-agent", "1", "prompts/case-agent.md")
-TASK_PROMPT = AgentResource("task-prompt", "agent/revision-task", "2", "prompts/revision-task.md")
+SYSTEM_PROMPT = AgentResource("system-prompt", "agent/case-agent", "2", "prompts/case-agent.md")
+TASK_PROMPT = AgentResource("task-prompt", "agent/revision-task", "3", "prompts/revision-task.md")
 READER_PROMPT = AgentResource("task-prompt", "agent/reader-agent", "1", "prompts/reader-agent.md")
 
 

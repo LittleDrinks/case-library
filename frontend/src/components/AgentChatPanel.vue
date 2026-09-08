@@ -26,8 +26,8 @@ const emit = defineEmits(["case-revised", "case-refreshed"]);
 const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
-  decide, artifacts, threadState, threadId, stopping, retryableMessageId,
-  listThreads, selectThread, createThread, renameThread,
+  decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId,
+  listThreads, selectThread, createThread, renameThread, undoWrite,
   skills, selectedSkillId, catalog, reloadCatalog, skillReady,
 } = useAgentChat(props.caseRecord.id, props.versionId);
 const configured = computed(() => Boolean(settings.value?.configured));
@@ -50,6 +50,11 @@ const selectedSources = ref([]);
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
+const syncedWrites = new Set();
+const undoingWrites = reactive(new Set());
+const localUndoneWrites = reactive(new Set());
+let pendingWriteSync = false;
+let hydratedWriteThread = "";
 
 function sourceRefs() {
   const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
@@ -228,13 +233,25 @@ async function scrollToLatest() {
 
 watch(messages, () => {
   void refreshSources();
+  void syncWrittenDocuments();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
+// 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
+// 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
+watch(() => threadState.value?.latestRun?.status, (current, previous) => {
+  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)
+      || !pendingWriteSync) return;
+  pendingWriteSync = false;
+  void refreshCaseAfterWrite();
+});
 watch(artifacts, () => {
   void refreshSources();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 watch(threadId, () => {
+  syncedWrites.clear();
+  pendingWriteSync = false;
+  hydratedWriteThread = "";
   refreshSourcePermissions();
 });
 watch(() => props.open, (open, wasOpen) => {
@@ -330,6 +347,67 @@ async function acceptArtifact(artifactId) {
     emit("case-revised", result.case);
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
+  }
+}
+
+function writtenWriteIds() {
+  return messages.value.flatMap((message) => message.parts || [])
+    .filter((part) => part.type === "tool-write_document"
+      && part.state === "output-available"
+      && part.output?.status === "written" && part.output?.writeId)
+    .map((part) => part.output.writeId);
+}
+
+function writeRunInFlight() {
+  return Boolean(threadState.value.activeRun)
+    || threadState.value.latestRun?.status === "active";
+}
+
+function writeState(part) {
+  const writeId = part.output?.writeId;
+  const server = writes.value.find((row) => row.id === writeId);
+  if (server) return server.status;
+  return localUndoneWrites.has(writeId) ? "undone" : "written";
+}
+
+function syncWrittenDocuments() {
+  if (!threadId.value || !threadState.value) return;
+  const ids = writtenWriteIds();
+  if (hydratedWriteThread !== threadId.value) {
+    hydratedWriteThread = threadId.value;
+    [...writes.value.map((row) => row.id), ...ids]
+      .forEach((writeId) => syncedWrites.add(writeId));
+    pendingWriteSync = Boolean(ids.length && writeRunInFlight());
+    return;
+  }
+  const fresh = ids.filter((writeId) => !syncedWrites.has(writeId));
+  fresh.forEach((writeId) => syncedWrites.add(writeId));
+  if (!fresh.length) return;
+  const waitingForTerminal = writeRunInFlight() && !sending.value;
+  pendingWriteSync = waitingForTerminal;
+  if (!waitingForTerminal) void refreshCaseAfterWrite();
+}
+
+async function refreshCaseAfterWrite() {
+  try {
+    emit("case-revised", await api.getCase(props.caseRecord.id));
+  } catch {
+    // 画布刷新失败不阻塞对话，教师可手动刷新
+  }
+}
+
+async function undoWriteRecord(writeId) {
+  if (!writeId || !threadId.value || undoingWrites.has(writeId)) return;
+  undoingWrites.add(writeId);
+  decideError.value = "";
+  try {
+    const result = await undoWrite(writeId);
+    localUndoneWrites.add(writeId);
+    emit("case-revised", result.case);
+  } catch (requestError) {
+    decideError.value = requestError.message || "撤销失败";
+  } finally {
+    undoingWrites.delete(writeId);
   }
 }
 
@@ -500,6 +578,20 @@ async function retryRun() {
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
+              <div
+                v-if="part.type === 'tool-write_document' && part.output?.status === 'written' && !readOnly"
+                class="agent-write-actions"
+                data-testid="agent-write-actions"
+              >
+                <span v-if="writeState(part) === 'undone'" data-testid="agent-write-undone">已撤销写入</span>
+                <button
+                  v-else
+                  type="button"
+                  data-testid="agent-undo-write"
+                  :disabled="undoingWrites.has(part.output?.writeId)"
+                  @click="undoWriteRecord(part.output?.writeId)"
+                >撤销写入</button>
+              </div>
             </template>
             <AgentArtifactCard
               v-for="artifact in messageArtifacts(message)"

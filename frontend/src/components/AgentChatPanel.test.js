@@ -7,7 +7,7 @@ import { session } from "../session.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(), agentThreads: vi.fn(), listSkills: vi.fn(),
+    agentCancel: vi.fn(), agentThreads: vi.fn(), agentUndoWrite: vi.fn(), listSkills: vi.fn(),
     getCase: vi.fn(), getPublicCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
   },
 }));
@@ -23,6 +23,28 @@ const snapshot = {
   activeRun: null,
   latestRun: null,
 };
+
+function writeSnapshot(status = "written") {
+  return {
+    ...structuredClone(snapshot),
+    messages: [{
+      ...structuredClone(snapshot.messages[0]),
+      parts: [{
+        type: "tool-write_document", state: "output-available",
+        input: { scope: "document", blocks: [{ type: "paragraph", text: "初稿" }] },
+        output: { status: "written", writeId: "write-1" },
+      }],
+    }],
+    writes: [{ id: "write-1", status, scope: "document" }],
+  };
+}
+
+function activeWriteSnapshot() {
+  const running = writeSnapshot();
+  running.activeRun = { id: "run-1", status: "active" };
+  running.latestRun = { id: "run-1", status: "active" };
+  return running;
+}
 
 function streamResponse(chunks) {
   const encoder = new TextEncoder();
@@ -71,6 +93,44 @@ beforeEach(() => {
   api.getCase.mockImplementation((id) => Promise.resolve({ id }));
   api.getMaterial.mockImplementation((id) => Promise.resolve({ id }));
   api.search.mockResolvedValue({ items: [] });
+});
+
+it("hydrates an undone write from the server snapshot", async () => {
+  api.agentThread.mockResolvedValue(writeSnapshot("undone"));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-write-undone"]').text()).toBe("已撤销写入");
+  expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
+});
+
+it("refreshes the case after an in-flight write is hydrated", async () => {
+  const completed = writeSnapshot();
+  completed.latestRun = { id: "run-1", status: "completed" };
+  api.agentThread.mockResolvedValueOnce(activeWriteSnapshot()).mockResolvedValueOnce(completed);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse()));
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(api.getCase).toHaveBeenCalledWith("case-1"));
+
+  expect(wrapper.emitted("case-revised")[0][0]).toEqual({ id: "case-1" });
+});
+
+it("refreshes the thread after undo so the write action is replaced", async () => {
+  api.agentThread.mockResolvedValueOnce(writeSnapshot()).mockResolvedValueOnce(writeSnapshot("undone"));
+  api.agentUndoWrite.mockResolvedValue({
+    write: { id: "write-1", status: "undone" },
+    case: { id: "case-1", revision: 3 },
+  });
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[data-testid="agent-undo-write"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentUndoWrite).toHaveBeenCalledWith("case-1", "thread-1", "write-1", "csrf");
+  expect(wrapper.get('[data-testid="agent-write-undone"]').exists()).toBe(true);
+  expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
+  expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ id: "case-1", revision: 3 });
 });
 
 it("passes the reader version and readonly flag to the source picker", async () => {

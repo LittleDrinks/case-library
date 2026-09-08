@@ -1,7 +1,8 @@
 <script setup>
+import { computed } from "vue";
 import { artifactStatus, sourceHref, sourceRefId, sourceStatusLabel } from "../lib/agentTimeline.js";
 
-defineProps({
+const props = defineProps({
   artifact: { type: Object, required: true },
   sending: { type: Boolean, default: false },
   decideError: { type: String, default: "" },
@@ -9,6 +10,28 @@ defineProps({
   readOnly: { type: Boolean, default: false },
 });
 const emit = defineEmits(["accept", "reject"]);
+
+const isDocument = computed(() => props.artifact.kind === "document");
+const draftPreview = computed(() =>
+  (props.artifact.blocks || []).map(blockText).filter(Boolean).join("\n"));
+
+function blockText(block) {
+  if (!block) return "";
+  if (block.type === "bullet_list") {
+    return listText(block, "·");
+  }
+  if (block.type === "ordered_list") {
+    return listText(block, "");
+  }
+  if (block.type === "blockquote") {
+    return block.paragraphs.map((text) => `「${text}」`).join("\n");
+  }
+  return block.type === "heading" ? `【${block.text}】` : block.text || "";
+}
+
+function listText(block, marker) {
+  return block.items.map((item, index) => `${marker || index + 1 + "."} ${item}`).join("\n");
+}
 </script>
 
 <template>
@@ -16,11 +39,17 @@ const emit = defineEmits(["accept", "reject"]);
     class="agent-artifact"
     :data-artifact-id="artifact.id"
     :data-artifact-status="artifact.status"
+    :data-artifact-kind="artifact.kind || 'range'"
     data-testid="agent-artifact"
   >
-    <b>修订候选</b>
-    <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
-    <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
+    <b>{{ isDocument ? "全文初稿候选" : "修订候选" }}</b>
+    <template v-if="isDocument">
+      <pre class="agent-artifact-replacement agent-artifact-draft">{{ draftPreview }}</pre>
+    </template>
+    <template v-else>
+      <p class="agent-artifact-quote">原文：{{ artifact.target.quote }}</p>
+      <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
+    </template>
     <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
     <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
     <template v-for="source in artifact.sources || []" :key="sourceRefId(source)">

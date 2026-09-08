@@ -275,6 +275,11 @@
 .agent-artifact-source { display: block; margin: 8px 0; color: var(--brand); overflow-wrap: anywhere; }
 a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-artifact-replacement { color: #175641; }
+.agent-artifact-draft { margin: 8px 0; padding: 8px 10px; max-height: 180px; overflow: auto; border: 1px solid var(--line-soft); border-radius: 4px; background: white; font: inherit; white-space: pre-wrap; color: #175641; }
+.agent-write-actions { margin: 6px 0; font-size: 12px; color: var(--muted); }
+.agent-write-actions button { padding: 5px 12px; background: white; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-2); }
+.agent-write-actions button:hover { border-color: var(--brand); color: var(--brand); }
+.agent-write-actions button:disabled { opacity: .5; }
 .agent-artifact-actions { display: flex; gap: 8px; }
 .agent-artifact-actions button { padding: 5px 12px; background: white; border: 1px solid var(--line); border-radius: 4px; }
 .agent-artifact-actions button:first-child { background: var(--brand); color: white; }

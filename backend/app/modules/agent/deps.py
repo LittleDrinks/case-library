@@ -27,3 +27,4 @@ class ToolDeps:
     hits: list[SourceRef] = field(default_factory=list)
     evidence: list[SourceRef] = field(default_factory=list)
     proposed: AgentArtifact | None = None
+    wrote: bool = False

@@ -20,6 +20,7 @@ from app.modules.agent.source_reader import source_readable
 
 HIDDEN_ANSWER = "该回答引用的来源当前不可读，相关内容已隐藏"
 HIDDEN_REVISION = "该候选引用的来源当前不可读，修订内容已隐藏"
+HIDDEN_BLOCKS = [{"type": "paragraph", "text": HIDDEN_REVISION}]
 NO_ACCESS_OUTPUT = {"status": "no_access", "detail": "来源当前不可读"}
 
 
@@ -84,11 +85,14 @@ def _visible_artifact(gate: SourceGate, artifact: AgentArtifact) -> AgentArtifac
     sources = [ref for ref, ok in zip(artifact.sources, readable) if ok]
     if all(readable):
         return artifact
-    return artifact.model_copy(update={
+    hidden = {
         "sources": sources,
         "replacement": HIDDEN_REVISION,
         "reason": HIDDEN_REVISION,
-    })
+    }
+    if artifact.kind == "document":
+        hidden["blocks"] = list(HIDDEN_BLOCKS)
+    return artifact.model_copy(update=hidden)
 
 
 def _visible_part(gate: SourceGate, part: dict, tainted: bool) -> dict:
@@ -101,6 +105,8 @@ def _visible_part(gate: SourceGate, part: dict, tainted: bool) -> dict:
         return _search_part(gate, part)
     if kind == "tool-propose_revision":
         return _propose_part(part, tainted)
+    if kind in ("tool-write_document", "tool-propose_document"):
+        return _write_part(part, tainted)
     return part
 
 
@@ -122,6 +128,25 @@ def _propose_part(part: dict, tainted: bool) -> dict:
         "input": _revision_view(part.get("input")),
         "output": _revision_view(part.get("output")),
     }
+
+
+def _write_part(part: dict, tainted: bool) -> dict:
+    """整篇写入/提议的工具输入复述受限来源内容时遮蔽块文本与摘要。"""
+    if not tainted:
+        return part
+    return {**part, "input": _write_input_view(part.get("input"))}
+
+
+def _write_input_view(raw: object) -> object:
+    if not isinstance(raw, dict):
+        return raw
+    hidden = dict(raw)
+    for field in ("summary", "reason"):
+        if field in hidden:
+            hidden[field] = HIDDEN_REVISION
+    if "blocks" in hidden:
+        hidden["blocks"] = list(HIDDEN_BLOCKS)
+    return hidden
 
 
 def _revision_view(raw: object) -> object:
