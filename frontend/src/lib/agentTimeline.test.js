@@ -70,7 +70,7 @@ describe("document write result summaries", () => {
 
   it("reports direct writes only when truly written", () => {
     const write = { type: "tool-write_document", state: "output-available" };
-    expect(toolResultSummary({ ...write, output: { status: "written", writeId: "w-1" } }))
+    expect(toolResultSummary({ ...write, output: { status: "written", id: "w-1" } }))
       .toBe("已写入正文，可撤销");
     expect(toolResultSummary({ ...write, output: {} })).toBe("");
   });

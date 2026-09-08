@@ -32,7 +32,7 @@ function writeSnapshot(status = "written") {
       parts: [{
         type: "tool-write_document", state: "output-available",
         input: { scope: "document", blocks: [{ type: "paragraph", text: "初稿" }] },
-        output: { status: "written", writeId: "write-1" },
+        output: { status: "written", id: "write-1" },
       }],
     }],
     writes: [{ id: "write-1", status, scope: "document" }],

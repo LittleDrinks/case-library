@@ -354,8 +354,8 @@ function writtenWriteIds() {
   return messages.value.flatMap((message) => message.parts || [])
     .filter((part) => part.type === "tool-write_document"
       && part.state === "output-available"
-      && part.output?.status === "written" && part.output?.writeId)
-    .map((part) => part.output.writeId);
+      && part.output?.status === "written" && part.output?.id)
+    .map((part) => part.output.id);
 }
 
 function writeRunInFlight() {
@@ -364,7 +364,7 @@ function writeRunInFlight() {
 }
 
 function writeState(part) {
-  const writeId = part.output?.writeId;
+  const writeId = part.output?.id;
   const server = writes.value.find((row) => row.id === writeId);
   if (server) return server.status;
   return localUndoneWrites.has(writeId) ? "undone" : "written";
@@ -588,8 +588,8 @@ async function retryRun() {
                   v-else
                   type="button"
                   data-testid="agent-undo-write"
-                  :disabled="undoingWrites.has(part.output?.writeId)"
-                  @click="undoWriteRecord(part.output?.writeId)"
+                  :disabled="undoingWrites.has(part.output?.id)"
+                  @click="undoWriteRecord(part.output?.id)"
                 >撤销写入</button>
               </div>
             </template>
