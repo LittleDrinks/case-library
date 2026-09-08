@@ -39,7 +39,13 @@ _SCHEMA = Schema({
             "leafText": lambda _node: "\n",
         },
     },
-    "marks": {"bold": {}, "italic": {}, "strike": {}},
+    "marks": {"bold": {}, "italic": {}, "strike": {},
+              "citation": {
+                  "attrs": {
+                      "sourceType": {"validate": "string"},
+                      "sourceId": {"validate": "string"},
+                  },
+              }},
 })
 
 
@@ -115,19 +121,22 @@ def replaced_document(
     return updated
 
 
-def replaced_document_lines(
-    document: dict[str, Any], from_pos: int, to_pos: int, quote: str, lines: list[str]
+def replaced_document_blocks(
+    document: dict[str, Any], from_pos: int, to_pos: int, quote: str,
+    block_nodes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Replace a checked range with plain lines separated by hard breaks."""
+    """Replace a checked range with structured block nodes.
+
+    整块替换按节点边界处理；部分选区由 ProseMirror 拆分原段落，保留前后文、
+    标题、列表和引用等块结构。
+    """
     check_target(document, from_pos, to_pos, quote)
-    content: list = []
-    for index, line in enumerate(lines):
-        if index:
-            content.append(_SCHEMA.node("hardBreak"))
-        if line:
-            content.append(_SCHEMA.text(line))
+    block = selection_block(document, from_pos, to_pos)
+    if from_pos == block["start"] and to_pos == block["end"]:
+        from_pos, to_pos = block["start"] - 1, block["end"] + 1
+    nodes = [_SCHEMA.node_from_json(node) for node in block_nodes]
     updated = Transform(_document(document)).replace_with(
-        from_pos, to_pos, content
+        from_pos, to_pos, nodes
     ).doc.to_json()
     validate_prosemirror_document(updated)
     return updated

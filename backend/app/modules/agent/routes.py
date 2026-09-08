@@ -22,8 +22,9 @@ from app.modules.agent.models import (
     AgentThreadSummary,
     ArtifactDecision,
     ArtifactTarget,
+    write_view,
 )
-from app.modules.agent.writes import direct_write_requested, undo_write, write_view
+from app.modules.agent.writes import direct_write_requested, undo_write
 from app.modules.agent.recovery import (
     LiveBuffer,
     events_stream,

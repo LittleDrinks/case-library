@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic_ai import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai import ModelResponse, ToolCallPart
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
-from app.modules.agent import artifacts, prosemirror, writes
+from app.modules.agent import artifacts, blocks, prosemirror, writes
 from app.modules.agent.models import ArtifactTarget
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.visibility import HIDDEN_REVISION
@@ -96,12 +96,109 @@ def _block_texts(document: dict) -> list[str]:
 
 
 def test_direct_write_authorization_detected_from_message_text() -> None:
-    assert writes.direct_write_requested("请把初稿直接写入正文") is True
-    assert writes.direct_write_requested("这段直接修改一下") is True
-    assert writes.direct_write_requested("帮我生成一份初稿") is False
-    assert writes.direct_write_requested("润色一下这个段落") is False
-    assert writes.direct_write_requested("不要直接写入，先给我候选") is False
-    assert writes.direct_write_requested("") is False
+    authorized = (
+        "我要直接写入", "直接写入", "请把初稿直接写入正文", "帮我直接写入吧",
+        "直接修改这一段", "先检索，然后直接写入", "直接替换成修订后的段落",
+        "直接开始生成，你能直接操纵我的草稿吗？直接写入。",
+        "不用先确认，直接写入",
+    )
+    for text in authorized:
+        assert writes.direct_write_requested(text) is True, text
+    denied = (
+        "不能直接写入", "不可以直接写入", "不想直接写入", "无法直接写入",
+        "是否可以直接写入", "能不能直接写入", "可以直接写入吗", "如何直接写入",
+        "提示词里的“直接写入”是什么意思", "提示词里的直接写入是什么意思",
+        "解释直接写入", "直接写入的含义", "如果合适，直接写入",
+        "直接写入功能很好用", "避免直接覆盖", "不要直接写入，先给我候选",
+        "如果需要就直接写入", "待审核通过之后直接写入", "帮我生成一份初稿",
+        "润色一下这个段落", "",
+    )
+    for text in denied:
+        assert writes.direct_write_requested(text) is False, text
+
+
+def test_normalized_blocks_keep_real_storage_shape() -> None:
+    """存储/预览/遮蔽共用规范化输入形状；有序列表不得折叠为无序列表。"""
+    normalized = blocks.validate_blocks([
+        {"type": "heading", "level": 1, "text": "标题"},
+        {"type": "paragraph", "text": "段落"},
+        {"type": "ordered_list", "items": ["第一步", "第二步"]},
+        {"type": "bullet_list", "items": ["要点"]},
+        {"type": "blockquote", "paragraphs": ["引用"]},
+    ])
+    assert normalized == [
+        {"type": "heading", "level": 1, "text": "标题"},
+        {"type": "paragraph", "text": "段落"},
+        {"type": "ordered_list", "items": ["第一步", "第二步"]},
+        {"type": "bullet_list", "items": ["要点"]},
+        {"type": "blockquote", "paragraphs": ["引用"]},
+    ]
+    document = blocks.structured_document(normalized)
+    assert [node["type"] for node in document["content"]] == [
+        "heading", "paragraph", "orderedList", "bulletList", "blockquote",
+    ]
+
+
+def test_document_candidate_and_write_store_canonical_blocks(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    thread, run = _locked_run(database, auth, case)
+    artifact = artifacts.propose_document_artifact(
+        database, case["id"], thread.id, run.id,
+        [{"type": "ordered_list", "items": ["第一步"]},
+         {"type": "paragraph", "text": "段落"}], "初稿", [], auth["user"],
+    )
+    assert artifact.blocks == [
+        {"type": "ordered_list", "items": ["第一步"]},
+        {"type": "paragraph", "text": "段落"},
+    ]
+    _publish(database, AgentRepository(database), run, artifact)
+    row = database.agent_artifacts.find_one({"id": artifact.id}, {"_id": 0})
+    assert row["blocks"][0]["type"] == "ordered_list"
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+    updated = database.cases.find_one({"id": case["id"]})
+    assert [node["type"] for node in updated["document"]["content"]] == [
+        "orderedList", "paragraph",
+    ]
+
+
+def test_blank_detection_only_allows_truly_empty_or_template(
+        client: TestClient) -> None:
+    assert blocks.document_blank({"type": "doc", "content": []})
+    assert blocks.document_blank({"type": "doc", "content": [
+        {"type": "paragraph", "content": []},
+    ]})
+    assert blocks.document_blank({"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "  "}]},
+    ]})
+    content_nodes = (
+        {"type": "hardBreak"},
+        {"type": "image", "attrs": {"src": "attachment-1"}},
+        {"type": "text", "text": " ", "marks": [
+            {"type": "citation", "attrs": {"sourceType": "case", "sourceId": "c-1"}},
+        ]},
+        {"type": "text", "text": "正文"},
+    )
+    for inline in content_nodes:
+        assert not blocks.document_blank({"type": "doc", "content": [
+            {"type": "paragraph", "content": [inline]},
+        ]})
+    assert not blocks.document_blank({"type": "doc", "content": [
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [
+            {"type": "paragraph", "content": []},
+        ]}]},
+    ]})
+    from app.modules.cases.template import new_case_document
+
+    assert blocks.document_rewritable(new_case_document())
+    edited = new_case_document()
+    edited["content"][0]["content"][0]["text"] += "（已改）"
+    assert not blocks.document_rewritable(edited)
 
 
 def test_unauthorized_run_cannot_direct_write(client: TestClient) -> None:
@@ -162,7 +259,7 @@ def test_direct_write_replaces_blank_document(client: TestClient) -> None:
     case = _create_case(client, auth, _document())
     database = client.app.state.database
     thread, run = _locked_run(database, auth, case)
-    record = writes.apply_write(
+    writes.apply_write(
         database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
     )
     updated = database.cases.find_one({"id": case["id"]})
@@ -217,17 +314,59 @@ def test_direct_selection_write_replaces_locked_range(client: TestClient) -> Non
     _thread, run = _locked_run(database, auth, case, SECOND)
     writes.apply_write(
         database, case["id"], run.id, "selection",
-        [{"type": "paragraph", "text": "第一行"}, {"type": "paragraph", "text": "第二行"}],
+        [{"type": "heading", "level": 2, "text": "小结"},
+         {"type": "bullet_list", "items": ["要点一", "要点二"]}],
         auth["user"],
     )
     updated = database.cases.find_one({"id": case["id"]})
     assert updated["revision"] == 2
-    paragraphs = prosemirror.paragraphs(updated["document"])
-    assert paragraphs[1]["quote"] == "第一行\n第二行"
-    assert paragraphs[0]["quote"] == PARAGRAPHS[0]
+    assert [node["type"] for node in updated["document"]["content"]] == [
+        "paragraph", "heading", "bulletList",
+    ]
+    assert prosemirror.paragraphs(updated["document"])[0]["quote"] == PARAGRAPHS[0]
 
 
-def test_direct_selection_write_requires_locked_target(client: TestClient) -> None:
+def test_direct_selection_write_preserves_partial_range_and_citation(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth, _document(*PARAGRAPHS))
+    database = client.app.state.database
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "前置"},
+            {"type": "text", "text": "原句保留依据", "marks": [
+                {"type": "citation", "attrs": {"sourceType": "case", "sourceId": "c-src"}},
+            ]},
+        ]},
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "改写前缀"},
+            {"type": "text", "text": PARAGRAPHS[1]},
+            {"type": "text", "text": "改写后缀"},
+        ]},
+    ]}
+    database.cases.update_one({"id": case["id"]}, {"$set": {"document": document}})
+    block = prosemirror.text_blocks(document)[1]
+    target = ArtifactTarget(from_pos=block["start"] + 4,
+                            to_pos=block["start"] + 4 + len(PARAGRAPHS[1]),
+                            quote=PARAGRAPHS[1])
+    _thread, run = _locked_run(database, auth, case, target)
+    writes.apply_write(
+        database, case["id"], run.id, "selection",
+        [{"type": "paragraph", "text": "已重写的结构化段落"}], auth["user"],
+    )
+    content = database.cases.find_one({"id": case["id"]})["document"]["content"]
+    assert [node["type"] for node in content] == [
+        "paragraph", "paragraph", "paragraph", "paragraph",
+    ]
+    first = content[0]["content"]
+    assert first[1]["marks"][0]["type"] == "citation"
+    assert first[1]["text"] == "原句保留依据"
+    assert prosemirror.paragraphs(
+        database.cases.find_one({"id": case["id"]})["document"]
+    )[2]["quote"] == "已重写的结构化段落"
+
+
+def test_selection_without_locked_target_refused(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth, _document(*PARAGRAPHS))
     database = client.app.state.database
@@ -237,6 +376,27 @@ def test_direct_selection_write_requires_locked_target(client: TestClient) -> No
             database, case["id"], run.id, "selection", DRAFT_BLOCKS, auth["user"],
         )
     assert excinfo.value.status_code == 422
+
+
+def test_read_only_run_write_paths_explicitly_refused(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth, _document(*PARAGRAPHS))
+    database = client.app.state.database
+    thread, run = _locked_run(database, auth, case, SECOND)
+    database.agent_runs.update_one({"id": run.id}, {"$set": {"readOnly": True}})
+    with pytest.raises(CaseError) as denied:
+        writes.apply_write(
+            database, case["id"], run.id, "selection", DRAFT_BLOCKS, auth["user"],
+        )
+    assert denied.value.status_code == 403
+    with pytest.raises(CaseError) as candidate:
+        artifacts.propose_document_artifact(
+            database, case["id"], thread.id, run.id, DRAFT_BLOCKS, "初稿", [],
+            auth["user"],
+        )
+    assert candidate.value.status_code == 403
+    assert "只读" in candidate.value.detail
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
 
 
 def test_direct_write_refuses_stale_baseline(client: TestClient) -> None:
@@ -300,6 +460,8 @@ def _written_case(client: TestClient, auth: dict):
 def test_undo_restores_previous_document_exactly_once(client: TestClient) -> None:
     auth = _login(client)
     database, thread, case, record = _written_case(client, auth)
+    snapshot = AgentRepository(database).snapshot(thread)
+    assert snapshot.writes[0].status == "written"
     result = writes.undo_write(
         database, case["id"], thread.id, record["id"], auth["user"],
     )
@@ -307,6 +469,9 @@ def test_undo_restores_previous_document_exactly_once(client: TestClient) -> Non
     updated = database.cases.find_one({"id": case["id"]})
     assert updated["revision"] == 3
     assert updated["document"] == {"type": "doc", "content": []}
+    # 快照携带写入状态：撤销后刷新回显 undone，而不是本地标记。
+    refreshed = AgentRepository(database).snapshot(thread)
+    assert refreshed.writes[0].status == "undone"
     replay = writes.undo_write(
         database, case["id"], thread.id, record["id"], auth["user"],
     )
@@ -539,7 +704,7 @@ def test_visibility_masks_document_write_parts_and_blocks() -> None:
 
 
 def _submit(client: TestClient, auth: dict, case_id: str, model: FunctionModel,
-            text: str = "直接写入初稿"):
+            text: str = "直接开始生成，你能直接操纵我的草稿吗？直接写入。"):
     return _submit_with_text(client, auth, case_id, text, model)
 
 

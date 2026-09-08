@@ -17,14 +17,30 @@ const draftPreview = computed(() =>
 
 function blockText(block) {
   if (!block) return "";
-  if (block.type === "bullet_list" || block.type === "ordered_list") {
-    return (block.items || []).map((item) => `· ${item}`).join("\n");
+  if (block.type === "bullet_list" || block.type === "bulletList") {
+    return listText(block, "·");
+  }
+  if (block.type === "ordered_list" || block.type === "orderedList") {
+    return listText(block, "");
   }
   if (block.type === "blockquote") {
-    return (block.paragraphs || []).map((text) => `「${text}」`).join("\n");
+    const texts = block.paragraphs || (block.content || []).map(nodeText);
+    return texts.map((text) => `「${text}」`).join("\n");
   }
-  if (block.type === "heading") return `【${block.text || ""}】`;
-  return block.text || "";
+  const text = block.text || nodeText(block);
+  return block.type === "heading" ? `【${text}】` : text;
+}
+
+function listText(block, marker) {
+  const items = block.items || (block.content || []).map(nodeText);
+  const start = block.attrs?.start || 1;
+  return items.map((item, index) => `${marker || start + index + "."} ${item}`).join("\n");
+}
+
+function nodeText(node) {
+  if (!node) return "";
+  if (typeof node.text === "string") return node.text;
+  return (node.content || []).map(nodeText).join("");
 }
 </script>
 

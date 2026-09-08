@@ -14,7 +14,7 @@ from pydantic_ai.tools import RunContext, Tool
 from app.modules.agent import artifacts, writes
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import search_corpus
-from app.modules.agent.models import SourceRef
+from app.modules.agent.models import SourceRef, write_view
 from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
@@ -125,7 +125,7 @@ async def write_document(
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.wrote = True
-    return {**writes.write_view(record), "undoable": True}
+    return {**write_view(record), "undoable": True}
 
 
 def domain_capability() -> Capability:

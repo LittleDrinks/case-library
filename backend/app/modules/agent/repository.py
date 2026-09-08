@@ -18,6 +18,7 @@ from app.modules.agent.models import (
     ArtifactTarget,
     TerminalRunStatus,
     ThreadEventType,
+    write_view,
 )
 from app.modules.cases.published import version_readable
 
@@ -195,10 +196,18 @@ class AgentRepository:
             event_seq=current.event_seq,
             messages=self.messages(current.id, session),
             artifacts=self._snapshot_artifacts(current, session),
+            writes=self.write_views(current.id, session),
             runs=self.runs(current.id, session),
             active_run=self.active_run(current.id, session),
             latest_run=self.latest_run(current.id, session),
         )
+
+    def write_views(self, thread_id: str, session=None) -> list:
+        """线程写入记录视图：撤销状态回显的服务端真源。"""
+        rows = self.database.agent_writes.find(
+            {"threadId": thread_id}, session=session
+        ).sort([("createdAt", ASCENDING), ("id", ASCENDING)])
+        return [write_view(row) for row in rows]
 
     def _snapshot_artifacts(self, thread: AgentThread, session) -> list[AgentArtifact]:
         revision = _case_revision(self.database, thread.case_id, session)

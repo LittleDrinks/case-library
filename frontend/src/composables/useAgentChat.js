@@ -312,6 +312,14 @@ async function decideArtifact(caseId, state, generation, artifactId, decision) {
   return result;
 }
 
+async function undoWrite(caseId, state, generation, threadId, writeId) {
+  const result = await api.agentUndoWrite(caseId, threadId, writeId, session.csrfToken);
+  if (isCurrent(state, generation) && state.threadId.value === threadId) {
+    await refreshSnapshot(caseId, state, generation, threadId);
+  }
+  return result;
+}
+
 async function renameThread(caseId, state, threadId, title) {
   const summary = await api.agentRenameThread(caseId, threadId, title, session.csrfToken);
   if (state.threadId.value === threadId && state.snapshot.value) {
@@ -360,6 +368,12 @@ function retryMessageId(state) {
   return last.id;
 }
 
+function statusFor(state) {
+  const chatStatus = state.chat.value?.status;
+  return chatStatus && chatStatus !== "ready"
+    ? chatStatus : snapshotStatus(state.snapshot.value);
+}
+
 function computedState(state) {
   return {
     messages: computed(() => mergeTimelineMessages(
@@ -367,11 +381,9 @@ function computedState(state) {
       state.snapshot.value?.messages || [], state.snapshot.value?.runs || [],
     )),
     artifacts: computed(() => state.snapshot.value?.artifacts || []),
+    writes: computed(() => state.snapshot.value?.writes || []),
     threadId: computed(() => state.threadId.value),
-    status: computed(() => {
-      const chatStatus = state.chat.value?.status;
-      return chatStatus && chatStatus !== "ready" ? chatStatus : snapshotStatus(state.snapshot.value);
-    }),
+    status: computed(() => statusFor(state)),
     chatError: computed(() => snapshotError(state.snapshot.value) || state.chat.value?.error?.message || ""),
     threadState: computed(() => state.snapshot.value),
     stopping: computed(() => Boolean(state.stopping.value)), recovering: computed(() => Boolean(state.recovering.value)),
@@ -412,6 +424,7 @@ function exposedApi(caseId, state, at) {
     stop: () => stopChat(caseId, state, at()),
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
+    undoWrite: (writeId) => undoWrite(caseId, state, at(), state.threadId.value, writeId),
     reload: () => reload(caseId, state),
   };
 }

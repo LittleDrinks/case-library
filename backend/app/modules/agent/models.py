@@ -181,6 +181,15 @@ class AgentWriteView(BaseModel):
     revision: int = Field(ge=1)
 
 
+def write_view(write: dict) -> dict:
+    """对外暴露的写入记录视图：不含文档内容，只含撤销回显所需字段。"""
+    return {
+        "id": write["id"], "runId": write["runId"], "scope": write["scope"],
+        "summary": write.get("summary", ""), "status": write["status"],
+        "revision": write["resultRevision"],
+    }
+
+
 class AgentThreadEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -216,6 +225,7 @@ class AgentSnapshot(BaseModel):
     event_seq: int = Field(default=0, alias="eventSeq")
     messages: list[AgentMessage]
     artifacts: list[AgentArtifact] = Field(default_factory=list)
+    writes: list[AgentWriteView] = Field(default_factory=list)
     runs: list[AgentRun] = Field(default_factory=list)
     active_run: AgentRun | None = Field(default=None, alias="activeRun")
     latest_run: AgentRun | None = Field(default=None, alias="latestRun")

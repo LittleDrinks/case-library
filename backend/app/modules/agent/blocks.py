@@ -1,7 +1,9 @@
-"""结构化正文块：初稿写入的受控输入与服务端规范化。
+"""结构化正文块：初稿写入的受控输入、存储与显示共用同一形状。
 
-模型不得把 Markdown 标记当正文：标题、段落、列表和引用必须用块类型表达，
-服务端校验并转换为 ProseMirror 文档；整篇写入仅允许空草稿或模板。
+模型不得把 Markdown 标记当正文：标题、段落、列表和引用必须用块类型表达。
+服务端校验后以规范化「输入形状」（text/items/paragraphs）存储与投影，
+写入时才转换为 ProseMirror 节点；块类型按 type 字面值分发，避免子类
+继承导致有序列表被折叠为无序列表。整篇写入仅允许真空文档或未编辑模板。
 """
 
 from __future__ import annotations
@@ -80,7 +82,7 @@ _BLOCK_ADAPTER: TypeAdapter = TypeAdapter(
 
 
 def validate_blocks(blocks: object) -> list[dict[str, Any]]:
-    """校验并规范化正文块；输入不合法时抛出可重试的 CaseError。"""
+    """校验并返回规范化块（输入形状）；该形状同时用于存储、预览与遮蔽。"""
     if not isinstance(blocks, list) or not 1 <= len(blocks) <= MAX_BLOCKS:
         raise CaseError(422, "正文块无效：需要 1-300 个块")
     normalized: list[dict[str, Any]] = []
@@ -94,21 +96,43 @@ def validate_blocks(blocks: object) -> list[dict[str, Any]]:
 
 
 def _normalized(block: object) -> dict[str, Any]:
-    if isinstance(block, HeadingBlock):
-        return {"type": "heading", "attrs": {"level": block.level},
-                "content": [_text_node(block.text)]}
-    if isinstance(block, ParagraphBlock):
-        return {"type": "paragraph", "content": [_text_node(block.text)]}
-    if isinstance(block, BulletListBlock):
-        return {"type": "bulletList",
-                "content": [_list_item(text) for text in block.items]}
-    if isinstance(block, OrderedListBlock):
-        return {"type": "orderedList",
-                "content": [_list_item(text) for text in block.items]}
+    # 按 type 字面值分发：ordered_list 是 bullet_list 的子类，
+    # isinstance 顺序会把有序列表错归为无序列表。
+    kind = getattr(block, "type", None)
+    if kind == "heading":
+        return {"type": "heading", "level": block.level, "text": block.text}
+    if kind == "paragraph":
+        return {"type": "paragraph", "text": block.text}
+    if kind == "ordered_list":
+        return {"type": "ordered_list", "items": list(block.items)}
+    if kind == "bullet_list":
+        return {"type": "bullet_list", "items": list(block.items)}
     assert isinstance(block, BlockquoteBlock)
+    return {"type": "blockquote", "paragraphs": list(block.paragraphs)}
+
+
+def structured_document(normalized_blocks: list[dict[str, Any]]) -> dict[str, Any]:
+    """把规范化块转换为经过校验的 ProseMirror 文档（仅写入时）。"""
+    return validate_prosemirror_document(
+        {"type": "doc", "content": [_document_node(block) for block in normalized_blocks]}
+    )
+
+
+def _document_node(block: dict[str, Any]) -> dict[str, Any]:
+    kind = block.get("type")
+    if kind == "heading":
+        return {"type": "heading", "attrs": {"level": block["level"]},
+                "content": [_text_node(block["text"])]}
+    if kind == "paragraph":
+        return {"type": "paragraph", "content": [_text_node(block["text"])]}
+    if kind in ("bullet_list", "ordered_list"):
+        pm_kind = "bulletList" if kind == "bullet_list" else "orderedList"
+        return {"type": pm_kind,
+                "content": [_list_item(text) for text in block["items"]]}
+    assert kind == "blockquote"
     return {"type": "blockquote",
             "content": [{"type": "paragraph", "content": [_text_node(text)]}
-                        for text in block.paragraphs]}
+                        for text in block["paragraphs"]]}
 
 
 def _text_node(text: str) -> dict[str, Any]:
@@ -120,43 +144,23 @@ def _list_item(text: str) -> dict[str, Any]:
             "content": [{"type": "paragraph", "content": [_text_node(text)]}]}
 
 
-def structured_document(normalized_blocks: list[dict[str, Any]]) -> dict[str, Any]:
-    """把规范化正文块转换为经过校验的 ProseMirror 文档。"""
-    return validate_prosemirror_document({"type": "doc", "content": normalized_blocks})
-
-
-def _node_text(node: Any) -> str:
-    if not isinstance(node, dict):
-        return ""
-    if isinstance(node.get("text"), str):
-        return node["text"]
-    return "".join(_node_text(child) for child in node.get("content", []))
-
-
-def document_text(document: dict[str, Any]) -> str:
-    return _node_text(document)
-
-
 def document_blank(document: dict[str, Any]) -> bool:
-    return not document_text(document).strip()
+    """真空文档：仅含空段落或纯空白且无任何 mark 的文本。
+
+    hardBreak/citation 等原子内容与携带 mark 的文本都是内容，
+    不得判空后整篇覆盖。
+    """
+    for node in document.get("content") or []:
+        if node.get("type") != "paragraph":
+            return False
+        for child in node.get("content") or []:
+            if child.get("type") != "text" or child.get("marks"):
+                return False
+            if str(child.get("text", "")).strip():
+                return False
+    return True
 
 
 def document_rewritable(document: dict[str, Any]) -> bool:
-    """整篇写入仅接受空草稿或未经改动的模板正文。"""
+    """整篇写入仅接受真空文档或未经改动的模板正文。"""
     return document_blank(document) or document == new_case_document()
-
-
-def block_lines(normalized_blocks: list[dict[str, Any]]) -> list[str]:
-    """把规范化正文块压平为纯文本行，供选区范围内的直接写入使用。"""
-    lines: list[str] = []
-    for block in normalized_blocks:
-        kind = block.get("type")
-        if kind in ("bulletList", "orderedList"):
-            lines.extend(_node_text(item) for item in block.get("content", []))
-        elif kind == "blockquote":
-            lines.extend(
-                _node_text(paragraph) for paragraph in block.get("content", [])
-            )
-        else:
-            lines.append(_node_text(block))
-    return [line for line in lines if line]

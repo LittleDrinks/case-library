@@ -1,11 +1,16 @@
 """Agent 直接写入正文：教师明确指令下服务端执行、恰好一次、可撤销。
 
-与修订候选不同，直接写入在工具调用事务内真实落库。写入授权不在工具参数
-或模型自报：由服务端在 Run 创建时从当前教师消息文本中判定「直接写入」
-类指令并冻结在 Run 上；写入时重验作者与工作版本门禁、Run 基线修订号、
-Run 与目标案例的 Thread 绑定及授权标记，范围守卫（整篇仅空草稿/模板，
-选区仅锁定范围）全部通过才写入；写入记录保留前后文档，撤销在事务内按
-修订号守卫精确恢复。
+写入授权不在工具参数或模型自报：由服务端在 Run 创建时从当前教师消息
+判定「直接肯定指令」并冻结在 Run 上（内化 langgraph interrupt 原则：
+可信授权状态先于写入且持久绑定操作；不引入新框架与二次确认）。判定
+按从句分析：引用、疑问、否定、条件与说明性提及不得授权，只有不含
+否定/疑问/条件标记的从句中的「直接＋写入类动词」才授权，例如「我要
+直接写入」授权而「不能直接写入」「是否可以直接写入」不授权。
+
+写入时重验作者与工作版本门禁、Run 基线修订号、Thread 与目标案例绑定、
+授权标记与只读拒绝；范围守卫（整篇仅真空文档/未编辑模板，选区仅锁定
+范围）全部通过才写入；写入保留结构化块与撤销所需前后文档，撤销按修订
+号守卫精确恢复。
 """
 
 from __future__ import annotations
@@ -25,13 +30,71 @@ from app.modules.cases.service import CaseError
 from app.modules.cases.snapshots import record_snapshot
 
 SCOPES = ("document", "selection")
-# 明确「直接写入」类指令：否定语（勿/要/别 + 直接）不授权，退回候选确认。
-_DIRECT_WRITE_PATTERN = re.compile(r"(?<![勿要别])直接(?:写入|写进|修改|替换|插入|覆盖)")
+# 核心指令词：直接＋写入类动词。
+_DIRECT_WRITE_CORE = re.compile(r"直接(?:写入|写进|修改|替换|插入|覆盖)")
+# 引号/括号内的提及是说明性引用，先剔除再判定。
+_QUOTED_SPANS = re.compile(
+    r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|【[^】]*】"
+    r'|"[^"]*"|\'[^\']*\'|（[^）]*）|\([^)]*\)'
+)
+_CLAUSE_SPLIT = re.compile(r"[。！？!?；;.\n]")
+# 从句内出现即否定，不得授权。
+_NEGATIONS = (
+    "不", "没", "未", "勿", "别", "免", "禁", "拒", "防", "慎", "莫",
+    "无需", "无须", "无法", "难以", "避免",
+)
+# 从句内出现即疑问/询问，不得授权。
+_QUESTIONS = (
+    "吗", "呢", "请问", "能不能", "是否", "可否", "能否", "如何", "怎么", "怎样",
+    "为何", "为什么", "什么", "哪",
+)
+# 从句内出现即条件假设，尚未成为指令，不得授权。
+_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话", "以后", "之后")
+# 直接写入作为名词被提及（功能/规则说明）而非指令时，不得授权。
+_MENTION_SUFFIXES = ("功能", "按钮", "规则", "模式", "选项", "机制", "说明",
+                     "是什么", "的意思", "的含义", "用法", "怎么用")
+_MENTION_PREFIXES = (
+    "提示词", "需求", "验收", "文档", "说明", "解释", "含义", "意思", "介绍",
+    "理解",
+)
+_CLAUSE_COMMA = re.compile(r"[，,：:、]")
 
 
 def direct_write_requested(text: str) -> bool:
-    """服务端从教师当前消息文本判定直接写入授权；普通生成/润色不授权。"""
-    return bool(_DIRECT_WRITE_PATTERN.search(text or ""))
+    """服务端从教师当前消息判定直接写入授权：仅直接肯定指令。
+
+    剔除引用后按标点拆从句；只有包含核心指令词且无否定、疑问、条件、
+    名词化提及标记的从句才授权。普通生成、润色与解释性文字一律不授权。
+    """
+    cleaned = _QUOTED_SPANS.sub("", text or "")
+    for clause in _CLAUSE_SPLIT.split(cleaned):
+        match = _DIRECT_WRITE_CORE.search(clause)
+        if match is None:
+            continue
+        if _contains(clause, _QUESTIONS + _CONDITIONALS) or _negates_core(clause, match):
+            continue
+        if _is_mention(clause):
+            continue
+        return True
+    return False
+
+
+def _contains(clause: str, tokens) -> bool:
+    return any(token in clause for token in tokens)
+
+
+def _negates_core(clause: str, match: re.Match) -> bool:
+    prefix = clause[:match.start()]
+    local = _CLAUSE_COMMA.split(prefix)[-1] + clause[match.start():]
+    return _contains(local, _NEGATIONS)
+
+
+def _is_mention(clause: str) -> bool:
+    match = _DIRECT_WRITE_CORE.search(clause)
+    after = clause[match.end():match.end() + 8]
+    before = clause[max(0, match.start() - 12):match.start()]
+    return (_contains(after, _MENTION_SUFFIXES)
+            or _contains(before, _MENTION_PREFIXES))
 
 
 def _now() -> datetime:
@@ -94,14 +157,14 @@ def _document_scope(case: dict, normalized: list[dict]) -> dict:
 
 
 def _selection_scope(case: dict, normalized: list[dict], run: dict) -> dict:
-    """选区写入仅接受 Run 创建时锁定的教师非空选区。"""
+    """选区写入仅接受 Run 创建时锁定的教师非空选区，并保留块结构。"""
     target = run.get("target")
     if not target:
         raise CaseError(422, "本条消息没有教师选定的正文范围，不能直接写入选区")
-    lines = blocks.block_lines(normalized)
+    nodes = blocks.structured_document(normalized)["content"]
     try:
-        return prosemirror.replaced_document_lines(
-            case["document"], target["from"], target["to"], target["quote"], lines,
+        return prosemirror.replaced_document_blocks(
+            case["document"], target["from"], target["to"], target["quote"], nodes,
         )
     except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
         raise CaseError(409, "目标选区原文已变化，请重新选择范围") from error
@@ -160,10 +223,12 @@ def _writable_case(database, case_id, user, session) -> dict:
 
 
 def _writable_run(database, run_id, case_id, user, session) -> dict:
-    """Run 必须活跃、属于当前用户、通过 Thread 绑定到目标案例且已获授权。"""
+    """Run 必须活跃、属当前用户、非只读、经 Thread 绑定到目标案例且已授权。"""
     run = database.agent_runs.find_one({"id": run_id}, session=session)
     if not run or run["userId"] != user["id"] or run["status"] != "active":
         raise CaseError(409, "运行已结束，不能直接写入")
+    if run.get("readOnly"):
+        raise CaseError(403, "只读对话不能写入正文")
     thread = database.agent_threads.find_one(
         {"id": run["threadId"]}, session=session
     )
@@ -190,12 +255,3 @@ def _append_event(database, thread_id, event_type, run_id, payload, session) -> 
         thread_id, event_type, run_id, payload, session
     ) is None:
         raise RuntimeError("Thread 事件写入失败")
-
-
-def write_view(write: dict) -> dict:
-    """对外暴露的写入记录视图：不含文档内容，只含撤销所需的结构字段。"""
-    return {
-        "id": write["id"], "runId": write["runId"], "scope": write["scope"],
-        "summary": write.get("summary", ""), "status": write["status"],
-        "revision": write["resultRevision"],
-    }

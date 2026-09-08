@@ -77,8 +77,10 @@ def _run_row(database, run_id: str) -> dict:
 
 
 def _verify_run_baseline(database, run_id: str, case: dict) -> dict:
-    """作者运行创建时已锁定基线修订号；基线越过则提议过期。"""
+    """作者运行创建时已锁定基线修订号；只读运行与基线越过均显式拒绝。"""
     run = _run_row(database, run_id)
+    if run.get("readOnly"):
+        raise CaseError(403, "只读对话不能写入正文")
     if run.get("baseRevision") is None:
         raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
     if run["baseRevision"] != case["revision"]:
