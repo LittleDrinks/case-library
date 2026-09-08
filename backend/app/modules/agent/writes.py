@@ -59,8 +59,6 @@ _MENTION_PREFIXES = (
     "提示词", "需求", "验收", "文档", "说明", "解释", "含义", "意思", "介绍",
     "理解", "撤销", "取消", "回滚", "撤回", "展示", "查看", "显示",
 )
-_CLAUSE_COMMA = re.compile(r"[，,：:、]")
-
 
 def direct_write_requested(text: str) -> bool:
     """服务端从教师当前消息判定直接写入授权：仅直接肯定指令。
@@ -86,8 +84,11 @@ def _contains(clause: str, tokens) -> bool:
 
 
 def _negates_core(clause: str, match: re.Match) -> bool:
-    prefix = clause[:match.start()]
-    return _contains(_CLAUSE_COMMA.split(prefix)[-1], _NEGATIONS)
+    separators = "，,：:、"
+    start = max(clause.rfind(separator, 0, match.start()) for separator in separators) + 1
+    ends = [clause.find(separator, match.end()) for separator in separators]
+    end = min((value for value in ends if value >= 0), default=len(clause))
+    return _contains(clause[start:end], _NEGATIONS)
 
 
 def _is_mention(clause: str) -> bool:
