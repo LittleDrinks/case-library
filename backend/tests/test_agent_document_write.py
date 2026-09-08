@@ -11,10 +11,12 @@ import json
 import time
 import uuid
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic_ai import ModelResponse, ToolCallPart
+from pydantic import BaseModel, ValidationError
+from pydantic_ai import ModelResponse, ToolCallPart, Tool
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
@@ -704,6 +706,33 @@ def test_write_tools_only_available_to_author_runs() -> None:
     reader_tools = {tool.__name__ for tool in reader_capability().tools}
     assert {"write_document", "propose_document", "propose_revision"} <= domain_tools
     assert domain_tools & reader_tools == {"search_corpus", "read_source"}
+
+
+def _tool_contract(name: str) -> tuple[dict, Any]:
+    tool = next(item for item in domain_capability().tools if item.__name__ == name)
+    schema = Tool(tool, takes_ctx=True).function_schema
+    return schema.json_schema, schema.validator
+
+
+def test_write_tools_sdk_contract_schema_and_validator() -> None:
+    """生产 Tool 契约：真实块字段与 scope 枚举对模型可见，坏参数被 SDK 指出。"""
+    schema, validator = _tool_contract("write_document")
+    assert schema["properties"]["scope"]["enum"] == ["document", "selection"]
+    fields = {key for block in schema["$defs"].values() for key in block["properties"]}
+    assert fields == {"type", "text", "items", "paragraphs", "level"}
+    with pytest.raises(ValidationError) as excinfo:
+        validator.validate_python(
+            {"scope": "document",
+             "blocks": [{"type": "paragraph", "content": "误用content"}]}
+        )
+    assert excinfo.value.errors()[0]["loc"] == ("blocks", 0, "paragraph", "text")
+    candidate_schema, candidate = _tool_contract("propose_document")
+    items = candidate_schema["properties"]["blocks"]["items"]
+    assert items["discriminator"]["propertyName"] == "type"
+    typed = candidate.validate_python({"blocks": _CANONICAL_BLOCKS})
+    assert all(isinstance(block, BaseModel) for block in typed["blocks"])
+    # SDK 校验后的模型实例沿既有归一化得到同一存储形状。
+    assert blocks.validate_blocks(typed["blocks"]) == _CANONICAL_BLOCKS
 
 
 # ---- 来源收紧时整篇写入/提议内容随消息一并遮蔽 ----
