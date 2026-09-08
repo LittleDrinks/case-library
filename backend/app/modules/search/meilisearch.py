@@ -40,6 +40,8 @@ CASE_FIELDS = (
     "title",
     "summary",
     "publishedAt",
+    "versionId",
+    "versionNumber",
     "typeId",
     "typeName",
     "course",

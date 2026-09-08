@@ -67,6 +67,8 @@ def _case_fields(version: dict, publication: dict) -> dict:
         "title": version["title"],
         "summary": version.get("summary", ""),
         "publishedAt": publication.get("publishedAt", ""),
+        "versionId": version["id"],
+        "versionNumber": version.get("number"),
         **{field: metadata.get(field) for field in CASE_FIELDS},
         "tagIds": metadata.get("tagIds", []),
         "createdBy": publication["ownerId"],

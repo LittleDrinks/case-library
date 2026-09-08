@@ -74,7 +74,7 @@ function held() {
 
 function mountAnswer(props = {}) {
   return mount(SearchAIAnswer, {
-    props: { snapshot: snapshotOf(), ...props },
+    props: { snapshot: snapshotOf(), hrefFor: (item) => `#/${item.kind}/${item.id}`, ...props },
     global: { stubs: { RouterLink: RouterLinkStub } },
   });
 }
@@ -222,7 +222,7 @@ test("四种标记形式解析并统一呈现顺序编号，未知标记保持�
   expect(wrapper.text()).toContain("[8]");
 });
 
-test("回答按 Markdown 渲染标题、列表与可滚动表格，引用仍可定位", async () => {
+test("回答按 Markdown 渲染标题、列表与可滚动表格，引用是真链接", async () => {
   const answer = "## 结论〔1〕\n\n- **要点**加粗\n\n| 指标〔1〕 | 数值 |\n| --- | --- |\n| 甲 | 12 |";
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse(answer)));
   const wrapper = mountAnswer();
@@ -233,8 +233,8 @@ test("回答按 Markdown 渲染标题、列表与可滚动表格，引用仍可�
   expect(body.get("li").get("strong").text()).toBe("要点");
   expect(body.get(".md-table-scroll table").exists()).toBe(true);
   expect(body.findAll(".ai-marker").map((marker) => marker.text())).toEqual(["〔1〕", "〔1〕"]);
-  await body.get(".ai-marker").trigger("click");
-  expect(wrapper.emitted("locate")[0]).toEqual([{ kind: "case", id: "c-05" }]);
+  expect(body.get(".ai-marker").attributes("href")).toBe("#/case/c-05");
+  expect(body.get(".ai-marker").attributes("target")).toBe("_blank");
   expect(wrapper.get(".ai-answer-sources").text()).toContain("重复标题");
 });
 
@@ -261,39 +261,32 @@ test("来源列表仅来自实际渲染的引用标记，代码与链接内标�
   const wrapper = mountAnswer();
   await flushPromises();
   expect(wrapper.get(".ai-answer-text").findAll(".ai-marker")).toHaveLength(1);
-  expect(wrapper.get(".ai-answer-text").get("a").attributes("href")).toBe("https://example.org");
-  const sources = wrapper.get(".ai-answer-sources").findAll("button");
+  expect(wrapper.get(".ai-answer-text").get('a[href="https://example.org"]').exists()).toBe(true);
+  const sources = wrapper.get(".ai-answer-sources").findAll("a");
   expect(sources.map((source) => source.text())).toEqual(["〔1〕 重复标题"]);
-  await wrapper.get(".ai-marker").trigger("click");
-  expect(wrapper.emitted("locate")[0]).toEqual([{ kind: "case", id: "c-05" }]);
+  expect(sources[0].attributes("href")).toBe("#/case/c-05");
+  expect(sources[0].attributes("target")).toBe("_blank");
 });
 
-test("已解析引用与来源行按稳定 kind+id 定位精确结果卡片", async () => {
+test("已解析引用与来源行按稳定 kind+id 链接到精确详情", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse("依据[2]与〔kn-1〕。")));
   const wrapper = mountAnswer();
   await flushPromises();
   const markers = wrapper.get(".ai-answer-text").findAll(".ai-marker");
-  await markers[0].trigger("click");
-  expect(wrapper.emitted("locate")[0]).toEqual([{ kind: "material", id: "mat-1" }]);
-  await markers[1].trigger("click");
-  expect(wrapper.emitted("locate")[1]).toEqual([{ kind: "knowledge", id: "kn-1" }]);
-  const sources = wrapper.get(".ai-answer-sources").findAll("button");
+  expect(markers[0].attributes("href")).toBe("#/material/mat-1");
+  expect(markers[1].attributes("href")).toBe("#/knowledge/kn-1");
+  const sources = wrapper.get(".ai-answer-sources").findAll("a");
   expect(sources.map((source) => source.text())).toEqual(["〔2〕 素材一", "〔3〕 知识一"]);
-  await sources[1].trigger("click");
-  expect(wrapper.emitted("locate")[2]).toEqual([{ kind: "knowledge", id: "kn-1" }]);
+  expect(sources[1].attributes("href")).toBe("#/knowledge/kn-1");
 });
 
-test("重名结果按 ID 区分定位而非标题", async () => {
+test("重名结果按 ID 区分链接而非标题", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse("对比〔c-05〕和[m-kcsz]。")));
   const wrapper = mountAnswer();
   await flushPromises();
   const markers = wrapper.get(".ai-answer-text").findAll(".ai-marker");
-  await markers[0].trigger("click");
-  await markers[1].trigger("click");
-  expect(wrapper.emitted("locate")).toEqual([
-    [{ kind: "case", id: "c-05" }],
-    [{ kind: "material", id: "m-kcsz" }],
-  ]);
+  expect(markers[0].attributes("href")).toBe("#/case/c-05");
+  expect(markers[1].attributes("href")).toBe("#/material/m-kcsz");
 });
 
 test("摘要请求最多携带当前结果前 15 条", async () => {

@@ -5,11 +5,12 @@ import SearchFilters from "../components/SearchFilters.vue";
 import { api, ApiError } from "../api.js";
 
 const replace = vi.fn();
+const resolve = vi.fn((location) => ({ href: `resolved:${location.name}` }));
 const route = { query: { q: "游标目录", kind: "material" } };
 
 vi.mock("vue-router", () => ({
   useRoute: () => route,
-  useRouter: () => ({ replace }),
+  useRouter: () => ({ replace, resolve }),
 }));
 vi.mock("../api.js", () => ({
   api: { search: vi.fn() },
@@ -17,7 +18,7 @@ vi.mock("../api.js", () => ({
 }));
 
 const SearchAIAnswerStub = {
-  props: ["snapshot"],
+  props: ["snapshot", "hrefFor"],
   template: '<div class="ai-answer-stub" :data-revision="snapshot.revision" :data-query="snapshot.query" />',
 };
 
@@ -61,7 +62,7 @@ function revisionOf(wrapper) {
 beforeEach(() => {
   vi.clearAllMocks();
   replace.mockReset();
-  Element.prototype.scrollIntoView = vi.fn();
+  resolve.mockClear();
   route.query = { q: "游标目录", kind: "material" };
   api.search.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
 });
@@ -158,7 +159,7 @@ test("检索失败不推进修订且 AI 区域随错误态隐藏", async () => {
   expect(wrapper.text()).toContain("网络错误");
 });
 
-test("定位按稳定 kind+id 聚焦精确结果卡片，重名不混淆", async () => {
+test("摘要来源交给真实链接处理，不再滚动结果卡片", async () => {
   api.search.mockReset();
   api.search.mockResolvedValue({ ...first, items: [
     { id: "one", kind: "material", title: "同名条目" },
@@ -166,11 +167,28 @@ test("定位按稳定 kind+id 聚焦精确结果卡片，重名不混淆", async
   ] });
   const wrapper = render({ attachTo: document.body });
   await flushPromises();
-  wrapper.findComponent(SearchAIAnswerStub).vm.$emit("locate", { kind: "case", id: "c-05" });
+  expect(wrapper.findComponent(SearchAIAnswerStub).props("hrefFor")).toEqual(expect.any(Function));
+  expect(wrapper.find(".mixed-result").attributes("id")).toBeUndefined();
+  expect(wrapper.find(".mixed-result").attributes("tabindex")).toBeUndefined();
+  wrapper.unmount();
+});
+
+test("详情链接使用对应资源路由与已知案例版本", async () => {
+  api.search.mockReset().mockResolvedValue({ ...first, items: [
+    { id: "c-05", kind: "case", title: "案例", versionId: "cv-05", versionNumber: 2 },
+    { id: "kn-1", kind: "knowledge", title: "知识" },
+    { id: "mat-1", kind: "material", title: "素材" },
+  ] });
+  const wrapper = render();
   await flushPromises();
-  const target = document.getElementById("result-case-c-05");
-  expect(target.scrollIntoView).toHaveBeenCalled();
-  expect(document.activeElement).toBe(target);
-  expect(document.activeElement).not.toBe(document.getElementById("result-material-one"));
+  const hrefFor = wrapper.findComponent(SearchAIAnswerStub).props("hrefFor");
+
+  expect(hrefFor({ id: "c-05", kind: "case", versionId: "cv-05" })).toBe("resolved:case-public");
+  expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+    name: "case-public", params: { id: "c-05" },
+    query: expect.objectContaining({ versionId: "cv-05", q: "游标目录", from: "search" }),
+  }));
+  expect(hrefFor({ id: "kn-1", kind: "knowledge" })).toBe("resolved:knowledge-detail");
+  expect(hrefFor({ id: "mat-1", kind: "material" })).toBe("resolved:material-detail");
   wrapper.unmount();
 });
