@@ -18,7 +18,7 @@
 .ai-answer-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .ai-answer-state a { color: var(--brand); font-weight: 650; text-decoration: none; }
 .ai-progress { display: flex; align-items: center; gap: 8px; color: var(--ink-3); }
-.ai-answer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-answer-text { overflow-wrap: anywhere; }
 .ai-answer-text .ai-marker { padding: 0; border: 0; background: none; color: var(--brand); font-weight: 650; cursor: pointer; }
 .ai-answer-text.collapsed { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .ai-answer-toggle { display: inline-flex; align-items: center; gap: 4px; margin: 8px 0 0; padding: 0; border: 0; background: none; color: var(--brand); font-size: 13px; font-weight: 650; cursor: pointer; }

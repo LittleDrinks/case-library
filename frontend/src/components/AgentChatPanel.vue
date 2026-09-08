@@ -2,6 +2,7 @@
 import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
+import { renderMarkdown } from "../lib/markdown.js";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import {
   sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
@@ -507,7 +508,13 @@ async function retryRun() {
                 <summary><LoaderCircle v-if="part.state === 'streaming'" class="spin" :size="13" /><span>{{ part.state === "streaming" ? "思考中" : "思考过程" }}</span></summary>
                 <p>{{ part.text }}</p>
               </details>
-              <p v-else-if="part.type === 'text' && part.text">{{ part.text }}</p>
+              <p v-else-if="part.type === 'text' && part.text && message.role === 'user'">{{ part.text }}</p>
+              <div
+                v-else-if="part.type === 'text' && part.text"
+                class="markdown-body agent-answer"
+                data-testid="agent-answer"
+                v-html="renderMarkdown(part.text)"
+              />
               <p
                 v-else-if="part.type === 'data-skill' && !readOnly"
                 class="ai-skill-chip"

@@ -4,6 +4,7 @@ import { DefaultChatTransport } from "ai";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ChevronDown, LoaderCircle, RotateCcw } from "@lucide/vue";
 import { api } from "../api.js";
+import { renderAnswer } from "../lib/markdown.js";
 import { session } from "../session.js";
 
 const props = defineProps({
@@ -41,26 +42,24 @@ function resolveMarker(raw) {
   return item ? { item, order: contextItems.value.indexOf(item) + 1 } : null;
 }
 
-function parseSegments(value) {
-  const segments = [];
-  let last = 0;
-  for (const match of value.matchAll(/〔([^〔〕]+)〕|\[([^\[\]]+)\]/g)) {
-    if (match.index > last) segments.push({ type: "text", value: value.slice(last, match.index) });
-    const resolved = resolveMarker(match[1] ?? match[2]);
-    segments.push(resolved ? { type: "marker", ...resolved } : { type: "text", value: match[0] });
-    last = match.index + match[0].length;
-  }
-  if (last < value.length) segments.push({ type: "text", value: value.slice(last) });
-  return segments;
-}
-
-const segments = computed(() => parseSegments(text.value || ""));
+const answer = computed(() => renderAnswer(text.value, resolveMarker));
+const answerHtml = computed(() => answer.value.html
+  + (state.value === "streaming" ? '<span class="stream-caret" aria-hidden="true"></span>' : ""));
 const citedSources = computed(() => {
   const cited = new Map();
-  segments.value.filter((segment) => segment.type === "marker")
-    .forEach((segment) => cited.set(`${segment.item.kind}:${segment.item.id}`, segment));
+  for (const resolved of answer.value.citations) {
+    const key = `${resolved.item.kind}:${resolved.item.id}`;
+    if (!cited.has(key)) cited.set(key, resolved);
+  }
   return [...cited.values()];
 });
+
+function onAnswerClick(event) {
+  const marker = event.target.closest(".ai-marker");
+  if (!marker) return;
+  const item = contextItems.value[Number(marker.dataset.citationOrder) - 1];
+  if (item) locate(item);
+}
 
 function locate(item) {
   emit("locate", { kind: item.kind, id: item.id });
@@ -124,7 +123,7 @@ onBeforeUnmount(() => retire("idle"));
     </div>
     <p v-else-if="state === 'checking'" class="ai-progress"><LoaderCircle class="spin" :size="16" />检查模型配置</p>
     <template v-else-if="state === 'streaming' || state === 'complete'">
-      <p class="ai-answer-text" :class="{ collapsed: !expanded }"><template v-for="(segment, index) in segments" :key="index"><span v-if="segment.type === 'text'">{{ segment.value }}</span><button v-else type="button" class="ai-marker" @click="locate(segment.item)">〔{{ segment.order }}〕</button></template><span v-if="state === 'streaming'" class="stream-caret" /></p>
+      <div class="ai-answer-text markdown-body" :class="{ collapsed: !expanded }" v-html="answerHtml" @click="onAnswerClick" />
       <button type="button" class="ai-answer-toggle" :aria-expanded="expanded" @click="expanded = !expanded">
         {{ expanded ? "收起" : "展开全文" }}
         <ChevronDown :size="14" aria-hidden="true" :class="{ flipped: expanded }" />
