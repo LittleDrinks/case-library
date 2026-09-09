@@ -18,6 +18,7 @@ import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
+import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
 
 const route = useRoute();
@@ -54,6 +55,7 @@ const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
 const overwriteTarget = ref(null);
+const historyRefreshKey = ref(0);
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
 const activeVersion = computed(() => (
@@ -61,7 +63,7 @@ const activeVersion = computed(() => (
 ));
 const versionTabItems = computed(() => openVersionTabs.value.map((version) => ({
   id: version.id,
-  label: `v${version.number} · ${version.title}`,
+  label: versionLabel(version),
 })));
 const onDraftTab = computed(() => !activeVersion.value);
 const activeDocument = computed(() => (
@@ -427,6 +429,10 @@ function selectTab(id) {
   activeTabId.value = id;
 }
 
+function refreshVersionHistory() {
+  historyRefreshKey.value += 1;
+}
+
 function requestOverwrite() {
   if (headerBusyAction.value || !activeVersion.value) return;
   actionNotice.value = "";
@@ -538,7 +544,7 @@ onBeforeUnmount(() => {
       />
       <OverwriteConfirmDialog
         :open="Boolean(overwriteTarget)"
-        :version-label="overwriteTarget ? `v${overwriteTarget.number} · ${overwriteTarget.title}` : ''"
+        :version-label="overwriteTarget ? versionLabel(overwriteTarget) : ''"
         :busy="busyAction === 'overwrite'"
         :error="overwriteTarget && busyAction === 'overwrite' ? actionNotice : ''"
         @cancel="cancelOverwrite"
@@ -612,7 +618,7 @@ onBeforeUnmount(() => {
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
               <h2>{{ activeVersion.title }}</h2>
-              <p>提交版本 v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
+              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
             </header>
             <CanvasEditor
               :key="activeVersion.id"
@@ -639,6 +645,7 @@ onBeforeUnmount(() => {
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"
+          :history-refresh-key="historyRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
@@ -651,6 +658,7 @@ onBeforeUnmount(() => {
           @clear-writing-context="writingContext = null"
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
+          @versions-updated="refreshVersionHistory"
         />
       </div>
     </template>

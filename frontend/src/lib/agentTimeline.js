@@ -1,10 +1,11 @@
 export const TOOL_LABELS = {
   load_capability: "加载 Skill", search_corpus: "检索案例", list_tag_catalog: "查询标签",
   read_source: "阅读来源", propose_revision: "生成修订建议",
-  propose_document: "生成全文初稿", write_document: "直接写入正文",
+  propose_document: "生成 AI 版本", write_document: "直接写入正文",
 };
 export const TOOL_STATUS_LABELS = {
-  ok: "已完成", pending: "待确认", unavailable: "无法读取", not_found: "未找到",
+  ok: "已完成", pending: "处理中", created: "已创建", not_saved: "未保存",
+  unavailable: "无法读取", not_found: "未找到",
   no_access: "当前身份无权限读取", empty: "内容为空", error: "读取失败",
 };
 export const ARTIFACT_STATUS_LABELS = {
@@ -54,7 +55,7 @@ export function toolParamSummary(part) {
     return Number.isInteger(input.start) && Number.isInteger(input.end)
       ? `目标：${input.start}–${input.end}` : "";
   }
-  if (toolName(part) === "propose_document") return "范围：全文（待确认）";
+  if (toolName(part) === "propose_document") return "范围：全文（AI版本）";
   if (toolName(part) === "write_document") {
     return input.scope === "selection" ? "范围：选区" : "范围：全文";
   }
@@ -66,8 +67,8 @@ export function toolResultSummary(part) {
   if (part.state === "output-error") return part.errorText || "执行失败";
   if (part.state !== "output-available") return "";
   const output = part.output || {};
-  if (part.type === "tool-propose_document" && output.artifactId) {
-    return "已创建全文初稿候选，等待确认";
+  if (part.type === "tool-propose_document") {
+    return documentResultSummary(output);
   }
   if (part.type === "tool-write_document" && output.status === "written") {
     return "已写入正文，可撤销";
@@ -79,6 +80,12 @@ export function toolResultSummary(part) {
     return TOOL_STATUS_LABELS[output.status] || output.status;
   }
   return "";
+}
+
+function documentResultSummary(output) {
+  if (output.status === "created") return "已保存 AI 版本，可在版本时间线查看";
+  if (output.status === "not_saved") return output.detail || "AI 版本未保存";
+  return output.status === "pending" ? "正在保存 AI 版本" : "";
 }
 
 export function sourceHref(source) {

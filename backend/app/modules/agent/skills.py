@@ -24,6 +24,16 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 READER_CAPABILITY_ID = "platform-tools"
+_FULL_GENERATION_MARKERS = (
+    "完整生成", "生成全文", "生成整篇", "生成完整稿", "生成初稿", "生成一份初稿",
+    "生成一篇初稿", "撰写全文", "撰写整篇", "写全文", "写整篇", "full draft",
+    "full document",
+)
+
+
+def full_generation_requested(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return any(marker in text for marker in _FULL_GENERATION_MARKERS)
 
 
 async def search_corpus(ctx: RunContext[ToolDeps], params: CorpusSearchParams) -> dict:
@@ -106,9 +116,15 @@ def _artifact_view(artifact) -> dict:
 async def propose_document(
     ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
-    """为空草稿或模板提议整篇初稿候选；随运行完成事务统一提交，教师确认后才生效。"""
+    """暂存整篇 AI 生成稿；运行成功后才落为只读版本。"""
+    if not getattr(ctx.deps, "full_generation_allowed", False):
+        raise ModelRetry("本条消息未请求完整生成，不能创建 AI 版本")
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
+    return _propose_document(ctx, blocks, reason)
+
+
+def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str) -> dict:
     try:
         artifact = artifacts.propose_document_artifact(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
@@ -118,7 +134,7 @@ async def propose_document(
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.proposed = artifact
     return {
-        "artifactId": artifact.id, "kind": artifact.kind,
+        "kind": artifact.kind, "status": "pending",
         "blocks": len(artifact.blocks), "baseRevision": artifact.base_revision,
     }
 

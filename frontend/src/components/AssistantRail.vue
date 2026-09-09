@@ -17,6 +17,7 @@ const props = defineProps({
   sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
+  historyRefreshKey: { type: Number, default: 0 },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
@@ -26,7 +27,7 @@ const props = defineProps({
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
-  "open-version",
+  "open-version", "versions-updated",
 ]);
 
 const tabs = [
@@ -72,6 +73,7 @@ function select(tab) {
       :review="review"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
+      @versions-updated="emit('versions-updated')"
       @clear-writing-context="emit('clear-writing-context')"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
@@ -106,6 +108,7 @@ function select(tab) {
     <VersionPanel
       v-else-if="active === 'history'"
       :case-record="caseRecord"
+      :refresh-key="historyRefreshKey"
       @open-version="emit('open-version', $event)"
     />
   </aside>

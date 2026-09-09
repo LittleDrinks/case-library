@@ -36,9 +36,19 @@ def _initialize_cases(database: Database) -> None:
     database.cases.create_index(
         [("publishedVersionId", ASCENDING), ("publicationStatus", ASCENDING)]
     )
+    _initialize_case_versions(database)
+
+
+def _initialize_case_versions(database: Database) -> None:
     database.case_versions.create_index([("id", ASCENDING)], unique=True)
     database.case_versions.create_index(
         [("caseId", ASCENDING), ("number", ASCENDING)], unique=True
+    )
+    database.case_versions.create_index(
+        [("caseId", ASCENDING), ("sourceRunId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"sourceRunId": {"$type": "string"}},
+        name="one_ai_version_per_run",
     )
     database.case_versions.create_index([("attachments.blobId", ASCENDING)])
     database.case_versions.create_index([("materials.id", ASCENDING)])

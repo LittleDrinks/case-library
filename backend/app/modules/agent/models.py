@@ -17,6 +17,7 @@ ThreadEventType = Literal[
     "run.cancelled",
     "artifact.created",
     "artifact.decided",
+    "version.created",
     "document.written",
     "document.undone",
 ]

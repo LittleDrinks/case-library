@@ -2,8 +2,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { History } from "@lucide/vue";
 import { api } from "../api.js";
+import { versionLabel } from "../lib/version.js";
 
-const props = defineProps({ caseRecord: { type: Object, required: true } });
+const props = defineProps({
+  caseRecord: { type: Object, required: true },
+  refreshKey: { type: Number, default: 0 },
+});
 const emit = defineEmits(["open-version"]);
 const versions = ref([]);
 const loading = ref(true);
@@ -30,7 +34,7 @@ async function loadHistory() {
   }
 }
 
-watch(() => props.caseRecord.versionNumber, loadHistory);
+watch(() => [props.caseRecord.id, props.caseRecord.versionNumber, props.refreshKey], loadHistory);
 onMounted(loadHistory);
 </script>
 
@@ -40,20 +44,20 @@ onMounted(loadHistory);
       <b>版本时间线</b>
     </div>
     <div class="panel-scroll">
-      <p class="version-note">提交审核时创建版本；普通编辑与保存不新增版本。</p>
+      <p class="version-note">提交审核或 AI 完整生成时创建版本；普通聊天、局部修订、普通编辑与保存不新增版本。</p>
       <div v-if="loading" class="panel-empty"><History :size="24" /><span>正在加载版本</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
         <span>{{ error }}</span><button type="button" @click="loadHistory">重试</button>
       </div>
-      <p v-else-if="!timeline.length" class="version-note">还没有历史版本，投稿后会出现在这里。</p>
+      <p v-else-if="!timeline.length" class="version-note">还没有历史版本，提交或完整生成后会出现在这里。</p>
       <ol v-else class="version-timeline">
         <li v-for="version in timeline" :key="version.id">
           <span class="timeline-dot" aria-hidden="true" />
           <div class="version-meta">
             <small>{{ time(version.createdAt) }}</small>
-            <b>v{{ version.number }} · {{ version.title }}</b>
+            <b>{{ versionLabel(version) }}</b>
           </div>
-          <button type="button" :aria-label="`打开 v${version.number} 版本`" @click="emit('open-version', version)">
+          <button type="button" :aria-label="`打开 ${versionLabel(version)} 版本`" @click="emit('open-version', version)">
             打开
           </button>
         </li>

@@ -47,6 +47,30 @@ def _interrupted(payload: dict) -> bool:
     return "上游中断测试" in prompt
 
 
+def _full_generation_call(payload: dict) -> bool:
+    prompt = json.dumps(payload, ensure_ascii=False)
+    return "请完整生成全文" in prompt and '"role": "tool"' not in prompt
+
+
+def _tool_event() -> bytes:
+    arguments = json.dumps({
+        "blocks": [
+            {"type": "heading", "level": 1, "text": "AI完整稿"},
+            {"type": "paragraph", "text": "AI生成正文"},
+        ],
+        "reason": "完整生成",
+    }, ensure_ascii=False)
+    payload = {"choices": [{"delta": {"tool_calls": [{
+        "index": 0, "id": "full-generation-call", "type": "function",
+        "function": {"name": "propose_document", "arguments": arguments},
+    }]}}]}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _tool_finish_event() -> bytes:
+    return b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+
+
 def _send_pieces(handler, payload: dict) -> bool:
     pieces, delay = _pieces(payload)
     for piece in pieces:
@@ -65,7 +89,11 @@ def _stream(handler, payload: dict) -> None:
     handler.send_header("Connection", "close")
     handler.end_headers()
     try:
-        if not _send_pieces(handler, payload):
+        if _full_generation_call(payload):
+            for event in (_tool_event(), _tool_finish_event()):
+                handler.wfile.write(event)
+                handler.wfile.flush()
+        elif not _send_pieces(handler, payload):
             return
         handler.wfile.write(b"data: [DONE]\n\n")
         handler.wfile.flush()

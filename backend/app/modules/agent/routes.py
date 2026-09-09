@@ -42,6 +42,7 @@ from app.modules.agent.service import RunContext, load_history
 from app.modules.agent.skills import (
     bound_skill_capability,
     domain_capability,
+    full_generation_requested,
     reader_capability,
 )
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
@@ -600,6 +601,9 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state, secret_path=settings.app_secret_file,
         store=request.app.state.blob_store, version_id=conversation.version_id,
+        full_generation_allowed=(
+            not conversation.reader and full_generation_requested(plan.prompt)
+        ),
         sources=refs, selected=plan.selected, selections=plan.selections,
     )
 

@@ -26,7 +26,8 @@ function mergeTimelineMessages(messages = [], persisted = [], runs = []) {
   }
   return messages.map((message) => saved.has(message.id)
     ? { ...message, id: saved.get(message.id).id,
-      metadata: { ...message.metadata, ...saved.get(message.id).metadata } }
+      metadata: { ...message.metadata, ...saved.get(message.id).metadata },
+      parts: saved.get(message.id).parts || message.parts }
     : message);
 }
 

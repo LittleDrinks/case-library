@@ -8,6 +8,7 @@ from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.core.ids import new_id
+from app.modules.agent import blocks
 from app.modules.agent.models import (
     REVIEW_MODE,
     AgentArtifact,
@@ -22,6 +23,7 @@ from app.modules.agent.models import (
     write_view,
 )
 from app.modules.cases.published import version_readable
+from app.modules.cases.versions import create_ai_version
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -440,12 +442,27 @@ class AgentRepository:
         return self._complete_records(run, assistant, session, owner_id, resources, artifact)
 
     def _complete_records(self, run, assistant, session, owner_id, resources, artifact=None) -> bool:
+        version = self._persist_version(run, artifact, session)
+        if artifact and artifact.kind == "document":
+            assistant = _link_version(assistant, artifact.id, version)
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
-        if artifact is not None:
+        if artifact is not None and artifact.kind != "document":
             self._persist_artifact(run, artifact, session)
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
+
+    def _persist_version(self, run, artifact, session):
+        if not artifact or artifact.kind != "document":
+            return None
+        document = blocks.structured_document(artifact.blocks)
+        version = create_ai_version(self.database, artifact, run, document, session)
+        if version and self._append_event(
+            run.thread_id, "version.created", run.id,
+            {"versionId": version["id"]}, session,
+        ) is None:
+            raise RuntimeError("Thread 事件写入失败")
+        return version
 
     def _reader_completion_allowed(self, case_id, version_id, run_id, session) -> bool:
         case = self.database.cases.find_one_and_update(
@@ -612,6 +629,24 @@ class AgentRepository:
             {"$set": {"activeRunId": None, "lastRunId": run_id, "updatedAt": _now()}},
             session=session,
         )
+
+
+def _link_version(assistant: AgentMessage, artifact_id: str, version: dict | None) -> AgentMessage:
+    return assistant.model_copy(update={
+        "parts": [_version_part(part, artifact_id, version) for part in assistant.parts],
+    })
+
+
+def _version_part(part: dict, artifact_id: str, version: dict | None) -> dict:
+    output = part.get("output")
+    if part.get("type") != "tool-propose_document" or not isinstance(output, dict):
+        return part
+    if output.get("artifactId") not in (artifact_id, None):
+        return part
+    if version:
+        return {**part, "output": {"status": "created", "kind": "ai",
+                                    "versionId": version["id"]}}
+    return {**part, "output": {"status": "not_saved", "detail": "正文已更新，AI版本未保存"}}
 
 
 def _default_thread_update(

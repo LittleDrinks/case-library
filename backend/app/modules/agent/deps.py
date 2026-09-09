@@ -21,6 +21,7 @@ class ToolDeps:
     secret_path: str
     store: object = None
     version_id: str | None = None
+    full_generation_allowed: bool = False
     sources: list[SourceRef] = field(default_factory=list)
     selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)
