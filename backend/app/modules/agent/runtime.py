@@ -93,20 +93,36 @@ def _tag_context_lines(tag_groups: dict, has_tag_ids: bool) -> list[str]:
     return []
 
 
-def _grounding_instructions(case: dict, database=None) -> str:
+def _review_tag_lines(tag_groups: dict, has_tag_ids: bool) -> list[str]:
+    """审核上下文只认真实已选标签：无标签时明示不足，不退回旧课程/受众字段。"""
+    if tag_groups:
+        return _tag_context_lines(tag_groups, has_tag_ids)
+    if has_tag_ids:
+        return ["- 当前案例 tagIds 未返回可用标签名称；缺失标签不得推断。"]
+    return ["- 当前案例未选择任何标签：标签一致性与课堂适用性缺少依据，不得推断。"]
+
+
+def _author_context_lines(case: dict, tag_groups: dict, has_tag_ids: bool) -> list[str]:
+    values = _context_fields(case, tag_groups, has_tag_ids)
+    lines = _tag_context_lines(tag_groups, has_tag_ids)
+    lines.extend(
+        f"- {label}：{_context_value(values[field])}"
+        for field, label in _COURSE_CONTEXT_FIELDS
+    )
+    return lines
+
+
+def _grounding_instructions(case: dict, database=None, review: bool = False) -> str:
     tag_groups = _tag_groups(database, case)
     has_tag_ids = bool(case.get("tagIds"))
-    values = _context_fields(case, tag_groups, has_tag_ids)
-
     lines = [
         "## 服务端运行上下文",
         f"- 系统当前日期（北京时间，服务端提供）：{_current_date()}",
         "- 以下课程与案例标签来自当前案例服务端上下文，优先于 Skill 主题或模型记忆：",
     ]
-    lines.extend(_tag_context_lines(tag_groups, has_tag_ids))
     lines.extend(
-        f"- {label}：{_context_value(values[field])}"
-        for field, label in _COURSE_CONTEXT_FIELDS
+        _review_tag_lines(tag_groups, has_tag_ids) if review
+        else _author_context_lines(case, tag_groups, has_tag_ids)
     )
     return "\n".join(lines)
 
@@ -137,7 +153,7 @@ def case_instructions(
     base = "\n\n".join((
         prompts,
         prompt_text("grounding.md"),
-        _grounding_instructions(case, database),
+        _grounding_instructions(case, database, review),
         f"当前案例标题：{title}",
         f"当前案例正文：{text}",
     ))

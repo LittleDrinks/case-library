@@ -513,7 +513,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _plan_for(repository, thread, adapter, database, user, conversation)
-    if conversation.reader and plan.skills:
+    if conversation.reader and plan.skills and not conversation.review:
         raise HTTPException(status_code=422, detail="AI 能力不可用")
     context = _start_context(
         request, database, settings, user, conversation, repository, thread,
@@ -605,8 +605,12 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
 
 
 def _capabilities(conversation: Conversation, bounds) -> list:
+    """审核对话在读者只读工具面之上允许加载已发布 Skill；写工具永不出现。"""
     if conversation.reader:
-        return [reader_capability()]
+        capabilities = [reader_capability()]
+        if conversation.review:
+            capabilities += [bound_skill_capability(bound) for bound in bounds]
+        return capabilities
     return [domain_capability()] + [bound_skill_capability(bound) for bound in bounds]
 
 

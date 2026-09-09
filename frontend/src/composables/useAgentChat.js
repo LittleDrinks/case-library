@@ -227,7 +227,7 @@ async function selectThread(caseId, state, threadId) {
 
 function messageParts(state, text, contextParts, skillId) {
   const parts = [{ type: "text", text }, ...contextParts];
-  if (!state.versionId && !state.mode && skillId) {
+  if (!state.versionId && (!state.mode || state.mode === "review") && skillId) {
     parts.push({ type: "data-skill", data: { skillId } });
   }
   return parts;
@@ -413,6 +413,6 @@ export function useAgentChat(caseId, versionId = "", mode = "") {
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
-  if (!versionId && !mode) void reloadCatalog(state);
+  if (!versionId && (!mode || mode === "review")) void reloadCatalog(state);
   return exposedApi(caseId, state, at);
 }
