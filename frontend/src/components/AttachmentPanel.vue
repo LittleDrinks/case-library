@@ -5,6 +5,7 @@ import {
   Trash2, Upload,
 } from "@lucide/vue";
 import { api } from "../api.js";
+import { useConversationSources } from "../composables/useConversationSources.js";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
@@ -13,6 +14,7 @@ const props = defineProps({
   beforeMutation: { type: Function, required: true },
 });
 const emit = defineEmits(["case-refreshed", "mutation-state"]);
+const conversationSources = useConversationSources();
 const rows = ref([]);
 const materials = ref([]);
 const sources = ref([]);
@@ -152,6 +154,14 @@ onMounted(loadAttachments);
           <div class="attachment-copy">
             <b>〔{{ index + 1 }}〕{{ row.title }}</b>
             <span>{{ sourceMeta(row) || sourceKind(row) }}</span>
+            <button
+              type="button"
+              class="conversation-toggle"
+              :class="{ on: conversationSources.has(row) }"
+              :aria-pressed="conversationSources.has(row)"
+              :data-testid="'conversation-toggle-' + row.id"
+              @click="conversationSources.toggle(row)"
+            >{{ conversationSources.has(row) ? "已用于对话 ✓" : "用于对话" }}</button>
             <small v-if="!row.contentAvailable"><LockKeyhole :size="12" />内容按权限开放</small>
           </div>
           <a

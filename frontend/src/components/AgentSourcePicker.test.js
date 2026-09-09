@@ -1,7 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentSourcePicker from "./AgentSourcePicker.vue";
-import { useConversationSources } from "../composables/useConversationSources.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { api } from "../api.js";
 
 vi.mock("../api.js", () => ({
@@ -10,10 +10,12 @@ vi.mock("../api.js", () => ({
 
 const entries = { entries: [{ sourceType: "case", id: "src-1", title: "来源一" }] };
 let wrapper;
+let store;
 
 function mountPicker(overrides = {}) {
   wrapper = mount(AgentSourcePicker, {
     props: { caseId: "case-1", ...overrides },
+    global: { provide: { [CONVERSATION_SOURCES_KEY]: store } },
     attachTo: document.body,
   });
   return wrapper;
@@ -33,7 +35,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useConversationSources().clear();
+  store = createConversationSources();
   api.listSources.mockResolvedValue(structuredClone(entries));
 });
 
@@ -44,7 +46,7 @@ it("opens a searchable popover and toggles sources through the shared store", as
   expect(panel.textContent).toContain("本次对话参考资料");
   panel.querySelector('[data-testid="agent-source-option"] input').click();
   await flushPromises();
-  expect(useConversationSources().sources.value.map((row) => row.id)).toEqual(["src-1"]);
+  expect(store.sources.value.map((row) => row.id)).toEqual(["src-1"]);
   expect(wrapper.get(".context-trigger .count").text()).toBe("1");
 });
 
@@ -77,7 +79,6 @@ it("readonly picker reads the fixed version without any platform search", async 
 });
 
 it("clears the shared selection and reloads on version change", async () => {
-  const store = useConversationSources();
   store.toggle({ sourceType: "case", id: "src-old" });
   mountPicker();
   await flushPromises();

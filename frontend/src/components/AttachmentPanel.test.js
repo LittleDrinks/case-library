@@ -2,6 +2,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, test, vi } from "vitest";
 import { api } from "../api.js";
 import AttachmentPanel from "./AttachmentPanel.vue";
+import AgentComposer from "./AgentComposer.vue";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -31,7 +33,8 @@ const sourceRows = [
   },
 ];
 
-async function setup(props = {}) {
+async function setup(props = {}, store) {
+  store ||= createConversationSources();
   api.listSources.mockResolvedValue({ entries: sourceRows });
   const wrapper = mount(AttachmentPanel, {
     props: {
@@ -41,7 +44,7 @@ async function setup(props = {}) {
       beforeMutation: vi.fn().mockResolvedValue(3),
       ...props,
     },
-    global: { stubs: { RouterLink: true } },
+    global: { stubs: { RouterLink: true }, provide: { [CONVERSATION_SOURCES_KEY]: store } },
   });
   await flushPromises();
   await wrapper.findAll(".folder-tabs button")[2].trigger("click");
@@ -74,4 +77,39 @@ test("显式移除来源调用删除接口", async () => {
   await wrapper.get("[aria-label='移除来源引用案例甲']").trigger("click");
   await flushPromises();
   expect(api.removeCaseSource).toHaveBeenCalledWith("case-1", "src-1", 3, "csrf");
+});
+
+test("用于对话写入共享上下文并同步到 composer", async () => {
+  const store = createConversationSources();
+  const wrapper = await setup({}, store);
+  const toggle = wrapper.get('[data-testid="conversation-toggle-src-1"]');
+  await toggle.trigger("click");
+  expect(store.sources.value.map((row) => row.id)).toEqual(["src-1"]);
+  expect(toggle.attributes("aria-pressed")).toBe("true");
+  expect(toggle.text()).toContain("已用于对话");
+  const composer = mount(AgentComposer, {
+    props: { caseId: "case-1", configured: true, skills: [], catalog: "ready" },
+    global: { stubs: { RouterLink: true }, provide: { [CONVERSATION_SOURCES_KEY]: store } },
+  });
+  await flushPromises();
+  expect(composer.get(".context-strip .context-chip").text()).toContain("引用案例甲");
+  composer.unmount();
+});
+
+test("composer 取消参考同步回面板按钮状态", async () => {
+  const store = createConversationSources();
+  const wrapper = await setup({}, store);
+  await wrapper.get('[data-testid="conversation-toggle-src-1"]').trigger("click");
+  const composer = mount(AgentComposer, {
+    props: { caseId: "case-1", configured: true, skills: [], catalog: "ready" },
+    global: { stubs: { RouterLink: true }, provide: { [CONVERSATION_SOURCES_KEY]: store } },
+  });
+  await flushPromises();
+  await composer.get('[aria-label="取消参考引用案例甲"]').trigger("click");
+  await flushPromises();
+  expect(store.sources.value).toEqual([]);
+  const toggle = wrapper.get('[data-testid="conversation-toggle-src-1"]');
+  expect(toggle.text()).toContain("用于对话");
+  expect(toggle.attributes("aria-pressed")).toBe("false");
+  composer.unmount();
 });

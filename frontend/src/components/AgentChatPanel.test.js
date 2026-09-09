@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -76,11 +77,15 @@ function answerResponse() {
 function mountPanel(overrides = {}) {
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
-    global: { stubs: { RouterLink: true } },
+    global: {
+      stubs: { RouterLink: true },
+      provide: { [CONVERSATION_SOURCES_KEY]: conversationStore },
+    },
   });
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+let conversationStore;
 
 async function openSkillPopover(wrapper) {
   await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
@@ -102,6 +107,7 @@ afterEach(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  conversationStore = createConversationSources();
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
@@ -229,6 +235,20 @@ it("sends selected sources and the current writing selection as data parts", asy
   expect(body.messages.at(-1).parts.map((part) => part.type)).toEqual([
     "text", "data-source", "data-selection",
   ]);
+});
+
+it("keeps conversation context across panel remounts so tab switches never wipe it", async () => {
+  conversationStore.toggle({ sourceType: "case", id: "src-1", title: "来源一" });
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(conversationStore.sources.value.map((row) => row.id)).toEqual(["src-1"]);
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("新案例提问");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  const parts = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+  expect(parts.map((part) => part.type)).toEqual(["text", "data-source"]);
 });
 
 it("reader discussion binds its version and does not send an edit Skill", async () => {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
@@ -13,12 +13,15 @@ import WorkspaceHeader from "../components/WorkspaceHeader.vue";
 import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { session } from "../session.js";
 
 const route = useRoute();
 const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
+// 案例级「用于对话」上下文；App 按 fullPath 重挂载工作台，切案例即换新实例
+provide(CONVERSATION_SOURCES_KEY, createConversationSources());
 const caseRecord = ref(null);
 const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
 const title = ref("");

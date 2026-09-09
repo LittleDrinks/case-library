@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowUp, Check, ChevronDown, Search, SlidersHorizontal, Sparkles, TextSelect, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, Search, Sparkles, TextSelect, X } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { ElPopover } from "element-plus";
 import { useConversationSources } from "../composables/useConversationSources.js";
@@ -161,9 +161,6 @@ function submit() {
             </div>
             <div class="picker-bottom"><small>下条消息按需重新插入</small></div>
           </ElPopover>
-          <button type="button" class="capability" disabled title="工具选择即将上线，当前仅保留入口" aria-disabled="true" data-testid="tools-placeholder">
-            <SlidersHorizontal :size="15" aria-hidden="true" /><span>工具</span>
-          </button>
         </div>
         <button type="button" class="send-button" aria-label="发送" :disabled="!canSend" @click="submit">
           <ArrowUp :size="18" aria-hidden="true" />

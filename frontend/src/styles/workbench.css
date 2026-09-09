@@ -418,6 +418,9 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .attachment-copy b { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-copy span { color: var(--ink-3); font-size: 11px; }
 .attachment-copy small { display: flex; align-items: center; gap: 4px; color: var(--amber); font-size: 11px; }
+.conversation-toggle { justify-self: start; width: fit-content; padding: 3px 8px; margin-top: 2px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 11px; }
+.conversation-toggle:hover { border-color: var(--brand); color: var(--brand); }
+.conversation-toggle.on { border-color: #dfb98a; background: #fbf5e9; color: #936c3e; }
 .attachment-icon { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-2); text-decoration: none; }
 .attachment-icon:hover:not(:disabled) { border-color: var(--line); background: var(--paper); color: var(--brand); }
 .attachment-actions { align-items: center; }

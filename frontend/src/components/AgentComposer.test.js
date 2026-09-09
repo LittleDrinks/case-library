@@ -1,16 +1,18 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentComposer from "./AgentComposer.vue";
-import { useConversationSources } from "../composables/useConversationSources.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 
 vi.mock("../api.js", () => ({ api: { listSources: vi.fn().mockResolvedValue({ entries: [] }) } }));
 
 const skills = [{ id: "skill-pub", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" }];
 let wrapper;
+let store;
 
-function mountComposer(props = {}) {
+function mountComposer(props = {}, overrides = {}) {
   wrapper = mount(AgentComposer, {
     props: { caseId: "case-1", configured: true, skills, catalog: "ready", ...props },
+    global: { provide: { [CONVERSATION_SOURCES_KEY]: store }, ...overrides.global },
     attachTo: document.body,
   });
   return wrapper;
@@ -40,7 +42,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useConversationSources().clear();
+  store = createConversationSources();
 });
 
 it("sends the draft and clears it for the next message", async () => {
@@ -121,7 +123,8 @@ it("shows catalog loading, error and empty states with retry", async () => {
 it("keeps the reader composer free of skill controls", async () => {
   mountComposer({ readOnly: true });
   expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
-  expect(wrapper.find('[data-testid="tools-placeholder"]').exists()).toBe(true);
+  expect(wrapper.find('[data-testid="tools-placeholder"]').exists()).toBe(false);
+  expect(wrapper.findAll(".capability")).toHaveLength(0);
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("只读问题");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   expect(wrapper.emitted("send")[0][0]).toEqual({ text: "只读问题", skillId: "" });
@@ -137,6 +140,22 @@ it("disables sending while unconfigured or busy and blocks empty drafts", async 
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
   await wrapper.setProps({ busy: false });
   expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+});
+
+it("renders no placeholder tool switches in the capability bar", async () => {
+  mountComposer();
+  expect(wrapper.find('[data-testid="tools-placeholder"]').exists()).toBe(false);
+  expect(wrapper.findAll(".capability")).toHaveLength(1);
+});
+
+it("reflects attachment-panel conversation toggles through the provided store", async () => {
+  mountComposer();
+  store.toggle({ sourceType: "case", id: "src-1", title: "引用案例甲" });
+  await flushPromises();
+  expect(wrapper.get(".context-strip .context-chip").text()).toContain("引用案例甲");
+  store.remove({ sourceType: "case", id: "src-1" });
+  await flushPromises();
+  expect(wrapper.find(".context-strip .context-chip").exists()).toBe(false);
 });
 
 it("offers clearing the writing-context chip from the strip", async () => {
