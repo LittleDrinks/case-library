@@ -80,10 +80,12 @@ function isCatalogCurrent(state, generation) {
   return !state.disposed && state.catalogGeneration === generation;
 }
 
-function preferenceKey(caseId, versionId) {
-  return versionId
-    ? `agent-thread:${session.user?.id || "anonymous"}:${caseId}:${versionId}`
-    : `agent-thread:${caseId}`;
+function preferenceKey(caseId, versionId, mode) {
+  if (versionId) {
+    return `agent-thread:${session.user?.id || "anonymous"}:${caseId}:${versionId}`;
+  }
+  if (mode) return `agent-thread:${caseId}:${mode}`;
+  return `agent-thread:${caseId}`;
 }
 
 function readPreference(key) {
@@ -103,8 +105,9 @@ function writePreference(key, threadId) {
 }
 
 function defaultThread(caseId, state) {
-  return state.versionId
-    ? api.agentThread(caseId, null, state.versionId) : api.agentThread(caseId);
+  return state.versionId || state.mode
+    ? api.agentThread(caseId, null, state.versionId, state.mode)
+    : api.agentThread(caseId);
 }
 
 async function resolveSnapshot(caseId, state) {
@@ -224,7 +227,9 @@ async function selectThread(caseId, state, threadId) {
 
 function messageParts(state, text, contextParts, skillId) {
   const parts = [{ type: "text", text }, ...contextParts];
-  if (!state.versionId && skillId) parts.push({ type: "data-skill", data: { skillId } });
+  if (!state.versionId && !state.mode && skillId) {
+    parts.push({ type: "data-skill", data: { skillId } });
+  }
   return parts;
 }
 
@@ -302,15 +307,14 @@ async function renameThread(caseId, state, threadId, title) {
 }
 
 async function createThread(caseId, state) {
-  const created = state.versionId
-    ? await api.agentCreateThread(caseId, null, session.csrfToken, state.versionId)
-    : await api.agentCreateThread(caseId, null, session.csrfToken);
+  const created = await api.agentCreateThread(
+    caseId, null, session.csrfToken, state.versionId, state.mode,
+  );
   await selectThread(caseId, state, created.id);
 }
 
 function listThreadSummaries(caseId, state) {
-  return state.versionId
-    ? api.agentThreads(caseId, state.versionId) : api.agentThreads(caseId);
+  return api.agentThreads(caseId, state.versionId, state.mode);
 }
 
 function threadActions(caseId, state) {
@@ -322,12 +326,12 @@ function threadActions(caseId, state) {
   };
 }
 
-function createState(caseId, versionId) {
+function createState(caseId, versionId, mode) {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false), recovering: ref(false),
     skills: ref([]), catalog: ref("loading"),
-    versionId, preferenceKey: preferenceKey(caseId, versionId),
+    versionId, mode, preferenceKey: preferenceKey(caseId, versionId, mode),
     generation: 0, catalogGeneration: 0, disposed: false,
   };
 }
@@ -401,14 +405,14 @@ function exposedApi(caseId, state, at) {
   };
 }
 
-export function useAgentChat(caseId, versionId = "") {
-  const state = createState(caseId, versionId);
+export function useAgentChat(caseId, versionId = "", mode = "") {
+  const state = createState(caseId, versionId, mode);
   const at = () => state.generation;
   const recover = () => {
     if (state.snapshot.value?.activeRun) kickResume(caseId, state, at());
   };
   bindLifecycle(state, recover);
   void reload(caseId, state);
-  if (!versionId) void reloadCatalog(state);
+  if (!versionId && !mode) void reloadCatalog(state);
   return exposedApi(caseId, state, at);
 }

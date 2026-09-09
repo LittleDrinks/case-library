@@ -26,6 +26,9 @@ ArtifactKind = Literal["range", "document"]
 WriteStatus = Literal["written", "undone"]
 SourceKind = Literal["case", "knowledge", "material", "attachment"]
 
+# 管理员审核对话：绑定当前待审工作稿、服务端全链路只读、按管理员私人隔离。
+REVIEW_MODE = "review"
+
 
 class AgentThread(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -34,6 +37,7 @@ class AgentThread(BaseModel):
     case_id: str = Field(alias="caseId")
     owner_id: str = Field(alias="ownerId")
     version_id: str | None = Field(default=None, alias="versionId")
+    mode: str | None = None
     title: str | None = None
     is_default: bool = Field(alias="isDefault")
     next_message_seq: int = Field(default=0, alias="nextMessageSeq")

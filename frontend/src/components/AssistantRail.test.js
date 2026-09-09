@@ -46,6 +46,13 @@ it("requires login before opening a private reader discussion", () => {
   expect(wrapper.findComponent({ name: "RouterLink" }).exists()).toBe(true);
 });
 
+it("keeps review chat private to review mode while annotations stay available", () => {
+  const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
+  const panel = wrapper.findComponent({ name: "AgentChatPanel" });
+  expect(panel.props("review")).toBe(true);
+  expect(wrapper.find(".assistant-tabs button:nth-child(2)").isVisible()).toBe(true);
+});
+
 it("forwards source citation inserts from the attachment panel", () => {
   const wrapper = render({ active: "files" });
   const row = { sourceType: "case", id: "src-1", number: 1, title: "来源" };

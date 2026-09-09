@@ -144,8 +144,10 @@ def _initialize_agent_threads(database: Database) -> None:
         if legacy in information:
             database.agent_threads.drop_index(legacy)
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
+    # mode 参与唯一性：同一管理员的作者线程（mode 缺省）与审核线程（mode=review）互不冲突。
     database.agent_threads.create_index(
-        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("versionId", ASCENDING)],
+        [("ownerId", ASCENDING), ("caseId", ASCENDING), ("versionId", ASCENDING),
+         ("mode", ASCENDING)],
         unique=True,
         partialFilterExpression={"isDefault": True},
         name="agent_one_default_thread",
