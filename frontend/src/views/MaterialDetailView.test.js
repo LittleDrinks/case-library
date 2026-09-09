@@ -37,3 +37,14 @@ test("详情页展示受权限保护的元数据、原始网页和下载入口",
   expect(wrapper.get(".material-source-link").attributes("href"))
     .toBe("https://example.com/material");
 });
+
+test("摘录渲染 Markdown 并转义不安全 HTML", async () => {
+  api.getMaterial.mockResolvedValue({ ...material, excerpt: "## 小节\n\n- **要点**\n\n<script>alert(1)</script>" });
+  const wrapper = mount(MaterialDetailView, {
+    global: { stubs: { SiteHeader: true, RouterLink: true, MaterialDownloadAction: true } },
+  });
+  await flushPromises();
+  expect(wrapper.get(".markdown-body h2").text()).toBe("小节");
+  expect(wrapper.get(".markdown-body li strong").text()).toBe("要点");
+  expect(wrapper.find(".markdown-body script").exists()).toBe(false);
+});

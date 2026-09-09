@@ -5,6 +5,7 @@ import { useRoute } from "vue-router";
 import MaterialDownloadAction from "../components/MaterialDownloadAction.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
+import { renderMarkdown } from "../lib/markdown.js";
 import { publicUrl } from "../lib/publicUrl.js";
 
 const route = useRoute();
@@ -70,7 +71,7 @@ watch(materialId, loadMaterial, { immediate: true });
         <header class="material-detail-heading">
           <div><span class="home-eyebrow">素材详情</span><h1>{{ material.title }}</h1><p>{{ material.materialType || "未分类素材" }} · {{ authorityLabel(material.authority) }}</p></div>
           <div class="material-detail-actions">
-            <MaterialDownloadAction :material="material" />
+            <MaterialDownloadAction :material="material" show-label />
             <a v-if="sourceUrl" class="material-source-link" :href="sourceUrl" target="_blank" rel="noopener noreferrer"><ExternalLink :size="15" />查看原始网页</a>
           </div>
         </header>
@@ -80,7 +81,8 @@ watch(materialId, loadMaterial, { immediate: true });
               <h2>摘要</h2><p>{{ material.summary }}</p>
             </section>
             <section v-if="material.excerpt" class="material-detail-excerpt">
-              <h2><FileText :size="17" />内容摘录</h2><p>{{ material.excerpt }}</p>
+              <h2><FileText :size="17" />内容摘录</h2>
+              <div class="markdown-body" v-html="renderMarkdown(material.excerpt)" />
             </section>
             <p v-if="!material.summary && !material.excerpt" class="material-detail-empty">暂无可展示的内容摘录</p>
           </section>
