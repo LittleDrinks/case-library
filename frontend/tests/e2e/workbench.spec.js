@@ -631,6 +631,7 @@ test("作者从版本时间线打开只读 Tab，取消与确认覆盖行为正�
   const marker = `版本覆盖 ${Date.now()}`;
   await stageFrozenVersion(page, request, marker);
 
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
   await page.getByLabel("案例标题").fill(`${marker} 已改`);
   await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
   await page.reload();
@@ -656,7 +657,7 @@ test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async (
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await openHistoryTimeline(page);
   await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
-  await page.getByRole("button", { name: "当前教师稿", exact: true }).click();
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
 });
 

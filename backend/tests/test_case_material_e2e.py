@@ -101,20 +101,21 @@ def assert_public_permissions(response: httpx.Response) -> None:
     assert restricted["hasFile"] is False
 
 
-def test_material_snapshot_rollback_and_public_permissions() -> None:
+def test_material_overwrite_restores_relations_and_public_permissions() -> None:
     author, csrf = login("user", "user123")
     case = create_case(author, csrf)
     assert mount(author, csrf, case, "m-kcsz").status_code == 201
     case = current(author, case["id"])
     assert mount(author, csrf, case, "m-zrjs").status_code == 201
     case = current(author, case["id"])
-    snapshot = transition(author, csrf, case, "snapshot")
-    remove(author, csrf, snapshot["case"], "m-kcsz")
+    submitted = transition(author, csrf, case, "submit")
+    case = transition(author, csrf, submitted["case"], "withdraw")["case"]
+    remove(author, csrf, case, "m-kcsz")
     case = current(author, case["id"])
-    rolled = transition(
-        author, csrf, case, "rollback", targetId=snapshot["snapshot"]["id"]
+    overwritten = transition(
+        author, csrf, case, "overwrite", targetId=submitted["version"]["id"]
     )
-    published = publish(author, csrf, rolled["case"])
+    published = publish(author, csrf, overwritten["case"])
     path = f"/api/cases/{case['id']}/materials"
     assert_public_permissions(httpx.get(f"{BASE_URL}{path}"))
     assert ids(author.get(path)) == {"m-kcsz", "m-zrjs"}

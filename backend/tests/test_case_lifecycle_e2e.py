@@ -342,8 +342,8 @@ def test_owner_overwrites_the_working_draft_with_a_submitted_version() -> None:
     owner, csrf = login("user", "user123")
     case = create_case(owner, csrf, f"overwrite-{uuid.uuid4().hex}")
     submitted = _transition_ok(owner, csrf, case["id"], "submit", case)
-    reopened = _withdraw(owner, csrf, case["id"], submitted["case"])
-    changed = patch_title(owner, csrf, reopened, "覆盖后标题")
+    withdrawn = _withdraw(owner, csrf, case["id"], submitted["case"])
+    changed = patch_title(owner, csrf, withdrawn["case"], "覆盖后标题")
     overwritten = _overwrite(owner, csrf, case["id"], changed, submitted["version"]["id"])
 
     assert overwritten["case"]["title"] == case["title"]
