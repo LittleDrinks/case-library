@@ -188,7 +188,6 @@ def _review_run_receipt(client: TestClient, thread_id: str) -> tuple[list, dict]
 
 
 def test_review_run_loads_published_skill_and_stays_read_only(client: TestClient) -> None:
-    """审核对话可加载已发布 Skill：版本绑定入账，写工具与产物仍不可用。"""
     version = _upload_and_publish(client)
     _start_review(client)
     thread = _review_thread(client, _login(client, ADMIN))
