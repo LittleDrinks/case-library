@@ -16,17 +16,17 @@ vi.mock("../api.js", () => ({
 
 const sourceRows = [
   {
-    sourceType: "case", id: "src-1", title: "引用案例甲", version: "v3",
+    sourceType: "case", id: "src-1", title: "引用案例甲", number: 1, version: "v3",
     publishedAt: "2026-08-01T00:00:00Z", contentAvailable: true,
     url: "http://testserver/#/cases/case-9?versionId=ver-3",
   },
   {
-    sourceType: "case", id: "src-2", title: "受限案例乙", version: "v1",
+    sourceType: "case", id: "src-2", title: "受限案例乙", number: 2, version: "v1",
     publishedAt: null, contentAvailable: false,
     url: "http://testserver/#/cases/case-8?versionId=ver-1",
   },
   {
-    sourceType: "attachment", id: "att-1", title: "notes.txt",
+    sourceType: "attachment", id: "att-1", title: "notes.txt", number: 3,
     contentAvailable: true, url: "http://testserver/api/cases/case-1/attachments/att-1/content",
   },
 ];
@@ -74,4 +74,23 @@ test("显式移除来源调用删除接口", async () => {
   await wrapper.get("[aria-label='移除来源引用案例甲']").trigger("click");
   await flushPromises();
   expect(api.removeCaseSource).toHaveBeenCalledWith("case-1", "src-1", 3, "csrf");
+});
+
+test("插入引用是独立动作，按下不抢正文光标并携带条目", async () => {
+  const wrapper = await setup();
+  const insert = wrapper.get("[aria-label='插入引用引用案例甲']");
+  const stolen = !insert.element.dispatchEvent(
+    new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+  );
+  expect(stolen).toBe(true);
+  await insert.trigger("click");
+  expect(wrapper.emitted("insert-citation")).toEqual([[sourceRows[0]]]);
+  expect(wrapper.get("[aria-label='打开来源引用案例甲']").exists()).toBe(true);
+  expect(wrapper.get("[aria-label='移除来源引用案例甲']").exists()).toBe(true);
+});
+
+test("非编辑状态不提供插入引用入口", async () => {
+  const wrapper = await setup({ editable: false });
+  expect(wrapper.find("[aria-label='插入引用引用案例甲']").exists()).toBe(false);
+  expect(wrapper.get("[aria-label='打开来源引用案例甲']").exists()).toBe(true);
 });

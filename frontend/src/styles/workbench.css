@@ -176,9 +176,8 @@
 }
 .editor-toolbar button:hover:not(:disabled), .editor-toolbar button.active { border-color: var(--line); background: var(--paper); color: var(--brand); }
 .toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
-.citation-picker { max-width: 128px; height: 30px; border: 1px solid transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
-.citation-picker:disabled { opacity: .5; }
 .citation-mark { border-bottom: 2px dotted var(--brand); background: rgba(183, 126, 44, .08); }
+.citation-number { color: var(--brand); font-size: .72em; line-height: 1; }
 .annotation-trigger { position: absolute; z-index: 12; min-width: 62px; height: 30px; padding: 0 10px; border: 1px solid var(--brand); border-radius: 5px; background: #fff; color: var(--brand); box-shadow: var(--shadow); }
 .annotation-anchor { background: #fff1b8; box-shadow: inset 0 -2px 0 #c88700; }
 .assistant-rail {
@@ -365,6 +364,8 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .file-actions button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
 .attachment-list { margin: 0; padding: 0 12px; list-style: none; }
 .attachment-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr) 32px 32px; align-items: center; gap: 9px; min-height: 68px; border-bottom: 1px solid var(--line-soft); }
+.source-list li { grid-template-columns: 20px minmax(0, 1fr) 32px 32px 32px; }
+.panel-hint { margin: 0 12px 8px; color: var(--ink-3); font-size: 11px; }
 .attachment-copy { display: grid; min-width: 0; gap: 3px; }
 .attachment-copy b { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-copy span { color: var(--ink-3); font-size: 11px; }

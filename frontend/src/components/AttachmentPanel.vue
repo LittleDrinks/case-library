@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import {
   BookOpen, Download, ExternalLink, FileSearch, FileText, LockKeyhole, Paperclip,
-  Trash2, Upload,
+  Quote, Trash2, Upload,
 } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -12,7 +12,7 @@ const props = defineProps({
   editable: { type: Boolean, required: true },
   beforeMutation: { type: Function, required: true },
 });
-const emit = defineEmits(["case-refreshed", "mutation-state"]);
+const emit = defineEmits(["case-refreshed", "mutation-state", "insert-citation"]);
 const rows = ref([]);
 const materials = ref([]);
 const sources = ref([]);
@@ -140,6 +140,7 @@ onMounted(loadAttachments);
       <button :class="{ active: folder === 'materials' }" type="button" @click="folder = 'materials'">{{ materialLabel }}</button>
       <button :class="{ active: folder === 'sources' }" type="button" @click="folder = 'sources'">{{ sourceLabel }}</button>
     </div>
+    <p v-if="folder === 'sources'" class="panel-hint">全部保留资料进入 Word 来源清单；点击条目动作可在正文插入引用。</p>
     <div class="panel-scroll">
       <div v-if="loading" class="panel-empty"><Paperclip :size="24" /><span>正在加载案例资料</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
@@ -147,13 +148,23 @@ onMounted(loadAttachments);
       </div>
       <div v-else-if="folder === 'sources' && !sources.length" class="panel-empty"><BookOpen :size="24" /><span>暂无来源，可在公开案例页「加入我的案例」</span></div>
       <ul v-else-if="folder === 'sources'" class="attachment-list source-list">
-        <li v-for="(row, index) in sources" :key="`${row.sourceType}-${row.id}`">
+        <li v-for="row in sources" :key="`${row.sourceType}-${row.id}`">
           <BookOpen :size="18" aria-hidden="true" />
           <div class="attachment-copy">
-            <b>〔{{ index + 1 }}〕{{ row.title }}</b>
+            <b>〔{{ row.number }}〕{{ row.title }}</b>
             <span>{{ sourceMeta(row) || sourceKind(row) }}</span>
             <small v-if="!row.contentAvailable"><LockKeyhole :size="12" />内容按权限开放</small>
           </div>
+          <button
+            v-if="editable"
+            class="attachment-icon"
+            type="button"
+            :aria-label="`插入引用${row.title}`"
+            :title="`插入引用 ${row.title}`"
+            :disabled="Boolean(busy)"
+            @mousedown.prevent
+            @click="emit('insert-citation', row)"
+          ><Quote :size="16" /></button>
           <a
             v-if="row.contentAvailable && row.url"
             class="attachment-icon"

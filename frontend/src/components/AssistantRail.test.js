@@ -45,3 +45,10 @@ it("requires login before opening a private reader discussion", () => {
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(false);
   expect(wrapper.findComponent({ name: "RouterLink" }).exists()).toBe(true);
 });
+
+it("forwards source citation inserts from the attachment panel", () => {
+  const wrapper = render({ active: "files" });
+  const row = { sourceType: "case", id: "src-1", number: 1, title: "来源" };
+  wrapper.findComponent({ name: "AttachmentPanel" }).vm.$emit("insert-citation", row);
+  expect(wrapper.emitted("insert-citation")).toEqual([[row]]);
+});

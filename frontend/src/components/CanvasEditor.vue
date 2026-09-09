@@ -6,7 +6,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { hashQuote } from "../lib/annotationAnchor.js";
-import { CitationMark } from "../lib/citation.js";
+import { CitationMark, createCitationNumbers, refreshCitationNumbers } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
 const props = defineProps({
@@ -19,6 +19,7 @@ const props = defineProps({
 });
 const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
 const selection = ref(null);
+const cursorPlaced = ref(false);
 const triggerPosition = ref({ top: "0", left: "0" });
 let selectionBlocked = false;
 let selectionRequest = 0;
@@ -162,11 +163,12 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), CitationMark, annotationExtension],
+  }), CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: captureSelection,
   onSelectionUpdate: captureSelection,
+  onFocus: () => { cursorPlaced.value = true; },
 });
 
 function replaceDocument(document) {
@@ -175,12 +177,14 @@ function replaceDocument(document) {
   if (current === JSON.stringify(document)) return;
   selectionBlocked = true;
   clearSelection();
+  cursorPlaced.value = false;
   editor.value.commands.setContent(document, false);
 }
 
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
 watch(() => props.annotations, refreshAnnotationAnchors, { deep: true });
+watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;
   selectionBlocked = true;
@@ -197,11 +201,27 @@ onMounted(() => {
   refreshAnnotationAnchors();
 });
 onBeforeUnmount(() => window.document.removeEventListener("selectionchange", handleSelectionChange));
-defineExpose({ recaptureSelection });
+
+// 资料区发起插入：有选区时把选区关联来源，否则在当前光标处落一个引用锚点。
+function insertCitation(source) {
+  if (!props.editable || !editor.value) return "readonly";
+  const { selection } = editor.value.state;
+  const attrs = { sourceType: source.sourceType, sourceId: source.id };
+  if (!selection.empty) {
+    return editor.value.chain().focus().setMark("citation", attrs).run() ? "linked" : "unpositioned";
+  }
+  if (!cursorPlaced.value || !selection.$from.parent.inlineContent) return "unpositioned";
+  const inserted = editor.value.chain().focus().insertContent({
+    type: "text", text: "\u200B", marks: [{ type: "citation", attrs }],
+  }).run();
+  return inserted ? "inserted" : "unpositioned";
+}
+
+defineExpose({ recaptureSelection, insertCitation });
 </script>
 
 <template>
-  <EditorToolbar v-if="editable" :editor="editor" :sources="sources" />
+  <EditorToolbar v-if="editable" :editor="editor" />
   <button
     v-if="selection"
     class="annotation-trigger"

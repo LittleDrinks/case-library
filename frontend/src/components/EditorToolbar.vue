@@ -1,10 +1,9 @@
 <script setup>
-import { Bold, Heading2, List, ListOrdered, Pilcrow, Redo2, Undo2 } from "@lucide/vue";
-import { sourceKey } from "../lib/citation.js";
+import { Bold, Eraser, Heading2, List, ListOrdered, Pilcrow, Redo2, Undo2 } from "@lucide/vue";
+import { citationRangeAt, removeCitation } from "../lib/citation.js";
 
 const props = defineProps({
   editor: { type: Object, default: null },
-  sources: { type: Array, default: () => [] },
 });
 
 const tools = [
@@ -20,19 +19,9 @@ function active(editor, name) {
   return editor?.isActive(name);
 }
 
-function hasSelection(editor) {
-  return Boolean(editor && editor.state.selection.from < editor.state.selection.to);
-}
-
-function applyCitation(event) {
-  const value = event.target.value;
-  event.target.value = "";
-  if (!hasSelection(props.editor)) return;
-  if (value === "remove") return props.editor.chain().unsetMark("citation").run();
-  const source = props.sources.find((row) => sourceKey(row) === value);
-  if (source) props.editor.chain().setMark("citation", {
-    sourceType: source.sourceType, sourceId: source.id,
-  }).run();
+// can().unsetMark 空选区恒真，不能作为启用判断；以真实引用区间为准。
+function hasCitation(editor) {
+  return Boolean(editor && citationRangeAt(editor.state));
 }
 </script>
 
@@ -50,17 +39,15 @@ function applyCitation(event) {
       <component :is="tool.icon" :size="15" aria-hidden="true" />
     </button>
     <span class="toolbar-divider" aria-hidden="true" />
-    <select
-      class="citation-picker"
-      aria-label="正文引用资料"
-      @change="applyCitation"
+    <button
+      type="button"
+      title="取消当前引用"
+      aria-label="取消当前引用"
+      :disabled="!hasCitation(editor)"
+      @mousedown.prevent="removeCitation(editor)"
     >
-      <option value="">引用资料</option>
-      <option value="remove">取消当前引用</option>
-      <option v-for="source in sources" :key="sourceKey(source)" :value="sourceKey(source)">
-        〔{{ source.number }}〕{{ source.title }}
-      </option>
-    </select>
+      <Eraser :size="15" aria-hidden="true" />
+    </button>
     <button type="button" title="撤销" aria-label="撤销" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()">
       <Undo2 :size="15" aria-hidden="true" />
     </button>
