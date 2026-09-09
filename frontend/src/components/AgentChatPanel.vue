@@ -251,7 +251,7 @@ watch(() => props.open, (open, wasOpen) => {
 });
 onMounted(() => {
   // 不在此处清空对话上下文：切页签会重挂面板，不能抹掉资料区刚勾选的内容；
-  // 案例隔离由 WorkbenchView 按案例提供新实例，版本切换由 AgentSourcePicker 清空。
+  // 案例隔离由 WorkbenchView 按案例提供新实例，版本切换由 WorkbenchView 清空。
   window.addEventListener("focus", refreshSourcePermissions);
   document.addEventListener("visibilitychange", refreshOnVisible);
 });

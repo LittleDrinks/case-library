@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -50,7 +51,10 @@ const threadRows = [
 function mountPanel() {
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1" } },
-    global: { stubs: { RouterLink: true } },
+    global: {
+      stubs: { RouterLink: true },
+      provide: { [CONVERSATION_SOURCES_KEY]: createConversationSources() },
+    },
   });
 }
 
