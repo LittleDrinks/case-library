@@ -16,8 +16,9 @@ from pydantic_ai.tools import RunContext, Tool
 from app.modules.agent import artifacts, writes
 from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.models import SourceRef, write_view
+from app.modules.agent.search import CorpusSearchParams
+from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
@@ -25,9 +26,13 @@ from app.modules.skills.service import BoundSkill, SkillError
 READER_CAPABILITY_ID = "platform-tools"
 
 
-async def search_corpus(ctx: RunContext[ToolDeps], query: str) -> dict:
-    """执行现有平台检索并显式标注范围；不执行联网或外部核验。"""
-    result = await search_platform_corpus(ctx, query)
+async def search_corpus(ctx: RunContext[ToolDeps], params: CorpusSearchParams) -> dict:
+    """站内检索平台公开案例/知识/素材，不是联网检索或外部核验。
+
+    先不带 query 调用可发现真实标签目录与命中规模；筛选用返回的真实标签
+    ID，翻页把上一页 nextCursor 原样传入 cursor；引用前用 read_source 读源。
+    """
+    result = await search_platform_corpus(ctx, params)
     return {"scope": "platform", **result}
 
 
