@@ -88,11 +88,11 @@ test("公共检索保留高级筛选和两种视图", async ({ page }) => {
   await assertGraph(page);
 });
 
-test("问题式检索仍只请求检索接口", async ({ page }) => {
+test("问题式检索仍只请求检索与筛选目录接口", async ({ page }) => {
   const requests = watchRequests(page, "/api/");
   await page.goto("/#/search");
   await search(page, "如何");
-  const allowed = new Set(["/api/auth/session", "/api/search"]);
+  const allowed = new Set(["/api/auth/session", "/api/search", "/api/tag-groups"]);
   expect(requests.filter((url) => !allowed.has(new URL(url).pathname))).toEqual([]);
 });
 
