@@ -13,7 +13,7 @@ vi.mock("vue-router", () => ({
   useRouter: () => ({ replace, resolve }),
 }));
 vi.mock("../api.js", () => ({
-  api: { search: vi.fn() },
+  api: { search: vi.fn(), listTagGroups: vi.fn() },
   ApiError: class ApiError extends Error {},
 }));
 
@@ -59,12 +59,48 @@ function revisionOf(wrapper) {
   return Number(wrapper.get(".ai-answer-stub").attributes("data-revision"));
 }
 
+function tagFilters(tagIds, tagMode) {
+  return {
+    type: [], audience: [], authority: [], materialType: [], tags: [], time: "",
+    tagIds, tagMode,
+  };
+}
+
+test("标签条件切换写入路由并从第一页检索", async () => {
+  route.query = { q: "思政", kind: "case" };
+  const wrapper = render();
+  await flushPromises();
+  wrapper.findComponent(SearchFilters).vm.$emit("update:filters", tagFilters(["tag-1", "tag-2"], "any"));
+  await flushPromises();
+
+  expect(replace).toHaveBeenCalledWith(expect.objectContaining({
+    name: "search",
+    query: expect.objectContaining({ q: "思政", kind: "case", tagIds: ["tag-1", "tag-2"], tagMode: "any" }),
+  }));
+  await wrapper.get("[aria-label='下一页']").trigger("click");
+  await flushPromises();
+  expect(api.search).toHaveBeenLastCalledWith(
+    "思政", "case", "next-token", 20, { tagIds: ["tag-1", "tag-2"], tagMode: "any" },
+  );
+});
+
+test("URL 携带标签条件时刷新后按原条件检索", async () => {
+  api.search.mockReset();
+  api.search.mockResolvedValue(first);
+  route.query = { kind: "case", tagIds: ["tag-1"], tagMode: "any" };
+  render();
+  await flushPromises();
+
+  expect(api.search).toHaveBeenLastCalledWith("", "case", null, 20, { tagIds: ["tag-1"], tagMode: "any" });
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   replace.mockReset();
   resolve.mockClear();
   route.query = { q: "游标目录", kind: "material" };
   api.search.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+  api.listTagGroups.mockResolvedValue([]);
 });
 
 afterEach(() => vi.useRealTimers());
