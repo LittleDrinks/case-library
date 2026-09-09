@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic_ai.capabilities import Capability
@@ -24,16 +25,48 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 READER_CAPABILITY_ID = "platform-tools"
-_FULL_GENERATION_MARKERS = (
-    "完整生成", "生成全文", "生成整篇", "生成完整稿", "生成初稿", "生成一份初稿",
-    "生成一篇初稿", "撰写全文", "撰写整篇", "写全文", "写整篇", "full draft",
-    "full document",
+_GENERATION_VERBS = (
+    "生成", "重写", "改写", "撰写", "编写", "起草", "创作", "重做", "写出", "写成", "整理", "修改",
+    "generate", "rewrite", "redraft", "write",
 )
+_FULL_SCOPES = (
+    "全文", "全篇", "整篇", "整份", "全案", "整案", "完整稿", "初稿", "整个案例", "整个文档",
+    "完整案例", "完整文档", "full draft", "full document",
+)
+_NEGATION_MARKERS = ("不要", "别", "无需", "不需要", "不用", "不必", "请勿", "勿", "不想", "不希望", "不是")
+_FULL_GENERATION_PHRASES = ("完整生成", "full draft", "full document")
+_GENERATION_PATTERNS = tuple(
+    re.compile(rf"{verb}.{{0,12}}{scope}")
+    for verb in _GENERATION_VERBS
+    for scope in _FULL_SCOPES
+)
+_REVERSE_GENERATION_PATTERNS = tuple(
+    re.compile(rf"{scope}.{{0,12}}{verb}")
+    for verb in _GENERATION_VERBS
+    for scope in _FULL_SCOPES
+)
+_CLAUSE_SPLIT = re.compile(r"[，。！？；,!?;]|但是|但|不过|而是")
 
 
 def full_generation_requested(prompt: str) -> bool:
-    text = (prompt or "").lower()
-    return any(marker in text for marker in _FULL_GENERATION_MARKERS)
+    text = re.sub(r"\s+", " ", (prompt or "").lower()).strip()
+    positive = False
+    negated = False
+    for clause in _CLAUSE_SPLIT.split(text):
+        if not _full_generation_clause(clause):
+            continue
+        if any(marker in clause for marker in _NEGATION_MARKERS):
+            negated = True
+        else:
+            positive = True
+    return positive and not negated
+
+
+def _full_generation_clause(clause: str) -> bool:
+    return any(phrase in clause for phrase in _FULL_GENERATION_PHRASES) or any(
+        pattern.search(clause)
+        for pattern in (*_GENERATION_PATTERNS, *_REVERSE_GENERATION_PATTERNS)
+    )
 
 
 async def search_corpus(ctx: RunContext[ToolDeps], params: CorpusSearchParams) -> dict:

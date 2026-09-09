@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from app.modules.agent.skills import full_generation_requested
+
 
 def _login(client: TestClient) -> dict:
     return client.post(
@@ -135,6 +137,32 @@ def test_ordinary_chat_cannot_create_an_ai_version(client: TestClient) -> None:
 
     assert response.status_code == 200
     _await_completed(client.app.state.database, thread_id)
+    assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
+    assert client.app.state.database.agent_artifacts.count_documents({}) == 0
+
+
+def test_natural_full_generation_request_creates_an_ai_version(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, "请根据资料重写整个案例", "natural-full-generation-message"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    _assert_saved_version(client, case, thread_id)
+
+
+def test_negated_full_generation_request_cannot_create_an_ai_version(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, "不要生成全文", "negated-full-generation-message"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    assert not full_generation_requested("不要生成全文")
     assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
     assert client.app.state.database.agent_artifacts.count_documents({}) == 0
 
