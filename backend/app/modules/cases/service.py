@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import UTC, datetime
 
@@ -173,6 +174,31 @@ def list_cases(database: Database, user: dict | None, scope: str) -> list[dict]:
     if scope == "admin":
         return _list_admin_cases(database, user)
     return _list_my_cases(database, user)
+
+
+DRAFT_PAGE_FIELDS = ("id", "title", "updatedAt")
+DRAFT_PAGE_MAX_SIZE = 50
+
+
+def list_drafts(
+    database: Database, user: dict, query: str, page: int, page_size: int
+) -> dict:
+    """加入来源弹窗的本人可编辑草稿分页：只出 id/标题/更新时间，支持标题检索。"""
+    condition: dict = {"ownerId": user["id"], "workflowStatus": "draft"}
+    keyword = query.strip()
+    if keyword:
+        condition["title"] = {"$regex": re.escape(keyword), "$options": "i"}
+    total = database.cases.count_documents(condition)
+    rows = (
+        database.cases.find(
+            condition, {**{field: 1 for field in DRAFT_PAGE_FIELDS}, "_id": 0}
+        )
+        .sort("updatedAt", DESCENDING)
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = [{field: row.get(field) for field in DRAFT_PAGE_FIELDS} for row in rows]
+    return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
 
 def _list_public_cases(database: Database) -> list[dict]:

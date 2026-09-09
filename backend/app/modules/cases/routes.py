@@ -15,6 +15,7 @@ from app.modules.cases.service import (
     get_case,
     get_public_case,
     list_cases,
+    list_drafts,
     update_case,
 )
 from app.modules.cases.sources import ordered_entries
@@ -40,6 +41,17 @@ def create(
     _session: dict = Depends(require_csrf),
 ):
     return create_case(database, body.model_dump(), user)
+
+
+@router.get("/drafts")
+def drafts(
+    q: Annotated[str, Query()] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(alias="pageSize", ge=1, le=50)] = 20,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+):
+    return list_drafts(database, user, q, page, page_size)
 
 
 @router.get("/{case_id}")

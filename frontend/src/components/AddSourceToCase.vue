@@ -1,6 +1,6 @@
 <script setup>
-import { BookMarked, LoaderCircle, X } from "@lucide/vue";
-import { ref } from "vue";
+import { BookMarked, LoaderCircle, Search, X } from "@lucide/vue";
+import { computed, ref } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
@@ -10,46 +10,86 @@ const props = defineProps({
   sourceTitle: { type: String, default: "" },
 });
 const NEW_DRAFT = "__new__";
+const PAGE_SIZE = 20;
 const open = ref(false);
 const loading = ref(false);
 const busy = ref(false);
 const error = ref("");
 const drafts = ref([]);
+const total = ref(0);
+const page = ref(1);
+const query = ref("");
 const target = ref("");
+const newTitle = ref("");
 const addedCaseId = ref("");
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const targetLabel = computed(() => {
+  if (target.value === NEW_DRAFT) return newTitle.value.trim() || "新建草稿";
+  const draft = drafts.value.find((item) => item.id === target.value);
+  return draft?.title || "未命名案例";
+});
+
+let requestSeq = 0;
+let searchTimer = 0;
+
+async function loadDrafts() {
+  const seq = ++requestSeq;
+  loading.value = true;
+  error.value = "";
+  try {
+    const result = await api.listDrafts(query.value, page.value, PAGE_SIZE);
+    if (seq !== requestSeq) return;
+    drafts.value = result.items;
+    total.value = result.total;
+    if (!target.value) target.value = result.items[0]?.id || NEW_DRAFT;
+  } catch (caught) {
+    if (seq === requestSeq) error.value = caught.message || "草稿加载失败";
+  } finally {
+    if (seq === requestSeq) loading.value = false;
+  }
+}
+
+function onSearchInput() {
+  page.value = 1;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadDrafts, 250);
+}
+
+function flipPage(delta) {
+  page.value = Math.min(Math.max(1, page.value + delta), totalPages.value);
+  loadDrafts();
+}
+
+function formatTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("zh-CN", {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
 
 async function openDialog() {
   open.value = true;
   error.value = "";
   addedCaseId.value = "";
-  loading.value = true;
-  try {
-    const mine = await api.listCases("mine");
-    drafts.value = mine.filter((item) => item.workflowStatus === "draft");
-    target.value = drafts.value[0]?.id || NEW_DRAFT;
-  } catch (caught) {
-    error.value = caught.message || "我的案例加载失败";
-  } finally {
-    loading.value = false;
-  }
+  target.value = "";
+  page.value = 1;
+  await loadDrafts();
 }
 
 function close() {
   if (!busy.value) open.value = false;
 }
 
-async function resolveRevision(id, revision) {
-  if (revision != null) return revision;
-  return (await api.getCase(id)).revision;
-}
-
 async function resolveTarget() {
   if (target.value === NEW_DRAFT) {
-    const created = await api.createCase({ title: "未命名案例" }, session.csrfToken);
-    return { id: created.id, revision: await resolveRevision(created.id, created.revision) };
+    const created = await api.createCase(
+      { title: newTitle.value.trim() || "未命名案例" }, session.csrfToken,
+    );
+    const revision = created.revision ?? (await api.getCase(created.id)).revision;
+    return { id: created.id, revision };
   }
-  const draft = drafts.value.find((item) => item.id === target.value);
-  return { id: draft.id, revision: await resolveRevision(draft.id, draft.revision) };
+  const record = await api.getCase(target.value);
+  return { id: record.id, revision: record.revision };
 }
 
 async function confirm() {
@@ -90,23 +130,51 @@ async function confirm() {
         </div>
         <form v-else @submit.prevent="confirm">
           <p class="collect-source-hint">只加入来源条目，不复制来源正文与私人对话。</p>
+          <div class="collect-source-search">
+            <Search :size="15" aria-hidden="true" />
+            <input
+              v-model="query"
+              type="search"
+              aria-label="按标题搜索草稿"
+              placeholder="按标题搜索草稿"
+              @input="onSearchInput"
+            />
+          </div>
           <p v-if="loading" class="collect-source-hint">正在加载我的草稿…</p>
-          <template v-else>
+          <p v-else-if="!drafts.length" class="collect-source-hint">
+            {{ query ? "没有匹配标题的可编辑草稿。" : "还没有可编辑的本人草稿。" }}
+          </p>
+          <div v-else class="collect-source-list" role="radiogroup" aria-label="选择目标草稿">
             <label v-for="draft in drafts" :key="draft.id" class="collect-source-option">
               <input v-model="target" type="radio" name="collect-target" :value="draft.id" />
-              <span>{{ draft.title || "未命名案例" }}</span>
+              <span class="collect-source-title">{{ draft.title || "未命名案例" }}</span>
+              <small class="collect-source-time">更新于 {{ formatTime(draft.updatedAt) }}</small>
             </label>
-            <label class="collect-source-option">
+            <label class="collect-source-option collect-source-new">
               <input v-model="target" type="radio" name="collect-target" :value="NEW_DRAFT" />
-              <span>新建草稿</span>
+              <span class="collect-source-title">新建草稿</span>
+              <input
+                v-model="newTitle"
+                class="collect-source-new-name"
+                type="text"
+                maxlength="80"
+                aria-label="新草稿名称"
+                placeholder="输入新草稿名称"
+                @focus="target = NEW_DRAFT"
+              />
             </label>
-          </template>
+          </div>
+          <div class="collect-source-pagination">
+            <button type="button" :disabled="page <= 1 || loading" @click="flipPage(-1)">上一页</button>
+            <span>第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 个可编辑草稿</span>
+            <button type="button" :disabled="page >= totalPages || loading" @click="flipPage(1)">下一页</button>
+          </div>
           <p v-if="error" class="review-decision-error" role="alert">{{ error }}</p>
-          <footer>
+          <footer class="collect-source-footer">
             <button type="button" :disabled="busy" @click="close">取消</button>
-            <button class="primary" type="submit" :disabled="busy || loading || !target">
+            <button class="primary collect-source-confirm" type="submit" :disabled="busy || loading || !target">
               <LoaderCircle v-if="busy" class="spin" :size="14" aria-hidden="true" />
-              {{ busy ? "正在加入" : "确认加入" }}
+              {{ busy ? "正在加入" : `确认加入「${targetLabel}」` }}
             </button>
           </footer>
         </form>
