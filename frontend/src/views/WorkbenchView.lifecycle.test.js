@@ -2,7 +2,21 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, test, vi } from "vitest";
 import WorkbenchView from "./WorkbenchView.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
+import { useConversationSources } from "../composables/useConversationSources.js";
 import { api } from "../api.js";
+
+const AssistantRailProbe = {
+  name: "AssistantRailProbe",
+  setup() {
+    const { sources, toggle } = useConversationSources();
+    return { sources, toggle };
+  },
+  template: `<div data-testid="conversation-probe">
+    <b data-testid="probe-count">{{ sources.length }}</b>
+    <button data-testid="probe-toggle" type="button" @click="toggle({ sourceType: 'case', id: 'probe-src' })">勾选</button>
+    <button data-testid="probe-refresh" type="button" @click="$emit('case-refreshed', { id: 'case-1', publishedVersionId: 'pub-v2', revision: 4 })">刷新版本</button>
+  </div>`,
+};
 
 const state = vi.hoisted(() => ({
   route: { params: { id: "case-1" }, name: "workbench" },
@@ -36,12 +50,12 @@ function caseFixture(overrides = {}) {
   };
 }
 
-function render() {
+function render(railStub = true) {
   return mount(WorkbenchView, {
     global: {
       stubs: {
         SiteHeader: true, CanvasEditor: true, OutlinePanel: true, teleport: true,
-        AssistantRail: true, RouterLink: { template: "<a><slot /></a>" },
+        AssistantRail: railStub, RouterLink: { template: "<a><slot /></a>" },
       },
     },
   });
@@ -241,3 +255,30 @@ function rejectBody() {
     command: "reject", revision: 3, reasonType: "结构不完整", submittedVersionId: "cv-1",
   };
 }
+
+test("「用于对话」上下文随工作台真实重挂载重建，切案例不泄漏", async () => {
+  api.getCase.mockResolvedValue(caseFixture());
+  const first = render(AssistantRailProbe);
+  await flushPromises();
+  expect(first.get('[data-testid="probe-count"]').text()).toBe("0");
+  await first.get('[data-testid="probe-toggle"]').trigger("click");
+  expect(first.get('[data-testid="probe-count"]').text()).toBe("1");
+  first.unmount();
+
+  const second = render(AssistantRailProbe);
+  await flushPromises();
+  expect(second.get('[data-testid="probe-count"]').text()).toBe("0");
+  second.unmount();
+});
+
+test("读者版本变化时 provider 清理对话上下文", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(caseFixture({ publicationStatus: "public", publishedVersionId: "pub-v1" }));
+  const wrapper = render(AssistantRailProbe);
+  await flushPromises();
+  await wrapper.get('[data-testid="probe-toggle"]').trigger("click");
+  expect(wrapper.get('[data-testid="probe-count"]').text()).toBe("1");
+  await wrapper.get('[data-testid="probe-refresh"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.get('[data-testid="probe-count"]').text()).toBe("0");
+});

@@ -4,8 +4,6 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
-export const NO_SKILL_ID = "";
-
 function textParts(message) {
   return (message?.parts || [])
     .filter((part) => part.type === "text")
@@ -120,27 +118,6 @@ async function resolveSnapshot(caseId, state) {
   }
 }
 
-function isSelectedSkillValid(state) {
-  const skillId = state.selectedSkillId.value;
-  if (!skillId) return true;
-  return state.catalog.value === "ready"
-    && state.skills.value.some((skill) => skill.id === skillId);
-}
-
-function dropUnknownSkill(state) {
-  const skillId = state.selectedSkillId.value;
-  const known = !skillId
-    || state.skills.value.some((skill) => skill.id === skillId);
-  if (!known) state.selectedSkillId.value = NO_SKILL_ID;
-}
-
-function restoreSkill(state, snapshot) {
-  const message = [...(snapshot.messages || [])].reverse().find((item) => item.role === "user");
-  const skillId = message?.parts?.find((part) => part.type === "data-skill")?.data?.skillId;
-  state.selectedSkillId.value = skillId || NO_SKILL_ID;
-  if (state.catalog.value === "ready") dropUnknownSkill(state);
-}
-
 async function loadCatalog(state, generation) {
   state.catalog.value = "loading";
   try {
@@ -148,7 +125,6 @@ async function loadCatalog(state, generation) {
     if (!isCatalogCurrent(state, generation)) return;
     state.skills.value = catalog || [];
     state.catalog.value = "ready";
-    dropUnknownSkill(state);
   } catch {
     if (isCatalogCurrent(state, generation)) state.catalog.value = "error";
   }
@@ -219,7 +195,6 @@ async function loadChat(caseId, state, generation) {
   if (threadResult.status === "fulfilled") {
     state.snapshot.value = threadResult.value;
     state.threadId.value = threadResult.value.id;
-    restoreSkill(state, threadResult.value);
     replaceChat(state, buildChat(caseId, threadResult.value, state));
   } else state.error.value = threadResult.reason.message || "对话加载失败";
   if (settingsResult.status === "fulfilled") state.settings.value = settingsResult.value;
@@ -237,7 +212,6 @@ async function selectThread(caseId, state, threadId) {
     if (!isCurrent(state, generation)) return;
     state.snapshot.value = snapshot;
     state.threadId.value = snapshot.id;
-    restoreSkill(state, snapshot);
     replaceChat(state, buildChat(caseId, snapshot, state));
     writePreference(state.preferenceKey, snapshot.id);
   } catch (requestError) {
@@ -248,18 +222,17 @@ async function selectThread(caseId, state, threadId) {
   kickResume(caseId, state, generation);
 }
 
-function messageParts(state, text, contextParts) {
+function messageParts(state, text, contextParts, skillId) {
   const parts = [{ type: "text", text }, ...contextParts];
-  const skillId = state.selectedSkillId.value;
   if (!state.versionId && skillId) parts.push({ type: "data-skill", data: { skillId } });
   return parts;
 }
 
-async function sendChat(caseId, state, text, generation, contextParts = []) {
+async function sendChat(caseId, state, text, generation, contextParts = [], skillId = "") {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
   try {
-    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts) });
+    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts, skillId) });
   } finally {
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
@@ -353,7 +326,7 @@ function createState(caseId, versionId) {
   return {
     snapshot: ref(null), settings: ref(null), chat: shallowRef(null),
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false), recovering: ref(false),
-    skills: ref([]), selectedSkillId: ref(NO_SKILL_ID), catalog: ref("loading"),
+    skills: ref([]), catalog: ref("loading"),
     versionId, preferenceKey: preferenceKey(caseId, versionId),
     generation: 0, catalogGeneration: 0, disposed: false,
   };
@@ -388,7 +361,6 @@ function computedState(state) {
     threadState: computed(() => state.snapshot.value),
     stopping: computed(() => Boolean(state.stopping.value)), recovering: computed(() => Boolean(state.recovering.value)),
     retryableMessageId: computed(() => retryMessageId(state)),
-    skillReady: computed(() => isSelectedSkillValid(state)),
   };
 }
 
@@ -417,10 +389,10 @@ function exposedApi(caseId, state, at) {
   return {
     ...computedState(state), ...threadActions(caseId, state),
     loading: state.loading, error: state.error, settings: state.settings,
-    skills: state.skills, selectedSkillId: state.selectedSkillId,
+    skills: state.skills,
     catalog: state.catalog, reloadCatalog: () => reloadCatalog(state),
     textParts,
-    send: (text, contextParts = []) => sendChat(caseId, state, text, at(), contextParts),
+    send: (text, contextParts = [], skillId = "") => sendChat(caseId, state, text, at(), contextParts, skillId),
     stop: () => stopChat(caseId, state, at()),
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),

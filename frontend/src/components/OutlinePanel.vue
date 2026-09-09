@@ -12,6 +12,7 @@ const emit = defineEmits(["collapse", "locate"]);
   <aside class="outline-wrap">
     <nav class="outline-panel" aria-label="正文目录">
       <template v-if="!collapsed">
+        <p class="outline-label">本文目录</p>
         <button v-for="(item, order) in items" :key="item.index" type="button" :class="`level-${item.level}`" @click="emit('locate', order)">
           {{ item.text }}
         </button>

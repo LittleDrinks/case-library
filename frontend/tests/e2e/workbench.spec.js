@@ -212,11 +212,11 @@ async function buttonLayout(buttons) {
 
 async function assertMiddleLayout(page) {
   await page.setViewportSize({ width: 1024, height: 768 });
-  await expect(page.locator(".outline-wrap")).toBeHidden();
+  await expect(page.locator(".outline-wrap")).toBeVisible();
   const rail = await page.locator(".assistant-rail").boundingBox();
   const paper = await page.locator(".document-paper").boundingBox();
-  expect(rail.width).toBeGreaterThanOrEqual(385);
-  expect(rail.width).toBeLessThanOrEqual(395);
+  expect(rail.width).toBeGreaterThanOrEqual(355);
+  expect(rail.width).toBeLessThanOrEqual(365);
   expect(paper.x + paper.width).toBeLessThanOrEqual(rail.x);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
 }
@@ -226,9 +226,9 @@ async function assertDesktopLayout(page) {
   await expect(page.locator(".outline-wrap")).toBeVisible();
   const rail = await page.locator(".assistant-rail").boundingBox();
   const paper = await page.locator(".document-paper").boundingBox();
-  expect(rail.width).toBeGreaterThanOrEqual(415);
-  expect(rail.width).toBeLessThanOrEqual(425);
-  expect(paper.width).toBeLessThanOrEqual(900);
+  expect(rail.width).toBeGreaterThanOrEqual(405);
+  expect(rail.width).toBeLessThanOrEqual(415);
+  expect(paper.width).toBeLessThanOrEqual(820);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1600);
   const items = page.locator(".outline-panel button:not(.outline-collapse)");
   const index = (await items.count()) - 1;

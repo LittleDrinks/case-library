@@ -1,8 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
+import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -76,13 +77,37 @@ function answerResponse() {
 function mountPanel(overrides = {}) {
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
-    global: { stubs: { RouterLink: true } },
+    global: {
+      stubs: { RouterLink: true },
+      provide: { [CONVERSATION_SOURCES_KEY]: conversationStore },
+    },
   });
 }
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+let conversationStore;
+
+async function openSkillPopover(wrapper) {
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  return document.querySelector(".skill-popover");
+}
+
+async function pickSourceInPopover(wrapper) {
+  await wrapper.get('[data-testid="agent-source-picker-toggle"]').trigger("click");
+  await settle();
+  document.querySelector(".source-popover [data-testid=\"agent-source-option\"] input").click();
+  await flushPromises();
+}
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  conversationStore = createConversationSources();
   session.csrfToken = "csrf";
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
@@ -139,6 +164,7 @@ it("passes the reader version and readonly flag to the source picker", async () 
   const picker = wrapper.findComponent({ name: "AgentSourcePicker" });
   expect(picker.props("versionId")).toBe("v-reader-1");
   expect(picker.props("readOnly")).toBe(true);
+  expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
 });
 
 const artifactSnapshot = () => ({
@@ -201,8 +227,7 @@ it("sends selected sources and the current writing selection as data parts", asy
     from: 1, to: 4, quote: "第二段", sameBlock: true,
   } });
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  await wrapper.get(".agent-source-option input").setValue(true);
+  await pickSourceInPopover(wrapper);
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("结合来源");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
@@ -212,13 +237,35 @@ it("sends selected sources and the current writing selection as data parts", asy
   ]);
 });
 
+it("asks the workbench to clear the writing context when the chip is removed", async () => {
+  const wrapper = mountPanel({ writingContext: { from: 1, to: 4, quote: "第二段", sameBlock: true } });
+  await flushPromises();
+  expect(wrapper.get('[data-testid="composer-selection"]').exists()).toBe(true);
+  await wrapper.get('[aria-label="移除正文选区"]').trigger("click");
+  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
+});
+
+it("keeps conversation context across panel remounts so tab switches never wipe it", async () => {
+  conversationStore.toggle({ sourceType: "case", id: "src-1", title: "来源一" });
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  expect(conversationStore.sources.value.map((row) => row.id)).toEqual(["src-1"]);
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("新案例提问");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+  const parts = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+  expect(parts.map((part) => part.type)).toEqual(["text", "data-source"]);
+});
+
 it("reader discussion binds its version and does not send an edit Skill", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountPanel({ versionId: "version-2", readOnly: true });
   await flushPromises();
   expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2");
-  expect(wrapper.find('[data-testid="skill-select"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("只读问题");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
@@ -226,21 +273,23 @@ it("reader discussion binds its version and does not send an edit Skill", async 
   expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "只读问题" }]);
 });
 
-it("carries the selected published skill id and shows the catalog options", async () => {
+it("inserts a published skill into the pending message and sends it once", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountPanel();
   await flushPromises();
-  const select = wrapper.get('[data-testid="skill-select"]');
-  expect(select.findAll("option").at(0).text()).toBe("不使用 Skill");
-  expect(select.findAll("option").at(1).text()).toContain("思政案例生成（v1）");
-  await select.setValue("skill-pub");
+  const panel = await openSkillPopover(wrapper);
+  expect(panel.textContent).toContain("思政案例生成（v1）");
+  panel.querySelector('[data-testid="skill-option"]').click();
+  await flushPromises();
+  expect(wrapper.get('[data-testid="composer-skill-block"]').text()).toContain("思政案例生成");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-
   const body = JSON.parse(fetch.mock.calls[0][1].body);
   expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
+  expect(wrapper.find('[data-testid="composer-skill-block"]').exists()).toBe(false);
+  expect(wrapper.get('[aria-label="向 AI 提问"]').element.value).toBe("");
 });
 
 function restoredSnapshot() {
@@ -295,21 +344,14 @@ it("folds completed Skill resources with a user-expandable summary", async () =>
   expect(resource.get("pre").text()).toContain("选题原则");
 });
 
-it("restores the selected skill from the thread snapshot after reload", async () => {
+it("shows the historical skill chip without preselecting the next message", async () => {
   api.agentThread.mockResolvedValue(restoredSnapshot());
   const wrapper = mountPanel();
   await flushPromises();
 
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
   expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：思政案例生成");
+  expect(wrapper.find('[data-testid="composer-skill-block"]').exists()).toBe(false);
 });
-
-function pendingThread() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  api.agentThread.mockReturnValue(promise);
-  return resolve;
-}
 
 function deferred() {
   let resolve;
@@ -321,14 +363,6 @@ function emptyThread(id) {
   const result = structuredClone(snapshot);
   result.id = id;
   result.messages = [];
-  return result;
-}
-
-function threadWithSkill(id, skillId) {
-  const result = emptyThread(id);
-  result.messages = [{ id: `${id}-message`, role: "user", metadata: {}, parts: [
-    { type: "data-skill", data: { skillId } },
-  ] }];
   return result;
 }
 
@@ -351,74 +385,55 @@ it("keeps a delayed catalog alive while switching threads", async () => {
   await switchThread(wrapper);
   catalog.resolve([{ id: "skill-pub", version: "v1", name: "思政案例生成" }]);
   await flushPromises();
-  expect(wrapper.find('[data-testid="skill-catalog-loading"]').exists()).toBe(false);
-  expect(wrapper.get('[data-testid="skill-select"] option:nth-child(2)').text()).toContain("思政案例生成");
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  expect(document.querySelector(".skill-popover").textContent).toContain("思政案例生成（v1）");
 });
 
-it("resets to plain chat for a thread without skill history", async () => {
+it("clears the pending skill block when switching threads", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
   api.agentThreads.mockResolvedValue([{ id: "thread-empty", title: "空对话" }]);
   api.agentThread.mockImplementation((_, id) => Promise.resolve(
     id === "thread-empty" ? emptyThread("thread-empty") : restoredSnapshot(),
   ));
   const wrapper = mountPanel();
   await flushPromises();
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
-  await switchThread(wrapper);
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("");
-});
-
-it("restores the target skill when switching between published skills", async () => {
-  api.agentThreads.mockResolvedValue([{ id: "thread-two", title: "第二 Skill" }]);
-  api.agentThread.mockImplementation((_, id) => Promise.resolve(
-    id === "thread-two" ? threadWithSkill("thread-two", "skill-two") : restoredSnapshot(),
-  ));
-  api.listSkills.mockResolvedValue([
-    { id: "skill-pub", version: "v1", name: "思政案例生成" },
-    { id: "skill-two", version: "v2", name: "第二 Skill" },
-  ]);
-  const wrapper = mountPanel();
+  const panel = await openSkillPopover(wrapper);
+  panel.querySelector('[data-testid="skill-option"]').click();
   await flushPromises();
+  expect(wrapper.get('[data-testid="composer-skill-block"]').exists()).toBe(true);
   await switchThread(wrapper);
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-two");
+  expect(wrapper.find('[data-testid="composer-skill-block"]').exists()).toBe(false);
 });
 
-it("reconciles a withdrawn skill when the catalog arrives before the thread", async () => {
-  const resolve = pendingThread();
-  api.listSkills.mockResolvedValue([]);
+it("sends plain chat without the cleared skill after a thread switch", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
+  api.agentThreads.mockResolvedValue([{ id: "thread-empty", title: "空对话" }]);
+  api.agentThread.mockImplementation((_, id) => Promise.resolve(emptyThread("thread-empty")));
   const wrapper = mountPanel();
   await flushPromises();
-  expect(wrapper.find('[data-testid="skill-catalog-empty"]').exists()).toBe(true);
-  resolve(restoredSnapshot());
-  await flushPromises();
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("当前问题");
-  expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
-  expect(sentRequest(fetch).body.messages.at(-1).parts).toEqual([
-    { type: "text", text: "当前问题" },
-  ]);
+  expect(sentRequest(fetch).body.messages.at(-1).parts).toEqual([{ type: "text", text: "当前问题" }]);
 });
 
-it("keeps the server skill through a failed catalog and restores it on retry", async () => {
+it("shows catalog errors with retry and falls back to the id for history", async () => {
   api.listSkills.mockRejectedValueOnce(new Error("目录服务不可用"));
   api.agentThread.mockResolvedValue(restoredSnapshot());
   const wrapper = mountPanel();
   await flushPromises();
 
-  expect(wrapper.get('[data-testid="skill-catalog-error"]').text()).toContain("目录加载失败");
   expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：skill-pub");
-  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成一个案例");
-  expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
-
-  await wrapper.get('[data-testid="skill-catalog-retry"]').trigger("click");
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  expect(document.querySelector('[data-testid="skill-catalog-error"]').textContent).toContain("目录加载失败");
+  await document.querySelector('[data-testid="skill-catalog-retry"]').click();
   await flushPromises();
-
-  expect(wrapper.find('[data-testid="skill-catalog-error"]').exists()).toBe(false);
-  expect(wrapper.get('[data-testid="skill-select"]').element.value).toBe("skill-pub");
-  expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+  expect(document.querySelector(".skill-popover").textContent).toContain("思政案例生成（v1）");
+  expect(wrapper.get('[data-testid="message-skill"]').text()).toContain("使用 Skill：思政案例生成");
 });
 
 it("shows an empty catalog state and still sends plain chat", async () => {
@@ -428,7 +443,9 @@ it("shows an empty catalog state and still sends plain chat", async () => {
   const wrapper = mountPanel();
   await flushPromises();
 
-  expect(wrapper.get('[data-testid="skill-catalog-empty"]').text()).toContain("暂无已发布 Skill");
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  expect(document.querySelector('[data-testid="skill-catalog-empty"]').textContent).toContain("暂无已发布 Skill");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("当前问题");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
@@ -819,10 +836,10 @@ function selectionContext() {
 it("sends the selected text as a structured selection part", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
-  const wrapper = mount(AgentChatPanel, { props: { caseRecord: { id: "case-1" }, writingContext: selectionContext() }, global: { stubs: { RouterLink: true } } });
+  const wrapper = mountPanel({ writingContext: selectionContext() });
   await flushPromises();
 
-  expect(wrapper.get('[data-testid="composer-selection"]').text()).toContain("正文上下文");
+  expect(wrapper.get('[data-testid="composer-selection"]').text()).toContain("正文选区");
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("改这段");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
