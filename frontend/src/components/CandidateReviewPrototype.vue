@@ -1,26 +1,28 @@
 <script setup>
-// 两种候选预览交互嵌入真实工作台；所有采用和批注操作仅保存在本页内存。
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, ArrowRight, Check, MessageSquareText, Sparkles, X } from "@lucide/vue";
-import CanvasEditor from "./CanvasEditor.vue";
-import { diffChars } from "diff";
+import { ArrowLeft, ArrowRight, Check, MessageSquareText, Sparkles, X, History, FileText } from "@lucide/vue";
 import { generateJSON } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { diffChars } from "diff";
+import CanvasEditor from "./CanvasEditor.vue";
 import { renderMarkdown } from "../lib/markdown.js";
 import { api } from "../api.js";
 const props = defineProps({ caseRecord: Object });
 const route = useRoute(), router = useRouter();
-const artifact = ref(null), selected = ref(1), tab = ref("candidate"), comments = ref([]);
-const rejected = ref([]);
-const accepted = ref([]), status = ref("待确认"), note = ref(""), panel = ref("candidate");
-const chatInput = ref(""), chatQuote = ref(""), selectionQuote = ref(""), targetQuote = ref("");
-const messages = ref([]), pickOpen = ref(false), previewOpen = ref(false), original = ref(JSON.parse(JSON.stringify(props.caseRecord.document)));
-const popup = ref({ left: "0px", top: "0px" });
+const clone = value => JSON.parse(JSON.stringify(value));
+const artifact = ref(null), selected = ref(1), tab = ref("original"), panel = ref("chat");
+const original = ref(clone(props.caseRecord.document)), generated = ref(null), generatedOpen = ref(false);
+const messages = ref([]), chatInput = ref(""), chatQuote = ref(""), selectionQuote = ref("");
+const floating = ref(false), note = ref(""), opinions = ref({}), decisions = ref({});
+const popup = ref({ left: "0px", top: "0px" }), status = ref("");
 const variant = computed(() => route.query.variant === "B" ? "B" : "A");
 const blocks = computed(() => artifact.value?.blocks || []);
 const sections = computed(() => blocks.value.reduce(groupBlock, []));
 const current = computed(() => sections.value[selected.value]);
+const activeDocument = computed(() => tab.value === "original" ? original.value : generated.value);
+const currentOpinion = computed(() => opinions.value[selected.value] || "这里的表述有些绕，能否更直接一些，同时保留原意？");
+const decision = computed(() => decisions.value[selected.value] || "pending");
 function groupBlock(result, block) {
   if (block.type === "heading" || !result.length) result.push({ title: block.type === "heading" ? block.text : "正文", blocks: [] });
   result.at(-1).blocks.push(block);
@@ -33,6 +35,17 @@ function blockMarkdown(block) {
   if (block.type === "blockquote") return block.paragraphs.map(x => `> ${x}`).join("\n");
   return block.text || "";
 }
+function candidateDocument() { return generateJSON(renderMarkdown(blocks.value.map(blockMarkdown).join("\n\n")), [StarterKit]); }
+function openGenerated() {
+  if (!generated.value) generated.value = candidateDocument();
+  generatedOpen.value = true; tab.value = "generated";
+}
+function saveDocument(value) {
+  if (tab.value === "original") original.value = value;
+  else generated.value = value;
+  status.value = "编辑已保留在原型内";
+}
+function resetGenerated() { generated.value = candidateDocument(); status.value = "已重新打开生成时的快照"; }
 function escape(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function revisedText(text) {
   if (text.includes("本案例聚焦")) return text.replace("本案例聚焦", "本案例探讨");
@@ -40,60 +53,48 @@ function revisedText(text) {
   return text + "（具体依据待补充）";
 }
 function changedParagraph(text) {
-  const replacement = revisedText(text);
-  return diffChars(text, replacement).map(part => {
+  return diffChars(text, revisedText(text)).map(part => {
     const tag = part.added ? "ins" : part.removed ? "del" : "span";
     return `<${tag}>${escape(part.value)}</${tag}>`;
   }).join("");
 }
 function sectionHtml(section, index) {
   return section.blocks.map(block => {
-    if (variant.value === "B" && block === section.blocks.find(item => item.type === "paragraph")) {
-      if (accepted.value.includes(index)) return renderMarkdown(revisedText(block.text));
-      if (index === selected.value && !rejected.value.includes(index)) return `<p class="prototype-inline-change">${changedParagraph(block.text)}</p>`;
+    if (block === section.blocks.find(item => item.type === "paragraph")) {
+      if (decisions.value[index] === "accepted") return renderMarkdown(revisedText(block.text));
+      if (index === selected.value && !["rejected", "comment"].includes(decisions.value[index])) return `<p>${changedParagraph(block.text)}</p>`;
     }
     return renderMarkdown(blockMarkdown(block));
   }).join("\n");
 }
 function captureSelection() {
-  const selection = window.getSelection();
-  const quote = selection?.toString().trim();
+  const selection = window.getSelection(), quote = selection?.toString().trim();
   if (!quote || !selection.rangeCount) { selectionQuote.value = ""; return; }
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   selectionQuote.value = quote;
-  popup.value = { left: `${Math.min(rect.left, window.innerWidth - 360)}px`, top: `${Math.max(125, rect.top - 46)}px` };
+  popup.value = { left: `${Math.max(8, Math.min(rect.left, window.innerWidth - 320))}px`, top: `${Math.max(130, rect.top - 46)}px` };
 }
-function askAI() {
-  chatQuote.value = selectionQuote.value;
-  selectionQuote.value = "";
-  panel.value = "candidate";
+function askAI() { chatQuote.value = selectionQuote.value; selectionQuote.value = ""; panel.value = "chat"; }
+async function copySelection() {
+  try { await navigator.clipboard.writeText(selectionQuote.value); status.value = "已复制，可切到当前正文粘贴"; selectionQuote.value = ""; }
+  catch { status.value = "请使用 Ctrl+C 复制选中文字"; }
 }
-function selectTarget() { targetQuote.value = selectionQuote.value; selectionQuote.value = ""; tab.value = "candidate"; }
-function replaceText(node, quote, replacement) {
-  if (node.text?.includes(quote)) { node.text = node.text.replace(quote, replacement); return true; }
-  return (node.content || []).some(child => replaceText(child, quote, replacement));
+function addOpinion() {
+  if (!note.value.trim()) return;
+  opinions.value[selected.value] = note.value.trim(); decisions.value[selected.value] = "comment"; note.value = "";
 }
-function chooseText(replace = false) {
-  const draft = JSON.parse(JSON.stringify(original.value));
-  if (replace && !replaceText(draft, targetQuote.value, selectionQuote.value)) { status.value = "请重新选择一个完整段落内的替换位置"; return; }
-  if (!replace) draft.content.push({ type: "paragraph", content: [{ type: "text", text: selectionQuote.value }] });
-  original.value = draft;
-  messages.value.push({ kind: "receipt", text: replace ? "已在原型正文中替换选区。" : "已将所选内容加入原型正文末尾。" });
-  status.value = "部分选用";
-  selectionQuote.value = "";
-  pickOpen.value = false;
-}
+function openComment(index) { selected.value = index; floating.value = true; selectionQuote.value = ""; }
+function leaveSelectionComment() { note.value = `关于“${selectionQuote.value.slice(0, 90)}”：`; floating.value = true; selectionQuote.value = ""; }
 function sendOpinion() {
   if (!chatInput.value.trim()) return;
   messages.value.push({ kind: "user", text: chatInput.value, quote: chatQuote.value });
-  messages.value.push({ kind: "reply", text: "已收到这条修改意见。正式交互会针对该选区返回新的修订候选，原内容在采用前保留。" });
-  chatInput.value = "";
-  chatQuote.value = "";
+  messages.value.push({ kind: "reply", text: "原型已记录这条意见。正式功能将在这份稿件的基础上继续处理。" });
+  chatInput.value = ""; chatQuote.value = "";
 }
-function commentOnSelection() { note.value = `关于“${selectionQuote.value.slice(0, 100)}”：`; selectionQuote.value = ""; panel.value = "comments"; }
-function keySwitch(event) {
-  if (["INPUT", "TEXTAREA"].includes(event.target.tagName) || event.target.isContentEditable) return;
-  if (["ArrowLeft", "ArrowRight"].includes(event.key)) switchVariant();
+function locate(index) {
+  selected.value = index;
+  if (variant.value === "B") document.getElementById(`candidate-section-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  else document.querySelectorAll(".prototype-paper .tiptap h1, .prototype-paper .tiptap h2, .prototype-paper .tiptap h3")[index]?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 async function load() {
   const threads = await api.agentThreads(props.caseRecord.id);
@@ -103,68 +104,38 @@ async function load() {
     if (candidate) { artifact.value = candidate; return; }
   }
 }
-function locate(index) {
-  selected.value = index;
-  document.getElementById(`candidate-section-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
-}
-function switchVariant() { router.replace({ query: { ...route.query, variant: variant.value === "A" ? "B" : "A" } }); }
-function acceptAll() {
-  original.value = generateJSON(renderMarkdown(blocks.value.map(blockMarkdown).join("\n\n")), [StarterKit]);
-  status.value = "已在原型中采用整稿";
-  tab.value = "original";
-  previewOpen.value = true;
-}
-function acceptSection(index) { rejected.value = rejected.value.filter(i => i !== index); if (!accepted.value.includes(index)) accepted.value.push(index); }
-function rejectSection(index) { accepted.value = accepted.value.filter(i => i !== index); if (!rejected.value.includes(index)) rejected.value.push(index); }
-function addComment() {
-  if (!note.value.trim()) return;
-  comments.value.push({ section: current.value?.title || "全文", text: note.value.trim() });
-  note.value = "";
+function switchVariant() { floating.value = false; router.replace({ query: { ...route.query, variant: variant.value === "A" ? "B" : "A" } }); }
+function keySwitch(event) {
+  if (["INPUT", "TEXTAREA"].includes(event.target.tagName) || event.target.isContentEditable) return;
+  if (["ArrowLeft", "ArrowRight"].includes(event.key)) switchVariant();
 }
 onMounted(() => { load(); window.addEventListener("keydown", keySwitch); });
 onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 </script>
-
 <template>
   <div class="canvas-workspace candidate-prototype">
-    <nav class="prototype-outline"><small>候选目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}<Check v-if="accepted.includes(i)" :size="13" /></button></nav>
+    <nav class="prototype-outline"><small>本文目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}</button></nav>
     <main class="canvas-column prototype-canvas">
-      <div class="prototype-preview-bar"><span><Sparkles :size="15" />{{ variant === 'A' ? '全文候选预览' : '逐节审阅候选' }}</span><div v-if="variant === 'A'" class="prototype-segment"><button :class="{ active: tab === 'original' }" @click="tab = 'original'; previewOpen = true">当前正文</button><button :class="{ active: tab === 'candidate' }" @click="tab = 'candidate'; previewOpen = true">AI 候选</button></div><span class="prototype-state">{{ status }}</span></div>
+      <div v-if="variant === 'A'" class="prototype-version-tabs"><button :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前正文</button><button v-if="generatedOpen" :class="{ active: tab === 'generated' }" @click="tab = 'generated'"><Sparkles :size="14" />AI 初稿 · 编辑副本</button><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />版本</button></div>
+      <div v-else class="prototype-preview-bar"><span><MessageSquareText :size="15" />正文精修</span><span class="prototype-state">点击修改标记或右侧批注标记查看意见</span></div>
       <article class="document-paper prototype-paper" @mouseup="captureSelection">
-        <template v-if="variant === 'A' && (!previewOpen || tab === 'original')"><h1>{{ caseRecord.title }}</h1><CanvasEditor :document="original" :editable="false" /></template>
-        <template v-else>
-          <div class="prototype-document-note">{{ variant === 'A' ? '完整预览 · 采用前不会修改正文' : '精修示意 · 仅高亮当前修改的文字，原文保持可读' }}</div>
-          <p v-if="!artifact">正在读取本案例的完整候选……</p>
-          <section v-for="(section, i) in sections" :id="`candidate-section-${i}`" :key="i" class="prototype-section" :class="{ proposed: variant === 'B', focused: selected === i, adopted: accepted.includes(i) }" @click="selected = i">
-            <div class="markdown-body" v-html="sectionHtml(section, i)" />
-            <div v-if="variant === 'B' && selected === i" class="prototype-section-actions"><span>{{ accepted.includes(i) ? '已采用这处修改' : rejected.includes(i) ? '已保留原文' : '表达精炼 · 示例修订' }}</span><button @click.stop="acceptSection(i)"><Check :size="14" />接受修改</button><button @click.stop="selected = i; panel = 'comments'"><MessageSquareText :size="14" />留批注</button><button @click.stop="rejectSection(i)"><X :size="14" />保留原文</button></div>
-          </section>
-        </template>
+        <template v-if="variant === 'A'"><div class="prototype-document-note">{{ tab === 'original' ? '当前正文 · 可编辑' : '基于 AI 生成快照编辑 · 可复制到当前正文' }}</div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="true" @change="saveDocument" /></template>
+        <template v-else><section v-for="(section, i) in sections" :id="`candidate-section-${i}`" :key="i" class="prototype-section" :class="{ focused: selected === i }"><div class="markdown-body" v-html="sectionHtml(section, i)" @click="openComment(i)" /><button v-if="i > 0" class="prototype-comment-pin" :class="{ active: selected === i }" :aria-label="`查看${section.title}的批注`" @click="openComment(i)"><MessageSquareText :size="16" /><span v-if="selected === i">1</span></button></section></template>
       </article>
     </main>
     <aside class="prototype-assistant">
-      <header><button :class="{ active: panel === 'candidate' }" @click="panel = 'candidate'"><Sparkles :size="17" />AI</button><button :class="{ active: panel === 'comments' }" @click="panel = 'comments'"><MessageSquareText :size="17" />批注 <small v-if="comments.length">{{ comments.length }}</small></button></header>
+      <header><button :class="{ active: panel === 'chat' }" @click="panel = 'chat'"><Sparkles :size="17" />AI</button><button :class="{ active: panel === 'versions' }" @click="panel = 'versions'"><History :size="17" />版本</button><button :class="{ active: panel === 'comments' }" @click="panel = 'comments'"><MessageSquareText :size="17" />批注</button></header>
       <div class="prototype-thread">根据我的资料帮我生成一份案例 <span>⌄</span></div>
       <div class="prototype-rail-content">
-        <template v-if="panel === 'candidate'">
-          <div class="prototype-chat-user">根据我的资料生成一份完整案例。</div>
-          <div class="prototype-assistant-label">AI</div><p>已准备好一份初稿。你可以先预览全文，选用其中的段落，也可以继续告诉我怎么改。</p>
-          <article class="prototype-compact-card"><div><Sparkles :size="16" /><b>全文初稿候选</b><span>{{ status }}</span></div><p>{{ sections.length }} 个章节 · 尚未修改正文</p><button class="prototype-primary" @click="previewOpen = true; tab = 'candidate'">{{ previewOpen ? '正在预览' : '预览完整初稿' }}</button><button class="prototype-text-button" @click="acceptAll">采用整稿</button><button class="prototype-text-button" @click="status = '已拒绝候选'">拒绝</button></article>
-          <p class="prototype-chat-hint">在预览中拖选文字，可选择放入正文的位置，或把选区带入对话继续修改。</p>
-          <template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template>
-        </template>
-        <template v-else>
-          <div class="prototype-assistant-label">当前定位</div><blockquote>{{ current?.title || '全文' }}</blockquote><p class="prototype-muted">先定位原文，再记录具体问题与建议。正式审核的通过或退回仍在页面顶部操作。</p>
-          <article v-for="(comment, i) in comments" :key="i" class="prototype-comment"><small>{{ comment.section }}</small><p>{{ comment.text }}</p><span>待处理</span></article>
-          <div v-if="!comments.length" class="prototype-empty"><MessageSquareText :size="25" /><p>这个位置还没有批注</p></div>
-          <textarea v-model="note" placeholder="例如：这个数据的来源是什么？建议补充出处。" aria-label="原型批注意见" /><button class="prototype-primary" :disabled="!note.trim()" @click="addComment">添加意见</button>
-        </template>
+        <template v-if="panel === 'chat'"><div class="prototype-chat-user">根据我的资料生成一份完整案例。</div><div class="prototype-assistant-label">AI</div><p>初稿已保存。可以打开继续编辑，或选中文字和我讨论。</p><article class="prototype-compact-card"><div><FileText :size="17" /><b>科学家精神的时代回响</b></div><p>AI 生成稿 · {{ sections.length }} 个章节</p><button class="prototype-primary" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })">打开稿件</button></article><template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template></template>
+        <template v-else-if="panel === 'versions'"><h2>稿件与版本</h2><p class="prototype-muted">打开工作副本继续编辑，生成时的快照保留。</p><button class="prototype-version-card" @click="tab = 'original'; router.replace({ query: { ...route.query, variant: 'A' } })"><FileText :size="18" /><span><b>当前正文</b><small>正在编辑的案例</small></span></button><button class="prototype-version-card" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })"><Sparkles :size="18" /><span><b>AI 初稿</b><small>从生成快照打开编辑副本</small></span></button><button v-if="generatedOpen" class="prototype-text-button" @click="resetGenerated">重新打开生成时的快照</button></template>
+        <template v-else><h2>批注</h2><p class="prototype-muted">意见和对应的 AI 修订放在同一条批注里。</p><button class="prototype-version-card" @click="router.replace({ query: { ...route.query, variant: 'B' } }); openComment(1)"><MessageSquareText :size="18" /><span><b>{{ sections[1]?.title || '摘要' }}</b><small>查看意见与关联修改</small></span></button></template>
       </div>
-      <footer class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>候选选区：{{ chatQuote.slice(0, 90) }}{{ chatQuote.length > 90 ? '…' : '' }}</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选中候选文字提出修改意见…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>原型演示 · 本页操作不写入真实案例</small></footer>
+      <footer class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>稿件选区：{{ chatQuote.slice(0, 90) }}…</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选择稿件中的文字…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>{{ status || '原型演示 · 编辑和批注仅保留在本页' }}</small></footer>
     </aside>
-    <div v-if="selectionQuote && !pickOpen" class="prototype-selection-toolbar" :style="popup" @mousedown.prevent><template v-if="variant === 'A' && (!previewOpen || tab === 'original')"><button @click="selectTarget">设为正文替换位置</button></template><template v-else><button @click="pickOpen = true">选用到正文…</button><button @click="askAI">让 AI 修改</button><button @click="commentOnSelection">留批注</button></template></div>
-    <div v-if="pickOpen" class="prototype-pick-backdrop"><section class="prototype-pick-dialog"><h2>把所选内容放在哪里？</h2><blockquote>{{ selectionQuote.slice(0, 180) }}</blockquote><button @click="chooseText(false)">追加到正文末尾</button><button :disabled="!targetQuote" @click="chooseText(true)">替换已选择的正文位置</button><p v-if="!targetQuote">需要替换时，先在“当前正文”中选择要替换的文字。</p><button class="prototype-text-button" @click="pickOpen = false">取消</button></section></div>
-    <div class="prototype-switcher"><span>交互原型</span><button @click="switchVariant"><ArrowLeft :size="16" /></button><b>{{ variant === 'A' ? 'A · 正文切换预览' : 'B · 原位逐节审阅' }}</b><button @click="switchVariant"><ArrowRight :size="16" /></button><span>{{ status }}</span></div>
+    <div v-if="selectionQuote" class="prototype-selection-toolbar" :style="popup" @mousedown.prevent><button @click="copySelection">复制</button><button @click="askAI">就此提问</button><button @click="leaveSelectionComment">留批注</button></div>
+    <aside v-if="floating" class="prototype-comment-float" role="dialog" aria-label="批注与关联修改"><header><div><MessageSquareText :size="16" /><b>批注与修改</b></div><button aria-label="关闭批注浮窗" @click="floating = false"><X :size="17" /></button></header><div class="prototype-comment-scroll"><small class="prototype-muted">{{ current?.title }}</small><div class="prototype-thread-message"><b>我</b><p>{{ currentOpinion }}</p></div><template v-if="decision !== 'comment'"><div class="prototype-thread-message"><b><Sparkles :size="14" />AI · 对这条意见的修改</b><p>将“聚焦”改为“探讨”，使句子直接说明这份案例的研究目的。保留主体、事实与原有教学内容。</p><details><summary>修改依据与说明</summary><p>这是一处措辞调整，回应上方批注中的“更直接一些”。正文以淡红删除线标出原词、淡绿下划线标出建议用词；未经确认时保留原文。此处不补写新事实，也不把措辞修改当作事实核验。</p><p>如果你认为原来的措辞更准确，可以保留原文，或在下方补充意见，让 AI 继续针对同一条批注提出新的修改。</p></details></div><div class="prototype-floating-decisions" v-if="decision === 'pending'"><button class="prototype-primary" @click="decisions[selected] = 'accepted'"><Check :size="14" />接受修改</button><button @click="decisions[selected] = 'rejected'">保留原文</button></div><p v-else class="prototype-resolution">{{ decision === 'accepted' ? '已接受修改 · 原型内生效' : '已保留原文' }}</p></template><button v-else class="prototype-primary" @click="decisions[selected] = 'pending'">让 AI 按这条意见修改</button></div><footer><textarea v-model="note" aria-label="原型批注意见" placeholder="补充意见，继续讨论这处修改…" /><button class="prototype-primary" :disabled="!note.trim()" @click="addOpinion">发送意见</button></footer></aside>
+    <div class="prototype-switcher"><span>交互原型</span><button @click="switchVariant"><ArrowLeft :size="16" /></button><b>{{ variant === 'A' ? 'A · 版本与编辑' : 'B · 浮动批注精修' }}</b><button @click="switchVariant"><ArrowRight :size="16" /></button></div>
   </div>
 </template>
 <style scoped>
@@ -253,4 +224,33 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .prototype-pick-dialog > button { display: block; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: white; margin-top: 10px; }
 .prototype-pick-dialog > button:disabled { opacity: .5; }
 .prototype-pick-dialog p { color: var(--ink-3); font-size: 12px; }
+
+.prototype-version-tabs { display:flex; align-items:center; gap:4px; position:sticky; top:0; z-index:3; padding:8px 10px 0; background:#f4f0e8; border:1px solid var(--line); border-radius:9px 9px 0 0; }
+.prototype-version-tabs button { display:flex; gap:7px; align-items:center; padding:13px 16px; background:transparent; border:0; color:var(--ink-2); border-radius:7px 7px 0 0; font-size:12px; }
+.prototype-version-tabs button.active { background:white; color:var(--brand); box-shadow:0 -2px 0 var(--brand) inset; }
+.prototype-version-tabs .version-history-entry { margin-left:auto; }
+.prototype-version-card { display:flex; align-items:flex-start; gap:12px; width:100%; text-align:left; background:white; border:1px solid var(--line); border-radius:8px; padding:17px; margin-top:14px; color:var(--ink); }
+.prototype-version-card span { display:flex; flex-direction:column; gap:5px; }
+.prototype-version-card small { color:var(--ink-3); font-size:11px; }
+.prototype-section { position:relative; }
+.prototype-section :deep(ins), .prototype-section :deep(del) { cursor:pointer; }
+.prototype-comment-pin { position:absolute; right:-43px; top:36px; border:1px solid #e8dfd0; background:#fffdf7; color:#9b8661; padding:7px; border-radius:7px; display:flex; align-items:center; gap:4px; opacity:.5; }
+.prototype-comment-pin.active, .prototype-section:hover .prototype-comment-pin { opacity:1; color:var(--brand); }
+.prototype-comment-float { position:fixed; z-index:100; right:max(26px,calc((100vw - 1440px)/2)); top:205px; width:400px; max-height:calc(100vh - 240px); display:flex; flex-direction:column; border:1px solid #dfd5c4; border-radius:13px; background:#fffefa; box-shadow:0 16px 60px #30271930,0 2px 8px #30271915; }
+.prototype-comment-float > header { display:flex; align-items:center; justify-content:space-between; padding:15px 18px; border-bottom:1px solid var(--line); font-size:13px; }
+.prototype-comment-float > header > div { display:flex; align-items:center; gap:7px; }
+.prototype-comment-float > header > button { display:flex; padding:5px; border:0; background:transparent; color:var(--ink-3); }
+.prototype-comment-scroll { padding:18px; overflow:auto; min-height:0; font-size:13px; line-height:1.8; }
+.prototype-thread-message { margin-top:17px; padding-bottom:16px; border-bottom:1px solid #eee7db; }
+.prototype-thread-message > b { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-2); }
+.prototype-thread-message > p { margin:8px 0 0; }
+.prototype-thread-message details { margin-top:12px; color:var(--ink-2); font-size:12px; }
+.prototype-thread-message summary { cursor:pointer; color:#947c55; }
+.prototype-floating-decisions { display:flex; gap:10px; margin-top:16px; }
+.prototype-floating-decisions button { display:flex; gap:5px; align-items:center; padding:9px 13px; border:1px solid var(--line); border-radius:6px; background:white; }
+.prototype-floating-decisions button.prototype-primary { background:var(--brand); color:white; border-color:var(--brand); }
+.prototype-comment-float > footer { flex-shrink:0; border-top:1px solid var(--line); padding:14px 18px; display:flex; flex-direction:column; align-items:flex-end; gap:9px; }
+.prototype-comment-float textarea { width:100%; min-height:68px; max-height:130px; padding:10px; border:1px solid var(--line); border-radius:7px; resize:vertical; font:12px/1.7 sans-serif; }
+.prototype-resolution { color:#348260; font-size:12px; }
+@media(max-width:780px) { .prototype-comment-float { right:12px; width:calc(100vw - 24px); top:160px; max-height:calc(100vh - 190px); } }
 </style>
