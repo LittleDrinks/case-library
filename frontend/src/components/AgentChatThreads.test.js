@@ -83,7 +83,7 @@ it("opens the thread list with rows, status, back and create entries", async () 
 
   await openList(wrapper);
 
-  expect(api.agentThreads).toHaveBeenCalledWith("case-1");
+  expect(api.agentThreads).toHaveBeenCalledWith("case-1", "", "");
   const list = wrapper.get('[data-testid="agent-thread-list"]');
   expect(list.text()).toContain("返回当前对话");
   expect(list.text()).toContain("新建对话");
