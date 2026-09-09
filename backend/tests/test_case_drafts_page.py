@@ -61,6 +61,30 @@ def test_draft_page_is_bounded_and_ordered_by_update_time(client: TestClient) ->
     assert all(left >= right for left, right in zip(updated, updated[1:]))
 
 
+def test_draft_page_tie_breaks_identical_timestamps_without_loss(client: TestClient) -> None:
+    auth = login(client)
+    for index in range(45):
+        created = client.post(
+            "/api/cases", json={"title": f"同刻草稿 {index:02d}"}, headers=headers(auth)
+        )
+        assert created.status_code == 200
+    database = client.app.state.database
+    database.cases.update_many(
+        {"ownerId": "u-user-demo", "workflowStatus": "draft"},
+        {"$set": {"updatedAt": "2025-09-09T00:00:00+00:00"}},
+    )
+
+    seen: list[str] = []
+    for page in range(1, 4):
+        body = client.get("/api/cases/drafts", params={"page": page}).json()
+        seen.extend(item["id"] for item in body["items"])
+
+    assert len(seen) == 46
+    assert len(set(seen)) == 46
+    assert "c-draft-1" in seen
+    assert seen == sorted(seen, reverse=True)
+
+
 def test_draft_page_rejects_oversize_page_size(client: TestClient) -> None:
     login(client)
     response = client.get("/api/cases/drafts", params={"pageSize": 51})

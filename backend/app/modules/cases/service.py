@@ -177,7 +177,6 @@ def list_cases(database: Database, user: dict | None, scope: str) -> list[dict]:
 
 
 DRAFT_PAGE_FIELDS = ("id", "title", "updatedAt")
-DRAFT_PAGE_MAX_SIZE = 50
 
 
 def list_drafts(
@@ -193,7 +192,7 @@ def list_drafts(
         database.cases.find(
             condition, {**{field: 1 for field in DRAFT_PAGE_FIELDS}, "_id": 0}
         )
-        .sort("updatedAt", DESCENDING)
+        .sort([("updatedAt", DESCENDING), ("id", DESCENDING)])
         .skip((page - 1) * page_size)
         .limit(page_size)
     )

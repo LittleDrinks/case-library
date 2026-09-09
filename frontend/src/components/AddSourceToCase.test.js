@@ -129,6 +129,65 @@ test("新建草稿允许输入名称并显示在确认按钮", async () => {
   expect(wrapper.get("button.primary").text()).toContain("确认加入「我的新课」");
 });
 
+test("空列表也可命名新建草稿", async () => {
+  api.listDrafts.mockResolvedValue(draftPage([]));
+  const wrapper = render();
+  await openDialog(wrapper);
+  await wrapper.get("input[aria-label='新草稿名称']").setValue("从零新建");
+  expect(wrapper.get("button.primary").text()).toContain("确认加入「从零新建」");
+  await wrapper.get("button.primary").trigger("submit");
+  await flushPromises();
+  expect(api.createCase).toHaveBeenCalledWith({ title: "从零新建" }, "csrf");
+  expect(api.addCaseSource).toHaveBeenCalledWith("draft-new", {
+    sourceCaseId: "case-9", versionId: "ver-3", revision: 0,
+  }, "csrf");
+});
+
+test("跨页与搜索后仍显示已选目标", async () => {
+  api.listDrafts.mockImplementation((_q, page) => Promise.resolve(
+    page === 1 ? draftPage([["draft-1", "甲页草稿"]], 25) : draftPage([["draft-9", "乙页草稿"]], 25),
+  ));
+  const wrapper = render();
+  await openDialog(wrapper);
+  await buttonByText(wrapper, "下一页").trigger("click");
+  await flushPromises();
+  expect(wrapper.text()).toContain("乙页草稿");
+  expect(wrapper.get("button.primary").text()).toContain("确认加入「甲页草稿」");
+});
+
+test("搜索竞态：过期响应不覆盖新结果", async () => {
+  let resolveStale;
+  api.listDrafts.mockImplementationOnce(
+    () => new Promise((resolve) => { resolveStale = resolve; }),
+  );
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const wrapper = render();
+  await openDialog(wrapper);
+  await wrapper.get("input[type='search']").setValue("旧词");
+  await vi.advanceTimersByTimeAsync(250);
+  await wrapper.get("input[type='search']").setValue("新词");
+  await vi.advanceTimersByTimeAsync(250);
+  resolveStale(draftPage([]));
+  await flushPromises();
+  expect(wrapper.text()).toContain("进行中的案例");
+  expect(wrapper.text()).not.toContain("没有匹配标题");
+});
+
+test("关闭即取消待执行搜索，重开清空搜索词", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const wrapper = render();
+  await openDialog(wrapper);
+  await wrapper.get("input[type='search']").setValue("旧词");
+  await wrapper.get("button[aria-label='关闭']").trigger("click");
+  await vi.advanceTimersByTimeAsync(250);
+  const callsAfterClose = api.listDrafts.mock.calls.length;
+  await wrapper.get(".source-collect").trigger("click");
+  await flushPromises();
+  expect(api.listDrafts).toHaveBeenLastCalledWith("", 1, 20);
+  await vi.advanceTimersByTimeAsync(250);
+  expect(api.listDrafts.mock.calls.length).toBe(callsAfterClose + 1);
+});
+
 test("重复加入时展示不重复提示", async () => {
   api.addCaseSource.mockRejectedValue({ status: 409, message: "conflict" });
   const wrapper = render();

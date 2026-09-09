@@ -21,12 +21,12 @@ const page = ref(1);
 const query = ref("");
 const target = ref("");
 const newTitle = ref("");
+const selectedDraft = ref(null);
 const addedCaseId = ref("");
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 const targetLabel = computed(() => {
   if (target.value === NEW_DRAFT) return newTitle.value.trim() || "新建草稿";
-  const draft = drafts.value.find((item) => item.id === target.value);
-  return draft?.title || "未命名案例";
+  return selectedDraft.value?.title || "未命名案例";
 });
 
 let requestSeq = 0;
@@ -41,7 +41,10 @@ async function loadDrafts() {
     if (seq !== requestSeq) return;
     drafts.value = result.items;
     total.value = result.total;
-    if (!target.value) target.value = result.items[0]?.id || NEW_DRAFT;
+    if (!target.value) {
+      target.value = result.items[0]?.id || NEW_DRAFT;
+      selectedDraft.value = result.items[0] ?? null;
+    }
   } catch (caught) {
     if (seq === requestSeq) error.value = caught.message || "草稿加载失败";
   } finally {
@@ -71,13 +74,21 @@ async function openDialog() {
   open.value = true;
   error.value = "";
   addedCaseId.value = "";
+  query.value = "";
+  newTitle.value = "";
   target.value = "";
+  selectedDraft.value = null;
+  drafts.value = [];
+  total.value = 0;
   page.value = 1;
   await loadDrafts();
 }
 
 function close() {
-  if (!busy.value) open.value = false;
+  if (busy.value) return;
+  clearTimeout(searchTimer);
+  requestSeq += 1;
+  open.value = false;
 }
 
 async function resolveTarget() {
@@ -140,18 +151,32 @@ async function confirm() {
               @input="onSearchInput"
             />
           </div>
-          <p v-if="loading" class="collect-source-hint">正在加载我的草稿…</p>
-          <p v-else-if="!drafts.length" class="collect-source-hint">
-            {{ query ? "没有匹配标题的可编辑草稿。" : "还没有可编辑的本人草稿。" }}
-          </p>
-          <div v-else class="collect-source-list" role="radiogroup" aria-label="选择目标草稿">
-            <label v-for="draft in drafts" :key="draft.id" class="collect-source-option">
-              <input v-model="target" type="radio" name="collect-target" :value="draft.id" />
-              <span class="collect-source-title">{{ draft.title || "未命名案例" }}</span>
-              <small class="collect-source-time">更新于 {{ formatTime(draft.updatedAt) }}</small>
-            </label>
+          <div class="collect-source-list" role="radiogroup" aria-label="选择目标草稿">
+            <p v-if="loading" class="collect-source-hint">正在加载我的草稿…</p>
+            <p v-else-if="!drafts.length" class="collect-source-hint">
+              {{ query ? "没有匹配标题的可编辑草稿，可直接新建。" : "还没有可编辑的本人草稿，可直接新建。" }}
+            </p>
+            <template v-else>
+              <label v-for="draft in drafts" :key="draft.id" class="collect-source-option">
+                <input
+                  v-model="target"
+                  type="radio"
+                  name="collect-target"
+                  :value="draft.id"
+                  @change="selectedDraft = draft"
+                />
+                <span class="collect-source-title">{{ draft.title || "未命名案例" }}</span>
+                <small class="collect-source-time">更新于 {{ formatTime(draft.updatedAt) }}</small>
+              </label>
+            </template>
             <label class="collect-source-option collect-source-new">
-              <input v-model="target" type="radio" name="collect-target" :value="NEW_DRAFT" />
+              <input
+                v-model="target"
+                type="radio"
+                name="collect-target"
+                :value="NEW_DRAFT"
+                @change="selectedDraft = null"
+              />
               <span class="collect-source-title">新建草稿</span>
               <input
                 v-model="newTitle"
@@ -160,7 +185,7 @@ async function confirm() {
                 maxlength="80"
                 aria-label="新草稿名称"
                 placeholder="输入新草稿名称"
-                @focus="target = NEW_DRAFT"
+                @focus="target = NEW_DRAFT; selectedDraft = null"
               />
             </label>
           </div>
