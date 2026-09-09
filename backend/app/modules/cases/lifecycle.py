@@ -16,11 +16,7 @@ from app.modules.cases.service import (
     internal_case_view,
 )
 from app.modules.cases.submission_check import submission_issues
-from app.modules.cases.snapshots import (
-    create_snapshot,
-    list_snapshots,
-    rollback_snapshot,
-)
+from app.modules.cases.snapshots import overwrite_draft
 from app.modules.case_materials.service import snapshot_materials
 from app.modules.search.outbox import SearchOutbox
 
@@ -58,7 +54,7 @@ def _authorize(case: dict, user: dict, command: str) -> None:
         if case["ownerId"] == user["id"]:
             return
         return _require_admin(user)
-    if command in {"submit", "withdraw", "snapshot", "rollback"}:
+    if command in {"submit", "withdraw", "overwrite"}:
         _require_owner(case, user)
     else:
         _require_admin(user)
@@ -507,10 +503,8 @@ def _execute(database, case_id: str, body: dict, user: dict, session) -> dict:
         return _withdraw(database, case, user, session)
     if body["command"] == "start":
         return _start(database, case, user, session)
-    if body["command"] == "snapshot":
-        return create_snapshot(database, case, user, session)
-    if body["command"] == "rollback":
-        return rollback_snapshot(database, case, user, body.get("targetId"), session)
+    if body["command"] == "overwrite":
+        return overwrite_draft(database, case, user, body.get("targetId"), session)
     if body["command"] == "reopen":
         return _reopen(database, case, user, session)
     return _admin_action(database, case, body, user, session)
@@ -534,6 +528,5 @@ def get_history(database: Database, case_id: str, user: dict) -> dict:
     return {
         "caseId": case_id,
         "versions": [_clean(row) for row in versions],
-        "snapshots": list_snapshots(database, case_id),
         "events": [_clean(row) for row in events],
     }

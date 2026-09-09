@@ -150,12 +150,8 @@ def _concurrent_submit_statuses(case: dict, sessions: list[tuple]) -> list[int]:
         return sorted(pool.map(_submit_status, tasks))
 
 
-def _snapshot(owner, csrf: str, case_id: str, case: dict) -> dict:
-    return _transition_ok(owner, csrf, case_id, "snapshot", case)
-
-
-def _rollback(owner, csrf: str, case_id: str, case: dict, target_id: str) -> dict:
-    return _transition_ok(owner, csrf, case_id, "rollback", case, targetId=target_id)
+def _overwrite(owner, csrf: str, case_id: str, case: dict, target_id: str) -> dict:
+    return _transition_ok(owner, csrf, case_id, "overwrite", case, targetId=target_id)
 
 
 def assert_lifecycle_history(owner, case_id: str) -> None:
@@ -322,7 +318,7 @@ def test_non_owner_cannot_probe_case_revision_through_lifecycle() -> None:
         == 403
     )
     assert (
-        _transition_status(stranger, stranger_csrf, case["id"], "snapshot", revision)
+        _transition_status(stranger, stranger_csrf, case["id"], "overwrite", revision)
         == 403
     )
 
@@ -342,15 +338,16 @@ def patch_title(opener, csrf: str, case: dict, title: str) -> dict:
     return saved
 
 
-def test_owner_rolls_back_to_a_manual_working_snapshot() -> None:
+def test_owner_overwrites_the_working_draft_with_a_submitted_version() -> None:
     owner, csrf = login("user", "user123")
-    case = create_case(owner, csrf, f"snapshot-{uuid.uuid4().hex}")
-    baseline = patch_title(owner, csrf, case, "快照基线")
-    snapshot = _snapshot(owner, csrf, case["id"], baseline)
-    assert snapshot["snapshot"]["kind"] == "manual"
-    changed = patch_title(owner, csrf, snapshot["case"], "快照后修改")
-    target_id = snapshot["snapshot"]["id"]
-    rolled = _rollback(owner, csrf, case["id"], changed, target_id)
-    assert rolled["case"]["title"] == "快照基线"
+    case = create_case(owner, csrf, f"overwrite-{uuid.uuid4().hex}")
+    submitted = _transition_ok(owner, csrf, case["id"], "submit", case)
+    reopened = _withdraw(owner, csrf, case["id"], submitted["case"])
+    changed = patch_title(owner, csrf, reopened, "覆盖后标题")
+    overwritten = _overwrite(owner, csrf, case["id"], changed, submitted["version"]["id"])
+
+    assert overwritten["case"]["title"] == case["title"]
+    assert overwritten["case"]["document"] == case["document"]
+    assert submitted["version"]["document"] == case["document"]
     history = request(owner, "GET", f"/api/cases/{case['id']}/history")[1]
-    assert [row["kind"] for row in history["snapshots"]] == ["manual", "pre_rollback"]
+    assert [row["number"] for row in history["versions"]] == [1]

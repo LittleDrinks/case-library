@@ -19,13 +19,13 @@ const props = defineProps({
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
-  beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits([
-  "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
+  "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
+  "open-version",
 ]);
 
 const tabs = [
@@ -102,12 +102,7 @@ function select(tab) {
     <VersionPanel
       v-else-if="active === 'history'"
       :case-record="caseRecord"
-      :user="user"
-      :editable="editable"
-      :before-mutation="beforeVersionMutation"
-      @case-refreshed="emit('case-refreshed', $event)"
-      @case-restored="emit('case-restored', $event)"
-      @mutation-state="emit('mutation-state', $event)"
+      @open-version="emit('open-version', $event)"
     />
   </aside>
 </template>

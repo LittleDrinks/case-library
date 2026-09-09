@@ -27,9 +27,9 @@ def _now() -> str:
 
 def _require_draft_owner(case: dict, user: dict) -> None:
     if case["ownerId"] != user["id"]:
-        raise CaseError(403, "仅案例作者可管理工作快照")
+        raise CaseError(403, "仅案例作者可覆盖工作稿")
     if case["workflowStatus"] != "draft":
-        raise CaseError(409, "仅工作版本可管理快照")
+        raise CaseError(409, "仅工作版本可执行覆盖")
 
 
 def _record(
@@ -87,17 +87,6 @@ def _raise_lock_conflict(database, case: dict, user: dict, session) -> None:
     raise RevisionConflict(current["revision"])
 
 
-def create_snapshot(database: Database, case: dict, user: dict, session) -> dict:
-    _require_draft_owner(case, user)
-    locked = _lock_case(database, case, user, session)
-    attachments = snapshot_attachments(database, case["id"], session)
-    materials = snapshot_materials(database, case["id"], session)
-    case_sources = snapshot_case_sources(database, case["id"], session)
-    snapshot = _record(locked, user, attachments, materials, case_sources, "manual")
-    database.case_snapshots.insert_one(snapshot, session=session)
-    return {"case": internal_case_view(locked, user), "snapshot": _clean(snapshot)}
-
-
 def record_snapshot(database: Database, case: dict, user: dict, kind: str, session) -> dict:
     """在既有事务会话内留存一份批前快照，供写回类操作（如 Agent 接受）回滚。"""
     attachments = snapshot_attachments(database, case["id"], session)
@@ -108,13 +97,21 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
     return _clean(snapshot)
 
 
-def _target(database, case_id: str, target_id: str, session) -> dict:
-    query = {"id": target_id, "caseId": case_id}
-    target = database.case_snapshots.find_one(query, session=session)
-    target = target or database.case_versions.find_one(query, session=session)
+def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
+    """覆盖目标只能是本案例的投稿版本；跨案例或他人版本一律 404。"""
+    target = database.case_versions.find_one(
+        {"id": target_id, "caseId": case_id}, session=session
+    )
     if not target:
         raise CaseError(404, "目标版本不存在")
     return target
+
+
+def _clear_draft_annotations(database, case_id: str, session) -> None:
+    """覆盖替换整篇工作稿；挂在工作稿上的旧批注随之清除，版本批注不受影响。"""
+    database.annotations.delete_many(
+        {"caseId": case_id, "versionId": None}, session=session
+    )
 
 
 def _restore_case(database, case: dict, target: dict, session) -> dict:
@@ -143,7 +140,7 @@ def _restore_attachments(database, case_id: str, target: dict, session) -> None:
 
 
 def _frozen_assets(database, case_id: str, session) -> tuple[list, list, list]:
-    """冻结资料区三源：附件、素材与案例来源，供版本记录与回滚共用。"""
+    """冻结资料区三源：附件、素材与案例来源，供版本记录与覆盖共用。"""
     return (
         snapshot_attachments(database, case_id, session),
         snapshot_materials(database, case_id, session),
@@ -151,16 +148,15 @@ def _frozen_assets(database, case_id: str, session) -> tuple[list, list, list]:
     )
 
 
-def rollback_snapshot(
-    database: Database, case: dict, user: dict, target_id: str | None, session
-) -> dict:
+def overwrite_draft(database: Database, case: dict, user: dict, target_id, session) -> dict:
+    """用历史版本原子覆盖当前教师稿：不留版本、清工作稿旧批注，其余版本不变。"""
     _require_draft_owner(case, user)
     if not target_id:
-        raise CaseError(422, "回滚目标不能为空")
-    target = _target(database, case["id"], target_id, session)
+        raise CaseError(422, "覆盖目标不能为空")
+    target = _overwrite_target(database, case["id"], target_id, session)
     locked = _lock_case(database, case, user, session)
     before = _record(
-        locked, user, *_frozen_assets(database, case["id"], session), "pre_rollback",
+        locked, user, *_frozen_assets(database, case["id"], session), "pre_overwrite",
     )
     database.case_snapshots.insert_one(before, session=session)
     restored = _restore_case(database, locked, target, session)
@@ -169,9 +165,5 @@ def rollback_snapshot(
     _restore_attachments(database, case["id"], target, session)
     restore_materials(database, case["id"], target, session)
     restore_case_sources(database, case["id"], target, session)
+    _clear_draft_annotations(database, case["id"], session)
     return {"case": internal_case_view(restored, user), "snapshot": _clean(before)}
-
-
-def list_snapshots(database: Database, case_id: str) -> list[dict]:
-    rows = database.case_snapshots.find({"caseId": case_id}).sort("createdAt", 1)
-    return [_clean(row) for row in rows]

@@ -489,12 +489,13 @@ def test_mount_allows_approved_historical_version(client: TestClient) -> None:
 
 
 def _snapshot_id(client: TestClient, auth: dict) -> str:
-    response = client.post(
-        "/api/cases/c-draft-1/lifecycle",
-        headers=headers(auth),
-        json={"command": "snapshot", "revision": revision(client)},
-    )
-    return response.json()["snapshot"]["id"]
+    """手动快照入口已移除：内部快照改由服务直接留档（等价批前快照）。"""
+    from app.modules.cases.snapshots import record_snapshot
+
+    database = client.app.state.database
+    case = database.cases.find_one({"id": "c-draft-1"})
+    snapshot = record_snapshot(database, case, auth["user"], "pre_agent_write", None)
+    return snapshot["id"]
 
 
 def test_owner_keeps_private_attachment_history_after_publication(client: TestClient) -> None:

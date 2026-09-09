@@ -7,8 +7,10 @@ import AddSourceToCase from "../components/AddSourceToCase.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
+import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
 import SiteHeader from "../components/SiteHeader.vue";
+import VersionTabs from "../components/VersionTabs.vue";
 import WorkspaceHeader from "../components/WorkspaceHeader.vue";
 import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
@@ -49,9 +51,23 @@ const annotations = ref([]);
 const sources = ref([]);
 const canvasEditor = ref(null);
 const decisionCommand = ref("");
+const openVersionTabs = ref([]);
+const activeTabId = ref("draft");
+const overwriteTarget = ref(null);
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
-const outline = computed(() => documentOutline(document.value));
+const activeVersion = computed(() => (
+  openVersionTabs.value.find((tab) => tab.id === activeTabId.value) || null
+));
+const versionTabItems = computed(() => openVersionTabs.value.map((version) => ({
+  id: version.id,
+  label: `v${version.number} · ${version.title}`,
+})));
+const onDraftTab = computed(() => !activeVersion.value);
+const activeDocument = computed(() => (
+  onDraftTab.value ? document.value : activeVersion.value.document
+));
+const outline = computed(() => documentOutline(activeDocument.value));
 watch(readerVersion, () => conversationSources.clear());
 const reviewMode = computed(() => route.name === "case-review");
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
@@ -64,12 +80,14 @@ const publicCaseId = computed(() => (
   !readerMode.value && publicationStatus.value === "public"
     ? caseId() : ""
 ));
+const versionTabsAvailable = computed(() => !readerMode.value && historyAvailable.value);
+const overwriteAllowed = computed(() => isOwner.value && workflowStatus.value === "draft");
 const editable = computed(() => (
   !readerMode.value && isOwner.value && workflowStatus.value === "draft" && !reviewMode.value
-  && !busyAction.value && !contentMutationBusy.value
+  && onDraftTab.value && !busyAction.value && !contentMutationBusy.value
 ));
 const annotatable = computed(() => Boolean(
-  !readerMode.value && session.user && (
+  !readerMode.value && session.user && onDraftTab.value && (
     (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
     || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
   ),
@@ -283,7 +301,9 @@ const CITATION_NOTICES = {
 };
 
 function insertSourceCitation(row) {
-  const status = canvasEditor.value?.insertCitation(row) ?? "unpositioned";
+  const status = onDraftTab.value
+    ? (canvasEditor.value?.insertCitation(row) ?? "unpositioned")
+    : "readonly";
   actionNotice.value = CITATION_NOTICES[status] ?? (status === "linked"
     ? `已将选区关联引用〔${row.number}〕`
     : `已插入引用〔${row.number}〕`);
@@ -386,6 +406,67 @@ async function prepareContentMutation() {
   return revision.value;
 }
 
+function openVersionTab(version) {
+  if (!openVersionTabs.value.some((tab) => tab.id === version.id)) {
+    openVersionTabs.value = [...openVersionTabs.value, version];
+  }
+  activeTabId.value = version.id;
+}
+
+function closeVersionTab(id) {
+  openVersionTabs.value = openVersionTabs.value.filter((tab) => tab.id !== id);
+  if (activeTabId.value === id) activeTabId.value = "draft";
+}
+
+function selectTab(id) {
+  activeTabId.value = id;
+}
+
+function requestOverwrite() {
+  if (headerBusyAction.value || !activeVersion.value) return;
+  actionNotice.value = "";
+  overwriteTarget.value = activeVersion.value;
+}
+
+function cancelOverwrite() {
+  overwriteTarget.value = null;
+}
+
+async function overwriteBaseline() {
+  await autosave.flush();
+  if (autosave.state.value === "saved") return revision.value;
+  actionNotice.value = "正文尚未保存，未执行覆盖。";
+  return null;
+}
+
+function overwriteSucceeded(result) {
+  applyCase(result.case);
+  activeTabId.value = "draft";
+  overwriteTarget.value = null;
+  crashDraft.load(result.case);
+}
+
+function overwriteFailed(error) {
+  overwriteTarget.value = null;
+  actionNotice.value = error.message || "覆盖失败";
+  if (error.status === 409) void refreshLifecycleState();
+}
+
+async function performOverwrite() {
+  const target = overwriteTarget.value;
+  if (!target || headerBusyAction.value) return;
+  busyAction.value = "overwrite";
+  try {
+    if (await overwriteBaseline() === null) return;
+    const body = lifecycleBody("overwrite", { targetId: target.id });
+    overwriteSucceeded(await api.lifecycleCase(caseId(), body, session.csrfToken));
+  } catch (error) {
+    overwriteFailed(error);
+  } finally {
+    busyAction.value = "";
+  }
+}
+
 function startDownload() {
   const link = window.document.createElement("a");
   const area = readerMode.value ? "/public" : "";
@@ -452,6 +533,14 @@ onBeforeUnmount(() => {
         @cancel="cancelDecision"
         @confirm="confirmDecision"
       />
+      <OverwriteConfirmDialog
+        :open="Boolean(overwriteTarget)"
+        :version-label="overwriteTarget ? `v${overwriteTarget.number} · ${overwriteTarget.title}` : ''"
+        :busy="busyAction === 'overwrite'"
+        :error="overwriteTarget && busyAction === 'overwrite' ? actionNotice : ''"
+        @cancel="cancelOverwrite"
+        @confirm="performOverwrite"
+      />
       <div v-if="conflict" class="conflict-banner" role="alert">
         <AlertTriangle :size="17" aria-hidden="true" />
         <span>案例已在其他页面更新，本页内容尚未保存。</span>
@@ -470,39 +559,65 @@ onBeforeUnmount(() => {
             :version-id="readerVersion"
             :source-title="title"
           />
-          <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
-            <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
-          </div>
-          <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
-            <AlertTriangle :size="17" aria-hidden="true" />
-            <span>
-              {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
-            </span>
-          </div>
-          <article class="document-paper">
-            <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
-            <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
-            <CaseTagPicker
-              :tag-ids="tagIds"
-              :groups="tagCatalog"
-              :editable="editable"
-              :loading="tagCatalogLoading"
-              :error="tagCatalogError"
-              @update:tag-ids="changeTags"
-              @retry="loadTagCatalog"
-            />
+          <VersionTabs
+            v-else-if="versionTabsAvailable"
+            :tabs="versionTabItems"
+            :active="activeTabId"
+            :disabled="Boolean(headerBusyAction)"
+            :overwritable="overwriteAllowed"
+            @select="selectTab"
+            @close="closeVersionTab"
+            @overwrite="requestOverwrite"
+          />
+          <template v-if="onDraftTab">
+            <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
+              <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
+            </div>
+            <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
+              <AlertTriangle :size="17" aria-hidden="true" />
+              <span>
+                {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
+              </span>
+            </div>
+            <article class="document-paper">
+              <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
+              <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
+              <CaseTagPicker
+                :tag-ids="tagIds"
+                :groups="tagCatalog"
+                :editable="editable"
+                :loading="tagCatalogLoading"
+                :error="tagCatalogError"
+                @update:tag-ids="changeTags"
+                @retry="loadTagCatalog"
+              />
+              <CanvasEditor
+                ref="canvasEditor"
+                :document="document"
+                :revision="revision"
+                :editable="editable"
+                :annotatable="annotatable"
+                :annotations="annotations"
+                :sources="sources"
+                @change="changeDocument"
+                @selection="annotationSelection = $event"
+                @writing-context="writingContext = $event"
+                @annotate="selectTool('comments')"
+              />
+            </article>
+          </template>
+          <article v-else-if="activeVersion" class="document-paper version-paper">
+            <header class="version-paper-head">
+              <h2>{{ activeVersion.title }}</h2>
+              <p>提交版本 v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
+            </header>
             <CanvasEditor
-              ref="canvasEditor"
-              :document="document"
-              :revision="revision"
-              :editable="editable"
-              :annotatable="annotatable"
-              :annotations="annotations"
-              :sources="sources"
-              @change="changeDocument"
-              @selection="annotationSelection = $event"
-              @writing-context="writingContext = $event"
-              @annotate="selectTool('comments')"
+              :key="activeVersion.id"
+              :document="activeVersion.document"
+              :editable="false"
+              :annotatable="false"
+              :annotations="[]"
+              :sources="[]"
             />
           </article>
         </main>
@@ -521,7 +636,6 @@ onBeforeUnmount(() => {
           :selection="annotationSelection"
           :writing-context="writingContext"
           :before-attachment-mutation="prepareContentMutation"
-          :before-version-mutation="prepareContentMutation"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
@@ -532,6 +646,7 @@ onBeforeUnmount(() => {
           @sources-retry="loadSources"
           @clear-writing-context="writingContext = null"
           @insert-citation="insertSourceCitation"
+          @open-version="openVersionTab"
         />
       </div>
     </template>

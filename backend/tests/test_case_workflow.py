@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from fastapi.testclient import TestClient
 
 
@@ -50,6 +52,19 @@ def _save_title(client: TestClient, auth: dict, case: dict, title: str) -> dict:
         headers={"X-CSRF-Token": auth["csrfToken"]},
         json={"title": title, "revision": case["revision"]},
     ).json()
+
+
+def _save_content(client, auth: dict, case: dict, text: str, title: str | None = None):
+    body = {"document": paragraph_document(text), "revision": case["revision"]}
+    if title is not None:
+        body["title"] = title
+    response = client.patch(
+        f"/api/cases/{case['id']}",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json=body,
+    )
+    assert response.status_code == 200
+    return response.json()
 
 
 def publish_seed_case(client: TestClient) -> tuple[dict, dict]:
@@ -218,7 +233,7 @@ def test_case_creation_requires_csrf(client: TestClient) -> None:
     assert created.json()["revision"] == 1
     assert created.json()["workflowStatus"] == "draft"
     assert created.json()["publicationStatus"] == "none"
-    assert created.json()["availableActions"] == ["submit", "snapshot", "rollback"]
+    assert created.json()["availableActions"] == ["submit", "overwrite"]
 
 
 def test_new_case_uses_the_required_teaching_template(client: TestClient) -> None:
@@ -237,25 +252,162 @@ def test_new_case_uses_the_required_teaching_template(client: TestClient) -> Non
     assert "三、附件" in text
 
 
-def test_author_can_snapshot_and_rollback_a_working_version(client: TestClient) -> None:
+OVERWRITE_HEADING = "一、教学说明"
+
+
+def _annotated_document(text: str) -> dict:
+    return {
+        "type": "doc",
+        "content": [
+            {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": OVERWRITE_HEADING}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": text}]},
+        ],
+    }
+
+
+def _freeze_and_reopen(client, auth: dict, case: dict, text: str, title: str):
+    """投稿冻结一个历史版本，再撤回并改掉当前稿；返回（工作稿，已建版本）。"""
+    saved = _save_content(client, auth, case, text, title)
+    submitted = _transition_json(client, case["id"], auth["csrfToken"], "submit", saved)
+    reopened = _transition_json(client, case["id"], auth["csrfToken"], "withdraw", submitted["case"])
+    return reopened["case"], submitted
+
+
+def _overwrite_version(client, auth: dict, case: dict, changed: dict, version: dict):
+    return _transition(
+        client, case["id"], auth["csrfToken"], "overwrite", changed, targetId=version["id"],
+    )
+
+
+def test_author_overwrites_draft_with_a_history_version(client: TestClient) -> None:
     auth = login(client, "user", "user123").json()
     case = client.get("/api/cases/c-draft-1").json()
-    saved = _save_title(client, auth, case, "快照基线")
-    snapshot = _transition_json(
-        client, case["id"], auth["csrfToken"], "snapshot", saved
+    reopened, submitted = _freeze_and_reopen(client, auth, case, "冻结正文", "投稿标题")
+    changed = _save_content(client, auth, reopened, "覆盖前草稿正文", "覆盖前标题")
+    overwritten = _overwrite_version(client, auth, case, changed, submitted["version"]).json()
+
+    assert overwritten["case"]["title"] == "投稿标题"
+    assert document_text(overwritten["case"]["document"]) == "冻结正文"
+    assert overwritten["case"]["availableActions"] == ["submit", "overwrite"]
+    history = client.get("/api/cases/c-draft-1/history").json()
+    assert [row["number"] for row in history["versions"]] == [1]
+    assert history["versions"][0]["id"] == submitted["version"]["id"]
+    assert history["versions"][0]["document"] == submitted["version"]["document"]
+
+
+def _review_round_with_annotations(client, created: dict, owner: dict):
+    """投稿→开审→版本批注→撤回；返回（撤回工作稿，投稿版本，两批批注）。"""
+    draft_note = _draft_annotation(client, owner, created)
+    submitted = _transition_json(client, created["id"], owner["csrfToken"], "submit", created)
+    admin = _relogin(client, "admin", "admin123")
+    started = _transition_json(client, created["id"], admin["csrfToken"], "start", submitted["case"])
+    version_note = _version_annotation(client, admin, started)
+    owner = login(client, "user", "user123").json()
+    reopened = _transition_json(client, created["id"], owner["csrfToken"], "withdraw", started["case"])
+    return reopened["case"], submitted, draft_note, version_note, owner
+
+
+def test_overwrite_clears_draft_annotations_but_keeps_version_ones(client: TestClient) -> None:
+    owner = login(client, "user", "user123").json()
+    created = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": owner["csrfToken"]},
+        json={"title": "覆盖批注案例", "document": _annotated_document("工作稿正文")},
+    ).json()
+    reopened, submitted, draft_note, version_note, owner = _review_round_with_annotations(
+        client, created, owner,
     )
-    assert snapshot["case"]["availableActions"] == ["submit", "snapshot", "rollback"]
-    changed = _save_title(client, auth, saved, "回滚前")
-    rolled = _transition(
-        client,
-        case["id"],
-        auth["csrfToken"],
-        "rollback",
-        changed,
-        targetId=snapshot["snapshot"]["id"],
+    changed = _save_content(client, owner, reopened, "覆盖前草稿正文", "覆盖前标题")
+    _overwrite_version(client, owner, created, changed, submitted["version"])
+
+    remaining = client.get(f"/api/cases/{created['id']}/annotations").json()
+    ids = [row["id"] for row in remaining]
+    assert draft_note["id"] not in ids
+    assert version_note["id"] in ids
+
+
+def _draft_annotation(client, owner: dict, case: dict) -> dict:
+    quote = "工作稿正文"
+    start = len(OVERWRITE_HEADING) + 3
+    note = client.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": owner["csrfToken"]},
+        json={
+            "quote": quote, "section": OVERWRITE_HEADING, "content": "工作稿旧批注",
+            "source": "manual", "revision": case["revision"],
+            "from": start, "to": start + len(quote),
+            "quoteHash": hashlib.sha256(quote.encode()).hexdigest(),
+        },
     )
-    assert rolled.status_code == 200 and rolled.json()["case"]["title"] == "快照基线"
-    assert rolled.json()["case"]["availableActions"] == ["submit", "snapshot", "rollback"]
+    assert note.status_code == 201
+    return note.json()
+
+
+def _version_annotation(client, admin: dict, started: dict) -> dict:
+    note = client.post(
+        f"/api/cases/{started['case']['id']}/annotations",
+        headers={"X-CSRF-Token": admin["csrfToken"]},
+        json={
+            "quote": "工作稿正文", "section": OVERWRITE_HEADING,
+            "content": "待审版本批注", "source": "admin",
+        },
+    )
+    assert note.status_code == 201
+    return note.json()
+
+
+def _other_case_version(client, auth: dict) -> dict:
+    other = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "另一案例", "document": paragraph_document("其他案例正文")},
+    ).json()
+    return _transition_json(client, other["id"], auth["csrfToken"], "submit", other)
+
+
+def test_overwrite_rejects_cross_case_and_unknown_targets(client: TestClient) -> None:
+    auth = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+    submitted = _other_case_version(client, auth)
+    cross_case = _overwrite_version(client, auth, case, case, submitted["version"])
+    unknown = _transition(
+        client, case["id"], auth["csrfToken"], "overwrite", case, targetId="cv-missing",
+    )
+
+    assert cross_case.status_code == 404
+    assert unknown.status_code == 404
+    current = client.get("/api/cases/c-draft-1").json()
+    assert current["revision"] == case["revision"]
+    assert current["document"] == case["document"]
+
+
+def test_overwrite_requires_owner_draft_and_current_revision(client: TestClient) -> None:
+    owner = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+    admin = login(client).json()
+    stranger = _transition(client, case["id"], admin["csrfToken"], "overwrite", case, targetId="cv-x")
+    assert stranger.status_code == 403
+
+    owner = login(client, "user", "user123").json()
+    stale = _transition(
+        client, case["id"], owner["csrfToken"], "overwrite",
+        {**case, "revision": case["revision"] + 9}, targetId="cv-x",
+    )
+    assert stale.status_code == 409
+
+    submitted = _transition_json(client, case["id"], owner["csrfToken"], "submit", case)
+    frozen = _transition(
+        client, case["id"], owner["csrfToken"], "overwrite", submitted["case"], targetId="cv-x",
+    )
+    assert frozen.status_code == 409
+
+
+def test_removed_manual_version_commands_are_rejected(client: TestClient) -> None:
+    auth = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+
+    assert _transition(client, case["id"], auth["csrfToken"], "snapshot", case).status_code == 422
+    assert _transition(client, case["id"], auth["csrfToken"], "rollback", case).status_code == 422
 
 
 def test_admin_can_hide_and_restore_the_same_published_version(
@@ -350,7 +502,7 @@ def test_reviewer_returns_without_annotations_and_owner_sees_reason(
     assert view["lastReview"]["action"] == "reject"
     assert view["lastReview"]["reasonType"] == "证据不足"
     assert view["lastReview"]["summary"] == ""
-    assert view["availableActions"] == ["submit", "snapshot", "rollback"]
+    assert view["availableActions"] == ["submit", "overwrite"]
 
 
 def _review_annotation(client, admin, case):

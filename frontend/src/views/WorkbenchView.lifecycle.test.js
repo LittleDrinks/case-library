@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, test, vi } from "vitest";
 import WorkbenchView from "./WorkbenchView.vue";
+import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
 import { useConversationSources } from "../composables/useConversationSources.js";
 import { api } from "../api.js";
@@ -15,6 +16,26 @@ const AssistantRailProbe = {
     <b data-testid="probe-count">{{ sources.length }}</b>
     <button data-testid="probe-toggle" type="button" @click="toggle({ sourceType: 'case', id: 'probe-src' })">勾选</button>
     <button data-testid="probe-refresh" type="button" @click="$emit('case-refreshed', { id: 'case-1', publishedVersionId: 'pub-v2', revision: 4 })">刷新版本</button>
+  </div>`,
+};
+
+function versionFixture(overrides = {}) {
+  return {
+    id: "cv-9", number: 1, kind: "submission", title: "首次提交",
+    createdAt: "2026-09-01T08:00:00Z",
+    document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "冻结版本正文" }] }] },
+    metadata: { course: "思政课" },
+    ...overrides,
+  };
+}
+
+const VersionRailProbe = {
+  name: "VersionRailProbe",
+  setup() {
+    return { version: versionFixture() };
+  },
+  template: `<div data-testid="version-probe">
+    <button data-testid="rail-open" type="button" @click="$emit('open-version', version)">打开版本</button>
   </div>`,
 };
 
@@ -35,6 +56,7 @@ vi.mock("../api.js", () => ({
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
+    caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
   },
 }));
 
@@ -281,4 +303,97 @@ test("读者版本变化时 provider 清理对话上下文", async () => {
   await wrapper.get('[data-testid="probe-refresh"]').trigger("click");
   await flushPromises();
   expect(wrapper.get('[data-testid="probe-count"]').text()).toBe("0");
+});
+
+function renderWithRail(rail) {
+  return mount(WorkbenchView, {
+    global: {
+      stubs: {
+        SiteHeader: true, CanvasEditor: true, OutlinePanel: true, teleport: true,
+        AssistantRail: rail, RouterLink: { template: "<a><slot /></a>" },
+      },
+    },
+  });
+}
+
+async function renderVersionWorkbench() {
+  api.getCase.mockResolvedValue(caseFixture());
+  const wrapper = renderWithRail(VersionRailProbe);
+  await flushPromises();
+  return wrapper;
+}
+
+test("首 Tab 固定当前教师稿，历史版本以只读 Tab 打开且可关闭", async () => {
+  const wrapper = await renderVersionWorkbench();
+  expect(wrapper.get("button.draft-tab").text()).toContain("当前教师稿");
+  expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();
+
+  await wrapper.get('[data-testid="rail-open"]').trigger("click");
+  expect(wrapper.find("textarea.document-title").exists()).toBe(false);
+  expect(wrapper.text()).toContain("首次提交");
+  const editor = wrapper.findComponent({ name: "CanvasEditor" });
+  expect(editor.props("editable")).toBe(false);
+  expect(editor.props("document")).toEqual(versionFixture().document);
+
+  await wrapper.get('button[aria-label="关闭 v1 · 首次提交"]').trigger("click");
+  expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();
+});
+
+async function openOverwriteDialog(wrapper) {
+  await wrapper.get('[data-testid="rail-open"]').trigger("click");
+  await wrapper.get("button.overwrite-entry").trigger("click");
+  return wrapper.getComponent(OverwriteConfirmDialog);
+}
+
+test("确认覆盖调用 overwrite 接口并回首 Tab 继续编辑", async () => {
+  api.lifecycleCase.mockResolvedValue({
+    case: caseFixture({ revision: 9, title: "投稿标题" }), version: {}, event: {},
+  });
+  const wrapper = await renderVersionWorkbench();
+  const dialog = await openOverwriteDialog(wrapper);
+  expect(dialog.props("versionLabel")).toContain("v1 · 首次提交");
+  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await flushPromises();
+
+  expect(api.lifecycleCase).toHaveBeenCalledWith(
+    "case-1",
+    { command: "overwrite", revision: 3, targetId: "cv-9", submittedVersionId: undefined },
+    "csrf-token",
+  );
+  expect(wrapper.get("textarea.document-title").element.value).toBe("投稿标题");
+});
+
+test("取消覆盖不发任何请求且停留在只读 Tab", async () => {
+  const wrapper = await renderVersionWorkbench();
+  const dialog = await openOverwriteDialog(wrapper);
+  await dialog.get('button[aria-label="取消覆盖"]').trigger("click");
+  await flushPromises();
+
+  expect(api.lifecycleCase).not.toHaveBeenCalled();
+  expect(wrapper.find("textarea.document-title").exists()).toBe(false);
+});
+
+test("覆盖冲突时关闭对话框、提示并回刷服务端状态", async () => {
+  api.lifecycleCase.mockRejectedValue(Object.assign(new Error("案例已在其他位置更新"), { status: 409 }));
+  api.getCase.mockResolvedValue(caseFixture({ revision: 7 }));
+  const wrapper = await renderVersionWorkbench();
+  const dialog = await openOverwriteDialog(wrapper);
+  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.findComponent(OverwriteConfirmDialog).props("open")).toBe(false);
+  expect(wrapper.text()).toContain("案例已在其他位置更新");
+  expect(api.getCase).toHaveBeenCalledTimes(2);
+  expect(wrapper.find("textarea.document-title").exists()).toBe(false);
+  await wrapper.get("button.draft-tab").trigger("click");
+  expect(wrapper.get("textarea.document-title").element.value).toBe("示例案例");
+  expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();
+});
+
+test("读者模式不渲染版本 Tab 栏", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(caseFixture({ publicationStatus: "public" }));
+  const wrapper = renderWithRail(VersionRailProbe);
+  await flushPromises();
+  expect(wrapper.find("button.draft-tab").exists()).toBe(false);
 });

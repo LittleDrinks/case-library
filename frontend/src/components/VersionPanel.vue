@@ -1,70 +1,33 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { History, RotateCcw, Save } from "@lucide/vue";
+import { History } from "@lucide/vue";
 import { api } from "../api.js";
 
-const props = defineProps({
-  caseRecord: { type: Object, required: true },
-  user: { type: Object, required: true },
-  editable: { type: Boolean, required: true },
-  beforeMutation: { type: Function, required: true },
-});
-const emit = defineEmits(["case-refreshed", "case-restored", "mutation-state"]);
-const history = ref({ versions: [], snapshots: [] });
+const props = defineProps({ caseRecord: { type: Object, required: true } });
+const emit = defineEmits(["open-version"]);
+const versions = ref([]);
 const loading = ref(true);
 const error = ref("");
-const busy = ref("");
-const entries = computed(() => orderedEntries());
 
-function label(entry) {
-  if (entry.kind === "submission") return `提交版本 v${entry.number}`;
-  return entry.kind === "manual" ? "手动快照" : "回滚前快照";
-}
-
-function orderedEntries() {
-  return [...history.value.versions, ...history.value.snapshots]
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-}
+const timeline = computed(() => [...versions.value].sort((left, right) => right.number - left.number));
 
 function time(value) {
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
 }
 
 async function loadHistory() {
   loading.value = true;
   error.value = "";
   try {
-    history.value = await api.caseHistory(props.caseRecord.id);
+    const history = await api.caseHistory(props.caseRecord.id);
+    versions.value = history.versions || [];
   } catch (caught) {
     error.value = caught.message || "版本历史加载失败";
   } finally {
     loading.value = false;
   }
-}
-
-async function run(command, targetId) {
-  if (busy.value) return;
-  busy.value = command;
-  emit("mutation-state", true);
-  error.value = "";
-  try {
-    const revision = await props.beforeMutation();
-    const result = await api.lifecycleCase(props.caseRecord.id, {
-      command, revision, targetId,
-    }, props.user.csrfToken);
-    emit(command === "rollback" ? "case-restored" : "case-refreshed", result.case);
-    await loadHistory();
-  } catch (caught) {
-    error.value = caught.message || "版本操作失败";
-  } finally {
-    busy.value = "";
-    emit("mutation-state", false);
-  }
-}
-
-function rollback(entry) {
-  if (!window.confirm(`回滚到${label(entry)}？当前内容会自动保存为回滚前快照。`)) return;
-  void run("rollback", entry.id);
 }
 
 onMounted(loadHistory);
@@ -73,30 +36,27 @@ onMounted(loadHistory);
 <template>
   <section class="assistant-panel version-panel">
     <div class="panel-head version-head">
-      <b>版本历史</b>
-      <button v-if="editable || busy" type="button" :disabled="Boolean(busy)" @click="run('snapshot')">
-        <Save :size="14" />创建快照
-      </button>
+      <b>版本时间线</b>
     </div>
     <div class="panel-scroll">
+      <p class="version-note">提交审核时创建版本；普通编辑与保存不新增版本。</p>
       <div v-if="loading" class="panel-empty"><History :size="24" /><span>正在加载版本</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
         <span>{{ error }}</span><button type="button" @click="loadHistory">重试</button>
       </div>
-      <div v-else-if="!entries.length" class="panel-empty"><History :size="24" /><span>暂无版本</span></div>
-      <ul v-else class="version-list">
-        <li v-for="entry in entries" :key="entry.id">
-          <div><b>{{ label(entry) }}</b><span>{{ time(entry.createdAt) }}</span></div>
-          <button
-            v-if="editable || busy"
-            type="button"
-            :aria-label="`回滚到${label(entry)}`"
-            :title="`回滚到${label(entry)}`"
-            :disabled="Boolean(busy)"
-            @click="rollback(entry)"
-          ><RotateCcw :size="15" /></button>
+      <p v-else-if="!timeline.length" class="version-note">还没有历史版本，投稿后会出现在这里。</p>
+      <ol v-else class="version-timeline">
+        <li v-for="version in timeline" :key="version.id">
+          <span class="timeline-dot" aria-hidden="true" />
+          <div class="version-meta">
+            <small>{{ time(version.createdAt) }}</small>
+            <b>v{{ version.number }} · {{ version.title }}</b>
+          </div>
+          <button type="button" :aria-label="`打开 v${version.number} 版本`" @click="emit('open-version', version)">
+            打开
+          </button>
         </li>
-      </ul>
+      </ol>
     </div>
   </section>
 </template>
