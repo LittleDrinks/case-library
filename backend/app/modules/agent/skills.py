@@ -150,7 +150,7 @@ async def propose_document(
     ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
     """暂存整篇 AI 生成稿；运行成功后才落为只读版本。"""
-    if not getattr(ctx.deps, "full_generation_allowed", False):
+    if not ctx.deps.full_generation_allowed:
         raise ModelRetry("本条消息未请求完整生成，不能创建 AI 版本")
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
