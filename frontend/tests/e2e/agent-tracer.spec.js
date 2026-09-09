@@ -92,11 +92,11 @@ async function expandSearchTool(page) {
 }
 
 async function selectPublishedSkill(page) {
-  const picker = page.getByLabel("选择 Skill");
-  await expect(picker).toBeVisible();
-  await expect(picker.locator(`option[value="${SKILL_ID}"]`)).toHaveCount(1, { timeout: 30_000 });
-  await picker.selectOption(SKILL_ID);
-  await expect(picker).toHaveValue(SKILL_ID);
+  await page.getByTestId("skill-picker-toggle").click();
+  const option = page.locator(".skill-popover [data-testid='skill-option']").filter({ hasText: SKILL_ID });
+  await expect(option).toHaveCount(1, { timeout: 30_000 });
+  await option.first().click();
+  await expect(page.getByTestId("composer-skill-block")).toContainText(SKILL_ID);
 }
 
 async function selectCanvasTarget(page) {

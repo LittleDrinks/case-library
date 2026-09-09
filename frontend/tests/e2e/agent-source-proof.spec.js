@@ -85,11 +85,12 @@ async function unmountMaterial(page, caseId, materialId) {
 }
 
 async function selectSingleSource(page) {
-  await page.locator(".agent-source-picker-toggle").click();
-  const option = page.locator(".agent-source-option input");
+  await page.getByTestId("agent-source-picker-toggle").click();
+  const option = page.locator("[data-testid='agent-source-option'] input");
   await expect(option).toHaveCount(1);
   await option.first().check();
-  await expect(page.locator(".agent-source-chip")).toHaveCount(1);
+  await expect(page.locator(".context-strip .context-chip")).toHaveCount(1);
+  await page.locator(".source-popover .picker-bottom button").filter({ hasText: "完成" }).click();
 }
 
 async function sendQuestion(page, text) {
