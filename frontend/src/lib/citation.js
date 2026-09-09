@@ -1,4 +1,4 @@
-import { Extension, Mark, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, getMarkRange, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
@@ -37,8 +37,55 @@ export const CitationMark = Mark.create({
   },
 });
 
-export function sourceKey(source) {
-  return `${source.sourceType}:${source.id}`;
+// 按首次出现顺序去重的引用键；用于保存成功后判断资料区编号是否需要重取。
+export function citationSignature(document) {
+  const refs = [];
+  const walk = (node) => {
+    const mark = node.marks?.find((item) => item.type === "citation");
+    if (mark) {
+      const key = `${mark.attrs.sourceType}:${mark.attrs.sourceId}`;
+      if (!refs.includes(key)) refs.push(key);
+    }
+    node.content?.forEach(walk);
+  };
+  walk(document || {});
+  return refs.join("|");
+}
+
+// 空选区时 getMarkRange 兼容 inclusive:false 锚点的游标边界；有选区时检查范围内引用。
+export function citationRangeAt(state) {
+  const type = state.schema.marks.citation;
+  if (!type) return null;
+  const { selection } = state;
+  if (!selection.empty) {
+    let range = null;
+    state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+      if (!range && node.isText && node.marks.some((mark) => mark.type === type)) {
+        range = { from: pos, to: pos + node.nodeSize };
+      }
+    });
+    return range;
+  }
+  return getMarkRange(selection.$from, type) || null;
+}
+
+function anchorOnly(document, range) {
+  const text = document.textBetween(range.from, range.to, "\u0000", "\u0000");
+  return text !== "" && [...text].every((char) => char === "\u200B");
+}
+
+// 取消引用：纯锚点直接删除锚点本身；引用文字仅去标记，保留正文。
+export function removeCitation(editor) {
+  const { state } = editor;
+  if (!citationRangeAt(state)) return false;
+  const { selection } = state;
+  const range = selection.empty
+    ? getMarkRange(selection.$from, state.schema.marks.citation)
+    : { from: selection.from, to: selection.to };
+  if (anchorOnly(state.doc, range)) {
+    return editor.chain().focus().deleteRange(range).run();
+  }
+  return editor.chain().focus().unsetMark("citation", { extendEmptyMarkRange: true }).run();
 }
 
 function citationMarkKey(mark) {

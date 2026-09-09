@@ -177,6 +177,7 @@ function replaceDocument(document) {
   if (current === JSON.stringify(document)) return;
   selectionBlocked = true;
   clearSelection();
+  cursorPlaced.value = false;
   editor.value.commands.setContent(document, false);
 }
 
@@ -207,14 +208,13 @@ function insertCitation(source) {
   const { selection } = editor.value.state;
   const attrs = { sourceType: source.sourceType, sourceId: source.id };
   if (!selection.empty) {
-    editor.value.chain().focus().setMark("citation", attrs).run();
-    return "linked";
+    return editor.value.chain().focus().setMark("citation", attrs).run() ? "linked" : "unpositioned";
   }
   if (!cursorPlaced.value || !selection.$from.parent.inlineContent) return "unpositioned";
-  editor.value.chain().focus().insertContent({
+  const inserted = editor.value.chain().focus().insertContent({
     type: "text", text: "\u200B", marks: [{ type: "citation", attrs }],
   }).run();
-  return "inserted";
+  return inserted ? "inserted" : "unpositioned";
 }
 
 defineExpose({ recaptureSelection, insertCitation });

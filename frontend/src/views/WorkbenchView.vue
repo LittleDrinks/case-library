@@ -14,6 +14,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { citationSignature } from "../lib/citation.js";
 import { session } from "../session.js";
 
 const route = useRoute();
@@ -154,7 +155,16 @@ async function persist(payload) {
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
+  await syncSourcesAfterSave(payload);
   return saved;
+}
+
+// 资料区编号以保存成功的正文为准；失败不刷新，也不另立第二真源。
+async function syncSourcesAfterSave(payload) {
+  const signature = citationSignature(payload.document);
+  if (signature === sourcesSignature.value) return;
+  sourcesSignature.value = signature;
+  await loadSources();
 }
 
 function invalidateSelection() {
@@ -189,6 +199,7 @@ async function loadAnnotations() {
 
 const sourcesLoading = ref(false);
 const sourcesError = ref("");
+const sourcesSignature = ref("");
 
 async function loadSources() {
   sourcesLoading.value = true;
@@ -231,6 +242,7 @@ async function loadCase() {
     const current = await fetchCase();
     applyCase(current, !initial);
     await Promise.all([loadAnnotations(), loadSources()]);
+    sourcesSignature.value = citationSignature(document.value);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {

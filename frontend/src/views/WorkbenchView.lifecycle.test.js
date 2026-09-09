@@ -193,6 +193,49 @@ test("审核模式按钮来自服务端动作而非本地状态推断", async ()
   expect(wrapper.find('button[aria-label="通过发布"]').exists()).toBe(false);
 });
 
+function renderWorkbenchWithEditor() {
+  return mount(WorkbenchView, {
+    global: { stubs: {
+      SiteHeader: true, OutlinePanel: true, teleport: true,
+      AssistantRail: true, RouterLink: { template: "<a><slot /></a>" },
+    } },
+  });
+}
+
+async function renderDraftWorkspace() {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.saveCase.mockResolvedValue({ revision: 4 });
+  api.listSources.mockResolvedValue({ entries: [] });
+  const wrapper = renderWorkbenchWithEditor();
+  await flushPromises();
+  return wrapper;
+}
+
+async function insertAnchorFromSources(wrapper, canvas) {
+  await wrapper.get(".canvas-editor").trigger("focus");
+  return canvas.vm.insertCitation({ sourceType: "case", id: "src-1", number: 1, title: "引用案例" });
+}
+
+test("引用变化保存成功后才重取资料区编号，普通正文改动不重取", async () => {
+  vi.useFakeTimers();
+  try {
+    const wrapper = await renderDraftWorkspace();
+    expect(api.listSources).toHaveBeenCalledTimes(1);
+    const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+    expect(await insertAnchorFromSources(wrapper, canvas)).toBe("inserted");
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.saveCase).toHaveBeenCalledTimes(1);
+    expect(api.listSources).toHaveBeenCalledTimes(2);
+    canvas.vm.editor.commands.insertContent("补充");
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.saveCase).toHaveBeenCalledTimes(2);
+    expect(api.listSources).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 function rejectBody() {
   return {
     command: "reject", revision: 3, reasonType: "结构不完整", submittedVersionId: "cv-1",

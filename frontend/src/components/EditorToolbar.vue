@@ -1,5 +1,6 @@
 <script setup>
 import { Bold, Eraser, Heading2, List, ListOrdered, Pilcrow, Redo2, Undo2 } from "@lucide/vue";
+import { citationRangeAt, removeCitation } from "../lib/citation.js";
 
 const props = defineProps({
   editor: { type: Object, default: null },
@@ -16,6 +17,11 @@ const tools = [
 function active(editor, name) {
   if (name === "heading") return editor?.isActive("heading", { level: 2 });
   return editor?.isActive(name);
+}
+
+// can().unsetMark 空选区恒真，不能作为启用判断；以真实引用区间为准。
+function hasCitation(editor) {
+  return Boolean(editor && citationRangeAt(editor.state));
 }
 </script>
 
@@ -37,8 +43,8 @@ function active(editor, name) {
       type="button"
       title="取消当前引用"
       aria-label="取消当前引用"
-      :disabled="!editor.can().unsetMark('citation')"
-      @mousedown.prevent="editor.chain().focus().unsetMark('citation').run()"
+      :disabled="!hasCitation(editor)"
+      @mousedown.prevent="removeCitation(editor)"
     >
       <Eraser :size="15" aria-hidden="true" />
     </button>
