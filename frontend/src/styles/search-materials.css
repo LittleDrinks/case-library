@@ -149,9 +149,9 @@
 .material-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-width: 0; }
 .material-detail-main { min-width: 0; padding: 28px 30px 38px; }
 .material-detail-summary { margin-bottom: 26px; padding: 18px 20px; border-left: 3px solid var(--brand); background: var(--paper); }
-.material-detail-summary h2, .material-detail-excerpt h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font: 650 17px/1.5 var(--serif); }
-.material-detail-summary p, .material-detail-excerpt p { margin: 0; color: var(--ink-2); line-height: 1.9; overflow-wrap: anywhere; white-space: pre-wrap; }
-.material-detail-excerpt p { font-size: 15px; }
+.material-detail-summary h2, .material-detail-excerpt > h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font: 650 17px/1.5 var(--serif); }
+.material-detail-summary p { margin: 0; color: var(--ink-2); line-height: 1.9; overflow-wrap: anywhere; white-space: pre-wrap; }
+.material-detail-excerpt .markdown-body { font-size: 15px; }
 .material-detail-empty { margin: 0; color: var(--ink-3); }
 .material-detail-info { min-width: 0; padding: 28px 24px; border-left: 1px solid var(--line); background: var(--paper); }
 .material-detail-info h2 { margin: 0 0 16px; font: 650 17px/1.5 var(--serif); }
@@ -214,3 +214,5 @@
   .material-detail-main { padding: 22px 18px 28px; }
   .material-detail-info { padding: 22px 18px; border-top: 1px solid var(--line); border-left: 0; }
 }
+
+.material-download.labeled { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: auto; min-height: 42px; padding: 0 16px; white-space: nowrap; background: var(--brand); color: #fff; }

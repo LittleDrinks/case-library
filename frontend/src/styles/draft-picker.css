@@ -1,3 +1,4 @@
+.review-decision-dialog.collect-source-dialog { width: min(800px, 100%); }
 /* Issue 210：加入我的案例草稿选择弹窗（只服务 AddSourceToCase，不进入全局 workbench 布局）。 */
 .collect-source-dialog form { gap: 12px; }
 .collect-source-search {

@@ -2,9 +2,10 @@ import MarkdownIt from "markdown-it";
 
 export const CITATION_PATTERN = /〔([^〔〕]+)〕|\[([^\[\]]+)\]/g;
 
-// 安全基线：html:false 把原文中的内联 HTML 全部转义为纯文本，不进入 DOM；
+// html:false 保持 HTML 转义，仅单独识别无属性的换行标签。
 // markdown-it 内置 validateLink 会拦截 javascript:、vbscript:、file: 等危险协议链接。
 const parser = new MarkdownIt({ html: false, breaks: true });
+parser.inline.ruler.before("html_inline", "safe_break", safeBreak);
 wrapTables(parser);
 openExternalLinks(parser);
 // 引用标记按官方架构在 token 层处理：block/inline 解析完成后，只转换正文
@@ -18,6 +19,14 @@ parser.renderer.rules.citation = (tokens, index) => {
   const order = Number(token.content);
   return `<a${parser.renderer.renderAttrs(token)} class="ai-marker" data-citation-order="${order}">〔${order}〕</a>`;
 };
+
+function safeBreak(state, silent) {
+  const found = /^<br\s*\/?>/i.exec(state.src.slice(state.pos));
+  if (!found) return false;
+  if (!silent) state.push("hardbreak", "br", 0);
+  state.pos += found[0].length;
+  return true;
+}
 
 function resolveCitations(state) {
   const resolve = state.env?.resolve;

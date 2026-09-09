@@ -133,3 +133,11 @@ test("引用标记正则可全局枚举两种形式", () => {
   const matches = [..."见〔1〕与[kn]。".matchAll(CITATION_PATTERN)].map((match) => match[1] ?? match[2]);
   expect(matches).toEqual(["1", "kn"]);
 });
+
+test("安全换行支持表格且保留代码、转义及带属性标签", () => {
+  const html = renderMarkdown("| 内容 |\n| --- |\n| 甲<br>乙<BR/>丙<br />丁 |\n\n`<br>` \\<br> <br onclick=alert(1)>");
+  expect(html.replace(/\n/g, "")).toContain("甲<br>乙<br>丙<br>丁");
+  expect(html).toContain("<code>&lt;br&gt;</code>");
+  expect(html).toContain("&lt;br&gt;");
+  expect(html).not.toContain("<br onclick");
+});

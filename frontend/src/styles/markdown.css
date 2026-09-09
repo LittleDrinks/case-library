@@ -1,5 +1,5 @@
 /* 检索 AI 摘要与工作台回答共用的 Markdown 渲染样式 */
-.markdown-body { overflow-wrap: anywhere; }
+.markdown-body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body blockquote,
 .markdown-body pre, .markdown-body hr,
@@ -21,7 +21,7 @@
 .markdown-body code { padding: 1px 5px; border-radius: 4px; background: var(--line-soft); font-size: .92em; }
 .markdown-body pre { padding: 8px 10px; overflow-x: auto; border-radius: 6px; background: var(--line-soft); }
 .markdown-body pre code { padding: 0; background: none; }
-.markdown-body .md-table-scroll { max-width: 100%; overflow-x: auto; }
+.markdown-body .md-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: auto; }
 .markdown-body table { border-collapse: collapse; }
 .markdown-body th, .markdown-body td { min-width: 5em; padding: 4px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .markdown-body th { background: var(--paper); }
