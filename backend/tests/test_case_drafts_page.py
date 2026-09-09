@@ -61,13 +61,17 @@ def test_draft_page_is_bounded_and_ordered_by_update_time(client: TestClient) ->
     assert all(left >= right for left, right in zip(updated, updated[1:]))
 
 
-def test_draft_page_tie_breaks_identical_timestamps_without_loss(client: TestClient) -> None:
-    auth = login(client)
+def create_same_time_drafts(client: TestClient, auth: dict) -> None:
     for index in range(45):
         created = client.post(
             "/api/cases", json={"title": f"同刻草稿 {index:02d}"}, headers=headers(auth)
         )
         assert created.status_code == 200
+
+
+def test_draft_page_tie_breaks_identical_timestamps_without_loss(client: TestClient) -> None:
+    auth = login(client)
+    create_same_time_drafts(client, auth)
     database = client.app.state.database
     database.cases.update_many(
         {"ownerId": "u-user-demo", "workflowStatus": "draft"},
