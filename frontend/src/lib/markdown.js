@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import taskLists from "markdown-it-task-lists";
 
 export const CITATION_PATTERN = /〔([^〔〕]+)〕|\[([^\[\]]+)\]/g;
 
@@ -6,6 +7,8 @@ export const CITATION_PATTERN = /〔([^〔〕]+)〕|\[([^\[\]]+)\]/g;
 // markdown-it 内置 validateLink 会拦截 javascript:、vbscript:、file: 等危险协议链接。
 const parser = new MarkdownIt({ html: false, breaks: true });
 parser.inline.ruler.before("html_inline", "safe_break", safeBreak);
+parser.use(taskLists);
+parser.core.ruler.after("inline", "artifact_links", removeArtifactLinks);
 wrapTables(parser);
 openExternalLinks(parser);
 // 引用标记按官方架构在 token 层处理：block/inline 解析完成后，只转换正文
@@ -26,6 +29,21 @@ function safeBreak(state, silent) {
   if (!silent) state.push("hardbreak", "br", 0);
   state.pos += found[0].length;
   return true;
+}
+
+function removeArtifactLinks(state) {
+  for (const block of state.tokens) {
+    const children = block.children || [];
+    let remove = false;
+    for (const token of children) {
+      if (token.type === "link_open") remove = /^(?:artifact[-:]|#artifact[-:])/i.test(token.attrGet("href") || "");
+      if (remove && ["link_open", "link_close"].includes(token.type)) {
+        remove = token.type !== "link_close";
+        token.type = "text";
+        token.content = "";
+      }
+    }
+  }
 }
 
 function resolveCitations(state) {
