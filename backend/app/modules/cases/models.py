@@ -61,8 +61,7 @@ class LifecycleCommand(BaseModel):
         "hide",
         "restore",
         "reopen",
-        "snapshot",
-        "rollback",
+        "overwrite",
     ]
     revision: int = Field(ge=1)
     submittedVersionId: str | None = None

@@ -10,6 +10,7 @@ const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
   sources: { type: Array, default: () => [] },
   sourcesLoading: { type: Boolean, default: false },
@@ -19,13 +20,13 @@ const props = defineProps({
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
-  beforeVersionMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits([
-  "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
+  "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
+  "open-version",
 ]);
 
 const tabs = [
@@ -58,8 +59,11 @@ function select(tab) {
       </button>
     </nav>
 
+    <div v-if="historical && active === 'ai'" class="assistant-panel panel-empty">
+      <span>历史版本只读，请先覆盖当前教师稿后使用 AI</span>
+    </div>
     <AgentChatPanel
-      v-if="active === 'ai' && (!readOnly || user)"
+      v-else-if="active === 'ai' && (!readOnly || user)"
       :key="versionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
@@ -102,12 +106,7 @@ function select(tab) {
     <VersionPanel
       v-else-if="active === 'history'"
       :case-record="caseRecord"
-      :user="user"
-      :editable="editable"
-      :before-mutation="beforeVersionMutation"
-      @case-refreshed="emit('case-refreshed', $event)"
-      @case-restored="emit('case-restored', $event)"
-      @mutation-state="emit('mutation-state', $event)"
+      @open-version="emit('open-version', $event)"
     />
   </aside>
 </template>

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 OWNER_COMMANDS = {
-    "draft": ("submit", "snapshot", "rollback"),
+    "draft": ("submit", "overwrite"),
     "pending": ("withdraw",),
     "reviewing": ("withdraw",),
     "published": ("reopen",),

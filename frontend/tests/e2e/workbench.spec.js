@@ -131,12 +131,6 @@ async function expectMutationLocked(page, button, label) {
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
 }
 
-async function createManualSnapshot(page) {
-  await page.getByRole("button", { name: "版本历史" }).click();
-  await page.getByRole("button", { name: "创建快照" }).click();
-  await expect(page.getByText("手动快照")).toBeVisible();
-}
-
 async function crashDraftValue(page, caseId) {
   const auth = await (await page.context().request.get("/api/auth/session")).json();
   const key = `case-library:crash-draft:${auth.user.id}:${caseId}`;
@@ -605,40 +599,85 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
   await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
 });
 
-test("作者创建工作快照并回滚正文", async ({ page }) => {
-  await login(page);
-  const marker = `版本快照 ${Date.now()}`;
-  const created = await createCase(page.context().request, marker);
-  await page.goto(`/#/workbench/${created.id}`);
+async function openHistoryTimeline(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
-  await page.getByRole("button", { name: "创建快照" }).click();
-  await expect(page.getByText("手动快照")).toBeVisible();
+  await page.getByRole("button", { name: /^打开 v1 版本/ }).click();
+}
 
-  await page.getByLabel("案例标题").fill("回滚前修改");
+async function stageFrozenVersion(page, request, marker) {
+  const created = await createCase(request, marker);
+  await lifecycle(request, created.id, "submit");
+  await lifecycle(request, created.id, "withdraw");
+  await page.goto(`/#/workbench/${created.id}`);
+  await openHistoryTimeline(page);
+  return created;
+}
+
+async function overwriteDialogStep(page, action) {
+  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
+  await page.getByRole("button", { name: action }).click();
+}
+
+async function expectReadOnlyVersionTab(page, marker) {
+  const chip = page.getByRole("tab", { name: `v1 · ${marker}` });
+  await expect(chip).toBeVisible();
+  await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveCount(0);
+}
+
+async function editDraftAndOpenHistory(page, marker) {
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
+  await page.getByLabel("案例标题").fill(`${marker} 已改`);
   await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "回滚到手动快照" }).click();
+  await page.reload();
+  await openHistoryTimeline(page);
+}
 
+test("作者从版本时间线打开只读 Tab，取消与确认覆盖行为正确", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const marker = `版本覆盖 ${Date.now()}`;
+  await stageFrozenVersion(page, request, marker);
+
+  await editDraftAndOpenHistory(page, marker);
+  await expectReadOnlyVersionTab(page, marker);
+
+  await overwriteDialogStep(page, "取消覆盖");
+  await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
+
+  await overwriteDialogStep(page, "确认覆盖");
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
-  await expect(page.getByText("回滚前快照")).toBeVisible();
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
 });
 
-test("回滚请求在途锁定编辑器且按钮立即进入 busy", async ({ page }) => {
+test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async ({ page }) => {
   await login(page);
-  const marker = `回滚在途 ${Date.now()}`;
-  const created = await createCase(page.context().request, marker);
-  await page.goto(`/#/workbench/${created.id}`);
-  await createManualSnapshot(page);
-  const rollback = page.getByRole("button", { name: "回滚到手动快照" });
-  const held = await holdLifecycle(page, created.id, "rollback");
-  await page.getByLabel("案例标题").fill(`${marker} 已编辑`);
-  page.once("dialog", (dialog) => dialog.accept());
-  await rollback.click();
+  const request = page.context().request;
+  const marker = `刷新版本 ${Date.now()}`;
+  await stageFrozenVersion(page, request, marker);
+  await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  await openHistoryTimeline(page);
+  await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+});
+
+test("覆盖请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const created = await stageFrozenVersion(page, request, `覆盖在途 ${Date.now()}`);
+  const held = await holdLifecycle(page, created.id, "overwrite");
+  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
+  const confirm = page.getByRole("button", { name: "确认覆盖" });
+  await confirm.click();
   try {
-    await expectMutationLocked(page, rollback);
+    await expect(confirm).toBeDisabled();
+    await expect(confirm).toHaveText("处理中");
     await held.started;
   } finally { held.release(); }
-  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
-  await expect(page.getByText("回滚前快照")).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
   await expect.poll(() => crashDraftValue(page, created.id)).toBeNull();
 });

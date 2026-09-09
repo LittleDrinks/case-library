@@ -199,24 +199,15 @@ def _withdraw(client, csrf: str, case_id: str, submitted: dict) -> dict:
     )
 
 
-def _snapshot(client, csrf: str, case_id: str) -> dict:
-    return _transition(
-        client,
-        csrf,
-        case_id,
-        {"command": "snapshot", "revision": _revision(client, case_id)},
-    )["snapshot"]
-
-
-def _rollback(client, csrf: str, case_id: str, snapshot: dict) -> dict:
+def _overwrite(client, csrf: str, case_id: str, version: dict) -> dict:
     return _transition(
         client,
         csrf,
         case_id,
         {
-            "command": "rollback",
+            "command": "overwrite",
             "revision": _revision(client, case_id),
-            "targetId": snapshot["id"],
+            "targetId": version["id"],
         },
     )
 
@@ -255,16 +246,18 @@ def test_versions_keep_their_attachment_snapshots() -> None:
     )
 
 
-def test_rollback_restores_the_snapshot_attachment_and_blob() -> None:
+def test_overwrite_restores_the_version_attachment_and_blob() -> None:
     author, csrf = _login("user", "user123")
     case = _create_case(author, csrf)
     attachment = _upload(author, csrf, case["id"], "private")
-    snapshot = _snapshot(author, csrf, case["id"])
+    submitted = _submit(author, csrf, case)
+    withdrawn = _withdraw(author, csrf, case["id"], submitted)
+    version = submitted["version"]
     path = f"/api/cases/{case['id']}/attachments/{attachment['id']}"
-    _delete(author, csrf, case["id"], attachment["id"])
+    _delete(author, csrf, withdrawn["case"]["id"], attachment["id"])
     assert (
-        author.get(f"{path}/content?versionId={snapshot['id']}").content == b"private"
+        author.get(f"{path}/content?versionId={version['id']}").content == b"private"
     )
-    rolled = _rollback(author, csrf, case["id"], snapshot)
-    assert rolled["case"]["revision"] == snapshot["sourceRevision"] + 2
+    overwritten = _overwrite(author, csrf, case["id"], version)
+    assert overwritten["case"]["revision"] == version["sourceRevision"] + 4
     assert author.get(f"{path}/content").content == b"private"

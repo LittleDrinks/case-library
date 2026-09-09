@@ -190,14 +190,15 @@ def test_author_can_list_an_owned_private_material(client: TestClient) -> None:
     assert mounted in client.get("/api/cases/c-draft-1/materials").json()
 
 
-def test_snapshot_rollback_restores_material_relations(client: TestClient) -> None:
+def test_overwrite_restores_material_relations(client: TestClient) -> None:
     auth = login(client)
     first = mount(client, auth, "m-kcsz")
-    snapshot = transition(client, auth, "snapshot")["snapshot"]
+    submitted = transition(client, auth, "submit")["version"]
+    transition(client, auth, "withdraw")
     unmount(client, auth, first["id"])
     mount(client, auth, "m-kxjsh")
     before = outbox_sequence(client, "material:m-kxjsh")
-    transition(client, auth, "rollback", targetId=snapshot["id"])
+    transition(client, auth, "overwrite", targetId=submitted["id"])
     rows = client.get("/api/cases/c-draft-1/materials").json()
     assert [row["id"] for row in rows] == [first["id"]]
     restored = outbox_sequence(client, "material:m-kcsz")
