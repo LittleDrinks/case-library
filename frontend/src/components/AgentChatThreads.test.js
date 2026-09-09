@@ -83,7 +83,7 @@ it("opens the thread list with rows, status, back and create entries", async () 
 
   await openList(wrapper);
 
-  expect(api.agentThreads).toHaveBeenCalledWith("case-1");
+  expect(api.agentThreads).toHaveBeenCalledWith("case-1", "", "");
   const list = wrapper.get('[data-testid="agent-thread-list"]');
   expect(list.text()).toContain("返回当前对话");
   expect(list.text()).toContain("新建对话");
@@ -120,7 +120,7 @@ it("creates a new thread into an empty chat with a fixed composer", async () => 
   await wrapper.get('[data-testid="agent-thread-create"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf");
+  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf", "", "");
   expect(wrapper.findAll(".ai-message")).toHaveLength(0);
   expect(wrapper.get('[aria-label="向 AI 提问"]').exists()).toBe(true);
   expect(wrapper.get(".agent-thread-current").text()).toContain("未命名对话");

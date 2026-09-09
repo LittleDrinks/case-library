@@ -69,7 +69,7 @@ def test_review_thread_binds_draft_and_isolates_identities(client: TestClient) -
     assert _review_thread(client, admin)["id"] == mine["id"]
     listed = client.get(THREADS_PATH, params={"mode": "review"}).json()
     assert [item["id"] for item in listed] == [mine["id"]]
-    author = _login(client, AUTHOR)
+    _login(client, AUTHOR)
     assert client.get(THREAD_PATH, params={"mode": "review"}).status_code == 403
     assert client.get(f"{THREADS_PATH}/{mine['id']}").status_code == 404
 
