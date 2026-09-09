@@ -12,24 +12,27 @@ const props = defineProps({ caseRecord: Object });
 const route = useRoute(), router = useRouter();
 const clone = value => JSON.parse(JSON.stringify(value));
 const artifact = ref(null), selected = ref(1), tab = ref("original"), panel = ref("chat");
-const original = ref(clone(props.caseRecord.document)), generated = ref(null), generatedOpen = ref(false);
+const original = ref(clone(props.caseRecord.document)), versions = ref([]), openedVersions = ref([]);
 const messages = ref([]), chatInput = ref(""), chatQuote = ref(""), selectionQuote = ref("");
 const floating = ref(false), note = ref(""), decisions = ref({}), commentThreads = ref({});
+const activeThread = ref(null), draftAnchor = ref(null);
+let nextThreadId = 1;
 const threadQuote = ref(""), overwriteOpen = ref(false), savedOriginal = ref(clone(props.caseRecord.document));
-const savedGenerated = ref(null), savedTimes = ref({});
+const savedTimes = ref({});
 const popup = ref({ left: "0px", top: "0px" }), status = ref("");
 const variant = computed(() => route.query.variant === "B" ? "B" : "A");
 const blocks = computed(() => artifact.value?.blocks || []);
 const sections = computed(() => blocks.value.reduce(groupBlock, []));
-const current = computed(() => sections.value[selected.value]);
-const activeDocument = computed(() => tab.value === "original" ? original.value : generated.value);
-const threadMessages = computed(() => commentThreads.value[selected.value] || []);
-const threadList = computed(() => Object.entries(commentThreads.value).map(([index, entries]) => ({ index: Number(index), entries, latest: entries.at(-1), title: sections.value[index]?.title })));
-const timeline = computed(() => [
-  { id: "generated", title: "AI 初稿", origin: "AI 生成", time: savedTimes.value.generated || artifact.value?.createdAt },
-  { id: "original", title: "教师稿", origin: "教师保存", time: savedTimes.value.original || props.caseRecord.updatedAt },
-]);
-const decision = computed(() => decisions.value[selected.value] || "pending");
+const current = computed(() => sections.value[floating.value ? (draftAnchor.value?.section ?? commentThreads.value[activeThread.value]?.section ?? selected.value) : selected.value]);
+const activeVersion = computed(() => versions.value.find(version => version.id === tab.value));
+const activeDocument = computed(() => tab.value === "original" ? original.value : activeVersion.value?.document);
+const activeTitle = computed(() => tab.value === "original" ? "当前教师稿" : activeVersion.value?.title);
+const opened = computed(() => openedVersions.value.map(id => versions.value.find(version => version.id === id)).filter(Boolean));
+const threadMessages = computed(() => commentThreads.value[activeThread.value]?.messages || []);
+const threadList = computed(() => Object.values(commentThreads.value).map(thread => ({ ...thread, latest: thread.messages.at(-1), title: sections.value[thread.section]?.title })));
+function sectionThreads(index) { return threadList.value.filter(thread => thread.section === index); }
+
+const timeline = computed(() => versions.value);
 function groupBlock(result, block) {
   if (block.type === "heading" || !result.length) result.push({ title: block.type === "heading" ? block.text : "正文", blocks: [] });
   result.at(-1).blocks.push(block);
@@ -43,30 +46,38 @@ function blockMarkdown(block) {
   return block.text || "";
 }
 function candidateDocument() { return generateJSON(renderMarkdown(blocks.value.map(blockMarkdown).join("\n\n")), [StarterKit]); }
-function openGenerated() {
-  if (!generated.value) { generated.value = candidateDocument(); savedGenerated.value = clone(generated.value); }
-  generatedOpen.value = true; tab.value = "generated";
+function seedVersions() {
+  const titles = ["AI 初稿", "补充教学目标后提交", "AI 精炼摘要", "讨论问题调整后提交", "AI 补充案例结构", "核对引用后提交", "备课稿提交审核", "AI 改写案例背景", "课堂活动调整后提交", "AI 生成教学建议", "修改题目后提交", "AI 初次整理资料", "资料整理后提交", "首次提交审核"];
+  versions.value = titles.map((title, index) => {
+    const document = index === titles.length - 1 ? clone(props.caseRecord.document) : candidateDocument();
+    return { id: index === 0 ? "generated" : `version-${index}`, title, origin: title.startsWith("AI") ? "AI 生成" : "提交审核", time: new Date(Date.now() - index * 8 * 3600000).toISOString(), document, saved: clone(document) };
+  });
 }
-function displayTime(value) { return value ? new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "生成时"; }
+function openGenerated() { openVersion("generated"); }
+function displayTime(value) { return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
 function openVersion(id) {
-  if (id === "generated") openGenerated();
-  else tab.value = "original";
+  if (id !== "original" && !openedVersions.value.includes(id)) openedVersions.value.push(id);
+  tab.value = id;
   router.replace({ query: { ...route.query, variant: "A" } });
+}
+function closeVersion(id) {
+  openedVersions.value = openedVersions.value.filter(value => value !== id);
+  if (tab.value === id) tab.value = "original";
 }
 function overwriteVersion() {
   if (tab.value === "original") savedOriginal.value = clone(original.value);
-  else savedGenerated.value = clone(generated.value);
+  else activeVersion.value.saved = clone(activeVersion.value.document);
   savedTimes.value[tab.value] = new Date().toISOString();
   overwriteOpen.value = false; status.value = "已覆盖保存此版本（原型）";
 }
 function saveDocument(value) {
   if (tab.value === "original") original.value = value;
-  else generated.value = value;
+  else activeVersion.value.document = value;
   status.value = "编辑已保留在原型内";
 }
 function restoreSaved() {
   if (tab.value === "original") original.value = clone(savedOriginal.value);
-  else generated.value = clone(savedGenerated.value);
+  else activeVersion.value.document = clone(activeVersion.value.saved);
   status.value = "已载入此版本最后保存的内容";
 }
 function escape(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
@@ -83,7 +94,7 @@ function changedParagraph(text) {
 }
 function sectionHtml(section, index) {
   return section.blocks.map(block => {
-    if (block === section.blocks.find(item => item.type === "paragraph")) {
+    if (sectionThreads(index).length && block === section.blocks.find(item => item.type === "paragraph")) {
       if (decisions.value[index] === "accepted") return renderMarkdown(revisedText(block.text));
       if (index === selected.value && !["rejected", "comment"].includes(decisions.value[index])) return `<p>${changedParagraph(block.text)}</p>`;
     }
@@ -98,7 +109,7 @@ function captureSelection() {
   popup.value = { left: `${Math.max(8, Math.min(rect.left, window.innerWidth - 320))}px`, top: `${Math.max(130, rect.top - 46)}px` };
 }
 function askAI() {
-  if (variant.value === "B") { ensureThread(selected.value); threadQuote.value = selectionQuote.value; floating.value = true; }
+  if (variant.value === "B") { startComment(selected.value, selectionQuote.value); }
   else { chatQuote.value = selectionQuote.value; panel.value = "chat"; }
   selectionQuote.value = "";
 }
@@ -106,27 +117,46 @@ async function copySelection() {
   try { await navigator.clipboard.writeText(selectionQuote.value); status.value = "已复制，可切到当前正文粘贴"; selectionQuote.value = ""; }
   catch { status.value = "请使用 Ctrl+C 复制选中文字"; }
 }
-function ensureThread(index) {
-  if (commentThreads.value[index]) return;
-  commentThreads.value[index] = [
+function seedExampleComment() {
+  const id = nextThreadId++;
+  commentThreads.value[id] = { id, section: 1, quote: "本案例聚焦", messages: [
     { kind: "human", text: "这里的表述有些绕，能否更直接一些，同时保留原意？" },
     { kind: "revision", round: 1, text: "建议把‘聚焦’改为‘探讨’，保留原句其他内容。", decision: "pending" },
-  ];
+  ] };
+}
+function startComment(section, quote) {
+  selected.value = section; activeThread.value = null; draftAnchor.value = { section, quote };
+  threadQuote.value = quote; note.value = ""; floating.value = true; selectionQuote.value = "";
+}
+function replyToComment(entries, text, quote) {
+  entries.filter(item => item.kind === "revision" && item.decision === "pending").forEach(item => item.decision = "superseded");
+  entries.push({ kind: "human", text, quote });
+  const round = entries.filter(item => item.kind === "revision").length + 1;
+  entries.push({ kind: "revision", round, text: `已收到意见：“${text}”。${quote ? "仅围绕所引用的部分继续处理。" : "保留已认可的内容，继续讨论需要调整的部分。"}（模拟回复）`, quote, decision: "pending" });
 }
 function addOpinion() {
   if (!note.value.trim()) return;
-  ensureThread(selected.value);
-  const entries = commentThreads.value[selected.value];
-  entries.filter(item => item.kind === "revision" && item.decision === "pending").forEach(item => item.decision = "superseded");
-  entries.push({ kind: "human", text: note.value.trim(), quote: threadQuote.value });
-  const round = entries.filter(item => item.kind === "revision").length + 1;
-  entries.push({ kind: "revision", round, text: threadQuote.value ? "已记录你引用的部分。下一轮围绕这部分继续修改，其他内容保留。" : "收到补充意见。继续沿用已认可的部分，针对你指出的问题提出下一轮修改。", quote: threadQuote.value, decision: "pending" });
-  decisions.value[selected.value] = "pending"; note.value = ""; threadQuote.value = "";
+  if (draftAnchor.value) {
+    const id = nextThreadId++;
+    commentThreads.value[id] = { id, ...draftAnchor.value, messages: [] }; activeThread.value = id; draftAnchor.value = null;
+  }
+  const thread = commentThreads.value[activeThread.value];
+  if (!thread) return;
+  replyToComment(thread.messages, note.value.trim(), threadQuote.value);
+  decisions.value[thread.section] = "pending"; note.value = ""; threadQuote.value = "";
   nextTick(() => { const box = document.querySelector(".prototype-comment-scroll"); if (box) box.scrollTop = box.scrollHeight; });
 }
-function decideRevision(message, value) { message.decision = value; decisions.value[selected.value] = value; }
-function openComment(index) { selected.value = index; ensureThread(index); floating.value = true; selectionQuote.value = ""; }
-function leaveSelectionComment() { threadQuote.value = selectionQuote.value; openComment(selected.value); }
+function decideRevision(message, value) { message.decision = value; decisions.value[commentThreads.value[activeThread.value].section] = value; }
+function openThread(id) {
+  const thread = commentThreads.value[id]; if (!thread) return;
+  selected.value = thread.section; activeThread.value = id; draftAnchor.value = null;
+  floating.value = true; selectionQuote.value = ""; threadQuote.value = ""; note.value = "";
+}
+function openComment(index) {
+  if (window.getSelection()?.toString().trim()) return;
+  const thread = sectionThreads(index)[0]; if (thread) openThread(thread.id);
+}
+function leaveSelectionComment() { startComment(selected.value, selectionQuote.value); }
 function sendOpinion() {
   if (!chatInput.value.trim()) return;
   messages.value.push({ kind: "user", text: chatInput.value, quote: chatQuote.value });
@@ -143,7 +173,7 @@ async function load() {
   for (const thread of threads) {
     const snapshot = await api.agentThread(props.caseRecord.id, thread.id);
     const candidate = [...(snapshot.artifacts || [])].reverse().find(x => x.kind === "document");
-    if (candidate) { artifact.value = candidate; ensureThread(1); return; }
+    if (candidate) { artifact.value = candidate; seedVersions(); seedExampleComment(); return; }
   }
 }
 function switchVariant() { floating.value = false; router.replace({ query: { ...route.query, variant: variant.value === "A" ? "B" : "A" } }); }
@@ -158,11 +188,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
   <div class="canvas-workspace candidate-prototype">
     <nav class="prototype-outline"><small>本文目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}</button></nav>
     <main class="canvas-column prototype-canvas">
-      <div v-if="variant === 'A'" class="prototype-version-tabs"><button :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />教师稿</button><button v-if="generatedOpen" :class="{ active: tab === 'generated' }" @click="tab = 'generated'"><Sparkles :size="14" />AI 初稿</button><button class="version-save-entry" @click="overwriteOpen = true">覆盖保存</button><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />版本</button></div>
+      <div v-if="variant === 'A'" class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-save-entry" @click="overwriteOpen = true">覆盖保存</button><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />版本</button></div>
       <div v-else class="prototype-preview-bar"><span><MessageSquareText :size="15" />正文精修</span><span class="prototype-state">点击修改标记或右侧批注标记查看意见</span></div>
       <article class="document-paper prototype-paper" @mouseup="captureSelection">
-        <template v-if="variant === 'A'"><div class="prototype-document-note">{{ tab === 'original' ? '教师稿 · 可编辑' : 'AI 初稿 · 可编辑、复制到教师稿' }}</div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="true" @change="saveDocument" /></template>
-        <template v-else><section v-for="(section, i) in sections" :id="`candidate-section-${i}`" :key="i" class="prototype-section" :class="{ focused: selected === i }"><div class="markdown-body" v-html="sectionHtml(section, i)" @click="openComment(i)" /><button v-if="i > 0" class="prototype-comment-pin" :class="{ active: selected === i }" :aria-label="`查看${section.title}的批注`" @click="openComment(i)"><MessageSquareText :size="16" /><span v-if="selected === i">1</span></button></section></template>
+        <template v-if="variant === 'A'"><div class="prototype-document-note">{{ activeTitle }} · 可编辑、复制</div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="true" @change="saveDocument" /></template>
+        <template v-else><section v-for="(section, i) in sections" :id="`candidate-section-${i}`" :key="i" class="prototype-section" :class="{ focused: selected === i }"><div class="markdown-body" v-html="sectionHtml(section, i)" @mousedown="selected = i" @click="openComment(i)" /><button v-if="sectionThreads(i).length" class="prototype-comment-pin" :class="{ active: selected === i }" :aria-label="`查看${section.title}的批注`" @click="openThread(sectionThreads(i)[0].id)"><MessageSquareText :size="16" /><span>{{ sectionThreads(i).length }}</span></button></section></template>
       </article>
     </main>
     <aside class="prototype-assistant">
@@ -170,14 +200,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
       <div class="prototype-thread">根据我的资料帮我生成一份案例 <span>⌄</span></div>
       <div class="prototype-rail-content">
         <template v-if="panel === 'chat'"><div class="prototype-chat-user">根据我的资料生成一份完整案例。</div><div class="prototype-assistant-label">AI</div><p>初稿已保存。可以打开继续编辑，或选中文字和我讨论。</p><article class="prototype-compact-card"><div><FileText :size="17" /><b>科学家精神的时代回响</b></div><p>AI 生成稿 · {{ sections.length }} 个章节</p><button class="prototype-primary" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })">打开稿件</button></article><template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template></template>
-        <template v-else-if="panel === 'versions'"><h2>版本时间线</h2><div class="prototype-timeline"><article v-for="version in timeline" :key="version.id"><span class="timeline-dot" :class="{ ai: version.id === 'generated' }" /><small>{{ displayTime(version.time) }} · {{ version.origin }}</small><button class="prototype-version-card" :disabled="version.id === 'generated' && !artifact" @click="openVersion(version.id)"><Sparkles v-if="version.id === 'generated'" :size="18" /><FileText v-else :size="18" /><span><b>{{ version.title }}</b><small>在 Tab 中打开并编辑</small></span></button></article></div><button class="prototype-text-button" @click="restoreSaved">重新载入当前 Tab 已保存的内容</button></template>
-        <template v-else><div class="prototype-list-heading"><h2>批注列表</h2><small>{{ threadList.length }} 条</small></div><button v-for="thread in threadList" :key="thread.index" class="prototype-comment-row" @click="router.replace({ query: { ...route.query, variant: 'B' } }); openComment(thread.index)"><span class="comment-row-icon"><MessageSquareText :size="17" /></span><span><b>{{ thread.title }}</b><p>{{ thread.entries.filter(item => item.kind === 'human').at(-1)?.text }}</p><small>{{ thread.entries.length }} 条消息 · {{ thread.latest.decision === 'accepted' ? '已接受' : thread.latest.decision === 'rejected' ? '保留原文' : '待处理' }}</small></span></button></template>
+        <template v-else-if="panel === 'versions'"><div class="prototype-list-heading"><h2>版本时间线</h2><small>{{ timeline.length }} 条演示记录</small></div><p class="prototype-muted">提交审核或 AI 生成完整稿件时创建版本；普通保存不新增。</p><div class="prototype-timeline"><article v-for="version in timeline" :key="version.id"><span class="timeline-dot" :class="{ ai: version.origin === 'AI 生成' }" /><small>{{ displayTime(version.time) }} · {{ version.origin }}</small><button class="prototype-version-card" :disabled="version.id === 'generated' && !artifact" @click="openVersion(version.id)"><Sparkles v-if="version.origin === 'AI 生成'" :size="18" /><FileText v-else :size="18" /><span><b>{{ version.title }}</b><small>在 Tab 中打开并编辑</small></span></button></article></div><button class="prototype-text-button" @click="restoreSaved">重新载入当前 Tab 已保存的内容</button></template>
+        <template v-else><div class="prototype-list-heading"><h2>批注列表</h2><small>{{ threadList.length }} 条</small></div><button v-for="thread in threadList" :key="thread.id" class="prototype-comment-row" @click="router.replace({ query: { ...route.query, variant: 'B' } }); openThread(thread.id)"><span class="comment-row-icon"><MessageSquareText :size="17" /></span><span><b>{{ thread.title }}</b><p>{{ thread.messages.filter(item => item.kind === 'human').at(-1)?.text }}</p><small>{{ thread.messages.length }} 条消息 · {{ thread.latest.decision === 'accepted' ? '已接受' : thread.latest.decision === 'rejected' ? '保留原文' : '待处理' }}</small></span></button></template>
       </div>
       <footer class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>稿件选区：{{ chatQuote.slice(0, 90) }}…</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选择稿件中的文字…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>{{ status || '原型演示 · 编辑和批注仅保留在本页' }}</small></footer>
     </aside>
     <div v-if="selectionQuote" class="prototype-selection-toolbar" :style="popup" @mousedown.prevent><button @click="copySelection">复制</button><button @click="askAI">就此提问</button><button @click="leaveSelectionComment">留批注</button></div>
-    <div v-if="overwriteOpen" class="prototype-pick-backdrop"><section class="prototype-pick-dialog" role="dialog" aria-label="覆盖版本警告"><h2>覆盖保存“{{ tab === 'original' ? '教师稿' : 'AI 初稿' }}”？</h2><p class="overwrite-warning">此版本原先保存的内容将被替换，覆盖后无法找回。其他版本不受影响。</p><button class="prototype-primary" @click="overwriteVersion">确认覆盖保存</button><button @click="overwriteOpen = false">取消</button><small class="prototype-muted">原型操作，仅本页生效</small></section></div>
-    <aside v-if="floating" class="prototype-comment-float" role="dialog" aria-label="批注与关联修改"><header><div><MessageSquareText :size="16" /><b>批注与修改</b></div><button aria-label="关闭批注浮窗" @click="floating = false"><X :size="17" /></button></header><div class="prototype-comment-scroll"><small class="prototype-muted">{{ current?.title }}</small><article v-for="(message, i) in threadMessages" :key="i" class="prototype-thread-message"><b v-if="message.kind === 'human'">我</b><b v-else><Sparkles :size="14" />AI · 第 {{ message.round }} 轮修改</b><blockquote v-if="message.quote" class="thread-message-quote">{{ message.quote }}</blockquote><p>{{ message.text }}</p><template v-if="message.kind === 'revision'"><details><summary>修改依据与说明</summary><p>针对上方意见调整表达。淡红删除线标出原词，淡绿下划线标出建议用词。采用前保留原文。</p><p>进一步讨论时可以引用具体文字，说明要保留或继续修改的部分。每轮意见与建议都会保留；最新建议等待确认，先前建议仍可回看。这里是交互演示，未调用真实 AI。</p></details><div v-if="message.decision === 'pending'" class="prototype-floating-decisions"><button class="prototype-primary" @click="decideRevision(message, 'accepted')"><Check :size="14" />接受修改</button><button @click="decideRevision(message, 'rejected')">保留原文</button></div><small v-else class="prototype-resolution">{{ message.decision === 'accepted' ? '已接受修改' : message.decision === 'rejected' ? '已保留原文' : '已有后续建议 · 保留供回看' }}</small></template></article></div><footer><div v-if="threadQuote" class="prototype-quote-chip"><span>引用选区：{{ threadQuote.slice(0, 120) }}</span><button @click="threadQuote = ''"><X :size="13" /></button></div><textarea v-model="note" aria-label="原型批注意见" placeholder="继续讨论，例如：前半句保留，只改后半句…" /><button class="prototype-primary" :disabled="!note.trim()" @click="addOpinion">发送意见</button></footer></aside>
+    <div v-if="overwriteOpen" class="prototype-pick-backdrop"><section class="prototype-pick-dialog" role="dialog" aria-label="覆盖版本警告"><h2>覆盖保存“{{ activeTitle }}”？</h2><p class="overwrite-warning">此版本原先保存的内容将被替换，覆盖后无法找回。其他版本不受影响。</p><button class="prototype-primary" @click="overwriteVersion">确认覆盖保存</button><button @click="overwriteOpen = false">取消</button><small class="prototype-muted">原型操作，仅本页生效</small></section></div>
+    <aside v-if="floating" class="prototype-comment-float" role="dialog" aria-label="批注与关联修改"><header><div><MessageSquareText :size="16" /><b>{{ draftAnchor ? "新增批注" : "批注与修改" }}</b></div><button aria-label="关闭批注浮窗" @click="floating = false"><X :size="17" /></button></header><div class="prototype-comment-scroll"><small class="prototype-muted">{{ current?.title }}</small><p v-if="draftAnchor" class="prototype-muted">输入意见并发送后，这条批注才会加入列表。</p><article v-for="(message, i) in threadMessages" :key="i" class="prototype-thread-message"><b v-if="message.kind === 'human'">我</b><b v-else><Sparkles :size="14" />AI · 第 {{ message.round }} 轮修改</b><blockquote v-if="message.quote" class="thread-message-quote">{{ message.quote }}</blockquote><p>{{ message.text }}</p><template v-if="message.kind === 'revision'"><details><summary>修改依据与说明</summary><p>针对上方意见调整表达。淡红删除线标出原词，淡绿下划线标出建议用词。采用前保留原文。</p><p>进一步讨论时可以引用具体文字，说明要保留或继续修改的部分。每轮意见与建议都会保留；最新建议等待确认，先前建议仍可回看。这里是交互演示，未调用真实 AI。</p></details><div v-if="message.decision === 'pending'" class="prototype-floating-decisions"><button class="prototype-primary" @click="decideRevision(message, 'accepted')"><Check :size="14" />接受修改</button><button @click="decideRevision(message, 'rejected')">保留原文</button></div><small v-else class="prototype-resolution">{{ message.decision === 'accepted' ? '已接受修改' : message.decision === 'rejected' ? '已保留原文' : '已有后续建议 · 保留供回看' }}</small></template></article></div><footer><div v-if="threadQuote" class="prototype-quote-chip"><span>引用选区：{{ threadQuote.slice(0, 120) }}</span><button @click="threadQuote = ''"><X :size="13" /></button></div><textarea v-model="note" aria-label="原型批注意见" placeholder="继续讨论，例如：前半句保留，只改后半句…" /><button class="prototype-primary" :disabled="!note.trim()" @click="addOpinion">发送意见</button></footer></aside>
     <div class="prototype-switcher"><span>交互原型</span><button @click="switchVariant"><ArrowLeft :size="16" /></button><b>{{ variant === 'A' ? 'A · 版本与编辑' : 'B · 浮动批注精修' }}</b><button @click="switchVariant"><ArrowRight :size="16" /></button></div>
   </div>
 </template>
@@ -316,4 +346,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .thread-message-quote { margin:10px 0; border-left:2px solid #bba67f; background:#f5f0e6; padding:8px 10px; font-size:12px; color:var(--ink-2); max-height:130px; overflow:auto; }
 .prototype-comment-float .prototype-quote-chip { width:100%; margin:0; }
 .prototype-pick-dialog .overwrite-warning { color:#9b302c; line-height:1.8; font-size:14px; }
+
+.prototype-version-tabs { min-width:0; gap:0; padding-right:6px; }
+.prototype-version-tabs .pinned-teacher-tab { flex-shrink:0; white-space:nowrap; }
+.prototype-open-tabs { display:flex; overflow-x:auto; min-width:0; flex:1; align-self:stretch; scrollbar-width:thin; }
+.prototype-tab-chip { display:flex; flex-shrink:0; align-items:center; border-radius:7px 7px 0 0; max-width:210px; }
+.prototype-tab-chip > button:first-child { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:5px; display:block; }
+.prototype-tab-chip.active { background:white; box-shadow:0 -2px 0 var(--brand) inset; }
+.prototype-tab-chip.active > button { color:var(--brand); }
+.prototype-tab-chip .close-version-tab { padding:7px; margin-right:4px; border-radius:4px; }
+.prototype-tab-chip .close-version-tab:hover { background:#eee8de; }
+.prototype-version-tabs .version-save-entry, .prototype-version-tabs .version-history-entry { flex-shrink:0; white-space:nowrap; padding:12px 9px; }
 </style>
