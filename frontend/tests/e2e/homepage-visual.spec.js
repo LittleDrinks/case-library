@@ -96,7 +96,7 @@ async function expectDesktopCaseDetail(page) {
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".document-paper"), {
-    borderRadius: "6px", padding: "70px 78px 92px",
+    borderRadius: "6px", padding: "65px 55px 80px",
   });
 }
 
@@ -121,7 +121,7 @@ async function expectDesktopWorkbench(page) {
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".document-paper"), {
-    borderRadius: "6px", padding: "70px 78px 92px",
+    borderRadius: "6px", padding: "65px 55px 80px",
   });
 }
 
