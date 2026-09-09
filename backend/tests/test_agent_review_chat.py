@@ -7,9 +7,18 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from app.modules.agent.runtime import agent
+from tests.skill_packages import SKILL_ID
+from tests.test_agent_skill_run import (
+    _upload_and_publish,
+)
 
 CASE = "c-pending-1"
 DRAFT_TEXT = "学生作业中存在生成式人工智能代写痕迹"
+REVIEW_TAG_CONTEXT = (
+    "当前案例 tagIds 按现有标签组解析的名称",
+    "学科：工学", "课程：中国近现代史纲要",
+    "案例类型：课堂教学类", "思政元素：劳动教育",
+)
 THREAD_PATH = f"/api/cases/{CASE}/agent/thread"
 THREADS_PATH = f"/api/cases/{CASE}/agent/threads"
 ADMIN = {"username": "admin", "password": "admin123"}
@@ -148,3 +157,126 @@ def test_review_instructions_come_from_pending_draft(client: TestClient) -> None
     instructions = seen[0]
     assert "案例审核讨论助手" in instructions and DRAFT_TEXT in instructions
     assert "协助案例作者修订和撰写正文" not in instructions
+
+
+def _send_parts(client: TestClient, auth: dict, thread_id: str, parts: list[dict]) -> object:
+    return client.post(
+        f"{THREAD_PATH}/{thread_id}/stream", headers=_csrf(auth),
+        json={"id": "c1", "trigger": "submit-message",
+              "messages": [{"id": "m1", "role": "user", "parts": parts}]},
+    )
+
+
+def _review_skill_parts() -> list[dict]:
+    return [{"type": "text", "text": "请按审核维度核查这篇待审稿"},
+            {"type": "data-skill", "data": {"skillId": SKILL_ID}}]
+
+
+def _review_run_receipt(client: TestClient, thread_id: str) -> tuple[list, dict]:
+    calls: list = []
+    async def capture(messages, info):
+        calls.append((messages, info))
+        yield "按已加载规则进行只读核查"
+
+    model = FunctionModel(stream_function=capture)
+    with agent.override(model=model):
+        response = _send_parts(client, _login(client, ADMIN), thread_id, _review_skill_parts())
+    assert response.status_code == 200, response.text
+    return calls, client.app.state.database.agent_runs.find_one(
+        {"threadId": thread_id}, {"_id": 0}
+    )
+
+
+def test_review_run_loads_published_skill_and_stays_read_only(client: TestClient) -> None:
+    version = _upload_and_publish(client)
+    _start_review(client)
+    thread = _review_thread(client, _login(client, ADMIN))
+    calls, run = _review_run_receipt(client, thread["id"])
+    database = client.app.state.database
+    assert run["status"] == "completed"
+    assert run["readOnly"] is True and run["writeAuthorized"] is False
+    assert run["skillBindings"] == [{
+        "kind": "skill", "id": SKILL_ID,
+        "versionId": version["id"], "version": version["version"],
+    }]
+    records = {row["kind"]: row for row in run["resources"]}
+    assert records["skill"]["contentHash"] == version["packageSha256"]
+    assert database.agent_artifacts.count_documents({}) == 0
+    assert database.agent_writes.count_documents({}) == 0
+    assert "写作前至少通读一个范例" in calls[0][1].instructions
+    tools = {tool.name for tool in calls[0][1].function_tools}
+    assert not tools & {"write_document", "propose_revision", "propose_document"}
+
+
+def _tagged_review_case(client: TestClient, fields: dict) -> None:
+    client.app.state.database.cases.update_one({"id": CASE}, {"$set": fields})
+
+
+def test_review_instructions_resolve_case_tag_names_by_group(client: TestClient) -> None:
+    """审核上下文注入当前案例真实标签名称与所属组，缺失时模型不得猜标签。"""
+    _tagged_review_case(client, {"tagIds": [
+        "tag-seed-1-4", "tag-seed-2-2", "tag-seed-3-3", "tag-seed-4-4",
+    ]})
+    _start_review(client)
+    seen: list[str] = []
+    _capture_review_instructions(client, _login(client, ADMIN), seen)
+    for marker in REVIEW_TAG_CONTEXT:
+        assert marker in seen[0]
+
+
+def _capture_review_instructions(client: TestClient, admin: dict, seen: list[str]) -> None:
+    async def _capture(_messages, info):
+        seen.append(info.instructions or "")
+        yield "结合服务端上下文回答"
+
+    thread = _review_thread(client, admin)
+    with agent.override(model=FunctionModel(stream_function=_capture)):
+        assert _send(client, admin, thread["id"], "结合上下文核查这篇待审稿").status_code == 200
+
+
+def _seed_custom_review_tags(database) -> None:
+    database.tag_groups.insert_many([
+        {"id": "tgg-classroom", "name": "适用课堂", "requiredForSubmission": False,
+         "sortKey": 9, "enabled": True},
+        {"id": "tgg-stage", "name": "学习阶段", "requiredForSubmission": False,
+         "sortKey": 10, "enabled": True},
+    ])
+    database.tags.insert_many([
+        {"id": "tag-classroom-1", "groupId": "tgg-classroom", "name": "课程思政示范课",
+         "sortKey": 0, "enabled": True},
+        {"id": "tag-stage-1", "groupId": "tgg-stage", "name": "研究生阶段",
+         "sortKey": 0, "enabled": True},
+    ])
+
+
+def test_review_context_lists_custom_groups_over_legacy_fields(client: TestClient) -> None:
+    """审核上下文按实际标签组名（含自定义组）列出标签；与旧字段冲突时以真实 Tag 为准。"""
+    _seed_custom_review_tags(client.app.state.database)
+    _tagged_review_case(client, {
+        "tagIds": ["tag-classroom-1", "tag-stage-1"],
+        "course": "军事理论", "audience": "ug", "typeName": "人物传记类",
+    })
+    _start_review(client)
+    seen: list[str] = []
+    _capture_review_instructions(client, _login(client, ADMIN), seen)
+    assert "适用课堂：课程思政示范课" in seen[0]
+    assert "学习阶段：研究生阶段" in seen[0]
+    for legacy in ("课程：军事理论", "课程：自然辩证法概论", "案例类型：人物传记类",
+                   "案例类型：社会热点与治理类", "适用对象：本科", "适用对象：研究生"):
+        assert legacy not in seen[0]
+
+
+def test_review_context_states_missing_tags_instead_of_guessing(client: TestClient) -> None:
+    """无任何标签时审核上下文明示不足，不退回旧课程/受众字段推断课堂适用性。"""
+    client.app.state.database.cases.update_one(
+        {"id": CASE},
+        {"$unset": {"tagIds": "", "course": "", "audience": "", "typeName": "",
+                    "purpose": "", "theoryPoints": "", "stageText": ""}},
+    )
+    _start_review(client)
+    seen: list[str] = []
+    _capture_review_instructions(client, _login(client, ADMIN), seen)
+    assert "未选择任何标签" in seen[0]
+    assert "标签一致性与课堂适用性缺少依据" in seen[0]
+    for legacy in ("课程：", "案例类型：", "适用对象：", "教学用途：", "理论/思政要点："):
+        assert legacy not in seen[0]
