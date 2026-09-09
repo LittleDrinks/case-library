@@ -9,6 +9,7 @@ const props = defineProps({
   caseId: { type: String, required: true },
   versionId: { type: String, default: "" },
   readOnly: { type: Boolean, default: false },
+  review: { type: Boolean, default: false },
   configured: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   threadId: { type: String, default: "" },
@@ -24,8 +25,9 @@ const chosenSkillId = ref("");
 const skillOpen = ref(false);
 const skillQuery = ref("");
 
+const skillEnabled = computed(() => props.review || !props.readOnly);
 const placeholder = computed(() => (props.configured
-  ? (props.readOnly ? "输入问题" : "输入问题，或输入 $ 插入 Skill…") : "请先配置 AI 模型"));
+  ? (skillEnabled.value ? "输入问题，或输入 $ 插入 Skill…" : "输入问题") : "请先配置 AI 模型"));
 const selectionText = computed(() => props.writingContext?.quote || "");
 const chosenSkill = computed(() => props.skills.find((skill) => skill.id === chosenSkillId.value) || null);
 const matchedSkills = computed(() => {
@@ -39,7 +41,7 @@ function skillLabel(skill) {
 }
 
 function trackDraft() {
-  if (props.readOnly) return;
+  if (!skillEnabled.value) return;
   const pending = draft.value.match(/\$([^\s$]*)$/);
   if (!pending) return;
   skillQuery.value = pending[1];
@@ -114,7 +116,7 @@ function submit() {
       <div class="capability-bar">
         <div class="capability-actions">
           <ElPopover
-            v-if="!readOnly"
+            v-if="skillEnabled"
             v-model:visible="skillOpen"
             trigger="click"
             placement="top-start"
@@ -171,7 +173,7 @@ function submit() {
     </div>
     <div class="compose-footnote">
       <span>AI 内容请核实后使用</span>
-      <span v-if="!readOnly">Ctrl ↵ 发送 · Enter 换行</span>
+      <span v-if="skillEnabled">Ctrl ↵ 发送 · Enter 换行</span>
     </div>
   </div>
 </template>

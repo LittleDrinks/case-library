@@ -638,6 +638,7 @@ async function retryRun() {
         :case-id="caseRecord.id"
         :version-id="versionId"
         :read-only="readOnly || review"
+        :review="review"
         :configured="configured"
         :busy="loading || sending || recovering"
         :thread-id="threadId || ''"
