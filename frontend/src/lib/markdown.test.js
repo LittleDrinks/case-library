@@ -141,3 +141,19 @@ test("安全换行支持表格且保留代码、转义及带属性标签", () =>
   expect(html).toContain("&lt;br&gt;");
   expect(html).not.toContain("<br onclick");
 });
+
+test("任务列表显示只读勾选框，代码保持原样", () => {
+  const html = renderMarkdown("- [ ] 未完成\n- [x] 已完成\n\n`- [ ] 示例`");
+  expect(html.match(/type="checkbox"/g)).toHaveLength(2);
+  expect(html.match(/disabled/g)).toHaveLength(2);
+  expect(html).toContain('checked=');
+  expect(html).toContain('<code>- [ ] 示例</code>');
+});
+
+test("候选编号不伪装成预览网址，真实来源链接保留", () => {
+  const html = renderMarkdown("[预览](artifact-example) [资料](https://example.com) `artifact-example`");
+  expect(html).not.toContain('href="artifact-example"');
+  expect(html).toContain('预览');
+  expect(html).toContain('href="https://example.com"');
+  expect(html).toContain('<code>artifact-example</code>');
+});

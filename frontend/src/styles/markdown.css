@@ -25,3 +25,6 @@
 .markdown-body table { border-collapse: collapse; }
 .markdown-body th, .markdown-body td { min-width: 5em; padding: 4px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .markdown-body th { background: var(--paper); }
+
+.markdown-body .task-list-item { list-style: none; position: relative; }
+.markdown-body .task-list-item-checkbox { width: 14px; height: 14px; margin: 0 6px 0 -20px; vertical-align: middle; accent-color: var(--brand); }
