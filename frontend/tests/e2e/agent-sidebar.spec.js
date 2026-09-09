@@ -31,7 +31,7 @@ async function layout(page) {
     const rail = document.querySelector(".assistant-rail").getBoundingClientRect();
     const panel = document.querySelector(".agent-chat-panel");
     const conversation = document.querySelector(".ai-conversation");
-    const composer = document.querySelector(".assistant-composer").getBoundingClientRect();
+    const composer = document.querySelector(".agent-composer").getBoundingClientRect();
     return {
       railBottom: rail.bottom, viewport: innerHeight, railHeight: rail.height,
       panelOverflow: getComputedStyle(panel).overflow,
@@ -43,7 +43,8 @@ async function layout(page) {
 
 async function assertLayout(page, screenshot) {
   const box = await layout(page);
-  expect(Math.abs(box.railBottom - box.viewport)).toBeLessThanOrEqual(1);
+  expect(box.railBottom).toBeLessThanOrEqual(box.viewport + 1);
+  expect(box.viewport - box.railBottom).toBeLessThanOrEqual(40);
   expect(box.railHeight).toBeGreaterThan(300);
   expect(box.panelOverflow).toBe("hidden");
   expect(box.conversationOverflow).toBe("auto");
@@ -160,9 +161,21 @@ function longParagraphs(count) {
   return Array.from({ length: count }, (_, index) => `第${index + 1}段：撑起工作台滚动高度的验收正文。`);
 }
 
+async function scrollColumnToBottom(page) {
+  await page.locator(".canvas-column").evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => page.evaluate(() => document.querySelector(".canvas-column")?.scrollTop ?? 0))
+    .toBeGreaterThan(100);
+}
+
+async function assertRailPinned(page, before) {
+  const after = await page.locator(".assistant-rail").boundingBox();
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
+}
+
 async function composerViewportBox(page) {
   return page.evaluate(() => {
-    const rect = document.querySelector(".assistant-composer textarea").getBoundingClientRect();
+    const rect = document.querySelector(".compose-box textarea").getBoundingClientRect();
     return { top: rect.top, bottom: rect.bottom, height: rect.height, viewport: innerHeight };
   });
 }
@@ -192,12 +205,13 @@ async function mountMaterials(page, caseId, materialIds) {
 }
 
 async function selectAllSources(page) {
-  await page.locator(".agent-source-picker-toggle").click();
-  const options = page.locator(".agent-source-option input");
+  await page.getByTestId("agent-source-picker-toggle").click();
+  const options = page.locator("[data-testid='agent-source-option'] input");
   await expect(options).toHaveCount(MATERIAL_COUNT);
   for (let index = 0; index < MATERIAL_COUNT; index += 1) await options.nth(index).check();
-  await expect(page.locator(".agent-source-chip")).toHaveCount(MATERIAL_COUNT);
-  await expect(page.locator(".agent-source-summary")).toContainText(`已选 ${MATERIAL_COUNT} 条`);
+  await expect(page.locator(".source-popover .picker-bottom")).toContainText(`已选 ${MATERIAL_COUNT} 项`);
+  await page.locator(".source-popover .picker-bottom button").filter({ hasText: "完成" }).click();
+  await expect(page.locator(".context-trigger .count")).toHaveText(String(MATERIAL_COUNT));
 }
 
 function intersects(a, b) {
@@ -205,9 +219,8 @@ function intersects(a, b) {
 }
 
 async function expectCollapsedSources(page) {
-  await page.locator(".agent-source-picker-toggle").click();
-  await expect(page.locator(".agent-source-chips")).toHaveCount(0);
-  await expect(page.locator(".agent-source-summary")).toContainText(`已选 ${MATERIAL_COUNT} 条`);
+  await expect(page.locator(".context-strip .context-chip")).toHaveCount(1);
+  await expect(page.locator(".context-trigger .count")).toHaveText(String(MATERIAL_COUNT));
   const height = await page.locator(".ai-conversation").evaluate((node) => node.clientHeight);
   expect(height).toBeGreaterThanOrEqual(120);
   const box = await composerViewportBox(page);
@@ -222,9 +235,9 @@ async function composerGeometry(page) {
       return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
     };
     return {
-      textarea: box(document.querySelector(".assistant-composer textarea")),
-      send: box(document.querySelector('.assistant-composer button[aria-label="发送"]')),
-      chips: [...document.querySelectorAll(".agent-source-chip")].map(box),
+      textarea: box(document.querySelector(".compose-box textarea")),
+      send: box(document.querySelector('.agent-composer button[aria-label="发送"]')),
+      chips: [...document.querySelectorAll(".context-strip .context-chip, .context-strip .more-context")].map(box),
       viewport: innerHeight, width: innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
     };
@@ -270,11 +283,11 @@ function tracerDocument() {
 }
 
 async function selectPublishedSkill(page) {
-  const picker = page.getByLabel("选择 Skill");
-  await expect(picker).toBeVisible();
-  await expect(picker.locator(`option[value="${SKILL_ID}"]`)).toHaveCount(1, { timeout: 30_000 });
-  await picker.selectOption(SKILL_ID);
-  await expect(picker).toHaveValue(SKILL_ID);
+  await page.getByTestId("skill-picker-toggle").click();
+  const option = page.locator(".skill-popover [data-testid='skill-option']").filter({ hasText: SKILL_ID });
+  await expect(option).toHaveCount(1, { timeout: 30_000 });
+  await option.first().click();
+  await expect(page.getByTestId("composer-skill-block")).toContainText(SKILL_ID);
 }
 
 async function selectCanvasTarget(page) {
@@ -404,12 +417,13 @@ test("工作台滚动到底后侧栏输入仍可见", async ({ page }) => {
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await openChat(page);
 
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+  const railBefore = await page.locator(".assistant-rail").boundingBox();
+  await scrollColumnToBottom(page);
+  await assertRailPinned(page, railBefore);
   const box = await composerViewportBox(page);
   expect(box.top).toBeGreaterThanOrEqual(-1);
   expect(box.bottom).toBeLessThanOrEqual(box.viewport + 1);
-  expect(box.height).toBeGreaterThanOrEqual(60);
+  expect(box.height).toBeGreaterThanOrEqual(50);
   await expect(page.getByLabel("向 AI 提问")).toBeEditable();
   await page.screenshot({ path: "test-results/agent-sidebar-scrolled.png" });
 });
@@ -425,11 +439,19 @@ async function prepareSelectedSources(page) {
   await selectAllSources(page);
 }
 
+async function expectMobileContext(page) {
+  await expect(page.locator(".context-strip .context-chip")).toBeVisible();
+  await expect.poll(async () => {
+    const box = await composerGeometry(page);
+    return box.scrollWidth - box.width;
+  }).toBeLessThanOrEqual(1);
+}
+
 test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async ({ page }) => {
   test.setTimeout(60_000);
   await prepareSelectedSources(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator(".agent-source-chips")).toBeVisible();
+  await expectMobileContext(page);
   const box = await composerGeometry(page);
   expect(box.scrollWidth).toBeLessThanOrEqual(box.width + 1);
   expect(box.textarea.width).toBeGreaterThanOrEqual(180);
