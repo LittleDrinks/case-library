@@ -265,7 +265,8 @@ def test_platform_search_tool_marks_scope_without_network_claim(client: TestClie
         )
     )
     assert response.status_code == 200, response.text
-    assert outputs == [{"scope": "platform", "sources": []}]
+    assert outputs[0]["scope"] == "platform" and outputs[0]["sources"] == []
+    assert outputs[0]["total"] == 0 and "tagCatalog" in outputs[0]
 
 
 def test_selected_request_keeps_the_server_validated_scope(client: TestClient) -> None:
