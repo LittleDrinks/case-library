@@ -43,6 +43,13 @@
 .filter-popover legend { padding: 0 0 5px; color: var(--ink-3); font-size: 12px; font-weight: 650; }
 .filter-popover label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; color: var(--ink-2); }
 .filter-popover label small { color: var(--ink-3); }
+.filter-popover .tag-catalog-filter input[type="search"] { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 var(--sans); }
+.filter-popover .tag-group { display: grid; gap: 5px; margin-top: 8px; }
+.filter-popover .tag-group b { color: var(--ink-2); font-size: 12px; }
+.filter-popover .tag-mode { display: flex; gap: 6px; margin-top: 8px; }
+.filter-popover .tag-mode button { flex: 1; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-2); font-size: 12px; }
+.filter-popover .tag-mode button[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.filter-state { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ink-3); font-size: 12px; }
 .filter-chips { display: flex; width: min(760px, calc(100vw - 40px)); flex-wrap: wrap; justify-content: flex-end; gap: 6px; pointer-events: none; }
 .filter-chips button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 12px; pointer-events: auto; }
 .filter-chips .clear-filters { border-color: transparent; background: transparent; color: var(--brand); }

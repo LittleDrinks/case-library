@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
@@ -25,6 +25,9 @@ const view = ref(route.query.view === "graph" ? "graph" : "list");
 const loading = ref(false);
 const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
+const tagCatalog = ref([]);
+const tagCatalogLoading = ref(false);
+const tagCatalogError = ref("");
 const items = computed(() => payload.value.items);
 const summarySnapshot = ref(null);
 let searchGeneration = 0;
@@ -38,6 +41,19 @@ function invalidateSearch() {
   searchGeneration += 1;
   loading.value = false;
 }
+
+async function loadTagCatalog() {
+  tagCatalogLoading.value = true;
+  tagCatalogError.value = "";
+  try {
+    tagCatalog.value = await api.listTagGroups();
+  } catch {
+    tagCatalogError.value = "标签目录加载失败";
+  } finally {
+    tagCatalogLoading.value = false;
+  }
+}
+onMounted(loadTagCatalog);
 
 function tabLabel(kind, label) {
   return `${label} ${payload.value.counts[kind] || 0}`;
@@ -184,7 +200,7 @@ function selectFilters(next) {
 }
 
 function searchRouteState() {
-  const names = ["typeName", "audience", "authority", "materialType", "tag", "publishedWithin"];
+  const names = ["typeName", "audience", "authority", "materialType", "tag", "publishedWithin", "tagIds", "tagMode"];
   return [route.query.q, route.query.kind, ...names.map(name => route.query[name])];
 }
 
@@ -222,7 +238,11 @@ onBeforeUnmount(invalidateSearch);
               {{ tabLabel(tab[0], tab[1]) }}
             </button>
           </div>
-          <SearchFilters :filters="filters" :facets="payload.facets || {}" :kind="activeKind" @update:filters="selectFilters" />
+          <SearchFilters
+            :filters="filters" :facets="payload.facets || {}" :kind="activeKind"
+            :catalog="tagCatalog" :catalog-loading="tagCatalogLoading" :catalog-error="tagCatalogError"
+            @update:filters="selectFilters" @retry="loadTagCatalog"
+          />
         </div>
         <section class="mixed-results" aria-label="检索结果">
           <article v-for="item in items" :key="`${item.kind}-${item.id}`" class="mixed-result">
