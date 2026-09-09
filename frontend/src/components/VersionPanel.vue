@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { History } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -22,7 +22,7 @@ async function loadHistory() {
   error.value = "";
   try {
     const history = await api.caseHistory(props.caseRecord.id);
-    versions.value = history.versions || [];
+    versions.value = history.versions;
   } catch (caught) {
     error.value = caught.message || "版本历史加载失败";
   } finally {
@@ -30,6 +30,7 @@ async function loadHistory() {
   }
 }
 
+watch(() => props.caseRecord.versionNumber, loadHistory);
 onMounted(loadHistory);
 </script>
 

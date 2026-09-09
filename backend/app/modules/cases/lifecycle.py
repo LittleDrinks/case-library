@@ -523,7 +523,9 @@ def get_history(database: Database, case_id: str, user: dict) -> dict:
         raise CaseError(404, "案例不存在")
     if user["role"] != "admin" and case["ownerId"] != user["id"]:
         raise CaseError(403, "无权查看版本历史")
-    versions = database.case_versions.find({"caseId": case_id}).sort("number", 1)
+    versions = database.case_versions.find(
+        {"caseId": case_id, "kind": "submission"}
+    ).sort("number", 1)
     events = database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1)
     return {
         "caseId": case_id,

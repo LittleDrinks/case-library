@@ -100,7 +100,7 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
 def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
     """覆盖目标只能是本案例的投稿版本；跨案例或他人版本一律 404。"""
     target = database.case_versions.find_one(
-        {"id": target_id, "caseId": case_id}, session=session
+        {"id": target_id, "caseId": case_id, "kind": "submission"}, session=session
     )
     if not target:
         raise CaseError(404, "目标版本不存在")

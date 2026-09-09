@@ -10,6 +10,7 @@ const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
   sources: { type: Array, default: () => [] },
   sourcesLoading: { type: Boolean, default: false },
@@ -58,8 +59,11 @@ function select(tab) {
       </button>
     </nav>
 
+    <div v-if="historical && active === 'ai'" class="assistant-panel panel-empty">
+      <span>历史版本只读，请先覆盖当前教师稿后使用 AI</span>
+    </div>
     <AgentChatPanel
-      v-if="active === 'ai' && (!readOnly || user)"
+      v-else-if="active === 'ai' && (!readOnly || user)"
       :key="versionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"

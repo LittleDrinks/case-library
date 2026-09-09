@@ -279,6 +279,17 @@ def _overwrite_version(client, auth: dict, case: dict, changed: dict, version: d
     )
 
 
+def _insert_internal_version(client, version: dict) -> dict:
+    internal = {
+        **version,
+        "id": "ai-internal-1",
+        "kind": "pre_agent_write",
+        "number": 99,
+    }
+    client.app.state.database.case_versions.insert_one(internal)
+    return internal
+
+
 def test_author_overwrites_draft_with_a_history_version(client: TestClient) -> None:
     auth = login(client, "user", "user123").json()
     case = client.get("/api/cases/c-draft-1").json()
@@ -379,6 +390,20 @@ def test_overwrite_rejects_cross_case_and_unknown_targets(client: TestClient) ->
     current = client.get("/api/cases/c-draft-1").json()
     assert current["revision"] == case["revision"]
     assert current["document"] == case["document"]
+
+
+def test_history_and_overwrite_ignore_internal_versions(client: TestClient) -> None:
+    auth = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+    submitted = _transition_json(client, case["id"], auth["csrfToken"], "submit", case)
+    internal = _insert_internal_version(client, submitted["version"])
+
+    history = client.get(f"/api/cases/{case['id']}/history")
+    assert [row["id"] for row in history.json()["versions"]] == [submitted["version"]["id"]]
+
+    reopened = _transition_json(client, case["id"], auth["csrfToken"], "withdraw", submitted["case"])
+    rejected = _overwrite_version(client, auth, case, reopened["case"], internal)
+    assert rejected.status_code == 404
 
 
 def test_overwrite_requires_owner_draft_and_current_revision(client: TestClient) -> None:

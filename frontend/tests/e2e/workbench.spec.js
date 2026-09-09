@@ -625,17 +625,21 @@ async function expectReadOnlyVersionTab(page, marker) {
   await expect(page.getByLabel("案例标题")).toHaveCount(0);
 }
 
+async function editDraftAndOpenHistory(page, marker) {
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
+  await page.getByLabel("案例标题").fill(`${marker} 已改`);
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
+  await page.reload();
+  await openHistoryTimeline(page);
+}
+
 test("作者从版本时间线打开只读 Tab，取消与确认覆盖行为正确", async ({ page }) => {
   await login(page);
   const request = page.context().request;
   const marker = `版本覆盖 ${Date.now()}`;
   await stageFrozenVersion(page, request, marker);
 
-  await page.getByRole("tab", { name: "当前教师稿" }).click();
-  await page.getByLabel("案例标题").fill(`${marker} 已改`);
-  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
-  await page.reload();
-  await openHistoryTimeline(page);
+  await editDraftAndOpenHistory(page, marker);
   await expectReadOnlyVersionTab(page, marker);
 
   await overwriteDialogStep(page, "取消覆盖");

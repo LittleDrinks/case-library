@@ -45,3 +45,13 @@ it("时间线不展示内部快照，也不提供手动创建版本入口", asyn
   expect(wrapper.text()).not.toContain("pre_agent_write");
   expect(wrapper.text()).toContain("普通编辑与保存不新增版本");
 });
+
+it("投稿版本号变化后刷新时间线", async () => {
+  const wrapper = render();
+  await flushPromises();
+  expect(api.caseHistory).toHaveBeenCalledTimes(1);
+
+  await wrapper.setProps({ caseRecord: { id: "case-1", versionNumber: 1 } });
+  await flushPromises();
+  expect(api.caseHistory).toHaveBeenCalledTimes(2);
+});

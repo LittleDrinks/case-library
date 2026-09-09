@@ -31,6 +31,7 @@ function versionFixture(overrides = {}) {
 
 const VersionRailProbe = {
   name: "VersionRailProbe",
+  props: { historical: Boolean },
   setup() {
     return { version: versionFixture() };
   },
@@ -334,6 +335,7 @@ test("首 Tab 固定当前教师稿，历史版本以只读 Tab 打开且可关�
   const editor = wrapper.findComponent({ name: "CanvasEditor" });
   expect(editor.props("editable")).toBe(false);
   expect(editor.props("document")).toEqual(versionFixture().document);
+  expect(wrapper.findComponent(VersionRailProbe).props("historical")).toBe(true);
 
   await wrapper.get('button[aria-label="关闭 v1 · 首次提交"]').trigger("click");
   expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();

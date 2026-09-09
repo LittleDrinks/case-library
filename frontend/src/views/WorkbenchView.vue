@@ -67,6 +67,8 @@ const onDraftTab = computed(() => !activeVersion.value);
 const activeDocument = computed(() => (
   onDraftTab.value ? document.value : activeVersion.value.document
 ));
+const historicalVersion = computed(() => Boolean(activeVersion.value));
+const assistantReadOnly = computed(() => readerMode.value || historicalVersion.value);
 const outline = computed(() => documentOutline(activeDocument.value));
 watch(readerVersion, () => conversationSources.clear());
 const reviewMode = computed(() => route.name === "case-review");
@@ -339,10 +341,14 @@ function selectTool(tool) {
 
 async function prepareLifecycle(command) {
   if (command !== "submit") return true;
-  await autosave.flush();
-  if (autosave.state.value === "saved") return true;
+  if (await flushAutosave()) return true;
   actionNotice.value = "正文尚未保存，未执行提交。";
   return false;
+}
+
+async function flushAutosave() {
+  await autosave.flush();
+  return autosave.state.value === "saved";
 }
 
 function requestLifecycle(command) {
@@ -399,8 +405,7 @@ function cancelDecision() {
 }
 
 async function prepareContentMutation() {
-  await autosave.flush();
-  if (autosave.state.value !== "saved") {
+  if (!await flushAutosave()) {
     throw new Error("正文尚未保存，未执行当前操作。");
   }
   return revision.value;
@@ -433,8 +438,7 @@ function cancelOverwrite() {
 }
 
 async function overwriteBaseline() {
-  await autosave.flush();
-  if (autosave.state.value === "saved") return revision.value;
+  if (await flushAutosave()) return revision.value;
   actionNotice.value = "正文尚未保存，未执行覆盖。";
   return null;
 }
@@ -479,8 +483,7 @@ function startDownload() {
 async function exportCase() {
   if (readerMode.value) { startDownload(); return; }
   actionNotice.value = "";
-  await autosave.flush();
-  if (autosave.state.value !== "saved") {
+  if (!await flushAutosave()) {
     actionNotice.value = "正文尚未保存，未生成导出文件。";
     return;
   }
@@ -623,7 +626,6 @@ onBeforeUnmount(() => {
         </main>
         <AssistantRail
           :active="activeTool"
-          :read-only="readerMode"
           :review="reviewMode"
           :version-id="readerVersion"
           :sources="sources"
@@ -632,6 +634,8 @@ onBeforeUnmount(() => {
           :open="drawerOpen"
           :case-record="caseRecord"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :historical="historicalVersion"
+          :read-only="assistantReadOnly"
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"

@@ -46,6 +46,14 @@ it("requires login before opening a private reader discussion", () => {
   expect(wrapper.findComponent({ name: "RouterLink" }).exists()).toBe(true);
 });
 
+it("does not expose a writable AI thread on a historical version", () => {
+  const wrapper = render({
+    historical: true, readOnly: true, user: { id: "user-1" }, active: "ai",
+  });
+  expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(false);
+  expect(wrapper.text()).toContain("覆盖当前教师稿");
+});
+
 it("keeps review chat private to review mode while annotations stay available", () => {
   const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
   const panel = wrapper.findComponent({ name: "AgentChatPanel" });
