@@ -54,6 +54,14 @@ function versionQuery(versionId) {
   return versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
 }
 
+function agentThreadQuery(versionId, mode) {
+  const params = new URLSearchParams();
+  if (versionId) params.set("versionId", versionId);
+  if (mode) params.set("mode", mode);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 function annotationRoot(id) {
   return `/api/cases/${encodeURIComponent(id)}/annotations`;
 }
@@ -104,18 +112,20 @@ export const api = {
     searchPath(query, kind, cursor, pageSize, filters),
   ),
   listSkills: () => request("/api/skills"),
-  agentThread: (caseId, threadId, versionId) => request(
+  agentThread: (caseId, threadId, versionId, mode) => request(
     threadId
       ? `/api/cases/${encodeURIComponent(caseId)}/agent/threads/${encodeURIComponent(threadId)}`
-      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread${versionQuery(versionId)}`,
+      : `/api/cases/${encodeURIComponent(caseId)}/agent/thread${agentThreadQuery(versionId, mode)}`,
   ),
-  agentThreads: (caseId, versionId) => request(
-    `/api/cases/${encodeURIComponent(caseId)}/agent/threads${versionQuery(versionId)}`,
+  agentThreads: (caseId, versionId, mode) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/threads${agentThreadQuery(versionId, mode)}`,
   ),
-  agentCreateThread: (caseId, title, csrfToken, versionId) => request(
+  agentCreateThread: (caseId, title, csrfToken, versionId, mode) => request(
     `/api/cases/${encodeURIComponent(caseId)}/agent/threads`,
     jsonOptions("POST", {
-      ...(title ? { title } : {}), ...(versionId ? { versionId } : {}),
+      ...(title ? { title } : {}),
+      ...(versionId ? { versionId } : {}),
+      ...(mode ? { mode } : {}),
     }, csrfToken),
   ),
   agentRenameThread: (caseId, threadId, title, csrfToken) => request(

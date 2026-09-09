@@ -20,6 +20,7 @@ const props = defineProps({
   open: { type: Boolean, default: true },
   versionId: { type: String, default: "" },
   readOnly: { type: Boolean, default: false },
+  review: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits(["case-revised", "clear-writing-context"]);
@@ -29,7 +30,11 @@ const {
   decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread, undoWrite,
   skills, catalog, reloadCatalog,
-} = useAgentChat(props.caseRecord.id, props.versionId);
+} = useAgentChat(
+  props.caseRecord.id,
+  props.versionId,
+  props.review ? "review" : "",
+);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
@@ -632,7 +637,7 @@ async function retryRun() {
       <AgentComposer
         :case-id="caseRecord.id"
         :version-id="versionId"
-        :read-only="readOnly"
+        :read-only="readOnly || review"
         :configured="configured"
         :busy="loading || sending || recovering"
         :thread-id="threadId || ''"

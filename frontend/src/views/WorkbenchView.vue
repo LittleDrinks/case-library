@@ -509,6 +509,7 @@ onBeforeUnmount(() => {
         <AssistantRail
           :active="activeTool"
           :read-only="readerMode"
+          :review="reviewMode"
           :version-id="readerVersion"
           :sources="sources"
           :sources-loading="sourcesLoading"

@@ -9,6 +9,7 @@ import VersionPanel from "./VersionPanel.vue";
 const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
+  review: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
   sources: { type: Array, default: () => [] },
   sourcesLoading: { type: Boolean, default: false },
@@ -59,11 +60,12 @@ function select(tab) {
 
     <AgentChatPanel
       v-if="active === 'ai' && (!readOnly || user)"
-      :key="versionId || 'draft'"
+      :key="versionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
       :version-id="versionId"
       :read-only="readOnly"
+      :review="review"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
       @clear-writing-context="emit('clear-writing-context')"

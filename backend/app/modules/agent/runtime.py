@@ -119,14 +119,21 @@ def _node_text(node: object) -> str:
     return "".join(_node_text(child) for child in node.get("content", []))
 
 
+def _role_prompts(reader: bool, review: bool) -> str:
+    if review:
+        return prompt_text("review-agent.md")
+    if reader:
+        return prompt_text("reader-agent.md")
+    return "\n\n".join((prompt_text("case-agent.md"), prompt_text("revision-task.md")))
+
+
 def case_instructions(
-    case: dict, *, database=None, extra: str = "", reader: bool = False
+    case: dict, *, database=None, extra: str = "", reader: bool = False,
+    review: bool = False,
 ) -> str:
     title = str(case.get("title") or "未命名案例")
     text = _node_text(case.get("document"))[:12000]
-    prompts = prompt_text("reader-agent.md") if reader else "\n\n".join(
-        (prompt_text("case-agent.md"), prompt_text("revision-task.md"))
-    )
+    prompts = _role_prompts(reader, review)
     base = "\n\n".join((
         prompts,
         prompt_text("grounding.md"),

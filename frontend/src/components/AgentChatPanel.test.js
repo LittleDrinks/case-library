@@ -264,13 +264,22 @@ it("reader discussion binds its version and does not send an edit Skill", async 
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountPanel({ versionId: "version-2", readOnly: true });
   await flushPromises();
-  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2");
+  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2", "");
   expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("只读问题");
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
   const body = JSON.parse(fetch.mock.calls[0][1].body);
   expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "只读问题" }]);
+});
+
+it("review discussion passes the review mode and read-only composer", async () => {
+  const wrapper = mountPanel({ review: true });
+  await flushPromises();
+  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "", "review");
+  expect(wrapper.findComponent({ name: "AgentComposer" }).props("readOnly")).toBe(true);
+  expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
+  expect(api.listSkills).not.toHaveBeenCalled();
 });
 
 it("inserts a published skill into the pending message and sends it once", async () => {

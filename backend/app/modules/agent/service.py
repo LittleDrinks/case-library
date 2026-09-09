@@ -12,10 +12,10 @@ from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
-from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
+from app.modules.agent.models import REVIEW_MODE, AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import READER_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -47,6 +47,7 @@ class RunContext:
     bounds: tuple = ()
     instructions: str = ""
     reader: bool = False
+    review: bool = False
     cancelled: bool = False
     failed: bool = False
     lost: bool = False
@@ -61,7 +62,8 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
         "conversation_id": context.run.thread_id,
         "run_id": context.run.id,
         "instructions": case_instructions(
-            context.case, database=database, extra=context.instructions, reader=context.reader
+            context.case, database=database, extra=context.instructions,
+            reader=context.reader, review=context.review,
         ),
         "user_prompt": context.prompt,
         "deps": context.deps,
@@ -159,8 +161,15 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
     return ids
 
 
-def _run_resources(parts: list[dict], bounds: tuple = (), reader=False) -> list[dict[str, str]]:
-    records = [resource_record(SYSTEM_PROMPT), resource_record(READER_PROMPT if reader else TASK_PROMPT)]
+def _task_prompt(reader: bool, review: bool) -> str:
+    if review:
+        return REVIEW_PROMPT
+    return READER_PROMPT if reader else TASK_PROMPT
+
+
+def _run_resources(parts: list[dict], bounds: tuple = (), reader=False,
+                   review=False) -> list[dict[str, str]]:
+    records = [resource_record(SYSTEM_PROMPT), resource_record(_task_prompt(reader, review))]
     loaded = set(_loaded_capability_ids(parts))
     return [*records, *[bound.resource_record() for bound in bounds if bound.skill_id in loaded]]
 
@@ -317,17 +326,26 @@ def _complete(context: RunContext) -> None:
         _terminal(context, context.repository.fail_run)
         return
     artifact = context.deps.proposed if context.deps else None
+    reader = context.reader and not context.review
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
-        resources=_run_resources(_assistant_parts_of(context), context.bounds, context.reader),
-        reader_case_id=context.case["id"] if context.reader else None,
-        reader_version_id=context.case.get("versionId") if context.reader else None,
+        resources=_run_resources(_assistant_parts_of(context), context.bounds,
+                                 context.reader, context.review),
+        reader_case_id=context.case["id"] if reader else None,
+        reader_version_id=context.case.get("versionId") if reader else None,
         artifact=artifact,
     ):
         context.lost = True
 
 
+def _review_case_present(database, case_id: str) -> bool:
+    """审核对话锚定当前待审工作稿：案例不存在即终止流，无已发布版语义。"""
+    return database.cases.find_one({"id": case_id}, {"_id": 1}) is not None
+
+
 def _reader_accessible(context: RunContext) -> bool:
+    if context.review:
+        return _review_case_present(context.repository.database, context.case["id"])
     return not context.reader or version_readable_by_id(
         context.repository.database, context.case["id"], context.case.get("versionId")
     )

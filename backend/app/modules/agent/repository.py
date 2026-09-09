@@ -9,6 +9,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.ids import new_id
 from app.modules.agent.models import (
+    REVIEW_MODE,
     AgentArtifact,
     AgentMessage,
     AgentRun,
@@ -61,12 +62,13 @@ class AgentRepository:
     def __init__(self, database) -> None:
         self.database = database
 
-    def default_thread(self, case_id: str, owner_id: str, version_id: str | None = None) -> AgentThread:
+    def default_thread(self, case_id: str, owner_id: str, version_id: str | None = None,
+                       mode: str | None = None) -> AgentThread:
         try:
             row = self.database.agent_threads.find_one_and_update(
                 {"caseId": case_id, "ownerId": owner_id, "isDefault": True,
-                 "versionId": version_id},
-                _default_thread_update(case_id, owner_id, version_id),
+                 "versionId": version_id, "mode": mode},
+                _default_thread_update(case_id, owner_id, version_id, mode),
                 upsert=True,
                 return_document=ReturnDocument.AFTER,
             )
@@ -74,7 +76,7 @@ class AgentRepository:
             # 并发首建竞争：部分唯一索引拒绝败者插入，回读胜者文档。
             row = self.database.agent_threads.find_one(
                 {"caseId": case_id, "ownerId": owner_id, "isDefault": True,
-                 "versionId": version_id}
+                 "versionId": version_id, "mode": mode}
             )
         return _model_view(row, AgentThread)
 
@@ -86,20 +88,22 @@ class AgentRepository:
             raise ThreadNotFoundError
         return _model_view(row, AgentThread)
 
-    def list_threads(self, case_id: str, owner_id: str, version_id: str | None = None) -> list[AgentThread]:
+    def list_threads(self, case_id: str, owner_id: str, version_id: str | None = None,
+                     mode: str | None = None) -> list[AgentThread]:
         rows = self.database.agent_threads.find(
-            {"caseId": case_id, "ownerId": owner_id, "versionId": version_id}
+            {"caseId": case_id, "ownerId": owner_id, "versionId": version_id,
+             "mode": mode}
         ).sort([("updatedAt", DESCENDING), ("id", DESCENDING)])
         return [_model_view(row, AgentThread) for row in rows]
 
     def create_thread(
         self, case_id: str, owner_id: str, title: str | None = None,
-        version_id: str | None = None,
+        version_id: str | None = None, mode: str | None = None,
     ) -> AgentThread:
         now = _now()
         thread = AgentThread(
             id=new_id("thread"), case_id=case_id, owner_id=owner_id,
-            version_id=version_id, title=title, is_default=False,
+            version_id=version_id, mode=mode, title=title, is_default=False,
             created_at=now, updated_at=now,
         )
         self.database.agent_threads.insert_one(
@@ -610,10 +614,12 @@ class AgentRepository:
         )
 
 
-def _default_thread_update(case_id: str, owner_id: str, version_id: str | None) -> dict:
+def _default_thread_update(
+    case_id: str, owner_id: str, version_id: str | None, mode: str | None = None,
+) -> dict:
     now = _now()
     return {
-        "$setOnInsert": _default_thread(case_id, owner_id, now, version_id),
+        "$setOnInsert": _default_thread(case_id, owner_id, now, version_id, mode),
         "$set": {"updatedAt": now},
     }
 
@@ -632,7 +638,10 @@ def _reservation_query(thread: AgentThread) -> dict:
     }
 
 
-def _default_thread(case_id: str, owner_id: str, now: datetime, version_id: str | None) -> dict:
+def _default_thread(
+    case_id: str, owner_id: str, now: datetime, version_id: str | None,
+    mode: str | None = None,
+) -> dict:
     document = {
         "id": new_id("thread"), "caseId": case_id, "ownerId": owner_id,
         "isDefault": True, "nextMessageSeq": 0, "eventSeq": 0, "activeRunId": None,
@@ -640,6 +649,8 @@ def _default_thread(case_id: str, owner_id: str, now: datetime, version_id: str 
     }
     if version_id is not None:
         document["versionId"] = version_id
+    if mode is not None:
+        document["mode"] = mode
     return document
 
 
@@ -680,7 +691,7 @@ def _run_common_fields(
     return {
         "status": "active", "started_at": now,
         "skill_bindings": list(skill_bindings or []),
-        "read_only": thread.version_id is not None,
+        "read_only": thread.version_id is not None or thread.mode == REVIEW_MODE,
         "write_authorized": write_authorized,
         "base_revision": base_revision, "target": target,
         "owner_id": owner_id,
