@@ -9,8 +9,6 @@ from pydantic_ai.models.test import TestModel
 from app.modules.agent.runtime import agent
 from tests.skill_packages import SKILL_ID
 from tests.test_agent_skill_run import (
-    _placeholder_tool_name,
-    _recording_skill_model,
     _upload_and_publish,
 )
 
@@ -176,7 +174,11 @@ def _review_skill_parts() -> list[dict]:
 
 def _review_run_receipt(client: TestClient, thread_id: str) -> tuple[list, dict]:
     calls: list = []
-    model = _recording_skill_model(SKILL_ID, _placeholder_tool_name(SKILL_ID), calls)
+    async def capture(messages, info):
+        calls.append((messages, info))
+        yield "按已加载规则进行只读核查"
+
+    model = FunctionModel(stream_function=capture)
     with agent.override(model=model):
         response = _send_parts(client, _login(client, ADMIN), thread_id, _review_skill_parts())
     assert response.status_code == 200, response.text
@@ -202,8 +204,9 @@ def test_review_run_loads_published_skill_and_stays_read_only(client: TestClient
     assert records["skill"]["contentHash"] == version["packageSha256"]
     assert database.agent_artifacts.count_documents({}) == 0
     assert database.agent_writes.count_documents({}) == 0
-    later = [str(part) for message in calls[-1][0] for part in message.parts]
-    assert any("写作前至少通读一个范例" in text for text in later)
+    assert "写作前至少通读一个范例" in calls[0][1].instructions
+    tools = {tool.name for tool in calls[0][1].function_tools}
+    assert not tools & {"write_document", "propose_revision", "propose_document"}
 
 
 def _tagged_review_case(client: TestClient, fields: dict) -> None:

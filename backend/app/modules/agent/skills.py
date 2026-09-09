@@ -152,12 +152,12 @@ def domain_capability() -> Capability:
     )
 
 
-def bound_skill_capability(bound: BoundSkill) -> Capability:
-    """已发布 Skill 延迟加载正文与资源读取工具。"""
+def bound_skill_capability(bound: BoundSkill, *, defer_loading: bool = True) -> Capability:
+    """绑定已发布 Skill；显式审核调用立即加载规则，资源仍按需读取。"""
     return Capability(
         id=bound.skill_id, description=bound.description,
         instructions=skill_instructions(bound), tools=[resource_tool(bound)],
-        defer_loading=True,
+        defer_loading=defer_loading,
     )
 
 

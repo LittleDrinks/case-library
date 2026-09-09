@@ -609,7 +609,7 @@ def _capabilities(conversation: Conversation, bounds) -> list:
     if conversation.reader:
         capabilities = [reader_capability()]
         if conversation.review:
-            capabilities += [bound_skill_capability(bound) for bound in bounds]
+            capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
     return [domain_capability()] + [bound_skill_capability(bound) for bound in bounds]
 
