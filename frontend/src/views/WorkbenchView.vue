@@ -41,6 +41,7 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 const sources = ref([]);
+const canvasEditor = ref(null);
 const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
@@ -258,6 +259,18 @@ function changeDocument(value) {
   autosave.markDirty();
 }
 
+const CITATION_NOTICES = {
+  readonly: "只读工作台不能插入或修改引用",
+  unpositioned: "请先在正文点击插入位置，或选中一段文字",
+};
+
+function insertSourceCitation(row) {
+  const status = canvasEditor.value?.insertCitation(row) ?? "unpositioned";
+  actionNotice.value = CITATION_NOTICES[status] ?? (status === "linked"
+    ? `已将选区关联引用〔${row.number}〕`
+    : `已插入引用〔${row.number}〕`);
+}
+
 function changeTags(next) {
   tagIds.value = next;
   autosave.markDirty();
@@ -461,6 +474,7 @@ onBeforeUnmount(() => {
               @retry="loadTagCatalog"
             />
             <CanvasEditor
+              ref="canvasEditor"
               :document="document"
               :revision="revision"
               :editable="editable"
@@ -497,6 +511,7 @@ onBeforeUnmount(() => {
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
           @sources-retry="loadSources"
+          @insert-citation="insertSourceCitation"
         />
       </div>
     </template>

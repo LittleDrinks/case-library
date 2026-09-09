@@ -54,28 +54,59 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
 });
 
-it("可将选中文字关联资料并取消正文引用", async () => {
+it("选中文字可关联资料，工具栏可取消引用", async () => {
   const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
   await selectParagraph(wrapper);
-  const picker = wrapper.get('[aria-label="正文引用资料"]');
-  await picker.setValue("attachment:att-1");
+  expect(wrapper.vm.insertCitation(source)).toBe("linked");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toContainEqual({
     type: "citation", attrs: { sourceType: "attachment", sourceId: "att-1" },
   });
-  await picker.setValue("remove");
+  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toBeUndefined();
-  expect(picker.element.value).toBe("");
-  await picker.setValue("remove");
-  expect(picker.element.value).toBe("");
+});
+
+it("无选区时在光标处插入引用锚点并显示编号", async () => {
+  const source = { sourceType: "case", id: "src-1", number: 2, title: "引用案例" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  const editor = wrapper.vm.editor;
+  editor.commands.focus("end");
+  await wrapper.get(".canvas-editor").trigger("focus");
+  expect(wrapper.vm.insertCitation(source)).toBe("inserted");
+  await nextTick();
+  const nodes = editor.getJSON().content[1].content;
+  expect(nodes.at(-1).text).toBe("\u200B");
+  expect(nodes.at(-1).marks).toContainEqual({
+    type: "citation", attrs: { sourceType: "case", sourceId: "src-1" },
+  });
+  expect(wrapper.get(".canvas-editor .citation-number").text()).toBe("〔2〕");
+});
+
+it("未放置光标或只读时拒绝插入引用", async () => {
+  const source = { sourceType: "case", id: "src-1", number: 1, title: "引用案例" };
+  const unpositioned = await setup({ annotatable: true, sources: [source] });
+  expect(unpositioned.wrapper.vm.insertCitation(source)).toBe("unpositioned");
+  expect(unpositioned.wrapper.vm.editor.getJSON().content[1].content).toHaveLength(1);
+  const readonly = await setup({ editable: false, sources: [source] });
+  expect(readonly.wrapper.vm.insertCitation(source)).toBe("readonly");
+  expect(readonly.wrapper.find('[aria-label="取消当前引用"]').exists()).toBe(false);
+});
+
+it("来源编号变化时正文引用编号同步刷新", async () => {
+  const source = { sourceType: "case", id: "src-1", number: 2, title: "引用案例" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  wrapper.vm.editor.commands.focus("end");
+  await wrapper.get(".canvas-editor").trigger("focus");
+  wrapper.vm.insertCitation(source);
+  await wrapper.setProps({ sources: [{ ...source, number: 3 }] });
+  expect(wrapper.get(".canvas-editor .citation-number").text()).toBe("〔3〕");
 });
 
 it("引用 HTML 粘贴往返保留资料属性", async () => {
   const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
   await selectParagraph(wrapper);
-  const picker = wrapper.get('[aria-label="正文引用资料"]');
-  await picker.setValue("attachment:att-1");
+  wrapper.vm.insertCitation(source);
   const html = wrapper.vm.editor.getHTML();
   expect(html).toContain('data-citation-source="attachment:att-1"');
   wrapper.vm.editor.commands.setContent(html, false);
