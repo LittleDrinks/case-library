@@ -120,7 +120,7 @@ it("creates a new thread into an empty chat with a fixed composer", async () => 
   await wrapper.get('[data-testid="agent-thread-create"]').trigger("click");
   await flushPromises();
 
-  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf");
+  expect(api.agentCreateThread).toHaveBeenCalledWith("case-1", null, "csrf", "", "");
   expect(wrapper.findAll(".ai-message")).toHaveLength(0);
   expect(wrapper.get('[aria-label="向 AI 提问"]').exists()).toBe(true);
   expect(wrapper.get(".agent-thread-current").text()).toContain("未命名对话");
