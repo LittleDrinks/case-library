@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
+import CandidateReviewPrototype from "../components/CandidateReviewPrototype.vue";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
@@ -19,6 +20,7 @@ import { citationSignature } from "../lib/citation.js";
 import { session } from "../session.js";
 
 const route = useRoute();
+const candidatePrototype = computed(() => route.query.prototype === "candidate");
 const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
 // 案例级「用于对话」上下文归 provider 所有：按读者版本清理，
@@ -437,7 +439,7 @@ onBeforeUnmount(() => {
         :editable="editable"
         :review-mode="reviewMode"
         :read-only="readerMode"
-        :actions="lifecycleActions"
+        :actions="candidatePrototype ? [] : lifecycleActions"
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
@@ -461,7 +463,8 @@ onBeforeUnmount(() => {
       <div v-else-if="autosave.state.value === 'error'" class="conflict-banner" role="alert">
         <AlertTriangle :size="17" />自动保存失败，正在重试。
       </div>
-      <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
+      <CandidateReviewPrototype v-if="candidatePrototype" :case-record="caseRecord" />
+      <div v-else class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
         <OutlinePanel :items="outline" :collapsed="outlineCollapsed" @collapse="toggleOutline" @locate="locateHeading" />
         <main id="main-content" class="canvas-column">
           <AddSourceToCase
