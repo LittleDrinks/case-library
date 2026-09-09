@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronDown, LoaderCircle, MessageSquareText, Send } from "@lucide/vue";
+import { ChevronDown, LoaderCircle, MessageSquareText } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
 import { renderMarkdown } from "../lib/markdown.js";
@@ -10,9 +10,10 @@ import {
   runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
+import AgentComposer from "./AgentComposer.vue";
 import AgentResourceTrace from "./AgentResourceTrace.vue";
-import AgentSourcePicker from "./AgentSourcePicker.vue";
 import AgentThreadList from "./AgentThreadList.vue";
+import { useConversationSources } from "../composables/useConversationSources.js";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
@@ -21,14 +22,13 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised", "case-refreshed"]);
+const emit = defineEmits(["case-revised"]);
 
-const draft = ref("");
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
   decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId,
   listThreads, selectThread, createThread, renameThread, undoWrite,
-  skills, selectedSkillId, catalog, reloadCatalog, skillReady,
+  skills, catalog, reloadCatalog,
 } = useAgentChat(props.caseRecord.id, props.versionId);
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
@@ -41,12 +41,9 @@ const runStatusAttr = computed(() => (
   sending.value || threadState.value?.activeRun
     ? "active" : threadState.value?.latestRun?.status || "none"
 ));
-const canSend = computed(() => Boolean(
-  draft.value.trim() && configured.value && skillReady.value
-    && !loading.value && !sending.value && !recovering.value,
-));
 const decideError = ref("");
-const selectedSources = ref([]);
+const conversationSources = useConversationSources();
+const contextDismissed = ref(false);
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
@@ -162,10 +159,6 @@ function skillName(skillId) {
   return skills.value.find((skill) => skill.id === skillId)?.name || skillId || "";
 }
 
-function skillOptionLabel(skill) {
-  return skill.version ? `${skill.name}（${skill.version}）` : skill.name;
-}
-
 function toolDurationText(part, run) {
   const timing = run?.toolTimings?.[part.toolCallId];
   return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, Date.now()) : "";
@@ -257,8 +250,12 @@ watch(threadId, () => {
 watch(() => props.open, (open, wasOpen) => {
   if (open && !wasOpen) refreshSourcePermissions();
 });
+watch(() => props.writingContext, () => {
+  contextDismissed.value = false;
+});
 
 onMounted(() => {
+  conversationSources.clear();
   window.addEventListener("focus", refreshSourcePermissions);
   document.addEventListener("visibilitychange", refreshOnVisible);
 });
@@ -412,16 +409,20 @@ async function undoWriteRecord(writeId) {
 }
 
 function contextParts() {
-  const parts = selectedSources.value.map((source) => ({
+  const parts = conversationSources.sources.value.map((source) => ({
     type: "data-source", data: { sourceType: source.sourceType, id: source.id },
   }));
-  const selection = props.writingContext;
+  const selection = contextDismissed.value ? null : props.writingContext;
   const usable = selection?.sameBlock && Number.isInteger(selection.from)
     && Number.isInteger(selection.to) && selection.to > selection.from;
   if (usable) {
     parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to } });
   }
   return parts;
+}
+
+async function sendMessage({ text, skillId }) {
+  await send(text, contextParts(), skillId);
 }
 
 async function rejectArtifact(artifactId) {
@@ -431,13 +432,6 @@ async function rejectArtifact(artifactId) {
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
   }
-}
-
-async function submit() {
-  if (!canSend.value) return;
-  const text = draft.value.trim();
-  draft.value = "";
-  await send(text, contextParts());
 }
 
 async function stopRun() {
@@ -639,55 +633,20 @@ async function retryRun() {
         />
       </div>
       <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
-      <div v-if="!readOnly" class="assistant-skill-picker">
-        <label for="agent-skill-select">Skill</label>
-        <select
-          id="agent-skill-select"
-          v-model="selectedSkillId"
-          aria-label="选择 Skill"
-          data-testid="skill-select"
-          :disabled="loading || sending || catalog === 'loading'"
-        >
-          <option value="">不使用 Skill</option>
-          <option v-for="skill in skills" :key="skill.id" :value="skill.id">
-            {{ skillOptionLabel(skill) }}
-          </option>
-        </select>
-        <span v-if="catalog === 'loading'" class="skill-catalog-state" data-testid="skill-catalog-loading">正在加载目录</span>
-        <template v-else-if="catalog === 'error'">
-          <span class="skill-catalog-state error" data-testid="skill-catalog-error">目录加载失败</span>
-          <button type="button" class="skill-catalog-retry" data-testid="skill-catalog-retry" @click="reloadCatalog">重试</button>
-        </template>
-        <span v-else-if="!skills.length" class="skill-catalog-state" data-testid="skill-catalog-empty">暂无已发布 Skill</span>
-      </div>
-      <div class="assistant-composer">
-        <AgentSourcePicker
-          :case-id="caseRecord.id"
-          :revision="caseRecord.revision"
-          :version-id="versionId"
-          :read-only="readOnly"
-          :selected="selectedSources"
-          :disabled="loading || sending"
-          @update:selected="selectedSources = $event"
-          @case-refreshed="emit('case-refreshed', $event)"
-        />
-        <div
-          v-if="writingContext?.quote"
-          class="assistant-context-summary"
-          data-testid="composer-selection"
-          :title="`正文上下文：${writingContext.quote}`"
-        >正文上下文：{{ writingContext.quote }}</div>
-        <textarea
-          v-model="draft"
-          aria-label="向 AI 提问"
-          :placeholder="configured ? '输入问题' : '请先配置 AI 模型'"
-          :disabled="!configured || loading || sending || recovering"
-          @keydown.enter.exact.prevent="submit"
-        />
-        <button type="button" title="发送" aria-label="发送" :disabled="!canSend" @click="submit">
-          <Send :size="16" />
-        </button>
-      </div>
+      <AgentComposer
+        :case-id="caseRecord.id"
+        :version-id="versionId"
+        :read-only="readOnly"
+        :configured="configured"
+        :busy="loading || sending || recovering"
+        :thread-id="threadId || ''"
+        :writing-context="contextDismissed ? null : writingContext"
+        :skills="skills"
+        :catalog="catalog"
+        @send="sendMessage"
+        @clear-selection="contextDismissed = true"
+        @reload-catalog="reloadCatalog"
+      />
     </template>
     <AgentThreadList
       v-else

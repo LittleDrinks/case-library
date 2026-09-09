@@ -17,12 +17,6 @@ import SearchView from "./views/SearchView.vue";
 import WorkbenchView from "./views/WorkbenchView.vue";
 
 const routes = [
-  ...(import.meta.env.DEV ? [{
-    path: "/prototype/workbench-ai",
-    name: "prototype-workbench-ai",
-    component: () => import("./views/PrototypeWorkbenchAiView.vue"),
-    meta: { devOnly: true },
-  }] : []),
   { path: "/", name: "home", component: HomeView },
   { path: "/login", name: "login", component: LoginView },
   { path: "/search", name: "search", component: SearchView },

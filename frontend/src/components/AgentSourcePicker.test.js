@@ -1,94 +1,92 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentSourcePicker from "./AgentSourcePicker.vue";
+import { useConversationSources } from "../composables/useConversationSources.js";
 import { api } from "../api.js";
-import { session } from "../session.js";
 
 vi.mock("../api.js", () => ({
-  api: {
-    listSources: vi.fn(), search: vi.fn(), addCaseSource: vi.fn(),
-    mountCaseMaterial: vi.fn(), getCase: vi.fn(),
-  },
+  api: { listSources: vi.fn() },
 }));
 
 const entries = { entries: [{ sourceType: "case", id: "src-1", title: "来源一" }] };
+let wrapper;
 
-function mountPicker(selected = [], overrides = {}) {
-  return mount(AgentSourcePicker, {
-    props: { caseId: "case-1", revision: 3, selected, ...overrides },
+function mountPicker(overrides = {}) {
+  wrapper = mount(AgentSourcePicker, {
+    props: { caseId: "case-1", ...overrides },
+    attachTo: document.body,
   });
+  return wrapper;
 }
+
+async function openPicker() {
+  await wrapper.get('[data-testid="agent-source-picker-toggle"]').trigger("click");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  return document.querySelector(".source-popover");
+}
+
+afterEach(() => {
+  wrapper?.unmount();
+  wrapper = undefined;
+  document.body.innerHTML = "";
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
-  session.csrfToken = "csrf";
+  useConversationSources().clear();
   api.listSources.mockResolvedValue(structuredClone(entries));
-  api.getCase.mockResolvedValue({ id: "case-1", revision: 4 });
 });
 
-it("selects and removes compact source chips", async () => {
-  const wrapper = mountPicker();
+it("opens a searchable popover and toggles sources through the shared store", async () => {
+  mountPicker();
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  await wrapper.get(".agent-source-option input").setValue(true);
-  expect(wrapper.emitted("update:selected")[0][0][0].id).toBe("src-1");
-  await wrapper.setProps({ selected: [entries.entries[0]] });
-  await wrapper.get('[aria-label="移除来源一"]').trigger("click");
-  expect(wrapper.emitted("update:selected").at(-1)[0]).toEqual([]);
+  const panel = await openPicker();
+  expect(panel.textContent).toContain("本次对话参考资料");
+  panel.querySelector('[data-testid="agent-source-option"] input').click();
+  await flushPromises();
+  expect(useConversationSources().sources.value.map((row) => row.id)).toEqual(["src-1"]);
+  expect(wrapper.get(".context-trigger .count").text()).toBe("1");
 });
 
-it("adds a searched case only after the explicit confirmation button", async () => {
-  api.search.mockResolvedValue({ items: [{ kind: "case", id: "case-9", title: "新来源" }] });
-  api.addCaseSource.mockResolvedValue({});
-  const wrapper = mountPicker();
+it("filters entries locally by the search term", async () => {
+  api.listSources.mockResolvedValue({ entries: [
+    { sourceType: "case", id: "src-1", title: "来源一" },
+    { sourceType: "material", id: "mat-1", title: "课堂素材" },
+  ] });
+  mountPicker();
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  await wrapper.get('[aria-label="检索资料"]').setValue("新来源");
-  await wrapper.get(".agent-source-search button").trigger("click");
+  const panel = await openPicker();
+  const input = panel.querySelector('[aria-label="搜索本案例资料"]');
+  input.value = "素材";
+  input.dispatchEvent(new Event("input"));
   await flushPromises();
-  expect(api.addCaseSource).not.toHaveBeenCalled();
-  await wrapper.get(".agent-source-result button").trigger("click");
+  expect(panel.textContent).toContain("课堂素材");
+  expect(panel.textContent).not.toContain("来源一");
+  input.value = "不存在";
+  input.dispatchEvent(new Event("input"));
   await flushPromises();
-  expect(api.addCaseSource).toHaveBeenCalledWith(
-    "case-1", { sourceCaseId: "case-9", revision: 3 }, "csrf",
-  );
-  expect(wrapper.emitted("case-refreshed")[0][0].revision).toBe(4);
+  expect(panel.textContent).toContain("没有匹配的资料");
 });
 
-it("readonly picker reads the fixed version without add or search controls", async () => {
-  const wrapper = mountPicker([], { versionId: "v-pub-1", readOnly: true });
+it("readonly picker reads the fixed version without any platform search", async () => {
+  mountPicker({ versionId: "v-pub-1", readOnly: true });
   await flushPromises();
   expect(api.listSources).toHaveBeenCalledWith("case-1", "v-pub-1");
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  expect(wrapper.find(".agent-source-search").exists()).toBe(false);
-  expect(wrapper.find(".agent-source-result").exists()).toBe(false);
-  await wrapper.get(".agent-source-option input").setValue(true);
-  expect(wrapper.emitted("update:selected")[0][0][0].id).toBe("src-1");
+  const panel = await openPicker();
+  expect(panel.textContent).toContain("来源一");
 });
 
-it("clears the selection and reloads the fixed directory on version change", async () => {
-  const wrapper = mountPicker();
+it("clears the shared selection and reloads on version change", async () => {
+  const store = useConversationSources();
+  store.toggle({ sourceType: "case", id: "src-old" });
+  mountPicker();
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  await wrapper.get(".agent-source-option input").setValue(true);
-  api.listSources.mockClear();
-  await wrapper.setProps({ versionId: "v-2", readOnly: true });
+  expect(wrapper.get(".context-trigger .count").text()).toBe("1");
+  await wrapper.setProps({ versionId: "v-2" });
   await flushPromises();
-  expect(wrapper.emitted("update:selected").at(-1)[0]).toEqual([]);
-  expect(api.listSources).toHaveBeenCalledWith("case-1", "v-2");
-  expect(wrapper.emitted("update:selected").length).toBe(2);
-});
-
-it("keeps the closed picker to a compact count for many sources", async () => {
-  const many = Array.from({ length: 15 }, (_, index) => ({
-    sourceType: "material", id: `mat-${index}`, title: `素材${index}`,
-  }));
-  const wrapper = mountPicker(many);
-  await flushPromises();
-  expect(wrapper.get(".agent-source-summary").text()).toContain("已选 15 条");
-  expect(wrapper.find(".agent-source-chips").exists()).toBe(false);
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  expect(wrapper.findAll(".agent-source-chip")).toHaveLength(15);
+  expect(api.listSources).toHaveBeenLastCalledWith("case-1", "v-2");
+  expect(store.sources.value).toEqual([]);
+  expect(wrapper.find(".context-trigger .count").exists()).toBe(false);
 });
 
 it("ignores a stale fixed-version response after the version changes", async () => {
@@ -96,7 +94,7 @@ it("ignores a stale fixed-version response after the version changes", async () 
   api.listSources.mockImplementationOnce(
     () => new Promise((resolve) => { resolveFirst = resolve; }),
   );
-  const wrapper = mountPicker([], { versionId: "v-1", readOnly: true });
+  mountPicker({ versionId: "v-1", readOnly: true });
   await flushPromises();
   api.listSources.mockResolvedValueOnce({
     entries: [{ sourceType: "case", id: "src-2", title: "新版来源" }],
@@ -105,18 +103,19 @@ it("ignores a stale fixed-version response after the version changes", async () 
   await flushPromises();
   resolveFirst({ entries: [{ sourceType: "case", id: "src-stale", title: "旧版来源" }] });
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  expect(wrapper.text()).toContain("新版来源");
-  expect(wrapper.text()).not.toContain("旧版来源");
+  const panel = await openPicker();
+  expect(panel.textContent).toContain("新版来源");
+  expect(panel.textContent).not.toContain("旧版来源");
 });
 
-it("clears a load error on a successful reload", async () => {
+it("shows a load error with retry and clears it on success", async () => {
   api.listSources.mockRejectedValueOnce(new Error("boom"));
-  const wrapper = mountPicker();
+  mountPicker();
   await flushPromises();
-  await wrapper.get(".agent-source-picker-toggle").trigger("click");
-  expect(wrapper.get(".agent-source-error").text()).toContain("资料区加载失败");
-  await wrapper.setProps({ versionId: "v-2" });
+  const panel = await openPicker();
+  expect(panel.querySelector('[role="alert"]').textContent).toContain("资料区加载失败");
+  api.listSources.mockResolvedValue(structuredClone(entries));
+  panel.querySelector('[aria-label="重新加载资料"]').click();
   await flushPromises();
-  expect(wrapper.find(".agent-source-error").exists()).toBe(false);
+  expect(document.querySelector(".source-popover").textContent).toContain("来源一");
 });
