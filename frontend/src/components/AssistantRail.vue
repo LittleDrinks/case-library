@@ -24,7 +24,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "annotations", "sources-retry",
+  "case-revised", "annotations", "sources-retry", "clear-writing-context",
 ]);
 
 const tabs = [
@@ -66,7 +66,7 @@ function select(tab) {
       :read-only="readOnly"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
-      @case-refreshed="emit('case-refreshed', $event)"
+      @clear-writing-context="emit('clear-writing-context')"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>

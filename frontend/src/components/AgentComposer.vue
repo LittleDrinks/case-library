@@ -71,6 +71,8 @@ function submit() {
   emit("send", { text: draft.value.trim(), skillId: chosenSkillId.value });
   draft.value = "";
   chosenSkillId.value = "";
+  skillOpen.value = false;
+  skillQuery.value = "";
 }
 </script>
 

@@ -22,7 +22,7 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised"]);
+const emit = defineEmits(["case-revised", "clear-writing-context"]);
 
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
@@ -43,7 +43,6 @@ const runStatusAttr = computed(() => (
 ));
 const decideError = ref("");
 const conversationSources = useConversationSources();
-const contextDismissed = ref(false);
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
@@ -250,10 +249,6 @@ watch(threadId, () => {
 watch(() => props.open, (open, wasOpen) => {
   if (open && !wasOpen) refreshSourcePermissions();
 });
-watch(() => props.writingContext, () => {
-  contextDismissed.value = false;
-});
-
 onMounted(() => {
   // 不在此处清空对话上下文：切页签会重挂面板，不能抹掉资料区刚勾选的内容；
   // 案例隔离由 WorkbenchView 按案例提供新实例，版本切换由 AgentSourcePicker 清空。
@@ -413,7 +408,7 @@ function contextParts() {
   const parts = conversationSources.sources.value.map((source) => ({
     type: "data-source", data: { sourceType: source.sourceType, id: source.id },
   }));
-  const selection = contextDismissed.value ? null : props.writingContext;
+  const selection = props.writingContext;
   const usable = selection?.sameBlock && Number.isInteger(selection.from)
     && Number.isInteger(selection.to) && selection.to > selection.from;
   if (usable) {
@@ -641,11 +636,11 @@ async function retryRun() {
         :configured="configured"
         :busy="loading || sending || recovering"
         :thread-id="threadId || ''"
-        :writing-context="contextDismissed ? null : writingContext"
+        :writing-context="writingContext"
         :skills="skills"
         :catalog="catalog"
         @send="sendMessage"
-        @clear-selection="contextDismissed = true"
+        @clear-selection="emit('clear-writing-context')"
         @reload-catalog="reloadCatalog"
       />
     </template>

@@ -24,7 +24,7 @@ export function createConversationSources() {
   return { sources: computed(() => selected.value), has, toggle, remove, clear };
 }
 
-// 未被提供时（独立挂载/测试）退化为实例私有状态；正式页面由 WorkbenchView 提供
+// 未被提供时直接暴露缺失（不创建孤立实例静默兜底）；独立测试需显式 provide
 export function useConversationSources() {
-  return inject(CONVERSATION_SOURCES_KEY, null) || createConversationSources();
+  return inject(CONVERSATION_SOURCES_KEY);
 }

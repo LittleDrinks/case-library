@@ -78,16 +78,17 @@ it("readonly picker reads the fixed version without any platform search", async 
   expect(panel.textContent).toContain("来源一");
 });
 
-it("clears the shared selection and reloads on version change", async () => {
+it("reloads the directory on version change while the workbench provider owns clearing", async () => {
   store.toggle({ sourceType: "case", id: "src-old" });
   mountPicker();
   await flushPromises();
   expect(wrapper.get(".context-trigger .count").text()).toBe("1");
+  api.listSources.mockResolvedValue({ entries: [{ sourceType: "case", id: "src-2", title: "新版来源" }] });
   await wrapper.setProps({ versionId: "v-2" });
   await flushPromises();
   expect(api.listSources).toHaveBeenLastCalledWith("case-1", "v-2");
-  expect(store.sources.value).toEqual([]);
-  expect(wrapper.find(".context-trigger .count").exists()).toBe(false);
+  await openPicker();
+  expect(document.querySelector(".source-popover").textContent).toContain("新版来源");
 });
 
 it("ignores a stale fixed-version response after the version changes", async () => {

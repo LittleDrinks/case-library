@@ -237,6 +237,14 @@ it("sends selected sources and the current writing selection as data parts", asy
   ]);
 });
 
+it("asks the workbench to clear the writing context when the chip is removed", async () => {
+  const wrapper = mountPanel({ writingContext: { from: 1, to: 4, quote: "第二段", sameBlock: true } });
+  await flushPromises();
+  expect(wrapper.get('[data-testid="composer-selection"]').exists()).toBe(true);
+  await wrapper.get('[aria-label="移除正文选区"]').trigger("click");
+  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
+});
+
 it("keeps conversation context across panel remounts so tab switches never wipe it", async () => {
   conversationStore.toggle({ sourceType: "case", id: "src-1", title: "来源一" });
   const fetch = vi.fn().mockResolvedValue(answerResponse());
@@ -828,7 +836,7 @@ function selectionContext() {
 it("sends the selected text as a structured selection part", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
-  const wrapper = mount(AgentChatPanel, { props: { caseRecord: { id: "case-1" }, writingContext: selectionContext() }, global: { stubs: { RouterLink: true } } });
+  const wrapper = mountPanel({ writingContext: selectionContext() });
   await flushPromises();
 
   expect(wrapper.get('[data-testid="composer-selection"]').text()).toContain("正文选区");

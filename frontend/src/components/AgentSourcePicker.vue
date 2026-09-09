@@ -11,7 +11,7 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
 });
-const { sources, has, toggle, clear } = useConversationSources();
+const { sources, has, toggle } = useConversationSources();
 const entries = ref([]);
 const query = ref("");
 const error = ref("");
@@ -53,10 +53,10 @@ async function load() {
   }
 }
 
+// 版本切换只重载目录；共享上下文的清理由 Workbench provider 负责
 watch(() => props.versionId, () => {
   query.value = "";
   entries.value = [];
-  clear();
   load();
 });
 
@@ -66,7 +66,6 @@ defineExpose({ openPicker });
 
 <template>
   <div class="agent-source-picker" data-testid="agent-source-picker">
-    <ElPopover
     <ElPopover
       v-model:visible="open"
       trigger="click"

@@ -20,8 +20,10 @@ import { session } from "../session.js";
 const route = useRoute();
 const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
-// 案例级「用于对话」上下文；App 按 fullPath 重挂载工作台，切案例即换新实例
-provide(CONVERSATION_SOURCES_KEY, createConversationSources());
+// 案例级「用于对话」上下文归 provider 所有：按读者版本清理，
+// 切案例由 App 按 fullPath 重挂载换新实例兜底
+const conversationSources = createConversationSources();
+provide(CONVERSATION_SOURCES_KEY, conversationSources);
 const caseRecord = ref(null);
 const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
 const title = ref("");
@@ -48,6 +50,7 @@ const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
 const outline = computed(() => documentOutline(document.value));
+watch(readerVersion, () => conversationSources.clear());
 const reviewMode = computed(() => route.name === "case-review");
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
@@ -500,6 +503,7 @@ onBeforeUnmount(() => {
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
           @sources-retry="loadSources"
+          @clear-writing-context="writingContext = null"
         />
       </div>
     </template>

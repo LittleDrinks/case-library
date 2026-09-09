@@ -158,6 +158,19 @@ it("reflects attachment-panel conversation toggles through the provided store", 
   expect(wrapper.find(".context-strip .context-chip").exists()).toBe(false);
 });
 
+it("resets the skill popover state when sending with the popover left open", async () => {
+  mountComposer();
+  const input = wrapper.get('[aria-label="向 AI 提问"]');
+  await input.setValue("问题一 $案");
+  await settle();
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  expect(wrapper.emitted("send")).toHaveLength(1);
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  const panel = document.querySelector(".skill-popover");
+  expect(panel.querySelector('[aria-label="搜索 Skill"]').value).toBe("");
+});
+
 it("offers clearing the writing-context chip from the strip", async () => {
   mountComposer({ writingContext: { quote: "第二段原文", sameBlock: true, from: 1, to: 5 } });
   expect(wrapper.get('[data-testid="composer-selection"]').text()).toContain("正文选区 5 字");
