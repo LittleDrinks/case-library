@@ -15,6 +15,7 @@ import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { citationSignature } from "../lib/citation.js";
 import { session } from "../session.js";
 
 const route = useRoute();
@@ -46,6 +47,7 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 const sources = ref([]);
+const canvasEditor = ref(null);
 const decisionCommand = ref("");
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
@@ -159,7 +161,16 @@ async function persist(payload) {
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
+  await syncSourcesAfterSave(payload);
   return saved;
+}
+
+// 资料区编号以保存成功的正文为准；失败不刷新，也不另立第二真源。
+async function syncSourcesAfterSave(payload) {
+  const signature = citationSignature(payload.document);
+  if (signature === sourcesSignature.value) return;
+  sourcesSignature.value = signature;
+  await loadSources();
 }
 
 function invalidateSelection() {
@@ -194,6 +205,7 @@ async function loadAnnotations() {
 
 const sourcesLoading = ref(false);
 const sourcesError = ref("");
+const sourcesSignature = ref("");
 
 async function loadSources() {
   sourcesLoading.value = true;
@@ -236,6 +248,7 @@ async function loadCase() {
     const current = await fetchCase();
     applyCase(current, !initial);
     await Promise.all([loadAnnotations(), loadSources()]);
+    sourcesSignature.value = citationSignature(document.value);
   } catch (error) {
     loadError.value = error.message || "案例加载失败";
   } finally {
@@ -262,6 +275,18 @@ function changeDocument(value) {
   document.value = value;
   crashDraft.queue();
   autosave.markDirty();
+}
+
+const CITATION_NOTICES = {
+  readonly: "只读工作台不能插入或修改引用",
+  unpositioned: "请先在正文点击插入位置，或选中一段文字",
+};
+
+function insertSourceCitation(row) {
+  const status = canvasEditor.value?.insertCitation(row) ?? "unpositioned";
+  actionNotice.value = CITATION_NOTICES[status] ?? (status === "linked"
+    ? `已将选区关联引用〔${row.number}〕`
+    : `已插入引用〔${row.number}〕`);
 }
 
 function changeTags(next) {
@@ -467,6 +492,7 @@ onBeforeUnmount(() => {
               @retry="loadTagCatalog"
             />
             <CanvasEditor
+              ref="canvasEditor"
               :document="document"
               :revision="revision"
               :editable="editable"
@@ -504,6 +530,7 @@ onBeforeUnmount(() => {
           @annotations="annotations = $event"
           @sources-retry="loadSources"
           @clear-writing-context="writingContext = null"
+          @insert-citation="insertSourceCitation"
         />
       </div>
     </template>

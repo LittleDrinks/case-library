@@ -9,6 +9,7 @@ import "./styles/home.css";
 import "./styles/material-import.css";
 import "./styles/search-materials.css";
 import "./styles/workbench.css";
+import "./styles/draft-picker.css";
 import "./styles/markdown.css";
 
 createApp(App).use(router).mount("#app");

@@ -24,7 +24,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "case-restored", "mutation-state",
-  "case-revised", "annotations", "sources-retry", "clear-writing-context",
+  "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
 ]);
 
 const tabs = [
@@ -95,6 +95,7 @@ function select(tab) {
       :before-mutation="beforeAttachmentMutation"
       @case-refreshed="emit('case-refreshed', $event)"
       @mutation-state="emit('mutation-state', $event)"
+      @insert-citation="emit('insert-citation', $event)"
     />
     <VersionPanel
       v-else-if="active === 'history'"

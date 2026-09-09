@@ -97,6 +97,9 @@ export const api = {
     headers: { "X-CSRF-Token": csrfToken },
   }),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
+  listDrafts: (q, page = 1, pageSize = 20) => request(
+    `/api/cases/drafts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`,
+  ),
   search: (query, kind = "all", cursor = null, pageSize = 20, filters = {}) => request(
     searchPath(query, kind, cursor, pageSize, filters),
   ),
