@@ -439,11 +439,19 @@ async function prepareSelectedSources(page) {
   await selectAllSources(page);
 }
 
+async function expectMobileContext(page) {
+  await expect(page.locator(".context-strip .context-chip")).toBeVisible();
+  await expect.poll(async () => {
+    const box = await composerGeometry(page);
+    return box.scrollWidth - box.width;
+  }).toBeLessThanOrEqual(1);
+}
+
 test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async ({ page }) => {
   test.setTimeout(60_000);
   await prepareSelectedSources(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator(".context-strip .context-chip")).toBeVisible();
+  await expectMobileContext(page);
   const box = await composerGeometry(page);
   expect(box.scrollWidth).toBeLessThanOrEqual(box.width + 1);
   expect(box.textarea.width).toBeGreaterThanOrEqual(180);
