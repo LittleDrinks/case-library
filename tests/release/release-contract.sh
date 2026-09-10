@@ -61,6 +61,8 @@ grep -Fq 'head_sha=$RELEASE_SHA' "$release_workflow"
 grep -Fq '.head_branch == "main"' "$release_workflow"
 grep -Fq '.conclusion == "success"' "$release_workflow"
 grep -Fq -- '-alpha\.' "$release_workflow"
+grep -Fq 'alpha-v\1/' "$release_workflow"
+grep -Fq '"Case Library $DISPLAY_NAME"' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
 for image in app frontend mongo_init meilisearch; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
@@ -80,8 +82,7 @@ tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './compose.y
 tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './images.env'
 tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './update.sh'
 
-mkdir -p "$temporary/fake-bin" "$temporary/server"
-cp "$release_dir/update.sh" "$temporary/server/update.sh"
+mkdir -p "$temporary/fake-bin"
 cat > "$temporary/fake-bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -94,6 +95,7 @@ while test "$#" -gt 0; do
     *) shift ;;
   esac
 done
+printf '%s\n' "$url" >> "$CURL_LOG"
 case "$url" in
   *checksums.txt) cp "$RELEASE_FIXTURE/checksums.txt" "$output" ;;
   *) cp "$RELEASE_FIXTURE/case-library-deploy.tar.gz" "$output" ;;
@@ -104,14 +106,45 @@ cat > "$temporary/fake-bin/docker" <<'EOF'
 printf '%s\n' "$*" >> "$DOCKER_LOG"
 EOF
 chmod 755 "$temporary/fake-bin/curl" "$temporary/fake-bin/docker"
-PATH="$temporary/fake-bin:$PATH" RELEASE_FIXTURE="$temporary/release" \
-DOCKER_LOG="$temporary/docker.log" "$temporary/server/update.sh"
 
-grep -Eq '^APP_SECRET=.{64}$' "$temporary/server/.env"
-grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$temporary/server/.env"
-grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v2.0.0-alpha.1" "$temporary/server/images.env"
-grep -Fq 'config --quiet' "$temporary/docker.log"
-grep -Fq 'pull' "$temporary/docker.log"
-startup_command='up -d --wait --force-recreate production-config-check mongo-init'
-startup_command="$startup_command meilisearch search-init search-worker app frontend"
-grep -Fq "$startup_command" "$temporary/docker.log"
+install_run() {
+  selector="$1" root="$2"
+  mkdir -p "$root"
+  cp "$release_dir/update.sh" "$root/update.sh"
+  : > "$temporary/curl.log"; : > "$temporary/docker.log"
+  PATH="$temporary/fake-bin:$PATH" RELEASE_FIXTURE="$temporary/release" \
+    CURL_LOG="$temporary/curl.log" DOCKER_LOG="$temporary/docker.log" \
+    "$root/update.sh" "$selector"
+}
+assert_installed() {
+  root="$1" log="$2"
+  grep -Eq '^APP_SECRET=.{64}$' "$root/.env"
+  grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$root/.env"
+  grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v2.0.0-alpha.1" "$root/images.env"
+  grep -Fq 'config --quiet' "$log"
+  grep -Fq 'pull' "$log"
+  startup_command='up -d --wait --force-recreate production-config-check mongo-init'
+  startup_command="$startup_command meilisearch search-init search-worker app frontend"
+  grep -Fq "$startup_command" "$log"
+}
+install_run latest "$temporary/server"
+assert_installed "$temporary/server" "$temporary/docker.log"
+grep -Fq 'releases/latest/download/case-library-deploy.tar.gz' "$temporary/curl.log"
+install_run v2.0.0-alpha.1 "$temporary/server-selector"
+assert_installed "$temporary/server-selector" "$temporary/docker.log"
+grep -Fq 'releases/download/v2.0.0-alpha.1/case-library-deploy.tar.gz' "$temporary/curl.log"
+grep -Fq 'releases/download/v2.0.0-alpha.1/checksums.txt' "$temporary/curl.log"
+if grep -Fq 'releases/latest/download' "$temporary/curl.log"; then
+  echo "Explicit selector must not use the latest download path" >&2
+  exit 1
+fi
+
+mkdir -p "$temporary/server-bad"
+cp "$release_dir/update.sh" "$temporary/server-bad/update.sh"
+if PATH="$temporary/fake-bin:$PATH" RELEASE_FIXTURE="$temporary/release" \
+  CURL_LOG="$temporary/curl.log" DOCKER_LOG="$temporary/docker-bad.log" \
+  "$temporary/server-bad/update.sh" v2.0.0 2>/dev/null; then
+  echo "update.sh must reject non-alpha selectors" >&2
+  exit 1
+fi
+test ! -s "$temporary/docker-bad.log"
