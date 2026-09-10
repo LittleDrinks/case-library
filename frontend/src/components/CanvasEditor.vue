@@ -38,7 +38,7 @@ function sectionName(activeEditor, position) {
 
 function writingContext(activeEditor, from, to) {
   const section = sectionName(activeEditor, from);
-  const quote = activeEditor.state.doc.textBetween(from, to, "\n", "\n");
+  const quote = quoteText(activeEditor.state.doc, from, to);
   const sameBlock = activeEditor.state.doc.resolve(from).sameParent(activeEditor.state.doc.resolve(to));
   return { section, quote, from, to, sameBlock };
 }
@@ -122,11 +122,15 @@ function updateEditor({ editor: activeEditor, transaction }) {
 
 const annotationKey = new PluginKey("annotationAnchors");
 
+function quoteText(document, from, to) {
+  return document.textBetween(from, to, "\n", "\n");
+}
+
 function annotationAnchor(annotation, document) {
   if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
-  return document.textBetween(from, to, "\n", "\n") === annotation.quote
+  return quoteText(document, from, to) === annotation.quote
     ? { from, to } : null;
 }
 
