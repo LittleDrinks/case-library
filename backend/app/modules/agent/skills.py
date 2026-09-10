@@ -79,14 +79,16 @@ _GENERATION_GROUP_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部|批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
-# 「别」作祈使否定标记时直接前置于动词（AllSet 汉语语法：negative commands with 别），
-# 左侧只能是子句边界、代词或祈使/转述引导词；词内「别」（特别/级别/识别等）不算否定。
-_GENERATION_IMPERATIVE_LEFT = ("你", "我", "他", "她", "它", "请", "先", "千", "万",
-                               "就", "也", "更", "再", "可", "要", "想", "给", "让",
-                               "说", "讲", "提")
-_GENERATION_BARE_NEGATION = re.compile(
-    r"(?:^|[，,。；！？、\s]|[" + "".join(_GENERATION_IMPERATIVE_LEFT) + r"])别\s*$"
-)
+# 「别」直接前置于动词（含把/再/急等前动成分）是祈使否定标记（negative commands
+# with 别）；仅当它本身是双字词的词内语素时才不构成否定。
+_BIE_COMPOUNDS = ("特别", "级别", "性别", "个别", "分别", "告别", "识别", "判别",
+                  "差别", "区别", "鉴别", "类别", "离别", "送别", "派别", "别名",
+                  "别致", "别称", "别字", "评别")
+_GENERATION_BARE_NEGATION = re.compile(r"别[^，。；！？\s]{0,2}$")
+
+
+def _word_ends_with_bie(before: str) -> bool:
+    return any(before.endswith(word) for word in _BIE_COMPOUNDS)
 _GENERATION_REMINDER = re.compile(r"别忘(?:了|记)")
 _GENERATION_EVALUATION_SUFFIX = re.compile(
     r"^\s*得(?:很|太|非常|挺|比较|相当)?(?:好|不错|棒|精彩|漂亮|完整|满意)"
@@ -130,6 +132,8 @@ def _generation_negated(before: str) -> bool:
     if any(marker in before for marker in _GENERATION_NEGATIONS):
         return True
     if _GENERATION_REMINDER.search(before) is not None:
+        return False
+    if _word_ends_with_bie(before):
         return False
     return _NEGATED_BARE.search(before.strip()) is not None or bool(
         _GENERATION_BARE_NEGATION.search(before)

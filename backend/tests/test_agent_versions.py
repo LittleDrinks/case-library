@@ -208,6 +208,7 @@ def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> No
     "全部的批注都帮我看看", "从头到尾检查一遍全文的结构",
     "把正文结尾重写一遍",
     "识别重写全文的需求", "判别重写全文的时机",
+    "暂时别重写全文", "谁都别重写全文", "先别把全文重写", "先别急着重写全文",
 ])
 def test_full_generation_parser_rejects_natural_non_requests(prompt: str) -> None:
     assert full_generation_requested(prompt) is False
