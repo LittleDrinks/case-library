@@ -554,17 +554,19 @@ def _pending_document_artifact(client: TestClient, auth: dict, document: dict | 
     )
 
 
-def _publish(database, repository, run, artifact) -> None:
+def _publish(database, repository, run, artifact=None, write_record=None, parts=None) -> bool:
     from datetime import UTC, datetime
 
     from app.modules.agent.models import AgentMessage
 
     message = AgentMessage(
         id=f"assistant-{run.id}", thread_id=run.thread_id, run_id=run.id,
-        role="assistant", parts=[{"type": "text", "text": "完成"}],
+        role="assistant", parts=parts or [{"type": "text", "text": "完成"}],
         created_at=datetime.now(UTC),
     )
-    assert repository.complete_run(run.id, message, resources=[], artifact=artifact)
+    return repository.complete_run(
+        run.id, message, resources=[], artifact=artifact, write_record=write_record
+    )
 
 
 def _assert_document_version_created(database, case, run, artifact) -> None:
@@ -604,10 +606,15 @@ def test_document_generation_stale_baseline_is_not_saved(client: TestClient) -> 
     )
     database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
 
-    _publish(database, AgentRepository(database), run, artifact)
+    _publish(
+        database, AgentRepository(database), run, artifact,
+        parts=[{"type": "tool-propose_document", "output": {"artifactId": artifact.id}}],
+    )
 
     assert database.case_versions.count_documents({"caseId": case["id"]}) == 0
     assert database.cases.find_one({"id": case["id"]})["revision"] == 2
+    message = database.agent_messages.find_one({"runId": run.id, "role": "assistant"})
+    assert message["parts"][0]["output"]["detail"] == "AI版本未保存：正文基线已变化，未创建独立版本"
 
 
 def test_document_generation_allows_existing_body(client: TestClient) -> None:
@@ -838,6 +845,13 @@ def _assert_streamed_write_persisted(database, case_id: str, thread_id: str):
     assert run["writeAuthorized"] is True
     write = database.agent_writes.find_one({"threadId": thread_id}, {"_id": 0})
     assert write["status"] == "written"
+    version = database.case_versions.find_one({"sourceRunId": write["runId"]}, {"_id": 0})
+    assert version["kind"] == "ai"
+    assert version["document"] == updated["document"]
+    message = database.agent_messages.find_one({"threadId": thread_id, "role": "assistant"})
+    output = next(part["output"] for part in message["parts"]
+                  if part.get("type") == "tool-write_document")
+    assert output["versionId"] == version["id"]
     return write
 
 
@@ -882,6 +896,24 @@ def test_streamed_direct_write_lands_and_undo_api_restores(client: TestClient) -
     _await_run(database, thread_id, "completed")
     write = _assert_streamed_write_persisted(database, case["id"], thread_id)
     _undo_streamed_write(client, auth, case, thread_id, write)
+    assert database.case_versions.count_documents({"sourceRunId": write["runId"]}) == 1
+
+
+def test_direct_write_version_is_idempotent(client: TestClient) -> None:
+    auth = _login(client)
+    database, thread, _case, write = _written_case(client, auth)
+    run = AgentRepository(database).latest_run(thread.id)
+    repository = AgentRepository(database)
+    assert _publish(database, repository, run, write_record=write)
+    assert not _publish(database, repository, run, write_record=write)
+    assert database.case_versions.count_documents({"sourceRunId": run.id}) == 1
+
+
+def test_cancelled_direct_write_does_not_create_a_completed_version(client: TestClient) -> None:
+    auth = _login(client)
+    database, _thread, _case, write = _written_case(client, auth)
+    assert AgentRepository(database).cancel_run(write["runId"])
+    assert database.case_versions.count_documents({"sourceRunId": write["runId"]}) == 0
 
 
 def test_normal_generation_message_blocks_mistaken_direct_write(client: TestClient) -> None:

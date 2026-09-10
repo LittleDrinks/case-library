@@ -37,7 +37,7 @@
 
 | 子系统（PRD v2） | 复用目标 | 决策 |
 | --- | --- | --- |
-| Agent 工具环 | `pydantic-ai` | typed 工具注册、结构化输出（局部修订候选/候选批注）、OpenAI 兼容 base_url、流式事件；pydantic 2 与现栈同构。工具即现有服务函数薄封装：`search_corpus`=search.service，`fetch_url`=trafilatura 抽取后走 attachments 快照存储，写工具沿用 ADR 0016 语义：局部修订默认候选确认，完整生成通过 `propose_document` 直接保存独立只读 AI 版本；#214 起教师消息明确直接写入且服务端授权校验通过时可 `write_document` 直接执行并保留撤销；修订阻塞、批前快照是应用层状态机，不进框架 |
+| Agent 工具环 | `pydantic-ai` | typed 工具注册、结构化输出（局部修订候选/候选批注）、OpenAI 兼容 base_url、流式事件；pydantic 2 与现栈同构。工具即现有服务函数薄封装：`search_corpus`=search.service，`fetch_url`=trafilatura 抽取后走 attachments 快照存储，写工具沿用 ADR 0016 语义：局部修订默认候选确认，完整生成通过 `propose_document` 或成功的整篇 `write_document` 直接保存独立只读 AI 版本；#214 起教师消息明确直接写入且服务端授权校验通过时可 `write_document` 直接执行并保留撤销；修订阻塞、批前快照是应用层状态机，不进框架 |
 | 联网检索 `web_search` | SearXNG | compose 加一个服务，JSON API 无密钥，校内可自托管；结果仅作候选不入库 |
 | 网页采集副本 | `trafilatura` | 正文+元数据+发布时间一次抽取，替换不了的部分（截图类）明确不支持 |
 | 成套教学材料导出 | `docxtpl` 多模板 | 教案/讨论题/PPT 提纲各一个 Word 模板，zipfile 打包整套；对外申报版先跑脱敏扫描再填模板 |
@@ -62,7 +62,7 @@ Redis/Celery/arq（job 用 Mongo 租约）、Neo4j（引用关系聚合查询够
 3. markitdown 抽取接入导入管线（test_attachments、test_material_import_e2e）
 4. `core/jobs.py` + 导入异步化（material-import e2e）
 5. trafilatura 采集 + SearXNG 上线，`fetch_url` 工具落地（attachment e2e）
-6. pydantic-ai agent 环：三个读工具 + 写工具（局部修订默认确认门，完整生成直接保存只读 AI 版本；#214 起支持服务端授权的直接写入与撤销，ADR 0016 语义，workbench e2e）
+6. pydantic-ai agent 环：三个读工具 + 写工具（局部修订默认确认门，完整生成和成功整篇直接写入保存只读 AI 版本；#214 起支持服务端授权的直接写入与撤销，ADR 0016 语义，workbench e2e）
 7. 知识库入库 CLI + 管理页（search catalog 回归）
 8. 成套教学材料生成与整套导出 + 脱敏扫描（验收场景 1/6）
 9. hybrid search embedder + 同义词 + customRanking（search e2e、load-rate）

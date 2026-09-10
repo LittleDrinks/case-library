@@ -24,18 +24,32 @@ def next_version_number(database: Database, case_id: str, session) -> int:
 
 
 def create_ai_version(database: Database, artifact, run, document: dict, session) -> dict | None:
-    existing = database.case_versions.find_one(
-        {"caseId": artifact.case_id, "kind": AI_VERSION_KIND, "sourceRunId": run.id},
-        session=session,
-    )
+    existing = _existing(database, artifact.case_id, run.id, session)
     if existing:
         return existing
     case = database.cases.find_one({"id": artifact.case_id}, session=session)
     if not _eligible(case, artifact, run):
         return None
-    version = _record(database, case, artifact, run, document, session)
-    database.case_versions.insert_one(version, session=session)
-    return version
+    return _insert(database, case, run, document, case["revision"], session)
+
+
+def create_ai_version_from_write(database: Database, write: dict, run, session) -> dict | None:
+    if write.get("scope") != "document":
+        return None
+    existing = _existing(database, write["caseId"], run.id, session)
+    if existing:
+        return existing
+    case = database.cases.find_one({"id": write["caseId"]}, session=session)
+    if not _write_eligible(case, write, run):
+        return None
+    return _insert(database, case, run, write["document"], write["resultRevision"], session)
+
+
+def _existing(database: Database, case_id: str, run_id: str, session) -> dict | None:
+    return database.case_versions.find_one(
+        {"caseId": case_id, "kind": AI_VERSION_KIND, "sourceRunId": run_id},
+        session=session,
+    )
 
 
 def _eligible(case: dict | None, artifact, run) -> bool:
@@ -47,7 +61,22 @@ def _eligible(case: dict | None, artifact, run) -> bool:
     )
 
 
-def _record(database, case: dict, artifact, run, document: dict, session) -> dict:
+def _write_eligible(case: dict | None, write: dict, run) -> bool:
+    return bool(
+        case and write.get("status") in ("written", "undone")
+        and write.get("runId") == run.id and write.get("threadId") == run.thread_id
+        and write.get("baseRevision") == run.base_revision and not run.read_only
+        and case.get("ownerId") == run.user_id and case.get("workflowStatus") == "draft"
+    )
+
+
+def _insert(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
+    version = _record(database, case, run, document, source_revision, session)
+    database.case_versions.insert_one(version, session=session)
+    return version
+
+
+def _record(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
     assets = (
         snapshot_attachments(database, case["id"], session),
         snapshot_materials(database, case["id"], session),
@@ -59,7 +88,7 @@ def _record(database, case: dict, artifact, run, document: dict, session) -> dic
         "kind": AI_VERSION_KIND, "title": case["title"],
         "summary": case.get("summary", ""), "document": document,
         "attachments": assets[0], "materials": assets[1], "caseSources": assets[2],
-        "metadata": case_metadata(case), "sourceRevision": case["revision"],
+        "metadata": case_metadata(case), "sourceRevision": source_revision,
         "sourceRunId": run.id, "createdBy": run.user_id,
         "createdAt": datetime.now(UTC).isoformat(),
     }

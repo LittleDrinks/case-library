@@ -391,7 +391,8 @@ function syncWrittenDocuments() {
 
 function syncGeneratedVersions() {
   const ids = messages.value.flatMap((message) => message.parts || [])
-    .filter((part) => part.type === "tool-propose_document" && part.output?.versionId)
+    .filter((part) => ["tool-propose_document", "tool-write_document"].includes(part.type)
+      && part.output?.versionId)
     .map((part) => part.output.versionId);
   const fresh = ids.filter((id) => !syncedVersions.has(id));
   fresh.forEach((id) => syncedVersions.add(id));

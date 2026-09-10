@@ -70,8 +70,9 @@ export function toolResultSummary(part) {
   if (part.type === "tool-propose_document") {
     return documentResultSummary(output);
   }
-  if (part.type === "tool-write_document" && output.status === "written") {
-    return "已写入正文，可撤销";
+  if (part.type === "tool-write_document") {
+    const summary = directWriteResultSummary(output);
+    if (summary !== null) return summary;
   }
   if (output.artifactId) return "已创建修订候选，等待决定";
   if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
@@ -80,6 +81,13 @@ export function toolResultSummary(part) {
     return TOOL_STATUS_LABELS[output.status] || output.status;
   }
   return "";
+}
+
+function directWriteResultSummary(output) {
+  if (output.status !== "written") return null;
+  if (output.versionStatus === "created") return "已写入正文并保存 AI 版本，可撤销";
+  if (output.versionStatus === "not_saved") return output.versionDetail || "正文已写入，AI版本未保存";
+  return "已写入正文，可撤销";
 }
 
 function documentResultSummary(output) {

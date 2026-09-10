@@ -25,47 +25,61 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 READER_CAPABILITY_ID = "platform-tools"
-_GENERATION_VERBS = (
-    "生成", "重写", "改写", "撰写", "编写", "起草", "创作", "重做", "写出", "写成", "整理", "修改",
-    "generate", "rewrite", "redraft", "write",
+_GENERATION_ACTION = re.compile(
+    r"(?:生成|重写|改写|撰写|编写|起草|创作|重做|写|整理|修改|generate|rewrite|redraft|write)"
+    r".{0,16}(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的|地)?(?:案例|文档|稿|正文|文章)?|整个(?:案例|文档|稿|正文|文章)|full\s+(?:draft|document))",
+    re.IGNORECASE,
 )
-_FULL_SCOPES = (
-    "全文", "全篇", "整篇", "整份", "全案", "整案", "完整稿", "初稿", "整个案例", "整个文档",
-    "完整案例", "完整文档", "full draft", "full document",
+_FULL_GENERATION_PHRASE = re.compile(r"完整生成|full\s+(?:draft|document)", re.IGNORECASE)
+_GENERATION_QUESTIONS = ("吗", "呢", "请问", "是否", "能不能", "可否", "能否", "如何", "怎么", "怎样")
+_GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话")
+_GENERATION_NEGATIONS = ("不要", "不必", "不需要", "不用", "无需", "无须", "请勿", "勿", "不想", "不希望", "没有", "没", "未", "不是")
+_GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍", "分析", "讨论", "理解", "查看", "显示")
+_GENERATION_MENTION_SUFFIX = re.compile(
+    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容)"
 )
-_NEGATION_MARKERS = ("不要", "别", "无需", "不需要", "不用", "不必", "请勿", "勿", "不想", "不希望", "不是")
-_FULL_GENERATION_PHRASES = ("完整生成", "full draft", "full document")
-_GENERATION_PATTERNS = tuple(
-    re.compile(rf"{verb}.{{0,12}}{scope}")
-    for verb in _GENERATION_VERBS
-    for scope in _FULL_SCOPES
+_GENERATION_PARTIAL = re.compile(
+    r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
 )
-_REVERSE_GENERATION_PATTERNS = tuple(
-    re.compile(rf"{scope}.{{0,12}}{verb}")
-    for verb in _GENERATION_VERBS
-    for scope in _FULL_SCOPES
-)
-_CLAUSE_SPLIT = re.compile(r"[，。！？；,!?;]|但是|但|不过|而是")
+_NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
 
 
 def full_generation_requested(prompt: str) -> bool:
-    text = re.sub(r"\s+", " ", (prompt or "").lower()).strip()
-    positive = False
-    negated = False
-    for clause in _CLAUSE_SPLIT.split(text):
-        if not _full_generation_clause(clause):
+    for clause in writes.message_clauses((prompt or "").lower()):
+        if _generation_context_blocked(clause):
             continue
-        if any(marker in clause for marker in _NEGATION_MARKERS):
-            negated = True
-        else:
-            positive = True
-    return positive and not negated
+        for match in _generation_matches(clause):
+            if not _generation_match_blocked(clause, match):
+                return True
+    return False
 
 
-def _full_generation_clause(clause: str) -> bool:
-    return any(phrase in clause for phrase in _FULL_GENERATION_PHRASES) or any(
-        pattern.search(clause)
-        for pattern in (*_GENERATION_PATTERNS, *_REVERSE_GENERATION_PATTERNS)
+def _generation_matches(clause: str):
+    yield from _GENERATION_ACTION.finditer(clause)
+    yield from _FULL_GENERATION_PHRASE.finditer(clause)
+
+
+def _generation_context_blocked(clause: str) -> bool:
+    return any(token in clause for token in _GENERATION_QUESTIONS + _GENERATION_CONDITIONALS)
+
+
+def _generation_match_blocked(clause: str, match: re.Match) -> bool:
+    before = clause[max(0, match.start() - 24):match.start()]
+    after = clause[match.end():match.end() + 16]
+    return _generation_negated(before) or _generation_mentioned(before, after) or bool(
+        _GENERATION_PARTIAL.search(match.group()) or _GENERATION_PARTIAL.search(after)
+    )
+
+
+def _generation_negated(before: str) -> bool:
+    if any(marker in before for marker in _GENERATION_NEGATIONS):
+        return True
+    return _NEGATED_BARE.search(before.strip()) is not None
+
+
+def _generation_mentioned(before: str, after: str) -> bool:
+    return any(before.rstrip().endswith(prefix) for prefix in _GENERATION_MENTION_PREFIXES) or bool(
+        _GENERATION_MENTION_SUFFIX.match(after)
     )
 
 
@@ -190,6 +204,7 @@ async def write_document(
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.wrote = True
+    ctx.deps.write_record = record
     return {**write_view(record), "undoable": True}
 
 

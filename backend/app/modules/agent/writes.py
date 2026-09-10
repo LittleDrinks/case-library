@@ -38,6 +38,12 @@ _QUOTED_SPANS = re.compile(
     r'|"[^"]*"|\'[^\']*\'|（[^）]*）|\([^)]*\)'
 )
 _CLAUSE_SPLIT = re.compile(r"[。！？!?；;.\n]")
+
+
+def message_clauses(text: str) -> list[str]:
+    return _CLAUSE_SPLIT.split(_QUOTED_SPANS.sub("", text or ""))
+
+
 # 从句内出现即否定，不得授权。
 _NEGATIONS = (
     "不", "没", "未", "勿", "别", "免", "禁", "拒", "防", "慎", "莫",
@@ -66,8 +72,7 @@ def direct_write_requested(text: str) -> bool:
     剔除引用后按标点拆从句；只有包含核心指令词且无否定、疑问、条件、
     名词化提及标记的从句才授权。普通生成、润色与解释性文字一律不授权。
     """
-    cleaned = _QUOTED_SPANS.sub("", text or "")
-    for clause in _CLAUSE_SPLIT.split(cleaned):
+    for clause in message_clauses(text):
         match = _DIRECT_WRITE_CORE.search(clause)
         if match is None:
             continue

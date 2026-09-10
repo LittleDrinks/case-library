@@ -29,3 +29,4 @@ class ToolDeps:
     evidence: list[SourceRef] = field(default_factory=list)
     proposed: AgentArtifact | None = None
     wrote: bool = False
+    write_record: dict | None = None

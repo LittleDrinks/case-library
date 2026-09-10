@@ -4,6 +4,7 @@ import time
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
@@ -151,6 +152,33 @@ def test_natural_full_generation_request_creates_an_ai_version(client: TestClien
     assert response.status_code == 200
     _await_completed(client.app.state.database, thread_id)
     _assert_saved_version(client, case, thread_id)
+
+
+def test_full_generation_parser_rejects_non_requests() -> None:
+    for prompt in (
+        '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
+        "不要生成全文", "没有让你重写全文",
+    ):
+        assert full_generation_requested(prompt) is False, prompt
+
+
+@pytest.mark.parametrize("prompt", [
+    '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
+    "不要生成全文", "没有让你重写全文",
+])
+def test_non_generation_public_runs_do_not_create_ai_versions(
+    client: TestClient, prompt: str
+) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, prompt, f"non-generation-{uuid.uuid4().hex}"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
+    assert client.app.state.database.agent_artifacts.count_documents({}) == 0
 
 
 def test_negated_full_generation_request_cannot_create_an_ai_version(client: TestClient) -> None:

@@ -74,6 +74,9 @@ describe("document write result summaries", () => {
     const write = { type: "tool-write_document", state: "output-available" };
     expect(toolResultSummary({ ...write, output: { status: "written", id: "w-1" } }))
       .toBe("已写入正文，可撤销");
+    expect(toolResultSummary({
+      ...write, output: { status: "written", id: "w-1", versionStatus: "created" },
+    })).toBe("已写入正文并保存 AI 版本，可撤销");
     expect(toolResultSummary({ ...write, output: {} })).toBe("");
   });
 });

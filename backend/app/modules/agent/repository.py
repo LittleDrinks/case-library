@@ -23,7 +23,7 @@ from app.modules.agent.models import (
     write_view,
 )
 from app.modules.cases.published import version_readable
-from app.modules.cases.versions import create_ai_version
+from app.modules.cases.versions import create_ai_version, create_ai_version_from_write
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -412,6 +412,7 @@ class AgentRepository:
         resources: list[dict[str, str]] | None = None,
         reader_case_id: str | None = None, reader_version_id: str | None = None,
         artifact: AgentArtifact | None = None,
+        write_record: dict | None = None,
     ) -> bool:
         return _transaction(
             self.database,
@@ -419,12 +420,13 @@ class AgentRepository:
                 run_id, assistant, session, owner_id, resources,
                 reader_case_id, reader_version_id,
                 artifact,
+                write_record,
             ),
         )
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
-                      artifact: AgentArtifact | None = None) -> bool:
+                      artifact: AgentArtifact | None = None, write_record=None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(
                 _active_query(run_id, owner_id), session=session
@@ -439,12 +441,20 @@ class AgentRepository:
             return self._finish_transaction(
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
             )
-        return self._complete_records(run, assistant, session, owner_id, resources, artifact)
+        return self._complete_records(
+            run, assistant, session, owner_id, resources, artifact, write_record
+        )
 
-    def _complete_records(self, run, assistant, session, owner_id, resources, artifact=None) -> bool:
-        version = self._persist_version(run, artifact, session)
+    def _complete_records(
+        self, run, assistant, session, owner_id, resources, artifact=None, write_record=None
+    ) -> bool:
+        version = self._persist_version(run, artifact, write_record, session)
         if artifact and artifact.kind == "document":
-            assistant = _link_version(assistant, artifact.id, version)
+            assistant = _link_version(assistant, artifact.id, version, self._version_detail(run))
+        if write_record and write_record.get("scope") == "document":
+            assistant = _link_write_version(
+                assistant, write_record["id"], version, self._version_detail(run)
+            )
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
         if artifact is not None and artifact.kind != "document":
@@ -452,17 +462,27 @@ class AgentRepository:
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
 
-    def _persist_version(self, run, artifact, session):
-        if not artifact or artifact.kind != "document":
+    def _persist_version(self, run, artifact, write_record, session):
+        if artifact and artifact.kind == "document":
+            document = blocks.structured_document(artifact.blocks)
+            version = create_ai_version(self.database, artifact, run, document, session)
+        elif write_record:
+            version = create_ai_version_from_write(self.database, write_record, run, session)
+        else:
             return None
-        document = blocks.structured_document(artifact.blocks)
-        version = create_ai_version(self.database, artifact, run, document, session)
         if version and self._append_event(
             run.thread_id, "version.created", run.id,
             {"versionId": version["id"]}, session,
         ) is None:
             raise RuntimeError("Thread 事件写入失败")
         return version
+
+    def _version_detail(self, run) -> str:
+        thread = self.database.agent_threads.find_one({"id": run.thread_id}, {"caseId": 1})
+        case = self.database.cases.find_one({"id": thread["caseId"]}) if thread else None
+        if case and case.get("revision") != run.base_revision:
+            return "AI版本未保存：正文基线已变化，未创建独立版本"
+        return "AI版本未保存：未满足独立版本保存条件"
 
     def _reader_completion_allowed(self, case_id, version_id, run_id, session) -> bool:
         case = self.database.cases.find_one_and_update(
@@ -631,13 +651,15 @@ class AgentRepository:
         )
 
 
-def _link_version(assistant: AgentMessage, artifact_id: str, version: dict | None) -> AgentMessage:
+def _link_version(
+    assistant: AgentMessage, artifact_id: str, version: dict | None, detail: str
+) -> AgentMessage:
     return assistant.model_copy(update={
-        "parts": [_version_part(part, artifact_id, version) for part in assistant.parts],
+        "parts": [_version_part(part, artifact_id, version, detail) for part in assistant.parts],
     })
 
 
-def _version_part(part: dict, artifact_id: str, version: dict | None) -> dict:
+def _version_part(part: dict, artifact_id: str, version: dict | None, detail: str) -> dict:
     output = part.get("output")
     if part.get("type") != "tool-propose_document" or not isinstance(output, dict):
         return part
@@ -646,7 +668,28 @@ def _version_part(part: dict, artifact_id: str, version: dict | None) -> dict:
     if version:
         return {**part, "output": {"status": "created", "kind": "ai",
                                     "versionId": version["id"]}}
-    return {**part, "output": {"status": "not_saved", "detail": "正文已更新，AI版本未保存"}}
+    return {**part, "output": {"status": "not_saved", "detail": detail}}
+
+
+def _link_write_version(
+    assistant: AgentMessage, write_id: str, version: dict | None, detail: str
+) -> AgentMessage:
+    return assistant.model_copy(update={
+        "parts": [_write_version_part(part, write_id, version, detail) for part in assistant.parts],
+    })
+
+
+def _write_version_part(part: dict, write_id: str, version: dict | None, detail: str) -> dict:
+    output = part.get("output")
+    if part.get("type") != "tool-write_document" or not isinstance(output, dict):
+        return part
+    if output.get("id") not in (write_id, None):
+        return part
+    if version:
+        return {**part, "output": {**output, "versionId": version["id"],
+                                    "versionStatus": "created", "versionKind": "ai"}}
+    return {**part, "output": {**output, "versionStatus": "not_saved",
+                                "versionDetail": detail}}
 
 
 def _default_thread_update(
