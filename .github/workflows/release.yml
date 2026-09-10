@@ -1,4 +1,4 @@
-name: Pre-Alpha Release
+name: Release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: ghcr-pre-alpha-latest
+  group: ghcr-release-latest
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-pre-alpha\.[0-9]+$'
+          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$'
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
   verify:
@@ -32,17 +32,17 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
-      - name: Require successful CI for v2
+      - name: Require successful CI for main
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          git fetch origin v2:refs/remotes/origin/v2 --depth=1
-          test "$RELEASE_SHA" = "$(git rev-parse origin/v2)"
+          git fetch origin main:refs/remotes/origin/main --depth=1
+          test "$RELEASE_SHA" = "$(git rev-parse origin/main)"
           for attempt in $(seq 1 200); do
             result="$(gh api "repos/$RELEASE_REPOSITORY/actions/runs?event=push&head_sha=$RELEASE_SHA&per_page=100" --jq '
-              [.workflow_runs[] | select(.name == "CI" and .head_branch == "v2")]
+              [.workflow_runs[] | select(.name == "CI" and .head_branch == "main")]
               | if any(.conclusion == "success") then "success"
                 elif any(.conclusion != null) then "failure"
                 else "waiting"

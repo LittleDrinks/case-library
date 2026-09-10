@@ -56,11 +56,11 @@ grep -Fq 'actions/upload-artifact@v4' "$ci"
 grep -Fq 'if: failure()' "$ci"
 grep -Fq 'actions: read' "$release_workflow"
 grep -Fq 'packages: write' "$release_workflow"
-grep -Fq 'git fetch origin v2:refs/remotes/origin/v2 --depth=1' "$release_workflow"
+grep -Fq 'git fetch origin main:refs/remotes/origin/main --depth=1' "$release_workflow"
 grep -Fq 'head_sha=$RELEASE_SHA' "$release_workflow"
-grep -Fq '.head_branch == "v2"' "$release_workflow"
+grep -Fq '.head_branch == "main"' "$release_workflow"
 grep -Fq '.conclusion == "success"' "$release_workflow"
-grep -Fq 'pre-alpha' "$release_workflow"
+grep -Fq -- '-alpha\.' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
 for image in app frontend mongo_init meilisearch; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
@@ -71,7 +71,7 @@ CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app@$digest" \
 CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend@$digest" \
 CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init@$digest" \
 CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch@$digest" \
-  "$project_dir/scripts/package-release.sh" v0.1.0-pre-alpha.1 "$temporary/release"
+  "$project_dir/scripts/package-release.sh" v2.0.0-alpha.1 "$temporary/release"
 
 test -f "$temporary/release/case-library-deploy.tar.gz"
 test -f "$temporary/release/update.sh"
@@ -109,7 +109,7 @@ DOCKER_LOG="$temporary/docker.log" "$temporary/server/update.sh"
 
 grep -Eq '^APP_SECRET=.{64}$' "$temporary/server/.env"
 grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$temporary/server/.env"
-grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v0.1.0-pre-alpha.1" "$temporary/server/images.env"
+grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v2.0.0-alpha.1" "$temporary/server/images.env"
 grep -Fq 'config --quiet' "$temporary/docker.log"
 grep -Fq 'pull' "$temporary/docker.log"
 startup_command='up -d --wait --force-recreate production-config-check mongo-init'
