@@ -742,56 +742,54 @@ def test_direct_write_blocks_document_candidate_before_candidate_side_effect(
     assert database.agent_artifacts.count_documents({}) == 0
 
 
-def test_concurrent_document_and_direct_write_claim_one_path(
-        client: TestClient) -> None:
+def _concurrent_write_call(kind, deps, start):
     import asyncio
+
+    start.wait(timeout=5)
+    try:
+        output = asyncio.run(
+            propose_document(_ctx(deps), DRAFT_BLOCKS, "完整生成")
+            if kind == "candidate" else _call(deps, "document", DRAFT_BLOCKS, "直接写入")
+        )
+        return kind, "ok", output
+    except ModelRetry as error:
+        return kind, "retry", str(error)
+
+
+def _concurrent_write_results(candidate_deps, write_deps):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
-    auth = _login(client)
-    case = _create_case(client, auth, _document())
-    database = client.app.state.database
-    _thread, run = _locked_run(database, auth, case)
-    candidate_deps = _deps(database, case, run, auth["user"])
-    write_deps = _deps(database, case, run, auth["user"])
     start = Barrier(2)
-
-    def candidate_call():
-        start.wait()
-        try:
-            return "candidate", "ok", asyncio.run(
-                propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成")
-            )
-        except ModelRetry as error:
-            return "candidate", "retry", str(error)
-
-    def write_call():
-        start.wait()
-        try:
-            return "write", "ok", asyncio.run(
-                _call(write_deps, "document", DRAFT_BLOCKS, "直接写入")
-            )
-        except ModelRetry as error:
-            return "write", "retry", str(error)
-
+    calls = (("candidate", candidate_deps), ("write", write_deps))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(call) for call in (candidate_call, write_call)]
-        results = [future.result() for future in futures]
+        futures = [pool.submit(_concurrent_write_call, *call, start) for call in calls]
+        return [future.result(timeout=10) for future in futures]
 
+
+def _assert_concurrent_write_result(database, case, run, results):
     assert [result[1] for result in results].count("ok") == 1
     assert [result[1] for result in results].count("retry") == 1
     winner = next(result for result in results if result[1] == "ok")
     loser = next(result for result in results if result[1] == "retry")
     assert any(detail in loser[2] for detail in ("另一条正文路径", "正文已更新"))
     assert database.agent_artifacts.count_documents({}) == 0
-    if winner[0] == "candidate":
-        assert database.cases.find_one({"id": case["id"]})["revision"] == 1
-        assert database.agent_writes.count_documents({}) == 0
-        assert database.agent_runs.find_one({"id": run.id})["writePath"] == "document"
-    else:
-        assert database.cases.find_one({"id": case["id"]})["revision"] == 2
-        assert database.agent_writes.count_documents({}) == 1
-        assert database.agent_runs.find_one({"id": run.id})["writePath"] == "direct_write"
+    expected = (1, 0, "document") if winner[0] == "candidate" else (2, 1, "direct_write")
+    assert database.cases.find_one({"id": case["id"]})["revision"] == expected[0]
+    assert database.agent_writes.count_documents({}) == expected[1]
+    assert database.agent_runs.find_one({"id": run.id})["writePath"] == expected[2]
+
+
+def test_concurrent_document_and_direct_write_claim_one_path(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    results = _concurrent_write_results(
+        _deps(database, case, run, auth["user"]), _deps(database, case, run, auth["user"])
+    )
+    _assert_concurrent_write_result(database, case, run, results)
 
 
 def test_write_tools_only_available_to_author_runs() -> None:
