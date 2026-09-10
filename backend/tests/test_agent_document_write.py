@@ -845,6 +845,11 @@ def _assert_streamed_write_persisted(database, case_id: str, thread_id: str):
     assert run["writeAuthorized"] is True
     write = database.agent_writes.find_one({"threadId": thread_id}, {"_id": 0})
     assert write["status"] == "written"
+    _assert_streamed_write_version(database, updated, thread_id, write)
+    return write
+
+
+def _assert_streamed_write_version(database, updated, thread_id, write) -> None:
     version = database.case_versions.find_one({"sourceRunId": write["runId"]}, {"_id": 0})
     assert version["kind"] == "ai"
     assert version["document"] == updated["document"]
@@ -852,7 +857,6 @@ def _assert_streamed_write_persisted(database, case_id: str, thread_id: str):
     output = next(part["output"] for part in message["parts"]
                   if part.get("type") == "tool-write_document")
     assert output["versionId"] == version["id"]
-    return write
 
 
 def _undo_streamed_write(client, auth, case, thread_id: str, write) -> None:

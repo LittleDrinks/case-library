@@ -428,9 +428,7 @@ class AgentRepository:
                       resources=None, reader_case_id=None, reader_version_id=None,
                       artifact: AgentArtifact | None = None, write_record=None) -> bool:
         run = _model_view(
-            self.database.agent_runs.find_one(
-                _active_query(run_id, owner_id), session=session
-            ),
+            self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session),
             AgentRun,
         )
         if not run:

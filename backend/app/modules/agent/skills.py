@@ -204,6 +204,13 @@ async def write_document(
     """
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
+    record = _apply_document_write(ctx, scope, blocks, summary)
+    ctx.deps.wrote = True
+    ctx.deps.write_record = record
+    return {**write_view(record), "undoable": True}
+
+
+def _apply_document_write(ctx, scope, blocks, summary):
     try:
         record = writes.apply_write(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id, scope,
@@ -211,9 +218,7 @@ async def write_document(
         )
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.wrote = True
-    ctx.deps.write_record = record
-    return {**write_view(record), "undoable": True}
+    return record
 
 
 def domain_capability() -> Capability:
