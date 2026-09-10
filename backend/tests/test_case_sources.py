@@ -5,6 +5,8 @@ import io
 from docx import Document
 from fastapi.testclient import TestClient
 
+from app.modules.agent import prosemirror
+
 CITATION = {"type": "citation", "attrs": {"sourceType": "case", "sourceId": ""}}
 
 
@@ -53,10 +55,12 @@ def cite_document(client: TestClient, auth: dict, marks: list[dict]) -> object:
         for index, mark in enumerate(marks, start=1)
     ] or [{"type": "text", "text": "正文"}]
     document = {"type": "doc", "content": [{"type": "paragraph", "content": nodes}]}
+    current = client.get("/api/cases/c-draft-1").json()
+    _updated, steps = prosemirror.replace_document(current["document"], document)
     return client.patch(
         "/api/cases/c-draft-1",
         headers=headers(auth),
-        json={"document": document, "revision": revision(client)},
+        json={"document": document, "revision": current["revision"], "steps": steps},
     )
 
 

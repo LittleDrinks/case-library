@@ -34,6 +34,11 @@ def _csrf(client: httpx.Client, csrf: str) -> dict:
     return {"X-CSRF-Token": csrf}
 
 
+def _close_e2e(client: httpx.Client, mongo: MongoClient) -> None:
+    client.close()
+    mongo.close()
+
+
 def _document(*paragraphs: str) -> dict:
     return {
         "type": "doc",
@@ -42,6 +47,11 @@ def _document(*paragraphs: str) -> dict:
             for text in paragraphs
         ],
     }
+
+
+def _replace_step(start: int, end: int, text: str) -> dict:
+    return {"stepType": "replace", "from": start, "to": end,
+            "slice": {"content": [{"type": "text", "text": text}]}}
 
 
 PARAGRAPHS = TRACER_PARAGRAPHS
@@ -197,8 +207,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
         assert current["revision"] == 1
         assert current["document"] == _document(*PARAGRAPHS)
     finally:
-        client.close()
-        mongo.close()
+        _close_e2e(client, mongo)
 
 
 def test_accept_writes_revision_snapshot_and_replays_decision():
@@ -253,13 +262,13 @@ def test_accept_rejects_stale_revision_on_real_replica_set():
         changed = _document(*PARAGRAPHS[:1], "第二段已被作者手工改写。")
         patch = client.patch(
             f"/api/cases/{case_id}", headers={"X-CSRF-Token": csrf},
-            json={"revision": 1, "document": changed},
+            json={"revision": 1, "document": changed,
+                  "steps": [_replace_step(*TRACER_SELECTION, "第二段已被作者手工改写。")]},
         )
         assert patch.status_code == 200
         response = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert response.status_code == 409
-        assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "pending"
+        assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "expired"
         assert database.cases.find_one({"id": case_id})["revision"] == 2
     finally:
-        client.close()
-        mongo.close()
+        _close_e2e(client, mongo)

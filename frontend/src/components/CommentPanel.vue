@@ -11,6 +11,7 @@ const props = defineProps({
   selection: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
   refreshKey: { type: Number, default: 0 },
+  annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits(["annotations", "ask-ai", "case-revised"]);
@@ -233,6 +234,7 @@ async function merge(annotation) {
 }
 
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
+watch(() => props.annotationRefreshToken, loadAnnotations);
 watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 watch(() => props.refreshKey, (value, previous) => {
   if (value !== previous) void loadAnnotations();

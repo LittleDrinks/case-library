@@ -218,7 +218,7 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
     document, steps = _resolved_document(case, artifact)
     mapping = _revision_mapping(case, document, steps)
     record_snapshot(database, case, user, "pre_agent_decision", session)
-    return _commit_revision(database, case, document, steps, mapping, session)
+    return _commit_revision(database, case, document, steps, mapping, artifact.id, session)
 
 
 def _revision_mapping(case, document, steps):
@@ -227,7 +227,7 @@ def _revision_mapping(case, document, steps):
     return document_mapping(case["document"], document, steps)
 
 
-def _commit_revision(database, case, document, steps, mapping, session) -> dict:
+def _commit_revision(database, case, document, steps, mapping, artifact_id, session) -> dict:
     updated = database.cases.find_one_and_update(
         {"id": case["id"], "revision": case["revision"]},
         {"$set": {"document": document, "updatedAt": _now().isoformat()},
@@ -240,7 +240,7 @@ def _commit_revision(database, case, document, steps, mapping, session) -> dict:
 
     reconcile_document_annotations(
         database, case["id"], case["document"], document, updated["revision"],
-        steps, session, mapping,
+        steps, session, mapping, artifact_id,
     )
     return updated
 

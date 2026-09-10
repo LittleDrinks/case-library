@@ -77,14 +77,25 @@ def _review_version(database: Database, case: dict, session=None) -> dict:
     return version
 
 
+def _utf16_size(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _utf16_slice(value: str, left: int, right: int) -> str:
+    encoded = value.encode("utf-16-le")
+    return encoded[left * 2:right * 2].decode("utf-16-le")
+
+
 def _node_size(node: dict) -> int:
     if node.get("text") is not None:
-        return len(node["text"])
+        return _utf16_size(node["text"])
     children = node.get("content", [])
     return 1 if not children else 2 + sum(_node_size(child) for child in children)
 
 
 def _node_text(node: dict) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n"
     return node.get("text", "") + "".join(
         _node_text(child) for child in node.get("content", [])
     )
@@ -111,14 +122,23 @@ def _text_blocks(document: dict) -> list[dict]:
 
 
 def _range_text(node: dict, start: int, lower: int, upper: int) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n" if lower <= start < upper else ""
     if node.get("text") is not None:
-        left, right = max(lower, start), min(upper, start + len(node["text"]))
-        return node["text"][left - start : right - start] if left < right else ""
+        left, right = max(lower, start), min(upper, start + _utf16_size(node["text"]))
+        return _utf16_slice(node["text"], left - start, right - start) if left < right else ""
     cursor, parts = start + 1, []
     for child in node.get("content", []):
         parts.append(_range_text(child, cursor, lower, upper))
         cursor += _node_size(child)
     return "".join(parts)
+
+
+def _validated_range_text(node: dict, start: int, lower: int, upper: int) -> str:
+    try:
+        return _range_text(node, start, lower, upper)
+    except UnicodeDecodeError as error:
+        raise CaseError(409, "批注选区必须使用有效的正文位置") from error
 
 
 def _anchor_values(body: dict) -> tuple[int | None, int | None, str | None, int | None]:
@@ -133,7 +153,7 @@ def _require_anchor(document: dict, body: dict) -> None:
     quote = body["quote"]
     if not block or end <= start:
         raise CaseError(409, "批注选区必须位于同一正文段落")
-    actual = _range_text(block["node"], block["start"], start, end)
+    actual = _validated_range_text(block["node"], block["start"], start, end)
     if block["section"] != body["section"].strip() or actual != quote:
         raise CaseError(409, "批注选区已变化，请重新选择正文")
     if hashlib.sha256(quote.encode("utf-8")).hexdigest() != quote_hash:
@@ -144,7 +164,7 @@ def _mapping_for_change(document: dict, updated: dict, steps: list[dict] | None)
     if document == updated and not steps:
         return None
     if steps is None:
-        _ignored, steps = prosemirror.replace_document(document, updated)
+        raise CaseError(409, "正文位置映射缺失，请重新保存")
     if not steps:
         raise CaseError(409, "正文位置映射缺失，请重新保存")
     try:
@@ -238,9 +258,39 @@ def _map_revision_targets(row: dict, anchor: dict) -> list[dict] | None:
     ]
 
 
+def _reconcile_pending_artifact(
+    database, row: dict, document: dict, mapping, revision: int, session
+) -> None:
+    state, anchor = _mapped_anchor(document, row["target"], mapping)
+    if state == ACTIVE_ANCHOR and anchor:
+        target = {"from": anchor["from"], "to": anchor["to"], "quote": row["target"]["quote"]}
+        database.agent_artifacts.update_one(
+            {"id": row["id"], "status": "pending"},
+            {"$set": {"baseRevision": revision, "target": target}},
+            session=session,
+        )
+        return
+    database.agent_artifacts.update_one(
+        {"id": row["id"], "status": "pending"},
+        {"$set": {"status": "expired"}},
+        session=session,
+    )
+
+
+def _reconcile_pending_artifacts(
+    database, case_id: str, document: dict, mapping, revision: int, session,
+    exclude_artifact_id: str | None,
+) -> None:
+    rows = database.agent_artifacts.find({"caseId": case_id, "status": "pending"}, session=session)
+    for row in rows:
+        if row["id"] != exclude_artifact_id:
+            _reconcile_pending_artifact(database, row, document, mapping, revision, session)
+
+
 def reconcile_document_annotations(
     database: Database, case_id: str, document: dict, updated: dict,
     revision: int, steps: list[dict] | None, session=None, mapping=None,
+    exclude_artifact_id: str | None = None,
 ) -> None:
     if mapping is None:
         mapping = _mapping_for_change(document, updated, steps)
@@ -252,6 +302,9 @@ def reconcile_document_annotations(
             continue
         state, anchor = _mapped_anchor(updated, row, mapping)
         _set_anchor_state(database, row, state, anchor, revision, session)
+    _reconcile_pending_artifacts(
+        database, case_id, updated, mapping, revision, session, exclude_artifact_id,
+    )
 
 
 def _section_texts(document: dict) -> dict[str, str]:
