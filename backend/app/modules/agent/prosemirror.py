@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from prosemirror.model import Schema
-from prosemirror.transform import Transform
+from prosemirror.model import Slice
+from prosemirror.transform import Step, Transform
 
 from app.modules.cases.document_schema import validate_prosemirror_document
 
@@ -52,6 +53,41 @@ _SCHEMA = Schema({
 def _document(value: dict[str, Any]):
     validate_prosemirror_document(value)
     return _SCHEMA.node_from_json(value)
+
+
+def _result(transform: Transform) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    document = transform.doc.to_json()
+    document.setdefault("content", [])
+    validate_prosemirror_document(document)
+    return document, [step.to_json() for step in transform.steps]
+
+
+def replace_document(document: dict[str, Any], updated: dict[str, Any]):
+    source, target = _document(document), _document(updated)
+    transform = Transform(source).replace(0, source.content.size, Slice(target.content, 0, 0))
+    return _result(transform)
+
+
+def apply_steps(document: dict[str, Any], steps: list[dict[str, Any]]):
+    transform = Transform(_document(document))
+    for raw in steps:
+        result = transform.maybe_step(Step.from_json(_SCHEMA, raw))
+        if result.failed:
+            raise ValueError(result.failed)
+    applied, _steps = _result(transform)
+    return applied, transform.mapping
+
+
+def invert_steps(document: dict[str, Any], steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    source, inverted = _document(document), []
+    for raw in steps:
+        step = Step.from_json(_SCHEMA, raw)
+        inverted.append(step.invert(source).to_json())
+        result = step.apply(source)
+        if result.failed:
+            raise ValueError(result.failed)
+        source = result.doc
+    return list(reversed(inverted))
 
 
 def _node_text(node: dict[str, Any]) -> str:
@@ -108,35 +144,25 @@ def check_target(document: dict[str, Any], from_pos: int, to_pos: int, quote: st
         raise ParagraphChangedError
 
 
-def replaced_document(
+def replaced_document_with_steps(
     document: dict[str, Any], from_pos: int, to_pos: int, quote: str, replacement: str
-) -> dict[str, Any]:
-    """Replace only a checked range with a native ProseMirror transform."""
+):
     check_target(document, from_pos, to_pos, quote)
     content = _SCHEMA.text(replacement) if replacement else []
-    updated = Transform(_document(document)).replace_with(
-        from_pos, to_pos, content
-    ).doc.to_json()
-    validate_prosemirror_document(updated)
-    return updated
+    return _replace(document, from_pos, to_pos, content)
 
 
-def replaced_document_blocks(
+def _replace(document: dict[str, Any], from_pos: int, to_pos: int, content):
+    return _result(Transform(_document(document)).replace_with(from_pos, to_pos, content))
+
+
+def replaced_document_blocks_with_steps(
     document: dict[str, Any], from_pos: int, to_pos: int, quote: str,
     block_nodes: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Replace a checked range with structured block nodes.
-
-    整块替换按节点边界处理；部分选区由 ProseMirror 拆分原段落，保留前后文、
-    标题、列表和引用等块结构。
-    """
+):
     check_target(document, from_pos, to_pos, quote)
     block = selection_block(document, from_pos, to_pos)
     if from_pos == block["start"] and to_pos == block["end"]:
         from_pos, to_pos = block["start"] - 1, block["end"] + 1
     nodes = [_SCHEMA.node_from_json(node) for node in block_nodes]
-    updated = Transform(_document(document)).replace_with(
-        from_pos, to_pos, nodes
-    ).doc.to_json()
-    validate_prosemirror_document(updated)
-    return updated
+    return _replace(document, from_pos, to_pos, nodes)

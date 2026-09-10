@@ -17,7 +17,9 @@ const props = defineProps({
   annotations: { type: Array, default: () => [] },
   sources: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
+const emit = defineEmits([
+  "change", "selection", "writing-context", "annotate", "annotation-click",
+]);
 const selection = ref(null);
 const cursorPlaced = ref(false);
 const triggerPosition = ref({ top: "0", left: "0" });
@@ -36,7 +38,7 @@ function sectionName(activeEditor, position) {
 
 function writingContext(activeEditor, from, to) {
   const section = sectionName(activeEditor, from);
-  const quote = activeEditor.state.doc.textBetween(from, to, "\n", "\n");
+  const quote = quoteText(activeEditor.state.doc, from, to);
   const sameBlock = activeEditor.state.doc.resolve(from).sameParent(activeEditor.state.doc.resolve(to));
   return { section, quote, from, to, sameBlock };
 }
@@ -108,28 +110,45 @@ function currentContext(activeEditor) {
   return writingContext(activeEditor, from, to);
 }
 
-function updateEditor({ editor: activeEditor }) {
+function updateEditor({ editor: activeEditor, transaction }) {
   selectionBlocked = true;
   clearSelection();
-  emit("change", activeEditor.getJSON());
+  emit("change", {
+    document: activeEditor.getJSON(),
+    steps: transaction.steps.map((step) => step.toJSON()),
+  });
   emit("writing-context", currentContext(activeEditor));
 }
 
 const annotationKey = new PluginKey("annotationAnchors");
 
-function annotationAnchor(annotation, document) {
-  if (annotation.revision !== props.revision) return null;
+function quoteText(doc, from, to) {
+  return doc.textBetween(from, to, "\n", "\n");
+}
+
+function annotationAnchor(annotation, doc) {
+  if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
-  return document.textBetween(from, to, " ") === annotation.quote
+  return quoteText(doc, from, to) === annotation.quote
     ? { from, to } : null;
 }
 
-function annotationDecorations(document, annotations) {
-  return DecorationSet.create(document, annotations.flatMap((annotation) => {
-    const range = annotationAnchor(annotation, document);
-    return range ? [Decoration.inline(range.from, range.to, { class: "annotation-anchor" })] : [];
+function annotationDecorations(doc, annotations) {
+  return DecorationSet.create(doc, annotations.flatMap((annotation) => {
+    const range = annotationAnchor(annotation, doc);
+    return range ? [Decoration.inline(
+      range.from,
+      range.to,
+      { class: "annotation-anchor", "data-annotation-id": annotation.id },
+      { annotationId: annotation.id },
+    )] : [];
   }));
+}
+
+function clickedAnnotation(view, position) {
+  const decorations = annotationKey.getState(view.state)?.find(position, position + 1) || [];
+  return decorations.find((decoration) => decoration.spec.annotationId)?.spec.annotationId;
 }
 
 function applyAnnotationAnchors(transaction, previous) {
@@ -144,15 +163,23 @@ const annotationExtension = Extension.create({
     return [new Plugin({
       key: annotationKey,
       state: { init: () => DecorationSet.empty, apply: applyAnnotationAnchors },
-      props: { decorations: (state) => annotationKey.getState(state) },
+      props: {
+        decorations: (state) => annotationKey.getState(state),
+        handleClick: (view, position) => {
+          const annotationId = clickedAnnotation(view, position);
+          if (!annotationId) return false;
+          emit("annotation-click", annotationId);
+          return true;
+        },
+      },
     })];
   },
 });
 
-function refreshAnnotationAnchors() {
-  if (!editor.value) return;
-  const transaction = editor.value.state.tr.setMeta(annotationKey, props.annotations);
-  editor.value.view.dispatch(transaction);
+function refreshAnnotationAnchors(activeEditor = editor.value) {
+  if (!activeEditor) return;
+  const transaction = activeEditor.state.tr.setMeta(annotationKey, props.annotations);
+  activeEditor.view.dispatch(transaction);
 }
 
 const editor = useEditor({
@@ -166,7 +193,10 @@ const editor = useEditor({
   }), CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
-  onCreate: captureSelection,
+  onCreate: (context) => {
+    captureSelection(context);
+    refreshAnnotationAnchors(context.editor);
+  },
   onSelectionUpdate: captureSelection,
   onFocus: () => { cursorPlaced.value = true; },
 });
@@ -183,7 +213,7 @@ function replaceDocument(document) {
 
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
-watch(() => props.annotations, refreshAnnotationAnchors, { deep: true });
+watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;

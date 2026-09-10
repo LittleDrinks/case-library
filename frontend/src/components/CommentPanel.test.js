@@ -123,6 +123,17 @@ it("案例切换后忽略旧案例的批注加载结果", async () => {
   expect(wrapper.text()).not.toContain("旧案例批注");
 });
 
+it("正文保存后的批注刷新令牌会重新加载锚点状态", async () => {
+  api.listAnnotations
+    .mockResolvedValueOnce([annotation])
+    .mockResolvedValueOnce([{ ...annotation, anchorState: "changed" }]);
+  const wrapper = await mountPanel({ annotationRefreshToken: 1 });
+  await wrapper.setProps({ annotationRefreshToken: 2 });
+  await flushPromises();
+  expect(api.listAnnotations).toHaveBeenCalledTimes(2);
+  expect(wrapper.text()).toContain("原文已变动，旧修订不可合并");
+});
+
 it("创建成功后刷新失败仍显示已保存批注且不能重复提交空输入", async () => {
   api.listAnnotations.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("批注加载失败"));
   const wrapper = await mountPanel();
@@ -153,4 +164,15 @@ it("作者可以编辑并删除自己的未解决批注", async () => {
   await flushPromises();
   expect(api.deleteAnnotation).toHaveBeenCalledWith(caseRecord.id, annotation.id, user.csrfToken);
   expect(wrapper.find(".comment-card").exists()).toBe(false);
+});
+
+it("原文改写或删除时保留讨论并显示锚点状态", async () => {
+  api.listAnnotations.mockResolvedValue([
+    { ...annotation, id: "changed", anchorState: "changed" },
+    { ...annotation, id: "deleted", anchorState: "deleted" },
+  ]);
+  const wrapper = await mountPanel();
+  expect(wrapper.text()).toContain("原文已变动，旧修订不可合并");
+  expect(wrapper.text()).toContain("原文已删除");
+  expect(wrapper.findAll(".comment-card")).toHaveLength(2);
 });

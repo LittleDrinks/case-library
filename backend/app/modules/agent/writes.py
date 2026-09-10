@@ -117,12 +117,12 @@ def apply_write(
 
 
 def _apply(database, case_id, run_id, scope, normalized, user, summary, session) -> dict:
-    case, run, document = _write_guards(
+    case, run, document, steps = _write_guards(
         database, case_id, run_id, scope, normalized, user, session,
     )
     record_snapshot(database, case, user, "pre_agent_write", session)
-    write = _new_write_record(case, run, scope, normalized, user, summary, document)
-    return _commit_write(database, case_id, user, run, write, scope, session)
+    write = _new_write_record(case, run, scope, normalized, user, summary, document, steps)
+    return _commit_write(database, case_id, user, run, write, steps, scope, session)
 
 
 def _write_guards(database, case_id, run_id, scope, normalized, user, session) -> tuple:
@@ -134,25 +134,37 @@ def _write_guards(database, case_id, run_id, scope, normalized, user, session) -
     if case["revision"] != run["baseRevision"]:
         raise CaseError(409, "正文已更新，写入基线已过期，请重新确认范围")
     if scope == "document":
-        document = _document_scope(case, normalized)
+        document, steps = _document_scope(case, normalized)
     else:
-        document = _selection_scope(case, normalized, run)
-    return case, run, document
+        document, steps = _selection_scope(case, normalized, run)
+    return case, run, document, steps
 
 
-def _new_write_record(case, run, scope, normalized, user, summary, document) -> dict:
+def _new_write_record(case, run, scope, normalized, user, summary, document, steps) -> dict:
     record = AgentWrite(
         id=new_id("write"), case_id=case["id"], thread_id=run["threadId"],
         run_id=run["id"], scope=scope, summary=summary, blocks=normalized,
         before_document=case["document"], document=document,
+        document_steps=steps,
         base_revision=case["revision"], result_revision=case["revision"] + 1,
         created_by=user["id"], created_at=_now(),
     )
     return record.model_dump(by_alias=True, mode="python")
 
 
-def _commit_write(database, case_id, user, run, write, scope, session) -> dict:
+def _commit_write(database, case_id, user, run, write, steps, scope, session) -> dict:
     """CAS 落库：正文修订 +1，写入记录与线程事件同事务可见。"""
+    from app.modules.annotations.service import document_mapping
+
+    mapping = document_mapping(write["beforeDocument"], write["document"], steps)
+    _commit_written_document(database, case_id, user, write, steps, mapping, session)
+    database.agent_writes.insert_one(write, session=session)
+    _append_event(database, run["threadId"], "document.written", run["id"],
+                  {"writeId": write["id"], "scope": scope}, session)
+    return write
+
+
+def _commit_written_document(database, case_id, user, write, steps, mapping, session):
     updated = database.cases.find_one_and_update(
         {"id": case_id, "revision": write["baseRevision"], "ownerId": user["id"],
          "workflowStatus": "draft"},
@@ -162,27 +174,29 @@ def _commit_write(database, case_id, user, run, write, scope, session) -> dict:
     )
     if not updated:
         raise CaseError(409, "案例状态已变化")
-    database.agent_writes.insert_one(write, session=session)
-    _append_event(database, run["threadId"], "document.written", run["id"],
-                  {"writeId": write["id"], "scope": scope}, session)
-    return write
+    from app.modules.annotations.service import reconcile_document_annotations
+
+    reconcile_document_annotations(
+        database, case_id, write["beforeDocument"], write["document"],
+        write["resultRevision"], steps, session, mapping,
+    )
 
 
-def _document_scope(case: dict, normalized: list[dict]) -> dict:
+def _document_scope(case: dict, normalized: list[dict]) -> tuple[dict, list[dict]]:
     """整篇写入仅接受空草稿或模板；已有正文时必须先澄清范围。"""
     if not blocks.document_rewritable(case["document"]):
         raise CaseError(422, "正文已有内容，不能整篇覆盖；请先澄清要写入的范围")
-    return blocks.structured_document(normalized)
+    return prosemirror.replace_document(case["document"], blocks.structured_document(normalized))
 
 
-def _selection_scope(case: dict, normalized: list[dict], run: dict) -> dict:
+def _selection_scope(case: dict, normalized: list[dict], run: dict) -> tuple[dict, list[dict]]:
     """选区写入仅接受 Run 创建时锁定的教师非空选区，并保留块结构。"""
     target = run.get("target")
     if not target:
         raise CaseError(422, "本条消息没有教师选定的正文范围，不能直接写入选区")
     nodes = blocks.structured_document(normalized)["content"]
     try:
-        return prosemirror.replaced_document_blocks(
+        return prosemirror.replaced_document_blocks_with_steps(
             case["document"], target["from"], target["to"], target["quote"], nodes,
         )
     except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
@@ -229,6 +243,18 @@ def _undo_target(database, case_id, thread_id, write_id, user, session) -> dict:
 
 def _restore_document(database, case_id, write, user, session) -> dict:
     """CAS 恢复写入前正文；正文修订号未再前进才允许撤销。"""
+    from app.modules.annotations.service import document_mapping
+
+    steps = prosemirror.invert_steps(write["beforeDocument"], write["documentSteps"])
+    mapping = document_mapping(write["document"], write["beforeDocument"], steps)
+    return _restore_case_document(
+        database, case_id, write, user, steps, mapping, session,
+    )
+
+
+def _restore_case_document(database, case_id, write, user, steps, mapping, session):
+    from app.modules.annotations.service import reconcile_document_annotations
+
     updated = database.cases.find_one_and_update(
         {"id": case_id, "revision": write["resultRevision"], "ownerId": user["id"],
          "workflowStatus": "draft"},
@@ -238,6 +264,10 @@ def _restore_document(database, case_id, write, user, session) -> dict:
     )
     if not updated:
         raise CaseError(409, "案例状态已变化")
+    reconcile_document_annotations(
+        database, case_id, write["document"], write["beforeDocument"],
+        updated["revision"], steps, session, mapping,
+    )
     return updated
 
 

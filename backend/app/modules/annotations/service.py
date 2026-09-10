@@ -7,10 +7,14 @@ from datetime import UTC, datetime
 from pymongo import ReturnDocument
 from pymongo.database import Database
 
+from app.modules.agent import prosemirror
 from app.modules.cases.service import CaseError, RevisionConflict
 
 
 ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
+ACTIVE_ANCHOR = "active"
+CHANGED_ANCHOR = "changed"
+DELETED_ANCHOR = "deleted"
 
 
 def _now() -> str:
@@ -23,6 +27,8 @@ def _view(annotation: dict) -> dict:
     if view.pop("_legacy", False):
         for field in ANCHOR_FIELDS:
             view.pop(field, None)
+    elif view.get("versionId") is None:
+        view.setdefault("anchorState", ACTIVE_ANCHOR)
     return view
 
 
@@ -51,14 +57,25 @@ def _review_version(database: Database, case: dict, session=None) -> dict:
     return version
 
 
+def _utf16_size(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _utf16_slice(value: str, left: int, right: int) -> str:
+    encoded = value.encode("utf-16-le")
+    return encoded[left * 2:right * 2].decode("utf-16-le")
+
+
 def _node_size(node: dict) -> int:
     if node.get("text") is not None:
-        return len(node["text"])
+        return _utf16_size(node["text"])
     children = node.get("content", [])
     return 1 if not children else 2 + sum(_node_size(child) for child in children)
 
 
 def _node_text(node: dict) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n"
     return node.get("text", "") + "".join(
         _node_text(child) for child in node.get("content", [])
     )
@@ -85,14 +102,23 @@ def _text_blocks(document: dict) -> list[dict]:
 
 
 def _range_text(node: dict, start: int, lower: int, upper: int) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n" if lower <= start < upper else ""
     if node.get("text") is not None:
-        left, right = max(lower, start), min(upper, start + len(node["text"]))
-        return node["text"][left - start : right - start] if left < right else ""
+        left, right = max(lower, start), min(upper, start + _utf16_size(node["text"]))
+        return _utf16_slice(node["text"], left - start, right - start) if left < right else ""
     cursor, parts = start + 1, []
     for child in node.get("content", []):
         parts.append(_range_text(child, cursor, lower, upper))
         cursor += _node_size(child)
     return "".join(parts)
+
+
+def _validated_range_text(node: dict, start: int, lower: int, upper: int) -> str:
+    try:
+        return _range_text(node, start, lower, upper)
+    except UnicodeDecodeError as error:
+        raise CaseError(409, "批注选区必须使用有效的正文位置") from error
 
 
 def _anchor_values(body: dict) -> tuple[int | None, int | None, str | None, int | None]:
@@ -107,11 +133,144 @@ def _require_anchor(document: dict, body: dict) -> None:
     quote = body["quote"]
     if not block or end <= start:
         raise CaseError(409, "批注选区必须位于同一正文段落")
-    actual = _range_text(block["node"], block["start"], start, end)
+    actual = _validated_range_text(block["node"], block["start"], start, end)
     if block["section"] != body["section"].strip() or actual != quote:
         raise CaseError(409, "批注选区已变化，请重新选择正文")
     if hashlib.sha256(quote.encode("utf-8")).hexdigest() != quote_hash:
         raise CaseError(409, "批注引用校验失败，请重新选择正文")
+
+
+def _mapping_for_change(document: dict, updated: dict, steps: list[dict] | None):
+    if document == updated and not steps:
+        return None
+    if steps is None:
+        raise CaseError(409, "正文位置映射缺失，请重新保存")
+    if not steps:
+        raise CaseError(409, "正文位置映射缺失，请重新保存")
+    try:
+        applied, mapping = prosemirror.apply_steps(document, steps)
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise CaseError(409, "正文位置映射无效，请重新保存") from error
+    if applied != updated:
+        raise CaseError(409, "正文变更与位置映射不一致，请重新保存")
+    return mapping
+
+
+def document_mapping(document: dict, updated: dict, steps: list[dict] | None):
+    return _mapping_for_change(document, updated, steps)
+
+
+def _has_replacement(mapping, start: int, end: int) -> bool:
+    left, right = start, end
+    for step_map in mapping.maps:
+        for position, old_size, new_size in zip(
+            step_map.ranges[::3], step_map.ranges[1::3], step_map.ranges[2::3]
+        ):
+            overlaps = old_size and max(left, position) < min(right, position + old_size)
+            inserted_at_collapsed = left == right == position and old_size == 0
+            if new_size and (overlaps or inserted_at_collapsed):
+                return True
+        left = step_map.map(left, 1)
+        right = step_map.map(right, -1)
+    return False
+
+
+def _deleted_by_mapping(mapping, start: int, end: int) -> bool:
+    left = mapping.map_result(start, 1)
+    right = mapping.map_result(end, -1)
+    return left.pos == right.pos and left.deleted and right.deleted and not _has_replacement(
+        mapping, start, end
+    )
+
+
+def _mapped_anchor(document: dict, annotation: dict, mapping) -> tuple[str, dict | None]:
+    start, end = annotation.get("from"), annotation.get("to")
+    if not isinstance(start, int) or not isinstance(end, int) or start >= end:
+        return CHANGED_ANCHOR, None
+    mapped_start = mapping.map(start, 1)
+    mapped_end = mapping.map(end, -1)
+    if _deleted_by_mapping(mapping, start, end):
+        return DELETED_ANCHOR, None
+    if mapped_start >= mapped_end:
+        return CHANGED_ANCHOR, None
+    row = _anchor_at(document, mapped_start, mapped_end)
+    if not row or row["quote"] != annotation.get("quote"):
+        return CHANGED_ANCHOR, None
+    return ACTIVE_ANCHOR, row
+
+
+def _anchor_at(document: dict, start: int, end: int) -> dict | None:
+    block = next((row for row in _text_blocks(document)
+                  if row["start"] < start <= row["end"] and row["start"] < end <= row["end"]), None)
+    if not block or end <= start:
+        return None
+    return {
+        "from": start, "to": end, "quote": _range_text(block["node"], block["start"], start, end),
+        "section": block["section"],
+    }
+
+
+def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revision: int, session) -> None:
+    changes = {"anchorState": state, "revision": revision}
+    unset = {}
+    if anchor:
+        changes.update(anchor)
+    else:
+        unset.update({"from": "", "to": ""})
+    database.annotations.update_one(
+        {"id": row["id"], "caseId": row["caseId"]},
+        {"$set": changes, **({"$unset": unset} if unset else {})},
+        session=session,
+    )
+
+
+def _reconcile_pending_artifact(
+    database, row: dict, document: dict, mapping, revision: int, session
+) -> None:
+    state, anchor = _mapped_anchor(document, row["target"], mapping)
+    if state == ACTIVE_ANCHOR and anchor:
+        target = {"from": anchor["from"], "to": anchor["to"], "quote": row["target"]["quote"]}
+        database.agent_artifacts.update_one(
+            {"id": row["id"], "status": "pending"},
+            {"$set": {"baseRevision": revision, "target": target}},
+            session=session,
+        )
+        return
+    database.agent_artifacts.update_one(
+        {"id": row["id"], "status": "pending"},
+        {"$set": {"status": "expired"}},
+        session=session,
+    )
+
+
+def _reconcile_pending_artifacts(
+    database, case_id: str, document: dict, mapping, revision: int, session,
+    exclude_artifact_id: str | None,
+) -> None:
+    rows = database.agent_artifacts.find({"caseId": case_id, "status": "pending"}, session=session)
+    for row in rows:
+        if row["id"] != exclude_artifact_id:
+            _reconcile_pending_artifact(database, row, document, mapping, revision, session)
+
+
+def reconcile_document_annotations(
+    database: Database, case_id: str, document: dict, updated: dict,
+    revision: int, steps: list[dict] | None, session=None, mapping=None,
+    exclude_artifact_id: str | None = None,
+) -> None:
+    if mapping is None:
+        mapping = _mapping_for_change(document, updated, steps)
+    if mapping is None:
+        return
+    rows = database.annotations.find({"caseId": case_id, "versionId": None}, session=session)
+    for row in rows:
+        if row.get("anchorState", ACTIVE_ANCHOR) != ACTIVE_ANCHOR:
+            continue
+        state, anchor = _mapped_anchor(updated, row, mapping)
+        _set_anchor_state(database, row, state, anchor, revision, session)
+    _reconcile_pending_artifacts(
+        database, case_id, updated, mapping, revision, session, exclude_artifact_id,
+    )
 
 
 def _section_texts(document: dict) -> dict[str, str]:

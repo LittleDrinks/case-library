@@ -205,6 +205,17 @@ def _publish(database, repository, run, artifact=None) -> None:
     ) is True
 
 
+def _save_prefix(client: TestClient, auth: dict, case: dict) -> dict:
+    document = _document(f"前置{PARAGRAPHS[0]}", PARAGRAPHS[1])
+    return client.patch(
+        f"/api/cases/{case['id']}", headers=_csrf(auth), json={
+            "revision": case["revision"], "document": document,
+            "steps": [{"stepType": "replace", "from": 1, "to": 1,
+                        "slice": {"content": [{"type": "text", "text": "前置"}]} }],
+        },
+    )
+
+
 def test_propose_without_locked_target_is_refused(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
@@ -342,6 +353,24 @@ def test_accept_replaces_only_selected_range(client: TestClient) -> None:
     _assert_range_accepted(database, case, thread, artifact, auth)
 
 
+def test_accept_maps_pending_artifact_after_unrelated_save(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+    saved = _save_prefix(client, auth, case)
+    assert saved.status_code == 200, saved.text
+    row = database.agent_artifacts.find_one({"id": artifact.id})
+    assert row["baseRevision"] == 2
+    assert row["target"] == {"from": 13, "to": 21, "quote": PARAGRAPHS[1]}
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 3
+
+
 def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
     result = artifacts.decide_artifact(
         database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
@@ -355,13 +384,13 @@ def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
 
 def test_utf16_selection_preserves_following_text() -> None:
     document = _document("A😀B")
-    updated = prosemirror.replaced_document(document, 2, 4, "😀", "X")
+    updated, _steps = prosemirror.replaced_document_with_steps(document, 2, 4, "😀", "X")
     assert updated["content"][0]["content"][0]["text"] == "AXB"
 
 
 def test_native_transform_preserves_rich_nodes() -> None:
     block = prosemirror.text_blocks(RICH_DOCUMENT)[0]
-    updated = prosemirror.replaced_document(
+    updated, _steps = prosemirror.replaced_document_with_steps(
         RICH_DOCUMENT, block["start"] + 3, block["end"] - 1, "目标", "新"
     )
     content = updated["content"]

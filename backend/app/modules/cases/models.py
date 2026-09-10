@@ -32,6 +32,7 @@ class CasePatch(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=200)
     document: dict[str, Any] | None = None
+    steps: list[dict[str, Any]] | None = Field(default=None, max_length=1000)
     revision: int = Field(ge=1)
     tag_ids: list[Annotated[str, Field(min_length=1, max_length=100)]] | None = Field(
         default=None,
