@@ -168,7 +168,7 @@ jobs:
             gh release upload "$VERSION" "$RELEASE_DIR"/* --clobber
           else
             gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
-              --title "Case Library $DISPLAY_NAME" \
+              --title "$DISPLAY_NAME" \
               --notes "Run ./update.sh to install or update this release."
           fi
           gh release edit "$VERSION" --latest

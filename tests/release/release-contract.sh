@@ -62,7 +62,7 @@ grep -Fq '.head_branch == "main"' "$release_workflow"
 grep -Fq '.conclusion == "success"' "$release_workflow"
 grep -Fq -- '-alpha\.' "$release_workflow"
 grep -Fq 'alpha-v\1/' "$release_workflow"
-grep -Fq '"Case Library $DISPLAY_NAME"' "$release_workflow"
+grep -Fq '"$DISPLAY_NAME"' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
 for image in app frontend mongo_init meilisearch; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
