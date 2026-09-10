@@ -74,6 +74,8 @@ def _node_size(node: dict) -> int:
 
 
 def _node_text(node: dict) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n"
     return node.get("text", "") + "".join(
         _node_text(child) for child in node.get("content", [])
     )
@@ -100,6 +102,8 @@ def _text_blocks(document: dict) -> list[dict]:
 
 
 def _range_text(node: dict, start: int, lower: int, upper: int) -> str:
+    if node.get("type") == "hardBreak":
+        return "\n" if lower <= start < upper else ""
     if node.get("text") is not None:
         left, right = max(lower, start), min(upper, start + _utf16_size(node["text"]))
         return _utf16_slice(node["text"], left - start, right - start) if left < right else ""

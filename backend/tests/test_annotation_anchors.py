@@ -36,6 +36,17 @@ def document(*paragraphs: str) -> dict:
     return {"type": "doc", "content": content}
 
 
+def rich_document(prefix: str = "") -> dict:
+    return {"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 1},
+         "content": [{"type": "text", "text": HEADING}]},
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": f"{prefix}A"},
+            {"type": "hardBreak"}, {"type": "text", "text": "B"},
+        ]},
+    ]}
+
+
 def paragraph_start(*prior: str) -> int:
     return utf16_size(HEADING) + 3 + sum(utf16_size(text) + 2 for text in prior)
 
@@ -59,6 +70,15 @@ def create_case(client: TestClient, auth: dict, *paragraphs: str) -> dict:
         "/api/cases",
         headers={"X-CSRF-Token": auth["csrfToken"]},
         json={"title": "锚点测试", "document": document(*paragraphs)},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def create_document_case(client: TestClient, auth: dict, value: dict) -> dict:
+    response = client.post(
+        "/api/cases", headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "富文本锚点测试", "document": value},
     )
     assert response.status_code == 200
     return response.json()
@@ -216,6 +236,23 @@ def test_utf16_emoji_anchor_uses_native_positions(client: TestClient) -> None:
     row = annotation(client, saved.json())
     assert row["from"] == start + 2 and row["to"] == start + 4
     assert row["quote"] == "😀" and row["anchorState"] == "active"
+
+
+def test_hard_break_anchor_uses_native_leaf_text(client: TestClient) -> None:
+    auth = login(client)
+    case = create_document_case(client, auth, rich_document())
+    start = paragraph_start()
+    quote = "\nB"
+    payload = annotation_payload(case, quote)
+    payload.update({"from": start + 1, "to": start + 3})
+    create_annotation(client, auth, case, payload)
+    saved = save_document(
+        client, auth, case, rich_document("前"), [replace_step(start, start, "前")],
+    )
+    assert saved.status_code == 200
+    row = annotation(client, saved.json())
+    assert row["from"] == start + 2 and row["to"] == start + 4
+    assert row["quote"] == quote and row["anchorState"] == "active"
 
 
 def test_agent_write_and_undo_reconcile_active_anchor(client: TestClient) -> None:
