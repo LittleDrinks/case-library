@@ -38,10 +38,14 @@ _QUOTED_SPANS = re.compile(
     r'|"[^"]*"|\'[^\']*\'|（[^）]*）|\([^)]*\)'
 )
 _CLAUSE_SPLIT = re.compile(r"[。！？!?；;.\n]")
+_DISCOURSE_SPLIT = re.compile(r"[，,：:、]|但是|但|不过|而是")
 
 
-def message_clauses(text: str) -> list[str]:
-    return _CLAUSE_SPLIT.split(_QUOTED_SPANS.sub("", text or ""))
+def message_clauses(text: str, *, split_discourse: bool = False) -> list[str]:
+    cleaned = _QUOTED_SPANS.sub("", text or "")
+    if split_discourse:
+        cleaned = _DISCOURSE_SPLIT.sub(".", cleaned)
+    return _CLAUSE_SPLIT.split(cleaned)
 
 
 # 从句内出现即否定，不得授权。

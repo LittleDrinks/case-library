@@ -45,13 +45,16 @@ _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
 
 
 def full_generation_requested(prompt: str) -> bool:
-    for clause in writes.message_clauses((prompt or "").lower()):
+    requested = False
+    for clause in writes.message_clauses((prompt or "").lower(), split_discourse=True):
         if _generation_context_blocked(clause):
             continue
         for match in _generation_matches(clause):
-            if not _generation_match_blocked(clause, match):
-                return True
-    return False
+            if _generation_match_negated(clause, match):
+                requested = False
+            elif not _generation_match_blocked(clause, match):
+                requested = True
+    return requested
 
 
 def _generation_matches(clause: str):
@@ -66,9 +69,14 @@ def _generation_context_blocked(clause: str) -> bool:
 def _generation_match_blocked(clause: str, match: re.Match) -> bool:
     before = clause[max(0, match.start() - 24):match.start()]
     after = clause[match.end():match.end() + 16]
-    return _generation_negated(before) or _generation_mentioned(before, after) or bool(
+    return _generation_match_negated(clause, match) or _generation_mentioned(before, after) or bool(
         _GENERATION_PARTIAL.search(match.group()) or _GENERATION_PARTIAL.search(after)
     )
+
+
+def _generation_match_negated(clause: str, match: re.Match) -> bool:
+    before = clause[max(0, match.start() - 24):match.start()]
+    return _generation_negated(before)
 
 
 def _generation_negated(before: str) -> bool:

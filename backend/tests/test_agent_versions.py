@@ -157,14 +157,15 @@ def test_natural_full_generation_request_creates_an_ai_version(client: TestClien
 def test_full_generation_parser_rejects_non_requests() -> None:
     for prompt in (
         '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
-        "不要生成全文", "没有让你重写全文",
+        "不要生成全文", "没有让你重写全文", "请重写整个案例，但是不要生成全文",
     ):
         assert full_generation_requested(prompt) is False, prompt
+    assert full_generation_requested("不要生成全文，但是请重写整个案例") is True
 
 
 @pytest.mark.parametrize("prompt", [
     '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
-    "不要生成全文", "没有让你重写全文",
+    "不要生成全文", "没有让你重写全文", "请重写整个案例，但是不要生成全文",
 ])
 def test_non_generation_public_runs_do_not_create_ai_versions(
     client: TestClient, prompt: str
