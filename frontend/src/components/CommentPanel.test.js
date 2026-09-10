@@ -26,6 +26,17 @@ const annotation = {
   revision: selection.revision, status: "pending", replies: [], createdBy: user.id,
   createdAt: "2026-08-26T00:00:00Z",
 };
+const revisedAnnotation = {
+  ...annotation,
+  revisions: [
+    { id: "revision-1", replacement: "第一轮", reason: "先补充依据", status: "expired" },
+    { id: "revision-2", replacement: "最新轮", reason: "再收紧表述", status: "pending" },
+  ],
+};
+const resolvedAnnotation = { ...revisedAnnotation, status: "resolved", revisions: [
+  ...revisedAnnotation.revisions.slice(0, 1),
+  { ...revisedAnnotation.revisions[1], status: "accepted" },
+] };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -179,19 +190,9 @@ it("原文改写或删除时保留讨论并显示锚点状态", async () => {
 });
 
 it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
-  const revised = {
-    ...annotation,
-    revisions: [
-      { id: "revision-1", replacement: "第一轮", reason: "先补充依据", status: "expired" },
-      { id: "revision-2", replacement: "最新轮", reason: "再收紧表述", status: "pending" },
-    ],
-  };
-  const resolved = { ...revised, status: "resolved", revisions: [
-    ...revised.revisions.slice(0, 1), { ...revised.revisions[1], status: "accepted" },
-  ] };
-  api.listAnnotations.mockResolvedValue([revised]);
+  api.listAnnotations.mockResolvedValue([revisedAnnotation]);
   api.mergeAnnotation.mockResolvedValue({
-    annotation: resolved, case: { ...caseRecord, revision: 5 },
+    annotation: resolvedAnnotation, case: { ...caseRecord, revision: 5 },
   });
   const wrapper = await mountPanel();
   expect(wrapper.text()).toContain("第一轮");

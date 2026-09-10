@@ -17,7 +17,9 @@ TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
 TRACER_SELECTION = (11, 30)
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
+SECOND_REPLACEMENT = "第二轮修订：教学目标、课堂任务与评价依据逐项对应，并补充可核验的课堂证据。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
+SECOND_REASON = "根据第一轮候选继续收紧表述，补充可核验的课堂证据"
 RESOURCE_TOOL = f"read_skill_resource_{SKILL_ID.replace('-', '_')}"
 # 侧栏浏览器验收：带标记的提问首轮同时流出慢速 ThinkingPart 与既有工具调用。
 THINKING_MARKER = "思考测试"
@@ -25,21 +27,30 @@ THINKING_TEXT = "先核对资料区与选区，再检索平台依据。"
 
 
 def _tool_calls(messages) -> list[str]:
+    start = max(
+        (index for index, message in enumerate(messages)
+         if any(getattr(part, "part_kind", "") == "user-prompt" for part in message.parts)
+         and not any(getattr(part, "part_kind", "") == "tool-return" for part in message.parts)),
+        default=0,
+    )
     return [
         part.tool_name
-        for message in messages
+        for message in messages[start:]
         for part in getattr(message, "parts", [])
         if part.part_kind == "tool-call"
     ]
 
 
-def _wants_thinking(messages) -> bool:
-    """仅看最近一条用户输入（user-prompt），忽略工具返回等其他 part。"""
+def _latest_prompt(messages) -> str:
     for message in reversed(messages):
         for part in getattr(message, "parts", []):
             if getattr(part, "part_kind", "") == "user-prompt":
-                return THINKING_MARKER in part.content
-    return False
+                return part.content
+    return ""
+
+
+def _wants_thinking(messages) -> bool:
+    return THINKING_MARKER in _latest_prompt(messages)
 
 
 def thinking_pieces(content: str) -> list[str]:
@@ -97,8 +108,11 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
         return _tool_response("read_source", _search_source(messages))
     if "propose_revision" not in called:
         start, end = selection or TRACER_SELECTION
+        second_round = "第二轮" in _latest_prompt(messages)
         return _tool_response("propose_revision", {
-            "start": start, "end": end, "replacement": REPLACEMENT, "reason": REASON,
+            "start": start, "end": end,
+            "replacement": SECOND_REPLACEMENT if second_round else REPLACEMENT,
+            "reason": SECOND_REASON if second_round else REASON,
         })
     return ModelResponse(parts=[TextPart(content="已生成单段修订候选，等待作者决定。")])
 

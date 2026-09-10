@@ -4,6 +4,7 @@ import { SKILL_ID, teachingPackage } from "./skill-package.js";
 const REQUEST_TEXT = "请结合平台资料修订第2段：补充评价依据";
 const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
+const SECOND_REPLACEMENT_MARK = "第二轮修订：教学目标、课堂任务与评价依据逐项对应";
 
 async function login(page) {
   await page.goto("/#/login");
@@ -82,6 +83,22 @@ async function openChat(page, caseId) {
   await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+}
+
+async function addAnnotation(page) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await page.locator(".canvas-editor p").nth(1).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  await page.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
+  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(1);
+  return (await page.context().request.get(
+    `/api/cases/${await currentCaseId(page)}/annotations`,
+  )).json();
+}
+
+async function currentCaseId(page) {
+  return page.url().split("/").pop();
 }
 
 async function expandSearchTool(page) {
@@ -172,6 +189,57 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
   expect(await sources.count()).toBeGreaterThan(0);
   await acceptAndVerify(page, created.id);
   await reloadRestoresTracer(page, created.id);
+});
+
+async function sendAnnotationRound(page, text, annotationId) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  const card = page.locator(".comment-card");
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "让 AI 修订" }).click();
+  await selectPublishedSkill(page);
+  const request = page.waitForRequest((item) => (
+    item.method() === "POST" && new URL(item.url()).pathname.endsWith("/stream")
+  ));
+  await page.getByLabel("向 AI 提问").fill(text);
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  const payload = (await request).postDataJSON();
+  expect(payload.messages[0].parts).toContainEqual({
+    type: "data-annotation", data: { id: annotationId },
+  });
+  await expect(page.getByTestId("agent-artifact")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("agent-artifact")).toHaveAttribute("data-artifact-status", "pending");
+}
+
+async function prepareAnnotationDiscussion(page, playwright) {
+  await publishTeachingSkill(playwright);
+  await login(page);
+  await configureChat(page);
+  await waitSearchableCatalog(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await selectPublishedSkill(page);
+  const annotations = await addAnnotation(page);
+  return { created, annotation: annotations[0] };
+}
+
+async function expectAnnotationHistory(page) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expect(page.locator(".comment-revisions li")).toHaveCount(2);
+  await expect(page.locator(".comment-revisions")).toContainText(REPLACEMENT_MARK);
+  await expect(page.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
+}
+
+test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并合并最新轮", async ({ page, playwright }) => {
+  test.setTimeout(120_000);
+  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright);
+  await sendAnnotationRound(page, "第一轮：请结合当前选区生成修订候选。", annotation.id);
+  await sendAnnotationRound(page, "第二轮：请继续收紧当前批注对应的候选。", annotation.id);
+  await expectAnnotationHistory(page);
+  await page.getByRole("button", { name: "合并并关闭" }).click();
+  await expect(page.locator(".comment-card")).toContainText("已解决");
+  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
+  const current = await page.context().request.get(`/api/cases/${created.id}`);
+  expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
 });
 
 async function acceptAndVerify(page, caseId) {
