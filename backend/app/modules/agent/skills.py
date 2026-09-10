@@ -103,12 +103,10 @@ def _generation_match_negated(clause: str, match: re.Match) -> bool:
 def _generation_negated(before: str) -> bool:
     if any(marker in before for marker in _GENERATION_NEGATIONS):
         return True
-    return (
-        _GENERATION_REMINDER.search(before) is None
-        and (
-        _NEGATED_BARE.search(before.strip()) is not None
-        or _GENERATION_BARE_NEGATION.search(before) is not None
-        )
+    if _GENERATION_REMINDER.search(before) is not None:
+        return False
+    return _NEGATED_BARE.search(before.strip()) is not None or bool(
+        _GENERATION_BARE_NEGATION.search(before)
     )
 
 
