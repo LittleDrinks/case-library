@@ -617,6 +617,24 @@ def test_document_generation_stale_baseline_is_not_saved(client: TestClient) -> 
     assert message["parts"][0]["output"]["detail"] == "AI版本未保存：正文基线已变化，未创建独立版本"
 
 
+def test_document_generation_frozen_case_reports_freeze_reason(client: TestClient) -> None:
+    auth = _login(client)
+    database, _thread, case, run, artifact = _pending_document_artifact(
+        client, auth, _document()
+    )
+    database.cases.update_one(
+        {"id": case["id"]}, {"$set": {"workflowStatus": "submitted"}}
+    )
+
+    _publish(
+        database, AgentRepository(database), run, artifact,
+        parts=[{"type": "tool-propose_document", "output": {"artifactId": artifact.id}}],
+    )
+
+    message = database.agent_messages.find_one({"runId": run.id, "role": "assistant"})
+    assert message["parts"][0]["output"]["detail"] == "AI版本未保存：案例已冻结，未创建独立版本"
+
+
 def test_document_generation_allows_existing_body(client: TestClient) -> None:
     auth = _login(client)
     database, _thread, _case, _run, artifact = _pending_document_artifact(

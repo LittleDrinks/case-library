@@ -478,6 +478,8 @@ class AgentRepository:
     def _version_detail(self, run) -> str:
         thread = self.database.agent_threads.find_one({"id": run.thread_id}, {"caseId": 1})
         case = self.database.cases.find_one({"id": thread["caseId"]}) if thread else None
+        if case and case.get("workflowStatus") != "draft":
+            return "AI版本未保存：案例已冻结，未创建独立版本"
         if case and case.get("revision") != run.base_revision:
             return "AI版本未保存：正文基线已变化，未创建独立版本"
         return "AI版本未保存：未满足独立版本保存条件"

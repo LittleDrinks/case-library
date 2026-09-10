@@ -30,8 +30,8 @@ _GENERATION_ACTION_WORDS = (
     r"generate|rewrite|redraft|write)"
 )
 _GENERATION_TARGET_WORDS = (
-    r"(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的|地)?"
-    r"(?:案例|文档|稿|正文|文章)?|整个(?:案例|文档|稿|正文|文章)|"
+    r"(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的)?"
+    r"(?:案例|文档|稿|正文|文章)|整个(?:案例|文档|稿|正文|文章)|"
     r"full\s+(?:draft|document))"
 )
 _GENERATION_ACTION = re.compile(
@@ -51,7 +51,10 @@ _GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "�
 _GENERATION_NEGATIONS = ("不要", "不必", "不需要", "不用", "无需", "无须", "请勿", "勿", "不想", "不希望", "没有", "没", "未", "不是")
 _GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍", "分析", "讨论", "理解", "查看", "显示")
 _GENERATION_MENTION_SUFFIX = re.compile(
-    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程)"
+    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程|思路|好处|步骤)"
+)
+_GENERATION_REPORT_PREFIX = re.compile(
+    r"(?:^|[，,：:、\s])(?:他|她|他们|有人|据说|听说)(?:说|提到|声称)(?:要|会|将|想)?$"
 )
 _GENERATION_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
@@ -59,9 +62,12 @@ _GENERATION_PARTIAL = re.compile(
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
 _GENERATION_BARE_NEGATION = re.compile(
-    r"(?:^|[，,：:、\s])(?:千万|先|请你|请|暂时|暂且|你|我|他|它|就|再|都|也)?别"
+    r"(?<![特个性告分])别\s*$"
 )
 _GENERATION_REMINDER = re.compile(r"别忘(?:了|记)")
+_GENERATION_EVALUATION_SUFFIX = re.compile(
+    r"^\s*得(?:很|太|非常|挺|比较|相当)?(?:好|不错|棒|精彩|漂亮|完整|满意)"
+)
 
 
 def full_generation_requested(prompt: str) -> bool:
@@ -91,7 +97,9 @@ def _generation_match_blocked(clause: str, match: re.Match) -> bool:
     before = clause[max(0, match.start() - 24):match.start()]
     after = clause[match.end():match.end() + 16]
     return _generation_match_negated(clause, match) or _generation_mentioned(before, after) or bool(
-        _GENERATION_PARTIAL.search(match.group()) or _GENERATION_PARTIAL.search(after)
+        _GENERATION_PARTIAL.search(match.group())
+        or _GENERATION_PARTIAL.search(after)
+        or _GENERATION_EVALUATION_SUFFIX.match(after)
     )
 
 
@@ -111,8 +119,11 @@ def _generation_negated(before: str) -> bool:
 
 
 def _generation_mentioned(before: str, after: str) -> bool:
-    return any(before.rstrip().endswith(prefix) for prefix in (*_GENERATION_MENTION_PREFIXES, "了解")) or bool(
-        _GENERATION_MENTION_SUFFIX.match(after)
+    prefixes = (*_GENERATION_MENTION_PREFIXES, "介绍一下", "说说", "讲讲", "谈谈", "了解")
+    return (
+        any(before.rstrip().endswith(prefix) for prefix in prefixes)
+        or bool(_GENERATION_REPORT_PREFIX.search(before.rstrip()))
+        or bool(_GENERATION_MENTION_SUFFIX.match(after))
     )
 
 
