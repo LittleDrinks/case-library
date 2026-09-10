@@ -11,6 +11,10 @@ from app.modules.agent.repository import AgentRepository
 HEADING = "一、教学说明"
 
 
+def utf16_size(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
 def login(client: TestClient) -> dict:
     response = client.post(
         "/api/auth/login", json={"username": "user", "password": "user123"}
@@ -33,14 +37,14 @@ def document(*paragraphs: str) -> dict:
 
 
 def paragraph_start(*prior: str) -> int:
-    return len(HEADING) + 3 + sum(len(text) + 2 for text in prior)
+    return utf16_size(HEADING) + 3 + sum(utf16_size(text) + 2 for text in prior)
 
 
 def annotation_payload(case: dict, text: str, prior: tuple[str, ...] = ()) -> dict:
     start = paragraph_start(*prior)
     return {
         "from": start,
-        "to": start + len(text),
+        "to": start + utf16_size(text),
         "quote": text,
         "section": HEADING,
         "quoteHash": hashlib.sha256(text.encode()).hexdigest(),
@@ -188,6 +192,30 @@ def test_forged_steps_cannot_rebind_an_annotation(client: TestClient) -> None:
     current = client.get(f"/api/cases/{case['id']}").json()
     assert current["document"] == document("目标正文")
     assert annotation(client, case)["anchorState"] == "active"
+
+
+def test_changed_document_without_steps_is_refused(client: TestClient) -> None:
+    auth = login(client)
+    case = create_case(client, auth, "目标正文")
+    response = save_document(client, auth, case, document("前置目标正文"), [])
+    assert response.status_code == 409
+    assert client.get(f"/api/cases/{case['id']}").json()["document"] == document("目标正文")
+
+
+def test_utf16_emoji_anchor_uses_native_positions(client: TestClient) -> None:
+    auth = login(client)
+    case = create_case(client, auth, "A😀B")
+    start = paragraph_start()
+    payload = annotation_payload(case, "😀")
+    payload.update({"from": start + 1, "to": start + 3})
+    create_annotation(client, auth, case, payload)
+    saved = save_document(
+        client, auth, case, document("前A😀B"), [replace_step(start, start, "前")],
+    )
+    assert saved.status_code == 200
+    row = annotation(client, saved.json())
+    assert row["from"] == start + 2 and row["to"] == start + 4
+    assert row["quote"] == "😀" and row["anchorState"] == "active"
 
 
 def test_agent_write_and_undo_reconcile_active_anchor(client: TestClient) -> None:

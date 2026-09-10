@@ -4,6 +4,8 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
+from app.modules.agent import prosemirror
+
 
 def login(client: TestClient, username: str = "admin", password: str = "admin123"):
     return client.post(
@@ -17,6 +19,11 @@ def paragraph_document(text: str) -> dict:
         "type": "doc",
         "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
     }
+
+
+def document_update(case: dict, document: dict) -> dict:
+    _updated, steps = prosemirror.replace_document(case["document"], document)
+    return {"document": document, "steps": steps, "revision": case["revision"]}
 
 
 def document_text(document: dict) -> str:
@@ -55,7 +62,7 @@ def _save_title(client: TestClient, auth: dict, case: dict, title: str) -> dict:
 
 
 def _save_content(client, auth: dict, case: dict, text: str, title: str | None = None):
-    body = {"document": paragraph_document(text), "revision": case["revision"]}
+    body = document_update(case, paragraph_document(text))
     if title is not None:
         body["title"] = title
     response = client.patch(
@@ -172,15 +179,9 @@ def test_author_can_save_and_refresh_a_prosemirror_document(client: TestClient) 
     auth = login(client, "user", "user123").json()
     original = client.get("/api/cases/c-draft-1").json()
     document = paragraph_document("刷新后仍然存在的正文")
-
     saved = client.patch(
-        "/api/cases/c-draft-1",
-        headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={
-            "title": "已保存案例",
-            "document": document,
-            "revision": original["revision"],
-        },
+        "/api/cases/c-draft-1", headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "已保存案例", **document_update(original, document)},
     )
 
     assert saved.status_code == 200
@@ -652,11 +653,7 @@ def _create_empty_case(client, owner, title):
 
 
 def _save_body(client, owner, case, text):
-    return client.patch(
-        f"/api/cases/{case['id']}",
-        headers={"X-CSRF-Token": owner["csrfToken"]},
-        json={"document": paragraph_document(text), "revision": case["revision"]},
-    ).json()
+    return _save_content(client, owner, case, text)
 
 
 def _assert_missing_group(response):

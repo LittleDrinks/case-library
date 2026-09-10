@@ -137,6 +137,11 @@ def _document(*paragraphs: str) -> dict:
     }
 
 
+def _replace_step(start: int, end: int, text: str) -> dict:
+    return {"stepType": "replace", "from": start, "to": end,
+            "slice": {"content": [{"type": "text", "text": text}]}}
+
+
 def _create_case(client: TestClient, auth: dict, *paragraphs: str) -> dict:
     response = client.post(
         CASES_PATH,
@@ -421,13 +426,14 @@ def test_accept_fails_after_body_changed(client: TestClient, tracer_case) -> Non
     changed = _document(*PARAGRAPHS[:1], "第二段已被作者手工改写。")
     patch = client.patch(
         f"{CASES_PATH}/{case_id}", headers=headers,
-        json={"revision": 1, "document": changed},
+        json={"revision": 1, "document": changed,
+              "steps": [_replace_step(*SELECTION, "第二段已被作者手工改写。")]},
     )
     assert patch.status_code == 200
     assert _decide(client, case_id, artifact["id"], "accepted").status_code == 409
     assert client.app.state.database.agent_artifacts.find_one(
         {"id": artifact["id"]}
-    )["status"] == "pending"
+    )["status"] == "expired"
 
 
 def test_accept_fails_when_quote_no_longer_matches(client: TestClient, tracer_case) -> None:

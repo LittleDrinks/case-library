@@ -44,6 +44,11 @@ def _document(*paragraphs: str) -> dict:
     }
 
 
+def _replace_step(start: int, end: int, text: str) -> dict:
+    return {"stepType": "replace", "from": start, "to": end,
+            "slice": {"content": [{"type": "text", "text": text}]}}
+
+
 PARAGRAPHS = TRACER_PARAGRAPHS
 REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应"
 
@@ -253,12 +258,13 @@ def test_accept_rejects_stale_revision_on_real_replica_set():
         changed = _document(*PARAGRAPHS[:1], "第二段已被作者手工改写。")
         patch = client.patch(
             f"/api/cases/{case_id}", headers={"X-CSRF-Token": csrf},
-            json={"revision": 1, "document": changed},
+            json={"revision": 1, "document": changed,
+                  "steps": [_replace_step(*TRACER_SELECTION, "第二段已被作者手工改写。")]},
         )
         assert patch.status_code == 200
         response = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
         assert response.status_code == 409
-        assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "pending"
+        assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "expired"
         assert database.cases.find_one({"id": case_id})["revision"] == 2
     finally:
         client.close()

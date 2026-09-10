@@ -10,6 +10,7 @@ const props = defineProps({
   user: { type: Object, default: null },
   selection: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
+  annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits(["annotations"]);
@@ -190,6 +191,7 @@ async function setStatus(annotation, status) {
 }
 
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
+watch(() => props.annotationRefreshToken, loadAnnotations);
 watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 </script>
 

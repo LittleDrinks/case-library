@@ -49,6 +49,7 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 const focusedAnnotationId = ref("");
+const annotationRefreshToken = ref(0);
 let pendingSteps = [];
 const sources = ref([]);
 const canvasEditor = ref(null);
@@ -180,17 +181,23 @@ function snapshot() {
 }
 
 function contentSnapshot() {
-  return { title: title.value, document: document.value };
+  const steps = pendingSteps.slice();
+  return {
+    title: title.value,
+    document: document.value,
+    ...(steps.length ? { steps } : {}),
+  };
 }
 
 async function persist(payload) {
+  const documentChanged = Boolean(payload.steps?.length);
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   pendingSteps.splice(0, payload.steps?.length || 0);
   invalidateSelection();
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
-  await loadAnnotations();
+  if (documentChanged) await refreshAnnotations();
   await syncSourcesAfterSave(payload);
   return saved;
 }
@@ -231,12 +238,17 @@ async function loadAnnotations() {
     return;
   }
   try { annotations.value = await api.listAnnotations(caseId()); }
-  catch { annotations.value = []; }
+  catch { /* 保留当前批注标记，等待下一次刷新 */ }
+}
+
+async function refreshAnnotations() {
+  await loadAnnotations();
+  annotationRefreshToken.value += 1;
 }
 
 async function applyRevisedCase(value) {
   applyCase(value);
-  await loadAnnotations();
+  await refreshAnnotations();
 }
 
 const sourcesLoading = ref(false);
@@ -264,6 +276,7 @@ function syncCaseRevision(value) {
 }
 
 function recoverCrashDraft(value) {
+  pendingSteps = value.steps?.slice() || [];
   title.value = value.title;
   document.value = normalizeDocument(value.document);
   autosave.markDirty();
@@ -473,11 +486,12 @@ async function overwriteBaseline() {
   return null;
 }
 
-function overwriteSucceeded(result) {
+async function overwriteSucceeded(result) {
   applyCase(result.case);
   activeTabId.value = "draft";
   overwriteTarget.value = null;
   crashDraft.load(result.case);
+  await refreshAnnotations();
 }
 
 function overwriteFailed(error) {
@@ -493,7 +507,7 @@ async function performOverwrite() {
   try {
     if (await overwriteBaseline() === null) return;
     const body = lifecycleBody("overwrite", { targetId: target.id });
-    overwriteSucceeded(await api.lifecycleCase(caseId(), body, session.csrfToken));
+    await overwriteSucceeded(await api.lifecycleCase(caseId(), body, session.csrfToken));
   } catch (error) {
     overwriteFailed(error);
   } finally {
@@ -673,6 +687,7 @@ onBeforeUnmount(() => {
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
           :focus-annotation-id="focusedAnnotationId"
+          :annotation-refresh-token="annotationRefreshToken"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
