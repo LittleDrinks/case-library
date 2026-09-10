@@ -51,16 +51,17 @@ _GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "�
 _GENERATION_NEGATIONS = ("不要", "不必", "不需要", "不用", "无需", "无须", "请勿", "勿", "不想", "不希望", "没有", "没", "未", "不是")
 _GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍", "分析", "讨论", "理解", "查看", "显示")
 _GENERATION_MENTION_SUFFIX = re.compile(
-    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容)"
+    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程)"
 )
 _GENERATION_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
-    r"|的(?:批注|评论|标注)"
+    r"|的(?:批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
 _GENERATION_BARE_NEGATION = re.compile(
     r"(?:^|[，,：:、\s])(?:千万|先|请你|请|暂时|暂且|你|我|他|它|就|再|都|也)?别"
 )
+_GENERATION_REMINDER = re.compile(r"别忘(?:了|记)")
 
 
 def full_generation_requested(prompt: str) -> bool:
@@ -103,13 +104,16 @@ def _generation_negated(before: str) -> bool:
     if any(marker in before for marker in _GENERATION_NEGATIONS):
         return True
     return (
+        _GENERATION_REMINDER.search(before) is None
+        and (
         _NEGATED_BARE.search(before.strip()) is not None
         or _GENERATION_BARE_NEGATION.search(before) is not None
+        )
     )
 
 
 def _generation_mentioned(before: str, after: str) -> bool:
-    return any(before.rstrip().endswith(prefix) for prefix in _GENERATION_MENTION_PREFIXES) or bool(
+    return any(before.rstrip().endswith(prefix) for prefix in (*_GENERATION_MENTION_PREFIXES, "了解")) or bool(
         _GENERATION_MENTION_SUFFIX.match(after)
     )
 

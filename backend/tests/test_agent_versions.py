@@ -187,14 +187,21 @@ def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> No
 
 @pytest.mark.parametrize("prompt", [
     "先别重写整篇", "千万别生成全文", "帮我整理整个文档的批注",
+    "请重写整篇案例的摘要", "请修改完整文档的标题",
+    "请整理整个文档的结构", "我想了解全文重写的流程",
 ])
 def test_full_generation_parser_rejects_natural_non_requests(prompt: str) -> None:
     assert full_generation_requested(prompt) is False
 
 
+def test_full_generation_parser_accepts_positive_reminder() -> None:
+    assert full_generation_requested("别忘了生成全文") is True
+
+
 @pytest.mark.parametrize("prompt", [
     '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
     "不要生成全文", "没有让你重写全文", "先别重写整篇",
+    "请整理整个文档的结构",
     "请重写整个案例，但是不要生成全文",
 ])
 def test_non_generation_public_runs_do_not_create_ai_versions(

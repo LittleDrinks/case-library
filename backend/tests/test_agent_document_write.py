@@ -742,6 +742,44 @@ def test_direct_write_blocks_document_candidate_before_candidate_side_effect(
     assert database.agent_artifacts.count_documents({}) == 0
 
 
+def test_concurrent_document_and_direct_write_claim_one_path(
+        client: TestClient) -> None:
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    candidate_deps = _deps(database, case, run, auth["user"])
+    write_deps = _deps(database, case, run, auth["user"])
+
+    def candidate_call():
+        try:
+            return "candidate", "ok", asyncio.run(
+                propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成")
+            )
+        except ModelRetry as error:
+            return "candidate", "retry", str(error)
+
+    def write_call():
+        try:
+            return "write", "ok", asyncio.run(
+                _call(write_deps, "document", DRAFT_BLOCKS, "直接写入")
+            )
+        except ModelRetry as error:
+            return "write", "retry", str(error)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call) for call in (candidate_call, write_call)]
+        results = [future.result() for future in futures]
+
+    assert [result[1] for result in results].count("ok") == 1
+    assert [result[1] for result in results].count("retry") == 1
+    assert database.agent_artifacts.count_documents({}) == 0
+    assert database.agent_writes.count_documents({}) in (0, 1)
+
+
 def test_write_tools_only_available_to_author_runs() -> None:
     domain_tools = {tool.__name__ for tool in domain_capability().tools}
     reader_tools = {tool.__name__ for tool in reader_capability().tools}
