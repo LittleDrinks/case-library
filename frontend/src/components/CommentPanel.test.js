@@ -7,6 +7,7 @@ vi.mock("../api.js", () => ({
   api: {
     listAnnotations: vi.fn(), createAnnotation: vi.fn(), updateAnnotation: vi.fn(),
     deleteAnnotation: vi.fn(), replyAnnotation: vi.fn(), setAnnotationStatus: vi.fn(),
+    mergeAnnotation: vi.fn(),
   },
 }));
 
@@ -164,4 +165,31 @@ it("原文改写或删除时保留讨论并显示锚点状态", async () => {
   expect(wrapper.text()).toContain("原文已变动，旧修订不可合并");
   expect(wrapper.text()).toContain("原文已删除");
   expect(wrapper.findAll(".comment-card")).toHaveLength(2);
+});
+
+it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
+  const revised = {
+    ...annotation,
+    revisions: [
+      { id: "revision-1", replacement: "第一轮", reason: "先补充依据", status: "expired" },
+      { id: "revision-2", replacement: "最新轮", reason: "再收紧表述", status: "pending" },
+    ],
+  };
+  const resolved = { ...revised, status: "resolved", revisions: [
+    ...revised.revisions.slice(0, 1), { ...revised.revisions[1], status: "accepted" },
+  ] };
+  api.listAnnotations.mockResolvedValue([revised]);
+  api.mergeAnnotation.mockResolvedValue({
+    annotation: resolved, case: { ...caseRecord, revision: 5 },
+  });
+  const wrapper = await mountPanel();
+  expect(wrapper.text()).toContain("第一轮");
+  expect(wrapper.text()).toContain("最新轮");
+  await wrapper.findAll("button").find((button) => button.text().includes("让 AI 修订")).trigger("click");
+  expect(wrapper.emitted("ask-ai")[0][0]).toMatchObject({ id: annotation.id });
+  await wrapper.findAll("button").find((button) => button.text().includes("合并并关闭")).trigger("click");
+  await flushPromises();
+  expect(api.mergeAnnotation).toHaveBeenCalledWith(caseRecord.id, annotation.id, user.csrfToken);
+  expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ revision: 5 });
+  expect(wrapper.text()).toContain("已解决");
 });

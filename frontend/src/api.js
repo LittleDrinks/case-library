@@ -240,6 +240,10 @@ export const api = {
     `${annotationRoot(id)}/${encodeURIComponent(annotationId)}/status`,
     jsonOptions("PATCH", { status }, csrfToken),
   ),
+  mergeAnnotation: (id, annotationId, csrfToken) => request(
+    `${annotationRoot(id)}/${encodeURIComponent(annotationId)}/merge`,
+    jsonOptions("POST", {}, csrfToken),
+  ),
   listAttachments: (id, versionId) => request(`${attachmentRoot(id)}${versionQuery(versionId)}`),
   uploadAttachment: (id, file, accessLevel, revision, csrfToken) => request(
     attachmentRoot(id), {

@@ -23,7 +23,9 @@ const props = defineProps({
   review: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised", "clear-writing-context"]);
+const emit = defineEmits([
+  "case-revised", "clear-writing-context", "annotations-refresh",
+]);
 
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
@@ -418,12 +420,19 @@ function contextParts() {
     && Number.isInteger(selection.to) && selection.to > selection.from;
   if (usable) {
     parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to } });
+    if (selection.annotationId) {
+      parts.push({ type: "data-annotation", data: { id: selection.annotationId } });
+    }
   }
   return parts;
 }
 
 async function sendMessage({ text, skillId }) {
-  await send(text, contextParts(), skillId);
+  try {
+    await send(text, contextParts(), skillId);
+  } finally {
+    if (props.writingContext?.annotationId) emit("annotations-refresh");
+  }
 }
 
 async function rejectArtifact(artifactId) {

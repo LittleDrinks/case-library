@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import {
-  Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Trash2, X,
+  Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Sparkles, Trash2, X,
 } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -10,9 +10,10 @@ const props = defineProps({
   user: { type: Object, default: null },
   selection: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
+  refreshKey: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
-const emit = defineEmits(["annotations"]);
+const emit = defineEmits(["annotations", "ask-ai", "case-revised"]);
 const annotations = ref([]);
 const content = ref("");
 const error = ref("");
@@ -114,6 +115,31 @@ function canEdit(annotation) {
   return annotation.createdBy === props.user?.id && annotation.status === "pending";
 }
 
+function canDiscuss(annotation) {
+  return annotation.createdBy === props.user?.id
+    && annotation.status === "pending"
+    && (annotation.anchorState || "active") === "active";
+}
+
+function latestPendingRevision(annotation) {
+  return [...(annotation.revisions || [])].reverse()
+    .find((revision) => revision.status === "pending");
+}
+
+function canMerge(annotation) {
+  return Boolean(canDiscuss(annotation) && latestPendingRevision(annotation));
+}
+
+function revisionStatus(status) {
+  return ({
+    pending: "待决定", accepted: "已合并", rejected: "已拒绝", expired: "已失效",
+  })[status] || status;
+}
+
+function askAi(annotation) {
+  if (canDiscuss(annotation)) emit("ask-ai", annotation);
+}
+
 function beginEdit(annotation) {
   editingId.value = annotation.id;
   editingContent.value = annotation.content;
@@ -189,8 +215,28 @@ async function setStatus(annotation, status) {
   }
 }
 
+async function merge(annotation) {
+  if (!canMerge(annotation) || saving.value) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const result = await api.mergeAnnotation(
+      props.caseRecord.id, annotation.id, props.user.csrfToken,
+    );
+    replaceAnnotation(result.annotation);
+    emit("case-revised", result.case);
+  } catch (caught) {
+    error.value = caught.message || "合并修订失败";
+  } finally {
+    saving.value = false;
+  }
+}
+
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
 watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
+watch(() => props.refreshKey, (value, previous) => {
+  if (value !== previous) void loadAnnotations();
+});
 </script>
 
 <template>
@@ -226,6 +272,18 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             :disabled="saving"
           />
           <p v-else>{{ annotation.content }}</p>
+          <div v-if="annotation.revisions?.length" class="comment-revisions">
+            <b>AI 修订历史</b>
+            <ol>
+              <li v-for="(revision, index) in annotation.revisions" :key="revision.id">
+                <header>
+                  <span>第 {{ index + 1 }} 轮 · {{ revisionStatus(revision.status) }}</span>
+                </header>
+                <p>替换为：{{ revision.replacement }}</p>
+                <small v-if="revision.reason">理由：{{ revision.reason }}</small>
+              </li>
+            </ol>
+          </div>
           <div v-if="editingId === annotation.id" class="comment-owner-actions">
             <button type="button" :disabled="saving || !editingContent.trim()" @click="saveEdit(annotation)"><Check :size="14" />保存批注</button>
             <button type="button" :disabled="saving" @click="cancelEdit"><X :size="14" />取消</button>
@@ -250,6 +308,20 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             :disabled="saving"
             @click="setStatus(annotation, 'resolved')"
           ><Check :size="14" />标记解决</button>
+          <button
+            v-if="canDiscuss(annotation)"
+            class="comment-status-action"
+            type="button"
+            :disabled="saving"
+            @click="askAi(annotation)"
+          ><Sparkles :size="14" />让 AI 修订</button>
+          <button
+            v-if="canMerge(annotation)"
+            class="comment-status-action comment-merge-action"
+            type="button"
+            :disabled="saving"
+            @click="merge(annotation)"
+          ><Check :size="14" />合并并关闭</button>
           <button
             v-else-if="annotation.status === 'resolved' && user?.role === 'admin'"
             class="comment-status-action"

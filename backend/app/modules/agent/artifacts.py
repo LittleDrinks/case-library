@@ -34,7 +34,7 @@ def _now() -> datetime:
 def propose_artifact(
     database: Database, case_id: str, thread_id: str, run_id: str,
     start: int, end: int, replacement: str, reason: str,
-    sources: list[SourceRef], user: dict,
+    sources: list[SourceRef], user: dict, annotation_id: str | None = None,
 ) -> AgentArtifact:
     """校验 Run 锁定选区并构建 pending Artifact；不落库，随运行完成提交。
 
@@ -44,7 +44,9 @@ def propose_artifact(
     _verify_writer(case, user)
     target = _locked_target(database, run_id, case, start, end)
     _ensure_no_artifact(database, run_id)
-    return _artifact_document(case, thread_id, run_id, target, replacement, reason, sources)
+    return _artifact_document(
+        case, thread_id, run_id, target, replacement, reason, sources, annotation_id
+    )
 
 
 def propose_document_artifact(
@@ -118,12 +120,12 @@ def _current_case(database: Database, case_id: str, session=None) -> dict:
 
 def _artifact_document(
     case: dict, thread_id: str, run_id: str, target: ArtifactTarget,
-    replacement: str, reason: str, sources: list[SourceRef],
+    replacement: str, reason: str, sources: list[SourceRef], annotation_id: str | None,
 ) -> AgentArtifact:
     return AgentArtifact(
         id=new_id("artifact"), case_id=case["id"], thread_id=thread_id, run_id=run_id,
         base_revision=case["revision"], target=target, replacement=replacement,
-        reason=reason, sources=sources, created_at=_now(),
+        annotation_id=annotation_id, reason=reason, sources=sources, created_at=_now(),
     )
 
 
@@ -162,6 +164,12 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
         return artifact, case
     _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
+    if artifact.annotation_id and decision == "accepted":
+        raise CaseError(409, "批注修订请从批注面板合并")
+    if artifact.annotation_id:
+        from app.modules.annotations.service import mark_ai_revision_decision
+
+        mark_ai_revision_decision(database, artifact, user, decision, session)
     if decision == "accepted":
         if not revalidate_sources(database, user, case_id, artifact.sources):
             raise CaseError(409, "修订依据当前不可读，候选已过期")

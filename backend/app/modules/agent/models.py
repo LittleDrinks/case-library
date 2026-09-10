@@ -89,6 +89,7 @@ class AgentRun(BaseModel):
         default=None,
         description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
     )
+    annotation_id: str | None = Field(default=None, alias="annotationId")
     resources: list[dict[str, str]] = Field(default_factory=list)
     tool_timings: dict[str, dict[str, str]] = Field(default_factory=dict, alias="toolTimings")
     started_at: datetime = Field(alias="startedAt")
@@ -142,6 +143,7 @@ class AgentArtifact(BaseModel):
     kind: ArtifactKind = "range"
     base_revision: int = Field(alias="baseRevision", ge=1)
     target: ArtifactTarget
+    annotation_id: str | None = Field(default=None, alias="annotationId")
     replacement: str
     blocks: list[dict[str, object]] = Field(default_factory=list)
     reason: str = ""

@@ -8,7 +8,7 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.agent import prosemirror
-from app.modules.cases.service import CaseError, RevisionConflict
+from app.modules.cases.service import CaseError, RevisionConflict, case_view
 
 
 ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
@@ -21,6 +21,24 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _revision_is_valid(annotation: dict, revision: dict) -> bool:
+    target = revision.get("target") or {}
+    return (
+        annotation.get("status") == "pending"
+        and annotation.get("anchorState", ACTIVE_ANCHOR) == ACTIVE_ANCHOR
+        and target.get("from") == annotation.get("from")
+        and target.get("to") == annotation.get("to")
+        and target.get("quote") == annotation.get("quote")
+    )
+
+
+def _revision_view(annotation: dict, revision: dict) -> dict:
+    view = {key: value for key, value in revision.items() if key != "_id"}
+    if view.get("status") == "pending" and not _revision_is_valid(annotation, revision):
+        view["status"] = "expired"
+    return view
+
+
 def _view(annotation: dict) -> dict:
     view = {key: value for key, value in annotation.items() if key != "_id"}
     view.pop("updatedAt", None)
@@ -29,6 +47,8 @@ def _view(annotation: dict) -> dict:
             view.pop(field, None)
     elif view.get("versionId") is None:
         view.setdefault("anchorState", ACTIVE_ANCHOR)
+    if "revisions" in view:
+        view["revisions"] = [_revision_view(annotation, row) for row in view["revisions"]]
     return view
 
 
@@ -195,6 +215,9 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
     unset = {}
     if anchor:
         changes.update(anchor)
+        revisions = _map_revision_targets(row, anchor)
+        if revisions is not None:
+            changes["revisions"] = revisions
     else:
         unset.update({"from": "", "to": ""})
     database.annotations.update_one(
@@ -202,6 +225,17 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
         {"$set": changes, **({"$unset": unset} if unset else {})},
         session=session,
     )
+
+
+def _map_revision_targets(row: dict, anchor: dict) -> list[dict] | None:
+    if "revisions" not in row:
+        return None
+    return [
+        {**revision, "target": {**revision.get("target", {}), "from": anchor["from"], "to": anchor["to"]}}
+        if revision.get("status") == "pending" and revision.get("target", {}).get("quote") == row.get("quote")
+        else revision
+        for revision in row["revisions"]
+    ]
 
 
 def reconcile_document_annotations(
@@ -312,8 +346,8 @@ def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]
     return [_view(row) for row in rows]
 
 
-def _get_annotation(database: Database, case_id: str, annotation_id: str) -> dict:
-    annotation = database.annotations.find_one({"id": annotation_id, "caseId": case_id})
+def _get_annotation(database: Database, case_id: str, annotation_id: str, session=None) -> dict:
+    annotation = _find(database.annotations, {"id": annotation_id, "caseId": case_id}, session)
     if not annotation:
         raise CaseError(404, "批注不存在")
     return annotation
@@ -380,15 +414,204 @@ def _require_status_actor(case: dict, user: dict, status: str) -> None:
 def change_status(
     database: Database, case_id: str, annotation_id: str, status: str, user: dict
 ) -> dict:
-    case = _case(database, case_id, user)
-    _get_annotation(database, case_id, annotation_id)
+    return _transaction(
+        database,
+        lambda session: _change_status(
+            database, case_id, annotation_id, status, user, session
+        ),
+    )
+
+
+def _change_status(database, case_id, annotation_id, status, user, session):
+    case = _case(database, case_id, user, session)
+    annotation = _get_annotation(database, case_id, annotation_id, session)
     _require_status_actor(case, user, status)
     expected = "pending" if status == "resolved" else "resolved"
+    update = {"$set": {"status": status}}
+    if status == "resolved":
+        update["$set"]["revisions"] = _closed_revisions(annotation)
     updated = database.annotations.find_one_and_update(
         {"id": annotation_id, "caseId": case_id, "status": expected},
-        {"$set": {"status": status}},
-        return_document=ReturnDocument.AFTER,
+        update, return_document=ReturnDocument.AFTER, session=session,
     )
     if not updated:
         raise CaseError(409, "批注状态已变化")
+    _decide_linked_artifacts(database, annotation, user, "rejected", session)
     return _view(updated)
+
+
+def _closed_revisions(annotation: dict) -> list[dict]:
+    return [
+        {**revision, "status": "rejected" if revision.get("status") == "pending" else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+
+
+def _decide_linked_artifacts(database, annotation, user, decision, session, selected_id=None) -> None:
+    from app.modules.agent.repository import AgentRepository
+
+    for revision in annotation.get("revisions", []):
+        artifact_decision = decision
+        if selected_id and revision.get("id") != selected_id:
+            artifact_decision = "expired"
+        artifact = database.agent_artifacts.find_one_and_update(
+            {"id": revision.get("artifactId"), "status": "pending"},
+            {"$set": {"status": artifact_decision, "decidedBy": user["id"], "decidedAt": _now()}},
+            return_document=ReturnDocument.AFTER, session=session,
+        )
+        if artifact:
+            AgentRepository(database)._append_event(
+                artifact["threadId"], "artifact.decided", artifact["runId"],
+                {"artifactId": artifact["id"], "decision": artifact_decision}, session,
+            )
+
+
+def record_ai_revision(database, artifact, created_by: str, session=None) -> dict | None:
+    annotation_id = getattr(artifact, "annotation_id", None)
+    if not annotation_id:
+        return None
+    target = artifact.target.model_dump(by_alias=True)
+    revision = {
+        "id": new_revision_id(), "artifactId": artifact.id, "runId": artifact.run_id,
+        "baseRevision": artifact.base_revision, "target": target,
+        "replacement": artifact.replacement, "reason": artifact.reason,
+        "status": "pending", "createdBy": created_by, "createdAt": _now(),
+    }
+    query = {
+        "id": annotation_id, "caseId": artifact.case_id, "createdBy": created_by,
+        "status": "pending",
+        "from": target["from"], "to": target["to"], "quote": target["quote"],
+        "$or": [{"anchorState": ACTIVE_ANCHOR}, {"anchorState": {"$exists": False}}],
+    }
+    updated = database.annotations.find_one_and_update(
+        query, {"$push": {"revisions": revision}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "批注选区已变化，不能保存 AI 修订")
+    return revision
+
+
+def mark_ai_revision_decision(database, artifact, user: dict, decision: str, session=None) -> None:
+    if not artifact.annotation_id:
+        return
+    annotation = _find(
+        database.annotations,
+        {"id": artifact.annotation_id, "caseId": artifact.case_id},
+        session,
+    )
+    if not annotation or annotation.get("createdBy") != user["id"]:
+        raise CaseError(403, "仅批注作者可决定修订")
+    revisions = [
+        {**revision, "status": decision if revision.get("artifactId") == artifact.id
+         else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+    if not any(revision.get("artifactId") == artifact.id for revision in revisions):
+        raise CaseError(409, "批注修订已变化")
+    database.annotations.update_one(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"revisions": revisions}}, session=session,
+    )
+
+
+def new_revision_id() -> str:
+    return f"arv-{secrets.token_hex(8)}"
+
+
+def merge_annotation(database: Database, case_id: str, annotation_id: str, user: dict) -> dict:
+    return _transaction(
+        database,
+        lambda session: _merge_annotation(database, case_id, annotation_id, user, session),
+    )
+
+
+def _merge_annotation(database, case_id, annotation_id, user, session):
+    case = _case(database, case_id, user, session)
+    annotation = _get_annotation(database, case_id, annotation_id, session)
+    _require_merge_owner(case, annotation, user)
+    if annotation["status"] == "resolved":
+        return {"annotation": _view(annotation), "case": case_view(case)}
+    revision = _latest_valid_revision(annotation)
+    if revision is None:
+        _expire_invalid_revisions(database, annotation, session)
+        raise CaseError(409, "没有可合并的有效 AI 修订")
+    return _commit_annotation_merge(database, case, annotation, revision, user, session)
+
+
+def _require_merge_owner(case: dict, annotation: dict, user: dict) -> None:
+    if case["ownerId"] != user["id"] or annotation["createdBy"] != user["id"]:
+        raise CaseError(403, "仅批注作者可合并修订")
+    if case["workflowStatus"] != "draft":
+        raise CaseError(409, "案例当前不可编辑")
+
+
+def _latest_valid_revision(annotation: dict) -> dict | None:
+    return next(
+        (revision for revision in reversed(annotation.get("revisions", []))
+         if revision.get("status") == "pending" and _revision_is_valid(annotation, revision)),
+        None,
+    )
+
+
+def _expire_invalid_revisions(database, annotation, session) -> None:
+    revisions = [
+        {**revision, "status": "expired" if revision.get("status") == "pending" else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+    database.annotations.update_one(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"revisions": revisions}}, session=session,
+    )
+
+
+def _commit_annotation_merge(database, case, annotation, revision, user, session):
+    try:
+        document, steps = prosemirror.replaced_document_with_steps(
+            case["document"], annotation["from"], annotation["to"],
+            annotation["quote"], revision["replacement"],
+        )
+    except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
+        raise CaseError(409, "目标选区原文已变化，修订候选已过期") from error
+    from app.modules.cases.snapshots import record_snapshot
+
+    mapping = _mapping_for_change(case["document"], document, steps)
+    record_snapshot(database, case, user, "pre_annotation_merge", session)
+    updated_case = _commit_case_document(database, case, document, session)
+    reconcile_document_annotations(
+        database, case["id"], case["document"], document, updated_case["revision"],
+        steps, session, mapping,
+    )
+    updated_annotation = _finish_annotation_merge(
+        database, annotation, revision, user, session,
+    )
+    return {"annotation": _view(updated_annotation), "case": case_view(updated_case)}
+
+
+def _commit_case_document(database, case, document, session):
+    updated = database.cases.find_one_and_update(
+        {"id": case["id"], "ownerId": case["ownerId"], "workflowStatus": "draft",
+         "revision": case["revision"]},
+        {"$set": {"document": document, "updatedAt": _now()}, "$inc": {"revision": 1}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "案例状态已变化")
+    return updated
+
+
+def _finish_annotation_merge(database, annotation, selected, user, session):
+    revisions = [
+        {**revision, "status": "accepted" if revision["id"] == selected["id"]
+         else "expired" if revision.get("status") == "pending" else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+    updated = database.annotations.find_one_and_update(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"status": "resolved", "revisions": revisions}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "批注状态已变化")
+    _decide_linked_artifacts(database, annotation, user, "accepted", session, selected["id"])
+    return updated

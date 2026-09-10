@@ -16,6 +16,7 @@ from app.modules.annotations.service import (
     create_annotation,
     delete_annotation,
     list_annotations,
+    merge_annotation,
     update_annotation,
 )
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -83,6 +84,17 @@ def reply(
     _session: dict = Depends(require_csrf),
 ):
     return add_reply(database, case_id, annotation_id, body.content, user)
+
+
+@router.post("/{annotation_id}/merge")
+def merge(
+    case_id: str,
+    annotation_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+):
+    return merge_annotation(database, case_id, annotation_id, user)
 
 
 @router.patch(

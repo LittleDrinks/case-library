@@ -87,6 +87,7 @@ def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, 
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
         start, end, replacement, reason, list(ctx.deps.evidence), ctx.deps.user,
+        ctx.deps.annotation_id,
     )
 
 
@@ -107,6 +108,8 @@ async def propose_document(
     ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
     """为空草稿或模板提议整篇初稿候选；随运行完成事务统一提交，教师确认后才生效。"""
+    if ctx.deps.annotation_id:
+        raise ModelRetry("批注讨论只能提议选区修订")
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
     try:
@@ -131,6 +134,8 @@ async def write_document(
 
     写入即落库并保留可撤销记录；失败或冲突向模型返回原因，不虚报成功。
     """
+    if ctx.deps.annotation_id:
+        raise ModelRetry("批注讨论只能提议选区修订，不能直接写入正文")
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
     try:

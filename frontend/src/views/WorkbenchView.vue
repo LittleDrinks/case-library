@@ -48,6 +48,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const annotationRefreshKey = ref(0);
 const focusedAnnotationId = ref("");
 let pendingSteps = [];
 const sources = ref([]);
@@ -239,6 +240,11 @@ async function applyRevisedCase(value) {
   await loadAnnotations();
 }
 
+function refreshAnnotationsAfterAi() {
+  annotationRefreshKey.value += 1;
+  void loadAnnotations();
+}
+
 const sourcesLoading = ref(false);
 const sourcesError = ref("");
 const sourcesSignature = ref("");
@@ -379,6 +385,21 @@ function openAnnotation(id) {
   selectTool("comments");
   focusedAnnotationId.value = "";
   void nextTick(() => { focusedAnnotationId.value = id; });
+}
+
+function askAnnotationAi(annotation) {
+  if (!annotation || annotation.createdBy !== session.user?.id) return;
+  writingContext.value = {
+    annotationId: annotation.id,
+    from: annotation.from,
+    to: annotation.to,
+    quote: annotation.quote,
+    section: annotation.section,
+    quoteHash: annotation.quoteHash,
+    revision: revision.value,
+    sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
+  };
+  selectTool("ai");
 }
 
 function requestLifecycle(command) {
@@ -670,6 +691,7 @@ onBeforeUnmount(() => {
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"
+          :annotation-refresh-key="annotationRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
           :focus-annotation-id="focusedAnnotationId"
@@ -680,6 +702,8 @@ onBeforeUnmount(() => {
           @case-revised="applyRevisedCase"
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
+          @annotations-refresh="refreshAnnotationsAfterAi"
+          @ask-ai="askAnnotationAi"
           @sources-retry="loadSources"
           @clear-writing-context="writingContext = null"
           @insert-citation="insertSourceCitation"

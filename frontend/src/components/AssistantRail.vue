@@ -23,11 +23,13 @@ const props = defineProps({
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
+  annotationRefreshKey: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
-  "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
+  "case-revised", "annotations", "annotations-refresh", "ask-ai",
+  "sources-retry", "clear-writing-context", "insert-citation",
   "open-version",
 ]);
 
@@ -74,6 +76,7 @@ function select(tab) {
       :review="review"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
+      @annotations-refresh="emit('annotations-refresh')"
       @clear-writing-context="emit('clear-writing-context')"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
@@ -85,8 +88,11 @@ function select(tab) {
       :user="user"
       :selection="selection"
       :focus-annotation-id="focusAnnotationId"
+      :refresh-key="annotationRefreshKey"
       :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"
+      @ask-ai="emit('ask-ai', $event)"
+      @case-revised="emit('case-revised', $event)"
     />
 
     <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
