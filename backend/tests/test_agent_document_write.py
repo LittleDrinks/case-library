@@ -702,6 +702,46 @@ def test_propose_document_tool_stages_pending_candidate(client: TestClient) -> N
     assert database.agent_artifacts.count_documents({}) == 0
 
 
+def test_document_candidate_blocks_direct_write_before_body_side_effect(
+        client: TestClient) -> None:
+    import asyncio
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    candidate_deps = _deps(database, case, run, auth["user"])
+    write_deps = _deps(database, case, run, auth["user"])
+
+    asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
+    with pytest.raises(ModelRetry):
+        asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+    assert database.agent_writes.count_documents({}) == 0
+
+
+def test_direct_write_blocks_document_candidate_before_candidate_side_effect(
+        client: TestClient) -> None:
+    import asyncio
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    write_deps = _deps(database, case, run, auth["user"])
+    candidate_deps = _deps(database, case, run, auth["user"])
+
+    output = asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+    assert output["status"] == "written"
+    with pytest.raises(ModelRetry):
+        asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
+
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
+    assert database.agent_writes.count_documents({}) == 1
+    assert database.agent_artifacts.count_documents({}) == 0
+
+
 def test_write_tools_only_available_to_author_runs() -> None:
     domain_tools = {tool.__name__ for tool in domain_capability().tools}
     reader_tools = {tool.__name__ for tool in reader_capability().tools}

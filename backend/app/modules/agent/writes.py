@@ -25,7 +25,7 @@ from pymongo.database import Database
 from app.core.ids import new_id
 from app.modules.agent import blocks, prosemirror
 from app.modules.agent.models import AgentWrite
-from app.modules.agent.repository import AgentRepository, transaction
+from app.modules.agent.repository import AgentRepository, claim_run_write_path, transaction
 from app.modules.cases.service import CaseError
 from app.modules.cases.snapshots import record_snapshot
 
@@ -129,6 +129,8 @@ def _apply(database, case_id, run_id, scope, normalized, user, summary, session)
     case, run, document = _write_guards(
         database, case_id, run_id, scope, normalized, user, session,
     )
+    if not claim_run_write_path(database, run_id, "direct_write", session):
+        raise CaseError(409, "本次运行已选择另一条正文路径")
     record_snapshot(database, case, user, "pre_agent_write", session)
     write = _new_write_record(case, run, scope, normalized, user, summary, document)
     return _commit_write(database, case_id, user, run, write, scope, session)

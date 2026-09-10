@@ -25,13 +25,28 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 READER_CAPABILITY_ID = "platform-tools"
+_GENERATION_ACTION_WORDS = (
+    r"(?:生成|重写|改写|撰写|编写|起草|创作|重做|写|整理|修改|"
+    r"generate|rewrite|redraft|write)"
+)
+_GENERATION_TARGET_WORDS = (
+    r"(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的|地)?"
+    r"(?:案例|文档|稿|正文|文章)?|整个(?:案例|文档|稿|正文|文章)|"
+    r"full\s+(?:draft|document))"
+)
 _GENERATION_ACTION = re.compile(
-    r"(?:生成|重写|改写|撰写|编写|起草|创作|重做|写|整理|修改|generate|rewrite|redraft|write)"
-    r".{0,16}(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的|地)?(?:案例|文档|稿|正文|文章)?|整个(?:案例|文档|稿|正文|文章)|full\s+(?:draft|document))",
+    _GENERATION_ACTION_WORDS + r".{0,16}" + _GENERATION_TARGET_WORDS,
+    re.IGNORECASE,
+)
+_GENERATION_TARGET_ACTION = re.compile(
+    _GENERATION_TARGET_WORDS + r".{0,16}" + _GENERATION_ACTION_WORDS,
     re.IGNORECASE,
 )
 _FULL_GENERATION_PHRASE = re.compile(r"完整生成|full\s+(?:draft|document)", re.IGNORECASE)
-_GENERATION_QUESTIONS = ("吗", "呢", "请问", "是否", "能不能", "可否", "能否", "如何", "怎么", "怎样")
+_GENERATION_QUESTIONS = (
+    "吗", "呢", "请问", "是否", "能不能", "可否", "能否", "如何", "怎么", "怎样",
+    "为何", "为什么", "什么", "哪",
+)
 _GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话")
 _GENERATION_NEGATIONS = ("不要", "不必", "不需要", "不用", "无需", "无须", "请勿", "勿", "不想", "不希望", "没有", "没", "未", "不是")
 _GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍", "分析", "讨论", "理解", "查看", "显示")
@@ -40,8 +55,12 @@ _GENERATION_MENTION_SUFFIX = re.compile(
 )
 _GENERATION_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
+    r"|的(?:批注|评论|标注)"
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
+_GENERATION_BARE_NEGATION = re.compile(
+    r"(?:^|[，,：:、\s])(?:千万|先|请你|请|暂时|暂且|你|我|他|它|就|再|都|也)?别"
+)
 
 
 def full_generation_requested(prompt: str) -> bool:
@@ -59,6 +78,7 @@ def full_generation_requested(prompt: str) -> bool:
 
 def _generation_matches(clause: str):
     yield from _GENERATION_ACTION.finditer(clause)
+    yield from _GENERATION_TARGET_ACTION.finditer(clause)
     yield from _FULL_GENERATION_PHRASE.finditer(clause)
 
 
@@ -82,7 +102,10 @@ def _generation_match_negated(clause: str, match: re.Match) -> bool:
 def _generation_negated(before: str) -> bool:
     if any(marker in before for marker in _GENERATION_NEGATIONS):
         return True
-    return _NEGATED_BARE.search(before.strip()) is not None
+    return (
+        _NEGATED_BARE.search(before.strip()) is not None
+        or _GENERATION_BARE_NEGATION.search(before) is not None
+    )
 
 
 def _generation_mentioned(before: str, after: str) -> bool:

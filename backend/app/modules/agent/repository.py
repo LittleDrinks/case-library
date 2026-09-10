@@ -885,6 +885,16 @@ def transaction(database, callback):
     return _transaction(database, callback)
 
 
+def claim_run_write_path(database, run_id: str, path: str, session=None) -> bool:
+    """为活跃 Run 原子选择唯一正文写入路径。"""
+    result = database.agent_runs.update_one(
+        {"id": run_id, "status": "active", "writePath": {"$exists": False}},
+        {"$set": {"writePath": path}},
+        session=session,
+    )
+    return result.matched_count == 1
+
+
 def _case_revision(database, case_id: str, session) -> int | None:
     case = database.cases.find_one({"id": case_id}, {"revision": 1}, session=session)
     return case.get("revision") if case else None

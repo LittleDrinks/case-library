@@ -21,7 +21,12 @@ from app.modules.agent.models import (
     SourceRef,
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
-from app.modules.agent.repository import AgentRepository, expired_artifact_view, transaction
+from app.modules.agent.repository import (
+    AgentRepository,
+    claim_run_write_path,
+    expired_artifact_view,
+    transaction,
+)
 from app.modules.agent.source_reader import revalidate_sources
 from app.modules.cases.service import CaseError, case_view
 from app.modules.cases.snapshots import record_snapshot
@@ -69,7 +74,10 @@ def _document_candidate(database, run_id: str, case: dict, blocks_input: object)
     """整篇生成前提：运行基线未越且本次运行尚未生成过整篇稿。"""
     _verify_run_baseline(database, run_id, case)
     _ensure_no_artifact(database, run_id)
-    return blocks.validate_blocks(blocks_input)
+    normalized = blocks.validate_blocks(blocks_input)
+    if not claim_run_write_path(database, run_id, "document"):
+        raise CaseError(409, "本次运行已选择另一条正文路径")
+    return normalized
 
 
 def _run_row(database, run_id: str) -> dict:

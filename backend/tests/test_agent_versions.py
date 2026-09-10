@@ -154,9 +154,24 @@ def test_natural_full_generation_request_creates_an_ai_version(client: TestClien
     _assert_saved_version(client, case, thread_id)
 
 
+def test_reverse_order_full_generation_request_creates_an_ai_version(
+    client: TestClient,
+) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, "帮我把整篇案例重写一遍", "reverse-full-generation-message"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    _assert_saved_version(client, case, thread_id)
+
+
 def test_full_generation_parser_rejects_non_requests() -> None:
     for prompt in (
-        '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
+        '请说明“生成全文”这个功能', "你会生成全文吗", "什么是全文生成",
+        "请重写全文中的第二段",
         "不要生成全文", "没有让你重写全文", "请重写整个案例，但是不要生成全文",
     ):
         assert full_generation_requested(prompt) is False, prompt
@@ -164,8 +179,23 @@ def test_full_generation_parser_rejects_non_requests() -> None:
 
 
 @pytest.mark.parametrize("prompt", [
+    "把整份文档改写一遍", "将完整案例重写", "全文重写",
+])
+def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> None:
+    assert full_generation_requested(prompt) is True
+
+
+@pytest.mark.parametrize("prompt", [
+    "先别重写整篇", "千万别生成全文", "帮我整理整个文档的批注",
+])
+def test_full_generation_parser_rejects_natural_non_requests(prompt: str) -> None:
+    assert full_generation_requested(prompt) is False
+
+
+@pytest.mark.parametrize("prompt", [
     '请说明“生成全文”这个功能', "你会生成全文吗", "请重写全文中的第二段",
-    "不要生成全文", "没有让你重写全文", "请重写整个案例，但是不要生成全文",
+    "不要生成全文", "没有让你重写全文", "先别重写整篇",
+    "请重写整个案例，但是不要生成全文",
 ])
 def test_non_generation_public_runs_do_not_create_ai_versions(
     client: TestClient, prompt: str
