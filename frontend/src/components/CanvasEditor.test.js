@@ -221,6 +221,26 @@ it("正文插入由编辑器映射批注标记并上报原生 steps", async () =
   });
 });
 
+it("跨 hardBreak 批注用与创建一致的换行文本渲染标记", async () => {
+  const breakDocument = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [
+        { type: "text", text: "第一行" }, { type: "hardBreak" }, { type: "text", text: "第二行" },
+      ] },
+    ],
+  };
+  const annotation = {
+    id: "annotation-1", from: 9, to: 16, quote: "第一行\n第二行", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ document: breakDocument, revision: 3, annotations: [annotation] });
+  const { editor } = wrapper.vm;
+  expect(editor.state.doc.textBetween(9, 16, "\n", "\n")).toBe(annotation.quote);
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(true);
+});
+
 it("点击正文批注标记只发出打开事件", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,

@@ -126,7 +126,7 @@ function annotationAnchor(annotation, document) {
   if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
-  return document.textBetween(from, to, " ") === annotation.quote
+  return document.textBetween(from, to, "\n", "\n") === annotation.quote
     ? { from, to } : null;
 }
 
@@ -172,10 +172,10 @@ const annotationExtension = Extension.create({
   },
 });
 
-function refreshAnnotationAnchors() {
-  if (!editor.value) return;
-  const transaction = editor.value.state.tr.setMeta(annotationKey, props.annotations);
-  editor.value.view.dispatch(transaction);
+function refreshAnnotationAnchors(activeEditor = editor.value) {
+  if (!activeEditor) return;
+  const transaction = activeEditor.state.tr.setMeta(annotationKey, props.annotations);
+  activeEditor.view.dispatch(transaction);
 }
 
 const editor = useEditor({
@@ -189,7 +189,10 @@ const editor = useEditor({
   }), CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
-  onCreate: captureSelection,
+  onCreate: (context) => {
+    captureSelection(context);
+    refreshAnnotationAnchors(context.editor);
+  },
   onSelectionUpdate: captureSelection,
   onFocus: () => { cursorPlaced.value = true; },
 });
@@ -206,7 +209,7 @@ function replaceDocument(document) {
 
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
-watch(() => props.annotations, refreshAnnotationAnchors, { deep: true });
+watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;
