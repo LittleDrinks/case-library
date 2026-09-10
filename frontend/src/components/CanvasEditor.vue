@@ -122,21 +122,21 @@ function updateEditor({ editor: activeEditor, transaction }) {
 
 const annotationKey = new PluginKey("annotationAnchors");
 
-function quoteText(document, from, to) {
-  return document.textBetween(from, to, "\n", "\n");
+function quoteText(doc, from, to) {
+  return doc.textBetween(from, to, "\n", "\n");
 }
 
-function annotationAnchor(annotation, document) {
+function annotationAnchor(annotation, doc) {
   if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
-  return quoteText(document, from, to) === annotation.quote
+  return quoteText(doc, from, to) === annotation.quote
     ? { from, to } : null;
 }
 
-function annotationDecorations(document, annotations) {
-  return DecorationSet.create(document, annotations.flatMap((annotation) => {
-    const range = annotationAnchor(annotation, document);
+function annotationDecorations(doc, annotations) {
+  return DecorationSet.create(doc, annotations.flatMap((annotation) => {
+    const range = annotationAnchor(annotation, doc);
     return range ? [Decoration.inline(
       range.from,
       range.to,
