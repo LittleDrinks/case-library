@@ -34,6 +34,11 @@ def _csrf(client: httpx.Client, csrf: str) -> dict:
     return {"X-CSRF-Token": csrf}
 
 
+def _close_e2e(client: httpx.Client, mongo: MongoClient) -> None:
+    client.close()
+    mongo.close()
+
+
 def _document(*paragraphs: str) -> dict:
     return {
         "type": "doc",
@@ -202,8 +207,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
         assert current["revision"] == 1
         assert current["document"] == _document(*PARAGRAPHS)
     finally:
-        client.close()
-        mongo.close()
+        _close_e2e(client, mongo)
 
 
 def test_accept_writes_revision_snapshot_and_replays_decision():
@@ -267,5 +271,4 @@ def test_accept_rejects_stale_revision_on_real_replica_set():
         assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "expired"
         assert database.cases.find_one({"id": case_id})["revision"] == 2
     finally:
-        client.close()
-        mongo.close()
+        _close_e2e(client, mongo)
