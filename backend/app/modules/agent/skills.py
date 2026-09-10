@@ -62,8 +62,10 @@ _GENERATION_MENTION_SUFFIX = re.compile(
     r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程|思路|好处|步骤)"
 )
 # 目标带“的”后接元数据名词：谈论对象的记录而非执行请求。
+# 目标带“的”后接抽象名词：谈论对象的属性/需求而非执行请求。
 _GENERATION_METADATA_SUFFIX = re.compile(
-    r"^\s*(?:的)?[\u4e00-\u9fa5]{0,4}(?:历史|记录|版本|清单|列表)"
+    r"^\s*(?:的)?[\u4e00-\u9fa5]{0,4}"
+    r"(?:历史|记录|版本|清单|列表|需求|标准|方法|时机|条件|策略)"
 )
 _GENERATION_REPORT_PREFIX = re.compile(
     r"(?:^|[，,：:、\s])(?:他|她|他们|有人|据说|听说)(?:说|提到|声称)(?:要|会|将|想)?$"
@@ -77,8 +79,13 @@ _GENERATION_GROUP_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部|批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
+# 「别」作祈使否定标记时直接前置于动词（AllSet 汉语语法：negative commands with 别），
+# 左侧只能是子句边界、代词或祈使/转述引导词；词内「别」（特别/级别/识别等）不算否定。
+_GENERATION_IMPERATIVE_LEFT = ("你", "我", "他", "她", "它", "请", "先", "千", "万",
+                               "就", "也", "更", "再", "可", "要", "想", "给", "让",
+                               "说", "讲", "提")
 _GENERATION_BARE_NEGATION = re.compile(
-    r"(?<![特个性告分])别\s*$"
+    r"(?:^|[，,。；！？、\s]|[" + "".join(_GENERATION_IMPERATIVE_LEFT) + r"])别\s*$"
 )
 _GENERATION_REMINDER = re.compile(r"别忘(?:了|记)")
 _GENERATION_EVALUATION_SUFFIX = re.compile(
@@ -92,9 +99,10 @@ def full_generation_requested(prompt: str) -> bool:
         if _generation_context_blocked(clause):
             continue
         for match in _generation_matches(clause):
-            if _generation_match_negated(clause, match):
+            before = clause[max(0, match.start() - 24):match.start()]
+            if _generation_negated(before):
                 requested = False
-            elif not _generation_match_blocked(clause, match):
+            elif not _generation_blocked(match, before):
                 requested = True
     return requested
 
@@ -110,22 +118,14 @@ def _generation_context_blocked(clause: str) -> bool:
     return any(token in clause for token in _GENERATION_QUESTIONS + _GENERATION_CONDITIONALS)
 
 
-def _generation_match_blocked(clause: str, match: re.Match) -> bool:
-    before = clause[max(0, match.start() - 24):match.start()]
-    after = clause[match.end():match.end() + 16]
-    return _generation_match_negated(clause, match) or _generation_mentioned(before, after) or bool(
+def _generation_blocked(match: re.Match, before: str) -> bool:
+    after = match.string[match.end():match.end() + 16]
+    return _generation_mentioned(before, after) or bool(
         _GENERATION_GROUP_PARTIAL.search(match.group())
         or _GENERATION_PARTIAL.search(after)
         or _GENERATION_EVALUATION_SUFFIX.match(after)
         or _GENERATION_METADATA_SUFFIX.match(after)
     )
-
-
-def _generation_match_negated(clause: str, match: re.Match) -> bool:
-    before = clause[max(0, match.start() - 24):match.start()]
-    return _generation_negated(before)
-
-
 def _generation_negated(before: str) -> bool:
     if any(marker in before for marker in _GENERATION_NEGATIONS):
         return True

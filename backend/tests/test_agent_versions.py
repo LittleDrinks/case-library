@@ -53,12 +53,18 @@ def _full_generation_model() -> FunctionModel:
 
 
 def _await_completed(database, thread_id: str) -> None:
+    if not _await_run_status(database, thread_id, "completed"):
+        raise AssertionError("AI run did not complete")
+
+
+def _await_run_status(database, thread_id: str, status: str) -> object | None:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if database.agent_runs.find_one({"threadId": thread_id, "status": "completed"}):
-            return
+        run = database.agent_runs.find_one({"threadId": thread_id, "status": status})
+        if run:
+            return run
         time.sleep(0.02)
-    raise AssertionError("AI run did not complete")
+    return None
 
 
 def _message_body(text: str, message_id: str) -> dict:
@@ -184,6 +190,7 @@ def test_full_generation_parser_rejects_non_requests() -> None:
     "将这份案例文档重写一版", "再来一份全新的初稿", "我要一份完整稿",
     "帮我把正文重新写一遍", "这篇正文帮我从头到尾重写一版",
     "把整篇案例重写一遍，特别注意个别段落的衔接",
+    "根据内容级别重写全文", "按难度级别重写全文",
 ])
 def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> None:
     assert full_generation_requested(prompt) is True
@@ -200,6 +207,7 @@ def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> No
     "整理一下全文的重写历史", "要不要来一份初稿？",
     "全部的批注都帮我看看", "从头到尾检查一遍全文的结构",
     "把正文结尾重写一遍",
+    "识别重写全文的需求", "判别重写全文的时机",
 ])
 def test_full_generation_parser_rejects_natural_non_requests(prompt: str) -> None:
     assert full_generation_requested(prompt) is False
@@ -280,6 +288,54 @@ def test_negated_full_generation_request_cannot_create_an_ai_version(client: Tes
     assert not full_generation_requested("不要生成全文")
     assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
     assert client.app.state.database.agent_artifacts.count_documents({}) == 0
+
+
+def _failing_after_tool_model() -> FunctionModel:
+    blocks = [{"type": "heading", "level": 1, "text": "AI完整稿"},
+              {"type": "paragraph", "text": "AI生成正文"}]
+    issued: list[bool] = []
+
+    async def stream(_messages, _info):
+        if not issued:
+            issued.append(True)
+            yield {0: DeltaToolCall(
+                name="propose_document",
+                json_args=json.dumps({"blocks": blocks, "reason": "完整生成"}),
+                tool_call_id="fail-after-tool",
+            )}
+            return
+        raise RuntimeError("provider crashed after tool call")
+
+    return FunctionModel(stream_function=stream)
+
+
+def _post_with_model(client: TestClient, auth: dict, case: dict, thread_id: str,
+                     model, text: str, message_id: str):
+    from app.modules.agent.runtime import agent
+
+    body = _message_body(text, message_id)
+    with agent.override(model=model):
+        return client.post(
+            f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream",
+            headers={"X-CSRF-Token": auth["csrfToken"]}, json=body,
+        )
+
+
+def test_failed_generation_run_never_claims_or_creates_version(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    thread_id = client.get(f"/api/cases/{case['id']}/agent/thread").json()["id"]
+    response = _post_with_model(client, auth, case, thread_id,
+                                _failing_after_tool_model(), "请完整生成全文",
+                                "failed-after-tool-message")
+
+    assert response.status_code == 200
+    assert _await_run_status(client.app.state.database, thread_id, "failed")
+    assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
+    snapshot = client.get(f"/api/cases/{case['id']}/agent/threads/{thread_id}").json()
+    tool = next((part for message in snapshot["messages"] for part in message["parts"]
+                 if part["type"] == "tool-propose_document"), None)
+    assert tool is None or tool.get("output", {}).get("status") != "created"
 
 
 def test_replaying_full_generation_request_does_not_duplicate_version(
