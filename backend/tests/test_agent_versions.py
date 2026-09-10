@@ -180,6 +180,10 @@ def test_full_generation_parser_rejects_non_requests() -> None:
 
 @pytest.mark.parametrize("prompt", [
     "把整份文档改写一遍", "将完整案例重写", "全文重写",
+    "正文写得太乱了，从头到尾重写一遍", "帮我把这份案例全部重新写过",
+    "将这份案例文档重写一版", "再来一份全新的初稿", "我要一份完整稿",
+    "帮我把正文重新写一遍", "这篇正文帮我从头到尾重写一版",
+    "把整篇案例重写一遍，特别注意个别段落的衔接",
 ])
 def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> None:
     assert full_generation_requested(prompt) is True
@@ -193,6 +197,9 @@ def test_full_generation_parser_accepts_natural_reverse_order(prompt: str) -> No
     "这篇案例整篇写得很好，不用改",
     "请重写整篇案例的摘要", "请修改完整文档的标题",
     "请整理整个文档的结构", "我想了解全文重写的流程",
+    "整理一下全文的重写历史", "要不要来一份初稿？",
+    "全部的批注都帮我看看", "从头到尾检查一遍全文的结构",
+    "把正文结尾重写一遍",
 ])
 def test_full_generation_parser_rejects_natural_non_requests(prompt: str) -> None:
     assert full_generation_requested(prompt) is False
@@ -219,6 +226,40 @@ def test_non_generation_public_runs_do_not_create_ai_versions(
     case = _create_case(client, auth)
     response, thread_id = _run_message(
         client, auth, case, prompt, f"non-generation-{uuid.uuid4().hex}"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
+    assert client.app.state.database.agent_artifacts.count_documents({}) == 0
+
+
+@pytest.mark.parametrize("prompt", [
+    "将完整案例重写", "全文重写", "正文写得太乱了，从头到尾重写一遍",
+    "把整篇案例重写一遍，特别注意个别段落的衔接",
+])
+def test_unseen_natural_requests_create_ai_versions(client: TestClient, prompt: str) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, prompt, f"unseen-positive-{uuid.uuid4().hex}"
+    )
+
+    assert response.status_code == 200
+    _await_completed(client.app.state.database, thread_id)
+    _assert_saved_version(client, case, thread_id)
+
+
+@pytest.mark.parametrize("prompt", [
+    "整理一下全文的重写历史", "要不要来一份初稿？",
+])
+def test_unseen_non_requests_do_not_create_ai_versions(
+    client: TestClient, prompt: str
+) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    response, thread_id = _run_message(
+        client, auth, case, prompt, f"unseen-negative-{uuid.uuid4().hex}"
     )
 
     assert response.status_code == 200

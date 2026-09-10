@@ -27,12 +27,20 @@ from app.modules.skills.service import BoundSkill, SkillError
 READER_CAPABILITY_ID = "platform-tools"
 _GENERATION_ACTION_WORDS = (
     r"(?:生成|重写|改写|撰写|编写|起草|创作|重做|写|整理|修改|"
+    r"来一份|来一篇|要一份|要一篇|给我一份|需要一份|"
     r"generate|rewrite|redraft|write)"
 )
 _GENERATION_TARGET_WORDS = (
-    r"(?:全文|全篇|整篇|整份|全案|整案|初稿|完整(?:的)?"
+    r"(?:全文|全篇|整篇|整份|全案|整案|全部|从头到尾|初稿|完整(?:的)?"
     r"(?:案例|文档|稿|正文|文章)|整个(?:案例|文档|稿|正文|文章)|"
     r"full\s+(?:draft|document))"
+)
+# 文档名词作宾语且重写类动词带遍/版完量补语：把正文重新写一遍。
+_GENERATION_DOC_REWRITE = re.compile(
+    r"(?:全文|全篇|整篇|整份|正文|案例|文档|文章|稿子)"
+    r"[^，。；！？\n]{0,8}?(?:重新)?(?:重写|改写|写过|撰写|起草|创作|写)"
+    r"(?:一版|一遍|一次|一回)",
+    re.IGNORECASE,
 )
 _GENERATION_ACTION = re.compile(
     _GENERATION_ACTION_WORDS + r".{0,16}" + _GENERATION_TARGET_WORDS,
@@ -44,7 +52,7 @@ _GENERATION_TARGET_ACTION = re.compile(
 )
 _FULL_GENERATION_PHRASE = re.compile(r"完整生成|full\s+(?:draft|document)", re.IGNORECASE)
 _GENERATION_QUESTIONS = (
-    "吗", "呢", "请问", "是否", "能不能", "可否", "能否", "如何", "怎么", "怎样",
+    "吗", "呢", "请问", "是否", "能不能", "可否", "能否", "要不要", "如何", "怎么", "怎样",
     "为何", "为什么", "什么", "哪",
 )
 _GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话")
@@ -53,12 +61,20 @@ _GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍"
 _GENERATION_MENTION_SUFFIX = re.compile(
     r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程|思路|好处|步骤)"
 )
+# 目标带“的”后接元数据名词：谈论对象的记录而非执行请求。
+_GENERATION_METADATA_SUFFIX = re.compile(
+    r"^\s*(?:的)?[\u4e00-\u9fa5]{0,4}(?:历史|记录|版本|清单|列表)"
+)
 _GENERATION_REPORT_PREFIX = re.compile(
     r"(?:^|[，,：:、\s])(?:他|她|他们|有人|据说|听说)(?:说|提到|声称)(?:要|会|将|想)?$"
 )
 _GENERATION_PARTIAL = re.compile(
     r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
     r"|的(?:批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
+)
+# 匹配组内部的段落局部名词：把正文结尾重写一遍不是全文请求。
+_GENERATION_GROUP_PARTIAL = re.compile(
+    r"(?:中的|里的|之中|内部|批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
 )
 _NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
 _GENERATION_BARE_NEGATION = re.compile(
@@ -87,6 +103,7 @@ def _generation_matches(clause: str):
     yield from _GENERATION_ACTION.finditer(clause)
     yield from _GENERATION_TARGET_ACTION.finditer(clause)
     yield from _FULL_GENERATION_PHRASE.finditer(clause)
+    yield from _GENERATION_DOC_REWRITE.finditer(clause)
 
 
 def _generation_context_blocked(clause: str) -> bool:
@@ -97,9 +114,10 @@ def _generation_match_blocked(clause: str, match: re.Match) -> bool:
     before = clause[max(0, match.start() - 24):match.start()]
     after = clause[match.end():match.end() + 16]
     return _generation_match_negated(clause, match) or _generation_mentioned(before, after) or bool(
-        _GENERATION_PARTIAL.search(match.group())
+        _GENERATION_GROUP_PARTIAL.search(match.group())
         or _GENERATION_PARTIAL.search(after)
         or _GENERATION_EVALUATION_SUFFIX.match(after)
+        or _GENERATION_METADATA_SUFFIX.match(after)
     )
 
 
