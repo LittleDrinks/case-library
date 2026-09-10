@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
+const PROVIDER_BASE_URL = process.env.E2E_PROVIDER_BASE_URL || "http://ai-provider:8080/v1";
 
 async function login(page) {
   await page.goto("/#/login");
@@ -38,7 +39,7 @@ async function configureChat(page) {
   const response = await page.context().request.put("/api/ai/settings", {
     headers: { "X-CSRF-Token": await csrf(page) },
     data: {
-      mode: "custom", baseUrl: "http://ai-provider:8080/v1",
+      mode: "custom", baseUrl: PROVIDER_BASE_URL,
       apiKey: "e2e-api-key", model: "e2e-model-a",
     },
   });
@@ -188,6 +189,50 @@ test("完整生成通过真实 Run 保存 AI 版本并可只读打开、覆盖�
   await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
   const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
   expect(history.versions[0].id).toBe(version.id);
+});
+
+async function selectDraftRange(page, text) {
+  const target = page.locator(".canvas-editor p", { hasText: text }).first();
+  await expect(target).toBeVisible();
+  await target.selectText();
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
+    .toContain(text);
+}
+
+async function undoCount(page) {
+  return page.getByTestId("agent-undo-write").count();
+}
+
+test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendChat(page, "请完整生成全文");
+  const version = await assertSavedAiVersion(page, created.id);
+  await openAiVersion(page, version);
+  await overwriteAiVersion(page, version);
+  await page.reload();
+  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+
+  await selectDraftRange(page, "AI生成正文");
+  await sendChat(page, "帮我把这段话写入正文试试");
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  expect(await undoCount(page)).toBe(0);
+  let history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
+  expect(history.versions).toHaveLength(1);
+
+  await selectDraftRange(page, "AI生成正文");
+  await sendChat(page, "请直接写入替换选中文字");
+  await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
+  await expect(page.getByTestId("agent-undo-write")).toBeVisible();
+  await page.getByTestId("agent-undo-write").click();
+  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
+  expect(history.versions).toHaveLength(1);
+  expect(history.versions[0].id).toBe(version.id);
+  expect(history.versions[0].kind).toBe("ai");
 });
 
 async function submitMessage(page, text) {
