@@ -14,7 +14,7 @@
 | auth | 425 | bcrypt+cookie session+CSRF，小而对，保留 |
 | documents | 339 | python-docx 手写固定版式渲染，替换为模板填充 |
 | case_materials | 255 | 保留 |
-| annotations | 247 | 服务端 quote 前缀渐进匹配重挂，换位置映射方案 |
+| annotations | 由 ProseMirror 位置映射维护正文批注锚点，保留讨论线程与失效状态 |
 | knowledge | 109 | 只有 seed，PRD 要求的 7 门课知识库基本空白 |
 
 前端无 UI 库、无状态库；api.js/SSE 流解析/useAutosave/useCrashDraft 小而对，保留。WorkbenchView 513 行、AssistantRail 397 行是画布工作台本体，随 agent 改造重构。
@@ -31,7 +31,7 @@
 | `documents/render.py`+`styles.py`+`fonts.py` 339 行 | `docxtpl`（python-docx-template） | 版式做成 Word 模板文件放 `assets/docx-templates/`，Jinja2 占位填充正文/元数据；版式调整不再改代码。现有 golden 测试改期望产物即可 |
 | `attachments/text.py` docx+纯文本抽取 | `markitdown`（Microsoft） | PDF/DOCX/PPTX/XLSX 统一转 Markdown 供索引与 AI 引用；保留现有大小上限与 zip 炸弹防护壳，libarchive-c 继续解 zip/rar5 |
 | 版本对比基于 `diff` 包的纯文本 diff | `prosemirror-changeset` | 在 ProseMirror 文档层面计算增删片段，前后端共享同一 change 结构，「文字级增删高亮」直接渲染 |
-| 批注 quote 前缀模糊重挂（服务端） | ProseMirror Mapping（编辑器原生机制） | 锚点改为「绝对位置+quote」双存储；编辑会话内每次事务用 mapping 重映射位置并回写，落库时 quote 仅作跨会话冲突时的兜底校验。「原文已变动」降级路径保留 |
+| 批注正文锚点 | ProseMirror Mapping（编辑器原生机制） | 保存时验证真实 Step 并用 Mapping 重映射绝对位置；quote 只校验映射后的原文，不按相似文本重挂；目标改动标记「原文已变动」，全删标记「原文已删除」 |
 
 ## 新增子系统选型
 

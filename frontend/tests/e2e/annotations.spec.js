@@ -131,6 +131,13 @@ async function seedManualAnnotation(page, marker) {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openDraft(page, marker);
   await addManualAnnotation(page, marker, "请补充课堂活动与评价依据。");
+  return page.url().split("/").pop();
+}
+
+async function expectActiveAnnotation(page, caseId, marker) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/annotations`);
+  const annotations = await response.json();
+  expect(annotations[0]).toMatchObject({ quote: marker, anchorState: "active" });
 }
 
 async function manualAnnotationScenario(page) {
@@ -156,6 +163,26 @@ test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => 
 
 test("教师可在桌面创建并在移动端刷新编辑删除手工批注", async ({ page }) => {
   await manualAnnotationScenario(page);
+});
+
+test("正文前置编辑保存刷新后批注仍绑定原选区", async ({ page }) => {
+  const marker = `持久锚点正文 ${Date.now()}`;
+  const caseId = await seedManualAnnotation(page, marker);
+  await page.locator(".annotation-anchor").click();
+  await expect(page.locator(".comment-panel")).toBeVisible();
+
+  const paragraph = page.locator(".canvas-editor p", { hasText: marker });
+  await paragraph.click();
+  await page.keyboard.press("Home");
+  await page.keyboard.type("前置文字 ");
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
+  await expect(page.locator(".annotation-anchor")).toHaveText(marker);
+
+  await expectActiveAnnotation(page, caseId, marker);
+  await page.reload();
+  await expect(page.locator(".annotation-anchor")).toHaveText(marker);
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expect(page.locator(".comment-card blockquote")).toHaveText(marker);
 });
 
 test("匿名用户不能读取案例批注", async ({ page }) => {

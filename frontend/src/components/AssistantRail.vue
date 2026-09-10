@@ -22,6 +22,8 @@ const props = defineProps({
   beforeAttachmentMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
+  focusAnnotationId: { type: String, default: "" },
+  beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
@@ -82,6 +84,8 @@ function select(tab) {
       :case-record="caseRecord"
       :user="user"
       :selection="selection"
+      :focus-annotation-id="focusAnnotationId"
+      :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"
     />
 

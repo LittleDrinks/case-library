@@ -207,8 +207,19 @@ def _verify_writer(case: dict, user: dict) -> None:
 def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, session) -> dict:
     if case["revision"] != artifact.base_revision:
         raise CaseError(409, "正文已更新，修订候选已过期")
-    document = _resolved_document(case, artifact)
+    document, steps = _resolved_document(case, artifact)
+    mapping = _revision_mapping(case, document, steps)
     record_snapshot(database, case, user, "pre_agent_decision", session)
+    return _commit_revision(database, case, document, steps, mapping, session)
+
+
+def _revision_mapping(case, document, steps):
+    from app.modules.annotations.service import document_mapping
+
+    return document_mapping(case["document"], document, steps)
+
+
+def _commit_revision(database, case, document, steps, mapping, session) -> dict:
     updated = database.cases.find_one_and_update(
         {"id": case["id"], "revision": case["revision"]},
         {"$set": {"document": document, "updatedAt": _now().isoformat()},
@@ -217,15 +228,23 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
     )
     if not updated:
         raise CaseError(409, "案例状态已变化")
+    from app.modules.annotations.service import reconcile_document_annotations
+
+    reconcile_document_annotations(
+        database, case["id"], case["document"], document, updated["revision"],
+        steps, session, mapping,
+    )
     return updated
 
 
-def _resolved_document(case: dict, artifact: AgentArtifact) -> dict:
+def _resolved_document(case: dict, artifact: AgentArtifact) -> tuple[dict, list[dict]]:
     """范围候选按锁定选区替换；整篇候选由规范化块重建结构化文档。"""
     if artifact.kind == "document":
-        return blocks.structured_document(artifact.blocks)
+        return prosemirror.replace_document(
+            case["document"], blocks.structured_document(artifact.blocks)
+        )
     _recheck_target(case, artifact)
-    return prosemirror.replaced_document(
+    return prosemirror.replaced_document_with_steps(
         case["document"], artifact.target.from_pos, artifact.target.to_pos,
         artifact.target.quote, artifact.replacement,
     )

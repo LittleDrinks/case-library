@@ -154,3 +154,14 @@ it("作者可以编辑并删除自己的未解决批注", async () => {
   expect(api.deleteAnnotation).toHaveBeenCalledWith(caseRecord.id, annotation.id, user.csrfToken);
   expect(wrapper.find(".comment-card").exists()).toBe(false);
 });
+
+it("原文改写或删除时保留讨论并显示锚点状态", async () => {
+  api.listAnnotations.mockResolvedValue([
+    { ...annotation, id: "changed", anchorState: "changed" },
+    { ...annotation, id: "deleted", anchorState: "deleted" },
+  ]);
+  const wrapper = await mountPanel();
+  expect(wrapper.text()).toContain("原文已变动，旧修订不可合并");
+  expect(wrapper.text()).toContain("原文已删除");
+  expect(wrapper.findAll(".comment-card")).toHaveLength(2);
+});

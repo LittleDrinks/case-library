@@ -48,6 +48,8 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+const focusedAnnotationId = ref("");
+let pendingSteps = [];
 const sources = ref([]);
 const canvasEditor = ref(null);
 const decisionCommand = ref("");
@@ -168,7 +170,13 @@ function caseId() {
 }
 
 function snapshot() {
-  return { ...contentSnapshot(), tagIds: tagIds.value, revision: revision.value };
+  const steps = pendingSteps.slice();
+  return {
+    ...contentSnapshot(),
+    tagIds: tagIds.value,
+    revision: revision.value,
+    ...(steps.length ? { steps } : {}),
+  };
 }
 
 function contentSnapshot() {
@@ -177,10 +185,12 @@ function contentSnapshot() {
 
 async function persist(payload) {
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
+  pendingSteps.splice(0, payload.steps?.length || 0);
   invalidateSelection();
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
+  await loadAnnotations();
   await syncSourcesAfterSave(payload);
   return saved;
 }
@@ -204,6 +214,7 @@ function handleSaveConflict(error) {
 
 function applyCase(value, invalidate = true) {
   if (invalidate) invalidateSelection();
+  pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
   document.value = normalizeDocument(value.document);
@@ -221,6 +232,11 @@ async function loadAnnotations() {
   }
   try { annotations.value = await api.listAnnotations(caseId()); }
   catch { annotations.value = []; }
+}
+
+async function applyRevisedCase(value) {
+  applyCase(value);
+  await loadAnnotations();
 }
 
 const sourcesLoading = ref(false);
@@ -292,7 +308,8 @@ function resizeTitle() {
 
 function changeDocument(value) {
   invalidateSelection();
-  document.value = value;
+  document.value = value.document;
+  pendingSteps.push(...(value.steps || []));
   crashDraft.queue();
   autosave.markDirty();
 }
@@ -349,6 +366,19 @@ async function prepareLifecycle(command) {
 async function flushAutosave() {
   await autosave.flush();
   return autosave.state.value === "saved";
+}
+
+async function prepareAnnotationMutation() {
+  if (!await flushAutosave()) return false;
+  await canvasEditor.value?.recaptureSelection();
+  await nextTick();
+  return true;
+}
+
+function openAnnotation(id) {
+  selectTool("comments");
+  focusedAnnotationId.value = "";
+  void nextTick(() => { focusedAnnotationId.value = id; });
 }
 
 function requestLifecycle(command) {
@@ -606,6 +636,7 @@ onBeforeUnmount(() => {
                 @selection="annotationSelection = $event"
                 @writing-context="writingContext = $event"
                 @annotate="selectTool('comments')"
+                @annotation-click="openAnnotation"
               />
             </article>
           </template>
@@ -640,11 +671,13 @@ onBeforeUnmount(() => {
           :selection="annotationSelection"
           :writing-context="writingContext"
           :before-attachment-mutation="prepareContentMutation"
+          :before-annotation-mutation="prepareAnnotationMutation"
+          :focus-annotation-id="focusedAnnotationId"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
-          @case-revised="applyCase"
+          @case-revised="applyRevisedCase"
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
           @sources-retry="loadSources"

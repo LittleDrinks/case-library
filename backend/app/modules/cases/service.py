@@ -260,23 +260,53 @@ def create_case(database: Database, body: dict, user: dict) -> dict:
 
 
 def update_case(database: Database, case_id: str, body: dict, user: dict) -> dict:
-    current = database.cases.find_one({"id": case_id})
+    return run_transaction(
+        database, lambda session: _update_case(database, case_id, body, user, session)
+    )
+
+
+def _update_case(database: Database, case_id: str, body: dict, user: dict, session) -> dict:
+    current = _editable_case(database, case_id, user, session)
+    document = body.get("document")
+    mapping = _update_mapping(database, case_id, current, document, body, session)
+    updated = _cas_update(database, case_id, body, session)
+    _reconcile_update(database, case_id, current, document, updated, body, session, mapping)
+    return internal_case_view(updated, user)
+
+
+def _editable_case(database, case_id: str, user: dict, session) -> dict:
+    current = database.cases.find_one({"id": case_id}, session=session)
     if not current:
         raise CaseError(404, "案例不存在")
     if not _can_write(current, user):
         raise CaseError(403, "无权编辑该案例")
     if current["workflowStatus"] != "draft":
         raise CaseError(409, "案例当前不可编辑")
-    document = body.get("document")
-    if document is not None:
-        from app.modules.cases.citations import citations_resolve
-
-        citations_resolve(database, case_id, document, None)
-    updated = _cas_update(database, case_id, body)
-    return internal_case_view(updated, user)
+    return current
 
 
-def _cas_update(database: Database, case_id: str, body: dict) -> dict:
+def _update_mapping(database, case_id, current, document, body, session):
+    if document is None:
+        return None
+    from app.modules.cases.citations import citations_resolve
+    from app.modules.annotations.service import document_mapping
+
+    citations_resolve(database, case_id, document, session)
+    return document_mapping(current["document"], document, body.get("steps"))
+
+
+def _reconcile_update(database, case_id, current, document, updated, body, session, mapping):
+    if document is None:
+        return
+    from app.modules.annotations.service import reconcile_document_annotations
+
+    reconcile_document_annotations(
+        database, case_id, current["document"], document, updated["revision"],
+        body.get("steps"), session, mapping,
+    )
+
+
+def _cas_update(database: Database, case_id: str, body: dict, session) -> dict:
     changes = {
         key: body[key] for key in ("title", "document") if body.get(key) is not None
     }
@@ -286,11 +316,12 @@ def _cas_update(database: Database, case_id: str, body: dict) -> dict:
     updated = database.cases.find_one_and_update(
         {"id": case_id, "revision": body["revision"]},
         {"$set": changes, "$inc": {"revision": 1}},
+        session=session,
         return_document=ReturnDocument.AFTER,
     )
     if updated:
         return updated
-    current = database.cases.find_one({"id": case_id})
+    current = database.cases.find_one({"id": case_id}, session=session)
     raise RevisionConflict(current["revision"])
 
 

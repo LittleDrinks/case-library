@@ -202,3 +202,32 @@ it("修订变化或手动编辑会立即清除旧选区", async () => {
   await nextTick();
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
 });
+
+it("正文插入由编辑器映射批注标记并上报原生 steps", async () => {
+  const annotation = {
+    id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ revision: 3, annotations: [annotation] });
+  expect(wrapper.get(".annotation-anchor").text()).toBe("案例原文");
+
+  const { editor } = wrapper.vm;
+  editor.view.dispatch(editor.state.tr.insertText("前置", 9, 9));
+  await nextTick();
+
+  expect(wrapper.get(".annotation-anchor").text()).toBe("案例原文");
+  expect(wrapper.emitted("change").at(-1)[0]).toMatchObject({
+    document: expect.any(Object), steps: expect.arrayContaining([expect.any(Object)]),
+  });
+});
+
+it("点击正文批注标记只发出打开事件", async () => {
+  const annotation = {
+    id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ revision: 3, annotations: [annotation] });
+  const { editor } = wrapper.vm;
+  editor.view.someProp("handleClick", (handler) => handler(editor.view, 10));
+  expect(wrapper.emitted("annotation-click")).toEqual([["annotation-1"]]);
+});

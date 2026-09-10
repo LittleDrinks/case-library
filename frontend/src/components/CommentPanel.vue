@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import {
   Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Trash2, X,
 } from "@lucide/vue";
@@ -9,6 +9,8 @@ const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
   selection: { type: Object, default: null },
+  focusAnnotationId: { type: String, default: "" },
+  beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits(["annotations"]);
 const annotations = ref([]);
@@ -19,6 +21,7 @@ const saving = ref(false);
 const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
+const cardRefs = new Map();
 let loadGeneration = 0;
 
 const canCompose = computed(() => Boolean(
@@ -53,6 +56,7 @@ async function loadAnnotations() {
     if (generation !== loadGeneration) return;
     annotations.value = next;
     announce();
+    void focusAnnotation(props.focusAnnotationId);
   } catch (caught) {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
   } finally {
@@ -78,10 +82,12 @@ function showCreated(annotation) {
 async function addAnnotation() {
   if (!canCreate.value || !content.value.trim() || saving.value) return;
   const caseId = props.caseRecord.id;
-  const payload = createPayload();
   saving.value = true;
   error.value = "";
   try {
+    if (await props.beforeAnnotationMutation() === false) return;
+    if (!canCreate.value) return;
+    const payload = createPayload();
     const created = await api.createAnnotation(caseId, payload, props.user.csrfToken);
     if (caseId !== props.caseRecord.id) return;
     showCreated(created);
@@ -91,6 +97,17 @@ async function addAnnotation() {
   } finally {
     saving.value = false;
   }
+}
+
+function setCardRef(id, element) {
+  if (element) cardRefs.set(id, element);
+  else cardRefs.delete(id);
+}
+
+async function focusAnnotation(id) {
+  if (!id) return;
+  await nextTick();
+  cardRefs.get(id)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
 }
 
 function canEdit(annotation) {
@@ -173,6 +190,7 @@ async function setStatus(annotation, status) {
 }
 
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
+watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 </script>
 
 <template>
@@ -185,12 +203,21 @@ watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
         <MessageSquareText :size="24" /><span>暂无批注</span>
       </div>
       <ol v-else class="comment-list">
-        <li v-for="annotation in annotations" :key="annotation.id" class="comment-card">
+        <li
+          v-for="annotation in annotations"
+          :key="annotation.id"
+          :ref="(element) => setCardRef(annotation.id, element)"
+          class="comment-card"
+          :data-annotation-id="annotation.id"
+          tabindex="-1"
+        >
           <header>
             <span>{{ annotation.section }}</span>
             <b :class="annotation.status">{{ annotation.status === "resolved" ? "已解决" : "待处理" }}</b>
           </header>
           <blockquote>{{ annotation.quote }}</blockquote>
+          <p v-if="annotation.anchorState === 'deleted'" class="comment-anchor-state">原文已删除</p>
+          <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
           <textarea
             v-if="editingId === annotation.id"
             v-model="editingContent"

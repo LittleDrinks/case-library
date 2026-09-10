@@ -17,7 +17,9 @@ const props = defineProps({
   annotations: { type: Array, default: () => [] },
   sources: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["change", "selection", "writing-context", "annotate"]);
+const emit = defineEmits([
+  "change", "selection", "writing-context", "annotate", "annotation-click",
+]);
 const selection = ref(null);
 const cursorPlaced = ref(false);
 const triggerPosition = ref({ top: "0", left: "0" });
@@ -108,17 +110,20 @@ function currentContext(activeEditor) {
   return writingContext(activeEditor, from, to);
 }
 
-function updateEditor({ editor: activeEditor }) {
+function updateEditor({ editor: activeEditor, transaction }) {
   selectionBlocked = true;
   clearSelection();
-  emit("change", activeEditor.getJSON());
+  emit("change", {
+    document: activeEditor.getJSON(),
+    steps: transaction.steps.map((step) => step.toJSON()),
+  });
   emit("writing-context", currentContext(activeEditor));
 }
 
 const annotationKey = new PluginKey("annotationAnchors");
 
 function annotationAnchor(annotation, document) {
-  if (annotation.revision !== props.revision) return null;
+  if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
   return document.textBetween(from, to, " ") === annotation.quote
@@ -128,8 +133,18 @@ function annotationAnchor(annotation, document) {
 function annotationDecorations(document, annotations) {
   return DecorationSet.create(document, annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, document);
-    return range ? [Decoration.inline(range.from, range.to, { class: "annotation-anchor" })] : [];
+    return range ? [Decoration.inline(
+      range.from,
+      range.to,
+      { class: "annotation-anchor", "data-annotation-id": annotation.id },
+      { annotationId: annotation.id },
+    )] : [];
   }));
+}
+
+function clickedAnnotation(view, position) {
+  const decorations = annotationKey.getState(view.state)?.find(position, position + 1) || [];
+  return decorations.find((decoration) => decoration.spec.annotationId)?.spec.annotationId;
 }
 
 function applyAnnotationAnchors(transaction, previous) {
@@ -144,7 +159,15 @@ const annotationExtension = Extension.create({
     return [new Plugin({
       key: annotationKey,
       state: { init: () => DecorationSet.empty, apply: applyAnnotationAnchors },
-      props: { decorations: (state) => annotationKey.getState(state) },
+      props: {
+        decorations: (state) => annotationKey.getState(state),
+        handleClick: (view, position) => {
+          const annotationId = clickedAnnotation(view, position);
+          if (!annotationId) return false;
+          emit("annotation-click", annotationId);
+          return true;
+        },
+      },
     })];
   },
 });

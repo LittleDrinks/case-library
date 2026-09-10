@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -166,6 +166,7 @@ class AgentWrite(BaseModel):
     blocks: list[dict[str, object]] = Field(default_factory=list)
     before_document: dict[str, object] = Field(alias="beforeDocument")
     document: dict[str, object]
+    document_steps: list[dict[str, Any]] = Field(default_factory=list, alias="documentSteps")
     base_revision: int = Field(alias="baseRevision", ge=1)
     result_revision: int = Field(alias="resultRevision", ge=1)
     created_by: str = Field(alias="createdBy")
