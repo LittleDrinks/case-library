@@ -68,7 +68,7 @@ release_path() {
     printf '%s\n' releases/latest/download
     return
   }
-  printf '%s\n' "$selector" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-pre-alpha\.[0-9]+$' || fail "Use latest or vX.Y.Z-pre-alpha.N"
+  printf '%s\n' "$selector" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' || fail "Use latest or vX.Y.Z-alpha.N"
   printf '%s\n' "releases/download/$selector"
 }
 
