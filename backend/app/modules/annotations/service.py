@@ -485,7 +485,7 @@ def _require_status_actor(case: dict, annotation: dict, user: dict, status: str)
 
 def change_status(
     database: Database, case_id: str, annotation_id: str, status: str, user: dict,
-    append_artifact_event=None,
+    append_artifact_event,
 ) -> dict:
     return _transaction(
         database,
@@ -497,7 +497,7 @@ def change_status(
 
 
 def _change_status(database, case_id, annotation_id, status, user, session,
-                   append_artifact_event=None):
+                   append_artifact_event):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
     _require_status_actor(case, annotation, user, status)
@@ -526,8 +526,8 @@ def _closed_revisions(annotation: dict) -> list[dict]:
 
 
 def _decide_linked_artifacts(
-    database, annotation, user, decision, session, selected_id=None,
-    append_artifact_event=None,
+    database, annotation, user, decision, session, append_artifact_event,
+    selected_id=None,
 ) -> None:
     for revision in annotation.get("revisions", []):
         artifact_decision = decision
@@ -538,7 +538,7 @@ def _decide_linked_artifacts(
             {"$set": {"status": artifact_decision, "decidedBy": user["id"], "decidedAt": _now()}},
             return_document=ReturnDocument.AFTER, session=session,
         )
-        if artifact and append_artifact_event:
+        if artifact:
             append_artifact_event(artifact, artifact_decision, session)
 
 
@@ -610,7 +610,7 @@ def new_revision_id() -> str:
 
 def merge_annotation(
     database: Database, case_id: str, annotation_id: str, user: dict,
-    append_artifact_event=None,
+    append_artifact_event,
 ) -> dict:
     return _transaction(
         database,
@@ -621,7 +621,7 @@ def merge_annotation(
 
 
 def _merge_annotation(
-    database, case_id, annotation_id, user, session, append_artifact_event=None,
+    database, case_id, annotation_id, user, session, append_artifact_event,
 ):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
@@ -664,7 +664,7 @@ def _expire_invalid_revisions(database, annotation, session) -> None:
 
 
 def _commit_annotation_merge(
-    database, case, annotation, revision, user, session, append_artifact_event=None,
+    database, case, annotation, revision, user, session, append_artifact_event,
 ):
     document, steps = _merged_document(case, annotation, revision)
     from app.modules.cases.snapshots import record_snapshot
@@ -705,7 +705,7 @@ def _commit_case_document(database, case, document, session):
 
 
 def _finish_annotation_merge(
-    database, annotation, selected, user, session, append_artifact_event=None,
+    database, annotation, selected, user, session, append_artifact_event,
 ):
     revisions = [
         {**revision, "status": "accepted" if revision["id"] == selected["id"]
@@ -720,7 +720,7 @@ def _finish_annotation_merge(
     if not updated:
         raise CaseError(409, "批注状态已变化")
     _decide_linked_artifacts(
-        database, annotation, user, "accepted", session, selected["id"],
-        append_artifact_event,
+        database, annotation, user, "accepted", session, append_artifact_event,
+        selected["id"],
     )
     return updated

@@ -333,7 +333,8 @@ def _close_annotation(database, marker: str) -> None:
     from app.modules.annotations import service as annotations
 
     annotations.change_status(database, marker, f"an-{marker}", "resolved",
-                              {"id": "u1", "role": "user"})
+                              {"id": "u1", "role": "user"},
+                              AgentRepository(database).append_artifact_decision_event)
 
 
 def _assert_rolled_back(database, marker: str) -> None:
