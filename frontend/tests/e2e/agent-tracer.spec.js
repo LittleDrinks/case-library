@@ -288,11 +288,21 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await page.getByRole("button", { name: "合并并关闭" }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
   await page.getByRole("tab", { name: "查看已解决批注" }).click();
+  await assertResolvedHistoryWithoutStaleWarning(page, created);
+});
+
+async function assertResolvedHistoryWithoutStaleWarning(page, created) {
   await expect(page.locator(".comment-card")).toContainText("已解决");
+  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
+  await expect(page.locator(".comment-card")).toContainText("已解决");
+  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
-});
+}
 
 test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
   test.setTimeout(120_000);

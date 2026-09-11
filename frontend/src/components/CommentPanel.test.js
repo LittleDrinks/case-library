@@ -204,6 +204,16 @@ it("作者可以编辑并删除自己的未解决批注", async () => {
   expect(wrapper.find(".comment-card").exists()).toBe(false);
 });
 
+it("已解决历史的陈旧锚点不显示待处理警告", async () => {
+  api.listAnnotations.mockResolvedValue([{ ...resolvedDiscussion, anchorState: "changed" }]);
+  const wrapper = await mountPanel();
+  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
+  const card = wrapper.get('[data-annotation-id="annotation-resolved"]');
+  expect(card.text()).toContain("已解决");
+  expect(wrapper.text()).not.toContain("原文已变动，旧修订不可合并");
+  expect(wrapper.text()).not.toContain("原文已删除");
+});
+
 it("原文改写或删除时保留讨论并显示锚点状态", async () => {
   api.listAnnotations.mockResolvedValue([
     { ...annotation, id: "changed", anchorState: "changed" },

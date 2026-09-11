@@ -303,8 +303,10 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             <b :class="annotation.status">{{ annotation.status === "resolved" ? "已解决" : "待处理" }}</b>
           </header>
           <blockquote>{{ annotation.quote }}</blockquote>
-          <p v-if="annotation.anchorState === 'deleted'" class="comment-anchor-state">原文已删除</p>
-          <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
+          <template v-if="annotation.status !== 'resolved'">
+            <p v-if="annotation.anchorState === 'deleted'" class="comment-anchor-state">原文已删除</p>
+            <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
+          </template>
           <textarea
             v-if="editingId === annotation.id"
             v-model="editingContent"
