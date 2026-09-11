@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from functools import partial
 
 from pydantic_ai import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
-
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
@@ -179,6 +179,26 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
             yield {index: delta}
 
 
+async def _stream_tracer(
+    messages,
+    info,
+    state: dict,
+    recorder: Callable | None,
+    skill_id: str | None,
+    selection: tuple[int, int] | None,
+) -> AsyncIterator[dict | str]:
+    second_round = await _prepare_marked_stream(messages, state)
+    round_state = state["rounds"][asyncio.current_task()]
+    if recorder:
+        recorder(messages, info)
+    response = tracer_response(
+        messages, info, skill_id, selection, second_round, not round_state["proposal_seen"]
+    )
+    _record_proposal(round_state, response)
+    async for delta in _stream_deltas(response):
+        yield delta
+
+
 def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,
                  selection: tuple[int, int] | None = None) -> FunctionModel:
     """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
@@ -187,19 +207,11 @@ def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,
     """
 
     state = {"failure_consumed": False, "slow_consumed": False, "rounds": {}}
-
-    async def stream(messages, info):
-        second_round = await _prepare_marked_stream(messages, state)
-        round_state = state["rounds"][asyncio.current_task()]
-        if recorder:
-            recorder(messages, info)
-        response = tracer_response(
-            messages, info, skill_id, selection, second_round, not round_state["proposal_seen"]
-        )
-        _record_proposal(round_state, response)
-        async for delta in _stream_deltas(
-            response
-        ):
-            yield delta
-
-    return FunctionModel(stream_function=stream)
+    stream_function = partial(
+        _stream_tracer,
+        state=state,
+        recorder=recorder,
+        skill_id=skill_id,
+        selection=selection,
+    )
+    return FunctionModel(stream_function=stream_function)
