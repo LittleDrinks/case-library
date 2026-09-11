@@ -53,8 +53,14 @@ function positionTrigger(context) {
 }
 
 function clearSelection() {
+  selectionBlocked = true;
   selectionRequest += 1;
   selection.value = null;
+  triggerPosition.value = { top: "0", left: "0" };
+  const browserSelection = window.getSelection();
+  if (browserSelection?.rangeCount && editor.value?.view.dom.contains(browserSelection.anchorNode)) {
+    browserSelection.removeAllRanges();
+  }
   emit("selection", null);
 }
 
@@ -69,7 +75,7 @@ async function captureSelection({ editor: activeEditor }) {
   const context = writingContext(activeEditor, from, to);
   if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()) {
     clearSelection();
-    emit("writing-context", context);
+    emit("writing-context", null);
     return;
   }
   selectionBlocked = false;
@@ -247,7 +253,7 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ recaptureSelection, insertCitation });
+defineExpose({ clearSelection, recaptureSelection, insertCitation });
 </script>
 
 <template>

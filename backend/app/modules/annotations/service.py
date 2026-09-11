@@ -10,7 +10,6 @@ from pymongo.database import Database
 from app.modules.agent import prosemirror
 from app.modules.cases.service import CaseError, RevisionConflict, case_view
 
-
 ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
 ACTIVE_ANCHOR = "active"
 CHANGED_ANCHOR = "changed"
@@ -485,17 +484,20 @@ def _require_status_actor(case: dict, annotation: dict, user: dict, status: str)
 
 
 def change_status(
-    database: Database, case_id: str, annotation_id: str, status: str, user: dict
+    database: Database, case_id: str, annotation_id: str, status: str, user: dict,
+    append_artifact_event=None,
 ) -> dict:
     return _transaction(
         database,
         lambda session: _change_status(
-            database, case_id, annotation_id, status, user, session
+            database, case_id, annotation_id, status, user, session,
+            append_artifact_event,
         ),
     )
 
 
-def _change_status(database, case_id, annotation_id, status, user, session):
+def _change_status(database, case_id, annotation_id, status, user, session,
+                   append_artifact_event=None):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
     _require_status_actor(case, annotation, user, status)
@@ -509,7 +511,10 @@ def _change_status(database, case_id, annotation_id, status, user, session):
     )
     if not updated:
         raise CaseError(409, "批注状态已变化")
-    _decide_linked_artifacts(database, annotation, user, "rejected", session)
+    _decide_linked_artifacts(
+        database, annotation, user, "rejected", session,
+        append_artifact_event=append_artifact_event,
+    )
     return _view(updated)
 
 
@@ -520,9 +525,10 @@ def _closed_revisions(annotation: dict) -> list[dict]:
     ]
 
 
-def _decide_linked_artifacts(database, annotation, user, decision, session, selected_id=None) -> None:
-    from app.modules.agent.repository import AgentRepository
-
+def _decide_linked_artifacts(
+    database, annotation, user, decision, session, selected_id=None,
+    append_artifact_event=None,
+) -> None:
     for revision in annotation.get("revisions", []):
         artifact_decision = decision
         if selected_id and revision.get("id") != selected_id:
@@ -532,11 +538,8 @@ def _decide_linked_artifacts(database, annotation, user, decision, session, sele
             {"$set": {"status": artifact_decision, "decidedBy": user["id"], "decidedAt": _now()}},
             return_document=ReturnDocument.AFTER, session=session,
         )
-        if artifact:
-            AgentRepository(database)._append_event(
-                artifact["threadId"], "artifact.decided", artifact["runId"],
-                {"artifactId": artifact["id"], "decision": artifact_decision}, session,
-            )
+        if artifact and append_artifact_event:
+            append_artifact_event(artifact, artifact_decision, session)
 
 
 def record_ai_revision(database, artifact, created_by: str, session=None) -> dict | None:
@@ -605,14 +608,21 @@ def new_revision_id() -> str:
     return f"arv-{secrets.token_hex(8)}"
 
 
-def merge_annotation(database: Database, case_id: str, annotation_id: str, user: dict) -> dict:
+def merge_annotation(
+    database: Database, case_id: str, annotation_id: str, user: dict,
+    append_artifact_event=None,
+) -> dict:
     return _transaction(
         database,
-        lambda session: _merge_annotation(database, case_id, annotation_id, user, session),
+        lambda session: _merge_annotation(
+            database, case_id, annotation_id, user, session, append_artifact_event,
+        ),
     )
 
 
-def _merge_annotation(database, case_id, annotation_id, user, session):
+def _merge_annotation(
+    database, case_id, annotation_id, user, session, append_artifact_event=None,
+):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
     _require_merge_owner(case, annotation, user)
@@ -622,7 +632,9 @@ def _merge_annotation(database, case_id, annotation_id, user, session):
     if revision is None:
         _expire_invalid_revisions(database, annotation, session)
         raise CaseError(409, "没有可合并的有效 AI 修订")
-    return _commit_annotation_merge(database, case, annotation, revision, user, session)
+    return _commit_annotation_merge(
+        database, case, annotation, revision, user, session, append_artifact_event,
+    )
 
 
 def _require_merge_owner(case: dict, annotation: dict, user: dict) -> None:
@@ -651,7 +663,9 @@ def _expire_invalid_revisions(database, annotation, session) -> None:
     )
 
 
-def _commit_annotation_merge(database, case, annotation, revision, user, session):
+def _commit_annotation_merge(
+    database, case, annotation, revision, user, session, append_artifact_event=None,
+):
     document, steps = _merged_document(case, annotation, revision)
     from app.modules.cases.snapshots import record_snapshot
 
@@ -663,7 +677,7 @@ def _commit_annotation_merge(database, case, annotation, revision, user, session
         steps, session, mapping,
     )
     updated_annotation = _finish_annotation_merge(
-        database, annotation, revision, user, session,
+        database, annotation, revision, user, session, append_artifact_event,
     )
     return {"annotation": _view(updated_annotation), "case": case_view(updated_case)}
 
@@ -690,7 +704,9 @@ def _commit_case_document(database, case, document, session):
     return updated
 
 
-def _finish_annotation_merge(database, annotation, selected, user, session):
+def _finish_annotation_merge(
+    database, annotation, selected, user, session, append_artifact_event=None,
+):
     revisions = [
         {**revision, "status": "accepted" if revision["id"] == selected["id"]
          else "expired" if revision.get("status") == "pending" else revision.get("status")}
@@ -703,5 +719,8 @@ def _finish_annotation_merge(database, annotation, selected, user, session):
     )
     if not updated:
         raise CaseError(409, "批注状态已变化")
-    _decide_linked_artifacts(database, annotation, user, "accepted", session, selected["id"])
+    _decide_linked_artifacts(
+        database, annotation, user, "accepted", session, selected["id"],
+        append_artifact_event,
+    )
     return updated

@@ -15,8 +15,8 @@ from app.modules.agent.models import (
     AgentMessage,
     AgentRun,
     AgentSnapshot,
-    AgentThreadEvent,
     AgentThread,
+    AgentThreadEvent,
     ArtifactTarget,
     TerminalRunStatus,
     ThreadEventType,
@@ -24,7 +24,6 @@ from app.modules.agent.models import (
 )
 from app.modules.cases.published import version_readable
 from app.modules.cases.versions import create_ai_version, create_ai_version_from_write
-
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 RUN_OWNER_LEASE_SECONDS = 15
@@ -601,6 +600,13 @@ class AgentRepository:
                 thread_id, event_type, run_id, payload, session, owner_id
             ),
         )
+
+    def append_artifact_decision_event(self, artifact: dict, decision: str, session) -> None:
+        if self._append_event(
+            artifact["threadId"], "artifact.decided", artifact["runId"],
+            {"artifactId": artifact["id"], "decision": decision}, session,
+        ) is None:
+            raise RuntimeError("Thread 事件写入失败")
 
     def _append_active_event(
         self, thread_id: str, event_type: ThreadEventType, run_id: str, payload: dict,

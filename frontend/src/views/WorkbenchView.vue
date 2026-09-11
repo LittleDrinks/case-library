@@ -197,7 +197,7 @@ async function persist(payload) {
   const documentChanged = Boolean(payload.steps?.length);
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   pendingSteps.splice(0, payload.steps?.length || 0);
-  invalidateSelection();
+  clearWritingContext();
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
@@ -218,13 +218,19 @@ function invalidateSelection() {
   annotationSelection.value = null;
 }
 
+function clearWritingContext() {
+  writingContext.value = null;
+  invalidateSelection();
+  canvasEditor.value?.clearSelection?.();
+}
+
 function handleSaveConflict(error) {
   conflict.value = error;
-  invalidateSelection();
+  clearWritingContext();
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) invalidateSelection();
+  if (invalidate) clearWritingContext();
   pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
@@ -299,7 +305,7 @@ async function loadSources() {
 }
 
 function applyAttachmentCase(value) {
-  invalidateSelection();
+  clearWritingContext();
   syncCaseRevision(value);
   void loadSources();
 }
@@ -505,6 +511,7 @@ async function prepareContentMutation() {
 }
 
 function openVersionTab(version) {
+  clearWritingContext();
   if (!openVersionTabs.value.some((tab) => tab.id === version.id)) {
     openVersionTabs.value = [...openVersionTabs.value, version];
   }
@@ -512,11 +519,13 @@ function openVersionTab(version) {
 }
 
 function closeVersionTab(id) {
+  if (activeTabId.value === id) clearWritingContext();
   openVersionTabs.value = openVersionTabs.value.filter((tab) => tab.id !== id);
   if (activeTabId.value === id) activeTabId.value = "draft";
 }
 
 function selectTab(id) {
+  if (id !== activeTabId.value) clearWritingContext();
   activeTabId.value = id;
 }
 
@@ -755,7 +764,7 @@ onBeforeUnmount(() => {
           @annotation-run="watchAnnotationRun"
           @ask-ai="askAnnotationAi"
           @sources-retry="loadSources"
-          @clear-writing-context="writingContext = null"
+          @clear-writing-context="clearWritingContext"
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"

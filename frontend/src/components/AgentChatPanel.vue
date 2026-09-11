@@ -320,6 +320,7 @@ async function restoreScroll(id) {
 async function chooseThread(id) {
   stopThreadsPolling();
   if (id !== threadId.value) {
+    emit("clear-writing-context");
     await selectThread(id);
   }
   mode.value = "chat";
@@ -328,6 +329,7 @@ async function chooseThread(id) {
 
 async function addThread() {
   stopThreadsPolling();
+  emit("clear-writing-context");
   await createThread();
   mode.value = "chat";
   await restoreScroll(threadId.value);
