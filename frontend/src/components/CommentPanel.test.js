@@ -84,6 +84,7 @@ it("作者创建批注时发送完整锚点并立即更新列表", async () => {
     expect.objectContaining({ ...selection, content: "请补充依据", source: "manual" }),
     user.csrfToken,
   );
+  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
   expect(wrapper.text()).toContain("原始批注");
 });
 

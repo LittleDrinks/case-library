@@ -87,19 +87,44 @@ async function openChat(page, caseId) {
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
-async function selectAnnotationText(page, value) {
+function domSelectionPoints(node, text) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT); const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const source = nodes.map(({ nodeValue }) => nodeValue).join(""); const start = source.indexOf(text);
+    if (start < 0) return null;
+    const point = (offset) => {
+      let index = 0;
+      for (const current of nodes) {
+        if (offset <= index + current.length) return [current, offset - index];
+        index += current.length;
+      }
+      return null;
+    };
+    const range = document.createRange();
+    range.setStart(...point(start)); range.setEnd(...point(start + text.length));
+    const rects = [...range.getClientRects()];
+    const first = rects[0], last = rects.at(-1);
+    return { start: { x: first.left + 1, y: first.top + first.height / 2 }, end: { x: last.right - 1, y: last.top + last.height / 2 } };
+}
+
+async function selectionPoints(target, value) {
+  return target.evaluate(domSelectionPoints, value);
+}
+
+async function dragSelectText(page, value) {
   const target = page.locator(".canvas-editor p", { hasText: TARGET_TEXT });
-  if (value === TARGET_TEXT) return target.selectText();
-  await target.selectText();
-  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
-    .toBe(TARGET_TEXT);
-  await page.keyboard.press("ArrowLeft");
-  const offset = await target.evaluate((node, text) => node.textContent.indexOf(text), value);
-  expect(offset).toBeGreaterThanOrEqual(0);
-  for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
-  await page.keyboard.down("Shift");
-  for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
-  await page.keyboard.up("Shift");
+  await target.scrollIntoViewIfNeeded();
+  const points = await selectionPoints(target, value);
+  expect(points).not.toBeNull();
+  await page.mouse.move(points.start.x, points.start.y);
+  await page.mouse.down();
+  await page.mouse.move(points.end.x, points.end.y, { steps: 2 });
+  await page.mouse.up();
+}
+
+async function selectAnnotationText(page, value) {
+  await expect(page.locator(".comment-composer > blockquote")).toHaveCount(0);
+  await dragSelectText(page, value);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
   await expect(page.locator(".comment-composer > blockquote")).toHaveText(value);
 }
@@ -137,9 +162,7 @@ async function selectPublishedSkill(page) {
 }
 
 async function selectCanvasTarget(page) {
-  const target = page.locator(".canvas-editor p").nth(1);
-  await expect(target).toHaveText(TARGET_TEXT);
-  await target.selectText();
+  await dragSelectText(page, TARGET_TEXT);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
     .toBe(TARGET_TEXT);
   await expect(page.getByLabel("向 AI 提问")).toBeVisible();
@@ -349,10 +372,18 @@ test("目标变化后浏览器拒绝过期采用并保留无关正文编辑", as
   expect(text).toBe("第二段：教学目标需要更明确改写目标");
 });
 
-async function deleteAnnotationTarget(page) {
+async function deleteAnnotationTarget(page, caseId) {
   await page.getByRole("button", { name: "批注", exact: true }).click();
   await selectAnnotationText(page, M1_ANNOTATION_QUOTE);
+  const saveResponse = page.waitForResponse((response) => (
+    response.request().method() === "PATCH"
+    && new URL(response.url()).pathname === `/api/cases/${caseId}`
+  ));
   await page.keyboard.press("Backspace");
+  const response = await saveResponse;
+  expect(response.ok()).toBe(true);
+  const payload = response.request().postDataJSON();
+  expect(payload.steps).toContainEqual({ stepType: "replace", from: 24, to: 30 });
   await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
   await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
 }
@@ -368,7 +399,7 @@ test("目标删除后浏览器拒绝采用并保留已删除状态", async ({ pa
   test.setTimeout(120_000);
   const { created, annotation } = await prepareAnnotationDiscussion(page, playwright, M1_ANNOTATION_QUOTE);
   await sendAnnotationRound(page, "请修订选区：删除目标后不得采用。", annotation.id);
-  await deleteAnnotationTarget(page);
+  await deleteAnnotationTarget(page, created.id);
   const card = annotationCard(page, annotation.id);
   await expect(card).toContainText("原文已删除");
   await expect(card).toContainText("已失效");

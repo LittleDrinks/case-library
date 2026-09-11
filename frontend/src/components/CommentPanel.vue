@@ -97,14 +97,14 @@ function showCreated(annotation) {
 async function addAnnotation() {
   if (!canCreate.value || !content.value.trim() || saving.value) return;
   const caseId = props.caseRecord.id;
-  saving.value = true;
-  error.value = "";
+  saving.value = true; error.value = "";
   try {
     if (await props.beforeAnnotationMutation() === false) return;
     if (!canCreate.value) return;
     const payload = createPayload();
     const created = await api.createAnnotation(caseId, payload, props.user.csrfToken);
     if (caseId !== props.caseRecord.id) return;
+    emit("clear-writing-context");
     showCreated(created);
     await loadAnnotations();
   } catch (caught) {

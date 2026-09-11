@@ -29,13 +29,18 @@ async function setup(options = {}) {
   return { wrapper, context };
 }
 
-function selectDomRange(textNode, length) {
+function selectDomRange(textNode, length, start = 0) {
   const range = globalThis.document.createRange();
-  range.setStart(textNode, 0);
-  range.setEnd(textNode, length);
+  range.setStart(textNode, start);
+  range.setEnd(textNode, start + length);
   const browserSelection = globalThis.getSelection();
   browserSelection.removeAllRanges();
   browserSelection.addRange(range);
+  globalThis.document.dispatchEvent(new Event("selectionchange"));
+}
+
+function clearDomSelection() {
+  globalThis.getSelection().removeAllRanges();
   globalThis.document.dispatchEvent(new Event("selectionchange"));
 }
 
@@ -211,6 +216,20 @@ it("修订变化或手动编辑会立即清除旧选区", async () => {
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
 });
 
+it("清理选区同时折叠编辑器状态，后续批注刷新不会复活旧选区", async () => {
+  const annotation = {
+    id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  await selectParagraph(wrapper);
+  wrapper.vm.clearSelection();
+  expect(wrapper.vm.editor.state.selection.empty).toBe(true);
+  await wrapper.setProps({ annotations: [annotation] });
+  expect(globalThis.getSelection().toString()).toBe("");
+  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+});
+
 
 // 复现 selectionchange 早于编辑器 DOM→state 同步的真实顺序。
 async function selectWhileStateStale(wrapper, paragraph) {
@@ -223,7 +242,7 @@ async function selectWhileStateStale(wrapper, paragraph) {
 
 it("selectionchange 早于编辑器状态同步时不得清除正在建立的 DOM 选区", async () => {
   const { wrapper } = await setup({ annotatable: true, revision: 3 });
-  document.body.appendChild(wrapper.element);
+  globalThis.document.body.appendChild(wrapper.element);
   await nextTick();
   const paragraph = wrapper.get(".canvas-editor p").element;
   const editor = wrapper.vm.editor;
@@ -236,6 +255,46 @@ it("selectionchange 早于编辑器状态同步时不得清除正在建立的 DO
   await vi.waitUntil(() => (wrapper.emitted("selection") ?? []).some((event) => event[0]), { interval: 20 });
   expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
     .toMatchObject({ quote: "案例原文" });
+});
+
+it("批注装饰刷新等待 DOM 选区完成编辑器同步", async () => {
+  const annotation = {
+    id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  document.body.appendChild(wrapper.element);
+  await nextTick();
+  const editor = wrapper.vm.editor;
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 9))); selectDomRange(paragraph.firstChild, 4);
+  await wrapper.setProps({ annotations: [annotation] });
+  expect(globalThis.getSelection().toString()).toBe("案例原文");
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 9)));
+  clearDomSelection();
+  await wrapper.vm.recaptureSelection();
+  await nextTick();
+  expect(wrapper.get(".annotation-anchor").text()).toBe("案例原文");
+});
+
+it("相同 quote 的不同 DOM 位置不会被当作当前编辑器选区", async () => {
+  const document = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [{ type: "text", text: "案例原文案例原文" }] },
+    ],
+  };
+  const { wrapper } = await setup({ document, annotatable: true, revision: 3 });
+  globalThis.document.body.appendChild(wrapper.element);
+  await nextTick();
+  const editor = wrapper.vm.editor;
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 13)));
+  selectDomRange(paragraph.firstChild, 4, 4);
+  await wrapper.vm.recaptureSelection();
+  expect(globalThis.getSelection().toString()).toBe("案例原文");
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
 });
 // 启动一次悬挂中的摘要捕获，再把选区收起为光标（观察路径）。
 async function suspendDigestAndCollapse(wrapper, pending) {
