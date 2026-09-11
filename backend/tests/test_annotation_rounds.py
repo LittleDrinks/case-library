@@ -17,6 +17,7 @@ from app.modules.agent.runtime import agent
 from app.modules.cases.service import CaseError
 from tests.test_annotation_agent import _csrf, _send, _thread_id
 from tests.test_annotation_discussion import (
+    _linked_artifact,
     create_annotation,
     create_case,
     document,
@@ -369,12 +370,12 @@ def _seed_real_run(database, marker: str) -> None:
     })
 
 
-def _late_artifact(marker: str) -> "AgentArtifact":
+def _late_artifact(marker: str, base_revision: int = 1):
     from app.modules.agent.models import AgentArtifact, ArtifactTarget
 
     return AgentArtifact(
         id=f"a-{marker}", caseId=marker, threadId=f"t-{marker}", runId=f"r-{marker}",
-        baseRevision=1,
+        baseRevision=base_revision,
         target=ArtifactTarget(**{"from": 1, "to": 7, "quote": "目标正文段落"}),
         annotationId=f"an-{marker}", replacement="迟到改写", reason="理由",
         createdAt=datetime.now(UTC),
@@ -425,6 +426,156 @@ def _merge_revision(marker: str, index: int, replacement: str) -> dict:
         "status": "pending", "createdBy": "u1", "createdAt": datetime.now(UTC),
     }
 
+def _pending_artifact_row(client, annotation, base_revision, replacement, suffix):
+    database = client.app.state.database
+    artifact = _linked_artifact(
+        annotation, f"thread-{annotation['id']}", f"run-{suffix}",
+        f"artifact-{suffix}", replacement,
+    ) | {"baseRevision": base_revision}
+    database.agent_artifacts.insert_one(artifact)
+    return artifact
+
+
+def _append_revision_in_expiry_window(client, monkeypatch, annotation, artifact):
+    """拒绝事务重读前经真实 record_ai_revision 追加候选，复刻并发落库时序。"""
+    from app.modules.agent.models import AgentArtifact, ArtifactTarget
+    from app.modules.annotations import service as annotations
+
+    original = annotations._expire_invalid_revisions
+
+    def save_concurrent(database, _case_id, _annotation_id, _user, session,
+                        _append_artifact_event=None):
+        current = database.annotations.find_one({"id": annotation["id"]})
+        target = ArtifactTarget(**{"from": current["from"], "to": current["to"],
+                                   "quote": current["quote"]})
+        clean = {key: value for key, value in artifact.items() if key != "_id"}
+        row = AgentArtifact.model_validate({**clean, "target": target})
+        annotations.record_ai_revision(database, row, annotation["createdBy"], session)
+        return original(database, _case_id, _annotation_id, _user, session,
+                        _append_artifact_event)
+
+    monkeypatch.setattr(annotations, "_expire_invalid_revisions", save_concurrent)
+
+
+def _assert_rejection_preserves_concurrent(client, annotation, artifact, stale):
+    """拒绝后：并发候选 pending 保留，确实失效的旧候选精确过期。"""
+    database = client.app.state.database
+    row = database.annotations.find_one({"id": annotation["id"]})
+    assert [revision["replacement"] for revision in row["revisions"]] == [
+        "过期基线改写", "并发新增改写",
+    ]
+    assert [revision["status"] for revision in row["revisions"]] == ["expired", "pending"]
+    assert database.agent_artifacts.find_one({"id": artifact["id"]})["status"] == "pending"
+    assert database.agent_artifacts.find_one({"id": stale})["status"] == "expired"
+
+
+def _assert_surviving_candidate_adoptable(client, user, annotation):
+    """拒绝后存活的有效候选仍可采用：正文与关闭状态原子一致。"""
+    database = client.app.state.database
+    adopted = client.post(
+        f"/api/cases/{annotation['caseId']}/annotations/{annotation['id']}/merge",
+        headers=_csrf(user),
+    )
+    assert adopted.status_code == 200
+    result = adopted.json()
+    assert result["annotation"]["status"] == "resolved"
+    assert [revision["status"] for revision in result["annotation"]["revisions"]] == [
+        "expired", "accepted",
+    ]
+    assert "并发新增改写" in result["case"]["document"]["content"][-1]["content"][0]["text"]
+    final = database.annotations.find_one({"id": annotation["id"]})
+    assert [revision["status"] for revision in final["revisions"]] == ["expired", "accepted"]
+
+
+def test_rejected_merge_keeps_concurrent_new_revision_pending(client, monkeypatch) -> None:
+    """拒绝合并的过期事务重读库内状态：并发保存的候选保留，过时候选精确失效。"""
+    from tests.test_annotation_discussion import merge_path, save_title, seed_linked_revisions
+
+    user = login(client, "user", "user123")
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    stale = seed_linked_revisions(client, annotation, "过期基线改写")[0]
+    changed = save_title(client, user, case, "标题已更新")
+    assert changed.status_code == 200
+    artifact = _pending_artifact_row(
+        client, annotation, changed.json()["revision"], "并发新增改写", "concurrent",
+    )
+    _append_revision_in_expiry_window(client, monkeypatch, annotation, artifact)
+    rejected = client.post(merge_path(changed.json(), annotation), headers=_csrf(user))
+    assert rejected.status_code == 409
+    _assert_rejection_preserves_concurrent(client, annotation, artifact, stale)
+    _assert_surviving_candidate_adoptable(client, user, annotation)
+
+
+def _revision_flow_annotation(client, user):
+    """第一轮候选 + 标题保存推进修订号：构造锚点 active 且基线过期的场景。"""
+    from tests.test_annotation_discussion import save_title
+
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    _run_round(client, user, case, annotation, "第一轮", "第一轮改写")
+    saved = save_title(client, user, case, "标题更新后的案例")
+    assert saved.status_code == 200
+    return case, annotation, saved
+
+
+def _assert_mutation_views_expired(client, user, case, annotation, saved):
+    """编辑与回复的响应视图按当前修订号判定候选失效。"""
+    root = f"/api/cases/{case['id']}/annotations/{annotation['id']}"
+    edited = client.patch(root, headers=_csrf(user), json={"content": "更新意见"})
+    assert edited.status_code == 200
+    assert [revision["status"] for revision in edited.json()["revisions"]] == ["expired"]
+    replied = client.post(f"{root}/replies", headers=_csrf(user),
+                          json={"content": "补充讨论"})
+    assert replied.status_code == 200
+    assert [revision["status"] for revision in replied.json()["revisions"]] == ["expired"]
+    revision_now = client.get(f"/api/cases/{case['id']}").json()["revision"]
+    assert revision_now == saved.json()["revision"]
+
+
+def test_annotation_update_and_reply_show_current_revision_status(client: TestClient) -> None:
+    """编辑与回复响应按当前案例修订判定候选有效性，不用可选版本校验显示 pending。"""
+    user = login(client, "user", "user123")
+    case, annotation, saved = _revision_flow_annotation(client, user)
+    row = _annotation_row(client, case)
+    assert row["anchorState"] == "active"
+    assert [revision["status"] for revision in row["revisions"]] == ["expired"]
+    _assert_mutation_views_expired(client, user, case, annotation, saved)
+
+
+def _interleave_title_save(client, monkeypatch, user, case, content: str):
+    """mutation 写入前触发一次真实标题保存，制造读取-写入窗口。"""
+    from tests.test_annotation_discussion import save_title
+
+    database = client.app.state.database
+    original_find = database.annotations.find_one_and_update
+
+    def save_then_update(filter, update, **kwargs):
+        if update.get("$set", {}).get("content") == content:
+            save_title(client, user, case, "窗口期并发标题")
+        return original_find(filter, update, **kwargs)
+
+    monkeypatch.setattr(
+        database.annotations, "find_one_and_update", save_then_update,
+    )
+
+
+def test_mutation_response_matches_fresh_read_after_concurrent_title_save(client, monkeypatch) -> None:
+    """mutation 读取案例后、写入前并发保存标题：响应状态必须与随后读取一致。"""
+    user = login(client, "user", "user123")
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    _run_round(client, user, case, annotation, "第一轮", "第一轮改写")
+    _interleave_title_save(client, monkeypatch, user, case, "窗口期意见")
+    root = f"/api/cases/{case['id']}/annotations/{annotation['id']}"
+    edited = client.patch(root, headers=_csrf(user), json={"content": "窗口期意见"})
+    assert edited.status_code == 200
+    fresh = _annotation_row(client, {"id": case["id"]})
+    assert [revision["status"] for revision in fresh["revisions"]] == ["expired"]
+    assert [revision["status"] for revision in edited.json()["revisions"]] == [
+        revision["status"] for revision in fresh["revisions"]
+    ]
+
 
 def _seed_merge_artifacts(database, marker: str) -> None:
     _seed_real_annotation(database, marker)
@@ -448,11 +599,15 @@ def _seed_merge_artifacts(database, marker: str) -> None:
 
 
 def _cleanup_merge_data(database, marker: str) -> None:
+    thread_ids = [f"thread-{marker}", f"t-{marker}"]
     database.case_snapshots.delete_many({"caseId": marker})
-    database.agent_thread_events.delete_many({"threadId": f"thread-{marker}"})
+    database.agent_thread_events.delete_many({"threadId": {"$in": thread_ids}})
     database.agent_artifacts.delete_many({"caseId": marker})
-    database.agent_runs.delete_many({"id": {"$regex": f"^run-{marker}-"}})
-    database.agent_threads.delete_many({"id": f"thread-{marker}"})
+    database.agent_runs.delete_many({"id": {"$in": [
+        f"run-{marker}-1", f"run-{marker}-2", f"r-{marker}",
+    ]}})
+    database.agent_messages.delete_many({"threadId": {"$in": thread_ids}})
+    database.agent_threads.delete_many({"id": {"$in": thread_ids}})
     database.annotations.delete_many({"caseId": marker})
     database.cases.delete_many({"id": marker})
 
@@ -505,7 +660,6 @@ def _run_concurrent_merges(database, marker: str) -> list[dict]:
         futures = [pool.submit(_merge_once, *request[:2]) for _ in range(2)]
         return [future.result() for future in futures]
 
-
 def _assert_single_commit(database, marker: str, outcomes: list[dict]) -> None:
     assert all(result["case"]["revision"] == 2 for result in outcomes)
     assert database.case_snapshots.count_documents(
@@ -545,3 +699,126 @@ def test_late_completion_rolls_back_on_real_replica_set():
         _assert_rolled_back(database, marker)
     finally:
         mongo.close()
+
+
+def _seed_stale_then_active_run(database, marker: str) -> None:
+    """案例推进到 revision 2 且带失效旧候选；活跃 run 锚定新基线待真实落库。"""
+    _seed_real_annotation(database, marker)
+    _seed_real_run(database, marker)
+    database.agent_runs.update_one(
+        {"id": f"r-{marker}"}, {"$set": {"baseRevision": 2}},
+    )
+    database.cases.update_one({"id": marker}, {"$set": {"revision": 2}})
+    stale = _merge_revision(marker, 1, "过期基线改写")
+    stale["baseRevision"] = 1
+    stale_artifact = {**_merge_artifact(marker, 1, "过期基线改写"),
+                      "status": "expired", "baseRevision": 1}
+    database.agent_artifacts.insert_one(stale_artifact)
+    database.annotations.update_one(
+        {"id": f"an-{marker}"}, {"$set": {"revisions": [stale]}},
+    )
+
+
+def _run_real_completion_in_thread(database, marker: str, committed):
+    """独立线程执行真实 complete_run：事务内 record_ai_revision 落新候选。"""
+    from app.modules.agent.models import AgentMessage
+    from app.modules.agent.repository import AgentRepository
+
+    def run_completion():
+        assistant = AgentMessage(
+            id="am", threadId=f"t-{marker}", runId=f"r-{marker}",
+            role="assistant", parts=[], createdAt=datetime.now(UTC))
+        artifact = _late_artifact(marker, base_revision=2)
+        outcome = AgentRepository(database).complete_run(
+            f"r-{marker}", assistant, artifact=artifact)
+        assert outcome is True
+        committed.set()
+
+    worker = threading.Thread(target=run_completion)
+    worker.start()
+    worker.join(30)
+    assert not worker.is_alive()
+
+
+def _expire_after_completion_barrier(database, entered, committed):
+    """过期事务入口先报到达，再等 completion 真实提交，构造真交错。"""
+    from app.modules.annotations import service as annotations
+
+    original = annotations._expire_invalid_revisions
+
+    def expire_once_completed(database_arg, case_id, annotation_id, user_arg, session,
+                              _append_artifact_event=None):
+        entered.set()
+        assert committed.wait(10), "completion 未在窗口内提交"
+        return original(database_arg, case_id, annotation_id, user_arg, session,
+                        _append_artifact_event)
+
+    return original, expire_once_completed
+
+
+def _assert_interleaved_survivor_adoptable(database, marker: str):
+    """新候选保留 pending 且随后采用；正文、状态、Artifact 原子一致。"""
+    row = database.annotations.find_one({"id": f"an-{marker}"})
+    assert [revision["status"] for revision in row["revisions"]] == ["expired", "pending"]
+    assert database.agent_artifacts.find_one({"id": f"a-{marker}"})["status"] == "pending"
+    result = _merge_once(database, marker)
+    assert result["annotation"]["status"] == "resolved"
+    assert [revision["status"] for revision in result["annotation"]["revisions"]] == [
+        "expired", "accepted",
+    ]
+    assert "迟到改写" in result["case"]["document"]["content"][-1]["content"][0]["text"]
+    assert database.agent_artifacts.find_one({"id": f"a-{marker}"})["status"] == "accepted"
+
+
+def _reject_merge_in_thread(database, marker: str):
+    """后台线程执行 merge：应因无有效修订被拒（CaseError）。异常传播主线程。"""
+    import pytest as _pytest
+
+    worker_failure = []
+
+    def run_merge():
+        try:
+            with _pytest.raises(CaseError):
+                _merge_once(database, marker)
+        except BaseException as error:
+            worker_failure.append(error)
+
+    worker = threading.Thread(target=run_merge)
+    worker.start()
+    return worker, worker_failure
+
+
+def _wire_expiry_barrier(database, monkeypatch):
+    """打过期事务屏障：返回 (marker, entered, committed)。"""
+    from threading import Event
+
+    from app.modules.annotations import service as annotations
+
+    marker = f"annotation-merge-interleave-{uuid.uuid4().hex}"
+    entered, committed = Event(), Event()
+    original, barrier = _expire_after_completion_barrier(database, entered, committed)
+    monkeypatch.setattr(annotations, "_expire_invalid_revisions", barrier)
+    return marker, entered, committed
+
+
+
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
+def test_rejected_merge_interleaves_real_completion_on_replica_set(monkeypatch):
+    mongo, database = _open_merge_database()
+    marker, entered, committed = _wire_expiry_barrier(database, monkeypatch)
+    try:
+        _seed_stale_then_active_run(database, marker)
+        merge_worker, worker_failure = _reject_merge_in_thread(database, marker)
+        assert entered.wait(10), "merge 未抵达过期事务入口"
+        _run_real_completion_in_thread(database, marker, committed)
+        merge_worker.join(30)
+        assert not merge_worker.is_alive()
+        if worker_failure:
+            raise worker_failure[0]
+        _assert_interleaved_survivor_adoptable(database, marker)
+    finally:
+        monkeypatch.undo()
+        _cleanup_merge_data(database, marker)
+        mongo.close()
+
+
