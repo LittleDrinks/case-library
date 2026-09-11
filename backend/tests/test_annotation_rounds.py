@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
+from datetime import UTC, datetime
 
+import pytest
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from starlette.testclient import TestClient
+
+from app.modules.agent.repository import AgentRepository
+from app.modules.cases.service import CaseError
 
 from app.modules.agent.runtime import agent
 from tests.test_annotation_agent import _csrf, _send, _thread_id
@@ -129,6 +135,10 @@ def test_second_round_after_unrelated_edit_appends_on_remapped_anchor(client: Te
     ]
     assert all(revision["status"] == "pending" for revision in row["revisions"])
     assert row["revisions"][0]["target"]["from"] == remapped["from"]
+    assert row["quote"] == annotation["quote"]
+    assert all(revision["createdBy"] == annotation["createdBy"] for revision in row["revisions"])
+    assert row["revisions"][0]["reason"] == "补充评价依据"
+    assert row["revisions"][0]["target"]["quote"] == annotation["quote"]
 
 
 def test_target_change_expires_revision_and_rejects_stale_new_round(client: TestClient) -> None:
@@ -240,6 +250,61 @@ def test_late_completion_after_direct_close_marks_run_failed(client: TestClient)
     assert snapshot["latestRun"]["status"] == "failed"
     assert client.get(f"/api/cases/{case['id']}").json()["revision"] == case["revision"]
 
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
+def test_late_completion_rolls_back_on_real_replica_set():
+    """真 Mongo 事务下迟到完成必须整体回滚；mongomock 无法表达该语义。"""
+    import uuid
 
-def _dbg(client: TestClient) -> None:  # pragma: no cover
-    pass
+    from pymongo import MongoClient
+
+    from app.modules.agent.models import AgentArtifact, AgentMessage, ArtifactTarget
+    from app.modules.annotations import service as annotations
+
+    mongo = MongoClient(os.environ["AUTH_QUERY_MONGODB_URI"])
+    database = mongo.get_default_database()
+    marker = uuid.uuid4().hex
+    try:
+        database.cases.insert_one({
+            "id": marker, "ownerId": "u1", "revision": 1, "title": marker,
+            "workflowStatus": "draft",
+            "document": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "目标正文段落"}]},
+            ]},
+        })
+        database.annotations.insert_one({
+            "id": f"an-{marker}", "caseId": marker, "versionId": None,
+            "quote": "目标正文段落", "section": "p", "content": "意见", "source": "manual",
+            "from": 1, "to": 7, "quoteHash": "h", "revision": 1,
+            "status": "pending", "anchorState": "active", "replies": [],
+            "createdBy": "u1",
+        })
+        database.agent_threads.insert_one({
+            "id": f"t-{marker}", "caseId": marker, "ownerId": "u1", "isDefault": True,
+            "nextMessageSeq": 0, "eventSeq": 0, "activeRunId": f"r-{marker}",
+            "lastRunId": None,
+        })
+        database.agent_runs.insert_one({
+            "id": f"r-{marker}", "threadId": f"t-{marker}", "userId": "u1",
+            "userMessageId": "m", "assistantMessageId": "am", "status": "active",
+            "skillBindings": [], "readOnly": False, "writeAuthorized": True,
+            "baseRevision": 1, "annotationId": f"an-{marker}", "resources": [],
+            "toolTimings": {}, "startedAt": datetime.now(UTC),
+        })
+        annotations.change_status(database, marker, f"an-{marker}", "resolved", {"id": "u1", "role": "user"})
+        artifact = AgentArtifact(
+            id=f"a-{marker}", caseId=marker, threadId=f"t-{marker}", runId=f"r-{marker}",
+            baseRevision=1,
+            target=ArtifactTarget(**{"from": 1, "to": 7, "quote": "目标正文段落"}),
+            annotationId=f"an-{marker}", replacement="迟到改写", reason="理由",
+            createdAt=datetime.now(UTC),
+        )
+        message = AgentMessage(id="am", threadId=f"t-{marker}", runId=f"r-{marker}",
+                               role="assistant", parts=[], createdAt=datetime.now(UTC))
+        with pytest.raises(CaseError):
+            AgentRepository(database).complete_run(f"r-{marker}", message, artifact=artifact)
+        assert database.agent_artifacts.count_documents({"caseId": marker}) == 0
+        assert database.agent_messages.count_documents({"threadId": f"t-{marker}"}) == 0
+        row = database.annotations.find_one({"id": f"an-{marker}"})
+        assert row["status"] == "resolved" and row.get("revisions", []) == []
+    finally:
+        mongo.close()
