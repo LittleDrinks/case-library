@@ -89,6 +89,8 @@ async function resolveAsAuthor(page, created, marker) {
   await page.getByLabel("回复批注").fill("已补充评价标准。");
   await page.getByRole("button", { name: "回复", exact: true }).click();
   await page.getByRole("button", { name: "标记解决" }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "查看已解决批注" }).click();
   await expect(page.getByText("已解决", { exact: true })).toBeVisible();
 }
 
@@ -137,8 +139,9 @@ async function expectAnnotationDetails(page, annotation, status) {
   const card = page.locator(".comment-card[data-annotation-id=\"" + annotation.id + "\"]");
   await expect(card.locator("blockquote")).toHaveText(annotation.quote);
   await expect(card).toContainText(status);
-  await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + annotation.id + "\"]"))
-    .toHaveText(annotation.quote);
+  const anchor = page.locator(".annotation-anchor[data-annotation-id=\"" + annotation.id + "\"]");
+  if (status === "已解决") await expect(anchor).toHaveCount(0);
+  else await expect(anchor).toHaveText(annotation.quote);
 }
 
 async function expectAnnotationIdentity(page, first, second) {
@@ -156,22 +159,29 @@ async function resolveFirstAnnotation(page, first, second) {
   await page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]").click();
   await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toBeInViewport();
   await page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]").getByRole("button", { name: "标记解决" }).click();
-  await expectAnnotationDetails(page, first, "已解决");
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
+  await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
   await expectAnnotationDetails(page, second, "待处理");
+  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await expectAnnotationDetails(page, first, "已解决");
 }
 
 async function expectReloadedAnnotations(page, first, second) {
   const cards = page.locator(".comment-card");
-  await expect(cards).toHaveCount(2);
+  await expect(cards).toHaveCount(1);
   const caseId = page.url().split("/").pop();
   const rows = await (await page.context().request.get("/api/cases/" + caseId + "/annotations")).json();
   expect(rows).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: first.id, status: "resolved", quote: "同段甲：教学依据" }),
     expect.objectContaining({ id: second.id, status: "pending", quote: "同段乙：课堂活动" }),
   ]));
-  expect(await dataIds(cards)).toEqual([first.id, second.id].sort());
-  await expectAnnotationDetails(page, first, "已解决");
+  expect(await dataIds(cards)).toEqual([second.id]);
+  const anchors = page.locator(".annotation-anchor");
+  await expect(anchors).toHaveCount(1);
+  expect(await dataIds(anchors)).toEqual([second.id]);
   await expectAnnotationDetails(page, second, "待处理");
+  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await expectAnnotationDetails(page, first, "已解决");
 }
 
 async function addManualAnnotation(page, marker, content) {
