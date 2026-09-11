@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from starlette.testclient import TestClient
 
@@ -149,6 +150,65 @@ def _assert_replay_denied(client: TestClient, case: dict, thread_id: str, csrf: 
     assert replay.status_code in (403, 404), replay.text
 
 
+def _private_agent_requests(
+    client: TestClient, case: dict, thread_id: str, artifact_id: str, user: dict
+):
+    root = f"/api/cases/{case['id']}/agent"
+    headers = _csrf(user)
+    return [
+        client.get(f"{root}/thread", headers=headers),
+        client.get(f"{root}/threads", headers=headers),
+        client.get(f"{root}/threads/{thread_id}", headers=headers),
+        client.post(f"{root}/thread/{thread_id}/stream", headers=headers, json={}),
+        client.post(f"{root}/thread/{thread_id}/cancel", headers=headers),
+        client.get(f"{root}/thread/{thread_id}/events", headers=headers),
+        client.post(f"{root}/thread/{thread_id}/artifacts/{artifact_id}/decision",
+                    headers=headers, json={"decision": "rejected"}),
+        client.post(f"{root}/thread/{thread_id}/writes/missing/undo", headers=headers),
+    ]
+
+
+def _assert_private_agent_denied(
+    client: TestClient, case: dict, thread_id: str, artifact_id: str, user: dict
+) -> None:
+    responses = _private_agent_requests(client, case, thread_id, artifact_id, user)
+    assert all(response.status_code in (403, 404) for response in responses)
+    assert all("作者私有修订" not in response.text for response in responses)
+
+
+def _assert_author_private_run_intact(
+    client: TestClient, case: dict, snapshot: dict, thread_id: str, artifact_id: str
+) -> None:
+    author = login(client, "user", "user123")
+    after = client.get(f"/api/cases/{case['id']}/agent/thread").json()
+    assert after["id"] == thread_id
+    assert [run["id"] for run in after["runs"]] == [run["id"] for run in snapshot["runs"]]
+    assert [artifact["id"] for artifact in after["artifacts"]] == [artifact_id]
+    assert after["artifacts"][0]["status"] == snapshot["artifacts"][0]["status"]
+    rows = client.get(f"/api/cases/{case['id']}/annotations", headers=_csrf(author)).json()
+    assert rows[0]["revisions"]
+
+
+def test_private_annotation_run_entries_are_isolated(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    annotation = create_annotation(client, author, case, "目标正文")
+    with agent.override(model=_proposal_model("作者私有修订")):
+        assert _send(client, author, case, annotation, "第一轮").status_code == 200
+    _wait_terminal(client, case["id"])
+    snapshot = client.get(f"/api/cases/{case['id']}/agent/thread").json()
+    thread_id = snapshot["id"]
+    artifact_id = snapshot["artifacts"][0]["id"]
+    _second_teacher(client)
+    _assert_private_agent_denied(
+        client, case, thread_id, artifact_id, login(client, "admin", "admin123")
+    )
+    _assert_private_agent_denied(
+        client, case, thread_id, artifact_id, login(client, "second", "second-pass")
+    )
+    _assert_author_private_run_intact(client, case, snapshot, thread_id, artifact_id)
+
+
 def _assert_author_discussion_intact(client: TestClient, case: dict, annotation: dict) -> None:
     again = login(client, "user", "user123")
     row = client.get(
@@ -188,6 +248,17 @@ def _wait_terminal(client: TestClient, case_id: str) -> None:
         if runs and runs[-1].get("status") in terminal:
             return
         time.sleep(0.05)
+    raise AssertionError("后台 Run 未在限定时间内到达终态")
+
+
+def test_wait_terminal_timeout_is_explicit(monkeypatch) -> None:
+    from unittest.mock import Mock
+
+    client = Mock()
+    client.get.return_value.json.return_value = {"runs": [{"status": "active"}]}
+    monkeypatch.setattr("time.sleep", lambda _delay: None)
+    with pytest.raises(AssertionError, match="未在限定时间内"):
+        _wait_terminal(client, "case-timeout")
 
 
 def test_admin_cannot_read_or_reply_private_discussion(client: TestClient) -> None:

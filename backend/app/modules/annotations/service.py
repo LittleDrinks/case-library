@@ -473,7 +473,11 @@ def _require_reply_actor(case: dict, annotation: dict, user: dict) -> None:
         raise CaseError(403, "仅批注作者可回复私人讨论")
 
 
-def _require_status_actor(case: dict, user: dict, status: str) -> None:
+def _require_status_actor(case: dict, annotation: dict, user: dict, status: str) -> None:
+    if annotation.get("versionId") is None:
+        if case["ownerId"] != user["id"] or annotation.get("createdBy") != user["id"]:
+            raise CaseError(403, "仅私人批注作者可改变状态")
+        return
     if status == "resolved" and case["ownerId"] != user["id"]:
         raise CaseError(403, "仅案例作者可解决批注")
     if status == "pending" and user["role"] != "admin":
@@ -494,7 +498,7 @@ def change_status(
 def _change_status(database, case_id, annotation_id, status, user, session):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
-    _require_status_actor(case, user, status)
+    _require_status_actor(case, annotation, user, status)
     expected = "pending" if status == "resolved" else "resolved"
     update = {"$set": {"status": status}}
     if status == "resolved":
