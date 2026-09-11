@@ -59,6 +59,7 @@ vi.mock("../api.js", () => ({
     agentThread: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
+    listTagGroups: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -529,4 +530,40 @@ test("a transient thread snapshot failure does not abandon the annotation watch"
   } finally {
     vi.useRealTimers();
   }
+});
+
+const readerTagCatalog = [
+  {
+    id: "g1", name: "思政元素", requiredForSubmission: false, enabled: true, sortKey: 0,
+    tags: [{ id: "t-spirit", groupId: "g1", name: "科学家精神", sortKey: 0, enabled: true }],
+  },
+];
+
+function publicCaseWithTag() {
+  return caseFixture({
+    publicationStatus: "public", publishedVersionId: "pub-v1", tagIds: ["t-spirit"],
+  });
+}
+
+test("公开阅读页加载标签目录并以名称呈现", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  api.listTagGroups.mockResolvedValue(readerTagCatalog);
+  const wrapper = render();
+  await flushPromises();
+  expect(api.listTagGroups).toHaveBeenCalledTimes(1);
+  expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
+});
+
+test("公开阅读页标签目录失败时提示且不回退内部 ID", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  api.listTagGroups.mockRejectedValue(new Error("网络错误"));
+  const wrapper = render();
+  await flushPromises();
+  const tags = wrapper.get(".case-tags").text();
+  expect(tags).toContain("标签目录加载失败");
+  expect(tags).not.toContain("t-spirit");
+  await wrapper.get(".case-tags-state button").trigger("click");
+  expect(api.listTagGroups).toHaveBeenCalledTimes(2);
 });

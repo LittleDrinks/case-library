@@ -643,7 +643,7 @@ watch(readerMode, (value) => {
 });
 onMounted(() => {
   loadCase();
-  if (!readerMode.value) loadTagCatalog();
+  loadTagCatalog();
 });
 onBeforeUnmount(() => {
   if (!readerMode.value) crashDraft.flush();

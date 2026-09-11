@@ -22,7 +22,9 @@ const filteredGroups = computed(() => selectableGroups.value.map((group) => ({
 })).filter((group) => group.tags.length));
 const labels = computed(() => {
   const index = tagIndex(props.groups);
-  return props.tagIds.map(id => ({ id, name: index.get(id)?.name || id }));
+  return props.tagIds
+    .filter((id) => index.has(id))
+    .map((id) => ({ id, name: index.get(id).name }));
 });
 const quiet = computed(() => (
   !props.editable && !props.tagIds.length && !props.loading && !props.error
@@ -45,7 +47,7 @@ function remove(id) {
     <Tags :size="13" aria-hidden="true" />
     <span v-if="loading" class="case-tags-state"><LoaderCircle class="spin" :size="12" />标签目录加载中</span>
     <span v-else-if="error" class="case-tags-state" role="alert">
-      {{ error }}<button v-if="editable" type="button" @click="emit('retry')">重试</button>
+      {{ error }}<button type="button" @click="emit('retry')">重试</button>
     </span>
     <template v-else>
       <ul v-if="labels.length" class="case-tag-list" aria-label="案例标签">
