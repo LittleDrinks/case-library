@@ -1,8 +1,8 @@
-"""#214 初稿写入：空/模板草稿整体生成、明确指令直接写入可撤销、候选确认。
+"""正文写入：整篇 AI 版本、明确指令直接写入可撤销、候选修订确认。
 
-覆盖：直接写入的服务端守卫（作者、工作版本、基线修订号、整篇仅空/模板、
-选区仅锁定范围、一次运行一次写入）、撤销的修订号守卫与幂等、整篇候选的
-提议-确认流程、工具只真实成功才宣称写入，以及只读运行不暴露写工具。
+覆盖：直接写入的服务端守卫（作者、工作版本、基线修订号、选区仅锁定范围、
+一次运行一次写入）、撤销的修订号守卫与幂等、整篇 AI 版本的提议流程、工具
+只真实成功才宣称写入，以及只读运行不暴露写工具。
 """
 
 from __future__ import annotations
@@ -184,16 +184,10 @@ def test_document_candidate_and_write_store_canonical_blocks(
         {"type": "paragraph", "text": "段落"},
     ]
     _publish(database, AgentRepository(database), run, artifact)
-    row = database.agent_artifacts.find_one({"id": artifact.id}, {"_id": 0})
-    assert row["blocks"][0]["type"] == "ordered_list"
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert result["artifact"].status == "accepted"
-    updated = database.cases.find_one({"id": case["id"]})
-    assert [node["type"] for node in updated["document"]["content"]] == [
-        "orderedList", "paragraph",
-    ]
+    row = database.case_versions.find_one({"sourceRunId": run.id}, {"_id": 0})
+    assert row["document"]["content"][0]["type"] == "orderedList"
+    assert database.agent_artifacts.count_documents({}) == 0
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
 
 
 def _assert_blank_documents() -> None:
@@ -547,7 +541,7 @@ def test_undo_requires_author_and_editable_case(client: TestClient) -> None:
     assert denied.value.status_code == 404
 
 
-# ---- 整篇候选：确认后才写入 ----
+# ---- 整篇 AI 版本：成功后直接进入只读版本时间线 ----
 
 
 def _pending_document_artifact(client: TestClient, auth: dict, document: dict | None):
@@ -560,80 +554,104 @@ def _pending_document_artifact(client: TestClient, auth: dict, document: dict | 
     )
 
 
-def _publish(database, repository, run, artifact) -> None:
+def _publish(database, repository, run, artifact=None, write_record=None, parts=None) -> bool:
     from datetime import UTC, datetime
 
     from app.modules.agent.models import AgentMessage
 
     message = AgentMessage(
         id=f"assistant-{run.id}", thread_id=run.thread_id, run_id=run.id,
-        role="assistant", parts=[{"type": "text", "text": "完成"}],
+        role="assistant", parts=parts or [{"type": "text", "text": "完成"}],
         created_at=datetime.now(UTC),
     )
-    assert repository.complete_run(run.id, message, resources=[], artifact=artifact)
+    return repository.complete_run(
+        run.id, message, resources=[], artifact=artifact, write_record=write_record
+    )
 
 
-def _assert_accepted_document_candidate(
-        database, thread, case, run, artifact, auth) -> None:
+def _assert_document_version_created(database, case, run, artifact) -> None:
     assert artifact.kind == "document"
     assert database.agent_artifacts.count_documents({}) == 0
     _publish(database, AgentRepository(database), run, artifact)
-    pending = database.agent_artifacts.find_one({"id": artifact.id}, {"_id": 0})
-    assert pending["status"] == "pending"
-    assert pending["kind"] == "document"
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert result["artifact"].status == "accepted"
-    updated = database.cases.find_one({"id": case["id"]})
-    assert updated["revision"] == 2
-    assert [node["type"] for node in updated["document"]["content"]] == [
+    version = database.case_versions.find_one({"sourceRunId": run.id}, {"_id": 0})
+    assert version["kind"] == "ai"
+    assert [node["type"] for node in version["document"]["content"]] == [
         "heading", "paragraph", "bulletList",
     ]
+    assert database.agent_artifacts.count_documents({}) == 0
 
 
-def test_document_candidate_applies_after_accept(client: TestClient) -> None:
+def test_document_generation_creates_readonly_version(client: TestClient) -> None:
     auth = _login(client)
     database, thread, case, run, artifact = _pending_document_artifact(
         client, auth, _document()
     )
-    _assert_accepted_document_candidate(database, thread, case, run, artifact, auth)
+    _assert_document_version_created(database, case, run, artifact)
 
 
-def test_document_candidate_reject_keeps_body(client: TestClient) -> None:
+def test_document_generation_cancel_keeps_body(client: TestClient) -> None:
     auth = _login(client)
     database, thread, case, run, artifact = _pending_document_artifact(
         client, auth, _document()
     )
-    _publish(database, AgentRepository(database), run, artifact)
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "rejected",
-    )
-    assert result["artifact"].status == "rejected"
+    assert AgentRepository(database).cancel_run(run.id)
+    assert database.case_versions.count_documents({"caseId": case["id"]}) == 0
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
 
 
-def test_document_candidate_refused_on_existing_body(client: TestClient) -> None:
+def test_document_generation_stale_baseline_is_not_saved(client: TestClient) -> None:
     auth = _login(client)
-    with pytest.raises(CaseError) as excinfo:
-        _pending_document_artifact(client, auth, _document(*PARAGRAPHS))
-    assert excinfo.value.status_code == 422
+    database, _thread, case, run, artifact = _pending_document_artifact(
+        client, auth, _document()
+    )
+    database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
+
+    _publish(
+        database, AgentRepository(database), run, artifact,
+        parts=[{"type": "tool-propose_document", "output": {"artifactId": artifact.id}}],
+    )
+
+    assert database.case_versions.count_documents({"caseId": case["id"]}) == 0
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
+    message = database.agent_messages.find_one({"runId": run.id, "role": "assistant"})
+    assert message["parts"][0]["output"]["detail"] == "AI版本未保存：正文基线已变化，未创建独立版本"
+
+
+def test_document_generation_frozen_case_reports_freeze_reason(client: TestClient) -> None:
+    auth = _login(client)
+    database, _thread, case, run, artifact = _pending_document_artifact(
+        client, auth, _document()
+    )
+    database.cases.update_one(
+        {"id": case["id"]}, {"$set": {"workflowStatus": "submitted"}}
+    )
+
+    _publish(
+        database, AgentRepository(database), run, artifact,
+        parts=[{"type": "tool-propose_document", "output": {"artifactId": artifact.id}}],
+    )
+
+    message = database.agent_messages.find_one({"runId": run.id, "role": "assistant"})
+    assert message["parts"][0]["output"]["detail"] == "AI版本未保存：案例已冻结，未创建独立版本"
+
+
+def test_document_generation_allows_existing_body(client: TestClient) -> None:
+    auth = _login(client)
+    database, _thread, _case, _run, artifact = _pending_document_artifact(
+        client, auth, _document(*PARAGRAPHS)
+    )
+    assert artifact.kind == "document"
     assert client.app.state.database.agent_artifacts.count_documents({}) == 0
 
 
-def test_only_one_artifact_per_run_covers_both_kinds(client: TestClient) -> None:
+def test_document_generation_has_no_candidate_card(client: TestClient) -> None:
     auth = _login(client)
     database, thread, case, run, artifact = _pending_document_artifact(
         client, auth, _document()
     )
     _publish(database, AgentRepository(database), run, artifact)
-    with pytest.raises(CaseError) as excinfo:
-        artifacts.propose_document_artifact(
-            database, case["id"], thread.id, run.id,
-            [{"type": "paragraph", "text": "换一版"}], "重提", [], auth["user"],
-        )
-    assert excinfo.value.status_code == 409
-    assert database.agent_artifacts.count_documents({"runId": run.id}) == 1
+    assert database.agent_artifacts.count_documents({"runId": run.id}) == 0
+    assert database.case_versions.count_documents({"sourceRunId": run.id}) == 1
 
 
 # ---- 工具层：真实成功才宣称写入 ----
@@ -643,6 +661,7 @@ def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleN
     return SimpleNamespace(
         database=database, case_id=case["id"], thread_id=run.thread_id,
         run_id=run.id, user=user, proposed=None, wrote=wrote, evidence=[],
+        full_generation_allowed=True,
     )
 
 
@@ -699,6 +718,96 @@ def test_propose_document_tool_stages_pending_candidate(client: TestClient) -> N
     with pytest.raises(ModelRetry):
         asyncio.run(propose_document(_ctx(deps), DRAFT_BLOCKS, "再次提议"))
     assert database.agent_artifacts.count_documents({}) == 0
+
+
+def test_document_candidate_blocks_direct_write_before_body_side_effect(
+        client: TestClient) -> None:
+    import asyncio
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    candidate_deps = _deps(database, case, run, auth["user"])
+    write_deps = _deps(database, case, run, auth["user"])
+
+    asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
+    with pytest.raises(ModelRetry):
+        asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+    assert database.agent_writes.count_documents({}) == 0
+
+
+def test_direct_write_blocks_document_candidate_before_candidate_side_effect(
+        client: TestClient) -> None:
+    import asyncio
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    write_deps = _deps(database, case, run, auth["user"])
+    candidate_deps = _deps(database, case, run, auth["user"])
+
+    output = asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+    assert output["status"] == "written"
+    with pytest.raises(ModelRetry):
+        asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
+
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
+    assert database.agent_writes.count_documents({}) == 1
+    assert database.agent_artifacts.count_documents({}) == 0
+
+
+def _concurrent_write_call(kind, deps, start):
+    import asyncio
+
+    start.wait(timeout=5)
+    try:
+        output = asyncio.run(
+            propose_document(_ctx(deps), DRAFT_BLOCKS, "完整生成")
+            if kind == "candidate" else _call(deps, "document", DRAFT_BLOCKS, "直接写入")
+        )
+        return kind, "ok", output
+    except ModelRetry as error:
+        return kind, "retry", str(error)
+
+
+def _concurrent_write_results(candidate_deps, write_deps):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    start = Barrier(2)
+    calls = (("candidate", candidate_deps), ("write", write_deps))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_concurrent_write_call, *call, start) for call in calls]
+        return [future.result(timeout=10) for future in futures]
+
+
+def _assert_concurrent_write_result(database, case, run, results):
+    assert [result[1] for result in results].count("ok") == 1
+    assert [result[1] for result in results].count("retry") == 1
+    winner = next(result for result in results if result[1] == "ok")
+    loser = next(result for result in results if result[1] == "retry")
+    assert any(detail in loser[2] for detail in ("另一条正文路径", "正文已更新"))
+    assert database.agent_artifacts.count_documents({}) == 0
+    expected = (1, 0, "document") if winner[0] == "candidate" else (2, 1, "direct_write")
+    assert database.cases.find_one({"id": case["id"]})["revision"] == expected[0]
+    assert database.agent_writes.count_documents({}) == expected[1]
+    assert database.agent_runs.find_one({"id": run.id})["writePath"] == expected[2]
+
+
+def test_concurrent_document_and_direct_write_claim_one_path(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    _thread, run = _locked_run(database, auth, case)
+    results = _concurrent_write_results(
+        _deps(database, case, run, auth["user"]), _deps(database, case, run, auth["user"])
+    )
+    _assert_concurrent_write_result(database, case, run, results)
 
 
 def test_write_tools_only_available_to_author_runs() -> None:
@@ -844,7 +953,18 @@ def _assert_streamed_write_persisted(database, case_id: str, thread_id: str):
     assert run["writeAuthorized"] is True
     write = database.agent_writes.find_one({"threadId": thread_id}, {"_id": 0})
     assert write["status"] == "written"
+    _assert_streamed_write_version(database, updated, thread_id, write)
     return write
+
+
+def _assert_streamed_write_version(database, updated, thread_id, write) -> None:
+    version = database.case_versions.find_one({"sourceRunId": write["runId"]}, {"_id": 0})
+    assert version["kind"] == "ai"
+    assert version["document"] == updated["document"]
+    message = database.agent_messages.find_one({"threadId": thread_id, "role": "assistant"})
+    output = next(part["output"] for part in message["parts"]
+                  if part.get("type") == "tool-write_document")
+    assert output["versionId"] == version["id"]
 
 
 def _undo_streamed_write(client, auth, case, thread_id: str, write) -> None:
@@ -888,6 +1008,24 @@ def test_streamed_direct_write_lands_and_undo_api_restores(client: TestClient) -
     _await_run(database, thread_id, "completed")
     write = _assert_streamed_write_persisted(database, case["id"], thread_id)
     _undo_streamed_write(client, auth, case, thread_id, write)
+    assert database.case_versions.count_documents({"sourceRunId": write["runId"]}) == 1
+
+
+def test_direct_write_version_is_idempotent(client: TestClient) -> None:
+    auth = _login(client)
+    database, thread, _case, write = _written_case(client, auth)
+    run = AgentRepository(database).latest_run(thread.id)
+    repository = AgentRepository(database)
+    assert _publish(database, repository, run, write_record=write)
+    assert not _publish(database, repository, run, write_record=write)
+    assert database.case_versions.count_documents({"sourceRunId": run.id}) == 1
+
+
+def test_cancelled_direct_write_does_not_create_a_completed_version(client: TestClient) -> None:
+    auth = _login(client)
+    database, _thread, _case, write = _written_case(client, auth)
+    assert AgentRepository(database).cancel_run(write["runId"])
+    assert database.case_versions.count_documents({"sourceRunId": write["runId"]}) == 0
 
 
 def test_normal_generation_message_blocks_mistaken_direct_write(client: TestClient) -> None:

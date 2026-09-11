@@ -47,6 +47,24 @@ function activeWriteSnapshot() {
   return running;
 }
 
+function versionSnapshot() {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{
+    type: "tool-propose_document", state: "output-available",
+    output: { status: "created", kind: "ai", versionId: "cv-ai-1" },
+  }];
+  return result;
+}
+
+function directWriteVersionSnapshot() {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{
+    type: "tool-write_document", state: "output-available",
+    output: { status: "written", versionStatus: "created", versionId: "cv-ai-2" },
+  }];
+  return result;
+}
+
 function streamResponse(chunks) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
@@ -127,6 +145,22 @@ it("hydrates an undone write from the server snapshot", async () => {
 
   expect(wrapper.get('[data-testid="agent-write-undone"]').text()).toBe("已撤销写入");
   expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
+});
+
+it("notifies the workbench when a saved AI version appears", async () => {
+  api.agentThread.mockResolvedValue(versionSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+});
+
+it("notifies the workbench when a direct full write saves an AI version", async () => {
+  api.agentThread.mockResolvedValue(directWriteVersionSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
 });
 
 it("refreshes the case after an in-flight write is hydrated", async () => {

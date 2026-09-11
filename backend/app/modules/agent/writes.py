@@ -25,7 +25,7 @@ from pymongo.database import Database
 from app.core.ids import new_id
 from app.modules.agent import blocks, prosemirror
 from app.modules.agent.models import AgentWrite
-from app.modules.agent.repository import AgentRepository, transaction
+from app.modules.agent.repository import AgentRepository, claim_run_write_path, transaction
 from app.modules.cases.service import CaseError
 from app.modules.cases.snapshots import record_snapshot
 
@@ -38,6 +38,16 @@ _QUOTED_SPANS = re.compile(
     r'|"[^"]*"|\'[^\']*\'|（[^）]*）|\([^)]*\)'
 )
 _CLAUSE_SPLIT = re.compile(r"[。！？!?；;.\n]")
+_DISCOURSE_SPLIT = re.compile(r"[，,：:、]|但是|但|不过|而是")
+
+
+def message_clauses(text: str, *, split_discourse: bool = False) -> list[str]:
+    cleaned = _QUOTED_SPANS.sub("", text or "")
+    if split_discourse:
+        cleaned = _DISCOURSE_SPLIT.sub(".", cleaned)
+    return _CLAUSE_SPLIT.split(cleaned)
+
+
 # 从句内出现即否定，不得授权。
 _NEGATIONS = (
     "不", "没", "未", "勿", "别", "免", "禁", "拒", "防", "慎", "莫",
@@ -66,8 +76,7 @@ def direct_write_requested(text: str) -> bool:
     剔除引用后按标点拆从句；只有包含核心指令词且无否定、疑问、条件、
     名词化提及标记的从句才授权。普通生成、润色与解释性文字一律不授权。
     """
-    cleaned = _QUOTED_SPANS.sub("", text or "")
-    for clause in _CLAUSE_SPLIT.split(cleaned):
+    for clause in message_clauses(text):
         match = _DIRECT_WRITE_CORE.search(clause)
         if match is None:
             continue
@@ -120,6 +129,8 @@ def _apply(database, case_id, run_id, scope, normalized, user, summary, session)
     case, run, document, steps = _write_guards(
         database, case_id, run_id, scope, normalized, user, session,
     )
+    if not claim_run_write_path(database, run_id, "direct_write", session):
+        raise CaseError(409, "本次运行已选择另一条正文路径")
     record_snapshot(database, case, user, "pre_agent_write", session)
     write = _new_write_record(case, run, scope, normalized, user, summary, document, steps)
     return _commit_write(database, case_id, user, run, write, steps, scope, session)

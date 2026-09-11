@@ -24,7 +24,7 @@ const props = defineProps({
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits([
-  "case-revised", "clear-writing-context", "annotations-refresh",
+  "case-revised", "versions-updated", "clear-writing-context", "annotations-refresh",
 ]);
 
 const {
@@ -54,6 +54,7 @@ const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
 const syncedWrites = new Set();
+const syncedVersions = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
@@ -233,6 +234,7 @@ async function scrollToLatest() {
 watch(messages, () => {
   void refreshSources();
   void syncWrittenDocuments();
+  syncGeneratedVersions();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
@@ -249,6 +251,7 @@ watch(artifacts, () => {
 }, { deep: true });
 watch(threadId, () => {
   syncedWrites.clear();
+  syncedVersions.clear();
   pendingWriteSync = false;
   hydratedWriteThread = "";
   refreshSourcePermissions();
@@ -386,6 +389,16 @@ function syncWrittenDocuments() {
   const waitingForTerminal = writeRunInFlight() && !sending.value;
   pendingWriteSync = waitingForTerminal;
   if (!waitingForTerminal) void refreshCaseAfterWrite();
+}
+
+function syncGeneratedVersions() {
+  const ids = messages.value.flatMap((message) => message.parts || [])
+    .filter((part) => ["tool-propose_document", "tool-write_document"].includes(part.type)
+      && part.output?.versionId)
+    .map((part) => part.output.versionId);
+  const fresh = ids.filter((id) => !syncedVersions.has(id));
+  fresh.forEach((id) => syncedVersions.add(id));
+  if (fresh.length) emit("versions-updated");
 }
 
 async function refreshCaseAfterWrite() {

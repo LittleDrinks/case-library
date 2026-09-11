@@ -334,6 +334,7 @@ def _complete(context: RunContext) -> None:
         reader_case_id=context.case["id"] if reader else None,
         reader_version_id=context.case.get("versionId") if reader else None,
         artifact=artifact,
+        write_record=context.deps.write_record if context.deps else None,
     ):
         context.lost = True
 
