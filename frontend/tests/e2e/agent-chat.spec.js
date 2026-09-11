@@ -203,6 +203,30 @@ async function undoCount(page) {
   return page.getByTestId("agent-undo-write").count();
 }
 
+async function unauthorizedWriteKeepsDraft(page, created) {
+  await selectDraftRange(page, "AI生成正文");
+  await sendChat(page, "帮我把这段话写入正文试试");
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  expect(await undoCount(page)).toBe(0);
+  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
+  expect(history.versions).toHaveLength(1);
+  return history;
+}
+
+async function authorizedWriteAndUndo(page, created, version) {
+  await selectDraftRange(page, "AI生成正文");
+  await sendChat(page, "请直接写入替换选中文字");
+  await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
+  await expect(page.getByTestId("agent-undo-write")).toBeVisible();
+  await page.getByTestId("agent-undo-write").click();
+  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
+  expect(history.versions).toHaveLength(1);
+  expect(history.versions[0].id).toBe(version.id);
+  expect(history.versions[0].kind).toBe("ai");
+}
+
 test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page }) => {
   await login(page);
   await configureChat(page);
@@ -215,24 +239,8 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await page.reload();
   await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
 
-  await selectDraftRange(page, "AI生成正文");
-  await sendChat(page, "帮我把这段话写入正文试试");
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  expect(await undoCount(page)).toBe(0);
-  let history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-
-  await selectDraftRange(page, "AI生成正文");
-  await sendChat(page, "请直接写入替换选中文字");
-  await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
-  await expect(page.getByTestId("agent-undo-write")).toBeVisible();
-  await page.getByTestId("agent-undo-write").click();
-  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  expect(history.versions[0].id).toBe(version.id);
-  expect(history.versions[0].kind).toBe("ai");
+  await unauthorizedWriteKeepsDraft(page, created);
+  await authorizedWriteAndUndo(page, created, version);
 });
 
 async function submitMessage(page, text) {
