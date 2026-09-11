@@ -27,12 +27,10 @@ async function authHeaders(request) {
 
 async function applyTagSet(request, headers, caseId) {
   const current = await (await request.get(`/api/cases/${caseId}`)).json();
-  // 通过真实目录形状设置标签：覆盖提交所需标签并留出后续编辑增量。
-  const tagIds = [...PUBLISHED_TAG_IDS, "tag-seed-1-4"];
   const patched = await (await request.patch(`/api/cases/${caseId}`, {
-    headers, data: { revision: current.revision, tagIds },
+    headers, data: { revision: current.revision, tagIds: PUBLISHED_TAG_IDS },
   })).json();
-  expect(patched.tagIds).toEqual(expect.arrayContaining([...PUBLISHED_TAG_IDS, "tag-seed-1-4"]));
+  expect(patched.tagIds).toEqual(PUBLISHED_TAG_IDS);
 }
 
 async function createTaggedCase(request, marker) {
@@ -103,21 +101,42 @@ async function assertEditedTags(page) {
   await expect(tags).not.toContainText("tag-seed");
 }
 
-async function reopenAndAddTag(page, caseId, marker) {
-  // 作者另开新稿得到可编辑工作版本（既有 reopen 流程），修改标签后等待自动保存。
+async function assertPublicReadonly(page) {
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
+}
+
+async function assertPublicKeepsApprovedTags(page, caseId, marker) {
+  // 草稿保存不改变已批准版本：公开页继续展示旧标签。
+  await openPublicCase(page, caseId, marker);
+  await assertRealTagNames(page);
+  await assertPublicReadonly(page);
+}
+
+async function reopenAndSaveTags(page, caseId, marker) {
+  // 作者另开新稿得到可编辑工作版本（既有 reopen 流程），修改标签并等待本次保存返回。
   await page.goto(`/#/workbench/${caseId}`);
   await page.getByRole("button", { name: "另开新稿" }).click();
   await expect(page.locator("textarea.document-title")).not.toHaveAttribute("readonly");
-  const popover = page.locator(".case-tag-popover");
+  const saveDone = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/cases/${caseId}`) && response.request().method() === "PATCH",
+  );
   await page.getByRole("button", { name: "设置标签" }).click();
-  // 作者真实修改：勾上劳动教育并取消文化自信，产生工作记录净变化后等待自动保存。
+  const popover = page.locator(".case-tag-popover");
+  // 作者真实修改：勾上劳动教育并取消文化自信，产生工作记录净变化。
   await popover.locator("label", { hasText: ADDED_TAG }).locator("input").check();
   await popover.locator("label", { hasText: REMOVED_TAG }).locator("input").uncheck();
-  await expect(page.getByText("已保存")).toBeVisible();
+  await expectThisSaveApplied(await saveDone);
   await page.getByRole("button", { name: "设置标签" }).click();
 
   await page.reload();
   await expect(page.locator("textarea.document-title")).toHaveValue(marker);
+}
+
+async function expectThisSaveApplied(saved) {
+  expect(saved.ok()).toBe(true);
+  const savedTagIds = (await saved.json()).tagIds;
+  expect(savedTagIds).toContain(TAG_IDS[ADDED_TAG]);
+  expect(savedTagIds).not.toContain(TAG_IDS[REMOVED_TAG]);
 }
 
 async function newBrowserPage(browser) {
@@ -170,21 +189,22 @@ test("公开阅读目录加载失败展示错误与重试，不回退内部 ID",
   await reader.context.close();
 });
 
-test("作者从公开阅读回到工作台修改标签并保存，刷新后名称与公开页一致", async ({ browser }, testInfo) => {
+test("作者另开新稿修改标签保存后，公开页保持已批准版本标签", async ({ browser }, testInfo) => {
   const { context, page, request } = await newBrowserPage(browser);
   await signIn(page, AUTHOR);
   const marker = `作者编辑标签-${Date.now()}`;
   const created = await publishWithAdmin(browser, request, marker);
+
   await openPublicCase(page, created.id, marker);
   await assertRealTagNames(page);
+  await assertPublicReadonly(page);
   await capture(page, testInfo, "author-reader-tags.png");
-  await reopenAndAddTag(page, created.id, marker);
+
+  await reopenAndSaveTags(page, created.id, marker);
   await assertEditedTags(page);
   await capture(page, testInfo, "author-workbench-tags.png");
 
-  await openPublicCase(page, created.id, marker);
-  await assertEditedTags(page);
+  await assertPublicKeepsApprovedTags(page, created.id, marker);
   await capture(page, testInfo, "author-public-after-edit.png");
   await context.close();
 });
-
