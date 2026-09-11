@@ -384,13 +384,13 @@ def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
 
 def test_utf16_selection_preserves_following_text() -> None:
     document = _document("A😀B")
-    updated = prosemirror.replaced_document(document, 2, 4, "😀", "X")
+    updated, _steps = prosemirror.replaced_document_with_steps(document, 2, 4, "😀", "X")
     assert updated["content"][0]["content"][0]["text"] == "AXB"
 
 
 def test_native_transform_preserves_rich_nodes() -> None:
     block = prosemirror.text_blocks(RICH_DOCUMENT)[0]
-    updated = prosemirror.replaced_document(
+    updated, _steps = prosemirror.replaced_document_with_steps(
         RICH_DOCUMENT, block["start"] + 3, block["end"] - 1, "目标", "新"
     )
     content = updated["content"]

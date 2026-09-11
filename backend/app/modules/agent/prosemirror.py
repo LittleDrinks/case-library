@@ -144,16 +144,6 @@ def check_target(document: dict[str, Any], from_pos: int, to_pos: int, quote: st
         raise ParagraphChangedError
 
 
-def replaced_document(
-    document: dict[str, Any], from_pos: int, to_pos: int, quote: str, replacement: str
-) -> dict[str, Any]:
-    """Replace only a checked range with a native ProseMirror transform."""
-    check_target(document, from_pos, to_pos, quote)
-    content = _SCHEMA.text(replacement) if replacement else []
-    updated, _steps = _replace(document, from_pos, to_pos, content)
-    return updated
-
-
 def replaced_document_with_steps(
     document: dict[str, Any], from_pos: int, to_pos: int, quote: str, replacement: str
 ):
@@ -164,24 +154,6 @@ def replaced_document_with_steps(
 
 def _replace(document: dict[str, Any], from_pos: int, to_pos: int, content):
     return _result(Transform(_document(document)).replace_with(from_pos, to_pos, content))
-
-
-def replaced_document_blocks(
-    document: dict[str, Any], from_pos: int, to_pos: int, quote: str,
-    block_nodes: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Replace a checked range with structured block nodes.
-
-    整块替换按节点边界处理；部分选区由 ProseMirror 拆分原段落，保留前后文、
-    标题、列表和引用等块结构。
-    """
-    check_target(document, from_pos, to_pos, quote)
-    block = selection_block(document, from_pos, to_pos)
-    if from_pos == block["start"] and to_pos == block["end"]:
-        from_pos, to_pos = block["start"] - 1, block["end"] + 1
-    nodes = [_SCHEMA.node_from_json(node) for node in block_nodes]
-    updated, _steps = _replace(document, from_pos, to_pos, nodes)
-    return updated
 
 
 def replaced_document_blocks_with_steps(

@@ -1,8 +1,15 @@
 import { mount } from "@vue/test-utils";
 import { TextSelection } from "@tiptap/pm/state";
 import { nextTick } from "vue";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import CanvasEditor from "./CanvasEditor.vue";
+
+// 挂载过的编辑器必须在环境销毁前 destroy，否则 DOMObserver 挂起定时器越界触发
+const mounted = [];
+
+afterEach(() => {
+  while (mounted.length) mounted.pop().unmount();
+});
 
 const caseDocument = {
   type: "doc",
@@ -16,6 +23,7 @@ async function setup(options = {}) {
   const wrapper = mount(CanvasEditor, {
     props: { document: caseDocument, editable: true, ...options },
   });
+  mounted.push(wrapper);
   await nextTick();
   const context = wrapper.emitted("writing-context").at(-1)[0];
   return { wrapper, context };
@@ -219,6 +227,26 @@ it("正文插入由编辑器映射批注标记并上报原生 steps", async () =
   expect(wrapper.emitted("change").at(-1)[0]).toMatchObject({
     document: expect.any(Object), steps: expect.arrayContaining([expect.any(Object)]),
   });
+});
+
+it("跨 hardBreak 批注用与创建一致的换行文本渲染标记", async () => {
+  const breakDocument = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [
+        { type: "text", text: "第一行" }, { type: "hardBreak" }, { type: "text", text: "第二行" },
+      ] },
+    ],
+  };
+  const annotation = {
+    id: "annotation-1", from: 9, to: 16, quote: "第一行\n第二行", revision: 3,
+    anchorState: "active",
+  };
+  const { wrapper } = await setup({ document: breakDocument, revision: 3, annotations: [annotation] });
+  const { editor } = wrapper.vm;
+  expect(editor.state.doc.textBetween(9, 16, "\n", "\n")).toBe(annotation.quote);
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(true);
 });
 
 it("点击正文批注标记只发出打开事件", async () => {
