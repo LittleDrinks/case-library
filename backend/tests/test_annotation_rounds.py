@@ -820,5 +820,3 @@ def test_rejected_merge_interleaves_real_completion_on_replica_set(monkeypatch):
         monkeypatch.undo()
         _cleanup_merge_data(database, marker)
         mongo.close()
-
-
