@@ -177,3 +177,30 @@ def test_non_owner_cannot_merge_author_annotation(client: TestClient) -> None:
         merge_path(case, annotation), headers={"X-CSRF-Token": admin["csrfToken"]}
     )
     assert response.status_code == 403
+
+
+def _status(client: TestClient, case: dict, annotation: dict, user: dict, value: str):
+    return client.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation['id']}/status",
+        headers={"X-CSRF-Token": user["csrfToken"]}, json={"status": value},
+    )
+
+
+def _annotation_rows(client: TestClient, case: dict, user: dict) -> list[dict]:
+    return client.get(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": user["csrfToken"]},
+    ).json()
+
+
+def test_admin_cannot_reopen_private_annotation(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    annotation = create_annotation(client, author, case, "目标正文")
+    assert _status(client, case, annotation, author, "resolved").status_code == 200
+    admin = login(client, "admin", "admin123")
+    assert _status(client, case, annotation, admin, "pending").status_code == 403
+    author = login(client, "user", "user123")
+    current = _annotation_rows(client, case, author)[0]
+    assert current["status"] == "resolved"
+    assert current["content"] == "请补充评价依据。"

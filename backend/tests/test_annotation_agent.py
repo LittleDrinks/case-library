@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from starlette.testclient import TestClient
 
@@ -188,6 +189,17 @@ def _wait_terminal(client: TestClient, case_id: str) -> None:
         if runs and runs[-1].get("status") in terminal:
             return
         time.sleep(0.05)
+    raise AssertionError("后台 Run 未在限定时间内到达终态")
+
+
+def test_wait_terminal_timeout_is_explicit(monkeypatch) -> None:
+    from unittest.mock import Mock
+
+    client = Mock()
+    client.get.return_value.json.return_value = {"runs": [{"status": "active"}]}
+    monkeypatch.setattr("time.sleep", lambda _delay: None)
+    with pytest.raises(AssertionError, match="未在限定时间内"):
+        _wait_terminal(client, "case-timeout")
 
 
 def test_admin_cannot_read_or_reply_private_discussion(client: TestClient) -> None:
