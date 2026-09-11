@@ -25,7 +25,7 @@ function caseDocument() {
   return {
     type: "doc",
     content: [
-      { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
+      { type: "paragraph", content: [{ type: "text", text: "第一段保持原样。" }] },
       { type: "paragraph", content: [{ type: "text", text: "第二段：教学目标需要更明确的评价依据。" }] },
     ],
   };

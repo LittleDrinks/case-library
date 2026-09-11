@@ -143,10 +143,12 @@ def _proposal_response(messages, info, selection, second_round) -> ModelResponse
     new_annotation = second_round and not _has_previous_proposal(messages)
     instructions = getattr(info, "instructions", None) or ""
     locked = _locked_selection(instructions)
-    if new_annotation and locked:
+    if locked:
         start, end = locked
+    elif new_annotation:
+        start, end = TRACER_FIRST_SELECTION
     else:
-        start, end = TRACER_FIRST_SELECTION if new_annotation else (selection or locked or TRACER_SELECTION)
+        start, end = selection or TRACER_SELECTION
     return _tool_response("propose_revision", {
         "start": start, "end": end,
         "replacement": SECOND_REPLACEMENT if second_round else REPLACEMENT,
