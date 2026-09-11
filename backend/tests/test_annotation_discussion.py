@@ -100,24 +100,34 @@ def test_merge_uses_latest_revision_after_unrelated_edit_and_is_idempotent(clien
     case = create_case(client, user, "目标正文")
     annotation = create_annotation(client, user, case, "目标正文")
     seed_revisions(client, annotation, "旧轮改写", "最新有效改写")
+    saved = _edit_before_merge(client, user, case)
+    merged = client.post(merge_path(saved, annotation), headers={"X-CSRF-Token": user["csrfToken"]})
+    _assert_merge_applied_latest(merged, saved)
+    repeated = client.post(
+        merge_path(merged.json()["case"], annotation),
+        headers={"X-CSRF-Token": user["csrfToken"]},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["case"]["revision"] == merged.json()["case"]["revision"]
 
+
+def _edit_before_merge(client: TestClient, user: dict, case: dict) -> dict:
     saved = save_document(
         client, user, case, document("前置目标正文"),
         [{"stepType": "replace", "from": paragraph_start(), "to": paragraph_start(),
           "slice": {"content": [{"type": "text", "text": "前置"}]}}],
     )
     assert saved.status_code == 200
-    merged = client.post(merge_path(saved.json(), annotation), headers={"X-CSRF-Token": user["csrfToken"]})
+    return saved.json()
+
+
+def _assert_merge_applied_latest(merged, saved_case) -> None:
     assert merged.status_code == 200
     result = merged.json()
     assert result["annotation"]["status"] == "resolved"
     assert result["annotation"]["revisions"][-1]["status"] == "accepted"
-    assert result["case"]["revision"] == saved.json()["revision"] + 1
+    assert result["case"]["revision"] == saved_case["revision"] + 1
     assert "最新有效改写" in result["case"]["document"]["content"][1]["content"][0]["text"]
-
-    repeated = client.post(merge_path(result["case"], annotation), headers={"X-CSRF-Token": user["csrfToken"]})
-    assert repeated.status_code == 200
-    assert repeated.json()["case"]["revision"] == result["case"]["revision"]
 
 
 def test_direct_close_keeps_body_and_revision_history(client: TestClient) -> None:

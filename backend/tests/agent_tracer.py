@@ -106,6 +106,10 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
         return _tool_response("search_corpus", {"query": _summary_query(messages)})
     if "read_source" not in called:
         return _tool_response("read_source", _search_source(messages))
+    return _tracer_proposal(messages, selection, called)
+
+
+def _tracer_proposal(messages, selection, called) -> ModelResponse:
     if "propose_revision" not in called:
         start, end = selection or TRACER_SELECTION
         second_round = "第二轮" in _latest_prompt(messages)

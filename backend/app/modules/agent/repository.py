@@ -276,18 +276,12 @@ class AgentRepository:
         self._append_start_events(thread.id, run, message.id, session)
         return run
 
-    def retry_run(
-        self,
-        thread: AgentThread,
-        user_message_id: str,
-        assistant_id: str,
-        owner_id: str | None = None,
-        quota_ids: tuple[str, ...] = (),
-        skill_bindings: list[dict[str, str]] | None = None,
-        base_revision: int | None = None, target: ArtifactTarget | None = None,
-        write_authorized: bool = False,
-        annotation_id: str | None = None,
-    ) -> AgentRun:
+    def retry_run(self, thread: AgentThread, user_message_id: str, assistant_id: str,
+                  owner_id: str | None = None, quota_ids: tuple[str, ...] = (),
+                  skill_bindings: list[dict[str, str]] | None = None,
+                  base_revision: int | None = None, target: ArtifactTarget | None = None,
+                  write_authorized: bool = False,
+                  annotation_id: str | None = None) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
             return _transaction(self.database, lambda session: self._retry_run(
