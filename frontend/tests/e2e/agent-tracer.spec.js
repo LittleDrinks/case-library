@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { SKILL_ID, teachingPackage } from "./skill-package.js";
 
+const PROVIDER_BASE_URL = process.env.E2E_PROVIDER_BASE_URL || "http://ai-provider:8080/v1";
 const REQUEST_TEXT = "请结合平台资料修订第2段：补充评价依据";
 const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
@@ -42,7 +43,7 @@ async function configureChat(page) {
   const response = await page.context().request.put("/api/ai/settings", {
     headers: { "X-CSRF-Token": await csrf(page) },
     data: {
-      mode: "custom", baseUrl: "http://ai-provider:8080/v1",
+      mode: "custom", baseUrl: PROVIDER_BASE_URL,
       apiKey: "e2e-api-key", model: "e2e-model-a",
     },
   });
@@ -208,6 +209,8 @@ async function sendAnnotationRound(page, text, annotationId) {
   });
   await expect(page.getByTestId("agent-artifact")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("agent-artifact")).toHaveAttribute("data-artifact-status", "pending");
+  await expect(page.locator(".agent-chat-panel"))
+    .toHaveAttribute("data-run-status", "completed", { timeout: 30_000 });
 }
 
 async function prepareAnnotationDiscussion(page, playwright) {
