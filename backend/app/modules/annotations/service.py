@@ -21,25 +21,26 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _revision_is_valid(annotation: dict, revision: dict) -> bool:
+def _revision_is_valid(annotation: dict, revision: dict, case_revision: int | None = None) -> bool:
     target = revision.get("target") or {}
     return (
         annotation.get("status") == "pending"
         and annotation.get("anchorState", ACTIVE_ANCHOR) == ACTIVE_ANCHOR
+        and (case_revision is None or revision.get("baseRevision") == case_revision)
         and target.get("from") == annotation.get("from")
         and target.get("to") == annotation.get("to")
         and target.get("quote") == annotation.get("quote")
     )
 
 
-def _revision_view(annotation: dict, revision: dict) -> dict:
+def _revision_view(annotation: dict, revision: dict, case_revision: int | None = None) -> dict:
     view = {key: value for key, value in revision.items() if key != "_id"}
-    if view.get("status") == "pending" and not _revision_is_valid(annotation, revision):
+    if view.get("status") == "pending" and not _revision_is_valid(annotation, revision, case_revision):
         view["status"] = "expired"
     return view
 
 
-def _view(annotation: dict) -> dict:
+def _view(annotation: dict, case_revision: int | None = None) -> dict:
     view = {key: value for key, value in annotation.items() if key != "_id"}
     view.pop("updatedAt", None)
     if view.pop("_legacy", False):
@@ -48,7 +49,9 @@ def _view(annotation: dict) -> dict:
     elif view.get("versionId") is None:
         view.setdefault("anchorState", ACTIVE_ANCHOR)
     if "revisions" in view:
-        view["revisions"] = [_revision_view(annotation, row) for row in view["revisions"]]
+        view["revisions"] = [
+            _revision_view(annotation, row, case_revision) for row in view["revisions"]
+        ]
     return view
 
 
@@ -235,7 +238,7 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
     unset = {}
     if anchor:
         changes.update(anchor)
-        revisions = _map_revision_targets(row, anchor)
+        revisions = _map_revision_targets(row, anchor, revision)
         if revisions is not None:
             changes["revisions"] = revisions
     else:
@@ -247,11 +250,13 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
     )
 
 
-def _map_revision_targets(row: dict, anchor: dict) -> list[dict] | None:
+def _map_revision_targets(row: dict, anchor: dict, case_revision: int) -> list[dict] | None:
     if "revisions" not in row:
         return None
     return [
-        {**revision, "target": {**revision.get("target", {}), "from": anchor["from"], "to": anchor["to"]}}
+        {**revision, "baseRevision": case_revision, "target": {
+            **revision.get("target", {}), "from": anchor["from"], "to": anchor["to"]
+        }}
         if revision.get("status") == "pending" and revision.get("target", {}).get("quote") == row.get("quote")
         else revision
         for revision in row["revisions"]
@@ -396,7 +401,7 @@ def create_annotation(database: Database, case_id: str, body: dict, user: dict) 
 def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]:
     case = _case(database, case_id, user)
     rows = database.annotations.find(_list_query(case, user)).sort("createdAt", 1)
-    return [_view(row) for row in rows]
+    return [_view(row, case["revision"]) for row in rows]
 
 
 def _list_query(case: dict, user: dict) -> dict:
@@ -617,10 +622,10 @@ def _merge_annotation(database, case_id, annotation_id, user, session):
     annotation = _get_annotation(database, case_id, annotation_id, session)
     _require_merge_owner(case, annotation, user)
     if annotation["status"] == "resolved":
-        return {"annotation": _view(annotation), "case": case_view(case)}
-    revision = _latest_valid_revision(annotation)
+        return {"annotation": _view(annotation, case["revision"]), "case": case_view(case)}
+    revision = _latest_valid_revision(database, annotation, case["revision"], session)
     if revision is None:
-        _expire_invalid_revisions(database, annotation, session)
+        _expire_invalid_revisions(database, annotation, user, session)
         raise CaseError(409, "没有可合并的有效 AI 修订")
     return _commit_annotation_merge(database, case, annotation, revision, user, session)
 
@@ -632,15 +637,19 @@ def _require_merge_owner(case: dict, annotation: dict, user: dict) -> None:
         raise CaseError(409, "案例当前不可编辑")
 
 
-def _latest_valid_revision(annotation: dict) -> dict | None:
-    return next(
-        (revision for revision in reversed(annotation.get("revisions", []))
-         if revision.get("status") == "pending" and _revision_is_valid(annotation, revision)),
-        None,
-    )
+def _latest_valid_revision(database, annotation, case_revision: int, session) -> dict | None:
+    for revision in reversed(annotation.get("revisions", [])):
+        if revision.get("status") != "pending" or not _revision_is_valid(
+            annotation, revision, case_revision
+        ):
+            continue
+        artifact = _find(database.agent_artifacts, {"id": revision.get("artifactId")}, session)
+        if artifact and artifact.get("status") == "pending" and artifact.get("baseRevision") == case_revision:
+            return revision
+    return None
 
 
-def _expire_invalid_revisions(database, annotation, session) -> None:
+def _expire_invalid_revisions(database, annotation, user, session) -> None:
     revisions = [
         {**revision, "status": "expired" if revision.get("status") == "pending" else revision.get("status")}
         for revision in annotation.get("revisions", [])
@@ -649,6 +658,7 @@ def _expire_invalid_revisions(database, annotation, session) -> None:
         {"id": annotation["id"], "status": "pending"},
         {"$set": {"revisions": revisions}}, session=session,
     )
+    _decide_linked_artifacts(database, annotation, user, "expired", session)
 
 
 def _commit_annotation_merge(database, case, annotation, revision, user, session):
@@ -660,12 +670,15 @@ def _commit_annotation_merge(database, case, annotation, revision, user, session
     updated_case = _commit_case_document(database, case, document, session)
     reconcile_document_annotations(
         database, case["id"], case["document"], document, updated_case["revision"],
-        steps, session, mapping,
+        steps, session, mapping, exclude_artifact_id=revision["artifactId"],
     )
     updated_annotation = _finish_annotation_merge(
         database, annotation, revision, user, session,
     )
-    return {"annotation": _view(updated_annotation), "case": case_view(updated_case)}
+    return {
+        "annotation": _view(updated_annotation, updated_case["revision"]),
+        "case": case_view(updated_case),
+    }
 
 
 def _merged_document(case: dict, annotation: dict, revision: dict):
