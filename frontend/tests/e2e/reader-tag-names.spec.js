@@ -9,6 +9,8 @@ const ADDED_TAG = "劳动教育";
 const REMOVED_TAG = "文化自信";
 const NEW_TAG_SET = [...PUBLISHED_TAGS, ADDED_TAG];
 const PUBLISHED_TAG_IDS = PUBLISHED_TAGS.map((name) => TAG_IDS[name]);
+const AUTHOR = { username: "user", password: "user123" };
+const ADMIN = { username: "admin", password: "admin123" };
 
 async function signIn(page, { username, password }) {
   await page.goto("/#/login");
@@ -86,7 +88,7 @@ async function openPublicCase(page, caseId, marker) {
 
 async function assertRealTagNames(page) {
   const tags = page.getByLabel("案例标签");
-  for (const name of NEW_TAG_SET) await expect(tags).toContainText(name);
+  for (const name of PUBLISHED_TAGS) await expect(tags).toContainText(name);
   await expect(tags).not.toContainText("tag-seed");
 }
 
@@ -96,8 +98,9 @@ async function capture(page, testInfo, name) {
 
 async function assertEditedTags(page) {
   const tags = page.getByLabel("案例标签");
-  await expect(tags).toContainText(ADDED_TAG);
+  for (const name of NEW_TAG_SET) await expect(tags).toContainText(name);
   await expect(tags).not.toContainText(REMOVED_TAG);
+  await expect(tags).not.toContainText("tag-seed");
 }
 
 async function reopenAndAddTag(page, caseId, marker) {
@@ -176,7 +179,6 @@ test("作者从公开阅读回到工作台修改标签并保存，刷新后名�
   await assertRealTagNames(page);
   await capture(page, testInfo, "author-reader-tags.png");
   await reopenAndAddTag(page, created.id, marker);
-  await assertRealTagNames(page);
   await assertEditedTags(page);
   await capture(page, testInfo, "author-workbench-tags.png");
 
