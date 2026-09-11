@@ -465,14 +465,23 @@ async function stopRun() {
 }
 
 async function retryRun() {
-  decideError.value = "";
+  // 与 sendMessage 同因：await 前发出，切面板/线程卸载后 emit 不丢
   const messageId = retryableMessageId.value;
   if (!messageId) return;
+  if (props.writingContext?.annotationId || retryMessageHasAnnotation(messageId)) {
+    emit("annotation-run", threadId.value);
+  }
+  decideError.value = "";
   try {
     await retry(messageId);
   } catch (requestError) {
     decideError.value = requestError.message || "重试失败";
   }
+}
+
+function retryMessageHasAnnotation(messageId) {
+  const message = threadState.value?.messages?.find((item) => item.id === messageId);
+  return Boolean(message?.parts?.some((part) => part.type === "data-annotation"));
 }
 </script>
 

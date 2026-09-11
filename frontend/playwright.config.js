@@ -25,7 +25,7 @@ export default defineConfig({
   projects: [
     { name: "generic", testIgnore: "**/agent-*.spec.js" },
     { name: "agent", testMatch: ["**/agent-chat.spec.js", "**/agent-threads.spec.js", "**/agent-source-proof.spec.js"] },
-    { name: "agent-tracer", testMatch: "**/agent-tracer.spec.js" },
+    { name: "agent-tracer", testMatch: ["**/agent-tracer.spec.js", "**/annotation-rounds-r3.spec.js"] },
     { name: "sidebar", testMatch: "**/agent-sidebar.spec.js", grepInvert: /真实运行：Thinking/ },
     { name: "sidebar-tracer", testMatch: "**/agent-sidebar.spec.js", grep: /真实运行：Thinking/ },
   ],

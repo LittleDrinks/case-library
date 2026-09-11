@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from re import search
+from functools import partial
 
 from pydantic_ai import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
@@ -16,6 +17,7 @@ SUMMARY_MARKER = "摘要测试"
 TRACER_PARAGRAPHS = ("第一段保持原样。", "第二段：教学目标需要更明确的评价依据。")
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
 TRACER_SELECTION = (11, 30)
+TRACER_FIRST_SELECTION = (1, 9)
 REPLACEMENT = "修订后的段落：教学目标、课堂任务与评价依据逐项对应，依据已检索平台资料。"
 SECOND_REPLACEMENT = "第二轮修订：教学目标、课堂任务与评价依据逐项对应，并补充可核验的课堂证据。"
 REASON = "对照检索资料明确评价依据，使段落主张可核验"
@@ -24,6 +26,8 @@ RESOURCE_TOOL = f"read_skill_resource_{SKILL_ID.replace('-', '_')}"
 # 侧栏浏览器验收：带标记的提问首轮同时流出慢速 ThinkingPart 与既有工具调用。
 THINKING_MARKER = "思考测试"
 THINKING_TEXT = "先核对资料区与选区，再检索平台依据。"
+PROVIDER_FAILURE_MARKER = "确定性上游故障"
+SLOW_ROUND_MARKER = "确定性 A 慢速"
 
 
 def _tool_calls(messages) -> list[str]:
@@ -57,6 +61,39 @@ def _locked_selection(instructions: str) -> tuple[int, int] | None:
 
 def _wants_thinking(messages) -> bool:
     return THINKING_MARKER in _latest_prompt(messages)
+
+
+def _has_previous_proposal(messages) -> bool:
+    return any(
+        getattr(part, "tool_name", "") == "propose_revision"
+        for message in messages for part in getattr(message, "parts", [])
+    )
+
+
+def _record_proposal(round_state: dict, response: ModelResponse) -> None:
+    if any(getattr(part, "tool_name", "") == "propose_revision" for part in response.parts):
+        round_state["proposal_seen"] = True
+
+
+async def _prepare_marked_stream(messages, state: dict) -> bool:
+    prompt = _latest_prompt(messages)
+    round_prompt = "" if prompt.startswith("<system>") else prompt
+    task = asyncio.current_task()
+    detected = "第二轮" in prompt or _has_previous_proposal(messages)
+    round_state = state["rounds"].get(task)
+    if round_state is None or (round_prompt and round_prompt != round_state["prompt"]):
+        round_state = {"prompt": round_prompt, "second": detected, "proposal_seen": False}
+        state["rounds"][task] = round_state
+    elif detected:
+        round_state["second"] = True
+    second_round = round_state["second"]
+    if PROVIDER_FAILURE_MARKER in prompt and not state["failure_consumed"]:
+        state["failure_consumed"] = True
+        raise RuntimeError("deterministic provider failure")
+    if SLOW_ROUND_MARKER in prompt and not state["slow_consumed"]:
+        state["slow_consumed"] = True
+        await asyncio.sleep(45)
+    return second_round
 
 
 def thinking_pieces(content: str) -> list[str]:
@@ -100,10 +137,31 @@ def _search_source(messages) -> dict:
     raise AssertionError("tracer requires a completed search before reading")
 
 
+def _proposal_response(messages, info, selection, second_round) -> ModelResponse:
+    if second_round is None:
+        second_round = "第二轮" in _latest_prompt(messages)
+    new_annotation = second_round and not _has_previous_proposal(messages)
+    instructions = getattr(info, "instructions", None) or ""
+    locked = _locked_selection(instructions)
+    if new_annotation and locked:
+        start, end = locked
+    else:
+        start, end = TRACER_FIRST_SELECTION if new_annotation else (selection or locked or TRACER_SELECTION)
+    return _tool_response("propose_revision", {
+        "start": start, "end": end,
+        "replacement": SECOND_REPLACEMENT if second_round else REPLACEMENT,
+        "reason": SECOND_REASON if second_round else REASON,
+    })
+
+
 def tracer_response(messages, info=None, skill_id: str | None = None,
-                    selection: tuple[int, int] | None = None) -> ModelResponse:
+                    selection: tuple[int, int] | None = None,
+                    second_round: bool | None = None,
+                    force_proposal: bool = False) -> ModelResponse:
     """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
     called = _tool_calls(messages)
+    if force_proposal:
+        called = [name for name in called if name != "propose_revision"]
     if skill_id and "load_capability" not in called:
         return _load_capability_response(messages, skill_id)
     if skill_id and RESOURCE_TOOL not in called:
@@ -112,19 +170,12 @@ def tracer_response(messages, info=None, skill_id: str | None = None,
         return _tool_response("search_corpus", {"query": _summary_query(messages)})
     if "read_source" not in called:
         return _tool_response("read_source", _search_source(messages))
-    return _tracer_proposal(messages, selection, called, info)
+    return _tracer_proposal(messages, selection, called, info, second_round)
 
 
-def _tracer_proposal(messages, selection, called, info=None) -> ModelResponse:
+def _tracer_proposal(messages, selection, called, info=None, second_round=None) -> ModelResponse:
     if "propose_revision" not in called:
-        instructions = getattr(info, "instructions", None) or ""
-        start, end = _locked_selection(instructions) or selection or TRACER_SELECTION
-        second_round = "第二轮" in _latest_prompt(messages)
-        return _tool_response("propose_revision", {
-            "start": start, "end": end,
-            "replacement": SECOND_REPLACEMENT if second_round else REPLACEMENT,
-            "reason": SECOND_REASON if second_round else REASON,
-        })
+        return _proposal_response(messages, info, selection, second_round)
     return ModelResponse(parts=[TextPart(content="已生成单段修订候选，等待作者决定。")])
 
 
@@ -144,6 +195,26 @@ async def _stream_deltas(response: ModelResponse) -> AsyncIterator[dict | str]:
             yield {index: delta}
 
 
+async def _stream_tracer(
+    messages,
+    info,
+    state: dict,
+    recorder: Callable | None,
+    skill_id: str | None,
+    selection: tuple[int, int] | None,
+) -> AsyncIterator[dict | str]:
+    second_round = await _prepare_marked_stream(messages, state)
+    round_state = state["rounds"][asyncio.current_task()]
+    if recorder:
+        recorder(messages, info)
+    response = tracer_response(
+        messages, info, skill_id, selection, second_round, not round_state["proposal_seen"]
+    )
+    _record_proposal(round_state, response)
+    async for delta in _stream_deltas(response):
+        yield delta
+
+
 def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,
                  selection: tuple[int, int] | None = None) -> FunctionModel:
     """同一生产 Agent 使用的确定性模型装配，依次调用 Skill 加载、检索与提议。
@@ -151,12 +222,12 @@ def tracer_model(recorder: Callable | None = None, skill_id: str | None = None,
     recorder 每次模型请求收到 (messages, info)，供测试断言消息与 instructions 通道。
     """
 
-    async def stream(messages, info):
-        if recorder:
-            recorder(messages, info)
-        async for delta in _stream_deltas(
-            tracer_response(messages, info, skill_id, selection)
-        ):
-            yield delta
-
-    return FunctionModel(stream_function=stream)
+    state = {"failure_consumed": False, "slow_consumed": False, "rounds": {}}
+    stream_function = partial(
+        _stream_tracer,
+        state=state,
+        recorder=recorder,
+        skill_id=skill_id,
+        selection=selection,
+    )
+    return FunctionModel(stream_function=stream_function)

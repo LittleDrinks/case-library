@@ -551,6 +551,12 @@ function failedSnapshot() {
   return failed;
 }
 
+function failedAnnotationSnapshot() {
+  const failed = failedSnapshot();
+  failed.messages[0].parts.push({ type: "data-annotation", data: { id: "an-1" } });
+  return failed;
+}
+
 async function mountAndRetry(fetch) {
   api.agentThread.mockResolvedValue(failedSnapshot());
   vi.stubGlobal("fetch", fetch);
@@ -885,6 +891,18 @@ it("hands annotation runs with their thread to the workbench so refresh survives
   await flushPromises();
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("继续讨论");
   await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.emitted("annotation-run")).toEqual([["thread-1"]]);
+});
+
+it("re-arms the annotation observation when a failed run is retried", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  api.agentThread.mockResolvedValue(failedAnnotationSnapshot());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get("[data-testid=\"agent-retry\"]").trigger("click");
   await flushPromises();
 
   expect(wrapper.emitted("annotation-run")).toEqual([["thread-1"]]);

@@ -310,7 +310,7 @@ class AgentRepository:
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
             skill_bindings,
-            base_revision, target, write_authorized, annotation_id, session,
+            base_revision, target, write_authorized, session, annotation_id,
         )
 
     def _insert_retry_run(
