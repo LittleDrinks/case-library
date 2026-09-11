@@ -109,6 +109,7 @@ async function assertPublicKeepsApprovedTags(page, caseId, marker) {
   // 草稿保存不改变已批准版本：公开页继续展示旧标签。
   await openPublicCase(page, caseId, marker);
   await assertRealTagNames(page);
+  await expect(page.getByLabel("案例标签")).not.toContainText(ADDED_TAG);
   await assertPublicReadonly(page);
 }
 
