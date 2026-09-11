@@ -407,6 +407,36 @@ const annotationRailStub = {
     @click="$emit('annotation-run', 'thread-9')">run</button>`,
 };
 
+const annotationEventRailStub = {
+  name: "AnnotationEventRailStub", emits: ["annotations", "annotations-refresh"],
+  template: `<div>
+    <button data-testid="annotation-clear" type="button"
+      @click="$emit('annotations', [])">clear</button>
+    <button data-testid="annotation-refresh" type="button"
+      @click="$emit('annotations-refresh')">refresh</button>
+  </div>`,
+};
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test("关闭通知使 Workbench 中迟到的批注刷新失效", async () => {
+  const stale = deferred();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValueOnce([]).mockReturnValueOnce(stale.promise);
+  const wrapper = render(annotationEventRailStub);
+  await flushPromises();
+  await wrapper.get('[data-testid="annotation-refresh"]').trigger("click");
+  await wrapper.get('[data-testid="annotation-clear"]').trigger("click");
+  stale.resolve([{ id: "annotation-1", status: "pending" }]);
+  await flushPromises();
+  await new Promise((done) => setTimeout(done, 0));
+  expect(wrapper.findComponent({ name: "CanvasEditor" }).props("annotations")).toEqual([]);
+});
+
 test("annotation run finishing after panel switch refreshes the annotation history", async () => {
   vi.useFakeTimers();
   try {

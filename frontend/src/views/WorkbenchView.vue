@@ -49,6 +49,7 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+let annotationLoadGeneration = 0;
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
 const pendingAnnotationRun = ref("");
@@ -237,15 +238,22 @@ function applyCase(value, invalidate = true) {
 }
 
 async function loadAnnotations() {
+  const generation = ++annotationLoadGeneration;
   if (!session.user || readerMode.value) {
     annotations.value = [];
     return;
   }
   try {
     const rows = await api.listAnnotations(caseId());
+    if (generation !== annotationLoadGeneration) return;
     annotations.value = rows.filter(({ status }) => status !== "resolved");
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
+}
+
+function applyAnnotations(rows) {
+  annotationLoadGeneration += 1;
+  annotations.value = rows;
 }
 
 async function refreshAnnotations() {
@@ -753,7 +761,7 @@ onBeforeUnmount(() => {
           @case-restored="applyCase"
           @case-revised="applyRevisedCase"
           @mutation-state="contentMutationBusy = $event"
-          @annotations="annotations = $event"
+          @annotations="applyAnnotations($event)"
           @annotations-refresh="refreshAnnotationsAfterAi"
           @annotation-run="watchAnnotationRun"
           @ask-ai="askAnnotationAi"
