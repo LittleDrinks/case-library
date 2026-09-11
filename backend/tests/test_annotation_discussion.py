@@ -193,6 +193,61 @@ def _annotation_rows(client: TestClient, case: dict, user: dict) -> list[dict]:
     ).json()
 
 
+def _ensure_second_teacher(client: TestClient) -> None:
+    from app.modules.auth.passwords import hash_password
+
+    client.app.state.database.users.update_one(
+        {"id": "u-second-teacher"},
+        {"$setOnInsert": {
+            "id": "u-second-teacher", "username": "second", "name": "另一位教师",
+            "role": "user", "status": "active", "must_change_password": False,
+            "campus_verified": True, "token_version": 0,
+            "password_hash": hash_password("second-pass"),
+        }},
+        upsert=True,
+    )
+
+
+def _private_annotation_requests(client: TestClient, case: dict, annotation: dict, user: dict):
+    root = f"/api/cases/{case['id']}/annotations/{annotation['id']}"
+    headers = {"X-CSRF-Token": user["csrfToken"]}
+    return [
+        client.get(f"/api/cases/{case['id']}/annotations", headers=headers),
+        client.post(f"{root}/replies", headers=headers, json={"content": "越权回复"}),
+        client.patch(root, headers=headers, json={"content": "越权修改"}),
+        client.delete(root, headers=headers),
+        client.patch(f"{root}/status", headers=headers, json={"status": "pending"}),
+        client.post(f"{root}/merge", headers=headers),
+    ]
+
+
+def _assert_private_annotation_denied(
+    client: TestClient, case: dict, annotation: dict, user: dict, list_status: int
+) -> None:
+    responses = _private_annotation_requests(client, case, annotation, user)
+    assert responses[0].status_code == list_status
+    assert all(response.status_code == 403 for response in responses[1:])
+    assert all("请补充评价依据。" not in response.text for response in responses)
+
+
+def test_private_annotation_all_public_entries_are_isolated(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    annotation = create_annotation(client, author, case, "目标正文")
+    _ensure_second_teacher(client)
+    _assert_private_annotation_denied(
+        client, case, annotation, login(client, "admin", "admin123"), 200
+    )
+    _assert_private_annotation_denied(
+        client, case, annotation, login(client, "second", "second-pass"), 403
+    )
+    author = login(client, "user", "user123")
+    current = _annotation_rows(client, case, author)[0]
+    assert current["status"] == "pending"
+    assert current["content"] == "请补充评价依据。"
+    assert current["replies"] == []
+
+
 def test_admin_cannot_reopen_private_annotation(client: TestClient) -> None:
     author = login(client, "user", "user123")
     case = create_case(client, author, "目标正文")
