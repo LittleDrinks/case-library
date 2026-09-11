@@ -627,6 +627,11 @@ async function addDraftAnnotation(page, marker) {
   await expect(page.locator(".comment-card")).toHaveCount(1);
 }
 
+async function expectNoAnnotations(page) {
+  await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+}
+
 async function expectReadOnlyVersionTab(page, marker) {
   const chip = page.getByRole("tab", { name: `v1 · ${marker}` });
   await expect(chip).toBeVisible();
@@ -682,9 +687,12 @@ test("覆盖历史版本后清除草稿批注并刷新一致", async ({ page }) 
   await addDraftAnnotation(page, marker);
   await openHistoryTimeline(page); await overwriteDialogStep(page, "确认覆盖");
   await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(page.locator(".comment-card")).toHaveCount(0);
+  await expectNoAnnotations(page);
   const rows = await (await request.get(`/api/cases/${page.url().split("/").pop()}/annotations`)).json();
   expect(rows).toHaveLength(0);
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectNoAnnotations(page);
 });
 
 test("覆盖请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {

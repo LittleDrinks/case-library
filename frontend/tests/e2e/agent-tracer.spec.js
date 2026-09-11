@@ -7,6 +7,13 @@ const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
 const SECOND_REPLACEMENT_MARK = "第二轮修订：教学目标、课堂任务与评价依据逐项对应";
 const M1_ANNOTATION_QUOTE = "的评价依据。";
+const M1_CASE_DOCUMENT = {
+  type: "doc",
+  content: [
+    { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
+    { type: "paragraph", content: [{ type: "text", text: TARGET_TEXT }] },
+  ],
+};
 
 async function login(page) {
   await page.goto("/#/login");
@@ -25,16 +32,16 @@ function caseDocument() {
   return {
     type: "doc",
     content: [
-      { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
+      { type: "paragraph", content: [{ type: "text", text: "第一段保持原样。" }] },
       { type: "paragraph", content: [{ type: "text", text: "第二段：教学目标需要更明确的评价依据。" }] },
     ],
   };
 }
 
-async function createCase(page) {
+async function createCase(page, document = caseDocument()) {
   const response = await page.context().request.post("/api/cases", {
     headers: { "X-CSRF-Token": await csrf(page) },
-    data: { title: `Tracer ${Date.now()}`, document: caseDocument() },
+    data: { title: `Tracer ${Date.now()}`, document },
   });
   expect(response.ok()).toBe(true);
   return response.json();
@@ -88,10 +95,11 @@ async function openChat(page, caseId) {
 }
 
 async function selectAnnotationText(page, value) {
-  const target = page.locator(".canvas-editor p").nth(1);
+  const target = page.locator(".canvas-editor p", { hasText: TARGET_TEXT });
   if (value === TARGET_TEXT) return target.selectText();
   await target.click(); await page.keyboard.press("Home");
   const offset = await target.evaluate((node, text) => node.textContent.indexOf(text), value);
+  expect(offset).toBeGreaterThanOrEqual(0);
   for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
   await page.keyboard.down("Shift");
   for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
@@ -230,7 +238,7 @@ async function prepareAnnotationDiscussion(page, playwright, quote = TARGET_TEXT
   await login(page);
   await configureChat(page);
   await waitSearchableCatalog(page);
-  const created = await createCase(page);
+  const created = await createCase(page, quote === M1_ANNOTATION_QUOTE ? M1_CASE_DOCUMENT : undefined);
   await openChat(page, created.id);
   await selectPublishedSkill(page);
   const annotations = await addAnnotation(page, quote);
@@ -250,6 +258,22 @@ async function closeAnnotation(page) {
   await card.getByRole("button", { name: "标记解决" }).click();
   await expect(card).toContainText("已解决");
   await expect(card).toContainText("已拒绝");
+}
+
+function annotationCard(page, annotationId) {
+  return page.locator(".comment-card[data-annotation-id=\"" + annotationId + "\"]");
+}
+
+async function expectResolvedAnnotation(page, caseId, annotationId) {
+  const card = annotationCard(page, annotationId);
+  await expect(card).toContainText("已解决");
+  const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
+  expect(rows).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: annotationId, status: "resolved" }),
+  ]));
+  const history = card.locator(".comment-revisions");
+  await expect(history.locator("li")).toHaveCount(1);
+  await expect(history).toContainText("已拒绝");
 }
 
 async function changeAnnotationTarget(page) {
@@ -283,9 +307,7 @@ test("批注候选可直接关闭且正文与修订历史刷新一致", async ({
   const after = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
   expect(after.document).toEqual(before.document); expect(after.revision).toBe(before.revision);
   await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-  const history = page.locator(".comment-revisions");
-  await expect(history.locator("li")).toHaveCount(1);
-  await expect(history).toContainText("已拒绝");
+  await expectResolvedAnnotation(page, created.id, annotation.id);
 });
 
 test("目标变化后浏览器拒绝过期采用并保留无关正文编辑", async ({ page, playwright }) => {
@@ -302,6 +324,53 @@ test("目标变化后浏览器拒绝过期采用并保留无关正文编辑", as
   const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
   const text = current.document.content[1].content[0].text;
   expect(text).toBe("第二段：教学目标需要更明确改写目标");
+});
+
+async function deleteAnnotationTarget(page) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await selectAnnotationText(page, M1_ANNOTATION_QUOTE);
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+}
+
+async function editUnrelatedText(page) {
+  await page.locator(".canvas-editor p").first().click();
+  await page.keyboard.press("End"); await page.keyboard.type(" 无关正文编辑");
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+}
+
+test("目标删除后浏览器拒绝采用并保留已删除状态", async ({ page, playwright }) => {
+  test.setTimeout(120_000);
+  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright, M1_ANNOTATION_QUOTE);
+  await sendAnnotationRound(page, "请修订选区：删除目标后不得采用。", annotation.id);
+  await deleteAnnotationTarget(page);
+  const card = annotationCard(page, annotation.id);
+  await expect(card).toContainText("原文已删除");
+  await expect(card).toContainText("已失效");
+  await expect(card.getByRole("button", { name: "合并并关闭" })).toHaveCount(0);
+  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
+  expect(rows).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: annotation.id, anchorState: "deleted" }),
+  ]));
+});
+
+test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, playwright }) => {
+  test.setTimeout(120_000);
+  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright, M1_ANNOTATION_QUOTE);
+  await sendAnnotationRound(page, "请修订选区：无关编辑后仍可采用。", annotation.id);
+  await editUnrelatedText(page);
+  const card = annotationCard(page, annotation.id);
+  await expect(card.getByRole("button", { name: "合并并关闭" })).toBeVisible();
+  await card.getByRole("button", { name: "合并并关闭" }).click();
+  await expect(card).toContainText("已解决");
+  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
+  const accepted = rows[0].revisions.find((revision) => revision.status === "accepted");
+  const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
+  expect(accepted).toBeDefined();
+  expect(current.document.content[0].content[0].text).toContain("无关正文编辑");
+  expect(current.document.content[1].content[0].text).toContain(accepted.replacement);
 });
 
 test("批注讨论生成中切到批注面板：后台完成后当前历史自动出现新修订", async ({ page, playwright }) => {

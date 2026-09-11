@@ -110,6 +110,7 @@ async function selectSubstring(page, paragraph, value) {
   await paragraph.click();
   await page.keyboard.press("Home");
   const offset = await paragraph.evaluate((node, text) => node.textContent.indexOf(text), value);
+  expect(offset).toBeGreaterThanOrEqual(0);
   for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
   await page.keyboard.down("Shift");
   for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
@@ -123,6 +124,42 @@ async function addSelectedAnnotation(page, paragraph, quote, content) {
   await page.getByLabel("批注内容").fill(content);
   await page.getByRole("button", { name: "添加批注", exact: true }).click();
   await expect(page.locator(".comment-card", { hasText: content })).toBeVisible();
+  const caseId = page.url().split("/").pop();
+  const response = await page.context().request.get("/api/cases/" + caseId + "/annotations");
+  return (await response.json()).find((row) => row.content === content);
+}
+
+async function dataIds(locator) {
+  return locator.evaluateAll((nodes) => nodes.map((node) => node.dataset.annotationId).sort());
+}
+
+async function expectAnnotationIdentity(page, first, second) {
+  const cards = page.locator(".comment-card");
+  await expect(cards).toHaveCount(2);
+  expect(await dataIds(cards)).toEqual([first.id, second.id].sort());
+  const anchors = page.locator(".annotation-anchor");
+  await expect(anchors).toHaveCount(2);
+  expect(await dataIds(anchors)).toEqual([first.id, second.id].sort());
+}
+
+async function resolveFirstAnnotation(page, first, second) {
+  await page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]").click();
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toBeInViewport();
+  await page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]").getByRole("button", { name: "标记解决" }).click();
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toContainText("已解决");
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toContainText("待处理");
+}
+
+async function expectReloadedAnnotations(page, first, second) {
+  const cards = page.locator(".comment-card");
+  await expect(cards).toHaveCount(2);
+  const caseId = page.url().split("/").pop();
+  const rows = await (await page.context().request.get("/api/cases/" + caseId + "/annotations")).json();
+  expect(rows).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: first.id, status: "resolved", quote: "同段甲：教学依据" }),
+    expect.objectContaining({ id: second.id, status: "pending", quote: "同段乙：课堂活动" }),
+  ]));
+  expect(await dataIds(cards)).toEqual([first.id, second.id].sort());
 }
 
 async function addManualAnnotation(page, marker, content) {
@@ -189,19 +226,13 @@ test("同段多个批注可分别打开与关闭并刷新保留", async ({ page 
   await openDraft(page, marker);
   const paragraph = page.locator(".canvas-editor p", { hasText: marker });
   await page.getByRole("button", { name: "批注", exact: true }).click();
-  await addSelectedAnnotation(page, paragraph, "同段甲：教学依据", "第一条批注");
-  await addSelectedAnnotation(page, paragraph, "同段乙：课堂活动", "第二条批注");
-  const cards = page.locator(".comment-card");
-  await expect(cards).toHaveCount(2);
-  await expect(cards.nth(0)).toContainText("同段甲：教学依据");
-  await expect(cards.nth(1)).toContainText("同段乙：课堂活动");
-  await expect(page.locator(".annotation-anchor")).toHaveCount(2);
-  await page.locator(".annotation-anchor").nth(1).click(); await expect(cards.nth(1)).toBeInViewport();
-  await cards.nth(0).getByRole("button", { name: "标记解决" }).click();
-  await expect(cards.nth(0)).toContainText("已解决");
-  await expect(cards.nth(1)).toContainText("待处理");
+  const first = await addSelectedAnnotation(page, paragraph, "同段甲：教学依据", "第一条批注");
+  const second = await addSelectedAnnotation(page, paragraph, "同段乙：课堂活动", "第二条批注");
+  expect(first.id).not.toBe(second.id);
+  await expectAnnotationIdentity(page, first, second);
+  await resolveFirstAnnotation(page, first, second);
   await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(cards).toHaveCount(2); await expect(cards.nth(0)).toContainText("已解决");
+  await expectReloadedAnnotations(page, first, second);
 });
 
 test("正文前置编辑保存刷新后批注仍绑定原选区", async ({ page }) => {
