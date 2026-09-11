@@ -635,7 +635,9 @@ def merge_annotation(
     if isinstance(outcome, MergeRejected):
         _transaction(
             database,
-            lambda active: _expire_invalid_revisions(database, outcome.annotation, user, active),
+            lambda active: _expire_invalid_revisions(
+                database, outcome.annotation, user, active, append_artifact_event,
+            ),
         )
         raise CaseError(409, outcome.reason)
     return outcome
@@ -676,7 +678,7 @@ def _latest_valid_revision(database, annotation, case_revision: int, session) ->
     return None
 
 
-def _expire_invalid_revisions(database, annotation, user, session) -> None:
+def _expire_invalid_revisions(database, annotation, user, session, append_artifact_event) -> None:
     revisions = [
         {**revision, "status": "expired" if revision.get("status") == "pending" else revision.get("status")}
         for revision in annotation.get("revisions", [])
@@ -685,7 +687,10 @@ def _expire_invalid_revisions(database, annotation, user, session) -> None:
         {"id": annotation["id"], "status": "pending"},
         {"$set": {"revisions": revisions}}, session=session,
     )
-    _decide_linked_artifacts(database, annotation, user, "expired", session)
+    _decide_linked_artifacts(
+        database, annotation, user, "expired", session,
+        append_artifact_event=append_artifact_event,
+    )
 
 
 def _commit_annotation_merge(
