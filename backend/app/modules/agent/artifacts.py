@@ -170,17 +170,22 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
         return artifact, case
     _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
-    if artifact.annotation_id and decision == "accepted":
-        raise CaseError(409, "批注修订请从批注面板合并")
-    if artifact.annotation_id:
-        from app.modules.annotations.service import mark_ai_revision_decision
-
-        mark_ai_revision_decision(database, artifact, user, decision, session)
+    _decide_annotation_revision(database, artifact, user, decision, session)
     if decision == "accepted":
         if not revalidate_sources(database, user, case_id, artifact.sources):
             raise CaseError(409, "修订依据当前不可读，候选已过期")
         case = _apply_revision(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
+
+
+def _decide_annotation_revision(database, artifact, user, decision, session) -> None:
+    if not artifact.annotation_id:
+        return
+    if decision == "accepted":
+        raise CaseError(409, "批注修订请从批注面板合并")
+    from app.modules.annotations.service import mark_ai_revision_decision
+
+    mark_ai_revision_decision(database, artifact, user, decision, session)
 
 
 def _decidable_run(database, artifact: AgentArtifact, decision: ArtifactDecision,

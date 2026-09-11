@@ -7,6 +7,7 @@ from starlette.testclient import TestClient
 
 from app.modules.agent.runtime import agent
 from tests.test_annotation_discussion import (
+    HEADING,
     create_annotation,
     create_case,
     login,
@@ -14,26 +15,33 @@ from tests.test_annotation_discussion import (
 )
 
 
-def _proposal_model(replacement: str) -> FunctionModel:
-    async def stream(messages, _info):
-        start = max(
-            index for index, message in enumerate(messages)
-            if any(part.part_kind == "user-prompt" for part in getattr(message, "parts", []))
-        )
-        called = {
-            part.tool_name
-            for message in messages[start:]
-            for part in getattr(message, "parts", [])
-            if part.part_kind == "tool-call"
-        }
-        if "propose_revision" not in called:
-            args = {"start": paragraph_start(), "end": paragraph_start() + 4,
-                    "replacement": replacement, "reason": "补充评价依据"}
-            yield {0: DeltaToolCall(name="propose_revision", json_args=json.dumps(args))}
-            return
-        yield replacement
+def _proposal_model(replacement: str, reason: str = "补充评价依据", recorder=None) -> FunctionModel:
+    async def stream(messages, info):
+        if recorder is not None:
+            recorder(messages, info)
+        async for delta in _proposal_stream(messages, replacement, reason):
+            yield delta
 
     return FunctionModel(stream_function=stream)
+
+
+async def _proposal_stream(messages, replacement: str, reason: str):
+    start = max(
+        index for index, message in enumerate(messages)
+        if any(part.part_kind == "user-prompt" for part in getattr(message, "parts", []))
+    )
+    called = {
+        part.tool_name
+        for message in messages[start:]
+        for part in getattr(message, "parts", [])
+        if part.part_kind == "tool-call"
+    }
+    if "propose_revision" not in called:
+        args = {"start": paragraph_start(), "end": paragraph_start() + 4,
+                "replacement": replacement, "reason": reason}
+        yield {0: DeltaToolCall(name="propose_revision", json_args=json.dumps(args))}
+        return
+    yield replacement
 
 
 def _csrf(user: dict) -> dict:
@@ -82,6 +90,19 @@ def test_two_annotation_runs_append_revisions_and_merge_latest(client: TestClien
     user = login(client, "user", "user123")
     case = create_case(client, user, "目标正文")
     annotation = create_annotation(client, user, case, "目标正文")
+    _run_two_rounds(client, user, case, annotation)
+    merged = client.post(
+        f"/api/cases/{case['id']}/annotations/{annotation['id']}/merge",
+        headers=_csrf(user),
+    )
+    assert merged.status_code == 200, merged.text
+    result = merged.json()
+    assert result["annotation"]["status"] == "resolved"
+    assert result["annotation"]["revisions"][-1]["status"] == "accepted"
+    assert "第二轮改写" in result["case"]["document"]["content"][1]["content"][0]["text"]
+
+
+def _run_two_rounds(client: TestClient, user: dict, case: dict, annotation: dict) -> None:
     with agent.override(model=_proposal_model("第一轮改写")):
         first = _send(client, user, case, annotation, "第一轮")
     assert first.status_code == 200, first.text
@@ -97,15 +118,6 @@ def test_two_annotation_runs_append_revisions_and_merge_latest(client: TestClien
         "第一轮改写", "第二轮改写"
     ], {"annotation": row, "runs": snapshot["runs"], "artifacts": snapshot["artifacts"]}
     assert row["revisions"][0]["artifactId"]
-    merged = client.post(
-        f"/api/cases/{case['id']}/annotations/{annotation['id']}/merge",
-        headers=_csrf(user),
-    )
-    assert merged.status_code == 200, merged.text
-    result = merged.json()
-    assert result["annotation"]["status"] == "resolved"
-    assert result["annotation"]["revisions"][-1]["status"] == "accepted"
-    assert "第二轮改写" in result["case"]["document"]["content"][1]["content"][0]["text"]
 
 
 def test_private_discussion_is_invisible_to_other_teachers(client: TestClient) -> None:
@@ -121,6 +133,11 @@ def test_private_discussion_is_invisible_to_other_teachers(client: TestClient) -
     assert listed.status_code == 403, listed.text
     thread = client.get(f"/api/cases/{case['id']}/agent/thread/{thread_id}", headers=csrf)
     assert thread.status_code in (403, 404), thread.text
+    _assert_replay_denied(client, case, thread_id, csrf)
+    _assert_author_discussion_intact(client, case, annotation)
+
+
+def _assert_replay_denied(client: TestClient, case: dict, thread_id: str, csrf: dict) -> None:
     replay = client.post(
         f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream",
         headers=csrf,
@@ -130,6 +147,9 @@ def test_private_discussion_is_invisible_to_other_teachers(client: TestClient) -
         }]},
     )
     assert replay.status_code in (403, 404), replay.text
+
+
+def _assert_author_discussion_intact(client: TestClient, case: dict, annotation: dict) -> None:
     again = login(client, "user", "user123")
     row = client.get(
         f"/api/cases/{case['id']}/annotations", headers=_csrf(again),
@@ -144,10 +164,11 @@ def test_failed_annotation_run_leaves_no_revision(client: TestClient) -> None:
 
     async def broken(messages, _info):
         raise RuntimeError("upstream unavailable")
-
+        yield  # unreachable: 使函数成为 async generator，抛错发生在首次迭代
     with agent.override(model=FunctionModel(stream_function=broken)):
         response = _send(client, user, case, annotation, "请修订")
     assert response.status_code == 200, response.text
+    _wait_terminal(client, case["id"])
     row = client.get(
         f"/api/cases/{case['id']}/annotations", headers=_csrf(user),
     ).json()[0]
@@ -155,3 +176,127 @@ def test_failed_annotation_run_leaves_no_revision(client: TestClient) -> None:
     snapshot = client.get(f"/api/cases/{case['id']}/agent/thread").json()
     assert snapshot["artifacts"] == [], snapshot
     assert client.get(f"/api/cases/{case['id']}").json()["revision"] == 1
+
+
+def _wait_terminal(client: TestClient, case_id: str) -> None:
+    """等后台 Run 到达终态，避免后台协程与断言/客户端关闭竞争。"""
+    import time
+
+    terminal = {"completed", "failed", "cancelled"}
+    for _ in range(100):
+        runs = client.get(f"/api/cases/{case_id}/agent/thread").json().get("runs", [])
+        if runs and runs[-1].get("status") in terminal:
+            return
+        time.sleep(0.05)
+
+
+def test_admin_cannot_read_or_reply_private_discussion(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    annotation = create_annotation(client, author, case, "目标正文")
+    admin = login(client, "admin", "admin123")
+    csrf = _csrf(admin)
+    listed = client.get(f"/api/cases/{case['id']}/annotations", headers=csrf)
+    assert listed.status_code == 200
+    assert listed.json() == [], {"annotations": listed.json()}
+    replied = client.post(
+        f"/api/cases/{case['id']}/annotations/{annotation['id']}/replies",
+        headers=csrf, json={"content": "审核者插入私人讨论"},
+    )
+    assert replied.status_code == 403, replied.text
+    author = login(client, "user", "user123")
+    _assert_author_reply_works(client, case, annotation, author)
+
+
+def _assert_author_reply_works(client: TestClient, case: dict, annotation: dict, author: dict) -> None:
+    own = client.get(
+        f"/api/cases/{case['id']}/annotations", headers=_csrf(author),
+    ).json()[0]
+    assert own.get("replies") in (None, []), own
+    answered = client.post(
+        f"/api/cases/{case['id']}/annotations/{annotation['id']}/replies",
+        headers=_csrf(author), json={"content": "作者补充说明"},
+    )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["replies"][-1]["content"] == "作者补充说明"
+
+
+def test_admin_still_reads_and_replies_review_annotations(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    submission = _submit_case(client, author, case)
+    review_annotation = _admin_review_annotation(client, case, submission)
+    admin = login(client, "admin", "admin123")
+    listed = client.get(
+        f"/api/cases/{case['id']}/annotations", headers=_csrf(admin),
+    ).json()
+    assert [row["id"] for row in listed] == [review_annotation["id"]]
+    replied = client.post(
+        f"/api/cases/{case['id']}/annotations/{review_annotation['id']}/replies",
+        headers=_csrf(admin), json={"content": "审核员追问"},
+    )
+    assert replied.status_code == 200, replied.text
+    author_rows = client.get(
+        f"/api/cases/{case['id']}/annotations", headers=_csrf(author),
+    ).json()
+    assert [row["id"] for row in author_rows] == [review_annotation["id"]]
+
+
+def _submit_case(client: TestClient, author: dict, case: dict) -> dict:
+    response = client.post(
+        f"/api/cases/{case['id']}/lifecycle",
+        headers=_csrf(author), json={"command": "submit", "revision": case["revision"]},
+    )
+    assert response.status_code == 200, response.text
+    admin = login(client, "admin", "admin123")
+    started = client.post(
+        f"/api/cases/{case['id']}/lifecycle",
+        headers=_csrf(admin),
+        json={"command": "start", "revision": response.json()["case"]["revision"]},
+    )
+    assert started.status_code == 200, started.text
+    return {"versionId": response.json()["version"]["id"]}
+
+
+def _admin_review_annotation(client: TestClient, case: dict, submission: dict) -> dict:
+    admin = login(client, "admin", "admin123")
+    response = client.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers=_csrf(admin),
+        json={"quote": "目标正文", "section": HEADING,
+              "content": "审核意见", "source": "admin"},
+    )
+    assert response.status_code == 201, response.text
+    annotation = response.json()
+    assert annotation["versionId"] == submission["versionId"]
+    return annotation
+
+
+def test_annotation_opinion_enters_run_instructions(client: TestClient) -> None:
+    author = login(client, "user", "user123")
+    case = create_case(client, author, "目标正文")
+    annotation = create_annotation(client, author, case, "目标正文")
+    captured = {}
+
+    def recorder(messages, info):
+        captured["instructions"] = getattr(info, "instructions", "") or ""
+
+    with agent.override(model=_proposal_model("意见驱动修订", recorder=recorder)):
+        response = _send(client, author, case, annotation, "请按批注意见修订")
+    assert response.status_code == 200, response.text
+    instructions = captured["instructions"]
+    assert "作者私人意见" in instructions or "请补充评价依据" in instructions, instructions
+    assert annotation["quote"] in instructions, instructions
+
+
+def test_blank_revision_reason_is_rejected_before_artifact(client: TestClient) -> None:
+    from app.modules.agent.skills import require_revision_reason
+    from pydantic_ai.exceptions import ModelRetry
+
+    try:
+        require_revision_reason("   ")
+    except ModelRetry as retry:
+        assert "理由" in str(retry)
+    else:
+        raise AssertionError("blank reason must raise ModelRetry")
+    assert require_revision_reason(" 具体理由 ") == " 具体理由 "

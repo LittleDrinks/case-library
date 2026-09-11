@@ -114,6 +114,18 @@ def catalog_instructions(title: str, refs: list[SourceRef], selected: list[dict]
     return "\n".join(lines)
 
 
+def annotation_instructions(annotation: dict | None) -> str:
+    """服务端从已保存批注记录注入教师意见；不信任客户端重传的内容。"""
+    if not annotation:
+        return ""
+    opinion = annotation.get("content") or ""
+    quote = annotation.get("quote") or ""
+    return (
+        "本条消息关联批注（服务端读取的教师已保存意见，修订必须回应该意见）："
+        f"原引用：{quote}；意见：{opinion}。"
+    )
+
+
 def _selection_line(selections: list[dict], reader: bool = False) -> str:
     if not selections:
         return "本条消息没有正文选区；不得把整篇正文当作默认修订目标。"

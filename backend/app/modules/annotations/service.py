@@ -394,9 +394,16 @@ def create_annotation(database: Database, case_id: str, body: dict, user: dict) 
 
 
 def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]:
-    _case(database, case_id, user)
-    rows = database.annotations.find({"caseId": case_id}).sort("createdAt", 1)
+    case = _case(database, case_id, user)
+    rows = database.annotations.find(_list_query(case, user)).sort("createdAt", 1)
     return [_view(row) for row in rows]
+
+
+def _list_query(case: dict, user: dict) -> dict:
+    """私人讨论仅案例作者可见；管理员只读版本绑定的审核批注，不泄漏个人修订。"""
+    if case["ownerId"] == user["id"]:
+        return {"caseId": case["id"]}
+    return {"caseId": case["id"], "versionId": {"$ne": None}}
 
 
 def _get_annotation(database: Database, case_id: str, annotation_id: str, session=None) -> dict:
@@ -441,8 +448,9 @@ def delete_annotation(database: Database, case_id: str, annotation_id: str, user
 def add_reply(
     database: Database, case_id: str, annotation_id: str, content: str, user: dict
 ) -> dict:
-    _case(database, case_id, user)
-    _get_annotation(database, case_id, annotation_id)
+    case = _case(database, case_id, user)
+    annotation = _get_annotation(database, case_id, annotation_id)
+    _require_reply_actor(case, annotation, user)
     reply = {
         "id": f"ar-{secrets.token_hex(8)}",
         "content": content,
@@ -455,6 +463,14 @@ def add_reply(
         return_document=ReturnDocument.AFTER,
     )
     return _view(updated)
+
+
+def _require_reply_actor(case: dict, annotation: dict, user: dict) -> None:
+    """私人批注（版本未绑定）只有作者能回复；审核批注允许作者与管理员讨论。"""
+    if annotation.get("versionId") is not None:
+        return
+    if annotation.get("createdBy") != user["id"] or case["ownerId"] != user["id"]:
+        raise CaseError(403, "仅批注作者可回复私人讨论")
 
 
 def _require_status_actor(case: dict, user: dict, status: str) -> None:
@@ -523,19 +539,8 @@ def record_ai_revision(database, artifact, created_by: str, session=None) -> dic
     annotation_id = getattr(artifact, "annotation_id", None)
     if not annotation_id:
         return None
-    target = artifact.target.model_dump(by_alias=True)
-    revision = {
-        "id": new_revision_id(), "artifactId": artifact.id, "runId": artifact.run_id,
-        "baseRevision": artifact.base_revision, "target": target,
-        "replacement": artifact.replacement, "reason": artifact.reason,
-        "status": "pending", "createdBy": created_by, "createdAt": _now(),
-    }
-    query = {
-        "id": annotation_id, "caseId": artifact.case_id, "createdBy": created_by,
-        "status": "pending",
-        "from": target["from"], "to": target["to"], "quote": target["quote"],
-        "$or": [{"anchorState": ACTIVE_ANCHOR}, {"anchorState": {"$exists": False}}],
-    }
+    revision = _revision_document(artifact, created_by)
+    query = _revision_query(annotation_id, artifact, created_by, revision["target"])
     updated = database.annotations.find_one_and_update(
         query, {"$push": {"revisions": revision}},
         return_document=ReturnDocument.AFTER, session=session,
@@ -543,6 +548,25 @@ def record_ai_revision(database, artifact, created_by: str, session=None) -> dic
     if not updated:
         raise CaseError(409, "批注选区已变化，不能保存 AI 修订")
     return revision
+
+
+def _revision_document(artifact, created_by: str) -> dict:
+    target = artifact.target.model_dump(by_alias=True)
+    return {
+        "id": new_revision_id(), "artifactId": artifact.id, "runId": artifact.run_id,
+        "baseRevision": artifact.base_revision, "target": target,
+        "replacement": artifact.replacement, "reason": artifact.reason,
+        "status": "pending", "createdBy": created_by, "createdAt": _now(),
+    }
+
+
+def _revision_query(annotation_id: str, artifact, created_by: str, target: dict) -> dict:
+    return {
+        "id": annotation_id, "caseId": artifact.case_id, "createdBy": created_by,
+        "status": "pending",
+        "from": target["from"], "to": target["to"], "quote": target["quote"],
+        "$or": [{"anchorState": ACTIVE_ANCHOR}, {"anchorState": {"$exists": False}}],
+    }
 
 
 def mark_ai_revision_decision(database, artifact, user: dict, decision: str, session=None) -> None:
@@ -553,6 +577,14 @@ def mark_ai_revision_decision(database, artifact, user: dict, decision: str, ses
         {"id": artifact.annotation_id, "caseId": artifact.case_id},
         session,
     )
+    revisions = _decided_revisions(annotation, artifact, user, decision)
+    database.annotations.update_one(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"revisions": revisions}}, session=session,
+    )
+
+
+def _decided_revisions(annotation, artifact, user: dict, decision: str) -> list[dict]:
     if not annotation or annotation.get("createdBy") != user["id"]:
         raise CaseError(403, "仅批注作者可决定修订")
     revisions = [
@@ -562,10 +594,7 @@ def mark_ai_revision_decision(database, artifact, user: dict, decision: str, ses
     ]
     if not any(revision.get("artifactId") == artifact.id for revision in revisions):
         raise CaseError(409, "批注修订已变化")
-    database.annotations.update_one(
-        {"id": annotation["id"], "status": "pending"},
-        {"$set": {"revisions": revisions}}, session=session,
-    )
+    return revisions
 
 
 def new_revision_id() -> str:
@@ -619,13 +648,7 @@ def _expire_invalid_revisions(database, annotation, session) -> None:
 
 
 def _commit_annotation_merge(database, case, annotation, revision, user, session):
-    try:
-        document, steps = prosemirror.replaced_document_with_steps(
-            case["document"], annotation["from"], annotation["to"],
-            annotation["quote"], revision["replacement"],
-        )
-    except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
-        raise CaseError(409, "目标选区原文已变化，修订候选已过期") from error
+    document, steps = _merged_document(case, annotation, revision)
     from app.modules.cases.snapshots import record_snapshot
 
     mapping = _mapping_for_change(case["document"], document, steps)
@@ -639,6 +662,16 @@ def _commit_annotation_merge(database, case, annotation, revision, user, session
         database, annotation, revision, user, session,
     )
     return {"annotation": _view(updated_annotation), "case": case_view(updated_case)}
+
+
+def _merged_document(case: dict, annotation: dict, revision: dict):
+    try:
+        return prosemirror.replaced_document_with_steps(
+            case["document"], annotation["from"], annotation["to"],
+            annotation["quote"], revision["replacement"],
+        )
+    except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
+        raise CaseError(409, "目标选区原文已变化，修订候选已过期") from error
 
 
 def _commit_case_document(database, case, document, session):

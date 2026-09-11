@@ -192,6 +192,7 @@ async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
     """为教师选定的正文范围构建修订候选；随运行完成事务统一提交。"""
+    require_revision_reason(reason)
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
     try:
@@ -200,6 +201,13 @@ async def propose_revision(
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.proposed = artifact
     return _artifact_view(artifact)
+
+
+def require_revision_reason(reason: str) -> str:
+    """修订理由是非空契约：空/纯空白拒绝并由模型重试，不代填假原因。"""
+    if not isinstance(reason, str) or not reason.strip():
+        raise ModelRetry("修订必须给出具体修改理由，且不能为空白")
+    return reason
 
 
 def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str):
@@ -261,6 +269,13 @@ async def write_document(
     """
     if ctx.deps.annotation_id:
         raise ModelRetry("批注讨论只能提议选区修订，不能直接写入正文")
+    return await _write_document(ctx, scope, blocks, summary)
+
+
+async def _write_document(
+    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
+    blocks: DraftBlocks, summary: str,
+) -> dict:
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
     record = _apply_document_write(ctx, scope, blocks, summary)

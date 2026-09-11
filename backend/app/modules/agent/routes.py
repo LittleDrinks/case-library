@@ -12,7 +12,9 @@ from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
 from app.modules.agent import prosemirror
-from app.modules.agent.case_area import catalog_instructions, retained_sources, selection_from_parts
+from app.modules.agent.case_area import (
+    annotation_instructions, catalog_instructions, retained_sources, selection_from_parts,
+)
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.visibility import parts_projector, visible_snapshot
 from app.modules.agent.models import (
@@ -86,6 +88,7 @@ class RunPlan:
     selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)
     annotation_id: str | None = None
+    annotation: dict | None = None
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -357,12 +360,29 @@ def _validate_plan(
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
+    part = _single_annotation_part(plan, version_id, user, case["ownerId"] == user["id"])
+    if part is None:
+        return None
+    annotation = _revision_annotation(database, case, part, user)
+    _ensure_annotation_matches_selection(annotation, plan)
+    plan.annotation = {
+        "content": annotation.get("content") or "",
+        "quote": annotation.get("quote") or "",
+    }
+    return annotation["id"]
+
+
+def _single_annotation_part(plan, version_id, user, is_owner: bool) -> dict | None:
     parts = [part for part in plan.parts if part.get("type") == "data-annotation"]
     if not parts:
         return None
-    if len(parts) != 1 or version_id or not user or case["ownerId"] != user["id"]:
+    if len(parts) != 1 or version_id or not user or not is_owner:
         raise HTTPException(status_code=403, detail="批注 AI 修订仅限案例作者工作稿")
-    data = parts[0].get("data")
+    return parts[0]
+
+
+def _revision_annotation(database, case, part, user) -> dict:
+    data = part.get("data")
     annotation_id = data.get("id") if isinstance(data, dict) else None
     if not isinstance(annotation_id, str) or not annotation_id:
         raise HTTPException(status_code=422, detail="批注关联格式无效")
@@ -375,9 +395,12 @@ def _annotation_from_parts(database, case, plan, version_id, user) -> str | None
         raise HTTPException(status_code=403, detail="仅批注作者可请求 AI 修订")
     if annotation.get("status") != "pending" or annotation.get("anchorState", "active") != "active":
         raise HTTPException(status_code=409, detail="批注选区已变化或已解决，请重新选择")
+    return annotation
+
+
+def _ensure_annotation_matches_selection(annotation, plan) -> None:
     if len(plan.selections) != 1 or not _same_annotation_target(annotation, plan.selections[0]):
         raise HTTPException(status_code=409, detail="批注与当前正文选区不一致，请重新选择")
-    return annotation_id
 
 
 def _same_annotation_target(annotation: dict, selection: dict) -> bool:
@@ -608,10 +631,7 @@ def _run_lock_for(conversation: Conversation, plan: RunPlan):
 def _run_context(request, database, settings, user, conversation: Conversation,
                  repository, thread, adapter, plan, run, selection, lease, worker_id, bounds):
     refs = retained_sources(database, conversation.case["id"], user, conversation.version_id)
-    instructions = catalog_instructions(
-        conversation.case.get("title") or "未命名案例", refs,
-        plan.selected, plan.selections, conversation.reader,
-    )
+    instructions = _base_instructions(conversation, refs, plan)
     deps = _run_deps(
         request, database, settings, user, conversation, thread, run, refs, plan
     )
@@ -624,6 +644,14 @@ def _run_context(request, database, settings, user, conversation: Conversation,
         reader=conversation.reader, review=conversation.review,
         instructions=instructions,
     )
+
+
+def _base_instructions(conversation: Conversation, refs, plan) -> str:
+    instructions = catalog_instructions(
+        conversation.case.get("title") or "未命名案例", refs,
+        plan.selected, plan.selections, conversation.reader,
+    )
+    return instructions + annotation_instructions(plan.annotation)
 
 
 def _run_deps(request, database, settings, user, conversation, thread, run, refs, plan):
