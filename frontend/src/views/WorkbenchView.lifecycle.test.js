@@ -567,3 +567,18 @@ test("公开阅读页标签目录失败时提示且不回退内部 ID", async ()
   await wrapper.get(".case-tags-state button").trigger("click");
   expect(api.listTagGroups).toHaveBeenCalledTimes(2);
 });
+
+test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  let resolveCatalog;
+  api.listTagGroups.mockReturnValue(new Promise((resolve) => { resolveCatalog = resolve; }));
+  const wrapper = render();
+  await flushPromises();
+  const tags = wrapper.get(".case-tags").text();
+  expect(tags).toContain("标签目录加载中");
+  expect(tags).not.toContain("t-spirit");
+  resolveCatalog(readerTagCatalog);
+  await flushPromises();
+  expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
+});
