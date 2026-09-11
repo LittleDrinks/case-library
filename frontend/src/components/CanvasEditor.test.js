@@ -237,6 +237,32 @@ it("selectionchange 早于编辑器状态同步时不得清除正在建立的 DO
   expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
     .toMatchObject({ quote: "案例原文" });
 });
+// 启动一次悬挂中的摘要捕获，再把选区收起为光标（观察路径）。
+async function suspendDigestAndCollapse(wrapper, pending) {
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 13)));
+  void wrapper.vm.recaptureSelection();
+  await vi.waitUntil(() => pending.length > 0, { interval: 10 });
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9)));
+  await wrapper.vm.recaptureSelection();
+}
+
+it("悬挂的选区摘要完成时不得写回已被收起的选区", async () => {
+  const { wrapper } = await setup({ annotatable: true });
+  const pending = [];
+  vi.stubGlobal("crypto", { subtle: { digest: () => new Promise((resolve) => pending.push(resolve)) } });
+  try {
+    await suspendDigestAndCollapse(wrapper, pending);
+    const domLength = globalThis.getSelection().rangeCount;
+    pending.forEach((resolve) => resolve(new Uint8Array(32).buffer));
+    await nextTick();
+    await nextTick();
+    expect(globalThis.getSelection().rangeCount).toBe(domLength);
+    expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it("正文插入由编辑器映射批注标记并上报原生 steps", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,

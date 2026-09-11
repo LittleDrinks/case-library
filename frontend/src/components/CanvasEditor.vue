@@ -64,10 +64,12 @@ function clearSelection() {
   emit("selection", null);
 }
 
-// 状态观察：选区无效时只丢弃内部候选，不触碰 DOM 选区。
+// 状态观察：选区无效时只丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
 // selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
 // 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
+// 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
 function discardSelection() {
+  selectionRequest += 1;
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
   emit("selection", null);
