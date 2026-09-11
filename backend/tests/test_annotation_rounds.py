@@ -344,6 +344,131 @@ def _assert_rolled_back(database, marker: str) -> None:
     assert row["status"] == "resolved" and row.get("revisions", []) == []
 
 
+def _merge_target() -> dict:
+    return {"from": 1, "to": 7, "quote": "目标正文段落"}
+
+
+def _merge_artifact(marker: str, index: int, replacement: str) -> dict:
+    return {
+        "id": f"artifact-{marker}-{index}", "caseId": marker,
+        "threadId": f"thread-{marker}", "runId": f"run-{marker}-{index}",
+        "status": "pending", "baseRevision": 1, "target": _merge_target(),
+        "annotationId": f"an-{marker}", "replacement": replacement,
+        "reason": "理由", "sources": [], "createdAt": datetime.now(UTC),
+    }
+
+
+def _merge_revision(marker: str, index: int, replacement: str) -> dict:
+    return {
+        "id": f"arv-{marker}-{index}", "artifactId": f"artifact-{marker}-{index}",
+        "runId": f"run-{marker}-{index}", "baseRevision": 1,
+        "target": _merge_target(), "replacement": replacement, "reason": "理由",
+        "status": "pending", "createdBy": "u1", "createdAt": datetime.now(UTC),
+    }
+
+
+def _seed_merge_artifacts(database, marker: str) -> None:
+    _seed_real_annotation(database, marker)
+    database.agent_threads.insert_one({
+        "id": f"thread-{marker}", "caseId": marker, "ownerId": "u1", "eventSeq": 0,
+    })
+    replacements = ("旧轮改写", "最新有效改写")
+    for index, replacement in enumerate(replacements, 1):
+        database.agent_runs.insert_one({
+            "id": f"run-{marker}-{index}", "threadId": f"thread-{marker}",
+            "status": "completed",
+        })
+        database.agent_artifacts.insert_one(_merge_artifact(marker, index, replacement))
+    database.annotations.update_one(
+        {"id": f"an-{marker}"},
+        {"$set": {"revisions": [
+            _merge_revision(marker, 1, replacements[0]),
+            _merge_revision(marker, 2, replacements[1]),
+        ]}},
+    )
+
+
+def _cleanup_merge_data(database, marker: str) -> None:
+    database.case_snapshots.delete_many({"caseId": marker})
+    database.agent_thread_events.delete_many({"threadId": f"thread-{marker}"})
+    database.agent_artifacts.delete_many({"caseId": marker})
+    database.agent_runs.delete_many({"id": {"$regex": f"^run-{marker}-"}})
+    database.agent_threads.delete_many({"id": f"thread-{marker}"})
+    database.annotations.delete_many({"caseId": marker})
+    database.cases.delete_many({"id": marker})
+
+
+def _open_merge_database():
+    from pymongo import MongoClient
+
+    mongo = MongoClient(os.environ["AUTH_QUERY_MONGODB_URI"])
+    return mongo, mongo.get_default_database()
+
+
+def _merge_once(database, marker: str):
+    from app.modules.annotations import service as annotations
+
+    return annotations.merge_annotation(
+        database, marker, f"an-{marker}", {"id": "u1", "role": "user"},
+        AgentRepository(database).append_artifact_decision_event,
+    )
+
+
+def _assert_merge_result(database, marker: str, result: dict) -> None:
+    assert result["case"]["revision"] == 2
+    assert result["annotation"]["status"] == "resolved"
+    assert [row["status"] for row in result["annotation"]["revisions"]] == [
+        "expired", "accepted",
+    ]
+    statuses = database.agent_artifacts.find(
+        {"caseId": marker}, {"_id": 0, "status": 1}
+    ).sort("id", 1)
+    assert [row["status"] for row in statuses] == ["expired", "accepted"]
+
+
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
+def test_merge_keeps_selected_artifact_accepted_on_real_replica_set():
+    mongo, database = _open_merge_database()
+    marker = f"annotation-merge-{uuid.uuid4().hex}"
+    try:
+        _seed_merge_artifacts(database, marker)
+        _assert_merge_result(database, marker, _merge_once(database, marker))
+    finally:
+        _cleanup_merge_data(database, marker)
+        mongo.close()
+
+
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
+def _run_concurrent_merges(database, marker: str) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    request = (database, marker, f"an-{marker}", {"id": "u1", "role": "user"})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_merge_once, *request[:2]) for _ in range(2)]
+        return [future.result() for future in futures]
+
+
+def _assert_single_commit(database, marker: str, outcomes: list[dict]) -> None:
+    assert all(result["case"]["revision"] == 2 for result in outcomes)
+    assert database.case_snapshots.count_documents(
+        {"caseId": marker, "kind": "pre_annotation_merge"}
+    ) == 1
+    assert database.agent_artifacts.count_documents({"caseId": marker, "status": "accepted"}) == 1
+    assert database.agent_artifacts.count_documents({"caseId": marker, "status": "expired"}) == 1
+
+
+def test_concurrent_merge_commits_once_on_real_replica_set():
+    mongo, database = _open_merge_database()
+    marker = f"annotation-merge-concurrent-{uuid.uuid4().hex}"
+    try:
+        _seed_merge_artifacts(database, marker)
+        outcomes = _run_concurrent_merges(database, marker)
+        _assert_single_commit(database, marker, outcomes)
+    finally:
+        _cleanup_merge_data(database, marker)
+        mongo.close()
+
+
 @pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
 def test_late_completion_rolls_back_on_real_replica_set():
     """真 Mongo 事务下迟到完成必须整体回滚；mongomock 无法表达该语义。"""

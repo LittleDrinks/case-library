@@ -63,24 +63,62 @@ def create_annotation(client: TestClient, user: dict, case: dict, text: str) -> 
 
 
 def seed_revisions(client: TestClient, annotation: dict, *replacements: str) -> None:
-    revisions = [
-        {
-            "id": f"arv-{index}",
-            "artifactId": f"artifact-{index}",
-            "runId": f"run-{index}",
-            "baseRevision": 1,
-            "target": {"from": annotation["from"], "to": annotation["to"], "quote": annotation["quote"]},
-            "replacement": replacement,
-            "reason": f"第 {index} 轮修订原因",
-            "status": "pending",
-            "createdBy": annotation["createdBy"],
-            "createdAt": f"2026-09-10T00:00:0{index}+00:00",
-        }
-        for index, replacement in enumerate(replacements, 1)
-    ]
-    client.app.state.database.annotations.update_one(
+    seed_linked_revisions(client, annotation, *replacements)
+
+
+def _linked_target(annotation: dict) -> dict:
+    return {"from": annotation["from"], "to": annotation["to"], "quote": annotation["quote"]}
+
+
+def _linked_artifact(annotation: dict, thread_id: str, run_id: str,
+                     artifact_id: str, replacement: str) -> dict:
+    return {
+        "id": artifact_id, "caseId": annotation["caseId"], "threadId": thread_id,
+        "runId": run_id, "status": "pending", "baseRevision": annotation["revision"],
+        "target": _linked_target(annotation), "annotationId": annotation["id"],
+        "replacement": replacement, "reason": "修订理由", "sources": [],
+        "createdAt": "2026-09-11T00:00:00Z",
+    }
+
+
+def _linked_revision(annotation: dict, artifact_id: str, run_id: str,
+                     index: int, replacement: str) -> dict:
+    return {
+        "id": f"arv-{index}", "artifactId": artifact_id, "runId": run_id,
+        "baseRevision": annotation["revision"], "target": _linked_target(annotation),
+        "replacement": replacement, "reason": "修订理由", "status": "pending",
+        "createdBy": annotation["createdBy"], "createdAt": "2026-09-11T00:00:00Z",
+    }
+
+
+def _seed_linked_candidate(database, annotation: dict, thread_id: str,
+                            index: int, replacement: str) -> tuple[str, dict]:
+    artifact_id, run_id = f"artifact-{index}", f"run-{index}"
+    database.agent_runs.insert_one({"id": run_id, "threadId": thread_id, "status": "completed"})
+    database.agent_artifacts.insert_one(
+        _linked_artifact(annotation, thread_id, run_id, artifact_id, replacement)
+    )
+    return artifact_id, _linked_revision(annotation, artifact_id, run_id, index, replacement)
+
+
+def seed_linked_revisions(client: TestClient, annotation: dict, *replacements: str) -> list[str]:
+    database = client.app.state.database
+    thread_id = f"thread-{annotation['id']}"
+    database.agent_threads.insert_one({
+        "id": thread_id, "caseId": annotation["caseId"],
+        "ownerId": annotation["createdBy"], "eventSeq": 0,
+    })
+    revisions, artifact_ids = [], []
+    for index, replacement in enumerate(replacements, 1):
+        artifact_id, revision = _seed_linked_candidate(
+            database, annotation, thread_id, index, replacement
+        )
+        artifact_ids.append(artifact_id)
+        revisions.append(revision)
+    database.annotations.update_one(
         {"id": annotation["id"]}, {"$set": {"revisions": revisions}}
     )
+    return artifact_ids
 
 
 def save_document(client: TestClient, user: dict, case: dict, next_document: dict, steps: list[dict]):
@@ -88,6 +126,14 @@ def save_document(client: TestClient, user: dict, case: dict, next_document: dic
         f"/api/cases/{case['id']}",
         headers={"X-CSRF-Token": user["csrfToken"]},
         json={"revision": case["revision"], "document": next_document, "steps": steps},
+    )
+
+
+def save_title(client: TestClient, user: dict, case: dict, title: str):
+    return client.patch(
+        f"/api/cases/{case['id']}",
+        headers={"X-CSRF-Token": user["csrfToken"]},
+        json={"revision": case["revision"], "title": title},
     )
 
 
@@ -109,6 +155,50 @@ def test_merge_uses_latest_revision_after_unrelated_edit_and_is_idempotent(clien
     )
     assert repeated.status_code == 200
     assert repeated.json()["case"]["revision"] == merged.json()["case"]["revision"]
+
+
+def test_merge_accepts_selected_artifact_and_expires_other_revision(client: TestClient) -> None:
+    user = login(client, "user", "user123")
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    artifact_ids = seed_linked_revisions(client, annotation, "旧轮改写", "最新有效改写")
+
+    response = client.post(
+        merge_path(case, annotation), headers={"X-CSRF-Token": user["csrfToken"]}
+    )
+    _assert_linked_merge_result(client, response, artifact_ids)
+
+
+def test_merge_rejects_stale_baseline_and_expires_linked_artifact(client: TestClient) -> None:
+    user = login(client, "user", "user123")
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    artifact_ids = seed_linked_revisions(client, annotation, "过期基线改写")
+    changed = save_title(client, user, case, "标题已更新")
+    assert changed.status_code == 200
+
+    response = client.post(
+        merge_path(changed.json(), annotation), headers={"X-CSRF-Token": user["csrfToken"]}
+    )
+
+    assert response.status_code == 409
+    current = client.get(f"/api/cases/{case['id']}").json()
+    assert current["revision"] == 2 and current["document"] == document("目标正文")
+    row = client.get(f"/api/cases/{case['id']}/annotations").json()[0]
+    assert row["revisions"][0]["status"] == "expired"
+    assert client.app.state.database.agent_artifacts.find_one({"id": artifact_ids[0]})["status"] == "expired"
+
+
+def _assert_linked_merge_result(client: TestClient, response, artifact_ids: list[str]) -> None:
+    assert response.status_code == 200
+    result = response.json()
+    assert result["annotation"]["status"] == "resolved"
+    assert [row["status"] for row in result["annotation"]["revisions"]] == [
+        "expired", "accepted",
+    ]
+    statuses = [client.app.state.database.agent_artifacts.find_one({"id": artifact_id})["status"]
+                for artifact_id in artifact_ids]
+    assert statuses == ["expired", "accepted"]
 
 
 def _edit_before_merge(client: TestClient, user: dict, case: dict) -> dict:
