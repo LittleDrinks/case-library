@@ -64,6 +64,15 @@ function clearSelection() {
   emit("selection", null);
 }
 
+// 状态观察：选区无效时只丢弃内部候选，不触碰 DOM 选区。
+// selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
+// 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
+function discardSelection() {
+  selection.value = null;
+  triggerPosition.value = { top: "0", left: "0" };
+  emit("selection", null);
+}
+
 function validSelection(activeEditor) {
   const { from, to } = activeEditor.state.selection;
   const { $from, $to } = activeEditor.state.selection;
@@ -74,7 +83,7 @@ async function captureSelection({ editor: activeEditor }) {
   const { from, to } = activeEditor.state.selection;
   const context = writingContext(activeEditor, from, to);
   if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()) {
-    clearSelection();
+    discardSelection();
     emit("writing-context", null);
     return;
   }
@@ -118,7 +127,7 @@ function currentContext(activeEditor) {
 
 function updateEditor({ editor: activeEditor, transaction }) {
   selectionBlocked = true;
-  clearSelection();
+  discardSelection();
   emit("change", {
     document: activeEditor.getJSON(),
     steps: transaction.steps.map((step) => step.toJSON()),
