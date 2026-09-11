@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pymongo import ReturnDocument
@@ -9,7 +10,6 @@ from pymongo.database import Database
 
 from app.modules.agent import prosemirror
 from app.modules.cases.service import CaseError, RevisionConflict, case_view
-
 
 ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
 ACTIVE_ANCHOR = "active"
@@ -610,11 +610,26 @@ def new_revision_id() -> str:
     return f"arv-{secrets.token_hex(8)}"
 
 
+@dataclass
+class MergeRejected:
+    """合并被拒绝且无正文写入；过期状态在独立事务中持久化后以 409 返回。"""
+
+    annotation: dict
+    reason: str = "没有可合并的有效 AI 修订"
+
+
 def merge_annotation(database: Database, case_id: str, annotation_id: str, user: dict) -> dict:
-    return _transaction(
+    outcome = _transaction(
         database,
         lambda session: _merge_annotation(database, case_id, annotation_id, user, session),
     )
+    if isinstance(outcome, MergeRejected):
+        _transaction(
+            database,
+            lambda active: _expire_invalid_revisions(database, outcome.annotation, user, active),
+        )
+        raise CaseError(409, outcome.reason)
+    return outcome
 
 
 def _merge_annotation(database, case_id, annotation_id, user, session):
@@ -625,8 +640,7 @@ def _merge_annotation(database, case_id, annotation_id, user, session):
         return {"annotation": _view(annotation, case["revision"]), "case": case_view(case)}
     revision = _latest_valid_revision(database, annotation, case["revision"], session)
     if revision is None:
-        _expire_invalid_revisions(database, annotation, user, session)
-        raise CaseError(409, "没有可合并的有效 AI 修订")
+        return MergeRejected(annotation)
     return _commit_annotation_merge(database, case, annotation, revision, user, session)
 
 

@@ -437,23 +437,31 @@ def test_merge_keeps_selected_artifact_accepted_on_real_replica_set():
 
 
 @pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
-def test_concurrent_merge_commits_once_on_real_replica_set():
+def _run_concurrent_merges(database, marker: str) -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor
 
+    request = (database, marker, f"an-{marker}", {"id": "u1", "role": "user"})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_merge_once, *request[:2]) for _ in range(2)]
+        return [future.result() for future in futures]
+
+
+def _assert_single_commit(database, marker: str, outcomes: list[dict]) -> None:
+    assert all(result["case"]["revision"] == 2 for result in outcomes)
+    assert database.case_snapshots.count_documents(
+        {"caseId": marker, "kind": "pre_annotation_merge"}
+    ) == 1
+    assert database.agent_artifacts.count_documents({"caseId": marker, "status": "accepted"}) == 1
+    assert database.agent_artifacts.count_documents({"caseId": marker, "status": "expired"}) == 1
+
+
+def test_concurrent_merge_commits_once_on_real_replica_set():
     mongo, database = _open_merge_database()
     marker = f"annotation-merge-concurrent-{uuid.uuid4().hex}"
     try:
         _seed_merge_artifacts(database, marker)
-        request = (database, marker, f"an-{marker}", {"id": "u1", "role": "user"})
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(_merge_once, *request[:2]) for _ in range(2)]
-            outcomes = [future.result() for future in futures]
-        assert all(result["case"]["revision"] == 2 for result in outcomes)
-        assert database.case_snapshots.count_documents(
-            {"caseId": marker, "kind": "pre_annotation_merge"}
-        ) == 1
-        assert database.agent_artifacts.count_documents({"caseId": marker, "status": "accepted"}) == 1
-        assert database.agent_artifacts.count_documents({"caseId": marker, "status": "expired"}) == 1
+        outcomes = _run_concurrent_merges(database, marker)
+        _assert_single_commit(database, marker, outcomes)
     finally:
         _cleanup_merge_data(database, marker)
         mongo.close()

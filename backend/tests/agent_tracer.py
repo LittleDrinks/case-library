@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from re import search
 
 from pydantic_ai import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
-
 from tests.skill_packages import EXAMPLE_PATH, SKILL_ID
 
 SEARCH_QUERY = "科学家精神"
@@ -47,6 +47,12 @@ def _latest_prompt(messages) -> str:
             if getattr(part, "part_kind", "") == "user-prompt":
                 return part.content
     return ""
+
+
+def _locked_selection(instructions: str) -> tuple[int, int] | None:
+    """服务端锁定的选区：作者指令行要求 propose_revision 原样使用 from/to。"""
+    found = search(r"本条消息正文选区.*?from=(\d+)，to=(\d+)", instructions or "")
+    return (int(found.group(1)), int(found.group(2))) if found else None
 
 
 def _wants_thinking(messages) -> bool:
@@ -94,7 +100,7 @@ def _search_source(messages) -> dict:
     raise AssertionError("tracer requires a completed search before reading")
 
 
-def tracer_response(messages, _info=None, skill_id: str | None = None,
+def tracer_response(messages, info=None, skill_id: str | None = None,
                     selection: tuple[int, int] | None = None) -> ModelResponse:
     """按已发生的工具调用推进：加载 Skill → 检索 → 读源 → 提议。"""
     called = _tool_calls(messages)
@@ -106,12 +112,13 @@ def tracer_response(messages, _info=None, skill_id: str | None = None,
         return _tool_response("search_corpus", {"query": _summary_query(messages)})
     if "read_source" not in called:
         return _tool_response("read_source", _search_source(messages))
-    return _tracer_proposal(messages, selection, called)
+    return _tracer_proposal(messages, selection, called, info)
 
 
-def _tracer_proposal(messages, selection, called) -> ModelResponse:
+def _tracer_proposal(messages, selection, called, info=None) -> ModelResponse:
     if "propose_revision" not in called:
-        start, end = selection or TRACER_SELECTION
+        instructions = getattr(info, "instructions", None) or ""
+        start, end = _locked_selection(instructions) or selection or TRACER_SELECTION
         second_round = "第二轮" in _latest_prompt(messages)
         return _tool_response("propose_revision", {
             "start": start, "end": end,
