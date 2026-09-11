@@ -51,7 +51,9 @@ const writingContext = ref(null);
 const annotations = ref([]);
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
+const pendingAnnotationRun = ref("");
 let pendingSteps = [];
+let annotationRunPoll = null;
 const sources = ref([]);
 const canvasEditor = ref(null);
 const decisionCommand = ref("");
@@ -246,6 +248,33 @@ async function loadAnnotations() {
 async function refreshAnnotations() {
   await loadAnnotations();
   annotationRefreshToken.value += 1;
+}
+
+function stopAnnotationRunPoll(refresh) {
+  clearInterval(annotationRunPoll);
+  annotationRunPoll = null;
+  pendingAnnotationRun.value = "";
+  if (refresh) void refreshAnnotations();
+}
+
+// 批注修订在完成事务才可见，而 AI 面板切页签/切对话会卸载；
+// 批注刷新由共同祖先 WorkbenchView 轮询该对话快照到终态，不受面板卸载影响。
+function watchAnnotationRun(threadId) {
+  pendingAnnotationRun.value = threadId;
+  if (annotationRunPoll) return;
+  let seenActive = false;
+  let misses = 0;
+  let ticks = 0;
+  annotationRunPoll = setInterval(() => {
+    if (!pendingAnnotationRun.value || (ticks += 1) > 300) return stopAnnotationRunPoll(false);
+    api.agentThread(caseRecord.value.id, pendingAnnotationRun.value).then((snapshot) => {
+      if (snapshot.activeRun) {
+        seenActive = true;
+        return;
+      }
+      if (seenActive || (misses += 1) >= 3) stopAnnotationRunPoll(true);
+    }).catch(() => stopAnnotationRunPoll(false));
+  }, 2000);
 }
 
 async function applyRevisedCase(value) {
@@ -574,6 +603,7 @@ onBeforeUnmount(() => {
   crashDraft.destroy();
   if (!readerMode.value) void autosave.flush();
   autosave.destroy();
+  stopAnnotationRunPoll(false);
 });
 </script>
 
@@ -722,6 +752,7 @@ onBeforeUnmount(() => {
           @mutation-state="contentMutationBusy = $event"
           @annotations="annotations = $event"
           @annotations-refresh="refreshAnnotationsAfterAi"
+          @annotation-run="watchAnnotationRun"
           @ask-ai="askAnnotationAi"
           @sources-retry="loadSources"
           @clear-writing-context="writingContext = null"
