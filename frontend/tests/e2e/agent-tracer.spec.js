@@ -90,7 +90,10 @@ async function openChat(page, caseId) {
 async function selectAnnotationText(page, value) {
   const target = page.locator(".canvas-editor p", { hasText: TARGET_TEXT });
   if (value === TARGET_TEXT) return target.selectText();
-  await target.click(); await page.keyboard.press("Control+ArrowUp");
+  await target.selectText();
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || ""))
+    .toBe(TARGET_TEXT);
+  await page.keyboard.press("ArrowLeft");
   const offset = await target.evaluate((node, text) => node.textContent.indexOf(text), value);
   expect(offset).toBeGreaterThanOrEqual(0);
   for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
