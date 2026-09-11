@@ -103,9 +103,11 @@ def _assert_saved_version(client: TestClient, case: dict, thread_id: str) -> Non
 
 
 def _overwrite_version(client: TestClient, auth: dict, case: dict, version: dict):
+    step = {"stepType": "replace", "from": 1, "to": 5,
+            "slice": {"content": [{"type": "text", "text": "覆盖前教师稿"}]}}
     changed = client.patch(
         f"/api/cases/{case['id']}", headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"revision": 1, "document": _document("覆盖前教师稿")},
+        json={"revision": 1, "document": _document("覆盖前教师稿"), "steps": [step]},
     ).json()
     return client.post(
         f"/api/cases/{case['id']}/lifecycle",

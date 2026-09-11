@@ -661,7 +661,7 @@ def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleN
     return SimpleNamespace(
         database=database, case_id=case["id"], thread_id=run.thread_id,
         run_id=run.id, user=user, proposed=None, wrote=wrote, evidence=[],
-        full_generation_allowed=True,
+        full_generation_allowed=True, annotation_id=None,
     )
 
 
