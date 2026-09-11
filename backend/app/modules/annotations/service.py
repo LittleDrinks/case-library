@@ -517,8 +517,7 @@ def _change_status(database, case_id, annotation_id, status, user, session,
         raise CaseError(409, "批注状态已变化")
     _decide_linked_artifacts(
         database, annotation, user, "rejected", session,
-        append_artifact_event=append_artifact_event,
-    )
+        append_artifact_event=append_artifact_event)
     return _view(updated, case["revision"])
 
 
@@ -702,8 +701,7 @@ def _expire_invalid_revisions(
     ]
     if stale_ids:
         _expire_stale_revisions(
-            database, annotation, user, stale_ids, session, append_artifact_event,
-        )
+            database, annotation, user, stale_ids, session, append_artifact_event)
 
 
 def _expire_stale_revisions(
@@ -749,8 +747,7 @@ def _commit_annotation_merge(
         steps, session, mapping, exclude_artifact_id=revision["artifactId"],
     )
     updated_annotation = _finish_annotation_merge(
-        database, annotation, revision, user, session, append_artifact_event,
-    )
+        database, annotation, revision, user, session, append_artifact_event)
     return {
         "annotation": _view(updated_annotation, updated_case["revision"]),
         "case": case_view(updated_case),
@@ -796,6 +793,5 @@ def _finish_annotation_merge(
         raise CaseError(409, "批注状态已变化")
     _decide_linked_artifacts(
         database, annotation, user, "accepted", session,
-        append_artifact_event=append_artifact_event, selected_id=selected["id"],
-    )
+        append_artifact_event=append_artifact_event, selected_id=selected["id"])
     return updated
