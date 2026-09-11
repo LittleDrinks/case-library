@@ -101,6 +101,7 @@ async function selectAnnotationText(page, value) {
   for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
   await page.keyboard.up("Shift");
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
+  await expect(page.locator(".comment-composer > blockquote")).toHaveText(value);
 }
 
 async function addAnnotation(page, quote = TARGET_TEXT) {
