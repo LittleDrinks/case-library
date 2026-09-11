@@ -537,11 +537,15 @@ def _seed_merge_artifacts(database, marker: str) -> None:
 
 
 def _cleanup_merge_data(database, marker: str) -> None:
+    thread_ids = [f"thread-{marker}", f"t-{marker}"]
     database.case_snapshots.delete_many({"caseId": marker})
-    database.agent_thread_events.delete_many({"threadId": f"thread-{marker}"})
+    database.agent_thread_events.delete_many({"threadId": {"$in": thread_ids}})
     database.agent_artifacts.delete_many({"caseId": marker})
-    database.agent_runs.delete_many({"id": {"$regex": f"^run-{marker}-"}})
-    database.agent_threads.delete_many({"id": f"thread-{marker}"})
+    database.agent_runs.delete_many({"id": {"$in": [
+        f"run-{marker}-1", f"run-{marker}-2", f"r-{marker}",
+    ]}})
+    database.agent_messages.delete_many({"threadId": {"$in": thread_ids}})
+    database.agent_threads.delete_many({"id": {"$in": thread_ids}})
     database.annotations.delete_many({"caseId": marker})
     database.cases.delete_many({"id": marker})
 
@@ -682,12 +686,8 @@ def _expire_after_completion_barrier(database, entered, committed):
 
     def expire_once_completed(database_arg, case_id, annotation_id, user_arg, session):
         entered.set()
-        try:
-            assert committed.wait(10), "completion 未在窗口内提交"
-            return original(database_arg, case_id, annotation_id, user_arg, session)
-        except BaseException as barrier_error:
-            barrier_error._barrier_failure = True
-            raise
+        assert committed.wait(10), "completion 未在窗口内提交"
+        return original(database_arg, case_id, annotation_id, user_arg, session)
 
     return original, expire_once_completed
 
