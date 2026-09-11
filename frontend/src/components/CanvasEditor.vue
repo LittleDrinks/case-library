@@ -133,6 +133,7 @@ function quoteText(doc, from, to) {
 }
 
 function annotationAnchor(annotation, doc) {
+  if (annotation.status === "resolved") return null;
   if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;

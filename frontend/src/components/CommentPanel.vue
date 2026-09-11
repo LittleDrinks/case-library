@@ -25,7 +25,14 @@ const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
 const cardRefs = new Map();
+const showResolved = ref(false);
 let loadGeneration = 0;
+
+const pendingCount = computed(() => annotations.value.filter(({ status }) => status !== "resolved").length);
+const resolvedCount = computed(() => annotations.value.filter(({ status }) => status === "resolved").length);
+const visibleAnnotations = computed(() => annotations.value.filter(({ status }) => (
+  showResolved.value ? status === "resolved" : status !== "resolved"
+)));
 
 const canCompose = computed(() => Boolean(
   props.user && (
@@ -41,7 +48,12 @@ const canCreate = computed(() => Boolean(
 const creationSource = computed(() => props.user?.role === "admin" ? "admin" : "manual");
 
 function announce() {
-  emit("annotations", annotations.value);
+  emit("annotations", annotations.value.filter(({ status }) => status !== "resolved"));
+}
+
+function invalidateAnnotationLoads() {
+  loadGeneration += 1;
+  loading.value = false;
 }
 
 function replaceAnnotation(updated) {
@@ -109,6 +121,8 @@ function setCardRef(id, element) {
 
 async function focusAnnotation(id) {
   if (!id) return;
+  const target = annotations.value.find((annotation) => annotation.id === id);
+  if (target) showResolved.value = target.status === "resolved";
   await nextTick();
   cardRefs.get(id)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
 }
@@ -204,13 +218,16 @@ async function reply(annotation) {
 
 async function setStatus(annotation, status) {
   if (saving.value) return;
+  invalidateAnnotationLoads();
   saving.value = true;
   error.value = "";
   try {
-    replaceAnnotation(await api.setAnnotationStatus(
+    const updated = await api.setAnnotationStatus(
       props.caseRecord.id, annotation.id, status, props.user.csrfToken,
-    ));
+    );
     if (status === "resolved") emit("clear-writing-context");
+    invalidateAnnotationLoads();
+    replaceAnnotation(updated);
   } catch (caught) {
     error.value = caught.message || "状态更新失败";
   } finally {
@@ -220,12 +237,14 @@ async function setStatus(annotation, status) {
 
 async function merge(annotation) {
   if (!canMerge(annotation) || saving.value) return;
+  invalidateAnnotationLoads();
   saving.value = true;
   error.value = "";
   try {
     const result = await api.mergeAnnotation(
       props.caseRecord.id, annotation.id, props.user.csrfToken,
     );
+    invalidateAnnotationLoads();
     replaceAnnotation(result.annotation);
     emit("case-revised", result.case);
   } catch (caught) {
@@ -242,16 +261,37 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 
 <template>
   <section class="assistant-panel comment-panel">
-    <div class="panel-head"><b>批注</b><span>{{ annotations.length }}</span></div>
+    <div class="panel-head">
+      <b>批注</b>
+      <div class="comment-view-switch" role="tablist" aria-label="批注视图">
+        <button
+          class="comment-view-tab"
+          :class="{ active: !showResolved }"
+          type="button"
+          role="tab"
+          :aria-selected="!showResolved"
+          @click="showResolved = false"
+        >待处理 {{ pendingCount }}</button>
+        <button
+          class="comment-view-tab"
+          :class="{ active: showResolved }"
+          type="button"
+          role="tab"
+          aria-label="查看已解决批注"
+          :aria-selected="showResolved"
+          @click="showResolved = true"
+        >已解决 {{ resolvedCount }}</button>
+      </div>
+    </div>
     <div class="panel-scroll">
       <div v-if="loading" class="panel-empty">正在加载批注</div>
       <div v-else-if="error && !annotations.length" class="attachment-error" role="alert">{{ error }}</div>
-      <div v-else-if="!annotations.length" class="panel-empty">
-        <MessageSquareText :size="24" /><span>暂无批注</span>
+      <div v-else-if="!visibleAnnotations.length" class="panel-empty">
+        <MessageSquareText :size="24" /><span>{{ showResolved ? "暂无已解决批注" : "暂无批注" }}</span>
       </div>
       <ol v-else class="comment-list">
         <li
-          v-for="annotation in annotations"
+          v-for="annotation in visibleAnnotations"
           :key="annotation.id"
           :ref="(element) => setCardRef(annotation.id, element)"
           class="comment-card"

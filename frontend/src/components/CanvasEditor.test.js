@@ -229,6 +229,15 @@ it("正文插入由编辑器映射批注标记并上报原生 steps", async () =
   });
 });
 
+it("已解决批注不在正文绘制标记", async () => {
+  const annotation = {
+    id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
+    status: "resolved", anchorState: "active",
+  };
+  const { wrapper } = await setup({ revision: 3, annotations: [annotation] });
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(false);
+});
+
 it("跨 hardBreak 批注用与创建一致的换行文本渲染标记", async () => {
   const breakDocument = {
     type: "doc",

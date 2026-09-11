@@ -383,6 +383,9 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .comment-composer textarea { width: 100%; min-height: 72px; padding: 10px 42px 10px 11px; border: 1px solid var(--line); border-radius: 6px; resize: none; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }
+.comment-view-switch { display: flex; gap: 4px; }
+.comment-view-tab { padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-3); font-size: 11px; }
+.comment-view-tab.active { border-color: var(--line); background: var(--paper); color: var(--brand); font-weight: 650; }
 .comment-list { display: grid; gap: 10px; margin: 0; padding: 12px; list-style: none; }
 .comment-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .comment-card header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
