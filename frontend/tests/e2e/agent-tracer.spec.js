@@ -287,7 +287,20 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectReloadedMergeHistory(page, annotation.id);
 });
+
+async function expectReloadedMergeHistory(page, annotationId) {
+  const mergedCard = annotationCard(page, annotationId);
+  await expect(mergedCard).toContainText("已解决");
+  await expect(mergedCard.locator(".comment-revisions li")).toHaveCount(2);
+  await expect(mergedCard.locator(".comment-revisions li").nth(0)).toContainText("已失效");
+  await expect(mergedCard.locator(".comment-revisions li").nth(1)).toContainText("已合并");
+  await expect(mergedCard.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
+  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
+}
 
 test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
   test.setTimeout(120_000);
