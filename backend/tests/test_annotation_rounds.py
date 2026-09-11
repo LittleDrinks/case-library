@@ -329,7 +329,6 @@ def _late_message(marker: str):
                         role="assistant", parts=[], createdAt=datetime.now(UTC))
 
 
-@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
 def _close_annotation(database, marker: str) -> None:
     from app.modules.annotations import service as annotations
 
