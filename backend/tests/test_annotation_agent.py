@@ -164,8 +164,7 @@ def test_failed_annotation_run_leaves_no_revision(client: TestClient) -> None:
 
     async def broken(messages, _info):
         raise RuntimeError("upstream unavailable")
-        yield  # pragma: no cover — 使函数成为 async generator，抛错发生在首次迭代
-
+        yield  # unreachable: 使函数成为 async generator，抛错发生在首次迭代
     with agent.override(model=FunctionModel(stream_function=broken)):
         response = _send(client, user, case, annotation, "请修订")
     assert response.status_code == 200, response.text
