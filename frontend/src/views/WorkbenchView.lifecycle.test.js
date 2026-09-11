@@ -407,6 +407,11 @@ const annotationRailStub = {
     @click="$emit('annotation-run', 'thread-9')">run</button>`,
 };
 
+async function emitAnnotationRun(wrapper, threadId) {
+  wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", threadId);
+  await flushPromises();
+}
+
 test("annotation run finishing after panel switch refreshes the annotation history", async () => {
   vi.useFakeTimers();
   try {
@@ -417,10 +422,80 @@ test("annotation run finishing after panel switch refreshes the annotation histo
     const wrapper = render(annotationRailStub);
     await flushPromises();
     const loadsBefore = api.listAnnotations.mock.calls.length;
-    await wrapper.get('[data-testid="rail-annotation-run"]').trigger("click");
+    await emitAnnotationRun(wrapper, "thread-9");
     await flushPromises();
     await vi.advanceTimersByTimeAsync(4000);
     expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-9");
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+function advanceTwoSeconds() {
+  return vi.advanceTimersByTimeAsync(2000);
+}
+
+function concurrentThreadMock(finished) {
+  return (_caseId, threadId) => {
+    const running = threadId === "thread-a" ? !finished.threadA : !finished.threadB;
+    return Promise.resolve(running
+      ? { id: threadId, activeRun: { id: `run-${threadId.at(-1)}` } }
+      : { id: threadId, activeRun: null,
+        latestRun: { id: `run-${threadId.at(-1)}`, status: "completed" } });
+  };
+}
+
+test("two concurrent annotation runs refresh independently when they finish in reverse order", async () => {
+  vi.useFakeTimers();
+  try {
+    const finished = { threadA: false, threadB: false };
+    const loadsBefore = await renderConcurrentRuns(finished);
+    await advanceTwoSeconds();
+    finished.threadB = true;
+    await advanceTwoSeconds();
+    finished.threadA = true;
+    await advanceTwoSeconds();
+    expect(loadsFor("thread-a")).toBeGreaterThan(1);
+    expect(loadsFor("thread-b")).toBeGreaterThan(1);
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore + 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+async function renderConcurrentRuns(finished) {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.agentThread.mockImplementation(concurrentThreadMock(finished));
+  const wrapper = render(annotationRailStub);
+  await flushPromises();
+  await emitAnnotationRun(wrapper, "thread-b");
+  await emitAnnotationRun(wrapper, "thread-a");
+  return api.listAnnotations.mock.calls.length;
+}
+
+function loadsFor(threadId) {
+  return api.agentThread.mock.calls.filter(([, id]) => id === threadId).length;
+}
+
+function transientThreadMock() {
+  return api.agentThread
+    .mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+    .mockRejectedValueOnce(Object.assign(new Error("网络抖动"), { status: 0 }))
+    .mockResolvedValue({ id: "thread-9", activeRun: null,
+      latestRun: { id: "run-1", status: "completed" } });
+}
+
+test("a transient thread snapshot failure does not abandon the annotation watch", async () => {
+  vi.useFakeTimers();
+  try {
+    api.getCase.mockResolvedValue(caseFixture());
+    transientThreadMock();
+    const wrapper = render(annotationRailStub);
+    await flushPromises();
+    const loadsBefore = api.listAnnotations.mock.calls.length;
+    await emitAnnotationRun(wrapper, "thread-9");
+    await vi.advanceTimersByTimeAsync(6000);
     expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore);
   } finally {
     vi.useRealTimers();

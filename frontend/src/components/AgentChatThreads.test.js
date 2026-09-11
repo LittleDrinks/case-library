@@ -249,7 +249,8 @@ function runView(status) {
 
 function mountRunning(fetch) {
   api.agentThread.mockImplementation((caseId, threadId) => Promise.resolve(
-    structuredClone(threadId === "thread-2" ? snapshots["thread-2"] : runningThread()),
+    structuredClone(["thread-2", "thread-3"].includes(threadId)
+      ? snapshots[threadId] : runningThread()),
   ));
   vi.stubGlobal("fetch", fetch);
   return mountPanel();
@@ -280,6 +281,20 @@ it("reconnects the running thread's event stream after switching away and back",
   ]);
   expect(fetch.mock.calls.filter(([url]) => url.includes("/stream"))).toHaveLength(0);
   expect(localStorage.getItem("agent-thread:case-1")).toBe("thread-1");
+});
+
+it("allows a new thread to send while the previous thread reconnects", async () => {
+  const wrapper = mountRunning(heldFetch([]));
+  api.agentCreateThread.mockResolvedValue({ id: "thread-3" });
+  snapshots["thread-3"] = snapshotOf("thread-3", null);
+  await flushPromises();
+  await openList(wrapper);
+  await wrapper.get('[data-testid="agent-thread-create"]').trigger("click");
+  await flushPromises();
+
+  await vi.waitFor(() => expect(
+    wrapper.get('textarea[aria-label="向 AI 提问"]').attributes("disabled"),
+  ).toBeUndefined());
 });
 
 it("binds the cancel command to the thread selected at click time", async () => {

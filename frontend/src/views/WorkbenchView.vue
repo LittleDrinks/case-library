@@ -50,7 +50,7 @@ const writingContext = ref(null);
 const annotations = ref([]);
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
-const pendingAnnotationRun = ref("");
+const annotationRunWatches = new Map();
 let pendingSteps = [];
 let annotationRunPoll = null;
 const sources = ref([]);
@@ -251,28 +251,55 @@ async function refreshAnnotations() {
 function stopAnnotationRunPoll(refresh) {
   clearInterval(annotationRunPoll);
   annotationRunPoll = null;
-  pendingAnnotationRun.value = "";
+  annotationRunWatches.clear();
   if (refresh) void refreshAnnotations();
 }
 
 // 批注修订在完成事务才可见，而 AI 面板切页签/切对话会卸载；
-// 批注刷新由共同祖先 WorkbenchView 轮询该对话快照到终态，不受面板卸载影响。
+// 批注刷新由共同祖先 WorkbenchView 轮询各对话快照到终态，按线程隔离生命周期：
+// 新登记不打断既有线程；单次快照查询失败不判定终态，继续观察。
 function watchAnnotationRun(threadId) {
-  pendingAnnotationRun.value = threadId;
-  if (annotationRunPoll) return;
-  let seenActive = false;
-  let misses = 0;
-  let ticks = 0;
-  annotationRunPoll = setInterval(() => {
-    if (!pendingAnnotationRun.value || (ticks += 1) > 300) return stopAnnotationRunPoll(false);
-    api.agentThread(caseRecord.value.id, pendingAnnotationRun.value).then((snapshot) => {
-      if (snapshot.activeRun) {
-        seenActive = true;
-        return;
-      }
-      if (seenActive || (misses += 1) >= 3) stopAnnotationRunPoll(true);
-    }).catch(() => stopAnnotationRunPoll(false));
-  }, 2000);
+  if (threadId) {
+    annotationRunWatches.set(threadId, { seenActive: false, misses: 0, ticks: 0 });
+  }
+  if (annotationRunPoll || !annotationRunWatches.size) return;
+  annotationRunPoll = setInterval(pollAnnotationRuns, 2000);
+}
+
+function settleAnnotationWatch(threadId, refresh) {
+  annotationRunWatches.delete(threadId);
+  if (refresh) void refreshAnnotations();
+  if (!annotationRunWatches.size) stopAnnotationRunPoll(false);
+}
+
+function expireAnnotationWatches() {
+  for (const [threadId, watch] of annotationRunWatches) {
+    if ((watch.ticks += 1) > 300) settleAnnotationWatch(threadId, false);
+  }
+}
+
+function isCurrentAnnotationWatch(threadId, watch) {
+  return annotationRunWatches.get(threadId) === watch;
+}
+
+function pollAnnotationWatch(threadId, watch) {
+  api.agentThread(caseRecord.value.id, threadId).then((snapshot) => {
+    if (!isCurrentAnnotationWatch(threadId, watch)) return;
+    if (snapshot.activeRun) {
+      watch.misses = 0;
+      watch.seenActive = true;
+      return;
+    }
+    watch.misses += 1;
+    if (watch.seenActive || watch.misses >= 3) settleAnnotationWatch(threadId, true);
+  }).catch(() => {});
+}
+
+function pollAnnotationRuns() {
+  expireAnnotationWatches();
+  for (const [threadId, watch] of [...annotationRunWatches]) {
+    pollAnnotationWatch(threadId, watch);
+  }
 }
 
 async function applyRevisedCase(value) {

@@ -60,6 +60,14 @@ def _proposal_model(replacement: str, anchor: tuple[int, int] | None = None) -> 
     return FunctionModel(stream_function=stream)
 
 
+def _failure_model() -> FunctionModel:
+    async def stream(_messages, _info):
+        raise RuntimeError("upstream unavailable")
+        yield "unreachable"
+
+    return FunctionModel(stream_function=stream)
+
+
 def _gated_model(gate: threading.Event, replacement: str) -> FunctionModel:
     """提议修订后挂起等待，制造完成事务之前的迟到窗口。"""
 
@@ -105,6 +113,18 @@ def _wait_active(client: TestClient, case_id: str, timeout: float = 15.0) -> dic
     raise AssertionError("run did not become active")
 
 
+def _await_run_status(client: TestClient, thread_id: str, status: str) -> dict:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        run = client.app.state.database.agent_runs.find_one(
+            {"threadId": thread_id, "status": status}, {"_id": 0}
+        )
+        if run:
+            return run
+        time.sleep(0.02)
+    raise AssertionError(f"run did not become {status}")
+
+
 def _start_annotation_run(client: TestClient, user: dict, case: dict, annotation: dict,
                           replacement: str):
     gate = threading.Event()
@@ -135,6 +155,45 @@ def _run_round(client: TestClient, user: dict, case: dict, annotation: dict, tex
         response = _send(client, user, case, annotation, text)
     assert response.status_code == 200, response.text
 
+
+def _retry_request(client: TestClient, user: dict, case: dict, message_id: str):
+    return client.post(
+        f"/api/cases/{case['id']}/agent/thread/{_thread_id(client, case['id'])}/stream",
+        headers=_csrf(user),
+        json={"id": "retry-message", "trigger": "regenerate-message",
+          "messageId": message_id, "messages": []},
+    )
+
+
+def _failed_annotation_setup(client: TestClient) -> tuple[dict, dict, dict, str, dict]:
+    user = login(client, "user", "user123")
+    case = create_case(client, user, "目标正文")
+    annotation = create_annotation(client, user, case, "目标正文")
+    with agent.override(model=_failure_model()):
+        initial = _send(client, user, case, annotation, "重试消息")
+    assert initial.status_code == 200, initial.text
+    thread_id = _thread_id(client, case["id"])
+    failed = _await_run_status(client, thread_id, "failed")
+    assert failed["status"] == "failed"
+    assert failed["annotationId"] == annotation["id"]
+    assert _annotation_row(client, case).get("revisions", []) == []
+    user_message = client.app.state.database.agent_messages.find_one(
+        {"id": failed["userMessageId"]}, {"_id": 0}
+    )
+    return user, case, annotation, thread_id, user_message
+
+
+def test_retry_of_failed_annotation_run_keeps_annotation_binding(client: TestClient) -> None:
+    user, case, annotation, thread_id, user_message = _failed_annotation_setup(client)
+
+    with agent.override(model=_proposal_model("重试改写")):
+        response = _retry_request(client, user, case, user_message["id"])
+    assert response.status_code == 200, response.text
+
+    retried = _await_run_status(client, thread_id, "completed")
+    assert retried["status"] == "completed"
+    assert retried["annotationId"] == annotation["id"]
+    assert _replacements(_annotation_row(client, case)) == ["重试改写"]
 
 def _prepend_unrelated_paragraph(client: TestClient, user: dict, case: dict) -> dict:
     saved = save_document(
