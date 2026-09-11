@@ -204,9 +204,7 @@ async function sendAnnotationRound(page, text, annotationId) {
   await page.getByLabel("向 AI 提问").fill(text);
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const payload = (await request).postDataJSON();
-  expect(payload.messages[0].parts).toContainEqual({
-    type: "data-annotation", data: { id: annotationId },
-  });
+  expect(payload.messages[0].parts).toContainEqual({ type: "data-annotation", data: { id: annotationId } });
   await expect(page.getByTestId("agent-artifact")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("agent-artifact")).toHaveAttribute("data-artifact-status", "pending");
   await expect(page.locator(".agent-chat-panel"))

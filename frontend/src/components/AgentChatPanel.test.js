@@ -843,6 +843,26 @@ function selectionContext() {
   return { from: 9, to: 13, sameBlock: true, quote: "第二段原文", quoteHash: "quote-hash", revision: 3 };
 }
 
+it("refreshes annotations again when an annotation run reaches its terminal status", async () => {
+  const active = structuredClone(snapshot);
+  active.activeRun = { id: "run-1", status: "active" };
+  active.latestRun = { id: "run-1", status: "active" };
+  const completed = structuredClone(snapshot);
+  completed.latestRun = { id: "run-1", status: "completed" };
+  api.agentThread.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(active)
+    .mockResolvedValueOnce(completed);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answerResponse()));
+  const context = { annotationId: "an-1", from: 9, to: 13, sameBlock: true, quote: "第二段原文", revision: 3 };
+  const wrapper = mountPanel({ writingContext: context });
+  await flushPromises();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("继续讨论");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+
+  await vi.waitFor(() => {
+    expect(wrapper.emitted("annotations-refresh")?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
 it("sends the selected text as a structured selection part", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);

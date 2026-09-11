@@ -57,6 +57,7 @@ const syncedWrites = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
+let pendingAnnotationSync = false;
 let hydratedWriteThread = "";
 
 function sourceRefs() {
@@ -236,12 +237,18 @@ watch(messages, () => {
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
-// 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
+// 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新；
+// 批注讨论同理：修订在完成事务才可见，终态后补一次批注刷新，消除时点差。
 watch(() => threadState.value?.latestRun?.status, (current, previous) => {
-  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)
-      || !pendingWriteSync) return;
-  pendingWriteSync = false;
-  void refreshCaseAfterWrite();
+  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)) return;
+  if (pendingWriteSync) {
+    pendingWriteSync = false;
+    void refreshCaseAfterWrite();
+  }
+  if (pendingAnnotationSync) {
+    pendingAnnotationSync = false;
+    emit("annotations-refresh");
+  }
 });
 watch(artifacts, () => {
   void refreshSources();
@@ -250,6 +257,7 @@ watch(artifacts, () => {
 watch(threadId, () => {
   syncedWrites.clear();
   pendingWriteSync = false;
+  pendingAnnotationSync = false;
   hydratedWriteThread = "";
   refreshSourcePermissions();
 });
@@ -428,6 +436,7 @@ function contextParts() {
 }
 
 async function sendMessage({ text, skillId }) {
+  pendingAnnotationSync = Boolean(props.writingContext?.annotationId);
   try {
     await send(text, contextParts(), skillId);
   } finally {
