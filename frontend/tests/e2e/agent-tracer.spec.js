@@ -6,6 +6,7 @@ const REQUEST_TEXT = "请结合平台资料修订第2段：补充评价依据";
 const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
 const SECOND_REPLACEMENT_MARK = "第二轮修订：教学目标、课堂任务与评价依据逐项对应";
+const M1_ANNOTATION_QUOTE = "的评价依据。";
 
 async function login(page) {
   await page.goto("/#/login");
@@ -24,7 +25,7 @@ function caseDocument() {
   return {
     type: "doc",
     content: [
-      { type: "paragraph", content: [{ type: "text", text: "第一段保持原样。" }] },
+      { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
       { type: "paragraph", content: [{ type: "text", text: "第二段：教学目标需要更明确的评价依据。" }] },
     ],
   };
@@ -86,16 +87,29 @@ async function openChat(page, caseId) {
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
-async function addAnnotation(page) {
+async function selectAnnotationText(page, value) {
+  const target = page.locator(".canvas-editor p").nth(1);
+  if (value === TARGET_TEXT) return target.selectText();
+  await target.click(); await page.keyboard.press("Home");
+  const offset = await target.evaluate((node, text) => node.textContent.indexOf(text), value);
+  for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.down("Shift");
+  for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.up("Shift");
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
+}
+
+async function addAnnotation(page, quote = TARGET_TEXT) {
   await page.getByRole("button", { name: "批注", exact: true }).click();
-  await page.locator(".canvas-editor p").nth(1).selectText();
+  await selectAnnotationText(page, quote);
   await page.getByRole("button", { name: "添加选区批注" }).click();
   await page.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
   await page.getByRole("button", { name: "添加批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
-  return (await page.context().request.get(
+  const response = await page.context().request.get(
     `/api/cases/${await currentCaseId(page)}/annotations`,
-  )).json();
+  );
+  return response.json();
 }
 
 async function currentCaseId(page) {
@@ -211,7 +225,7 @@ async function sendAnnotationRound(page, text, annotationId) {
     .toHaveAttribute("data-run-status", "completed", { timeout: 30_000 });
 }
 
-async function prepareAnnotationDiscussion(page, playwright) {
+async function prepareAnnotationDiscussion(page, playwright, quote = TARGET_TEXT) {
   await publishTeachingSkill(playwright);
   await login(page);
   await configureChat(page);
@@ -219,7 +233,7 @@ async function prepareAnnotationDiscussion(page, playwright) {
   const created = await createCase(page);
   await openChat(page, created.id);
   await selectPublishedSkill(page);
-  const annotations = await addAnnotation(page);
+  const annotations = await addAnnotation(page, quote);
   return { created, annotation: annotations[0] };
 }
 
@@ -228,6 +242,21 @@ async function expectAnnotationHistory(page) {
   await expect(page.locator(".comment-revisions li")).toHaveCount(2);
   await expect(page.locator(".comment-revisions")).toContainText(REPLACEMENT_MARK);
   await expect(page.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
+}
+
+async function closeAnnotation(page) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  const card = page.locator(".comment-card");
+  await card.getByRole("button", { name: "标记解决" }).click();
+  await expect(card).toContainText("已解决");
+  await expect(card).toContainText("已拒绝");
+}
+
+async function changeAnnotationTarget(page) {
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await selectAnnotationText(page, M1_ANNOTATION_QUOTE); await page.keyboard.type("改写目标");
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
 }
 
 test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并合并最新轮", async ({ page, playwright }) => {
@@ -241,6 +270,38 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
+});
+
+test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
+  test.setTimeout(120_000);
+  const { created, annotation } = await prepareAnnotationDiscussion(
+    page, playwright, M1_ANNOTATION_QUOTE,
+  );
+  await sendAnnotationRound(page, "请修订选区：第一轮候选仅供直接关闭，不改正文。", annotation.id);
+  const before = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
+  await closeAnnotation(page);
+  const after = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
+  expect(after.document).toEqual(before.document); expect(after.revision).toBe(before.revision);
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+  const history = page.locator(".comment-revisions");
+  await expect(history.locator("li")).toHaveCount(1);
+  await expect(history).toContainText("已拒绝");
+});
+
+test("目标变化后浏览器拒绝过期采用并保留无关正文编辑", async ({ page, playwright }) => {
+  test.setTimeout(120_000);
+  const { created, annotation } = await prepareAnnotationDiscussion(
+    page, playwright, M1_ANNOTATION_QUOTE,
+  );
+  await sendAnnotationRound(page, "请修订选区：第一轮候选用于目标变化验证。", annotation.id);
+  await changeAnnotationTarget(page);
+  const card = page.locator(".comment-card");
+  await expect(card).toContainText("原文已变动，旧修订不可合并");
+  await expect(card.getByRole("button", { name: "合并并关闭" })).toHaveCount(0);
+  await expect(card).toContainText("已失效");
+  const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
+  const text = current.document.content[1].content[0].text;
+  expect(text).toBe("第二段：教学目标需要更明确改写目标");
 });
 
 test("批注讨论生成中切到批注面板：后台完成后当前历史自动出现新修订", async ({ page, playwright }) => {

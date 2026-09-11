@@ -106,6 +106,25 @@ async function selectManualAnnotation(page, marker) {
   await page.getByRole("button", { name: "添加选区批注" }).click();
 }
 
+async function selectSubstring(page, paragraph, value) {
+  await paragraph.click();
+  await page.keyboard.press("Home");
+  const offset = await paragraph.evaluate((node, text) => node.textContent.indexOf(text), value);
+  for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.down("Shift");
+  for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.up("Shift");
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
+}
+
+async function addSelectedAnnotation(page, paragraph, quote, content) {
+  await selectSubstring(page, paragraph, quote);
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  await page.getByLabel("批注内容").fill(content);
+  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  await expect(page.locator(".comment-card", { hasText: content })).toBeVisible();
+}
+
 async function addManualAnnotation(page, marker, content) {
   await selectManualAnnotation(page, marker);
   await page.getByLabel("批注内容").fill(content);
@@ -163,6 +182,26 @@ test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => 
 
 test("教师可在桌面创建并在移动端刷新编辑删除手工批注", async ({ page }) => {
   await manualAnnotationScenario(page);
+});
+
+test("同段多个批注可分别打开与关闭并刷新保留", async ({ page }) => {
+  const marker = `同段甲：教学依据；同段乙：课堂活动 ${Date.now()}`;
+  await openDraft(page, marker);
+  const paragraph = page.locator(".canvas-editor p", { hasText: marker });
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await addSelectedAnnotation(page, paragraph, "同段甲：教学依据", "第一条批注");
+  await addSelectedAnnotation(page, paragraph, "同段乙：课堂活动", "第二条批注");
+  const cards = page.locator(".comment-card");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("同段甲：教学依据");
+  await expect(cards.nth(1)).toContainText("同段乙：课堂活动");
+  await expect(page.locator(".annotation-anchor")).toHaveCount(2);
+  await page.locator(".annotation-anchor").nth(1).click(); await expect(cards.nth(1)).toBeInViewport();
+  await cards.nth(0).getByRole("button", { name: "标记解决" }).click();
+  await expect(cards.nth(0)).toContainText("已解决");
+  await expect(cards.nth(1)).toContainText("待处理");
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expect(cards).toHaveCount(2); await expect(cards.nth(0)).toContainText("已解决");
 });
 
 test("正文前置编辑保存刷新后批注仍绑定原选区", async ({ page }) => {
