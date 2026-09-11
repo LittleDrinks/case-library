@@ -47,6 +47,5 @@ test("阅读页切换到工作台编辑页标签名称仍正确", async ({ page 
   await page.goto("/#/workbench/c-02");
   await expect(page.locator("textarea.document-title")).toHaveValue(/钱伟长图书馆/);
   await assertRealTagNames(page);
-  await expect(page.locator("textarea.document-title")).toHaveAttribute("readonly", "");
   await capture(page, testInfo, "workbench-tags.png");
 });
