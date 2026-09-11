@@ -10,7 +10,6 @@ const props = defineProps({
   user: { type: Object, default: null },
   selection: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
-  refreshKey: { type: Number, default: 0 },
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
@@ -236,9 +235,6 @@ async function merge(annotation) {
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
 watch(() => props.annotationRefreshToken, loadAnnotations);
 watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
-watch(() => props.refreshKey, (value, previous) => {
-  if (value !== previous) void loadAnnotations();
-});
 </script>
 
 <template>

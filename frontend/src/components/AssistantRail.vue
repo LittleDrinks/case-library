@@ -23,7 +23,6 @@ const props = defineProps({
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
   focusAnnotationId: { type: String, default: "" },
-  annotationRefreshKey: { type: Number, default: 0 },
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
@@ -89,7 +88,6 @@ function select(tab) {
       :user="user"
       :selection="selection"
       :focus-annotation-id="focusAnnotationId"
-      :refresh-key="annotationRefreshKey"
       :annotation-refresh-token="annotationRefreshToken"
       :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"

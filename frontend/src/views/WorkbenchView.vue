@@ -48,7 +48,6 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
-const annotationRefreshKey = ref(0);
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
 let pendingSteps = [];
@@ -253,8 +252,7 @@ async function applyRevisedCase(value) {
 }
 
 function refreshAnnotationsAfterAi() {
-  annotationRefreshKey.value += 1;
-  void loadAnnotations();
+  void refreshAnnotations();
 }
 
 const sourcesLoading = ref(false);
@@ -705,7 +703,6 @@ onBeforeUnmount(() => {
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"
-          :annotation-refresh-key="annotationRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
           :focus-annotation-id="focusedAnnotationId"
