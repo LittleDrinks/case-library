@@ -17,6 +17,7 @@ const props = defineProps({
   sourcesError: { type: String, default: "" },
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
+  historyRefreshKey: { type: Number, default: 0 },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
@@ -28,8 +29,9 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
-  "case-revised", "annotations", "sources-retry", "clear-writing-context", "insert-citation",
-  "open-version",
+  "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
+  "sources-retry", "clear-writing-context", "insert-citation",
+  "open-version", "versions-updated",
 ]);
 
 const tabs = [
@@ -75,6 +77,9 @@ function select(tab) {
       :review="review"
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
+      @annotations-refresh="emit('annotations-refresh')"
+      @versions-updated="emit('versions-updated')"
+      @annotation-run="emit('annotation-run', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
@@ -89,6 +94,9 @@ function select(tab) {
       :annotation-refresh-token="annotationRefreshToken"
       :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"
+      @ask-ai="emit('ask-ai', $event)"
+      @case-revised="emit('case-revised', $event)"
+      @clear-writing-context="emit('clear-writing-context')"
     />
 
     <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
@@ -112,6 +120,7 @@ function select(tab) {
     <VersionPanel
       v-else-if="active === 'history'"
       :case-record="caseRecord"
+      :refresh-key="historyRefreshKey"
       @open-version="emit('open-version', $event)"
     />
   </aside>

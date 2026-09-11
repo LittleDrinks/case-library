@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { hashQuote } from "../lib/annotationAnchor.js";
@@ -25,6 +25,8 @@ const cursorPlaced = ref(false);
 const triggerPosition = ref({ top: "0", left: "0" });
 let selectionBlocked = false;
 let selectionRequest = 0;
+let selectionFrame = 0;
+let annotationRefreshPending = false;
 
 function sectionName(activeEditor, position) {
   let section = "正文";
@@ -53,8 +55,37 @@ function positionTrigger(context) {
 }
 
 function clearSelection() {
+  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  selectionFrame = 0;
+  selectionBlocked = true;
   selectionRequest += 1;
   selection.value = null;
+  triggerPosition.value = { top: "0", left: "0" };
+  collapseEditorSelection();
+  const browserSelection = window.getSelection();
+  if (browserSelection?.rangeCount && editor.value?.view.dom.contains(browserSelection.anchorNode)) {
+    browserSelection.removeAllRanges();
+  }
+  flushAnnotationRefresh();
+  emit("selection", null);
+}
+
+function collapseEditorSelection() {
+  const activeEditor = editor.value;
+  if (!activeEditor || activeEditor.state.selection.empty) return;
+  activeEditor.view.dispatch(activeEditor.state.tr.setSelection(
+    TextSelection.near(activeEditor.state.selection.$to),
+  ));
+}
+
+// 状态观察：选区无效时只丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
+// selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
+// 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
+// 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
+function discardSelection() {
+  selectionRequest += 1;
+  selection.value = null;
+  triggerPosition.value = { top: "0", left: "0" };
   emit("selection", null);
 }
 
@@ -65,11 +96,12 @@ function validSelection(activeEditor) {
 }
 
 async function captureSelection({ editor: activeEditor }) {
-  const { from, to } = activeEditor.state.selection;
-  const context = writingContext(activeEditor, from, to);
-  if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()) {
-    clearSelection();
-    emit("writing-context", context);
+  const context = currentContext(activeEditor);
+  flushAnnotationRefresh(activeEditor);
+  if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()
+    || selectionNeedsSync(activeEditor)) {
+    discardSelection();
+    emit("writing-context", null);
     return;
   }
   selectionBlocked = false;
@@ -83,15 +115,37 @@ async function captureSelection({ editor: activeEditor }) {
   positionTrigger(context);
 }
 
-function editorHasDomSelection() {
+function domSelectionRange(activeEditor = editor.value) {
   const browserSelection = window.getSelection();
   const anchor = browserSelection?.anchorNode;
   const focus = browserSelection?.focusNode;
-  return Boolean(
-    browserSelection?.rangeCount && !browserSelection.isCollapsed
-    && anchor && focus && editor.value?.view.dom.contains(anchor)
-    && editor.value.view.dom.contains(focus),
-  );
+  if (!activeEditor || !browserSelection?.rangeCount || browserSelection.isCollapsed) return null;
+  if (!anchor || !focus || !activeEditor.view.dom.contains(anchor) || !activeEditor.view.dom.contains(focus)) {
+    return null;
+  }
+  try {
+    const anchorPos = activeEditor.view.posAtDOM(anchor, browserSelection.anchorOffset);
+    const focusPos = activeEditor.view.posAtDOM(focus, browserSelection.focusOffset);
+    return {
+      from: Math.min(anchorPos, focusPos), to: Math.max(anchorPos, focusPos),
+    };
+  } catch { return null; }
+}
+
+function editorHasDomSelection() {
+  return domSelectionRange() !== null;
+}
+
+function selectionNeedsSync(activeEditor) {
+  const domRange = domSelectionRange(activeEditor);
+  if (!domRange) return false;
+  const { from, to } = activeEditor.state.selection;
+  return from !== domRange.from || to !== domRange.to;
+}
+
+function flushAnnotationRefresh(activeEditor = editor.value) {
+  if (!annotationRefreshPending || !activeEditor || selectionNeedsSync(activeEditor)) return;
+  refreshAnnotationAnchors(activeEditor);
 }
 
 async function recaptureSelection() {
@@ -100,9 +154,17 @@ async function recaptureSelection() {
   await captureSelection({ editor: editor.value });
 }
 
+function scheduleSelectionCapture() {
+  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  selectionFrame = requestAnimationFrame(() => {
+    selectionFrame = 0;
+    if (editorHasDomSelection()) void recaptureSelection();
+  });
+}
+
 function handleSelectionChange() {
   if (!editorHasDomSelection()) return;
-  void recaptureSelection();
+  scheduleSelectionCapture();
 }
 
 function currentContext(activeEditor) {
@@ -112,7 +174,7 @@ function currentContext(activeEditor) {
 
 function updateEditor({ editor: activeEditor, transaction }) {
   selectionBlocked = true;
-  clearSelection();
+  discardSelection();
   emit("change", {
     document: activeEditor.getJSON(),
     steps: transaction.steps.map((step) => step.toJSON()),
@@ -127,6 +189,7 @@ function quoteText(doc, from, to) {
 }
 
 function annotationAnchor(annotation, doc) {
+  if (annotation.status === "resolved") return null;
   if (annotation.anchorState && annotation.anchorState !== "active") return null;
   const { from, to } = annotation;
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
@@ -178,6 +241,11 @@ const annotationExtension = Extension.create({
 
 function refreshAnnotationAnchors(activeEditor = editor.value) {
   if (!activeEditor) return;
+  if (selectionNeedsSync(activeEditor)) {
+    annotationRefreshPending = true;
+    return;
+  }
+  annotationRefreshPending = false;
   const transaction = activeEditor.state.tr.setMeta(annotationKey, props.annotations);
   activeEditor.view.dispatch(transaction);
 }
@@ -230,7 +298,10 @@ onMounted(() => {
   captureSelection({ editor: editor.value });
   refreshAnnotationAnchors();
 });
-onBeforeUnmount(() => window.document.removeEventListener("selectionchange", handleSelectionChange));
+onBeforeUnmount(() => {
+  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  window.document.removeEventListener("selectionchange", handleSelectionChange);
+});
 
 // 资料区发起插入：有选区时把选区关联来源，否则在当前光标处落一个引用锚点。
 function insertCitation(source) {
@@ -247,7 +318,7 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ recaptureSelection, insertCitation });
+defineExpose({ clearSelection, recaptureSelection, insertCitation });
 </script>
 
 <template>

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response
 
 from app.core.dependencies import get_database
+from app.modules.agent.repository import AgentRepository
 from app.modules.annotations.models import (
     AnnotationCreate,
     AnnotationPatch,
@@ -16,6 +17,7 @@ from app.modules.annotations.service import (
     create_annotation,
     delete_annotation,
     list_annotations,
+    merge_annotation,
     update_annotation,
 )
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -85,6 +87,20 @@ def reply(
     return add_reply(database, case_id, annotation_id, body.content, user)
 
 
+@router.post("/{annotation_id}/merge")
+def merge(
+    case_id: str,
+    annotation_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+):
+    return merge_annotation(
+        database, case_id, annotation_id, user,
+        AgentRepository(database).append_artifact_decision_event,
+    )
+
+
 @router.patch(
     "/{annotation_id}/status", response_model=AnnotationView, response_model_exclude_none=True
 )
@@ -96,4 +112,7 @@ def status(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
-    return change_status(database, case_id, annotation_id, body.status, user)
+    return change_status(
+        database, case_id, annotation_id, body.status, user,
+        AgentRepository(database).append_artifact_decision_event,
+    )

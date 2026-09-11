@@ -19,6 +19,7 @@ from app.modules.cases.submission_check import submission_issues
 from app.modules.cases.snapshots import overwrite_draft
 from app.modules.case_materials.service import snapshot_materials
 from app.modules.search.outbox import SearchOutbox
+from app.modules.cases.versions import FORMAL_VERSION_KINDS, next_version_number
 
 
 def _now() -> str:
@@ -61,10 +62,10 @@ def _authorize(case: dict, user: dict, command: str) -> None:
 
 
 def _version(
-    case: dict, user: dict, now: str, attachments: list[dict], materials: list[dict],
-    case_sources: list[dict],
+    database, case: dict, user: dict, now: str, attachments: list[dict],
+    materials: list[dict], case_sources: list[dict], session,
 ) -> dict:
-    number = case.get("versionNumber", 0) + 1
+    number = next_version_number(database, case["id"], session)
     return {
         "id": _id("cv"), "caseId": case["id"], "number": number,
         "kind": "submission", "title": case["title"],
@@ -100,11 +101,7 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
         raise CaseError(409, "仅工作版本可提交")
     citations_resolve(database, case["id"], case["document"], session)
     _validate_submission(database, case)
-    now = _now()
-    attachments = snapshot_attachments(database, case["id"], session)
-    materials = snapshot_materials(database, case["id"], session)
-    case_sources = snapshot_case_sources(database, case["id"], session)
-    version = _version(case, user, now, attachments, materials, case_sources)
+    now, version = _submission_version(database, case, user, session)
     event = _event(case, user, version, now, "submit")
     updated = _mark_pending(database, case, version, now, session)
     if not updated:
@@ -112,6 +109,16 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
     database.case_versions.insert_one(version, session=session)
     database.lifecycle_events.insert_one(event, session=session)
     return _result(updated, version, event, user)
+
+
+def _submission_version(database, case: dict, user: dict, session) -> tuple[str, dict]:
+    now = _now()
+    assets = (
+        snapshot_attachments(database, case["id"], session),
+        snapshot_materials(database, case["id"], session),
+        snapshot_case_sources(database, case["id"], session),
+    )
+    return now, _version(database, case, user, now, *assets, session)
 
 
 def _mark_pending(database, case: dict, version: dict, now: str, session) -> dict:
@@ -524,7 +531,7 @@ def get_history(database: Database, case_id: str, user: dict) -> dict:
     if user["role"] != "admin" and case["ownerId"] != user["id"]:
         raise CaseError(403, "无权查看版本历史")
     versions = database.case_versions.find(
-        {"caseId": case_id, "kind": "submission"}
+        {"caseId": case_id, "kind": {"$in": list(FORMAL_VERSION_KINDS)}}
     ).sort("number", 1)
     events = database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1)
     return {

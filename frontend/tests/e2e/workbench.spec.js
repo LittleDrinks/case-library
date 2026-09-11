@@ -601,7 +601,7 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
 
 async function openHistoryTimeline(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
-  await page.getByRole("button", { name: /^打开 v1 版本/ }).click();
+  await page.getByRole("button", { name: /^打开 v1 · .+ 版本$/ }).click();
 }
 
 async function stageFrozenVersion(page, request, marker) {
@@ -616,6 +616,20 @@ async function stageFrozenVersion(page, request, marker) {
 async function overwriteDialogStep(page, action) {
   await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
   await page.getByRole("button", { name: action }).click();
+}
+
+async function addDraftAnnotation(page, marker) {
+  await page.getByRole("tab", { name: "当前教师稿" }).click();
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  await page.getByLabel("批注内容").fill("覆盖前的草稿批注");
+  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(1);
+}
+
+async function expectNoAnnotations(page) {
+  await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
+  await expect(page.locator(".comment-card")).toHaveCount(0);
 }
 
 async function expectReadOnlyVersionTab(page, marker) {
@@ -663,6 +677,22 @@ test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async (
   await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
   await page.getByRole("tab", { name: "当前教师稿" }).click();
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+});
+
+test("覆盖历史版本后清除草稿批注并刷新一致", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const marker = `覆盖批注清理 ${Date.now()}`;
+  await stageFrozenVersion(page, request, marker);
+  await addDraftAnnotation(page, marker);
+  await openHistoryTimeline(page); await overwriteDialogStep(page, "确认覆盖");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectNoAnnotations(page);
+  const rows = await (await request.get(`/api/cases/${page.url().split("/").pop()}/annotations`)).json();
+  expect(rows).toHaveLength(0);
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectNoAnnotations(page);
 });
 
 test("覆盖请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {

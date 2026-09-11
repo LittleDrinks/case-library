@@ -26,7 +26,8 @@ function mergeTimelineMessages(messages = [], persisted = [], runs = []) {
   }
   return messages.map((message) => saved.has(message.id)
     ? { ...message, id: saved.get(message.id).id,
-      metadata: { ...message.metadata, ...saved.get(message.id).metadata } }
+      metadata: { ...message.metadata, ...saved.get(message.id).metadata },
+      parts: saved.get(message.id).parts || message.parts }
     : message);
 }
 
@@ -173,7 +174,8 @@ async function resume(caseId, state, generation) {
     await chat.resumeStream();
     if (isCurrent(state, generation)) await refreshSnapshot(caseId, state, generation, threadId);
   } finally {
-    if (isCurrent(state, generation)) state.recovering.value = false;
+    // 切对话会更新 generation；被接管的恢复必须无条件清 busy，否则新对话输入框永久禁用
+    state.recovering.value = false;
   }
 }
 
@@ -208,6 +210,7 @@ async function loadChat(caseId, state, generation) {
 
 async function selectThread(caseId, state, threadId) {
   const generation = (state.generation += 1);
+  state.recovering.value = false;
   state.loading.value = true;
   state.error.value = "";
   try {

@@ -56,8 +56,10 @@ vi.mock("../api.js", () => ({
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    agentThread: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
+    listTagGroups: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -398,4 +400,185 @@ test("读者模式不渲染版本 Tab 栏", async () => {
   const wrapper = renderWithRail(VersionRailProbe);
   await flushPromises();
   expect(wrapper.find("button.draft-tab").exists()).toBe(false);
+});
+
+const annotationRailStub = {
+  name: "AssistantRailStub", emits: ["annotation-run"],
+  template: `<button data-testid="rail-annotation-run" type="button"
+    @click="$emit('annotation-run', 'thread-9')">run</button>`,
+};
+
+const annotationEventRailStub = {
+  name: "AnnotationEventRailStub", emits: ["annotations", "annotations-refresh"],
+  template: `<div>
+    <button data-testid="annotation-clear" type="button"
+      @click="$emit('annotations', [])">clear</button>
+    <button data-testid="annotation-refresh" type="button"
+      @click="$emit('annotations-refresh')">refresh</button>
+  </div>`,
+};
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test("关闭通知使 Workbench 中迟到的批注刷新失效", async () => {
+  const stale = deferred();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValueOnce([]).mockReturnValueOnce(stale.promise);
+  const wrapper = render(annotationEventRailStub);
+  await flushPromises();
+  await wrapper.get('[data-testid="annotation-refresh"]').trigger("click");
+  await wrapper.get('[data-testid="annotation-clear"]').trigger("click");
+  stale.resolve([{ id: "annotation-1", status: "pending" }]);
+  await flushPromises();
+  await new Promise((done) => setTimeout(done, 0));
+  expect(wrapper.findComponent({ name: "CanvasEditor" }).props("annotations")).toEqual([]);
+});
+
+async function emitAnnotationRun(wrapper, threadId) {
+  wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", threadId);
+  await flushPromises();
+}
+test("annotation run finishing after panel switch refreshes the annotation history", async () => {
+  vi.useFakeTimers();
+  try {
+    api.getCase.mockResolvedValue(caseFixture());
+    api.agentThread.mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+      .mockResolvedValue({ id: "thread-9", activeRun: null,
+        latestRun: { id: "run-1", status: "completed" } });
+    const wrapper = render(annotationRailStub);
+    await flushPromises();
+    const loadsBefore = api.listAnnotations.mock.calls.length;
+    await emitAnnotationRun(wrapper, "thread-9");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-9");
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+function advanceTwoSeconds() {
+  return vi.advanceTimersByTimeAsync(2000);
+}
+
+function concurrentThreadMock(finished) {
+  return (_caseId, threadId) => {
+    const running = threadId === "thread-a" ? !finished.threadA : !finished.threadB;
+    return Promise.resolve(running
+      ? { id: threadId, activeRun: { id: `run-${threadId.at(-1)}` } }
+      : { id: threadId, activeRun: null,
+        latestRun: { id: `run-${threadId.at(-1)}`, status: "completed" } });
+  };
+}
+
+test("two concurrent annotation runs refresh independently when they finish in reverse order", async () => {
+  vi.useFakeTimers();
+  try {
+    const finished = { threadA: false, threadB: false };
+    const loadsBefore = await renderConcurrentRuns(finished);
+    await advanceTwoSeconds();
+    finished.threadB = true;
+    await advanceTwoSeconds();
+    finished.threadA = true;
+    await advanceTwoSeconds();
+    expect(loadsFor("thread-a")).toBeGreaterThan(1);
+    expect(loadsFor("thread-b")).toBeGreaterThan(1);
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore + 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+async function renderConcurrentRuns(finished) {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.agentThread.mockImplementation(concurrentThreadMock(finished));
+  const wrapper = render(annotationRailStub);
+  await flushPromises();
+  await emitAnnotationRun(wrapper, "thread-b");
+  await emitAnnotationRun(wrapper, "thread-a");
+  return api.listAnnotations.mock.calls.length;
+}
+
+function loadsFor(threadId) {
+  return api.agentThread.mock.calls.filter(([, id]) => id === threadId).length;
+}
+
+function transientThreadMock() {
+  return api.agentThread
+    .mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+    .mockRejectedValueOnce(Object.assign(new Error("网络抖动"), { status: 0 }))
+    .mockResolvedValue({ id: "thread-9", activeRun: null,
+      latestRun: { id: "run-1", status: "completed" } });
+}
+
+test("a transient thread snapshot failure does not abandon the annotation watch", async () => {
+  vi.useFakeTimers();
+  try {
+    api.getCase.mockResolvedValue(caseFixture());
+    transientThreadMock();
+    const wrapper = render(annotationRailStub);
+    await flushPromises();
+    const loadsBefore = api.listAnnotations.mock.calls.length;
+    await emitAnnotationRun(wrapper, "thread-9");
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+const readerTagCatalog = [
+  {
+    id: "g1", name: "思政元素", requiredForSubmission: false, enabled: true, sortKey: 0,
+    tags: [{ id: "t-spirit", groupId: "g1", name: "科学家精神", sortKey: 0, enabled: true }],
+  },
+];
+
+function publicCaseWithTag() {
+  return caseFixture({
+    publicationStatus: "public", publishedVersionId: "pub-v1", tagIds: ["t-spirit"],
+  });
+}
+
+test("公开阅读页加载标签目录并以名称呈现", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  api.listTagGroups.mockResolvedValue(readerTagCatalog);
+  const wrapper = render();
+  await flushPromises();
+  expect(api.listTagGroups).toHaveBeenCalledTimes(1);
+  expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
+});
+
+test("公开阅读页标签目录失败时提示且不回退内部 ID", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  api.listTagGroups.mockRejectedValue(new Error("网络错误"));
+  const wrapper = render();
+  await flushPromises();
+  const tags = wrapper.get(".case-tags").text();
+  expect(tags).toContain("标签目录加载失败");
+  expect(tags).not.toContain("t-spirit");
+  await wrapper.get(".case-tags-state button").trigger("click");
+  expect(api.listTagGroups).toHaveBeenCalledTimes(2);
+});
+
+test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
+  state.route.name = "case-public";
+  api.getPublicCase.mockResolvedValue(publicCaseWithTag());
+  let resolveCatalog;
+  api.listTagGroups.mockReturnValue(new Promise((resolve) => { resolveCatalog = resolve; }));
+  const wrapper = render();
+  await flushPromises();
+  const tags = wrapper.get(".case-tags").text();
+  expect(tags).toContain("标签目录加载中");
+  expect(tags).not.toContain("t-spirit");
+  resolveCatalog(readerTagCatalog);
+  await flushPromises();
+  expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
 });

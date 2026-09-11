@@ -47,6 +47,70 @@ def _interrupted(payload: dict) -> bool:
     return "上游中断测试" in prompt
 
 
+def _pending_tool_round(payload: dict) -> bool:
+    """最后一条 user 消息之后是否尚无 tool 结果（即本轮首次请求）。"""
+    messages = payload.get("messages", [])
+    last_user = max(i for i, m in enumerate(messages) if m.get("role") == "user")
+    return not any(m.get("role") == "tool" for m in messages[last_user + 1:])
+
+
+def _current_user_text(payload: dict) -> str:
+    for message in reversed(payload.get("messages", [])):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        return ""
+    return ""
+
+
+def _full_generation_call(payload: dict) -> bool:
+    return "请完整生成全文" in _current_user_text(payload) and _pending_tool_round(payload)
+
+
+def _direct_write_call(payload: dict) -> bool:
+    text = _current_user_text(payload)
+    return ("直接写入" in text or "写入正文" in text) and _pending_tool_round(payload)
+
+
+def _write_event(scope: str) -> bytes:
+    arguments = json.dumps({
+        "scope": scope,
+        "blocks": [{"type": "paragraph", "text": "直接写入替换的新正文"}],
+        "summary": "教师指令直接写入",
+    }, ensure_ascii=False)
+    payload = {"choices": [{"delta": {"tool_calls": [{
+        "index": 0, "id": "direct-write-call", "type": "function",
+        "function": {"name": "write_document", "arguments": arguments},
+    }]}}]}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _tool_event() -> bytes:
+    arguments = json.dumps({
+        "blocks": [
+            {"type": "heading", "level": 1, "text": "AI完整稿"},
+            {"type": "paragraph", "text": "AI生成正文"},
+        ],
+        "reason": "完整生成",
+    }, ensure_ascii=False)
+    payload = {"choices": [{"delta": {"tool_calls": [{
+        "index": 0, "id": "full-generation-call", "type": "function",
+        "function": {"name": "propose_document", "arguments": arguments},
+    }]}}]}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _tool_finish_event() -> bytes:
+    return b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+
+
 def _send_pieces(handler, payload: dict) -> bool:
     pieces, delay = _pieces(payload)
     for piece in pieces:
@@ -65,7 +129,18 @@ def _stream(handler, payload: dict) -> None:
     handler.send_header("Connection", "close")
     handler.end_headers()
     try:
-        if not _send_pieces(handler, payload):
+        if _full_generation_call(payload):
+            for event in (_tool_event(), _tool_finish_event()):
+                handler.wfile.write(event)
+                handler.wfile.flush()
+        elif _direct_write_call(payload):
+            prompt = json.dumps(payload, ensure_ascii=False)
+            has_selection = "本条消息正文选区" in prompt and "没有正文选区" not in prompt
+            scope = "selection" if has_selection else "document"
+            for event in (_write_event(scope), _tool_finish_event()):
+                handler.wfile.write(event)
+                handler.wfile.flush()
+        elif not _send_pieces(handler, payload):
             return
         handler.wfile.write(b"data: [DONE]\n\n")
         handler.wfile.flush()

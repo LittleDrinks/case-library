@@ -19,6 +19,7 @@ from app.modules.cases.service import (
     case_metadata,
     internal_case_view,
 )
+from app.modules.cases.versions import FORMAL_VERSION_KINDS
 
 
 def _now() -> str:
@@ -98,9 +99,10 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
 
 
 def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
-    """覆盖目标只能是本案例的投稿版本；跨案例或他人版本一律 404。"""
+    """覆盖目标只能是本案例的正式提交或 AI 版本；跨案例一律 404。"""
     target = database.case_versions.find_one(
-        {"id": target_id, "caseId": case_id, "kind": "submission"}, session=session
+        {"id": target_id, "caseId": case_id,
+         "kind": {"$in": list(FORMAL_VERSION_KINDS)}}, session=session
     )
     if not target:
         raise CaseError(404, "目标版本不存在")

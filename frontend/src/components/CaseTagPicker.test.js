@@ -52,10 +52,25 @@ async function disabledTagContract() {
   expect(view.get("[aria-label='案例标签']").text()).toContain("劳动教育");
 }
 
+function unknownTagContract() {
+  const view = wrapper({ tagIds: ["t2", "tag-ghost"], editable: false });
+  const chips = view.get("[aria-label='案例标签']").text();
+  expect(chips).toContain("科学家精神");
+  expect(chips).not.toContain("tag-ghost");
+}
+
+async function readonlyErrorRetryContract() {
+  const view = wrapper({ tagIds: ["t2"], groups: [], editable: false, error: "标签目录加载失败" });
+  await view.get(".case-tags-state button").trigger("click");
+  expect(view.emitted("retry")).toHaveLength(1);
+}
+
 describe("案例标签设置", () => {
   it("按目录分组多选并回传完整标签集合", groupedMultiselectContract);
   it("已选标签可通过 chip 移除", chipRemovalContract);
   it("只读形态展示标签但不提供编辑入口", readonlyContract);
   it("目录加载失败展示错误与重试", errorRetryContract);
   it("停用标签不进入候选，已选停用标签仍回显", disabledTagContract);
+  it("无法解析的条目不把内部 ID 当作标签名称", unknownTagContract);
+  it("只读目录加载失败仍提供重试", readonlyErrorRetryContract);
 });

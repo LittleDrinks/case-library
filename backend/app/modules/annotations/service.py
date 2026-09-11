@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.agent import prosemirror
-from app.modules.cases.service import CaseError, RevisionConflict
-
+from app.modules.cases.service import CaseError, RevisionConflict, case_view
 
 ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
 ACTIVE_ANCHOR = "active"
@@ -21,7 +21,26 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _view(annotation: dict) -> dict:
+def _revision_is_valid(annotation: dict, revision: dict, case_revision: int) -> bool:
+    target = revision.get("target") or {}
+    return (
+        annotation.get("status") == "pending"
+        and annotation.get("anchorState", ACTIVE_ANCHOR) == ACTIVE_ANCHOR
+        and revision.get("baseRevision") == case_revision
+        and target.get("from") == annotation.get("from")
+        and target.get("to") == annotation.get("to")
+        and target.get("quote") == annotation.get("quote")
+    )
+
+
+def _revision_view(annotation: dict, revision: dict, case_revision: int) -> dict:
+    view = {key: value for key, value in revision.items() if key != "_id"}
+    if view.get("status") == "pending" and not _revision_is_valid(annotation, revision, case_revision):
+        view["status"] = "expired"
+    return view
+
+
+def _view(annotation: dict, case_revision: int) -> dict:
     view = {key: value for key, value in annotation.items() if key != "_id"}
     view.pop("updatedAt", None)
     if view.pop("_legacy", False):
@@ -29,6 +48,10 @@ def _view(annotation: dict) -> dict:
             view.pop(field, None)
     elif view.get("versionId") is None:
         view.setdefault("anchorState", ACTIVE_ANCHOR)
+    if "revisions" in view:
+        view["revisions"] = [
+            _revision_view(annotation, row, case_revision) for row in view["revisions"]
+        ]
     return view
 
 
@@ -215,6 +238,9 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
     unset = {}
     if anchor:
         changes.update(anchor)
+        revisions = _map_revision_targets(row, anchor, revision)
+        if revisions is not None:
+            changes["revisions"] = revisions
     else:
         unset.update({"from": "", "to": ""})
     database.annotations.update_one(
@@ -222,6 +248,19 @@ def _set_anchor_state(database, row: dict, state: str, anchor: dict | None, revi
         {"$set": changes, **({"$unset": unset} if unset else {})},
         session=session,
     )
+
+
+def _map_revision_targets(row: dict, anchor: dict, case_revision: int) -> list[dict] | None:
+    if "revisions" not in row:
+        return None
+    return [
+        {**revision, "baseRevision": case_revision, "target": {
+            **revision.get("target", {}), "from": anchor["from"], "to": anchor["to"]
+        }}
+        if revision.get("status") == "pending" and revision.get("target", {}).get("quote") == row.get("quote")
+        else revision
+        for revision in row["revisions"]
+    ]
 
 
 def _reconcile_pending_artifact(
@@ -312,7 +351,7 @@ def _touch_case(database, case: dict, session) -> None:
     )
     if updated:
         return
-    current = database.cases.find_one({"id": case["id"]})
+    current = database.cases.find_one({"id": case["id"]}, session=session)
     raise RevisionConflict(current["revision"])
 
 
@@ -344,7 +383,7 @@ def _create_in_transaction(database, case_id: str, body: dict, user: dict, sessi
     if legacy:
         annotation["_legacy"] = True
     database.annotations.insert_one(annotation, session=session)
-    return _view(annotation)
+    return _view(annotation, case["revision"])
 
 
 def _transaction(database, callback):
@@ -360,13 +399,20 @@ def create_annotation(database: Database, case_id: str, body: dict, user: dict) 
 
 
 def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]:
-    _case(database, case_id, user)
-    rows = database.annotations.find({"caseId": case_id}).sort("createdAt", 1)
-    return [_view(row) for row in rows]
+    case = _case(database, case_id, user)
+    rows = database.annotations.find(_list_query(case, user)).sort("createdAt", 1)
+    return [_view(row, case["revision"]) for row in rows]
 
 
-def _get_annotation(database: Database, case_id: str, annotation_id: str) -> dict:
-    annotation = database.annotations.find_one({"id": annotation_id, "caseId": case_id})
+def _list_query(case: dict, user: dict) -> dict:
+    """私人讨论仅案例作者可见；管理员只读版本绑定的审核批注，不泄漏个人修订。"""
+    if case["ownerId"] == user["id"]:
+        return {"caseId": case["id"]}
+    return {"caseId": case["id"], "versionId": {"$ne": None}}
+
+
+def _get_annotation(database: Database, case_id: str, annotation_id: str, session=None) -> dict:
+    annotation = _find(database.annotations, {"id": annotation_id, "caseId": case_id}, session)
     if not annotation:
         raise CaseError(404, "批注不存在")
     return annotation
@@ -390,8 +436,7 @@ def update_annotation(database: Database, case_id: str, annotation_id: str, cont
     )
     if not updated:
         raise CaseError(409, "批注状态已变化")
-    return _view(updated)
-
+    return _view(updated, _case(database, case_id, user)["revision"])
 
 def delete_annotation(database: Database, case_id: str, annotation_id: str, user: dict) -> None:
     _case(database, case_id, user)
@@ -407,8 +452,9 @@ def delete_annotation(database: Database, case_id: str, annotation_id: str, user
 def add_reply(
     database: Database, case_id: str, annotation_id: str, content: str, user: dict
 ) -> dict:
-    _case(database, case_id, user)
-    _get_annotation(database, case_id, annotation_id)
+    case = _case(database, case_id, user)
+    annotation = _get_annotation(database, case_id, annotation_id)
+    _require_reply_actor(case, annotation, user)
     reply = {
         "id": f"ar-{secrets.token_hex(8)}",
         "content": content,
@@ -420,10 +466,21 @@ def add_reply(
         {"$push": {"replies": reply}},
         return_document=ReturnDocument.AFTER,
     )
-    return _view(updated)
+    return _view(updated, _case(database, case_id, user)["revision"])
+
+def _require_reply_actor(case: dict, annotation: dict, user: dict) -> None:
+    """私人批注（版本未绑定）只有作者能回复；审核批注允许作者与管理员讨论。"""
+    if annotation.get("versionId") is not None:
+        return
+    if annotation.get("createdBy") != user["id"] or case["ownerId"] != user["id"]:
+        raise CaseError(403, "仅批注作者可回复私人讨论")
 
 
-def _require_status_actor(case: dict, user: dict, status: str) -> None:
+def _require_status_actor(case: dict, annotation: dict, user: dict, status: str) -> None:
+    if annotation.get("versionId") is None:
+        if case["ownerId"] != user["id"] or annotation.get("createdBy") != user["id"]:
+            raise CaseError(403, "仅私人批注作者可改变状态")
+        return
     if status == "resolved" and case["ownerId"] != user["id"]:
         raise CaseError(403, "仅案例作者可解决批注")
     if status == "pending" and user["role"] != "admin":
@@ -431,17 +488,310 @@ def _require_status_actor(case: dict, user: dict, status: str) -> None:
 
 
 def change_status(
-    database: Database, case_id: str, annotation_id: str, status: str, user: dict
+    database: Database, case_id: str, annotation_id: str, status: str, user: dict,
+    append_artifact_event,
 ) -> dict:
-    case = _case(database, case_id, user)
-    _get_annotation(database, case_id, annotation_id)
-    _require_status_actor(case, user, status)
+    return _transaction(
+        database,
+        lambda session: _change_status(
+            database, case_id, annotation_id, status, user, session,
+            append_artifact_event,
+        ),
+    )
+
+
+def _change_status(database, case_id, annotation_id, status, user, session,
+                   append_artifact_event):
+    case = _case(database, case_id, user, session)
+    annotation = _get_annotation(database, case_id, annotation_id, session)
+    _require_status_actor(case, annotation, user, status)
     expected = "pending" if status == "resolved" else "resolved"
+    update = {"$set": {"status": status}}
+    if status == "resolved":
+        update["$set"]["revisions"] = _closed_revisions(annotation)
     updated = database.annotations.find_one_and_update(
         {"id": annotation_id, "caseId": case_id, "status": expected},
-        {"$set": {"status": status}},
-        return_document=ReturnDocument.AFTER,
+        update, return_document=ReturnDocument.AFTER, session=session,
     )
     if not updated:
         raise CaseError(409, "批注状态已变化")
-    return _view(updated)
+    _decide_linked_artifacts(
+        database, annotation, user, "rejected", session,
+        append_artifact_event=append_artifact_event)
+    return _view(updated, case["revision"])
+
+
+def _closed_revisions(annotation: dict) -> list[dict]:
+    return [
+        {**revision, "status": "rejected" if revision.get("status") == "pending" else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+
+
+def _decide_linked_artifacts(
+    database, annotation, user, decision, session, append_artifact_event,
+    *, selected_id=None, only_ids=None,
+) -> None:
+    for revision in annotation.get("revisions", []):
+        if only_ids is not None and revision.get("id") not in only_ids:
+            continue
+        artifact_decision = decision
+        if selected_id and revision.get("id") != selected_id:
+            artifact_decision = "expired"
+        _decide_artifact(
+            database, revision.get("artifactId"), user, artifact_decision, session,
+            append_artifact_event,
+        )
+
+
+def _decide_artifact(
+    database, artifact_id, user, decision: str, session, append_artifact_event,
+) -> None:
+    artifact = database.agent_artifacts.find_one_and_update(
+        {"id": artifact_id, "status": "pending"},
+        {"$set": {"status": decision, "decidedBy": user["id"], "decidedAt": _now()}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if artifact:
+        append_artifact_event(artifact, decision, session)
+
+
+
+def record_ai_revision(database, artifact, created_by: str, session=None) -> dict | None:
+    annotation_id = getattr(artifact, "annotation_id", None)
+    if not annotation_id:
+        return None
+    revision = _revision_document(artifact, created_by)
+    query = _revision_query(annotation_id, artifact, created_by, revision["target"])
+    updated = database.annotations.find_one_and_update(
+        query, {"$push": {"revisions": revision}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "批注选区已变化，不能保存 AI 修订")
+    return revision
+
+
+def _revision_document(artifact, created_by: str) -> dict:
+    target = artifact.target.model_dump(by_alias=True)
+    return {
+        "id": new_revision_id(), "artifactId": artifact.id, "runId": artifact.run_id,
+        "baseRevision": artifact.base_revision, "target": target,
+        "replacement": artifact.replacement, "reason": artifact.reason,
+        "status": "pending", "createdBy": created_by, "createdAt": _now(),
+    }
+
+
+def _revision_query(annotation_id: str, artifact, created_by: str, target: dict) -> dict:
+    return {
+        "id": annotation_id, "caseId": artifact.case_id, "createdBy": created_by,
+        "status": "pending",
+        "from": target["from"], "to": target["to"], "quote": target["quote"],
+        "$or": [{"anchorState": ACTIVE_ANCHOR}, {"anchorState": {"$exists": False}}],
+    }
+
+
+def mark_ai_revision_decision(database, artifact, user: dict, decision: str, session=None) -> None:
+    if not artifact.annotation_id:
+        return
+    annotation = _find(
+        database.annotations,
+        {"id": artifact.annotation_id, "caseId": artifact.case_id},
+        session,
+    )
+    revisions = _decided_revisions(annotation, artifact, user, decision)
+    database.annotations.update_one(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"revisions": revisions}}, session=session,
+    )
+
+
+def _decided_revisions(annotation, artifact, user: dict, decision: str) -> list[dict]:
+    if not annotation or annotation.get("createdBy") != user["id"]:
+        raise CaseError(403, "仅批注作者可决定修订")
+    revisions = [
+        {**revision, "status": decision if revision.get("artifactId") == artifact.id
+         else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+    if not any(revision.get("artifactId") == artifact.id for revision in revisions):
+        raise CaseError(409, "批注修订已变化")
+    return revisions
+
+
+def new_revision_id() -> str:
+    return f"arv-{secrets.token_hex(8)}"
+
+
+@dataclass
+class MergeRejected:
+    """合并被拒绝且无正文写入；过期状态在独立事务中持久化后以 409 返回。"""
+
+    reason: str = "没有可合并的有效 AI 修订"
+
+
+def merge_annotation(
+    database: Database, case_id: str, annotation_id: str, user: dict,
+    append_artifact_event,
+) -> dict:
+    outcome = _transaction(
+        database,
+        lambda session: _merge_annotation(
+            database, case_id, annotation_id, user, session, append_artifact_event,
+        ),
+    )
+    if isinstance(outcome, MergeRejected):
+        _transaction(
+            database,
+            lambda active: _expire_invalid_revisions(
+                database, case_id, annotation_id, user, active, append_artifact_event,
+            ),
+        )
+        raise CaseError(409, outcome.reason)
+    return outcome
+
+
+def _merge_annotation(
+    database, case_id, annotation_id, user, session, append_artifact_event,
+):
+    case = _case(database, case_id, user, session)
+    annotation = _get_annotation(database, case_id, annotation_id, session)
+    _require_merge_owner(case, annotation, user)
+    if annotation["status"] == "resolved":
+        return {"annotation": _view(annotation, case["revision"]), "case": case_view(case)}
+    revision = _latest_valid_revision(database, annotation, case["revision"], session)
+    if revision is None:
+        return MergeRejected()
+    return _commit_annotation_merge(
+        database, case, annotation, revision, user, session, append_artifact_event,
+    )
+
+
+def _require_merge_owner(case: dict, annotation: dict, user: dict) -> None:
+    if case["ownerId"] != user["id"] or annotation["createdBy"] != user["id"]:
+        raise CaseError(403, "仅批注作者可合并修订")
+    if case["workflowStatus"] != "draft":
+        raise CaseError(409, "案例当前不可编辑")
+
+
+def _latest_valid_revision(database, annotation, case_revision: int, session) -> dict | None:
+    for revision in reversed(annotation.get("revisions", [])):
+        if revision.get("status") == "pending" and _revision_mergeable(
+            database, annotation, revision, case_revision, session,
+        ):
+            return revision
+    return None
+
+
+def _expire_invalid_revisions(
+    database, case_id: str, annotation_id: str, user: dict, session,
+    append_artifact_event,
+) -> None:
+    """过期事务内重新读取：只失效当前确实失效的候选，保留期间新增的有效修订。"""
+    case = _case(database, case_id, user, session)
+    annotation = _get_annotation(database, case_id, annotation_id, session)
+    _require_merge_owner(case, annotation, user)
+    if annotation.get("status") != "pending":
+        return
+    stale_ids = [
+        revision["id"] for revision in annotation.get("revisions", [])
+        if revision.get("status") == "pending" and not _revision_mergeable(
+            database, annotation, revision, case["revision"], session,
+        )
+    ]
+    if stale_ids:
+        _expire_stale_revisions(
+            database, annotation, user, stale_ids, session, append_artifact_event)
+
+
+def _expire_stale_revisions(
+    database, annotation, user, stale_ids: list[str], session, append_artifact_event,
+) -> None:
+    database.annotations.update_one(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"revisions": [
+            {**revision, "status": "expired"}
+            if revision.get("id") in stale_ids else revision
+            for revision in annotation.get("revisions", [])
+        ]}},
+        session=session,
+    )
+    _decide_linked_artifacts(
+        database, annotation, user, "expired", session,
+        append_artifact_event=append_artifact_event, only_ids=stale_ids,
+    )
+
+
+def _revision_mergeable(database, annotation, revision, case_revision: int, session) -> bool:
+    if not _revision_is_valid(annotation, revision, case_revision):
+        return False
+    artifact = _find(database.agent_artifacts, {"id": revision.get("artifactId")}, session)
+    return bool(
+        artifact and artifact.get("status") == "pending"
+        and artifact.get("baseRevision") == case_revision
+    )
+
+
+
+def _commit_annotation_merge(
+    database, case, annotation, revision, user, session, append_artifact_event,
+):
+    document, steps = _merged_document(case, annotation, revision)
+    from app.modules.cases.snapshots import record_snapshot
+
+    mapping = _mapping_for_change(case["document"], document, steps)
+    record_snapshot(database, case, user, "pre_annotation_merge", session)
+    updated_case = _commit_case_document(database, case, document, session)
+    reconcile_document_annotations(
+        database, case["id"], case["document"], document, updated_case["revision"],
+        steps, session, mapping, exclude_artifact_id=revision["artifactId"],
+    )
+    updated_annotation = _finish_annotation_merge(
+        database, annotation, revision, user, session, append_artifact_event)
+    return {
+        "annotation": _view(updated_annotation, updated_case["revision"]),
+        "case": case_view(updated_case),
+    }
+
+
+def _merged_document(case: dict, annotation: dict, revision: dict):
+    try:
+        return prosemirror.replaced_document_with_steps(
+            case["document"], annotation["from"], annotation["to"],
+            annotation["quote"], revision["replacement"],
+        )
+    except (prosemirror.ParagraphChangedError, prosemirror.ParagraphNotFoundError) as error:
+        raise CaseError(409, "目标选区原文已变化，修订候选已过期") from error
+
+
+def _commit_case_document(database, case, document, session):
+    updated = database.cases.find_one_and_update(
+        {"id": case["id"], "ownerId": case["ownerId"], "workflowStatus": "draft",
+         "revision": case["revision"]},
+        {"$set": {"document": document, "updatedAt": _now()}, "$inc": {"revision": 1}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "案例状态已变化")
+    return updated
+
+
+def _finish_annotation_merge(
+    database, annotation, selected, user, session, append_artifact_event,
+):
+    revisions = [
+        {**revision, "status": "accepted" if revision["id"] == selected["id"]
+         else "expired" if revision.get("status") == "pending" else revision.get("status")}
+        for revision in annotation.get("revisions", [])
+    ]
+    updated = database.annotations.find_one_and_update(
+        {"id": annotation["id"], "status": "pending"},
+        {"$set": {"status": "resolved", "revisions": revisions}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "批注状态已变化")
+    _decide_linked_artifacts(
+        database, annotation, user, "accepted", session,
+        append_artifact_event=append_artifact_event, selected_id=selected["id"])
+    return updated

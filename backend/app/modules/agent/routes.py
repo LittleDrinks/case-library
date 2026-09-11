@@ -12,7 +12,9 @@ from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
 from app.modules.agent import prosemirror
-from app.modules.agent.case_area import catalog_instructions, retained_sources, selection_from_parts
+from app.modules.agent.case_area import (
+    annotation_instructions, catalog_instructions, retained_sources, selection_from_parts,
+)
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.visibility import parts_projector, visible_snapshot
 from app.modules.agent.models import (
@@ -42,6 +44,7 @@ from app.modules.agent.service import RunContext, load_history
 from app.modules.agent.skills import (
     bound_skill_capability,
     domain_capability,
+    full_generation_requested,
     reader_capability,
 )
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
@@ -84,6 +87,8 @@ class RunPlan:
     retry_message_id: str | None = None
     selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)
+    annotation_id: str | None = None
+    annotation: dict | None = None
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -345,11 +350,61 @@ def _run_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
 
 
 def _validate_plan(
-    database, case: dict, plan: RunPlan, version_id: str | None = None
+    database, case: dict, plan: RunPlan, version_id: str | None = None,
+    user: dict | None = None,
 ) -> RunPlan:
     plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    plan.annotation_id = _annotation_from_parts(database, case, plan, version_id, user)
     return plan
+
+
+def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
+    part = _single_annotation_part(plan, case, version_id, user)
+    if part is None:
+        return None
+    annotation = _revision_annotation(database, case, part, user)
+    _ensure_annotation_matches_selection(annotation, plan)
+    plan.annotation = {
+        "content": annotation.get("content") or "",
+        "quote": annotation.get("quote") or "",
+    }
+    return annotation["id"]
+
+
+def _single_annotation_part(plan, case, version_id, user) -> dict | None:
+    parts = [part for part in plan.parts if part.get("type") == "data-annotation"]
+    if not parts:
+        return None
+    if len(parts) != 1 or version_id or not user or case["ownerId"] != user["id"]:
+        raise HTTPException(status_code=403, detail="批注 AI 修订仅限案例作者工作稿")
+    return parts[0]
+
+
+def _revision_annotation(database, case, part, user) -> dict:
+    data = part.get("data")
+    annotation_id = data.get("id") if isinstance(data, dict) else None
+    if not isinstance(annotation_id, str) or not annotation_id:
+        raise HTTPException(status_code=422, detail="批注关联格式无效")
+    annotation = database.annotations.find_one(
+        {"id": annotation_id, "caseId": case["id"]}
+    )
+    if not annotation:
+        raise HTTPException(status_code=409, detail="批注不存在或已刷新")
+    if annotation.get("createdBy") != user["id"]:
+        raise HTTPException(status_code=403, detail="仅批注作者可请求 AI 修订")
+    if annotation.get("status") != "pending" or annotation.get("anchorState", "active") != "active":
+        raise HTTPException(status_code=409, detail="批注选区已变化或已解决，请重新选择")
+    return annotation
+
+
+def _ensure_annotation_matches_selection(annotation, plan) -> None:
+    if len(plan.selections) != 1 or not _same_annotation_target(annotation, plan.selections[0]):
+        raise HTTPException(status_code=409, detail="批注与当前正文选区不一致，请重新选择")
+
+
+def _same_annotation_target(annotation: dict, selection: dict) -> bool:
+    return all(annotation.get(key) == selection.get(key) for key in ("from", "to", "quote"))
 
 
 def _document_selections(document: dict, parts: list[dict]) -> list[dict]:
@@ -527,7 +582,7 @@ def _plan_for(repository, thread, adapter, database, user, conversation):
     project = parts_projector(database, user, conversation.case["id"])
     return _validate_plan(
         database, conversation.case, _run_plan(repository, thread, adapter, project),
-        conversation.version_id,
+        conversation.version_id, user,
     )
 
 
@@ -576,10 +631,7 @@ def _run_lock_for(conversation: Conversation, plan: RunPlan):
 def _run_context(request, database, settings, user, conversation: Conversation,
                  repository, thread, adapter, plan, run, selection, lease, worker_id, bounds):
     refs = retained_sources(database, conversation.case["id"], user, conversation.version_id)
-    instructions = catalog_instructions(
-        conversation.case.get("title") or "未命名案例", refs,
-        plan.selected, plan.selections, conversation.reader,
-    )
+    instructions = _base_instructions(conversation, refs, plan)
     deps = _run_deps(
         request, database, settings, user, conversation, thread, run, refs, plan
     )
@@ -594,13 +646,25 @@ def _run_context(request, database, settings, user, conversation: Conversation,
     )
 
 
+def _base_instructions(conversation: Conversation, refs, plan) -> str:
+    instructions = catalog_instructions(
+        conversation.case.get("title") or "未命名案例", refs,
+        plan.selected, plan.selections, conversation.reader,
+    )
+    return instructions + annotation_instructions(plan.annotation)
+
+
 def _run_deps(request, database, settings, user, conversation, thread, run, refs, plan):
     return ToolDeps(
         database=database, case_id=conversation.case["id"], thread_id=thread.id,
         run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state, secret_path=settings.app_secret_file,
         store=request.app.state.blob_store, version_id=conversation.version_id,
-        sources=refs, selected=plan.selected, selections=plan.selections,
+        full_generation_allowed=(
+            not conversation.reader and full_generation_requested(plan.prompt)
+        ),
+        annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
+        selections=plan.selections,
     )
 
 
@@ -685,7 +749,7 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                 skill_bindings: list[dict[str, str]],
                 lock: tuple[int | None, ArtifactTarget | None, bool] = (None, None, False)):
-    run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock)
+    run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock, plan.annotation_id)
     if plan.retry_message_id:
         run = repository.retry_run(
             thread, plan.retry_message_id, assistant_id, **run_kwargs,
@@ -700,14 +764,14 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
     return run
 
 
-def _run_fields(lease, worker_id, skill_bindings, lock):
+def _run_fields(lease, worker_id, skill_bindings, lock, annotation_id=None):
     quota_ids = lease.quota_ids if lease else ()
     base_revision, target, write_authorized = lock
     return {
         "owner_id": worker_id, "quota_ids": quota_ids,
         "skill_bindings": skill_bindings,
         "base_revision": base_revision, "target": target,
-        "write_authorized": write_authorized,
+        "write_authorized": write_authorized, "annotation_id": annotation_id,
     }
 
 

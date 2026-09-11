@@ -7,6 +7,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 AnnotationSource = Literal["manual", "selfcheck", "ai", "admin"]
 AnnotationStatus = Literal["pending", "resolved"]
 AnchorState = Literal["active", "changed", "deleted"]
+AnnotationRevisionStatus = Literal["pending", "accepted", "rejected", "expired"]
 
 
 class AnnotationCreate(BaseModel):
@@ -64,6 +65,21 @@ class AnnotationReplyView(AnnotationReplyCreate):
     createdAt: str
 
 
+class AnnotationRevisionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    artifactId: str
+    runId: str
+    baseRevision: int = Field(ge=1)
+    target: dict
+    replacement: str
+    reason: str
+    status: AnnotationRevisionStatus
+    createdBy: str
+    createdAt: str
+
+
 class AnnotationView(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -81,5 +97,6 @@ class AnnotationView(BaseModel):
     status: AnnotationStatus
     anchorState: AnchorState | None = None
     replies: list[AnnotationReplyView]
+    revisions: list[AnnotationRevisionView] | None = None
     createdBy: str
     createdAt: str

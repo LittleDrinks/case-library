@@ -51,6 +51,9 @@ function listText(block, marker) {
       <p class="agent-artifact-replacement">替换为：{{ artifact.replacement }}</p>
     </template>
     <p v-if="artifact.reason" class="agent-artifact-reason">理由：{{ artifact.reason }}</p>
+    <p v-if="artifact.annotationId" class="agent-artifact-annotation">
+      已关联批注，请在批注面板中合并或关闭
+    </p>
     <p class="agent-artifact-status">状态：{{ artifactStatus(artifact) }}</p>
     <template v-for="source in artifact.sources || []" :key="sourceRefId(source)">
       <a
@@ -65,7 +68,7 @@ function listText(block, marker) {
       <p v-else class="agent-artifact-source" :data-source-ref="sourceRefId(source)">依据：{{ source.title || source.id }} · {{ sourceStatusLabel(sourceState(source)) }}</p>
     </template>
     <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
-    <div v-if="artifact.status === 'pending' && !readOnly" class="agent-artifact-actions">
+    <div v-if="artifact.status === 'pending' && !readOnly && !artifact.annotationId" class="agent-artifact-actions">
       <button type="button" data-testid="agent-accept" :disabled="sending" @click="emit('accept', artifact.id)">接受</button>
       <button type="button" data-testid="agent-reject" :disabled="sending" @click="emit('reject', artifact.id)">拒绝</button>
     </div>

@@ -89,6 +89,8 @@ async function resolveAsAuthor(page, created, marker) {
   await page.getByLabel("回复批注").fill("已补充评价标准。");
   await page.getByRole("button", { name: "回复", exact: true }).click();
   await page.getByRole("button", { name: "标记解决" }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expect(page.getByText("已解决", { exact: true })).toBeVisible();
 }
 
@@ -104,6 +106,82 @@ async function selectManualAnnotation(page, marker) {
   await page.locator(".canvas-editor p", { hasText: marker }).selectText();
   await expect(page.getByRole("button", { name: "添加选区批注" })).toBeEnabled();
   await page.getByRole("button", { name: "添加选区批注" }).click();
+}
+
+async function selectSubstring(page, paragraph, value) {
+  await paragraph.click();
+  await page.keyboard.press("Home");
+  const offset = await paragraph.evaluate((node, text) => node.textContent.indexOf(text), value);
+  expect(offset).toBeGreaterThanOrEqual(0);
+  for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.down("Shift");
+  for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
+  await page.keyboard.up("Shift");
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
+}
+
+async function addSelectedAnnotation(page, paragraph, quote, content) {
+  await selectSubstring(page, paragraph, quote);
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  await page.getByLabel("批注内容").fill(content);
+  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  await expect(page.locator(".comment-card", { hasText: content })).toBeVisible();
+  const caseId = page.url().split("/").pop();
+  const response = await page.context().request.get("/api/cases/" + caseId + "/annotations");
+  return (await response.json()).find((row) => row.content === content);
+}
+
+async function dataIds(locator) {
+  return locator.evaluateAll((nodes) => nodes.map((node) => node.dataset.annotationId).sort());
+}
+
+async function expectAnnotationDetails(page, annotation, status) {
+  const card = page.locator(".comment-card[data-annotation-id=\"" + annotation.id + "\"]");
+  await expect(card.locator("blockquote")).toHaveText(annotation.quote);
+  await expect(card).toContainText(status);
+  const anchor = page.locator(".annotation-anchor[data-annotation-id=\"" + annotation.id + "\"]");
+  if (status === "已解决") await expect(anchor).toHaveCount(0);
+  else await expect(anchor).toHaveText(annotation.quote);
+}
+
+async function expectAnnotationIdentity(page, first, second) {
+  const cards = page.locator(".comment-card");
+  await expect(cards).toHaveCount(2);
+  expect(await dataIds(cards)).toEqual([first.id, second.id].sort());
+  const anchors = page.locator(".annotation-anchor");
+  await expect(anchors).toHaveCount(2);
+  expect(await dataIds(anchors)).toEqual([first.id, second.id].sort());
+  await expectAnnotationDetails(page, first, "待处理");
+  await expectAnnotationDetails(page, second, "待处理");
+}
+
+async function resolveFirstAnnotation(page, first, second) {
+  await page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]").click();
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toBeInViewport();
+  await page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]").getByRole("button", { name: "标记解决" }).click();
+  await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
+  await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
+  await expectAnnotationDetails(page, second, "待处理");
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
+  await expectAnnotationDetails(page, first, "已解决");
+}
+
+async function expectReloadedAnnotations(page, first, second) {
+  const cards = page.locator(".comment-card");
+  await expect(cards).toHaveCount(1);
+  const caseId = page.url().split("/").pop();
+  const rows = await (await page.context().request.get("/api/cases/" + caseId + "/annotations")).json();
+  expect(rows).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: first.id, status: "resolved", quote: "同段甲：教学依据" }),
+    expect.objectContaining({ id: second.id, status: "pending", quote: "同段乙：课堂活动" }),
+  ]));
+  expect(await dataIds(cards)).toEqual([second.id]);
+  const anchors = page.locator(".annotation-anchor");
+  await expect(anchors).toHaveCount(1);
+  expect(await dataIds(anchors)).toEqual([second.id]);
+  await expectAnnotationDetails(page, second, "待处理");
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
+  await expectAnnotationDetails(page, first, "已解决");
 }
 
 async function addManualAnnotation(page, marker, content) {
@@ -163,6 +241,20 @@ test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => 
 
 test("教师可在桌面创建并在移动端刷新编辑删除手工批注", async ({ page }) => {
   await manualAnnotationScenario(page);
+});
+
+test("同段多个批注可分别打开与关闭并刷新保留", async ({ page }) => {
+  const marker = `同段甲：教学依据；同段乙：课堂活动 ${Date.now()}`;
+  await openDraft(page, marker);
+  const paragraph = page.locator(".canvas-editor p", { hasText: marker });
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  const first = await addSelectedAnnotation(page, paragraph, "同段甲：教学依据", "第一条批注");
+  const second = await addSelectedAnnotation(page, paragraph, "同段乙：课堂活动", "第二条批注");
+  expect(first.id).not.toBe(second.id);
+  await expectAnnotationIdentity(page, first, second);
+  await resolveFirstAnnotation(page, first, second);
+  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectReloadedAnnotations(page, first, second);
 });
 
 test("正文前置编辑保存刷新后批注仍绑定原选区", async ({ page }) => {

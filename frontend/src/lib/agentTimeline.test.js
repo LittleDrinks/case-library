@@ -39,7 +39,7 @@ describe("tool parameter summaries", () => {
 describe("document write scope summaries", () => {
   it("summarizes whole-draft scopes without character positions", () => {
     expect(toolParamSummary({ type: "tool-propose_document", input: {} }))
-      .toBe("范围：全文（待确认）");
+      .toBe("范围：全文（AI版本）");
     expect(toolParamSummary({ type: "tool-write_document", input: { scope: "document" } }))
       .toBe("范围：全文");
     expect(toolParamSummary({ type: "tool-write_document", input: { scope: "selection" } }))
@@ -62,16 +62,21 @@ describe("tool result summaries", () => {
 });
 
 describe("document write result summaries", () => {
-  it("reports document drafts without leaking payloads", () => {
+  it("reports AI versions without leaking payloads", () => {
     const propose = { type: "tool-propose_document", state: "output-available" };
-    expect(toolResultSummary({ ...propose, output: { artifactId: "a-2", kind: "document" } }))
-      .toBe("已创建全文初稿候选，等待确认");
+    expect(toolResultSummary({ ...propose, output: { status: "created", versionId: "cv-2" } }))
+      .toBe("已保存 AI 版本，可在版本时间线查看");
+    expect(toolResultSummary({ ...propose, output: { status: "not_saved" } }))
+      .toBe("AI 版本未保存");
   });
 
   it("reports direct writes only when truly written", () => {
     const write = { type: "tool-write_document", state: "output-available" };
     expect(toolResultSummary({ ...write, output: { status: "written", id: "w-1" } }))
       .toBe("已写入正文，可撤销");
+    expect(toolResultSummary({
+      ...write, output: { status: "written", id: "w-1", versionStatus: "created" },
+    })).toBe("已写入正文并保存 AI 版本，可撤销");
     expect(toolResultSummary({ ...write, output: {} })).toBe("");
   });
 });

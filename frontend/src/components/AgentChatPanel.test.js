@@ -47,6 +47,24 @@ function activeWriteSnapshot() {
   return running;
 }
 
+function versionSnapshot() {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{
+    type: "tool-propose_document", state: "output-available",
+    output: { status: "created", kind: "ai", versionId: "cv-ai-1" },
+  }];
+  return result;
+}
+
+function directWriteVersionSnapshot() {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{
+    type: "tool-write_document", state: "output-available",
+    output: { status: "written", versionStatus: "created", versionId: "cv-ai-2" },
+  }];
+  return result;
+}
+
 function streamResponse(chunks) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
@@ -127,6 +145,22 @@ it("hydrates an undone write from the server snapshot", async () => {
 
   expect(wrapper.get('[data-testid="agent-write-undone"]').text()).toBe("已撤销写入");
   expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
+});
+
+it("notifies the workbench when a saved AI version appears", async () => {
+  api.agentThread.mockResolvedValue(versionSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+});
+
+it("notifies the workbench when a direct full write saves an AI version", async () => {
+  api.agentThread.mockResolvedValue(directWriteVersionSnapshot());
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
 });
 
 it("refreshes the case after an in-flight write is hydrated", async () => {
@@ -517,6 +551,12 @@ function failedSnapshot() {
   return failed;
 }
 
+function failedAnnotationSnapshot() {
+  const failed = failedSnapshot();
+  failed.messages[0].parts.push({ type: "data-annotation", data: { id: "an-1" } });
+  return failed;
+}
+
 async function mountAndRetry(fetch) {
   api.agentThread.mockResolvedValue(failedSnapshot());
   vi.stubGlobal("fetch", fetch);
@@ -842,6 +882,31 @@ it("keeps retry on a newly failed turn with a server-assigned message id", async
 function selectionContext() {
   return { from: 9, to: 13, sameBlock: true, quote: "第二段原文", quoteHash: "quote-hash", revision: 3 };
 }
+
+it("hands annotation runs with their thread to the workbench so refresh survives panel switches", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const context = { annotationId: "an-1", from: 9, to: 13, sameBlock: true, quote: "第二段原文", revision: 3 };
+  const wrapper = mountPanel({ writingContext: context });
+  await flushPromises();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("继续讨论");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.emitted("annotation-run")).toEqual([["thread-1"]]);
+});
+
+it("re-arms the annotation observation when a failed run is retried", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  api.agentThread.mockResolvedValue(failedAnnotationSnapshot());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.get("[data-testid=\"agent-retry\"]").trigger("click");
+  await flushPromises();
+
+  expect(wrapper.emitted("annotation-run")).toEqual([["thread-1"]]);
+});
 
 it("sends the selected text as a structured selection part", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());

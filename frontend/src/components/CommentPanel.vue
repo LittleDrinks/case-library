@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import {
-  Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Trash2, X,
+  Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Sparkles, Trash2, X,
 } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -13,7 +13,9 @@ const props = defineProps({
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
-const emit = defineEmits(["annotations"]);
+const emit = defineEmits([
+  "annotations", "ask-ai", "case-revised", "clear-writing-context",
+]);
 const annotations = ref([]);
 const content = ref("");
 const error = ref("");
@@ -23,7 +25,14 @@ const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
 const cardRefs = new Map();
+const showResolved = ref(false);
 let loadGeneration = 0;
+
+const pendingCount = computed(() => annotations.value.filter(({ status }) => status !== "resolved").length);
+const resolvedCount = computed(() => annotations.value.filter(({ status }) => status === "resolved").length);
+const visibleAnnotations = computed(() => annotations.value.filter(({ status }) => (
+  showResolved.value ? status === "resolved" : status !== "resolved"
+)));
 
 const canCompose = computed(() => Boolean(
   props.user && (
@@ -39,7 +48,12 @@ const canCreate = computed(() => Boolean(
 const creationSource = computed(() => props.user?.role === "admin" ? "admin" : "manual");
 
 function announce() {
-  emit("annotations", annotations.value);
+  emit("annotations", annotations.value.filter(({ status }) => status !== "resolved"));
+}
+
+function invalidateAnnotationLoads() {
+  loadGeneration += 1;
+  loading.value = false;
 }
 
 function replaceAnnotation(updated) {
@@ -83,14 +97,14 @@ function showCreated(annotation) {
 async function addAnnotation() {
   if (!canCreate.value || !content.value.trim() || saving.value) return;
   const caseId = props.caseRecord.id;
-  saving.value = true;
-  error.value = "";
+  saving.value = true; error.value = "";
   try {
     if (await props.beforeAnnotationMutation() === false) return;
     if (!canCreate.value) return;
     const payload = createPayload();
     const created = await api.createAnnotation(caseId, payload, props.user.csrfToken);
     if (caseId !== props.caseRecord.id) return;
+    emit("clear-writing-context");
     showCreated(created);
     await loadAnnotations();
   } catch (caught) {
@@ -107,12 +121,39 @@ function setCardRef(id, element) {
 
 async function focusAnnotation(id) {
   if (!id) return;
+  const target = annotations.value.find((annotation) => annotation.id === id);
+  if (target) showResolved.value = target.status === "resolved";
   await nextTick();
   cardRefs.get(id)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
 }
 
 function canEdit(annotation) {
   return annotation.createdBy === props.user?.id && annotation.status === "pending";
+}
+
+function canDiscuss(annotation) {
+  return annotation.createdBy === props.user?.id
+    && annotation.status === "pending"
+    && (annotation.anchorState || "active") === "active";
+}
+
+function latestPendingRevision(annotation) {
+  return [...(annotation.revisions || [])].reverse()
+    .find((revision) => revision.status === "pending");
+}
+
+function canMerge(annotation) {
+  return Boolean(canDiscuss(annotation) && latestPendingRevision(annotation));
+}
+
+function revisionStatus(status) {
+  return ({
+    pending: "待决定", accepted: "已合并", rejected: "已拒绝", expired: "已失效",
+  })[status] || status;
+}
+
+function askAi(annotation) {
+  if (canDiscuss(annotation)) emit("ask-ai", annotation);
 }
 
 function beginEdit(annotation) {
@@ -177,14 +218,37 @@ async function reply(annotation) {
 
 async function setStatus(annotation, status) {
   if (saving.value) return;
+  invalidateAnnotationLoads();
   saving.value = true;
   error.value = "";
   try {
-    replaceAnnotation(await api.setAnnotationStatus(
+    const updated = await api.setAnnotationStatus(
       props.caseRecord.id, annotation.id, status, props.user.csrfToken,
-    ));
+    );
+    if (status === "resolved") emit("clear-writing-context");
+    invalidateAnnotationLoads();
+    replaceAnnotation(updated);
   } catch (caught) {
     error.value = caught.message || "状态更新失败";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function merge(annotation) {
+  if (!canMerge(annotation) || saving.value) return;
+  invalidateAnnotationLoads();
+  saving.value = true;
+  error.value = "";
+  try {
+    const result = await api.mergeAnnotation(
+      props.caseRecord.id, annotation.id, props.user.csrfToken,
+    );
+    invalidateAnnotationLoads();
+    replaceAnnotation(result.annotation);
+    emit("case-revised", result.case);
+  } catch (caught) {
+    error.value = caught.message || "合并修订失败";
   } finally {
     saving.value = false;
   }
@@ -197,16 +261,37 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 
 <template>
   <section class="assistant-panel comment-panel">
-    <div class="panel-head"><b>批注</b><span>{{ annotations.length }}</span></div>
+    <div class="panel-head">
+      <b>批注</b>
+      <div class="comment-view-switch" role="tablist" aria-label="批注视图">
+        <button
+          class="comment-view-tab"
+          :class="{ active: !showResolved }"
+          type="button"
+          role="tab"
+          :aria-selected="!showResolved"
+          @click="showResolved = false"
+        >待处理 {{ pendingCount }}</button>
+        <button
+          class="comment-view-tab"
+          :class="{ active: showResolved }"
+          type="button"
+          role="tab"
+          aria-label="查看已解决批注"
+          :aria-selected="showResolved"
+          @click="showResolved = true"
+        >已解决 {{ resolvedCount }}</button>
+      </div>
+    </div>
     <div class="panel-scroll">
       <div v-if="loading" class="panel-empty">正在加载批注</div>
       <div v-else-if="error && !annotations.length" class="attachment-error" role="alert">{{ error }}</div>
-      <div v-else-if="!annotations.length" class="panel-empty">
-        <MessageSquareText :size="24" /><span>暂无批注</span>
+      <div v-else-if="!visibleAnnotations.length" class="panel-empty">
+        <MessageSquareText :size="24" /><span>{{ showResolved ? "暂无已解决批注" : "暂无批注" }}</span>
       </div>
       <ol v-else class="comment-list">
         <li
-          v-for="annotation in annotations"
+          v-for="annotation in visibleAnnotations"
           :key="annotation.id"
           :ref="(element) => setCardRef(annotation.id, element)"
           class="comment-card"
@@ -218,8 +303,10 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             <b :class="annotation.status">{{ annotation.status === "resolved" ? "已解决" : "待处理" }}</b>
           </header>
           <blockquote>{{ annotation.quote }}</blockquote>
-          <p v-if="annotation.anchorState === 'deleted'" class="comment-anchor-state">原文已删除</p>
-          <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
+          <template v-if="annotation.status !== 'resolved'">
+            <p v-if="annotation.anchorState === 'deleted'" class="comment-anchor-state">原文已删除</p>
+            <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
+          </template>
           <textarea
             v-if="editingId === annotation.id"
             v-model="editingContent"
@@ -228,6 +315,18 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             :disabled="saving"
           />
           <p v-else>{{ annotation.content }}</p>
+          <div v-if="annotation.revisions?.length" class="comment-revisions">
+            <b>AI 修订历史</b>
+            <ol>
+              <li v-for="(revision, index) in annotation.revisions" :key="revision.id">
+                <header>
+                  <span>第 {{ index + 1 }} 轮 · {{ revisionStatus(revision.status) }}</span>
+                </header>
+                <p>替换为：{{ revision.replacement }}</p>
+                <small v-if="revision.reason">理由：{{ revision.reason }}</small>
+              </li>
+            </ol>
+          </div>
           <div v-if="editingId === annotation.id" class="comment-owner-actions">
             <button type="button" :disabled="saving || !editingContent.trim()" @click="saveEdit(annotation)"><Check :size="14" />保存批注</button>
             <button type="button" :disabled="saving" @click="cancelEdit"><X :size="14" />取消</button>
@@ -252,6 +351,20 @@ watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
             :disabled="saving"
             @click="setStatus(annotation, 'resolved')"
           ><Check :size="14" />标记解决</button>
+          <button
+            v-if="canDiscuss(annotation)"
+            class="comment-status-action"
+            type="button"
+            :disabled="saving"
+            @click="askAi(annotation)"
+          ><Sparkles :size="14" />让 AI 修订</button>
+          <button
+            v-if="canMerge(annotation)"
+            class="comment-status-action comment-merge-action"
+            type="button"
+            :disabled="saving"
+            @click="merge(annotation)"
+          ><Check :size="14" />合并并关闭</button>
           <button
             v-else-if="annotation.status === 'resolved' && user?.role === 'admin'"
             class="comment-status-action"

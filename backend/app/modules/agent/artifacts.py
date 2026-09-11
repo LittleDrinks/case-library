@@ -21,7 +21,12 @@ from app.modules.agent.models import (
     SourceRef,
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
-from app.modules.agent.repository import AgentRepository, expired_artifact_view, transaction
+from app.modules.agent.repository import (
+    AgentRepository,
+    claim_run_write_path,
+    expired_artifact_view,
+    transaction,
+)
 from app.modules.agent.source_reader import revalidate_sources
 from app.modules.cases.service import CaseError, case_view
 from app.modules.cases.snapshots import record_snapshot
@@ -34,7 +39,7 @@ def _now() -> datetime:
 def propose_artifact(
     database: Database, case_id: str, thread_id: str, run_id: str,
     start: int, end: int, replacement: str, reason: str,
-    sources: list[SourceRef], user: dict,
+    sources: list[SourceRef], user: dict, annotation_id: str | None = None,
 ) -> AgentArtifact:
     """校验 Run 锁定选区并构建 pending Artifact；不落库，随运行完成提交。
 
@@ -44,7 +49,9 @@ def propose_artifact(
     _verify_writer(case, user)
     target = _locked_target(database, run_id, case, start, end)
     _ensure_no_artifact(database, run_id)
-    return _artifact_document(case, thread_id, run_id, target, replacement, reason, sources)
+    return _artifact_document(
+        case, thread_id, run_id, target, replacement, reason, sources, annotation_id
+    )
 
 
 def propose_document_artifact(
@@ -52,7 +59,7 @@ def propose_document_artifact(
     blocks_input: object, reason: str,
     sources: list[SourceRef], user: dict,
 ) -> AgentArtifact:
-    """为空草稿或模板构建整篇初稿候选；已有正文时拒绝整篇提议。"""
+    """构建整篇 AI 版本草稿；已有教师正文也允许独立生成。"""
     case = _current_case(database, case_id)
     _verify_writer(case, user)
     normalized = _document_candidate(database, run_id, case, blocks_input)
@@ -66,12 +73,13 @@ def propose_document_artifact(
 
 
 def _document_candidate(database, run_id: str, case: dict, blocks_input: object) -> list:
-    """整篇候选前提：运行基线未越、未重复提议、正文确为空草稿或模板。"""
+    """整篇生成前提：运行基线未越且本次运行尚未生成过整篇稿。"""
     _verify_run_baseline(database, run_id, case)
     _ensure_no_artifact(database, run_id)
-    if not blocks.document_rewritable(case["document"]):
-        raise CaseError(422, "正文已有内容，整篇候选只适用于空草稿或模板；请先澄清要修改的范围")
-    return blocks.validate_blocks(blocks_input)
+    normalized = blocks.validate_blocks(blocks_input)
+    if not claim_run_write_path(database, run_id, "document"):
+        raise CaseError(409, "本次运行已选择另一条正文路径")
+    return normalized
 
 
 def _run_row(database, run_id: str) -> dict:
@@ -118,12 +126,12 @@ def _current_case(database: Database, case_id: str, session=None) -> dict:
 
 def _artifact_document(
     case: dict, thread_id: str, run_id: str, target: ArtifactTarget,
-    replacement: str, reason: str, sources: list[SourceRef],
+    replacement: str, reason: str, sources: list[SourceRef], annotation_id: str | None,
 ) -> AgentArtifact:
     return AgentArtifact(
         id=new_id("artifact"), case_id=case["id"], thread_id=thread_id, run_id=run_id,
         base_revision=case["revision"], target=target, replacement=replacement,
-        reason=reason, sources=sources, created_at=_now(),
+        annotation_id=annotation_id, reason=reason, sources=sources, created_at=_now(),
     )
 
 
@@ -162,11 +170,22 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
         return artifact, case
     _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
+    _decide_annotation_revision(database, artifact, user, decision, session)
     if decision == "accepted":
         if not revalidate_sources(database, user, case_id, artifact.sources):
             raise CaseError(409, "修订依据当前不可读，候选已过期")
         case = _apply_revision(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
+
+
+def _decide_annotation_revision(database, artifact, user, decision, session) -> None:
+    if not artifact.annotation_id:
+        return
+    if decision == "accepted":
+        raise CaseError(409, "批注修订请从批注面板合并")
+    from app.modules.annotations.service import mark_ai_revision_decision
+
+    mark_ai_revision_decision(database, artifact, user, decision, session)
 
 
 def _decidable_run(database, artifact: AgentArtifact, decision: ArtifactDecision,

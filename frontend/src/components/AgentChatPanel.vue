@@ -23,7 +23,10 @@ const props = defineProps({
   review: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
 });
-const emit = defineEmits(["case-revised", "clear-writing-context"]);
+const emit = defineEmits([
+  "case-revised", "versions-updated", "clear-writing-context", "annotations-refresh",
+  "annotation-run",
+]);
 
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
@@ -52,6 +55,7 @@ const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
 let sourceGeneration = 0;
 const syncedWrites = new Set();
+const syncedVersions = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
@@ -231,10 +235,12 @@ async function scrollToLatest() {
 watch(messages, () => {
   void refreshSources();
   void syncWrittenDocuments();
+  syncGeneratedVersions();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
 // 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
+// 批注修订在完成事务才可见，但批注刷新由 WorkbenchView 跟踪（切面板/线程后本组件会卸载）。
 watch(() => threadState.value?.latestRun?.status, (current, previous) => {
   if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)
       || !pendingWriteSync) return;
@@ -247,6 +253,7 @@ watch(artifacts, () => {
 }, { deep: true });
 watch(threadId, () => {
   syncedWrites.clear();
+  syncedVersions.clear();
   pendingWriteSync = false;
   hydratedWriteThread = "";
   refreshSourcePermissions();
@@ -313,6 +320,7 @@ async function restoreScroll(id) {
 async function chooseThread(id) {
   stopThreadsPolling();
   if (id !== threadId.value) {
+    emit("clear-writing-context");
     await selectThread(id);
   }
   mode.value = "chat";
@@ -321,6 +329,7 @@ async function chooseThread(id) {
 
 async function addThread() {
   stopThreadsPolling();
+  emit("clear-writing-context");
   await createThread();
   mode.value = "chat";
   await restoreScroll(threadId.value);
@@ -386,6 +395,16 @@ function syncWrittenDocuments() {
   if (!waitingForTerminal) void refreshCaseAfterWrite();
 }
 
+function syncGeneratedVersions() {
+  const ids = messages.value.flatMap((message) => message.parts || [])
+    .filter((part) => ["tool-propose_document", "tool-write_document"].includes(part.type)
+      && part.output?.versionId)
+    .map((part) => part.output.versionId);
+  const fresh = ids.filter((id) => !syncedVersions.has(id));
+  fresh.forEach((id) => syncedVersions.add(id));
+  if (fresh.length) emit("versions-updated");
+}
+
 async function refreshCaseAfterWrite() {
   try {
     emit("case-revised", await api.getCase(props.caseRecord.id));
@@ -418,11 +437,16 @@ function contextParts() {
     && Number.isInteger(selection.to) && selection.to > selection.from;
   if (usable) {
     parts.push({ type: "data-selection", data: { from: selection.from, to: selection.to } });
+    if (selection.annotationId) {
+      parts.push({ type: "data-annotation", data: { id: selection.annotationId } });
+    }
   }
   return parts;
 }
 
 async function sendMessage({ text, skillId }) {
+  // 必须在等待 send 前发出：切面板/线程会卸载本组件，finally 里的 emit 会丢失
+  if (props.writingContext?.annotationId) emit("annotation-run", threadId.value);
   await send(text, contextParts(), skillId);
 }
 
@@ -441,14 +465,23 @@ async function stopRun() {
 }
 
 async function retryRun() {
-  decideError.value = "";
+  // 与 sendMessage 同因：await 前发出，切面板/线程卸载后 emit 不丢
   const messageId = retryableMessageId.value;
   if (!messageId) return;
+  if (props.writingContext?.annotationId || retryMessageHasAnnotation(messageId)) {
+    emit("annotation-run", threadId.value);
+  }
+  decideError.value = "";
   try {
     await retry(messageId);
   } catch (requestError) {
     decideError.value = requestError.message || "重试失败";
   }
+}
+
+function retryMessageHasAnnotation(messageId) {
+  const message = threadState.value?.messages?.find((item) => item.id === messageId);
+  return Boolean(message?.parts?.some((part) => part.type === "data-annotation"));
 }
 </script>
 

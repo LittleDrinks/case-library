@@ -120,9 +120,9 @@ run_browser_tests() {
       -v "$artifact_dir:/app/test-results" agent-e2e
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   fi
-  if test "$browser_spec" = "tests/e2e/agent-tracer.spec.js"; then
-    set -- compose --profile e2e run --rm \
-      -v "$artifact_dir:/app/test-results" agent-tracer
+  if test "$browser_spec" = "tests/e2e/agent-tracer.spec.js" ||
+     test "$browser_spec" = "tests/e2e/agent-annotation-rounds.spec.js"; then
+    set -- compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" agent-tracer
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   fi
   "$@"

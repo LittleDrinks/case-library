@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic_ai.capabilities import Capability
@@ -24,6 +25,124 @@ from app.modules.cases.service import CaseError
 from app.modules.skills.service import BoundSkill, SkillError
 
 READER_CAPABILITY_ID = "platform-tools"
+_GENERATION_ACTION_WORDS = (
+    r"(?:生成|重写|改写|撰写|编写|起草|创作|重做|写|整理|修改|"
+    r"来一份|来一篇|要一份|要一篇|给我一份|需要一份|"
+    r"generate|rewrite|redraft|write)"
+)
+_GENERATION_TARGET_WORDS = (
+    r"(?:全文|全篇|整篇|整份|全案|整案|全部|从头到尾|初稿|完整(?:的)?"
+    r"(?:案例|文档|稿|正文|文章)|整个(?:案例|文档|稿|正文|文章)|"
+    r"full\s+(?:draft|document))"
+)
+# 文档名词作宾语且重写类动词带遍/版完量补语：把正文重新写一遍。
+_GENERATION_DOC_REWRITE = re.compile(
+    r"(?:全文|全篇|整篇|整份|正文|案例|文档|文章|稿子)"
+    r"[^，。；！？\n]{0,8}?(?:重新)?(?:重写|改写|写过|撰写|起草|创作|写)"
+    r"(?:一版|一遍|一次|一回)",
+    re.IGNORECASE,
+)
+_GENERATION_ACTION = re.compile(
+    _GENERATION_ACTION_WORDS + r".{0,16}" + _GENERATION_TARGET_WORDS,
+    re.IGNORECASE,
+)
+_GENERATION_TARGET_ACTION = re.compile(
+    _GENERATION_TARGET_WORDS + r".{0,16}" + _GENERATION_ACTION_WORDS,
+    re.IGNORECASE,
+)
+_FULL_GENERATION_PHRASE = re.compile(r"完整生成|full\s+(?:draft|document)", re.IGNORECASE)
+_GENERATION_QUESTIONS = (
+    "吗", "呢", "请问", "是否", "能不能", "可否", "能否", "要不要", "如何", "怎么", "怎样",
+    "为何", "为什么", "什么", "哪",
+)
+_GENERATION_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话")
+_GENERATION_NEGATIONS = ("不要", "不必", "不需要", "不用", "无需", "无须", "请勿", "勿", "不想", "不希望", "没有", "没", "未", "不是")
+_GENERATION_MENTION_PREFIXES = ("引用", "提及", "说明", "解释", "介绍", "分析", "讨论", "理解", "查看", "显示")
+_GENERATION_MENTION_SUFFIX = re.compile(
+    r"^\s*(?:的)?(?:功能|按钮|规则|模式|选项|机制|说明|意思|含义|用法|结果|内容|流程|思路|好处|步骤)"
+)
+# 目标带“的”后接元数据名词：谈论对象的记录而非执行请求。
+_GENERATION_METADATA_SUFFIX = re.compile(
+    r"^\s*(?:的)?[\u4e00-\u9fa5]{0,4}(?:历史|记录|版本|清单|列表)"
+)
+_GENERATION_REPORT_PREFIX = re.compile(
+    r"(?:^|[，,：:、\s])(?:他|她|他们|有人|据说|听说)(?:说|提到|声称)(?:要|会|将|想)?$"
+)
+_GENERATION_PARTIAL = re.compile(
+    r"(?:中的|里的|之中|内部)|^\s*的(?:第|某|部分|片段|选区|段|节|[一二三四五六七八九十\d])"
+    r"|的(?:批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
+)
+# 匹配组内部的段落局部名词：把正文结尾重写一遍不是全文请求。
+_GENERATION_GROUP_PARTIAL = re.compile(
+    r"(?:中的|里的|之中|内部|批注|评论|标注|摘要|标题|结构|结论|开头|结尾|段落|小节|章节)"
+)
+_NEGATED_BARE = re.compile(r"(?:^|[请你我他它们])(?:不|别).{0,16}$")
+_GENERATION_BARE_NEGATION = re.compile(
+    r"(?<![特个性告分])别\s*$"
+)
+_GENERATION_REMINDER = re.compile(r"别忘(?:了|记)")
+_GENERATION_EVALUATION_SUFFIX = re.compile(
+    r"^\s*得(?:很|太|非常|挺|比较|相当)?(?:好|不错|棒|精彩|漂亮|完整|满意)"
+)
+
+
+def full_generation_requested(prompt: str) -> bool:
+    requested = False
+    for clause in writes.message_clauses((prompt or "").lower(), split_discourse=True):
+        if _generation_context_blocked(clause):
+            continue
+        for match in _generation_matches(clause):
+            if _generation_match_negated(clause, match):
+                requested = False
+            elif not _generation_match_blocked(clause, match):
+                requested = True
+    return requested
+
+
+def _generation_matches(clause: str):
+    yield from _GENERATION_ACTION.finditer(clause)
+    yield from _GENERATION_TARGET_ACTION.finditer(clause)
+    yield from _FULL_GENERATION_PHRASE.finditer(clause)
+    yield from _GENERATION_DOC_REWRITE.finditer(clause)
+
+
+def _generation_context_blocked(clause: str) -> bool:
+    return any(token in clause for token in _GENERATION_QUESTIONS + _GENERATION_CONDITIONALS)
+
+
+def _generation_match_blocked(clause: str, match: re.Match) -> bool:
+    before = clause[max(0, match.start() - 24):match.start()]
+    after = clause[match.end():match.end() + 16]
+    return _generation_match_negated(clause, match) or _generation_mentioned(before, after) or bool(
+        _GENERATION_GROUP_PARTIAL.search(match.group())
+        or _GENERATION_PARTIAL.search(after)
+        or _GENERATION_EVALUATION_SUFFIX.match(after)
+        or _GENERATION_METADATA_SUFFIX.match(after)
+    )
+
+
+def _generation_match_negated(clause: str, match: re.Match) -> bool:
+    before = clause[max(0, match.start() - 24):match.start()]
+    return _generation_negated(before)
+
+
+def _generation_negated(before: str) -> bool:
+    if any(marker in before for marker in _GENERATION_NEGATIONS):
+        return True
+    if _GENERATION_REMINDER.search(before) is not None:
+        return False
+    return _NEGATED_BARE.search(before.strip()) is not None or bool(
+        _GENERATION_BARE_NEGATION.search(before)
+    )
+
+
+def _generation_mentioned(before: str, after: str) -> bool:
+    prefixes = (*_GENERATION_MENTION_PREFIXES, "介绍一下", "说说", "讲讲", "谈谈", "了解")
+    return (
+        any(before.rstrip().endswith(prefix) for prefix in prefixes)
+        or bool(_GENERATION_REPORT_PREFIX.search(before.rstrip()))
+        or bool(_GENERATION_MENTION_SUFFIX.match(after))
+    )
 
 
 async def search_corpus(ctx: RunContext[ToolDeps], params: CorpusSearchParams) -> dict:
@@ -73,6 +192,7 @@ async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
     """为教师选定的正文范围构建修订候选；随运行完成事务统一提交。"""
+    require_revision_reason(reason)
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
     try:
@@ -83,10 +203,18 @@ async def propose_revision(
     return _artifact_view(artifact)
 
 
+def require_revision_reason(reason: str) -> str:
+    """修订理由是非空契约：空/纯空白拒绝并由模型重试，不代填假原因。"""
+    if not isinstance(reason, str) or not reason.strip():
+        raise ModelRetry("修订必须给出具体修改理由，且不能为空白")
+    return reason
+
+
 def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str):
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
         start, end, replacement, reason, list(ctx.deps.evidence), ctx.deps.user,
+        ctx.deps.annotation_id,
     )
 
 
@@ -106,9 +234,17 @@ def _artifact_view(artifact) -> dict:
 async def propose_document(
     ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
-    """为空草稿或模板提议整篇初稿候选；随运行完成事务统一提交，教师确认后才生效。"""
+    """为空草稿或模板提议整篇初稿候选；暂存运行结果，成功后落为只读版本，教师确认后才生效。"""
+    if ctx.deps.annotation_id:
+        raise ModelRetry("批注讨论只能提议选区修订")
+    if not ctx.deps.full_generation_allowed:
+        raise ModelRetry("本条消息未请求完整生成，不能创建 AI 版本")
     if ctx.deps.proposed is not None:
         raise ModelRetry("本次运行已提议过修订候选")
+    return _propose_document(ctx, blocks, reason)
+
+
+def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str) -> dict:
     try:
         artifact = artifacts.propose_document_artifact(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
@@ -118,7 +254,7 @@ async def propose_document(
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.proposed = artifact
     return {
-        "artifactId": artifact.id, "kind": artifact.kind,
+        "kind": artifact.kind, "status": "pending",
         "blocks": len(artifact.blocks), "baseRevision": artifact.base_revision,
     }
 
@@ -131,8 +267,24 @@ async def write_document(
 
     写入即落库并保留可撤销记录；失败或冲突向模型返回原因，不虚报成功。
     """
+    if ctx.deps.annotation_id:
+        raise ModelRetry("批注讨论只能提议选区修订，不能直接写入正文")
+    return await _write_document(ctx, scope, blocks, summary)
+
+
+async def _write_document(
+    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
+    blocks: DraftBlocks, summary: str,
+) -> dict:
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
+    record = _apply_document_write(ctx, scope, blocks, summary)
+    ctx.deps.wrote = True
+    ctx.deps.write_record = record
+    return {**write_view(record), "undoable": True}
+
+
+def _apply_document_write(ctx, scope, blocks, summary):
     try:
         record = writes.apply_write(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id, scope,
@@ -140,8 +292,7 @@ async def write_document(
         )
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.wrote = True
-    return {**write_view(record), "undoable": True}
+    return record
 
 
 def domain_capability() -> Capability:

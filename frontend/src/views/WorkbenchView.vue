@@ -18,6 +18,7 @@ import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
+import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
 
 const route = useRoute();
@@ -48,15 +49,19 @@ const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
+let annotationLoadGeneration = 0;
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
+const annotationRunWatches = new Map();
 let pendingSteps = [];
+let annotationRunPoll = null;
 const sources = ref([]);
 const canvasEditor = ref(null);
 const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
 const overwriteTarget = ref(null);
+const historyRefreshKey = ref(0);
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
 
 const activeVersion = computed(() => (
@@ -64,7 +69,7 @@ const activeVersion = computed(() => (
 ));
 const versionTabItems = computed(() => openVersionTabs.value.map((version) => ({
   id: version.id,
-  label: `v${version.number} · ${version.title}`,
+  label: versionLabel(version),
 })));
 const onDraftTab = computed(() => !activeVersion.value);
 const activeDocument = computed(() => (
@@ -193,7 +198,7 @@ async function persist(payload) {
   const documentChanged = Boolean(payload.steps?.length);
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   pendingSteps.splice(0, payload.steps?.length || 0);
-  invalidateSelection();
+  clearWritingContext();
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
@@ -214,13 +219,19 @@ function invalidateSelection() {
   annotationSelection.value = null;
 }
 
+function clearWritingContext() {
+  writingContext.value = null;
+  invalidateSelection();
+  canvasEditor.value?.clearSelection?.();
+}
+
 function handleSaveConflict(error) {
   conflict.value = error;
-  invalidateSelection();
+  clearWritingContext();
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) invalidateSelection();
+  if (invalidate) clearWritingContext();
   pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
@@ -233,12 +244,22 @@ function applyCase(value, invalidate = true) {
 }
 
 async function loadAnnotations() {
+  const generation = ++annotationLoadGeneration;
   if (!session.user || readerMode.value) {
     annotations.value = [];
     return;
   }
-  try { annotations.value = await api.listAnnotations(caseId()); }
+  try {
+    const rows = await api.listAnnotations(caseId());
+    if (generation !== annotationLoadGeneration) return;
+    annotations.value = rows.filter(({ status }) => status !== "resolved");
+  }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
+}
+
+function applyAnnotations(rows) {
+  annotationLoadGeneration += 1;
+  annotations.value = rows;
 }
 
 async function refreshAnnotations() {
@@ -246,9 +267,67 @@ async function refreshAnnotations() {
   annotationRefreshToken.value += 1;
 }
 
+function stopAnnotationRunPoll(refresh) {
+  clearInterval(annotationRunPoll);
+  annotationRunPoll = null;
+  annotationRunWatches.clear();
+  if (refresh) void refreshAnnotations();
+}
+
+// 批注修订在完成事务才可见，而 AI 面板切页签/切对话会卸载；
+// 批注刷新由共同祖先 WorkbenchView 轮询各对话快照到终态，按线程隔离生命周期：
+// 新登记不打断既有线程；单次快照查询失败不判定终态，继续观察。
+function watchAnnotationRun(threadId) {
+  if (threadId) {
+    annotationRunWatches.set(threadId, { seenActive: false, misses: 0, ticks: 0 });
+  }
+  if (annotationRunPoll || !annotationRunWatches.size) return;
+  annotationRunPoll = setInterval(pollAnnotationRuns, 2000);
+}
+
+function settleAnnotationWatch(threadId, refresh) {
+  annotationRunWatches.delete(threadId);
+  if (refresh) void refreshAnnotations();
+  if (!annotationRunWatches.size) stopAnnotationRunPoll(false);
+}
+
+function expireAnnotationWatches() {
+  for (const [threadId, watch] of annotationRunWatches) {
+    if ((watch.ticks += 1) > 300) settleAnnotationWatch(threadId, false);
+  }
+}
+
+function isCurrentAnnotationWatch(threadId, watch) {
+  return annotationRunWatches.get(threadId) === watch;
+}
+
+function pollAnnotationWatch(threadId, watch) {
+  api.agentThread(caseRecord.value.id, threadId).then((snapshot) => {
+    if (!isCurrentAnnotationWatch(threadId, watch)) return;
+    if (snapshot.activeRun) {
+      watch.misses = 0;
+      watch.seenActive = true;
+      return;
+    }
+    watch.misses += 1;
+    if (watch.seenActive || watch.misses >= 3) settleAnnotationWatch(threadId, true);
+  }).catch(() => {});
+}
+
+function pollAnnotationRuns() {
+  expireAnnotationWatches();
+  for (const [threadId, watch] of [...annotationRunWatches]) {
+    pollAnnotationWatch(threadId, watch);
+  }
+}
+
 async function applyRevisedCase(value) {
   applyCase(value);
   await refreshAnnotations();
+}
+
+function refreshAnnotationsAfterAi() {
+  void refreshAnnotations();
 }
 
 const sourcesLoading = ref(false);
@@ -264,7 +343,7 @@ async function loadSources() {
 }
 
 function applyAttachmentCase(value) {
-  invalidateSelection();
+  clearWritingContext();
   syncCaseRevision(value);
   void loadSources();
 }
@@ -394,6 +473,21 @@ function openAnnotation(id) {
   void nextTick(() => { focusedAnnotationId.value = id; });
 }
 
+function askAnnotationAi(annotation) {
+  if (!annotation || annotation.createdBy !== session.user?.id) return;
+  writingContext.value = {
+    annotationId: annotation.id,
+    from: annotation.from,
+    to: annotation.to,
+    quote: annotation.quote,
+    section: annotation.section,
+    quoteHash: annotation.quoteHash,
+    revision: revision.value,
+    sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
+  };
+  selectTool("ai");
+}
+
 function requestLifecycle(command) {
   if (headerBusyAction.value) return;
   if (!["reject", "supplement"].includes(command)) {
@@ -455,6 +549,7 @@ async function prepareContentMutation() {
 }
 
 function openVersionTab(version) {
+  clearWritingContext();
   if (!openVersionTabs.value.some((tab) => tab.id === version.id)) {
     openVersionTabs.value = [...openVersionTabs.value, version];
   }
@@ -462,12 +557,18 @@ function openVersionTab(version) {
 }
 
 function closeVersionTab(id) {
+  if (activeTabId.value === id) clearWritingContext();
   openVersionTabs.value = openVersionTabs.value.filter((tab) => tab.id !== id);
   if (activeTabId.value === id) activeTabId.value = "draft";
 }
 
 function selectTab(id) {
+  if (id !== activeTabId.value) clearWritingContext();
   activeTabId.value = id;
+}
+
+function refreshVersionHistory() {
+  historyRefreshKey.value += 1;
 }
 
 function requestOverwrite() {
@@ -542,13 +643,14 @@ watch(readerMode, (value) => {
 });
 onMounted(() => {
   loadCase();
-  if (!readerMode.value) loadTagCatalog();
+  loadTagCatalog();
 });
 onBeforeUnmount(() => {
   if (!readerMode.value) crashDraft.flush();
   crashDraft.destroy();
   if (!readerMode.value) void autosave.flush();
   autosave.destroy();
+  stopAnnotationRunPoll(false);
 });
 </script>
 
@@ -582,7 +684,7 @@ onBeforeUnmount(() => {
       />
       <OverwriteConfirmDialog
         :open="Boolean(overwriteTarget)"
-        :version-label="overwriteTarget ? `v${overwriteTarget.number} · ${overwriteTarget.title}` : ''"
+        :version-label="overwriteTarget ? versionLabel(overwriteTarget) : ''"
         :busy="busyAction === 'overwrite'"
         :error="overwriteTarget && busyAction === 'overwrite' ? actionNotice : ''"
         @cancel="cancelOverwrite"
@@ -657,7 +759,7 @@ onBeforeUnmount(() => {
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
               <h2>{{ activeVersion.title }}</h2>
-              <p>提交版本 v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
+              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
             </header>
             <CanvasEditor
               :key="activeVersion.id"
@@ -684,6 +786,7 @@ onBeforeUnmount(() => {
           :editable="editable"
           :selection="annotationSelection"
           :writing-context="writingContext"
+          :history-refresh-key="historyRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
           :focus-annotation-id="focusedAnnotationId"
@@ -694,11 +797,15 @@ onBeforeUnmount(() => {
           @case-restored="applyCase"
           @case-revised="applyRevisedCase"
           @mutation-state="contentMutationBusy = $event"
-          @annotations="annotations = $event"
+          @annotations="applyAnnotations($event)"
+          @annotations-refresh="refreshAnnotationsAfterAi"
+          @annotation-run="watchAnnotationRun"
+          @ask-ai="askAnnotationAi"
           @sources-retry="loadSources"
-          @clear-writing-context="writingContext = null"
+          @clear-writing-context="clearWritingContext"
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
+          @versions-updated="refreshVersionHistory"
         />
       </div>
     </template>
