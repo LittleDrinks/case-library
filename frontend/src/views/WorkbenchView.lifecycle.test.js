@@ -56,6 +56,7 @@ vi.mock("../api.js", () => ({
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    agentThread: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
   },
@@ -398,4 +399,30 @@ test("读者模式不渲染版本 Tab 栏", async () => {
   const wrapper = renderWithRail(VersionRailProbe);
   await flushPromises();
   expect(wrapper.find("button.draft-tab").exists()).toBe(false);
+});
+
+const annotationRailStub = {
+  name: "AssistantRailStub", emits: ["annotation-run"],
+  template: `<button data-testid="rail-annotation-run" type="button"
+    @click="$emit('annotation-run', 'thread-9')">run</button>`,
+};
+
+test("annotation run finishing after panel switch refreshes the annotation history", async () => {
+  vi.useFakeTimers();
+  try {
+    api.getCase.mockResolvedValue(caseFixture());
+    api.agentThread.mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+      .mockResolvedValue({ id: "thread-9", activeRun: null,
+        latestRun: { id: "run-1", status: "completed" } });
+    const wrapper = render(annotationRailStub);
+    await flushPromises();
+    const loadsBefore = api.listAnnotations.mock.calls.length;
+    await wrapper.get('[data-testid="rail-annotation-run"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(api.agentThread).toHaveBeenCalledWith("case-1", "thread-9");
+    expect(api.listAnnotations.mock.calls.length).toBeGreaterThan(loadsBefore);
+  } finally {
+    vi.useRealTimers();
+  }
 });

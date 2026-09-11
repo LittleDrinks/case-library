@@ -243,6 +243,20 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
 });
 
+test("批注讨论生成中切到批注面板：后台完成后当前历史自动出现新修订", async ({ page, playwright }) => {
+  test.setTimeout(150_000);
+  await prepareAnnotationDiscussion(page, playwright);
+  await page.locator(".comment-card").getByRole("button", { name: "让 AI 修订" }).click();
+  await selectPublishedSkill(page);
+  await page.getByLabel("向 AI 提问").fill("第一轮：请结合当前选区生成修订候选。");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  // 生成中切到批注面板：AI 面板被卸载，服务端运行继续
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  // 后台完成终态后无需手动刷新，当前批注历史自动出现新修订
+  await expect(page.locator(".comment-revisions li")).toHaveCount(1, { timeout: 90_000 });
+  await expect(page.locator(".comment-revisions")).toContainText(REPLACEMENT_MARK);
+});
+
 async function acceptAndVerify(page, caseId) {
   await page.getByTestId("agent-accept").click();
   const artifact = page.getByTestId("agent-artifact");

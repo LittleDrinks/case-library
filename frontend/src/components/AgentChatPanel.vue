@@ -24,7 +24,7 @@ const props = defineProps({
   writingContext: { type: Object, default: null },
 });
 const emit = defineEmits([
-  "case-revised", "clear-writing-context", "annotations-refresh",
+  "case-revised", "clear-writing-context", "annotations-refresh", "annotation-run",
 ]);
 
 const {
@@ -57,7 +57,6 @@ const syncedWrites = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
-let pendingAnnotationSync = false;
 let hydratedWriteThread = "";
 
 function sourceRefs() {
@@ -237,18 +236,13 @@ watch(messages, () => {
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
-// 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新；
-// 批注讨论同理：修订在完成事务才可见，终态后补一次批注刷新，消除时点差。
+// 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
+// 批注修订在完成事务才可见，但批注刷新由 WorkbenchView 跟踪（切面板/线程后本组件会卸载）。
 watch(() => threadState.value?.latestRun?.status, (current, previous) => {
-  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)) return;
-  if (pendingWriteSync) {
-    pendingWriteSync = false;
-    void refreshCaseAfterWrite();
-  }
-  if (pendingAnnotationSync) {
-    pendingAnnotationSync = false;
-    emit("annotations-refresh");
-  }
+  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)
+      || !pendingWriteSync) return;
+  pendingWriteSync = false;
+  void refreshCaseAfterWrite();
 });
 watch(artifacts, () => {
   void refreshSources();
@@ -257,7 +251,6 @@ watch(artifacts, () => {
 watch(threadId, () => {
   syncedWrites.clear();
   pendingWriteSync = false;
-  pendingAnnotationSync = false;
   hydratedWriteThread = "";
   refreshSourcePermissions();
 });
@@ -436,12 +429,9 @@ function contextParts() {
 }
 
 async function sendMessage({ text, skillId }) {
-  pendingAnnotationSync = Boolean(props.writingContext?.annotationId);
-  try {
-    await send(text, contextParts(), skillId);
-  } finally {
-    if (props.writingContext?.annotationId) emit("annotations-refresh");
-  }
+  // 必须在等待 send 前发出：切面板/线程会卸载本组件，finally 里的 emit 会丢失
+  if (props.writingContext?.annotationId) emit("annotation-run", threadId.value);
+  await send(text, contextParts(), skillId);
 }
 
 async function rejectArtifact(artifactId) {

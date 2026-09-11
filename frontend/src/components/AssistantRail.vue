@@ -28,7 +28,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
-  "case-revised", "annotations", "annotations-refresh", "ask-ai",
+  "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
   "sources-retry", "clear-writing-context", "insert-citation",
   "open-version",
 ]);
@@ -77,6 +77,7 @@ function select(tab) {
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
       @annotations-refresh="emit('annotations-refresh')"
+      @annotation-run="emit('annotation-run', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />
     <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
