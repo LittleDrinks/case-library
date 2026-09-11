@@ -172,6 +172,21 @@ def test_reader_chat_run_completes_and_resumes(client: TestClient) -> None:
     assert '"delta":"读者讨论回答"' in events.text
 
 
+def test_reader_annotation_part_is_forbidden_on_published_view(client: TestClient) -> None:
+    auth = _login(client, READER)
+    thread = _default_thread(client, auth)
+    message = _message("伪造批注", message_id="forged-annotation")
+    message["parts"].append({"type": "data-annotation", "data": {"id": "fake"}})
+
+    response = client.post(
+        f"{THREAD_PATH}/{thread['id']}/stream?versionId={VERSION}",
+        headers=_csrf(auth),
+        json={"id": "reader-forged-annotation", "trigger": "submit-message", "messages": [message]},
+    )
+
+    assert response.status_code == 403
+
+
 def test_reader_cannot_select_case_edit_skill(client: TestClient) -> None:
     auth = _login(client, READER)
     thread = _default_thread(client, auth)

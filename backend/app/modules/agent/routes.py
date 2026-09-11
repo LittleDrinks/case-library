@@ -360,9 +360,7 @@ def _validate_plan(
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
-    if not any(part.get("type") == "data-annotation" for part in plan.parts):
-        return None
-    part = _single_annotation_part(plan, version_id, user, case["ownerId"] == user["id"])
+    part = _single_annotation_part(plan, case, version_id, user)
     if part is None:
         return None
     annotation = _revision_annotation(database, case, part, user)
@@ -374,11 +372,11 @@ def _annotation_from_parts(database, case, plan, version_id, user) -> str | None
     return annotation["id"]
 
 
-def _single_annotation_part(plan, version_id, user, is_owner: bool) -> dict | None:
+def _single_annotation_part(plan, case, version_id, user) -> dict | None:
     parts = [part for part in plan.parts if part.get("type") == "data-annotation"]
     if not parts:
         return None
-    if len(parts) != 1 or version_id or not user or not is_owner:
+    if len(parts) != 1 or version_id or not user or case["ownerId"] != user["id"]:
         raise HTTPException(status_code=403, detail="批注 AI 修订仅限案例作者工作稿")
     return parts[0]
 
