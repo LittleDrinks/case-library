@@ -360,6 +360,8 @@ def _validate_plan(
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
+    if not any(part.get("type") == "data-annotation" for part in plan.parts):
+        return None
     part = _single_annotation_part(plan, version_id, user, case["ownerId"] == user["id"])
     if part is None:
         return None
