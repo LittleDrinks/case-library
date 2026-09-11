@@ -133,6 +133,14 @@ async function dataIds(locator) {
   return locator.evaluateAll((nodes) => nodes.map((node) => node.dataset.annotationId).sort());
 }
 
+async function expectAnnotationDetails(page, annotation, status) {
+  const card = page.locator(".comment-card[data-annotation-id=\"" + annotation.id + "\"]");
+  await expect(card.locator("blockquote")).toHaveText(annotation.quote);
+  await expect(card).toContainText(status);
+  await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + annotation.id + "\"]"))
+    .toHaveText(annotation.quote);
+}
+
 async function expectAnnotationIdentity(page, first, second) {
   const cards = page.locator(".comment-card");
   await expect(cards).toHaveCount(2);
@@ -140,14 +148,16 @@ async function expectAnnotationIdentity(page, first, second) {
   const anchors = page.locator(".annotation-anchor");
   await expect(anchors).toHaveCount(2);
   expect(await dataIds(anchors)).toEqual([first.id, second.id].sort());
+  await expectAnnotationDetails(page, first, "待处理");
+  await expectAnnotationDetails(page, second, "待处理");
 }
 
 async function resolveFirstAnnotation(page, first, second) {
   await page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]").click();
   await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toBeInViewport();
   await page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]").getByRole("button", { name: "标记解决" }).click();
-  await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toContainText("已解决");
-  await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toContainText("待处理");
+  await expectAnnotationDetails(page, first, "已解决");
+  await expectAnnotationDetails(page, second, "待处理");
 }
 
 async function expectReloadedAnnotations(page, first, second) {
@@ -160,6 +170,8 @@ async function expectReloadedAnnotations(page, first, second) {
     expect.objectContaining({ id: second.id, status: "pending", quote: "同段乙：课堂活动" }),
   ]));
   expect(await dataIds(cards)).toEqual([first.id, second.id].sort());
+  await expectAnnotationDetails(page, first, "已解决");
+  await expectAnnotationDetails(page, second, "待处理");
 }
 
 async function addManualAnnotation(page, marker, content) {

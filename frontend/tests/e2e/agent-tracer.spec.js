@@ -7,13 +7,6 @@ const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
 const SECOND_REPLACEMENT_MARK = "第二轮修订：教学目标、课堂任务与评价依据逐项对应";
 const M1_ANNOTATION_QUOTE = "的评价依据。";
-const M1_CASE_DOCUMENT = {
-  type: "doc",
-  content: [
-    { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
-    { type: "paragraph", content: [{ type: "text", text: TARGET_TEXT }] },
-  ],
-};
 
 async function login(page) {
   await page.goto("/#/login");
@@ -32,16 +25,16 @@ function caseDocument() {
   return {
     type: "doc",
     content: [
-      { type: "paragraph", content: [{ type: "text", text: "第一段保持原样。" }] },
+      { type: "paragraph", content: [{ type: "text", text: "第一段仍保持原样。" }] },
       { type: "paragraph", content: [{ type: "text", text: "第二段：教学目标需要更明确的评价依据。" }] },
     ],
   };
 }
 
-async function createCase(page, document = caseDocument()) {
+async function createCase(page) {
   const response = await page.context().request.post("/api/cases", {
     headers: { "X-CSRF-Token": await csrf(page) },
-    data: { title: `Tracer ${Date.now()}`, document },
+    data: { title: `Tracer ${Date.now()}`, document: caseDocument() },
   });
   expect(response.ok()).toBe(true);
   return response.json();
@@ -238,7 +231,7 @@ async function prepareAnnotationDiscussion(page, playwright, quote = TARGET_TEXT
   await login(page);
   await configureChat(page);
   await waitSearchableCatalog(page);
-  const created = await createCase(page, quote === M1_ANNOTATION_QUOTE ? M1_CASE_DOCUMENT : undefined);
+  const created = await createCase(page);
   await openChat(page, created.id);
   await selectPublishedSkill(page);
   const annotations = await addAnnotation(page, quote);
