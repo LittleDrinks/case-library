@@ -497,7 +497,6 @@ def test_merge_keeps_selected_artifact_accepted_on_real_replica_set():
         mongo.close()
 
 
-@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
 def _run_concurrent_merges(database, marker: str) -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -515,7 +514,7 @@ def _assert_single_commit(database, marker: str, outcomes: list[dict]) -> None:
     assert database.agent_artifacts.count_documents({"caseId": marker, "status": "accepted"}) == 1
     assert database.agent_artifacts.count_documents({"caseId": marker, "status": "expired"}) == 1
 
-
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
 def test_concurrent_merge_commits_once_on_real_replica_set():
     mongo, database = _open_merge_database()
     marker = f"annotation-merge-concurrent-{uuid.uuid4().hex}"
@@ -532,8 +531,6 @@ def test_concurrent_merge_commits_once_on_real_replica_set():
 def test_late_completion_rolls_back_on_real_replica_set():
     """真 Mongo 事务下迟到完成必须整体回滚；mongomock 无法表达该语义。"""
     from pymongo import MongoClient
-
-    from app.modules.annotations import service as annotations
 
     mongo = MongoClient(os.environ["AUTH_QUERY_MONGODB_URI"])
     database = mongo.get_default_database()

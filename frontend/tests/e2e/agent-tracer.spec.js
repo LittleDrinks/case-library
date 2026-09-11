@@ -250,7 +250,7 @@ async function closeAnnotation(page) {
   const card = page.locator(".comment-card");
   await card.getByRole("button", { name: "标记解决" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expect(card).toContainText("已解决");
   await expect(card).toContainText("已拒绝");
 }
@@ -260,7 +260,7 @@ function annotationCard(page, annotationId) {
 }
 
 async function expectResolvedAnnotation(page, caseId, annotationId) {
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   const card = annotationCard(page, annotationId);
   await expect(card).toContainText("已解决");
   const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
@@ -287,7 +287,7 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await expectAnnotationHistory(page);
   await page.getByRole("button", { name: "合并并关闭" }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expect(page.locator(".comment-card")).toContainText("已解决");
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
@@ -363,7 +363,7 @@ test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, pl
   await expect(card.getByRole("button", { name: "合并并关闭" })).toBeVisible();
   await card.getByRole("button", { name: "合并并关闭" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expect(card).toContainText("已解决");
   const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
   const accepted = rows[0].revisions.find((revision) => revision.status === "accepted");

@@ -90,7 +90,7 @@ async function resolveAsAuthor(page, created, marker) {
   await page.getByRole("button", { name: "回复", exact: true }).click();
   await page.getByRole("button", { name: "标记解决" }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expect(page.getByText("已解决", { exact: true })).toBeVisible();
 }
 
@@ -162,7 +162,7 @@ async function resolveFirstAnnotation(page, first, second) {
   await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
   await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
   await expectAnnotationDetails(page, second, "待处理");
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expectAnnotationDetails(page, first, "已解决");
 }
 
@@ -180,7 +180,7 @@ async function expectReloadedAnnotations(page, first, second) {
   await expect(anchors).toHaveCount(1);
   expect(await dataIds(anchors)).toEqual([second.id]);
   await expectAnnotationDetails(page, second, "待处理");
-  await page.getByRole("button", { name: "查看已解决批注" }).click();
+  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expectAnnotationDetails(page, first, "已解决");
 }
 
