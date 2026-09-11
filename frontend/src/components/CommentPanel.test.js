@@ -189,6 +189,15 @@ it("原文改写或删除时保留讨论并显示锚点状态", async () => {
   expect(wrapper.findAll(".comment-card")).toHaveLength(2);
 });
 
+it("关闭批注后清除仍在正文与 AI 间绑定的选区", async () => {
+  api.listAnnotations.mockResolvedValue([annotation]);
+  api.setAnnotationStatus.mockResolvedValue({ ...annotation, status: "resolved" });
+  const wrapper = await mountPanel();
+  await wrapper.get("button.comment-status-action").trigger("click");
+  await flushPromises();
+  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
+});
+
 it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
   api.listAnnotations.mockResolvedValue([revisedAnnotation]);
   api.mergeAnnotation.mockResolvedValue({

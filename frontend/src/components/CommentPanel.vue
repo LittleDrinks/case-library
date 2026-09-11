@@ -13,7 +13,9 @@ const props = defineProps({
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
-const emit = defineEmits(["annotations", "ask-ai", "case-revised"]);
+const emit = defineEmits([
+  "annotations", "ask-ai", "case-revised", "clear-writing-context",
+]);
 const annotations = ref([]);
 const content = ref("");
 const error = ref("");
@@ -208,6 +210,7 @@ async function setStatus(annotation, status) {
     replaceAnnotation(await api.setAnnotationStatus(
       props.caseRecord.id, annotation.id, status, props.user.csrfToken,
     ));
+    if (status === "resolved") emit("clear-writing-context");
   } catch (caught) {
     error.value = caught.message || "状态更新失败";
   } finally {

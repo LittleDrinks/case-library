@@ -96,6 +96,7 @@ function select(tab) {
       @annotations="emit('annotations', $event)"
       @ask-ai="emit('ask-ai', $event)"
       @case-revised="emit('case-revised', $event)"
+      @clear-writing-context="emit('clear-writing-context')"
     />
 
     <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
