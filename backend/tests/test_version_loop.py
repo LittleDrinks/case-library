@@ -366,7 +366,9 @@ def _assert_restore_history(
     assert restore_record["title"].startswith("恢复：")
     assert restore_record["document"] == annotated_version["document"]
     assert restore_record["restoredFromId"] == annotated_version["id"]
-    assert restore_record["annotations"][0]["restoredFromId"] == version_note["id"]
+    restored = {row["restoredFromId"]: row for row in restore_record["annotations"]}
+    assert restored[draft_note["id"]]["id"] != draft_note["id"]
+    assert restored[version_note["id"]]["id"] != version_note["id"]
 
 
 def test_restore_keeps_current_work_and_appends_restore_record(client: TestClient) -> None:
@@ -382,8 +384,16 @@ def test_restore_keeps_current_work_and_appends_restore_record(client: TestClien
     by_id = {row["id"]: row for row in notes}
     assert draft_note["id"] not in by_id
     assert version_note["id"] in by_id
-    restored_note = next(row for row in by_id.values() if row.get("restoredFromId") == version_note["id"])
-    assert restored_note.get("versionId") is None
+    restored = {
+        row["restoredFromId"]: row for row in by_id.values()
+        if row.get("restoredFromId")
+    }
+    restored_draft = restored[draft_note["id"]]
+    restored_review = restored[version_note["id"]]
+    assert restored_draft["id"] != draft_note["id"]
+    assert restored_review["id"] != version_note["id"]
+    assert restored_draft.get("versionId") is None
+    assert restored_review.get("versionId") is None
     fresh = client.get(f"/api/cases/{case['id']}").json()
     assert fresh["document"] == annotated_version["document"]
 
