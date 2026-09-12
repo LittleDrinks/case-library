@@ -144,8 +144,12 @@ async function assertSavedAiVersion(page, caseId) {
 
 async function openAiVersion(page, version) {
   await page.getByLabel("版本历史").click();
-  await expect(page.getByText(`AI版本 v${version.number} · ${version.title}`)).toBeVisible();
-  await page.getByRole("button", { name: `查看历史版本 AI版本 v${version.number} · ${version.title}` }).click();
+  const historyButton = page.getByRole("button", {
+    name: `查看历史版本 AI版本 v${version.number} · ${version.title}`,
+    exact: true,
+  });
+  await expect(historyButton).toBeVisible();
+  await historyButton.click();
   await expect(page.getByText(`AI生成版本 v${version.number} · 只读`)).toBeVisible();
   await expect(page.locator(".version-paper .canvas-editor")).toHaveAttribute("contenteditable", "false");
 }

@@ -338,6 +338,19 @@ def patch_title(opener, csrf: str, case: dict, title: str) -> dict:
     return saved
 
 
+def _assert_overwrite_history(history: dict, submitted: dict, changed: dict) -> None:
+    versions = history["versions"]
+    assert [row["number"] for row in versions] == [1, 2, 3]
+    assert [row["kind"] for row in versions] == ["submission", "manual", "restore"]
+    submission, baseline, restored = versions
+    assert submission == submitted["version"]
+    assert baseline["title"] == "恢复前的当前稿"
+    assert baseline["document"] == changed["document"]
+    assert baseline["sourceRevision"] == changed["revision"]
+    assert restored["document"] == submitted["version"]["document"]
+    assert restored["restoredFromId"] == submitted["version"]["id"]
+
+
 def test_owner_overwrites_the_working_draft_with_a_submitted_version() -> None:
     owner, csrf = login("user", "user123")
     case = create_case(owner, csrf, f"overwrite-{uuid.uuid4().hex}")
@@ -350,4 +363,4 @@ def test_owner_overwrites_the_working_draft_with_a_submitted_version() -> None:
     assert overwritten["case"]["document"] == case["document"]
     assert submitted["version"]["document"] == case["document"]
     history = request(owner, "GET", f"/api/cases/{case['id']}/history")[1]
-    assert [row["number"] for row in history["versions"]] == [1]
+    _assert_overwrite_history(history, submitted, changed)
