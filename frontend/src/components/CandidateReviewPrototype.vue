@@ -21,7 +21,7 @@ const threadQuote = ref(""), overwriteOpen = ref(false), savedOriginal = ref(clo
 const savedTimes = ref({});
 const popup = ref({ left: "0px", top: "0px" }), status = ref("");
 const variant = computed(() => route.query.variant === "B" ? "B" : "A");
-const historyExpanded = ref(false), versionName = ref("");
+const historyExpanded = ref(false), versionName = ref(""), creatingVersion = ref(false);
 let hideTimer;
 function showHistory() { clearTimeout(hideTimer); historyExpanded.value = true; }
 function hideHistory() { hideTimer = setTimeout(() => historyExpanded.value = false, 450); }
@@ -76,7 +76,7 @@ function recordVersion(title, origin) {
 }
 function createVersion() {
   recordVersion(versionName.value.trim() || "手动保存", "手动创建");
-  versionName.value = ""; panel.value = "versions";
+  versionName.value = ""; creatingVersion.value = false; panel.value = "versions";
 }
 function overwriteVersion() {
   const target = activeVersion.value;
@@ -240,7 +240,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
       <div v-if="panel === 'chat'" class="prototype-thread">根据我的资料帮我生成一份案例 <span>⌄</span></div>
       <div class="prototype-rail-content">
         <template v-if="panel === 'chat'"><div class="prototype-chat-user">根据我的资料生成一份完整案例。</div><div class="prototype-assistant-label">AI</div><p>初稿已保存。可以打开继续编辑，或选中文字和我讨论。</p><article class="prototype-compact-card"><div><FileText :size="17" /><b>科学家精神的时代回响</b></div><p>AI 生成稿 · {{ sections.length }} 个章节</p><button class="prototype-primary" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })">打开稿件</button></article><article class="prototype-compact-card"><b>AI 建议 · 演示</b><p>在文末补充一项可执行的课堂讨论要求。</p><button class="prototype-primary" :disabled="tab !== 'original'" @click="acceptChatSuggestion">接受演示建议</button></article><template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template></template>
-        <template v-else-if="panel === 'versions'"><div class="prototype-list-heading"><h2>版本时间线</h2><small>{{ timeline.length }} 条演示记录</small></div><p class="prototype-muted">手动创建、接受 AI 建议或投稿时留下记录；整篇覆盖前保留当前稿。普通输入只自动保存。</p><div class="history-create"><input v-model="versionName" aria-label="版本名称" placeholder="版本名称（可选）" /><button class="prototype-primary" :disabled="tab !== 'original'" @click="createVersion">创建版本</button></div><div class="prototype-timeline"><article v-for="version in timeline" :key="version.id"><span class="timeline-dot" :class="{ ai: version.origin === 'AI 生成' }" /><small>{{ displayTime(version.time) }} · {{ version.origin }}</small><button class="prototype-version-card" :disabled="version.id === 'generated' && !artifact" @click="openVersion(version.id)"><Sparkles v-if="version.origin === 'AI 生成'" :size="18" /><FileText v-else :size="18" /><span><b>{{ version.title }}</b><small>打开只读历史稿</small></span></button></article></div></template>
+        <template v-else-if="panel === 'versions'"><div class="history-heading"><div><h2>历史版本</h2><span>{{ timeline.length }}</span></div><button class="history-new" :disabled="tab !== 'original'" @click="creatingVersion = !creatingVersion">＋ 创建版本</button></div><form v-if="creatingVersion" class="history-create history-create-form" @submit.prevent="createVersion"><label for="history-version-name">版本名称</label><input id="history-version-name" v-model="versionName" aria-label="版本名称" placeholder="例如：补充教学目标" autofocus /><div><button type="button" class="history-cancel" @click="creatingVersion = false">取消</button><button type="submit" class="prototype-primary">保存版本</button></div></form><div class="prototype-timeline"><article v-for="version in timeline" :key="version.id"><span class="timeline-dot" :class="{ ai: version.origin === 'AI 生成' }" /><small>{{ displayTime(version.time) }} · {{ version.origin }}</small><button class="prototype-version-card" :disabled="version.id === 'generated' && !artifact" @click="openVersion(version.id)"><Sparkles v-if="version.origin === 'AI 生成'" :size="18" /><FileText v-else :size="18" /><span><b>{{ version.title }}</b><small>打开只读历史稿</small></span></button></article></div></template>
         <template v-else-if="panel === 'comments'"><div class="prototype-list-heading"><h2>批注列表</h2><small>{{ threadList.length }} 条</small></div><button v-for="thread in threadList" :key="thread.id" class="prototype-comment-row" @click="openThread(thread.id)"><span class="comment-row-icon"><MessageSquareText :size="17" /></span><span><b>{{ thread.title }}</b><p>{{ thread.messages.filter(item => item.kind === 'human').at(-1)?.text }}</p><small>{{ thread.messages.length }} 条消息 · {{ thread.stale ? '原文已变化' : thread.resolved ? '已解决' : '待处理' }}</small></span></button></template>
       <template v-else><h2>附件</h2><p class="prototype-muted">附件入口保留。本轮仅演示历史版本与批注，不上传真实文件。</p></template></div>
       <footer v-if="panel === 'chat'" class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>稿件选区：{{ chatQuote.slice(0, 90) }}…</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选择稿件中的文字…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>{{ status || '原型演示 · 编辑和批注仅保留在本页' }}</small></footer>
@@ -423,4 +423,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .prototype-list-heading h2 { font-size:18px; }
 .prototype-timeline { margin-top:22px; }
 .prototype-assistant > .prototype-rail-content { flex:1; }
+
+.history-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:2px 0 18px; border-bottom:1px solid #ece6dd; }
+.history-heading > div { display:flex; align-items:center; gap:8px; }
+.history-heading h2 { margin:0; font-size:15px; font-weight:600; letter-spacing:.02em; }
+.history-heading span { font-size:11px; color:#968c7e; background:#f0ece5; padding:1px 7px; border-radius:10px; }
+.history-new { border:1px solid #e6d9cf; border-radius:6px; padding:7px 10px; background:#fffdfa; color:#a72228; font-size:12px; cursor:pointer; }
+.history-new:hover { background:#fff3f0; border-color:#d6b5ac; }
+.history-new:disabled { opacity:.45; cursor:default; }
+.history-create-form { display:flex; flex-direction:column; gap:10px; background:#fff; padding:14px; margin-top:14px; border:1px solid #e8e0d6; border-radius:8px; }
+.history-create-form label { color:#6e6256; font-size:12px; }
+.history-create-form input { box-sizing:border-box; width:100%; font-size:12px; padding:9px 10px; }
+.history-create-form > div { display:flex; gap:8px; justify-content:flex-end; }
+.history-create-form button { padding:6px 12px; font-size:12px; border-radius:5px; }
+.history-cancel { border:1px solid #e8e0d6; background:white; color:#7b7064; }
 </style>
