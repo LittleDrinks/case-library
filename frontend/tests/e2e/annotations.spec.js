@@ -112,7 +112,7 @@ async function selectManualAnnotation(page, marker) {
 }
 
 async function selectSubstring(page, paragraph, value) {
-  await paragraph.click();
+  await paragraph.selectText();
   await page.keyboard.press("Home");
   const offset = await paragraph.evaluate((node, text) => node.textContent.indexOf(text), value);
   expect(offset).toBeGreaterThanOrEqual(0);
