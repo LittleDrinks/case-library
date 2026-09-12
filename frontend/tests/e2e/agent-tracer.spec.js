@@ -448,9 +448,13 @@ test("批注讨论生成中切到批注面板：后台完成后当前历史自�
 });
 
 async function acceptAndVerify(page, caseId) {
+  const response = page.waitForResponse((item) => (
+    item.request().method() === "POST" && new URL(item.url()).pathname.endsWith("/decision")
+  ));
   await page.getByTestId("agent-accept").click();
-  const artifact = page.getByTestId("agent-artifact");
-  await expect(artifact).toHaveAttribute("data-artifact-status", "accepted", { timeout: 15_000 });
+  const accepted = await response;
+  expect(accepted.ok()).toBe(true);
+  expect((await accepted.json()).artifact.status).toBe("accepted");
   const version = await acceptedViaApi(page, caseId);
   const tab = page.getByRole("tab", { name: `AI版本 v${version.number} · ${version.title}` });
   await expect(tab).toHaveAttribute("aria-selected", "true");
