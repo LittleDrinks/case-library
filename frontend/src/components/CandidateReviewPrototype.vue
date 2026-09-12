@@ -21,11 +21,11 @@ const threadQuote = ref(""), overwriteOpen = ref(false), savedOriginal = ref(clo
 const savedTimes = ref({});
 const popup = ref({ left: "0px", top: "0px" }), status = ref("");
 const commentPosition = ref({ left: "400px", top: "230px" });
-function positionComment(rect) {
-  const paper = document.querySelector(".prototype-paper")?.getBoundingClientRect();
+function positionComment() {
+  const rail = document.querySelector(".prototype-assistant")?.getBoundingClientRect();
   const width = Math.min(390, window.innerWidth - 24);
-  const left = Math.max(12, Math.min(rect?.right ?? paper?.right - width, (paper?.right ?? window.innerWidth) - width - 16, window.innerWidth - width - 12));
-  const top = Math.max(150, Math.min((rect?.bottom ?? 220) + 10, window.innerHeight - 380));
+  const left = Math.max(12, Math.min(rail?.left ?? window.innerWidth - width - 24, window.innerWidth - width - 12));
+  const top = Math.max(130, (rail?.top ?? 150) + 62);
   commentPosition.value = { left: `${left}px`, top: `${top}px`, maxHeight: `${window.innerHeight - top - 16}px` };
 }
 function locateComment(quote) {
@@ -63,7 +63,9 @@ const highlightedAnnotations = computed(() => {
   if (!activeDocument.value) return [];
   const document = getSchema([StarterKit]).nodeFromJSON(activeDocument.value);
   const found = [];
-  for (const thread of Object.values(shownThreads.value)) {
+  const threads = Object.values(shownThreads.value);
+  if (floating.value && draftAnchor.value) threads.push({ ...draftAnchor.value, id: "pending" });
+  for (const thread of threads) {
     if (thread.resolved || thread.stale || !thread.quote) continue;
     document.descendants((node, position) => {
       if (!node.isText || found.some(item => item.id === thread.id)) return;
@@ -504,4 +506,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 
 .prototype-paper :deep(.annotation-anchor[data-prototype-comment]) { background:rgba(202,47,59,.13); color:inherit; border-bottom:1px solid rgba(202,47,59,.23); border-radius:3px; cursor:pointer; box-decoration-break:clone; transition:background .15s ease; }
 .prototype-paper :deep(.annotation-anchor[data-prototype-comment]:hover) { background:rgba(202,47,59,.23); }
+
+.prototype-paper :deep([data-prototype-comment="pending"]) { background:rgba(202,47,59,.22); border-bottom:2px solid rgba(202,47,59,.45); }
 </style>
