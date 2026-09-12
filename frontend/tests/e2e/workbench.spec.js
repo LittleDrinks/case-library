@@ -296,6 +296,44 @@ async function uploadWorkbenchEvidence(page) {
   await expect(page.locator(".attachment-copy span")).toContainText("校内访问");
 }
 
+async function addWorkbenchAnnotation(page, marker, content) {
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill(content);
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText(content);
+  await expect(page.locator(".annotation-anchor")).toHaveText(marker);
+}
+
+async function beginHeldWorkbenchUpload(page, caseId) {
+  const held = await holdAttachmentUpload(page, caseId);
+  await page.getByLabel("选择附件").setInputFiles({
+    name: "互斥验证.txt", mimeType: "text/plain", buffer: Buffer.from("locked"),
+  });
+  await held.started;
+  return held;
+}
+
+async function assertAnnotationBlockedDuringUpload(page) {
+  await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
+  await page.locator(".annotation-anchor").click();
+  await expect(page.locator(".assistant-tabs button.active")).toHaveText("附件");
+  await expect(page.locator(".attachment-panel")).toBeVisible();
+  await expect(page.locator(".annotation-float")).toHaveCount(0);
+}
+
+async function assertAnnotationReopensAfterUpload(page, content) {
+  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toBeEditable();
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByLabel("选择附件")).toBeEnabled();
+  await page.locator(".annotation-anchor").click();
+  await expect(page.locator(".assistant-tabs button.active")).toHaveText("批注");
+  await expect(page.locator(".annotation-float")).toContainText(content);
+}
+
 async function downloadAndDeleteEvidence(page) {
   const pending = page.waitForEvent("download");
   await page.getByRole("link", { name: "下载课堂证据.txt" }).click();
@@ -531,20 +569,16 @@ test("提交请求在途锁定编辑器并保留提交前正文", async ({ page 
 
 test("附件请求在途锁定正文避免与自动保存竞争", async ({ page }) => {
   await login(page);
-  const created = await createCase(page.context().request, `附件互斥 ${Date.now()}`);
+  const marker = `附件互斥 ${Date.now()}`;
+  const annotationContent = "附件交错已有批注";
+  const created = await createCase(page.context().request, marker);
   await page.goto(`/#/workbench/${created.id}`);
+  await addWorkbenchAnnotation(page, marker, annotationContent);
   await openAttachments(page);
-  const held = await holdAttachmentUpload(page, created.id);
-
-  await page.getByLabel("选择附件").setInputFiles({
-    name: "互斥验证.txt", mimeType: "text/plain", buffer: Buffer.from("locked"),
-  });
-  await held.started;
-  try {
-    await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
-    await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  } finally { held.release(); }
-  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
+  const held = await beginHeldWorkbenchUpload(page, created.id);
+  try { await assertAnnotationBlockedDuringUpload(page); }
+  finally { held.release(); }
+  await assertAnnotationReopensAfterUpload(page, annotationContent);
 });
 
 test("作者在草稿工作台上传、下载并删除附件", async ({ page }) => {

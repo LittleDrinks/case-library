@@ -411,7 +411,7 @@ test("读者模式不渲染版本 Tab 栏", async () => {
 });
 
 const annotationRailStub = {
-  name: "AssistantRailStub", props: ["active"], emits: ["annotation-run", "select"],
+  name: "AssistantRailStub", props: ["active"], emits: ["annotation-run", "select", "mutation-state"],
   template: `<button data-testid="rail-annotation-run" type="button"
     @click="$emit('annotation-run', 'thread-9')">run</button>`,
 };
@@ -600,6 +600,15 @@ async function openDraftFloat(wrapper, canvas) {
   expect(wrapper.get(".annotation-float")).toBeTruthy();
 }
 
+function emitAnnotationEntry(canvas, event) {
+  if (event === "annotate") {
+    canvas.vm.$emit("selection", {
+      from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+    });
+  }
+  canvas.vm.$emit(event, event === "annotation-click" ? "annotation-1" : undefined);
+}
+
 async function editOpenDraft(canvas, wrapper) {
   canvas.get(".canvas-editor p").element.textContent = "正文后缀";
   await canvas.get(".canvas-editor").trigger("input");
@@ -732,15 +741,18 @@ for (const event of ["annotate", "annotation-click"]) {
     const wrapper = await annotationWorkspace();
     const rail = wrapper.getComponent(annotationRailStub);
     const canvas = wrapper.findComponent({ name: "CanvasEditor" });
-    rail.vm.$emit("select", "attachments");
+    emitAnnotationEntry(canvas, event);
+    rail.vm.$emit("select", "files");
     rail.vm.$emit("mutation-state", true);
-    canvas.vm.$emit(event, "annotation-1");
+    emitAnnotationEntry(canvas, event);
     await flushPromises();
-    expect(rail.props("active")).toBe("attachments");
+    expect(rail.props("active")).toBe("files");
     expect(wrapper.find(".annotation-float").exists()).toBe(false);
     rail.vm.$emit("mutation-state", false);
-    await openAnnotationThread(wrapper);
+    emitAnnotationEntry(canvas, event);
+    await flushPromises();
     expect(rail.props("active")).toBe("comments");
+    expect(wrapper.find(".annotation-float").exists()).toBe(true);
     wrapper.unmount();
   });
 }
