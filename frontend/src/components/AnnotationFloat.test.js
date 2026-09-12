@@ -128,20 +128,74 @@ it("非作者草稿不显示保存与询问入口", () => {
   expect(buttons).not.toContain("询问AI");
 });
 
-it("回复后追加讨论并保留既有修订轮次", async () => {
-  api.replyAnnotation.mockResolvedValue({});
-  const refreshed = {
+it("线程浮窗保存意见走回复接口并即时回流线程", async () => {
+  const replied = {
     ...annotation,
-    replies: [{ id: "ar-1", content: "已采纳建议", createdBy: "user-1", createdAt: "2026-09-12T09:00:00Z" }],
+    replies: [{ id: "ar-1", content: "已补充评价标准", createdBy: "user-1", createdAt: "2026-09-12T09:00:00Z" }],
   };
+  api.replyAnnotation.mockResolvedValue(replied);
   const wrapper = mountFloat({ thread: annotation });
-  await wrapper.get('[aria-label="回复批注"]').setValue("已采纳建议");
-  const reply = wrapper.findAll("button").find((button) => button.text() === "回复");
-  await reply.trigger("click");
+  await wrapper.get('[aria-label="批注内容"]').setValue("已补充评价标准");
+  const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
+  await save.trigger("click");
   await flushPromises();
-  expect(api.replyAnnotation).toHaveBeenCalledWith("case-1", "annotation-1", { content: "已采纳建议" }, "csrf");
-  expect(wrapper.emitted("replied")).toHaveLength(1);
-  await wrapper.setProps({ thread: refreshed });
-  expect(wrapper.text()).toContain("已采纳建议");
+  expect(api.replyAnnotation).toHaveBeenCalledWith("case-1", "annotation-1", { content: "已补充评价标准" }, "csrf");
+  expect(api.createAnnotation).not.toHaveBeenCalled();
+  expect(wrapper.emitted("replied")[0][0]).toMatchObject({ id: "annotation-1" });
   expect(wrapper.text()).toContain("第 1 轮");
+});
+
+it("审核中管理员可填写并保存审核批注，source 为 admin", async () => {
+  api.createAnnotation.mockResolvedValue({
+    ...annotation, source: "admin", versionId: "cv-1", createdBy: "admin-1",
+  });
+  const reviewing = { ...caseRecord, workflowStatus: "reviewing", ownerId: "user-1" };
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  const wrapper = mountFloat({ caseRecord: reviewing, user: admin, draft: selection });
+  expect(wrapper.get('[aria-label="批注内容"]').attributes("disabled")).toBeUndefined();
+  await wrapper.get('[aria-label="批注内容"]').setValue("请明确评价标准");
+  const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
+  await save.trigger("click");
+  await flushPromises();
+  expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+    content: "请明确评价标准", source: "admin",
+  }), "csrf");
+  expect(wrapper.emitted("saved")[0][0]).toMatchObject({ id: "annotation-1" });
+});
+
+it("管理员在他人草稿仍不可批注", () => {
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  const wrapper = mountFloat({ user: admin, draft: selection });
+  expect(wrapper.get('[aria-label="批注内容"]').attributes("disabled")).toBeDefined();
+  expect(wrapper.findAll("button").map((button) => button.text())).not.toContain("保存意见");
+});
+
+it("beforeSave 门禁拒绝时不发送保存请求", async () => {
+  api.createAnnotation.mockResolvedValue(annotation);
+  const wrapper = mountFloat({ draft: selection, beforeSave: async () => false });
+  await wrapper.get('[aria-label="批注内容"]').setValue("门禁拦截");
+  const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
+  await save.trigger("click");
+  await flushPromises();
+  expect(api.createAnnotation).not.toHaveBeenCalled();
+  expect(wrapper.find('[role="alert"]').text()).toContain("正文尚未保存");
+});
+
+it("草稿保存前经过 beforeSave 门禁并携带新捕获锚点", async () => {
+  api.createAnnotation.mockResolvedValue(annotation);
+  const recaptured = { ...selection, from: 15, to: 19 };
+  const wrapper = mountFloat({
+    draft: selection,
+    beforeSave: async () => {
+      await wrapper.setProps({ draft: recaptured });
+      return true;
+    },
+  });
+  await wrapper.get('[aria-label="批注内容"]').setValue("重捕获后保存");
+  const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
+  await save.trigger("click");
+  await flushPromises();
+  expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+    from: 15, to: 19,
+  }), "csrf");
 });

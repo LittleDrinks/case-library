@@ -51,7 +51,6 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 let annotationLoadGeneration = 0;
-const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
 const floatDraft = ref(null);
 const floatThread = ref(null);
@@ -474,15 +473,23 @@ async function prepareAnnotationMutation() {
   return true;
 }
 
-function openAnnotation(id) {
-  selectTool("comments");
-  focusedAnnotationId.value = "";
-  void nextTick(() => { focusedAnnotationId.value = id; });
-}
-
 function openDraftFloat() {
   floatThread.value = null;
   floatDraft.value = annotationSelection.value;
+}
+
+// 浮窗保存前沿用旧可靠门禁：先 flush autosave，再重捕获精确选区替换旧 draft。
+async function prepareFloatSave() {
+  if (!await flushAutosave()) return false;
+  await canvasEditor.value?.recaptureSelection();
+  await nextTick();
+  if (annotationSelection.value && floatDraft.value) floatDraft.value = annotationSelection.value;
+  return true;
+}
+
+function floatReplied(updated) {
+  floatThread.value = updated;
+  void refreshAnnotations();
 }
 
 function openThreadFloat(id) {
@@ -834,7 +841,6 @@ onBeforeUnmount(() => {
           :history-refresh-key="historyRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
-          :focus-annotation-id="focusedAnnotationId"
           :annotation-refresh-token="annotationRefreshToken"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
@@ -858,12 +864,13 @@ onBeforeUnmount(() => {
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
           :draft="floatDraft"
           :thread="floatThread"
+          :before-save="prepareFloatSave"
           @close="closeAnnotationFloat"
           @saved="floatSaved"
           @resolved="floatResolved"
           @case-revised="floatRevised"
           @ask-ai="askFloatAi"
-          @replied="void refreshAnnotations()"
+          @replied="floatReplied"
         />
       </div>
     </template>

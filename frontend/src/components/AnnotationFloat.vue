@@ -8,8 +8,10 @@ const props = defineProps({
   user: { type: Object, default: null },
   draft: { type: Object, default: null },
   thread: { type: Object, default: null },
+  // 保存前门禁：先 flush autosave 再重捕获精确选区；拒绝时返回 falsy。
+  beforeSave: { type: Function, default: async () => true },
 });
-const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai"]);
+const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai", "replied"]);
 
 const content = ref("");
 const saving = ref(false);
@@ -17,7 +19,17 @@ const error = ref("");
 const replyText = ref("");
 
 const isDraft = computed(() => Boolean(props.draft));
-const isAuthor = computed(() => props.user?.id === props.caseRecord.ownerId);
+// 与 CommentPanel.canCompose 同一判定：作者草稿或审核中管理员，不放开他人草稿。
+const canCompose = computed(() => Boolean(
+  props.user && (
+    (props.user.id === props.caseRecord.ownerId && props.caseRecord.workflowStatus === "draft")
+    || (props.user.role === "admin" && props.caseRecord.workflowStatus === "reviewing")
+  ),
+));
+const canResolve = computed(() => Boolean(
+  props.thread && props.user?.id === props.caseRecord.ownerId
+    && props.thread.status === "pending",
+));
 const canDiscuss = computed(() => Boolean(
   props.thread && props.user?.id === props.thread.createdBy
     && props.thread.status === "pending"
@@ -49,16 +61,12 @@ function payload() {
   };
 }
 
-async function save() {
-  if (!isAuthor.value || !content.value.trim() || saving.value) return;
+// 统一事务壳：占位 saving、捕获错误；body 返回 null 表示被门禁拦截。
+async function runMutation(action) {
   saving.value = true;
   error.value = "";
   try {
-    const created = await api.createAnnotation(
-      props.caseRecord.id, payload(), props.user.csrfToken,
-    );
-    content.value = "";
-    emit("saved", created);
+    await action();
   } catch (caught) {
     error.value = caught.message || "批注保存失败";
   } finally {
@@ -66,27 +74,42 @@ async function save() {
   }
 }
 
-// 询问AI=先落一条正式意见再请求修订；不保存意见则不发送任何AI请求。
-async function saveAndAsk() {
-  if (!isAuthor.value || !content.value.trim() || saving.value) return;
-  saving.value = true;
-  error.value = "";
-  try {
+// 草稿：落正式批注（先过 beforeSave 门禁）。询问AI=保存后再请求修订；不保存则不发任何AI请求。
+async function saveDraft({ askAi = false } = {}) {
+  if (!canCompose.value || !content.value.trim() || saving.value) return;
+  await runMutation(async () => {
+    if (await props.beforeSave() === false) {
+      error.value = "正文尚未保存，批注未提交。";
+      return;
+    }
     const created = await api.createAnnotation(
       props.caseRecord.id, payload(), props.user.csrfToken,
     );
     content.value = "";
     emit("saved", created);
-    emit("ask-ai", created);
-  } catch (caught) {
-    error.value = caught.message || "批注保存失败";
-  } finally {
-    saving.value = false;
-  }
+    if (askAi) emit("ask-ai", created);
+  });
+}
+
+// 既有线程：追加意见走回复接口，返回完整线程即时回流浮窗。
+async function saveThreadOpinion() {
+  const value = content.value.trim();
+  if (!canDiscuss.value || !value || saving.value) return;
+  await runMutation(async () => {
+    const updated = await api.replyAnnotation(
+      props.caseRecord.id, props.thread.id, { content: value }, props.user.csrfToken,
+    );
+    content.value = "";
+    emit("replied", updated);
+  });
+}
+
+function save(options) {
+  return isDraft.value ? saveDraft(options) : saveThreadOpinion();
 }
 
 async function resolve() {
-  if (!isAuthor.value || saving.value) return;
+  if (!canResolve.value || saving.value) return;
   saving.value = true;
   error.value = "";
   try {
@@ -113,24 +136,6 @@ async function adopt() {
     emit("resolved", result.annotation);
   } catch (caught) {
     error.value = caught.message || "合并修订失败";
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function reply() {
-  const value = replyText.value.trim();
-  if (!value || saving.value) return;
-  saving.value = true;
-  error.value = "";
-  try {
-    await api.replyAnnotation(
-      props.caseRecord.id, props.thread.id, { content: value }, props.user.csrfToken,
-    );
-    replyText.value = "";
-    emit("replied");
-  } catch (caught) {
-    error.value = caught.message || "回复失败";
   } finally {
     saving.value = false;
   }
@@ -172,10 +177,6 @@ function revisionStatus(status) {
         <ul v-if="thread.replies?.length" class="float-replies">
           <li v-for="item in thread.replies" :key="item.id">{{ item.content }}</li>
         </ul>
-        <div class="float-reply-row">
-          <input v-model="replyText" aria-label="回复批注" placeholder="回复" :disabled="saving" />
-          <button type="button" :disabled="saving || !replyText.trim()" @click="reply">回复</button>
-        </div>
       </template>
       <p v-if="error" class="float-error" role="alert">{{ error }}</p>
     </div>
@@ -185,40 +186,60 @@ function revisionStatus(status) {
           v-model="content"
           aria-label="批注内容"
           placeholder="写下你的意见…"
-          :disabled="saving || !isAuthor"
+          :disabled="saving || !canCompose"
         />
         <div class="float-compose-actions">
           <button type="button" :disabled="saving" @click="close">取消</button>
           <button
-            v-if="isAuthor"
+            v-if="canCompose"
             type="button"
             class="float-primary"
             :disabled="saving || !content.trim()"
-            @click="save"
+            @click="save()"
           >保存意见</button>
           <button
-            v-if="isAuthor"
+            v-if="canCompose"
             type="button"
             :disabled="saving || !content.trim()"
-            @click="saveAndAsk"
+            @click="save({ askAi: true })"
           ><Sparkles :size="13" />询问AI</button>
         </div>
       </div>
-      <div v-else-if="thread" class="float-thread-actions">
-        <button
-          v-if="isAuthor && thread.status === 'pending'"
-          type="button"
-          :disabled="saving"
-          @click="resolve"
-        ><Check :size="13" />解决批注</button>
-        <button
-          v-if="canAdopt"
-          type="button"
-          aria-label="采用并解决"
-          class="float-primary"
-          :disabled="saving"
-          @click="adopt"
-        ><Check :size="13" />采用并解决</button>
+      <div v-else-if="thread" class="float-compose">
+        <textarea
+          v-model="content"
+          aria-label="批注内容"
+          placeholder="补充意见…"
+          :disabled="saving || !canDiscuss"
+        />
+        <div class="float-compose-actions">
+          <button
+            v-if="canResolve"
+            type="button"
+            :disabled="saving"
+            @click="resolve"
+          ><Check :size="13" />解决批注</button>
+          <button
+            v-if="canDiscuss"
+            type="button"
+            :disabled="saving || !content.trim()"
+            @click="save()"
+          >保存意见</button>
+          <button
+            v-if="canDiscuss"
+            type="button"
+            :disabled="saving || !content.trim()"
+            @click="save({ askAi: true })"
+          ><Sparkles :size="13" />询问AI</button>
+          <button
+            v-if="canAdopt"
+            type="button"
+            aria-label="采用并解决"
+            class="float-primary"
+            :disabled="saving"
+            @click="adopt"
+          ><Check :size="13" />采用并解决</button>
+        </div>
       </div>
     </footer>
   </aside>
