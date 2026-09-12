@@ -201,7 +201,7 @@ function refreshRevisionSelection() {
   const activeEditor = editor.value;
   if (!activeEditor || selectionBlocked || !documentMatches(activeEditor, props.document)) return false;
   const context = currentContext(activeEditor);
-  if (!selectionIsCapturable(activeEditor, context)) return false;
+  if (!domSelectionRange(activeEditor) || !selectionIsCapturable(activeEditor, context)) return false;
   const captured = selection.value;
   if (!captured || captured.from !== context.from || captured.to !== context.to
     || captured.quote !== context.quote || !captured.quoteHash) {

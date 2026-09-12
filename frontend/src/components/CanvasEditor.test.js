@@ -230,6 +230,15 @@ it("相同正文保存修订保留有效选区，正文替换或手动编辑会�
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
 });
 
+it("原生选区消失时修订变化不会复活 PM 旧选区", async () => {
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  globalThis.document.body.appendChild(wrapper.element);
+  await selectParagraph(wrapper);
+  clearDomSelection();
+  await wrapper.setProps({ revision: 4 });
+  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+});
+
 it("清理选区同时折叠编辑器状态，后续批注刷新不会复活旧选区", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
