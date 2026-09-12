@@ -318,20 +318,20 @@ it("drains a hydrated terminal version after failed new-thread transition", asyn
 });
 
 it("resyncs a fresh old-thread version after a failed switch", async () => {
-  const nextThread = deferred(), response = deferred();
-  vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
+  const nextThread = deferred(), history = deferred(), retryHistory = deferred();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
   api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
   api.agentThread.mockImplementation((_, id) => (
     id === "thread-2" ? nextThread.promise : Promise.resolve(structuredClone(snapshot))
   ));
-  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-new" }] });
+  api.caseHistory.mockReturnValueOnce(history.promise).mockReturnValueOnce(retryHistory.promise);
   const wrapper = mountPanel(); await flushPromises();
   await startGeneratedVersionRequest(wrapper);
+  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalledTimes(1));
   await openOtherThread(wrapper);
-  response.resolve(generatedVersionResponse());
-  await flushPromises();
-  expect(api.caseHistory).not.toHaveBeenCalled();
   nextThread.reject(new Error("切换失败"));
+  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalledTimes(2));
+  history.resolve({ versions: [{ id: "cv-ai-new" }] }); retryHistory.resolve({ versions: [{ id: "cv-ai-new" }] });
   await flushPromises();
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
   expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-new" }]]);

@@ -56,7 +56,7 @@ const sourceChecks = new Map();
 let sourceGeneration = 0;
 const syncedWrites = new Set();
 const syncedVersions = new Set();
-const pendingHydratedVersionIds = new Set();
+const pendingVersionOpenIds = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
@@ -252,7 +252,7 @@ watch(() => threadState.value?.latestRun?.status, (current, previous) => {
     void refreshCaseAfterWrite();
   }
   if (threadSwitchDepth) return;
-  drainPendingHydratedVersions();
+  drainPendingVersionOpens();
 });
 watch(artifacts, () => {
   void refreshSources();
@@ -263,7 +263,7 @@ watch(threadId, (current, previous) => {
   versionOpenGeneration += 1;
   syncedWrites.clear();
   syncedVersions.clear();
-  pendingHydratedVersionIds.clear();
+  pendingVersionOpenIds.clear();
   pendingWriteSync = false;
   hydratedWriteThread = "";
   hydratedVersionThread = "";
@@ -325,11 +325,9 @@ function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
 }
 
-function drainPendingHydratedVersions() {
-  if (!pendingHydratedVersionIds.size
-    || !["completed", "failed", "cancelled"].includes(threadState.value?.latestRun?.status)) return;
-  const ids = [...pendingHydratedVersionIds];
-  pendingHydratedVersionIds.clear();
+function drainPendingVersionOpens() {
+  if (!pendingVersionOpenIds.size) return;
+  const ids = [...pendingVersionOpenIds];
   ids.forEach((id) => {
     void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
   });
@@ -339,7 +337,7 @@ function finishThreadSwitch(previousThreadId) {
   threadSwitchDepth -= 1;
   if (threadSwitchDepth) return;
   syncGeneratedVersions();
-  if (previousThreadId === threadId.value) drainPendingHydratedVersions();
+  if (previousThreadId === threadId.value) drainPendingVersionOpens();
 }
 
 async function restoreScroll(id) {
@@ -413,7 +411,10 @@ async function openHistoryVersion(
     const version = (history.versions || []).find((item) => (
       (versionId && item.id === versionId) || (runId && item.sourceRunId === runId)
     ));
-    if (version) emit("open-version", version);
+    if (version) {
+      pendingVersionOpenIds.delete(version.id);
+      emit("open-version", version);
+    }
   } catch { /* 时间线刷新仍由父级处理 */ }
 }
 
@@ -476,7 +477,7 @@ function hydrateGeneratedVersions(entries) {
   const activeRunId = threadState.value.activeRun?.id;
   entries.forEach(({ id, runId }) => {
     syncedVersions.add(id);
-    if (activeRunId && runId === activeRunId) pendingHydratedVersionIds.add(id);
+    if (activeRunId && runId === activeRunId) pendingVersionOpenIds.add(id);
   });
 }
 
@@ -491,6 +492,7 @@ function syncGeneratedVersions() {
   fresh.forEach(({ id }) => syncedVersions.add(id));
   if (fresh.length) emit("versions-updated");
   fresh.forEach(({ id }) => {
+    pendingVersionOpenIds.add(id);
     void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
   });
 }
