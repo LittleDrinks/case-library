@@ -209,8 +209,8 @@ function pendingAnchorRange(doc, pending) {
   }
 }
 
-function annotationDecorations(doc, annotations, pending = props.pendingAnchor, previous = null) {
-  const marks = annotations.flatMap((annotation) => {
+function annotationMarks(doc, annotations) {
+  return annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
     return range ? [Decoration.inline(
       range.from,
@@ -219,16 +219,24 @@ function annotationDecorations(doc, annotations, pending = props.pendingAnchor, 
       { annotationId: annotation.id },
     )] : [];
   });
+}
+
+function pendingMarks(doc, pending, previous) {
   const anchor = pendingAnchorRange(doc, pending);
-  if (anchor) {
-    marks.push(Decoration.inline(
+  if (anchor) return [Decoration.inline(
       anchor.from, anchor.to, { class: "pending-anchor" }, { pendingAnchor: true },
-    ));
-  } else if (previous && pending) {
+    )];
+  if (previous && pending) {
     // 正文变化后位置/引文不再匹配：沿映射回迁旧 pending 装饰供审查，不再按旧选区重捕获。
-    marks.push(...previous.find(undefined, undefined, (spec) => spec.pendingAnchor));
+    return previous.find(undefined, undefined, (spec) => spec.pendingAnchor);
   }
-  return DecorationSet.create(doc, marks);
+  return [];
+}
+
+function annotationDecorations(doc, annotations, pending = props.pendingAnchor, previous = null) {
+  return DecorationSet.create(doc, [
+    ...annotationMarks(doc, annotations), ...pendingMarks(doc, pending, previous),
+  ]);
 }
 
 function applyAnnotationAnchors(transaction, previous) {
@@ -258,12 +266,19 @@ function remapDecorations(previous, transaction) {
     : DecorationSet.create(transaction.doc, kept);
 }
 
-// 保存门禁校验：直接读取 annotationAnchors 插件状态中的 pending 装饰。
-// 装饰链已按正文编辑映射其位置（正文改写/删除时被丢弃），此处只做存在性校验。
-function validatePendingAnchor() {
-  if (!editor.value) return false;
-  const state = annotationKey.getState(editor.value.state);
-  return Boolean(state?.find().some((decoration) => decoration.spec.pendingAnchor));
+function pendingDecoration() {
+  const decorations = annotationKey.getState(editor.value?.state)?.find() || [];
+  return decorations.find((decoration) => decoration.spec.pendingAnchor);
+}
+
+function getPendingAnchor() {
+  if (!editor.value || !props.pendingAnchor) return null;
+  const decoration = pendingDecoration();
+  if (!decoration) return null;
+  const quote = quoteText(editor.value.state.doc, decoration.from, decoration.to);
+  return quote === props.pendingAnchor.quote
+    ? { from: decoration.from, to: decoration.to, quote }
+    : null;
 }
 
 function clickedAnnotation(view, position) {
@@ -372,7 +387,7 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ clearSelection, recaptureSelection, insertCitation, validatePendingAnchor });
+defineExpose({ clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
 </script>
 
 <template>

@@ -123,18 +123,18 @@ async function dragSelectText(page, value) {
 }
 
 async function selectAnnotationText(page, value) {
-  await expect(page.locator(".comment-composer > blockquote")).toHaveCount(0);
   await dragSelectText(page, value);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
-  await expect(page.locator(".comment-composer > blockquote")).toHaveText(value);
 }
 
 async function addAnnotation(page, quote = TARGET_TEXT) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
   await selectAnnotationText(page, quote);
   await page.getByRole("button", { name: "添加选区批注" }).click();
-  await page.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
-  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText("请依据资料收紧这一段表述。");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
   const response = await page.context().request.get(
     `/api/cases/${await currentCaseId(page)}/annotations`,

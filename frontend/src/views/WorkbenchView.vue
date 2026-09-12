@@ -257,7 +257,7 @@ async function loadAnnotations() {
   try {
     const rows = await api.listAnnotations(caseId());
     if (generation !== annotationLoadGeneration) return;
-    annotations.value = rows.filter(({ status }) => status !== "resolved");
+    applyAnnotations(rows.filter(({ status }) => status !== "resolved"));
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
@@ -410,7 +410,6 @@ function resizeTitle() {
 
 function changeDocument(value) {
   invalidateSelection();
-  floatDraft.value = null;
   document.value = value.document;
   pendingSteps.push(...(value.steps || []));
   crashDraft.queue();
@@ -489,12 +488,13 @@ async function prepareFloatSave() {
   if (!floatDraft.value) return false;
   if (!await flushAutosave()) return false;
   await nextTick();
-  if (!canvasEditor.value?.validatePendingAnchor?.()) {
+  const anchor = canvasEditor.value?.getPendingAnchor?.();
+  if (!anchor) {
     // 锚点已被正文改写/删除丢弃：清挂起状态并拒绝，绝不带着过期锚点提交。
     floatDraft.value = null;
     return false;
   }
-  floatDraft.value = { ...floatDraft.value, revision: revision.value };
+  floatDraft.value = { ...floatDraft.value, ...anchor, revision: revision.value };
   return true;
 }
 

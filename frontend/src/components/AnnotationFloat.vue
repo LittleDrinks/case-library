@@ -48,6 +48,8 @@ const latestRevision = computed(() => (
 // 服务端仅批注作者可合并修订；管理员讨论但不拥有采用权。
 const canAdopt = computed(() => Boolean(
   props.user?.id === props.thread?.createdBy
+    && props.user?.id === props.caseRecord.ownerId
+    && props.caseRecord.workflowStatus === "draft"
     && props.thread.status === "pending"
     && (props.thread.anchorState || "active") === "active"
     && latestRevision.value,
@@ -118,7 +120,7 @@ async function saveThreadOpinion({ askAi = false } = {}) {
 }
 
 function save(options) {
-  return isDraft.value ? saveDraft(options) : saveThreadOpinion();
+  return isDraft.value ? saveDraft(options) : saveThreadOpinion(options);
 }
 
 async function resolve() {

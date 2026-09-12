@@ -622,8 +622,11 @@ async function addDraftAnnotation(page, marker) {
   await page.getByRole("tab", { name: "当前教师稿" }).click();
   await page.locator(".canvas-editor p", { hasText: marker }).selectText();
   await page.getByRole("button", { name: "添加选区批注" }).click();
-  await page.getByLabel("批注内容").fill("覆盖前的草稿批注");
-  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("覆盖前的草稿批注");
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText("覆盖前的草稿批注");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
 }
 

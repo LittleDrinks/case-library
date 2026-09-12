@@ -142,7 +142,36 @@ it("线程浮窗保存意见走回复接口并即时回流线程", async () => {
   expect(api.replyAnnotation).toHaveBeenCalledWith("case-1", "annotation-1", { content: "已补充评价标准" }, "csrf");
   expect(api.createAnnotation).not.toHaveBeenCalled();
   expect(wrapper.emitted("replied")[0][0]).toMatchObject({ id: "annotation-1" });
+  expect(wrapper.emitted("ask-ai")).toBeUndefined();
   expect(wrapper.text()).toContain("第 1 轮");
+});
+
+it("线程浮窗询问AI先保存回复再发出请求事件", async () => {
+  const replied = { ...annotation, replies: [{ id: "ar-2", content: "继续收紧", createdBy: "user-1" }] };
+  api.replyAnnotation.mockResolvedValue(replied);
+  const wrapper = mountFloat({ thread: annotation });
+  await wrapper.get('[aria-label="批注内容"]').setValue("继续收紧");
+  const ask = wrapper.findAll("button").find((button) => button.text().includes("询问AI"));
+  await ask.trigger("click");
+  await flushPromises();
+  expect(api.replyAnnotation).toHaveBeenCalledWith(
+    "case-1", "annotation-1", { content: "继续收紧" }, "csrf",
+  );
+  expect(wrapper.emitted("replied")[0][0]).toMatchObject({ id: "annotation-1" });
+  expect(wrapper.emitted("ask-ai")[0][0]).toMatchObject({ id: "annotation-1" });
+});
+
+it("作者可回复绑定版本的管理员审核批注", async () => {
+  const review = { ...annotation, versionId: "cv-1", createdBy: "admin-1" };
+  api.replyAnnotation.mockResolvedValue({ ...review, replies: [{ id: "ar-3", content: "已回复" }] });
+  const wrapper = mountFloat({ thread: review });
+  await wrapper.get('[aria-label="批注内容"]').setValue("已回复");
+  const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
+  await save.trigger("click");
+  await flushPromises();
+  expect(api.replyAnnotation).toHaveBeenCalledWith(
+    "case-1", "annotation-1", { content: "已回复" }, "csrf",
+  );
 });
 
 it("审核中管理员可填写并保存审核批注，source 为 admin", async () => {

@@ -233,11 +233,11 @@ test("审核模式按钮来自服务端动作而非本地状态推断", async ()
   expect(wrapper.find('button[aria-label="通过发布"]').exists()).toBe(false);
 });
 
-function renderWorkbenchWithEditor() {
+function renderWorkbenchWithEditor(rail = true) {
   return mount(WorkbenchView, {
     global: { stubs: {
       SiteHeader: true, OutlinePanel: true, teleport: true,
-      AssistantRail: true, RouterLink: { template: "<a><slot /></a>" },
+      AssistantRail: rail, RouterLink: { template: "<a><slot /></a>" },
     } },
   });
 }
@@ -584,35 +584,85 @@ test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
   expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
 });
 
-test("编辑后立即保存批注：flush 塌陷选区仍按映射锚点提交最新修订", async () => {
+async function openDraftFloat(wrapper, canvas) {
+  canvas.vm.$emit("selection", {
+    from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+  });
+  canvas.vm.$emit("annotate");
+  await flushPromises();
+  expect(wrapper.get(".annotation-float")).toBeTruthy();
+}
+
+async function editOpenDraft(canvas, wrapper) {
+  canvas.vm.editor.commands.setTextSelection(3);
+  canvas.vm.editor.commands.insertContent("后缀");
+  await flushPromises();
+  const float = wrapper.get(".annotation-float");
+  await float.get('[aria-label="批注内容"]').setValue("编辑后保存");
+  await float.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
+  await flushPromises();
+}
+
+test("编辑后立即保存批注：dirty flush 后仍按映射锚点提交最新修订", async () => {
+  api.createAnnotation.mockResolvedValue({
+    id: "annotation-new", caseId: "case-1", from: 1, to: 3, quote: "正文",
+    quoteHash: "h", section: "正文", revision: 4, anchorState: "active",
+    status: "pending", content: "编辑后保存", source: "manual", createdBy: "user-1",
+    createdAt: "2026-09-13T00:00:00Z", replies: [],
+  });
+  const wrapper = await renderDraftWorkspace();
+  const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+  await openDraftFloat(wrapper, canvas);
+  await editOpenDraft(canvas, wrapper);
+  expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+    from: 1, to: 3, quote: "正文", revision: 4, content: "编辑后保存",
+  }), "csrf-token");
+  expect(api.saveCase).toHaveBeenCalledTimes(1);
+  wrapper.unmount();
+});
+
+function annotationThread(overrides = {}) {
+  return {
+    id: "annotation-1", from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文",
+    revision: 3, anchorState: "active", status: "pending", content: "旧意见",
+    createdBy: "user-1", replies: [], revisions: [], ...overrides,
+  };
+}
+
+async function openAnnotationThread(wrapper) {
+  wrapper.findComponent({ name: "CanvasEditor" }).vm.$emit("annotation-click", "annotation-1");
+  await flushPromises();
+  expect(wrapper.get(".annotation-float").text()).toContain("旧意见");
+}
+
+async function finishAnnotationRun(wrapper) {
+  wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", "thread-9");
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(4000);
+  await flushPromises();
+}
+
+async function renderPollingWorkspace() {
+  const thread = annotationThread();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValueOnce([thread]).mockResolvedValueOnce([
+    annotationThread({ content: "更新意见", replies: [{ id: "reply-1", content: "第二轮" }] }),
+  ]);
+  api.agentThread.mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+    .mockResolvedValue({ id: "thread-9", activeRun: null, latestRun: { status: "completed" } });
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  return wrapper;
+}
+
+test("AI轮询完成后同步仍打开的浮窗线程", async () => {
   vi.useFakeTimers();
   try {
-    api.createAnnotation.mockResolvedValue({
-      id: "annotation-new", caseId: "case-1", from: 12, to: 16, quote: "正文",
-      quoteHash: "h", section: "正文", revision: 4, anchorState: "active",
-      status: "pending", content: "编辑后保存", source: "manual", createdBy: "user-1",
-      createdAt: "2026-09-13T00:00:00Z", replies: [],
-    });
-    const wrapper = await renderDraftWorkspace();
-    const canvas = wrapper.findComponent({ name: "CanvasEditor" });
-    const editor = canvas.vm.editor;
-    editor.commands.insertContent("编辑 ");
-    await vi.advanceTimersByTimeAsync(1100);
-    expect(api.saveCase).toHaveBeenCalledTimes(1);
-
-    // 选区在编辑前捕获（正文偏移 3 字符），映射后仍指向同一"正文"引文。
-    await wrapper.setData({ floatDraft: {
-      from: 9, to: 13, quote: "正文", quoteHash: "h",
-      section: "正文", revision: 3, sameBlock: true,
-    } });
-    const float = wrapper.getComponent({ name: "AnnotationFloat" });
-    await float.get('[aria-label="批注内容"]').setValue("编辑后保存");
-    await float.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
-    await vi.advanceTimersByTimeAsync(50);
-    await flushPromises();
-    expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
-      from: 9, to: 13, quote: "正文", revision: 4, content: "编辑后保存",
-    }), "csrf-token");
+    const wrapper = await renderPollingWorkspace();
+    await openAnnotationThread(wrapper);
+    await finishAnnotationRun(wrapper);
+    expect(wrapper.get(".annotation-float").text()).toContain("更新意见");
+    expect(wrapper.get(".annotation-float").text()).toContain("第二轮");
     wrapper.unmount();
   } finally {
     vi.useRealTimers();

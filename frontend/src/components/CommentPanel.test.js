@@ -205,6 +205,26 @@ it("作者可以编辑并删除自己的未解决批注", async () => {
   expect(wrapper.find(".comment-card").exists()).toBe(false);
 });
 
+it("审核批注列表允许作者和管理员讨论，但私人批注不泄露给管理员", async () => {
+  const review = { ...annotation, versionId: "cv-1", createdBy: "admin-1" };
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  api.listAnnotations.mockResolvedValue([review]);
+  api.replyAnnotation.mockResolvedValue({ ...review, replies: [{ id: "reply-1", content: "收到" }] });
+  const reviewPanel = await mountPanel({
+    caseRecord: { ...caseRecord, workflowStatus: "reviewing" }, user: admin, selection: null,
+  });
+  await reviewPanel.get('[aria-label="回复批注"]').setValue("收到");
+  await reviewPanel.get(".comment-thread-actions button").trigger("click");
+  await flushPromises();
+  expect(api.replyAnnotation).toHaveBeenCalledWith(
+    caseRecord.id, review.id, { content: "收到" }, admin.csrfToken,
+  );
+
+  api.listAnnotations.mockResolvedValue([annotation]);
+  const privatePanel = await mountPanel({ user: admin, selection: null });
+  expect(privatePanel.find('[aria-label="回复批注"]').exists()).toBe(false);
+});
+
 it("已解决历史的陈旧锚点不显示待处理警告", async () => {
   api.listAnnotations.mockResolvedValue([{ ...resolvedDiscussion, anchorState: "changed" }]);
   const wrapper = await mountPanel();

@@ -408,10 +408,12 @@ it("正文前置编辑映射后挂起锚点仍通过保存校验", async () => {
   // 前置插入 2 字符（模拟保存前编辑）：装饰链把 pending 映射到新位置，校验仍通过。
   editor.view.dispatch(editor.state.tr.insertText("前置", 9, 9));
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(wrapper.vm.validatePendingAnchor()).toBe(true);
+  expect(wrapper.vm.getPendingAnchor()).toBeTruthy();
   const mapped = wrapper.findAll(".pending-anchor");
   expect(mapped).toHaveLength(1);
   expect(mapped[0].text()).toBe("案例原文");
+  expect(wrapper.vm.getPendingAnchor()).toMatchObject({ quote: "案例原文" });
+  expect(wrapper.vm.getPendingAnchor().from).toBeGreaterThan(9);
 });
 
 it("挂起锚点失效或清空后移除临时高亮", async () => {

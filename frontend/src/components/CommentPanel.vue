@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import {
   Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Sparkles, Trash2, X,
 } from "@lucide/vue";
@@ -23,7 +23,6 @@ const saving = ref(false);
 const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
-const cardRefs = new Map();
 const showResolved = ref(false);
 let loadGeneration = 0;
 
@@ -112,19 +111,24 @@ async function addAnnotation() {
   }
 }
 
-function setCardRef(id, element) {
-  if (element) cardRefs.set(id, element);
-  else cardRefs.delete(id);
-}
-
 function canEdit(annotation) {
   return annotation.createdBy === props.user?.id && annotation.status === "pending";
 }
 
 function canDiscuss(annotation) {
-  return annotation.createdBy === props.user?.id
-    && annotation.status === "pending"
-    && (annotation.anchorState || "active") === "active";
+  if (annotation.status !== "pending" || (annotation.anchorState || "active") !== "active") return false;
+  if (annotation.versionId != null) {
+    return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
+  }
+  return annotation.createdBy === props.user?.id && props.caseRecord.ownerId === props.user?.id;
+}
+
+function canReply(annotation) {
+  if ((annotation.anchorState || "active") !== "active") return false;
+  if (annotation.versionId != null) {
+    return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
+  }
+  return annotation.createdBy === props.user?.id && props.caseRecord.ownerId === props.user?.id;
 }
 
 function latestPendingRevision(annotation) {
@@ -133,7 +137,11 @@ function latestPendingRevision(annotation) {
 }
 
 function canMerge(annotation) {
-  return Boolean(canDiscuss(annotation) && latestPendingRevision(annotation));
+  return Boolean(
+    canDiscuss(annotation) && props.user?.id === props.caseRecord.ownerId
+      && annotation.createdBy === props.user?.id && props.caseRecord.workflowStatus === "draft"
+      && latestPendingRevision(annotation),
+  );
 }
 
 function revisionStatus(status) {
@@ -191,7 +199,7 @@ async function removeAnnotation(annotation) {
 
 async function reply(annotation) {
   const value = replies[annotation.id]?.trim();
-  if (!value || saving.value) return;
+  if (!canReply(annotation) || !value || saving.value) return;
   saving.value = true;
   error.value = "";
   try {
@@ -282,7 +290,6 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
         <li
           v-for="annotation in visibleAnnotations"
           :key="annotation.id"
-          :ref="(element) => setCardRef(annotation.id, element)"
           class="comment-card"
           :data-annotation-id="annotation.id"
           tabindex="-1"
@@ -329,7 +336,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
               <CornerUpLeft :size="13" /><span>{{ item.content }}</span>
             </li>
           </ul>
-          <div class="comment-thread-actions">
+          <div v-if="canReply(annotation)" class="comment-thread-actions">
             <input v-model="replies[annotation.id]" aria-label="回复批注" placeholder="回复" />
             <button type="button" :disabled="saving || !replies[annotation.id]?.trim()" @click="reply(annotation)">回复</button>
           </div>
