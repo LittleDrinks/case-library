@@ -280,6 +280,26 @@ it("selectionchange 早于编辑器状态同步时不得清除正在建立的 DO
     .toMatchObject({ quote: "案例原文" });
 });
 
+it("autosave 修订早于 PM 同步时保留新原生选区并阻塞旧触发器", async () => {
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  globalThis.document.body.appendChild(wrapper.element);
+  await selectParagraph(wrapper);
+  const editor = wrapper.vm.editor;
+  await selectWhileStateStale(wrapper, wrapper.get(".canvas-editor p").element);
+  await wrapper.setProps({ revision: 4 });
+  expect(globalThis.getSelection().toString()).toBe("案例原文");
+  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect((wrapper.emitted("selection") ?? []).some(([event]) => event?.revision === 4)).toBe(false);
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 13)));
+  await wrapper.vm.recaptureSelection();
+  await vi.waitUntil(() => (wrapper.emitted("selection") ?? [])
+    .some(([event]) => event?.quote === "案例原文" && event.revision === 4), { interval: 10 });
+  await nextTick();
+  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
+    .toMatchObject({ quote: "案例原文", revision: 4 });
+});
+
 it("批注装饰刷新等待 DOM 选区完成编辑器同步", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,

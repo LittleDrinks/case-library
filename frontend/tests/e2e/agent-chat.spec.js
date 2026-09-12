@@ -49,9 +49,7 @@ async function configureChat(page) {
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
-  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+  await openChatPanel(page);
 }
 
 async function sendChat(page, text) {
@@ -62,6 +60,29 @@ async function sendChat(page, text) {
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
   await streamResponse;
+}
+
+async function sendGenerationAndWaitForPersistence(page, caseId, text) {
+  const streamResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/stream")
+  ));
+  await page.getByLabel("向 AI 提问").fill(text);
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await streamResponse;
+  await expect.poll(async () => {
+    const snapshot = await chatSnapshot(page, caseId);
+    const persistedAnswer = snapshot.messages.some((message) => (
+      message.role === "assistant"
+      && message.parts.some((part) => part.type === "text" && part.text?.includes(ANSWER))
+    ));
+    return { activeRun: snapshot.activeRun, status: snapshot.latestRun?.status, persistedAnswer };
+  }, { timeout: 15_000 }).toEqual({ activeRun: null, status: "completed", persistedAnswer: true });
+}
+
+async function openChatPanel(page) {
+  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
 async function chatSnapshot(page, caseId) {
@@ -236,12 +257,13 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "请完整生成全文");
+  await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
   await overwriteAiVersion(page, version);
   await page.reload();
   await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await openChatPanel(page);
 
   await unauthorizedWriteKeepsDraft(page, created);
   await authorizedWriteAndUndo(page, created, version);

@@ -111,6 +111,14 @@ function selectionIsCapturable(activeEditor, context) {
     && !selectionNeedsSync(activeEditor);
 }
 
+function validDomSelection(activeEditor, range) {
+  if (!range || !props.annotatable || range.from >= range.to) return false;
+  const $from = activeEditor.state.doc.resolve(range.from);
+  const $to = activeEditor.state.doc.resolve(range.to);
+  return $from.sameParent($to) && $from.parent.isTextblock
+    && quoteText(activeEditor.state.doc, range.from, range.to).trim();
+}
+
 function publishSelection(context, quoteHash) {
   const captured = { ...context, revision: props.revision, quoteHash };
   selection.value = captured;
@@ -180,6 +188,17 @@ function scheduleSelectionCapture() {
     selectionFrame = 0;
     if (editorHasDomSelection()) void recaptureSelection();
   });
+}
+
+function preservePendingDomSelection() {
+  const activeEditor = editor.value;
+  if (!activeEditor || !documentMatches(activeEditor, props.document)) return false;
+  const range = domSelectionRange(activeEditor);
+  if (!validDomSelection(activeEditor, range) || !selectionNeedsSync(activeEditor)) return false;
+  selectionBlocked = true;
+  discardSelection();
+  scheduleSelectionCapture();
+  return true;
 }
 
 function handleSelectionChange() {
@@ -398,6 +417,7 @@ watch(() => props.annotatable, (value) => {
 });
 watch(() => props.revision, () => {
   if (refreshRevisionSelection()) return;
+  if (preservePendingDomSelection()) return;
   selectionBlocked = true;
   clearSelection();
 });
