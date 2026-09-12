@@ -183,6 +183,7 @@ it("审核中管理员可填写并保存审核批注，source 为 admin", async 
   const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
   const wrapper = mountFloat({ caseRecord: reviewing, user: admin, draft: selection });
   expect(wrapper.get('[aria-label="批注内容"]').attributes("disabled")).toBeUndefined();
+  expect(wrapper.findAll("button").map((button) => button.text())).not.toContain("询问AI");
   await wrapper.get('[aria-label="批注内容"]').setValue("请明确评价标准");
   const save = wrapper.findAll("button").find((button) => button.text() === "保存意见");
   await save.trigger("click");

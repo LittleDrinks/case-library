@@ -25,6 +25,10 @@ const canCompose = computed(() => Boolean(
     || (props.user.role === "admin" && props.caseRecord.workflowStatus === "reviewing")
   ),
 ));
+const canAskDraftAi = computed(() => Boolean(
+  canCompose.value && props.user?.id === props.caseRecord.ownerId
+    && props.caseRecord.workflowStatus === "draft",
+));
 const canResolve = computed(() => Boolean(
   props.thread && props.user?.id === props.caseRecord.ownerId
     && props.thread.status === "pending",
@@ -218,7 +222,7 @@ function revisionStatus(status) {
             @click="save()"
           >保存意见</button>
           <button
-            v-if="canCompose"
+            v-if="canAskDraftAi"
             type="button"
             :disabled="saving || !content.trim()"
             @click="save({ askAi: true })"
