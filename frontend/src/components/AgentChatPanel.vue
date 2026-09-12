@@ -57,6 +57,7 @@ let sourceGeneration = 0;
 const syncedWrites = new Set();
 const syncedVersions = new Set();
 const pendingVersionOpenIds = new Set();
+const versionOpenInFlightIds = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
@@ -264,6 +265,7 @@ watch(threadId, (current, previous) => {
   syncedWrites.clear();
   syncedVersions.clear();
   pendingVersionOpenIds.clear();
+  versionOpenInFlightIds.clear();
   pendingWriteSync = false;
   hydratedWriteThread = "";
   hydratedVersionThread = "";
@@ -316,6 +318,8 @@ function closeThreads() {
 
 onBeforeUnmount(() => {
   versionOpenGeneration += 1;
+  pendingVersionOpenIds.clear();
+  versionOpenInFlightIds.clear();
   stopThreadsPolling();
   window.removeEventListener("focus", refreshSourcePermissions);
   document.removeEventListener("visibilitychange", refreshOnVisible);
@@ -327,10 +331,17 @@ function rememberScroll() {
 
 function drainPendingVersionOpens() {
   if (!pendingVersionOpenIds.size) return;
-  const ids = [...pendingVersionOpenIds];
+  const ids = [...pendingVersionOpenIds].filter((id) => !versionOpenInFlightIds.has(id));
   ids.forEach((id) => {
     void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
   });
+}
+
+function retryInvalidatedVersionOpen(versionId, generation, requestedThreadId) {
+  if (!versionId || !pendingVersionOpenIds.has(versionId)
+    || generation === versionOpenGeneration || requestedThreadId !== threadId.value
+    || threadSwitchDepth) return;
+  void openHistoryVersion(versionId, "", versionOpenGeneration, threadId.value);
 }
 
 function finishThreadSwitch(previousThreadId) {
@@ -401,21 +412,34 @@ async function acceptArtifact(artifactId) {
   }
 }
 
+function historyVersion(history, versionId, runId) {
+  return (history.versions || []).find((item) => (
+    (versionId && item.id === versionId) || (runId && item.sourceRunId === runId)
+  ));
+}
+
+function acknowledgeVersionOpen(version) {
+  pendingVersionOpenIds.delete(version.id);
+  emit("open-version", version);
+}
+
 async function openHistoryVersion(
   versionId = "", runId = "", generation = versionOpenGeneration,
   requestedThreadId = threadId.value,
 ) {
+  const requestKey = versionId || runId;
+  if (requestKey && versionOpenInFlightIds.has(requestKey)) return;
+  if (requestKey) versionOpenInFlightIds.add(requestKey);
   try {
     const history = await api.caseHistory(props.caseRecord.id);
     if (generation !== versionOpenGeneration || requestedThreadId !== threadId.value) return;
-    const version = (history.versions || []).find((item) => (
-      (versionId && item.id === versionId) || (runId && item.sourceRunId === runId)
-    ));
-    if (version) {
-      pendingVersionOpenIds.delete(version.id);
-      emit("open-version", version);
-    }
+    const version = historyVersion(history, versionId, runId);
+    if (version) acknowledgeVersionOpen(version);
   } catch { /* 时间线刷新仍由父级处理 */ }
+  finally {
+    if (requestKey) versionOpenInFlightIds.delete(requestKey);
+    retryInvalidatedVersionOpen(versionId, generation, requestedThreadId);
+  }
 }
 
 async function openArtifactVersion(artifact, result) {

@@ -217,14 +217,18 @@ it("does not reopen a hydrated direct-write AI version", async () => {
 });
 
 it("opens a newly generated AI version once after hydration", async () => {
+  const history = deferred();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
-  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-new" }] });
+  api.caseHistory.mockReturnValue(history.promise);
   const wrapper = mountPanel();
   await flushPromises();
 
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
   await wrapper.get('[aria-label="发送"]').trigger("click");
+  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalledTimes(1));
+  history.resolve({ versions: [{ id: "cv-ai-new" }] });
   await vi.waitFor(() => expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-new" }]]));
+  expect(api.caseHistory).toHaveBeenCalledTimes(1);
   expect(wrapper.emitted("open-version")).toHaveLength(1);
 });
 
@@ -329,9 +333,9 @@ it("resyncs a fresh old-thread version after a failed switch", async () => {
   await startGeneratedVersionRequest(wrapper);
   await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalledTimes(1));
   await openOtherThread(wrapper);
-  nextThread.reject(new Error("切换失败"));
+  nextThread.reject(new Error("切换失败")); history.resolve({ versions: [{ id: "cv-ai-new" }] });
   await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalledTimes(2));
-  history.resolve({ versions: [{ id: "cv-ai-new" }] }); retryHistory.resolve({ versions: [{ id: "cv-ai-new" }] });
+  retryHistory.resolve({ versions: [{ id: "cv-ai-new" }] });
   await flushPromises();
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
   expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-new" }]]);
