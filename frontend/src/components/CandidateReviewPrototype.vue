@@ -94,8 +94,12 @@ function saveDocument(value) {
   Object.values(commentThreads.value).forEach(thread => thread.stale = !JSON.stringify(value).includes(thread.quote));
   status.value = "当前稿已自动保存（本页内存），未新增历史版本";
 }
+function preserveCurrent(title) {
+  const latest = versions.value[0];
+  if (JSON.stringify(latest?.document) !== JSON.stringify(original.value) || JSON.stringify(latest?.comments) !== JSON.stringify(commentThreads.value)) recordVersion(title, "修改前保存");
+}
 function acceptChatSuggestion() {
-  recordVersion("接受建议前的当前稿", "修改前保存");
+  preserveCurrent("接受建议前的当前稿");
   original.value.content.push({ type: "paragraph", content: [{ type: "text", text: "课堂讨论后，请学生结合校园观察提出一项可执行的改进建议。" }] });
   recordVersion("补充课堂讨论要求", "接受 AI 建议");
   tab.value = "original";
@@ -176,7 +180,7 @@ function decideRevision(message, value) {
   const thread = commentThreads.value[activeThread.value];
   if (tab.value !== "original" || thread.stale) return;
   if (value === "accepted") {
-    recordVersion("采用批注前的当前稿", "修改前保存");
+    preserveCurrent("采用批注前的当前稿");
     const replace = node => { if (node.text) node.text = node.text.replace(thread.quote, revisedText(thread.quote)); node.content?.forEach(replace); };
     replace(original.value); message.decision = value; thread.resolved = true;
     recordVersion("采用批注修订", "接受 AI 建议");
@@ -208,10 +212,10 @@ async function load() {
   for (const thread of threads) {
     const snapshot = await api.agentThread(props.caseRecord.id, thread.id);
     const candidate = [...(snapshot.artifacts || [])].reverse().find(x => x.kind === "document");
-    if (candidate) { artifact.value = candidate; seedVersions(); original.value = candidateDocument(); seedExampleComment(); recordVersion("开始编辑", "初始记录"); panel.value = "versions"; return; }
+    if (candidate) { artifact.value = candidate; seedVersions(); original.value = candidateDocument(); seedExampleComment(); recordVersion("开始编辑", "初始记录"); panel.value = variant.value === "B" ? "comments" : "versions"; return; }
   }
 }
-function switchVariant() { floating.value = false; router.replace({ query: { ...route.query, variant: variant.value === "A" ? "B" : "A" } }); }
+function switchVariant() { floating.value = false; panel.value = variant.value === "A" ? "comments" : "versions"; router.replace({ query: { ...route.query, variant: variant.value === "A" ? "B" : "A" } }); }
 function keySwitch(event) {
   if (["INPUT", "TEXTAREA"].includes(event.target.tagName) || event.target.isContentEditable) return;
   if (["ArrowLeft", "ArrowRight"].includes(event.key)) switchVariant();
@@ -223,11 +227,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
   <div class="canvas-workspace candidate-prototype">
     <nav class="prototype-outline"><small>本文目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}</button></nav>
     <main class="canvas-column prototype-canvas">
-      <div v-if="variant === 'A'" class="history-hover-zone" @mouseenter="showHistory" @mouseleave="hideHistory" @focusin="showHistory" @focusout="hideHistory"><button class="history-handle" :aria-expanded="historyExpanded" @click="historyExpanded = !historyExpanded">历史版本 · {{ opened.length + 1 }} 个标签 ⌄</button><div class="history-collapse" :class="{ expanded: historyExpanded }"><div class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />历史版本</button></div></div></div>
-      <div v-else class="prototype-preview-bar"><span><MessageSquareText :size="15" />正文精修</span><span class="prototype-state">点击修改标记或右侧批注标记查看意见</span></div>
+      <div class="history-hover-zone" @mouseenter="showHistory" @mouseleave="hideHistory" @focusin="showHistory" @focusout="hideHistory"><button class="history-handle" :aria-expanded="historyExpanded" @click="historyExpanded = !historyExpanded">历史版本 · {{ opened.length + 1 }} 个标签 ⌄</button><div class="history-collapse" :class="{ expanded: historyExpanded }"><div class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />历史版本</button></div></div></div>
       <article class="document-paper prototype-paper" @mouseup="captureSelection">
-        <template v-if="variant === 'A'"><div class="prototype-document-note">{{ activeTitle }} · {{ tab === "original" ? "可编辑" : "历史稿 · 只读" }} <button v-if="tab !== 'original'" @click="tab = 'original'">返回当前稿</button><button v-if="tab !== 'original'" @click="overwriteOpen = true">恢复此版本</button></div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="tab === 'original'" @change="saveDocument" /></template>
-        <template v-else><section v-for="(section, i) in sections" :id="`candidate-section-${i}`" :key="i" class="prototype-section" :class="{ focused: selected === i }"><div class="markdown-body" v-html="sectionHtml(section, i)" @mousedown="selected = i" @click="openComment(i)" /><button v-if="sectionThreads(i).length" class="prototype-comment-pin" :class="{ active: selected === i }" :aria-label="`查看${section.title}的批注`" @click="openThread(sectionThreads(i)[0].id)"><MessageSquareText :size="16" /><span>{{ sectionThreads(i).length }}</span></button></section></template>
+        <template v-if="activeDocument"><div class="prototype-document-note">{{ activeTitle }} · {{ tab === "original" ? "可编辑" : "历史稿 · 只读" }} <button v-if="tab !== 'original'" @click="tab = 'original'">返回当前稿</button><button v-if="tab !== 'original'" @click="overwriteOpen = true">恢复此版本</button></div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="tab === 'original'" @change="saveDocument" /></template>
+
       </article>
     </main>
     <aside class="prototype-assistant">
