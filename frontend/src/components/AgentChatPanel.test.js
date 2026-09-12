@@ -109,12 +109,10 @@ function generatedVersionResponse() {
   ]);
 }
 
-async function startGeneratedVersion(wrapper, waitForHistory = true) {
+async function startGeneratedVersionRequest(wrapper) {
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
   await wrapper.get('[aria-label="发送"]').trigger("click");
-  await vi.waitFor(() => expect(
-    waitForHistory ? api.caseHistory : fetch,
-  ).toHaveBeenCalled());
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
   await flushPromises();
 }
 
@@ -250,7 +248,7 @@ it("drops a delayed generated-version open when switching threads", async () => 
   const wrapper = mountPanel();
   await flushPromises();
 
-  await startGeneratedVersion(wrapper, false);
+  await startGeneratedVersionRequest(wrapper);
   await openOtherThread(wrapper);
   await resolveDelayedVersion(response, history);
   expect(wrapper.emitted("open-version")).toBeUndefined();

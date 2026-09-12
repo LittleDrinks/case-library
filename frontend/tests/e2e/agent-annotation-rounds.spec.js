@@ -94,6 +94,11 @@ async function currentCaseId(page) {
 }
 
 async function startAnnotationRound(page, text, annotationIndex = 0) {
+  const float = page.locator(".annotation-float");
+  if (await float.isVisible()) {
+    await float.getByRole("button", { name: "关闭批注浮窗" }).click();
+    await expect(float).toHaveCount(0);
+  }
   await page.locator(".comment-card").nth(annotationIndex)
     .getByRole("button", { name: "让 AI 修订" }).click();
   await page.getByTestId("skill-picker-toggle").click();
