@@ -200,7 +200,7 @@ async function persist(payload) {
   const documentChanged = Boolean(payload.steps?.length);
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   pendingSteps.splice(0, payload.steps?.length || 0);
-  clearWritingContext();
+  // CanvasEditor revalidates the live DOM/PM selection against this saved document.
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);

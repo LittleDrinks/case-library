@@ -18,6 +18,13 @@ const caseDocument = {
     { type: "paragraph", content: [{ type: "text", text: "案例原文" }] },
   ],
 };
+const replacedDocument = {
+  type: "doc",
+  content: [
+    { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+    { type: "paragraph", content: [{ type: "text", text: "替换后的正文" }] },
+  ],
+};
 
 async function setup(options = {}) {
   const wrapper = mount(CanvasEditor, {
@@ -204,12 +211,19 @@ it("引用 HTML 粘贴往返保留资料属性", async () => {
   });
 });
 
-it("修订变化或手动编辑会立即清除旧选区", async () => {
+it("相同正文保存修订保留有效选区，正文替换或手动编辑会清除旧选区", async () => {
   const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  globalThis.document.body.appendChild(wrapper.element);
+  await nextTick();
   await selectParagraph(wrapper);
   await wrapper.setProps({ revision: 4 });
+  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  expect(globalThis.getSelection().toString()).toBe("案例原文");
+  expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
+    .toMatchObject({ quote: "案例原文", revision: 4 });
+  await wrapper.setProps({ document: replacedDocument, revision: 5 });
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
-  await wrapper.setProps({ revision: 3 });
+  await wrapper.setProps({ document: caseDocument, revision: 6 });
   await selectParagraph(wrapper);
   wrapper.vm.editor.commands.insertContent("新增");
   await nextTick();

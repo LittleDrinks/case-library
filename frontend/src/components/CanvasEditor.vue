@@ -193,6 +193,26 @@ function currentContext(activeEditor) {
   return writingContext(activeEditor, from, to);
 }
 
+function documentMatches(activeEditor, document) {
+  return JSON.stringify(activeEditor.getJSON()) === JSON.stringify(document);
+}
+
+function refreshRevisionSelection() {
+  const activeEditor = editor.value;
+  if (!activeEditor || selectionBlocked || !documentMatches(activeEditor, props.document)) return false;
+  const context = currentContext(activeEditor);
+  if (!selectionIsCapturable(activeEditor, context)) return false;
+  const captured = selection.value;
+  if (!captured || captured.from !== context.from || captured.to !== context.to
+    || captured.quote !== context.quote || !captured.quoteHash) {
+    void captureSelection({ editor: activeEditor });
+    return true;
+  }
+  selectionRequest += 1;
+  publishSelection(context, captured.quoteHash);
+  return true;
+}
+
 function updateEditor({ editor: activeEditor, transaction }) {
   selectionBlocked = true;
   discardSelection();
@@ -359,8 +379,7 @@ const editor = useEditor({
 
 function replaceDocument(document) {
   if (!editor.value) return;
-  const current = JSON.stringify(editor.value.getJSON());
-  if (current === JSON.stringify(document)) return;
+  if (documentMatches(editor.value, document)) return;
   selectionBlocked = true;
   clearSelection();
   cursorPlaced.value = false;
@@ -378,6 +397,7 @@ watch(() => props.annotatable, (value) => {
   clearSelection();
 });
 watch(() => props.revision, () => {
+  if (refreshRevisionSelection()) return;
   selectionBlocked = true;
   clearSelection();
 });
