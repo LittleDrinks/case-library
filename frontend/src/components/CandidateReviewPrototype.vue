@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, ArrowRight, Check, MessageSquareText, Sparkles, X, History, FileText } from "@lucide/vue";
+import { ArrowLeft, ArrowRight, Check, MessageSquareText, Sparkles, X, History, FileText, Paperclip } from "@lucide/vue";
 import { generateJSON } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { diffChars } from "diff";
@@ -99,10 +99,12 @@ function preserveCurrent(title) {
   if (JSON.stringify(latest?.document) !== JSON.stringify(original.value) || JSON.stringify(latest?.comments) !== JSON.stringify(commentThreads.value)) recordVersion(title, "修改前保存");
 }
 function acceptChatSuggestion() {
-  preserveCurrent("接受建议前的当前稿");
-  original.value.content.push({ type: "paragraph", content: [{ type: "text", text: "课堂讨论后，请学生结合校园观察提出一项可执行的改进建议。" }] });
-  recordVersion("补充课堂讨论要求", "接受 AI 建议");
-  tab.value = "original";
+  const document = clone(original.value);
+  document.content.push({ type: "paragraph", content: [{ type: "text", text: "课堂讨论后，请学生结合校园观察提出一项可执行的改进建议。" }] });
+  const id = `ai-${Date.now()}`;
+  versions.value.unshift({ id, title: "AI · 补充课堂讨论要求", origin: "AI 编写", time: new Date().toISOString(), document, comments: clone(commentThreads.value) });
+  openVersion(id); showHistory(); hideHistory();
+  status.value = "AI 历史版本已打开；当前教师稿保持不变";
 }
 function resolveThread() {
   const thread = commentThreads.value[activeThread.value];
@@ -227,21 +229,21 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
   <div class="canvas-workspace candidate-prototype">
     <nav class="prototype-outline"><small>本文目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}</button></nav>
     <main class="canvas-column prototype-canvas">
-      <div class="history-hover-zone" @mouseenter="showHistory" @mouseleave="hideHistory" @focusin="showHistory" @focusout="hideHistory"><button class="history-handle" :aria-expanded="historyExpanded" @click="historyExpanded = !historyExpanded">历史版本 · {{ opened.length + 1 }} 个标签 ⌄</button><div class="history-collapse" :class="{ expanded: historyExpanded }"><div class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />历史版本</button></div></div></div>
+      <div class="history-hover-zone" @mouseenter="showHistory" @mouseleave="hideHistory" @focusin="showHistory" @focusout="hideHistory"><button class="history-handle" :aria-expanded="historyExpanded" @click="historyExpanded = !historyExpanded"><span class="history-grip"></span><span>{{ tab === "original" ? "当前教师稿" : activeTitle }}</span><span class="history-count">{{ opened.length + 1 }} 个标签 · 悬停展开</span></button><div class="history-collapse" :class="{ expanded: historyExpanded }"><div class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />历史版本</button></div></div></div>
       <article class="document-paper prototype-paper" @mouseup="captureSelection">
         <template v-if="activeDocument"><div class="prototype-document-note">{{ activeTitle }} · {{ tab === "original" ? "可编辑" : "历史稿 · 只读" }} <button v-if="tab !== 'original'" @click="tab = 'original'">返回当前稿</button><button v-if="tab !== 'original'" @click="overwriteOpen = true">恢复此版本</button></div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="tab === 'original'" @change="saveDocument" /></template>
 
       </article>
     </main>
     <aside class="prototype-assistant">
-      <header><button :class="{ active: panel === 'chat' }" @click="panel = 'chat'"><Sparkles :size="17" />AI</button><button :class="{ active: panel === 'versions' }" @click="panel = 'versions'"><History :size="17" />历史版本</button><button :class="{ active: panel === 'comments' }" @click="panel = 'comments'"><MessageSquareText :size="17" />批注</button></header>
-      <div class="prototype-thread">根据我的资料帮我生成一份案例 <span>⌄</span></div>
+      <header><button :class="{ active: panel === 'chat' }" @click="panel = 'chat'"><Sparkles :size="17" />AI</button><button :class="{ active: panel === 'versions' }" @click="panel = 'versions'"><History :size="17" />历史版本</button><button :class="{ active: panel === 'comments' }" @click="panel = 'comments'"><MessageSquareText :size="17" />批注</button><button :class="{ active: panel === 'attachments' }" @click="panel = 'attachments'"><Paperclip :size="17" />附件</button></header>
+      <div v-if="panel === 'chat'" class="prototype-thread">根据我的资料帮我生成一份案例 <span>⌄</span></div>
       <div class="prototype-rail-content">
-        <template v-if="panel === 'chat'"><div class="prototype-chat-user">根据我的资料生成一份完整案例。</div><div class="prototype-assistant-label">AI</div><p>初稿已保存。可以打开继续编辑，或选中文字和我讨论。</p><article class="prototype-compact-card"><div><FileText :size="17" /><b>科学家精神的时代回响</b></div><p>AI 生成稿 · {{ sections.length }} 个章节</p><button class="prototype-primary" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })">打开稿件</button></article><article class="prototype-compact-card"><b>AI 建议 · 演示</b><p>在文末补充一项可执行的课堂讨论要求。</p><button class="prototype-primary" :disabled="tab !== 'original'" @click="acceptChatSuggestion">接受建议并创建版本</button></article><template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template></template>
+        <template v-if="panel === 'chat'"><div class="prototype-chat-user">根据我的资料生成一份完整案例。</div><div class="prototype-assistant-label">AI</div><p>初稿已保存。可以打开继续编辑，或选中文字和我讨论。</p><article class="prototype-compact-card"><div><FileText :size="17" /><b>科学家精神的时代回响</b></div><p>AI 生成稿 · {{ sections.length }} 个章节</p><button class="prototype-primary" :disabled="!artifact" @click="openGenerated(); router.replace({ query: { ...route.query, variant: 'A' } })">打开稿件</button></article><article class="prototype-compact-card"><b>AI 建议 · 演示</b><p>在文末补充一项可执行的课堂讨论要求。</p><button class="prototype-primary" :disabled="tab !== 'original'" @click="acceptChatSuggestion">接受演示建议</button></article><template v-for="(message, i) in messages" :key="i"><div :class="message.kind === 'user' ? 'prototype-chat-user' : 'prototype-chat-reply'"><blockquote v-if="message.quote">{{ message.quote }}</blockquote>{{ message.text }}</div></template></template>
         <template v-else-if="panel === 'versions'"><div class="prototype-list-heading"><h2>版本时间线</h2><small>{{ timeline.length }} 条演示记录</small></div><p class="prototype-muted">手动创建、接受 AI 建议或投稿时留下记录；整篇覆盖前保留当前稿。普通输入只自动保存。</p><div class="history-create"><input v-model="versionName" aria-label="版本名称" placeholder="版本名称（可选）" /><button class="prototype-primary" :disabled="tab !== 'original'" @click="createVersion">创建版本</button></div><div class="prototype-timeline"><article v-for="version in timeline" :key="version.id"><span class="timeline-dot" :class="{ ai: version.origin === 'AI 生成' }" /><small>{{ displayTime(version.time) }} · {{ version.origin }}</small><button class="prototype-version-card" :disabled="version.id === 'generated' && !artifact" @click="openVersion(version.id)"><Sparkles v-if="version.origin === 'AI 生成'" :size="18" /><FileText v-else :size="18" /><span><b>{{ version.title }}</b><small>打开只读历史稿</small></span></button></article></div></template>
-        <template v-else><div class="prototype-list-heading"><h2>批注列表</h2><small>{{ threadList.length }} 条</small></div><button v-for="thread in threadList" :key="thread.id" class="prototype-comment-row" @click="openThread(thread.id)"><span class="comment-row-icon"><MessageSquareText :size="17" /></span><span><b>{{ thread.title }}</b><p>{{ thread.messages.filter(item => item.kind === 'human').at(-1)?.text }}</p><small>{{ thread.messages.length }} 条消息 · {{ thread.stale ? '原文已变化' : thread.resolved ? '已解决' : '待处理' }}</small></span></button></template>
-      </div>
-      <footer class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>稿件选区：{{ chatQuote.slice(0, 90) }}…</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选择稿件中的文字…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>{{ status || '原型演示 · 编辑和批注仅保留在本页' }}</small></footer>
+        <template v-else-if="panel === 'comments'"><div class="prototype-list-heading"><h2>批注列表</h2><small>{{ threadList.length }} 条</small></div><button v-for="thread in threadList" :key="thread.id" class="prototype-comment-row" @click="openThread(thread.id)"><span class="comment-row-icon"><MessageSquareText :size="17" /></span><span><b>{{ thread.title }}</b><p>{{ thread.messages.filter(item => item.kind === 'human').at(-1)?.text }}</p><small>{{ thread.messages.length }} 条消息 · {{ thread.stale ? '原文已变化' : thread.resolved ? '已解决' : '待处理' }}</small></span></button></template>
+      <template v-else><h2>附件</h2><p class="prototype-muted">附件入口保留。本轮仅演示历史版本与批注，不上传真实文件。</p></template></div>
+      <footer v-if="panel === 'chat'" class="prototype-composer"><div v-if="chatQuote" class="prototype-quote-chip"><span>稿件选区：{{ chatQuote.slice(0, 90) }}…</span><button @click="chatQuote = ''"><X :size="13" /></button></div><div class="prototype-compose-box"><textarea v-model="chatInput" aria-label="原型对话输入" placeholder="继续讨论，或选择稿件中的文字…" @keydown.ctrl.enter="sendOpinion" /><div><span>插入 Skill⌄</span><button class="prototype-primary" :disabled="!chatInput.trim()" @click="sendOpinion">发送 ↑</button></div></div><small>{{ status || '原型演示 · 编辑和批注仅保留在本页' }}</small></footer>
     </aside>
     <div v-if="selectionQuote" class="prototype-selection-toolbar" :style="popup" @mousedown.prevent><button @click="copySelection">复制</button><button @click="askAI">就此提问</button><button v-if="tab === 'original'" @click="leaveSelectionComment">留批注</button><button v-if="tab === 'original' && commentThreads[activeThread]?.stale" @click="commentThreads[activeThread].quote = selectionQuote; commentThreads[activeThread].stale = false; selectionQuote = ''">重新定位此批注</button></div>
     <div v-if="overwriteOpen" class="prototype-pick-backdrop"><section class="prototype-pick-dialog" role="dialog" aria-label="覆盖版本警告"><h2>恢复“{{ activeTitle }}”？</h2><p class="overwrite-warning">先保存当前正文和批注，再恢复所选历史版本的正文、批注与讨论状态。恢复操作会新增记录，已有历史保持不变。</p><button class="prototype-primary" @click="overwriteVersion">确认恢复</button><button @click="overwriteOpen = false">取消</button><small class="prototype-muted">原型操作，仅本页生效</small></section></div>
@@ -406,4 +408,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .history-create input { min-width:0; width:60%; padding:8px; border:1px solid #ded4c3; border-radius:6px; }
 .prototype-document-note button { margin-left:10px; color:var(--brand); border:0; background:transparent; }
 .prototype-comment-float footer > button { margin:4px; }
+
+.prototype-assistant > header { display:grid; grid-template-columns: .8fr 1.35fr 1fr 1fr; gap:0; padding:0 12px; flex-shrink:0; }
+.prototype-assistant > header button { justify-content:center; gap:6px; padding:17px 5px; white-space:nowrap; font-size:14px; }
+.history-hover-zone { border:1px solid #ebe5dc; background:rgba(255,255,255,.94); border-radius:12px; box-shadow:0 3px 12px #392c1606; }
+.history-handle { height:30px; display:flex; align-items:center; gap:9px; padding:0 16px; text-align:left; color:#7d7264; }
+.history-grip { width:20px; height:3px; border-radius:3px; background:#d8cbb9; }
+.history-count { margin-left:auto; color:#a49889; font-size:10px; }
+.history-collapse > .prototype-version-tabs { border:0; box-shadow:none; border-radius:0 0 12px 12px; background:transparent; }
+.history-collapse.expanded > .prototype-version-tabs { padding:6px 10px 10px; }
+.prototype-version-tabs button { border-radius:7px; font-size:12px; }
+.prototype-tab-chip.active { background:#fff3f2; }
+.prototype-rail-content { padding:20px; }
+.prototype-list-heading h2 { font-size:18px; }
+.prototype-timeline { margin-top:22px; }
+.prototype-assistant > .prototype-rail-content { flex:1; }
 </style>
