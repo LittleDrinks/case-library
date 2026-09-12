@@ -13,6 +13,10 @@ function nodeText(node) {
   return (node?.content || []).map(nodeText).join("");
 }
 
+export function documentText(document) {
+  return (document?.content || []).map(nodeText).filter(Boolean).join("\n\n");
+}
+
 export function documentOutline(document) {
   return (document?.content || []).flatMap((node, index) => {
     const level = node.attrs?.level;

@@ -7,6 +7,9 @@ import hashlib
 from fastapi.testclient import TestClient
 
 from app.modules.agent import prosemirror
+from app.modules.agent.runtime import agent
+from tests.test_annotation_discussion import create_annotation
+from tests.test_annotation_agent import _proposal_model, _send, _wait_terminal
 
 
 def login(client: TestClient, username: str = "user", password: str = "user123"):
@@ -109,19 +112,25 @@ def _version_annotation(client, auth: dict, case: dict) -> dict:
     return reopened["case"], submitted["version"], note
 
 
-def test_author_creates_named_manual_version(client: TestClient) -> None:
-    auth = login(client).json()
+def _manual_version_fixture(client, auth):
     case = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": auth["csrfToken"]},
         json={"title": "手动版本案例", "document": paragraph_document("手动正文")},
     ).json()
     saved = _save_content(client, auth, case, "手动正文 第二版")
-    created = client.post(
+    return case, saved
+
+
+def _create_manual_version(client, auth, case, saved):
+    return client.post(
         f"/api/cases/{case['id']}/versions",
         headers={"X-CSRF-Token": auth["csrfToken"]},
         json={"title": "补充教学目标", "revision": saved["revision"]},
     )
+
+
+def _assert_manual_version(client, case, saved, created) -> None:
     assert created.status_code == 200
     version = created.json()
     assert version["kind"] == "manual"
@@ -132,6 +141,13 @@ def test_author_creates_named_manual_version(client: TestClient) -> None:
     assert rows[0]["document"] == saved["document"]
     refresh = client.get(f"/api/cases/{case['id']}").json()
     assert refresh["revision"] == saved["revision"] + 1
+
+
+def test_author_creates_named_manual_version(client: TestClient) -> None:
+    auth = login(client).json()
+    case, saved = _manual_version_fixture(client, auth)
+    created = _create_manual_version(client, auth, case, saved)
+    _assert_manual_version(client, case, saved, created)
     stale = client.post(
         f"/api/cases/{case['id']}/versions",
         headers={"X-CSRF-Token": auth["csrfToken"]},
@@ -140,13 +156,74 @@ def test_author_creates_named_manual_version(client: TestClient) -> None:
     assert stale.status_code == 409
 
 
-def test_manual_version_requires_owner_and_draft(client: TestClient) -> None:
-    auth = login(client).json()
+def _annotation_case(client, auth):
     case = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": "权限案例", "document": paragraph_document("权限正文")},
+        json={"title": "批注快照案例", "document": heading_document("批注正文")},
     ).json()
+    annotation = create_annotation(client, auth, case, "批注正文")
+    return case, annotation
+
+
+def _real_ai_revision(client, auth, case, annotation):
+    with agent.override(model=_proposal_model("保留修订集合")):
+        response = _send(client, auth, case, annotation, "请保留这条修订")
+    assert response.status_code == 200, response.text
+    _wait_terminal(client, case["id"])
+    database = client.app.state.database
+    live = database.annotations.find_one({"id": annotation["id"]}, {"_id": 0})
+    assert live and live["revisions"], live
+    revision = live["revisions"][0]
+    artifact = database.agent_artifacts.find_one({"id": revision["artifactId"]}, {"_id": 0})
+    assert artifact and artifact["annotationId"] == annotation["id"]
+    assert revision["runId"] == artifact["runId"]
+    return database, live, artifact
+
+
+def _formal_version_copy(client, auth, case, database, live, artifact):
+    created = client.post(
+        f"/api/cases/{case['id']}/versions",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "批注快照", "revision": case["revision"]},
+    )
+    assert created.status_code == 200
+    version = created.json()
+    assert version["annotations"][0]["revisions"][0]["artifactId"] == artifact["id"]
+    frozen = database.annotations.find_one(
+        {"caseId": case["id"], "versionId": version["id"]}, {"_id": 0},
+    )
+    assert frozen and frozen["id"] != live["id"]
+    assert frozen["revisions"] == live["revisions"]
+    return version
+
+
+def _reject_ai_artifact(client, auth, case, artifact) -> None:
+    snapshot = client.get(f"/api/cases/{case['id']}/agent/thread").json()
+    rejected = client.post(
+        f"/api/cases/{case['id']}/agent/thread/{snapshot['id']}/artifacts/"
+        f"{artifact['id']}/decision",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"decision": "rejected"},
+    )
+    assert rejected.status_code == 200, rejected.text
+
+
+def test_formal_version_keeps_independent_annotation_revisions(client: TestClient) -> None:
+    auth = login(client).json()
+    case, annotation = _annotation_case(client, auth)
+    database, live, artifact = _real_ai_revision(client, auth, case, annotation)
+    version = _formal_version_copy(client, auth, case, database, live, artifact)
+    _reject_ai_artifact(client, auth, case, artifact)
+    live_after = database.annotations.find_one({"id": annotation["id"]}, {"_id": 0})
+    assert live_after["revisions"][0]["status"] == "rejected"
+    frozen_after = database.annotations.find_one(
+        {"caseId": case["id"], "versionId": version["id"]}, {"_id": 0},
+    )
+    assert frozen_after and frozen_after["revisions"] == live["revisions"]
+
+
+def _assert_manual_version_owner_only(client, case) -> None:
     admin = login(client, "admin", "admin123").json()
     stranger = client.post(
         f"/api/cases/{case['id']}/versions",
@@ -155,6 +232,8 @@ def test_manual_version_requires_owner_and_draft(client: TestClient) -> None:
     )
     assert stranger.status_code == 403
 
+
+def _assert_manual_version_requires_draft(client, case) -> None:
     owner = login(client).json()
     submitted = _lifecycle(client, owner, case, "submit").json()
     frozen = client.post(
@@ -165,8 +244,18 @@ def test_manual_version_requires_owner_and_draft(client: TestClient) -> None:
     assert frozen.status_code == 409
 
 
-def test_restore_keeps_current_work_and_appends_restore_record(client: TestClient) -> None:
+def test_manual_version_requires_owner_and_draft(client: TestClient) -> None:
     auth = login(client).json()
+    case = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "权限案例", "document": paragraph_document("权限正文")},
+    ).json()
+    _assert_manual_version_owner_only(client, case)
+    _assert_manual_version_requires_draft(client, case)
+
+
+def _restore_current_work(client, auth):
     case, version = _frozen_version(client, auth, "恢复闭环")
     changed = _save_content(client, auth, case, "恢复前未保存的正文")
     draft_note = _draft_annotation(
@@ -179,18 +268,28 @@ def test_restore_keeps_current_work_and_appends_restore_record(client: TestClien
         client, author, changed, "overwrite", targetId=annotated_version["id"],
     )
     assert restored.status_code == 200
+    return case, changed, annotated_version, draft_note, version_note
 
+
+def _assert_restore_history(client, case, changed, annotated_version) -> None:
     rows = _history(client, case["id"])["versions"]
     kinds = [row["kind"] for row in rows]
     assert kinds == ["submission", "submission", "manual", "restore"]
     baseline = rows[2]
     assert baseline["title"] == "恢复前的当前稿"
     assert baseline["document"] == changed["document"]
-
     restore_record = rows[3]
     assert restore_record["title"].startswith("恢复：")
     assert restore_record["document"] == annotated_version["document"]
     assert restore_record["restoredFromId"] == annotated_version["id"]
+
+
+def test_restore_keeps_current_work_and_appends_restore_record(client: TestClient) -> None:
+    auth = login(client).json()
+    case, changed, annotated_version, draft_note, version_note = _restore_current_work(
+        client, auth,
+    )
+    _assert_restore_history(client, case, changed, annotated_version)
 
     notes = client.get(f"/api/cases/{case['id']}/annotations").json()
     by_id = {row["id"]: row for row in notes}
@@ -201,10 +300,7 @@ def test_restore_keeps_current_work_and_appends_restore_record(client: TestClien
     assert fresh["document"] == annotated_version["document"]
 
 
-def test_restored_annotations_keep_discussion_state(client: TestClient) -> None:
-    auth = login(client).json()
-    case, version = _frozen_version(client, auth, "讨论状态恢复")
-    note = _draft_annotation(client, auth, case, "论状态恢复 冻结正", "待回复批注")
+def _resolve_discussion(client, auth, case, note) -> None:
     client.post(
         f"/api/cases/{case['id']}/annotations/{note['id']}/replies",
         headers={"X-CSRF-Token": auth["csrfToken"]},
@@ -215,21 +311,37 @@ def test_restored_annotations_keep_discussion_state(client: TestClient) -> None:
         headers={"X-CSRF-Token": auth["csrfToken"]},
         json={"status": "resolved"},
     )
-    _save_content(client, auth, case, "改掉工作稿")
-    _draft_annotation(client, auth, case, "掉工作稿", "新批注应被替换")
 
+
+def _restore_discussion(client, auth, case, version):
+    case = _save_content(client, auth, case, "改掉工作稿")
+    new_note = _draft_annotation(client, auth, case, "掉工作稿", "新批注应被保存到恢复前版本")
     restored = _lifecycle(
         client, auth,
         client.get(f"/api/cases/{case['id']}").json(),
         "overwrite", targetId=version["id"],
     )
     assert restored.status_code == 200
-    notes = client.get(f"/api/cases/{case['id']}/annotations").json()
+    return client.get(f"/api/cases/{case['id']}/annotations").json(), new_note
+
+
+def _discussion_restore_fixture(client, auth):
+    case, version = _frozen_version(client, auth, "讨论状态恢复")
+    note = _draft_annotation(client, auth, case, "论状态恢复 冻结正", "待回复批注")
+    _resolve_discussion(client, auth, case, note)
+    return _restore_discussion(client, auth, case, version)
+
+
+def test_restored_annotations_keep_discussion_state(client: TestClient) -> None:
+    auth = login(client).json()
+    notes, new_note = _discussion_restore_fixture(client, auth)
     restored_note = [row for row in notes if row["content"] == "待回复批注"]
     assert len(restored_note) == 1
     assert restored_note[0]["status"] == "resolved"
     assert [row["content"] for row in restored_note[0]["replies"]] == ["作者回应：稍后处理"]
-    assert not [row for row in notes if row["content"] == "新批注应被替换"]
+    preserved = [row for row in notes if row["id"] == new_note["id"]]
+    assert len(preserved) == 1
+    assert preserved[0]["versionId"] is not None
 
 
 def test_overwrite_cancel_keeps_current_work_untouched(client: TestClient) -> None:

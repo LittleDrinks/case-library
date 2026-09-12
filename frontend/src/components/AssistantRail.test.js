@@ -4,6 +4,7 @@ import AssistantRail from "./AssistantRail.vue";
 
 const props = {
   active: "ai", open: true, caseRecord: { id: "case-1", revision: 1 }, user: null,
+  historyAvailable: true,
   editable: true, beforeAttachmentMutation: vi.fn(), beforeVersionMutation: vi.fn(),
   selection: null, writingContext: null,
 };
@@ -37,7 +38,8 @@ it("keeps comments and attachments on the same assistant rail", async () => {
 it("uses the read-only rail for public discussion and资料", () => {
   const wrapper = render({ readOnly: true, user: { id: "user-1" }, active: "ai" });
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).props("readOnly")).toBe(true);
-  expect(wrapper.find(".assistant-tabs button:nth-child(2)").isVisible()).toBe(false);
+  expect(wrapper.findAll(".assistant-tabs > button")[1].isVisible()).toBe(true);
+  expect(wrapper.findAll(".assistant-tabs > button")[2].isVisible()).toBe(false);
 });
 
 it("requires login before opening a private reader discussion", () => {
@@ -51,14 +53,23 @@ it("does not expose a writable AI thread on a historical version", () => {
     historical: true, readOnly: true, user: { id: "user-1" }, active: "ai",
   });
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(false);
-  expect(wrapper.text()).toContain("覆盖当前教师稿");
+  expect(wrapper.text()).toContain("恢复此版本");
 });
 
 it("keeps review chat private to review mode while annotations stay available", () => {
   const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
   const panel = wrapper.findComponent({ name: "AgentChatPanel" });
   expect(panel.props("review")).toBe(true);
-  expect(wrapper.find(".assistant-tabs button:nth-child(2)").isVisible()).toBe(true);
+  expect(wrapper.findAll(".assistant-tabs > button")[2].isVisible()).toBe(true);
+});
+
+it("exposes the fourth history entry and forwards manual version creation", () => {
+  const wrapper = render({ active: "history" });
+  const panel = wrapper.findComponent({ name: "VersionPanel" });
+  expect(wrapper.text()).toContain("历史");
+  const version = { id: "cv-4", number: 4 };
+  panel.vm.$emit("version-created", version);
+  expect(wrapper.emitted("version-created")).toEqual([[version]]);
 });
 
 it("forwards source citation inserts from the attachment panel", () => {

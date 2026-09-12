@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
+import { AlertTriangle, ArrowLeft, Copy, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
@@ -16,7 +16,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
-import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { documentOutline, documentText, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
@@ -252,7 +252,9 @@ async function loadAnnotations() {
   try {
     const rows = await api.listAnnotations(caseId());
     if (generation !== annotationLoadGeneration) return;
-    annotations.value = rows.filter(({ status }) => status !== "resolved");
+    annotations.value = rows.filter(({ status, versionId }) => (
+      versionId == null && status !== "resolved"
+    ));
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
@@ -572,7 +574,7 @@ function refreshVersionHistory() {
 }
 
 function requestOverwrite() {
-  if (headerBusyAction.value || !activeVersion.value) return;
+  if (headerBusyAction.value || !activeVersion.value || !overwriteAllowed.value) return;
   actionNotice.value = "";
   overwriteTarget.value = activeVersion.value;
 }
@@ -583,7 +585,7 @@ function cancelOverwrite() {
 
 async function overwriteBaseline() {
   if (await flushAutosave()) return revision.value;
-  actionNotice.value = "正文尚未保存，未执行覆盖。";
+  actionNotice.value = "正文尚未保存，未执行恢复。";
   return null;
 }
 
@@ -595,10 +597,32 @@ async function overwriteSucceeded(result) {
   await refreshAnnotations();
 }
 
+async function handleVersionCreated() {
+  try {
+    syncCaseRevision(await api.getCase(caseId()));
+    refreshVersionHistory();
+  } catch (error) {
+    actionNotice.value = error.message || "版本已保存，但案例状态刷新失败";
+  }
+}
+
 function overwriteFailed(error) {
   overwriteTarget.value = null;
-  actionNotice.value = error.message || "覆盖失败";
+  actionNotice.value = error.message || "恢复失败";
   if (error.status === 409) void refreshLifecycleState();
+}
+
+async function copyVersion() {
+  if (!activeVersion.value || !navigator.clipboard?.writeText) {
+    actionNotice.value = "当前环境不支持复制，请使用浏览器复制功能";
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(documentText(activeVersion.value.document));
+    actionNotice.value = `已复制${versionLabel(activeVersion.value)}正文`;
+  } catch {
+    actionNotice.value = "复制失败，请使用浏览器复制功能";
+  }
 }
 
 async function performOverwrite() {
@@ -759,7 +783,12 @@ onBeforeUnmount(() => {
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
               <h2>{{ activeVersion.title }}</h2>
-              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
+              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，恢复后可在当前教师稿继续编辑</p>
+              <div class="version-paper-actions">
+                <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />返回当前教师稿</button>
+                <button type="button" class="version-copy" @click="copyVersion"><Copy :size="14" aria-hidden="true" />复制正文</button>
+                <button v-if="overwriteAllowed" type="button" class="version-restore" @click="requestOverwrite"><RefreshCw :size="14" aria-hidden="true" />恢复此版本</button>
+              </div>
             </header>
             <CanvasEditor
               :key="activeVersion.id"
@@ -787,6 +816,7 @@ onBeforeUnmount(() => {
           :selection="annotationSelection"
           :writing-context="writingContext"
           :history-refresh-key="historyRefreshKey"
+          :history-available="historyAvailable"
           :before-attachment-mutation="prepareContentMutation"
           :before-annotation-mutation="prepareAnnotationMutation"
           :focus-annotation-id="focusedAnnotationId"
@@ -806,6 +836,7 @@ onBeforeUnmount(() => {
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"
+          @version-created="handleVersionCreated"
         />
       </div>
     </template>

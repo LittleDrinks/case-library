@@ -19,7 +19,12 @@ from app.modules.cases.submission_check import submission_issues
 from app.modules.cases.snapshots import overwrite_draft
 from app.modules.case_materials.service import snapshot_materials
 from app.modules.search.outbox import SearchOutbox
-from app.modules.cases.versions import FORMAL_VERSION_KINDS, next_version_number
+from app.modules.cases.versions import (
+    FORMAL_VERSION_KINDS,
+    freeze_draft_annotations,
+    next_version_number,
+    snapshot_annotations,
+)
 
 
 def _now() -> str:
@@ -71,7 +76,8 @@ def _version(
         "kind": "submission", "title": case["title"],
         "summary": case.get("summary", ""), "document": case["document"],
         "attachments": attachments, "materials": materials,
-        "caseSources": case_sources, "metadata": case_metadata(case),
+        "caseSources": case_sources, "annotations": snapshot_annotations(database, case["id"], None, session),
+        "metadata": case_metadata(case),
         "sourceRevision": case["revision"], "createdBy": user["id"], "createdAt": now,
     }
 
@@ -107,6 +113,7 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.case_versions.insert_one(version, session=session)
+    freeze_draft_annotations(database, case["id"], version["id"], session)
     database.lifecycle_events.insert_one(event, session=session)
     return _result(updated, version, event, user)
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
+import { ChevronDown, ChevronUp, History, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
@@ -18,6 +18,7 @@ const props = defineProps({
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   historyRefreshKey: { type: Number, default: 0 },
+  historyAvailable: { type: Boolean, default: false },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
@@ -32,10 +33,12 @@ const emit = defineEmits([
   "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
   "sources-retry", "clear-writing-context", "insert-citation",
   "open-version", "versions-updated",
+  "version-created",
 ]);
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
+  { id: "history", label: "历史", icon: History },
   { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
@@ -52,7 +55,7 @@ function select(tab) {
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
-        v-show="!readOnly || tab.id !== 'comments'"
+        v-show="(tab.id !== 'history' || historyAvailable) && (!readOnly || tab.id !== 'comments')"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -65,7 +68,7 @@ function select(tab) {
     </nav>
 
     <div v-if="historical && active === 'ai'" class="assistant-panel panel-empty">
-      <span>历史版本只读，请先覆盖当前教师稿后使用 AI</span>
+      <span>历史版本只读，请先恢复此版本后使用 AI</span>
     </div>
     <AgentChatPanel
       v-else-if="active === 'ai' && (!readOnly || user)"
@@ -78,6 +81,7 @@ function select(tab) {
       :writing-context="writingContext"
       @case-revised="emit('case-revised', $event)"
       @annotations-refresh="emit('annotations-refresh')"
+      @open-version="emit('open-version', $event)"
       @versions-updated="emit('versions-updated')"
       @annotation-run="emit('annotation-run', $event)"
       @clear-writing-context="emit('clear-writing-context')"
@@ -121,7 +125,10 @@ function select(tab) {
       v-else-if="active === 'history'"
       :case-record="caseRecord"
       :refresh-key="historyRefreshKey"
+      :editable="editable && historyAvailable"
+      :csrf-token="user?.csrfToken || ''"
       @open-version="emit('open-version', $event)"
+      @version-created="emit('version-created', $event)"
     />
   </aside>
 </template>

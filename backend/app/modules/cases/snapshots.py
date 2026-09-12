@@ -23,7 +23,11 @@ from app.modules.cases.versions import (
     FORMAL_VERSION_KINDS,
     MANUAL_VERSION_KIND,
     RESTORE_VERSION_KIND,
+    copy_draft_annotations,
     create_version,
+    freeze_draft_annotations,
+    restore_draft_annotations,
+    snapshot_annotations,
 )
 
 
@@ -36,9 +40,9 @@ def _now() -> str:
 
 def _require_draft_owner(case: dict, user: dict) -> None:
     if case["ownerId"] != user["id"]:
-        raise CaseError(403, "仅案例作者可覆盖工作稿")
+        raise CaseError(403, "仅案例作者可恢复工作稿")
     if case["workflowStatus"] != "draft":
-        raise CaseError(409, "仅工作版本可执行覆盖")
+        raise CaseError(409, "仅工作版本可执行恢复")
 
 
 def _record(
@@ -102,6 +106,7 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
     materials = snapshot_materials(database, case["id"], session)
     case_sources = snapshot_case_sources(database, case["id"], session)
     snapshot = _record(case, user, attachments, materials, case_sources, kind)
+    snapshot["annotations"] = snapshot_annotations(database, case["id"], None, session)
     database.case_snapshots.insert_one(snapshot, session=session)
     return _clean(snapshot)
 
@@ -115,13 +120,6 @@ def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
     if not target:
         raise CaseError(404, "目标版本不存在")
     return target
-
-
-def _clear_draft_annotations(database, case_id: str, session) -> None:
-    """覆盖替换整篇工作稿；挂在工作稿上的旧批注随之清除，版本批注不受影响。"""
-    database.annotations.delete_many(
-        {"caseId": case_id, "versionId": None}, session=session
-    )
 
 
 def _restore_case(database, case: dict, target: dict, session) -> dict:
@@ -149,24 +147,14 @@ def _restore_attachments(database, case_id: str, target: dict, session) -> None:
         database.attachments.insert_many(attachments, session=session)
 
 
-def _frozen_assets(database, case_id: str, session) -> tuple[list, list, list]:
-    """冻结资料区三源：附件、素材与案例来源，供版本记录与覆盖共用。"""
-    return (
-        snapshot_attachments(database, case_id, session),
-        snapshot_materials(database, case_id, session),
-        snapshot_case_sources(database, case_id, session),
-    )
-
-
 def overwrite_draft(database: Database, case: dict, user: dict, target_id, session) -> dict:
     """整篇恢复：先原子保存当前正文与批注为新版本，再恢复目标稿及其批注。"""
-    from app.modules.annotations.service import restore_draft_annotations
-
     target, locked = _prepare_restore(database, case, user, target_id, session)
     baseline = create_version(
         database, locked, user, MANUAL_VERSION_KIND, RESTORE_BASELINE_TITLE,
         locked["document"], session,
     )
+    freeze_draft_annotations(database, locked["id"], baseline["id"], session)
     restored = _restore_assets(database, locked, target, session)
     restore_draft_annotations(database, case["id"], target["id"], session)
     _append_restore_record(database, restored, user, target, session)
@@ -198,8 +186,10 @@ def _restore_assets(database, locked: dict, target: dict, session) -> dict:
 
 def _append_restore_record(database, restored: dict, user: dict, target: dict, session):
     """恢复完成后追加一条 restore 记录；document 为恢复后的目标正文。"""
-    return create_version(
+    record = create_version(
         database, restored, user, RESTORE_VERSION_KIND,
         f"恢复：{target['title']}", target["document"], session,
         restored_from_id=target["id"],
     )
+    copy_draft_annotations(database, restored["id"], record["id"], session)
+    return record

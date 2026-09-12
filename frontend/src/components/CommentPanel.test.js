@@ -250,6 +250,16 @@ it("默认列表隐藏已解决批注并从正文标记事件剔除，历史入�
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation]);
 });
 
+it("当前批注面板不显示绑定到历史版本的批注", async () => {
+  api.listAnnotations.mockResolvedValue([
+    annotation, { ...annotation, id: "historical", versionId: "cv-1", content: "历史批注" },
+  ]);
+  const wrapper = await mountPanel();
+  expect(wrapper.findAll(".comment-card")).toHaveLength(1);
+  expect(wrapper.text()).toContain("原始批注");
+  expect(wrapper.text()).not.toContain("历史批注");
+});
+
 it("直接关闭后从默认列表与正文标记移除，并可从历史入口回看", async () => {
   api.listAnnotations.mockResolvedValue([annotation]);
   api.setAnnotationStatus.mockResolvedValue({ ...resolvedDiscussion, id: annotation.id });

@@ -25,7 +25,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "case-revised", "versions-updated", "clear-writing-context", "annotations-refresh",
-  "annotation-run",
+  "annotation-run", "open-version",
 ]);
 
 const {
@@ -349,12 +349,29 @@ function statusText() {
 
 async function acceptArtifact(artifactId) {
   decideError.value = "";
+  const artifact = artifacts.value.find((item) => item.id === artifactId);
   try {
     const result = await decide(artifactId, "accepted");
     emit("case-revised", result.case);
+    await openArtifactVersion(artifact, result);
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
   }
+}
+
+async function openHistoryVersion(versionId = "", runId = "") {
+  try {
+    const history = await api.caseHistory(props.caseRecord.id);
+    const version = (history.versions || []).find((item) => (
+      (versionId && item.id === versionId) || (runId && item.sourceRunId === runId)
+    ));
+    if (version) emit("open-version", version);
+  } catch { /* 时间线刷新仍由父级处理 */ }
+}
+
+async function openArtifactVersion(artifact, result) {
+  const versionId = result?.versionId || result?.artifact?.versionId || "";
+  if (versionId || artifact?.runId) await openHistoryVersion(versionId, artifact?.runId);
 }
 
 function writtenWriteIds() {
@@ -403,6 +420,7 @@ function syncGeneratedVersions() {
   const fresh = ids.filter((id) => !syncedVersions.has(id));
   fresh.forEach((id) => syncedVersions.add(id));
   if (fresh.length) emit("versions-updated");
+  fresh.forEach((id) => { void openHistoryVersion(id); });
 }
 
 async function refreshCaseAfterWrite() {

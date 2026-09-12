@@ -10,6 +10,7 @@ vi.mock("../api.js", () => ({
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
     agentCancel: vi.fn(), agentThreads: vi.fn(), agentUndoWrite: vi.fn(), listSkills: vi.fn(),
     getCase: vi.fn(), getPublicCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
+    caseHistory: vi.fn(),
   },
 }));
 
@@ -130,6 +131,7 @@ beforeEach(() => {
   api.agentThread.mockResolvedValue(structuredClone(snapshot));
   api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "model-a" });
   api.listSources.mockResolvedValue({ entries: [] });
+  api.caseHistory.mockResolvedValue({ versions: [] });
   api.listSkills.mockResolvedValue([
     { id: "skill-pub", versionId: "skillver-1", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" },
   ]);
@@ -149,18 +151,22 @@ it("hydrates an undone write from the server snapshot", async () => {
 
 it("notifies the workbench when a saved AI version appears", async () => {
   api.agentThread.mockResolvedValue(versionSnapshot());
+  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-1", sourceRunId: "run-1" }] });
   const wrapper = mountPanel();
   await flushPromises();
 
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+  expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-1", sourceRunId: "run-1" }]]);
 });
 
 it("notifies the workbench when a direct full write saves an AI version", async () => {
   api.agentThread.mockResolvedValue(directWriteVersionSnapshot());
+  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-2" }] });
   const wrapper = mountPanel();
   await flushPromises();
 
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+  expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-2" }]]);
 });
 
 it("refreshes the case after an in-flight write is hydrated", async () => {
@@ -998,6 +1004,7 @@ it("renders the expired artifact status after the case revision moved on", async
 function decideResult(decision) {
   return {
     artifact: { status: decision },
+    ...(decision === "accepted" ? { versionId: "cv-ai-accepted" } : {}),
     case: decision === "accepted" ? { id: "case-1", revision: 2, document: { type: "doc", content: [] } } : null,
   };
 }
@@ -1013,6 +1020,7 @@ function mountWithDecision(decision) {
 
 it("accepting the artifact calls the decision API, emits the revised case and reloads", async () => {
   const wrapper = mountWithDecision("accepted");
+  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-accepted", kind: "ai" }] });
   await flushPromises();
 
   await wrapper.get('[data-testid="agent-accept"]').trigger("click");
@@ -1020,6 +1028,7 @@ it("accepting the artifact calls the decision API, emits the revised case and re
 
   expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
   expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ id: "case-1", revision: 2 });
+  expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-accepted", kind: "ai" }]]);
   expect(api.agentThread).toHaveBeenCalledTimes(2);
   expect(wrapper.get('[data-testid="agent-artifact"]').attributes("data-artifact-status")).toBe("accepted");
 });

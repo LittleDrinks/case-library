@@ -145,15 +145,15 @@ async function assertSavedAiVersion(page, caseId) {
 async function openAiVersion(page, version) {
   await page.getByLabel("版本历史").click();
   await expect(page.getByText(`AI版本 v${version.number} · ${version.title}`)).toBeVisible();
-  await page.getByRole("button", { name: `打开 AI版本 v${version.number} · ${version.title} 版本` }).click();
+  await page.getByRole("button", { name: `查看历史版本 AI版本 v${version.number} · ${version.title}` }).click();
   await expect(page.getByText(`AI生成版本 v${version.number} · 只读`)).toBeVisible();
   await expect(page.locator(".version-paper .canvas-editor")).toHaveAttribute("contenteditable", "false");
 }
 
 async function overwriteAiVersion(page, version) {
-  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
+  await page.locator(".version-paper-actions .version-restore").click();
   await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
-  await page.getByRole("button", { name: "确认覆盖" }).click();
+  await page.getByRole("button", { name: "确认恢复", exact: true }).click();
   await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
 }
@@ -176,7 +176,7 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   await reloadAndAssertChat(page, created.id, persisted);
 });
 
-test("完整生成通过真实 Run 保存 AI 版本并可只读打开、覆盖和刷新", async ({ page }) => {
+test("完整生成通过真实 Run 保存 AI 版本并可只读打开、恢复和刷新", async ({ page }) => {
   await login(page);
   await configureChat(page);
   const created = await createCase(page);

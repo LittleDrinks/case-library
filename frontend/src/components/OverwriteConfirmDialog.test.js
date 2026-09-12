@@ -11,28 +11,29 @@ function render(overrides = {}) {
   });
 }
 
-it("覆盖警告写明内容替换、旧批注清除且其他版本不受影响", () => {
+it("恢复警告说明先保存当前稿、恢复目标讨论且其他版本不受影响", () => {
   const wrapper = render();
   const text = wrapper.get('[role="dialog"]').text();
-  expect(text).toContain("覆盖当前教师稿");
+  expect(text).toContain("恢复此版本");
   expect(text).toContain("v2 · 修改后重投");
-  expect(text).toContain("现有批注将被清除");
+  expect(text).toContain("当前正文和批注会先保存");
+  expect(text).toContain("批注讨论和状态");
   expect(text).toContain("其他历史版本不受影响");
 });
 
 it("取消只发 cancel，不发 confirm", async () => {
   const wrapper = render();
-  await wrapper.get('button[aria-label="取消覆盖"]').trigger("click");
+  await wrapper.get('button[aria-label="取消恢复"]').trigger("click");
   expect(wrapper.emitted("cancel")).toHaveLength(1);
   expect(wrapper.emitted("confirm")).toBeUndefined();
 });
 
 it("确认发 confirm；处理中禁用两个按钮", async () => {
   const wrapper = render();
-  await wrapper.get('button[aria-label="确认覆盖"]').trigger("click");
+  await wrapper.get('button[aria-label="确认恢复"]').trigger("click");
   expect(wrapper.emitted("confirm")).toHaveLength(1);
 
   const busy = render({ busy: true });
-  expect(busy.get('button[aria-label="确认覆盖"]').attributes("disabled")).toBeDefined();
-  expect(busy.get('button[aria-label="取消覆盖"]').attributes("disabled")).toBeDefined();
+  expect(busy.get('button[aria-label="确认恢复"]').attributes("disabled")).toBeDefined();
+  expect(busy.get('button[aria-label="取消恢复"]').attributes("disabled")).toBeDefined();
 });

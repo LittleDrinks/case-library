@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 
 from pymongo import DESCENDING, ReturnDocument
@@ -21,6 +22,10 @@ RESTORE_VERSION_KIND = "restore"
 FORMAL_VERSION_KINDS = (
     "submission", AI_VERSION_KIND, MANUAL_VERSION_KIND, RESTORE_VERSION_KIND,
 )
+RESTORED_ANNOTATION_FIELDS = (
+    "quote", "section", "content", "source", "from", "to", "quoteHash",
+    "revision", "status", "replies", "revisions", "anchorState",
+)
 
 
 def next_version_number(database: Database, case_id: str, session) -> int:
@@ -29,6 +34,65 @@ def next_version_number(database: Database, case_id: str, session) -> int:
         {"number": 1}, sort=[("number", DESCENDING)], session=session
     )
     return (row or {}).get("number", 0) + 1
+
+
+def snapshot_annotations(database, case_id: str, version_id, session=None) -> list[dict]:
+    rows = database.annotations.find(
+        {"caseId": case_id, "versionId": version_id}, session=session,
+    )
+    return [_snapshot_copy(row) for row in rows]
+
+
+def _snapshot_copy(row: dict) -> dict:
+    snapshot = deepcopy(row)
+    snapshot.pop("_id", None)
+    return snapshot
+
+
+def freeze_draft_annotations(database, case_id: str, version_id: str, session) -> None:
+    database.annotations.update_many(
+        {"caseId": case_id, "versionId": None},
+        {"$set": {"versionId": version_id}}, session=session,
+    )
+
+
+def copy_draft_annotations(database, case_id: str, version_id: str, session) -> None:
+    rows = database.annotations.find({"caseId": case_id, "versionId": None}, session=session)
+    copies = [_version_copy(row, case_id, version_id) for row in rows]
+    if copies:
+        database.annotations.insert_many(copies, session=session)
+
+
+def _version_copy(row: dict, case_id: str, version_id: str) -> dict:
+    copy = _snapshot_copy(row)
+    copy.update({"id": new_id("an"), "caseId": case_id, "versionId": version_id})
+    return copy
+
+
+def restore_draft_annotations(
+    database: Database, case_id: str, target_version_id: str, session,
+) -> None:
+    database.annotations.delete_many(
+        {"caseId": case_id, "versionId": None}, session=session,
+    )
+    rows = database.annotations.find(
+        {"caseId": case_id, "versionId": target_version_id}, session=session,
+    )
+    restored = [_restore_annotation(row, case_id) for row in rows]
+    if restored:
+        database.annotations.insert_many(restored, session=session)
+
+
+def _restore_annotation(row: dict, case_id: str) -> dict:
+    restored = {
+        "id": new_id("an"), "caseId": case_id, "versionId": None,
+        "restoredFromId": row["id"], "createdBy": row["createdBy"],
+        "createdAt": datetime.now(UTC).isoformat(),
+    }
+    for field in RESTORED_ANNOTATION_FIELDS:
+        if row.get(field) is not None:
+            restored[field] = deepcopy(row[field])
+    return restored
 
 
 def create_ai_version(database: Database, artifact, run, document: dict, session) -> dict | None:
@@ -81,25 +145,17 @@ def _write_eligible(case: dict | None, write: dict, run) -> bool:
 def _insert(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
     version = _record(database, case, run, document, source_revision, session)
     database.case_versions.insert_one(version, session=session)
+    copy_draft_annotations(database, case["id"], version["id"], session)
     return version
 
 
 def _record(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
-    assets = (
-        snapshot_attachments(database, case["id"], session),
-        snapshot_materials(database, case["id"], session),
-        snapshot_case_sources(database, case["id"], session),
+    version = _version_record_base(
+        database, case, AI_VERSION_KIND, case["title"], document,
+        source_revision, run.user_id, session,
     )
-    return {
-        "id": new_id("cv"), "caseId": case["id"],
-        "number": next_version_number(database, case["id"], session),
-        "kind": AI_VERSION_KIND, "title": case["title"],
-        "summary": case.get("summary", ""), "document": document,
-        "attachments": assets[0], "materials": assets[1], "caseSources": assets[2],
-        "metadata": case_metadata(case), "sourceRevision": source_revision,
-        "sourceRunId": run.id, "createdBy": run.user_id,
-        "createdAt": datetime.now(UTC).isoformat(),
-    }
+    version["sourceRunId"] = run.id
+    return version
 
 
 def create_version(
@@ -117,21 +173,35 @@ def create_version(
 def _version_record(
     database, case, user, kind, title, document, session, restored_from_id,
 ) -> dict:
-    version = {
-        "id": new_id("cv"), "caseId": case["id"],
-        "number": next_version_number(database, case["id"], session),
-        "kind": kind, "title": title,
-        "summary": case.get("summary", ""), "document": document,
-        "attachments": snapshot_attachments(database, case["id"], session),
-        "materials": snapshot_materials(database, case["id"], session),
-        "caseSources": snapshot_case_sources(database, case["id"], session),
-        "metadata": case_metadata(case), "sourceRevision": case["revision"],
-        "createdBy": user["id"],
-        "createdAt": datetime.now(UTC).isoformat(),
-    }
+    version = _version_record_base(
+        database, case, kind, title, document, case["revision"], user["id"], session,
+    )
     if restored_from_id:
         version["restoredFromId"] = restored_from_id
     return version
+
+
+def _version_assets(database, case_id: str, session) -> tuple[list, list, list]:
+    return (
+        snapshot_attachments(database, case_id, session),
+        snapshot_materials(database, case_id, session),
+        snapshot_case_sources(database, case_id, session),
+    )
+
+
+def _version_record_base(
+    database, case, kind, title, document, source_revision, created_by, session,
+) -> dict:
+    attachments, materials, case_sources = _version_assets(database, case["id"], session)
+    return {
+        "id": new_id("cv"), "caseId": case["id"],
+        "number": next_version_number(database, case["id"], session), "kind": kind,
+        "title": title, "summary": case.get("summary", ""), "document": document,
+        "attachments": attachments, "materials": materials, "caseSources": case_sources,
+        "annotations": snapshot_annotations(database, case["id"], None, session),
+        "metadata": case_metadata(case), "sourceRevision": source_revision,
+        "createdBy": created_by, "createdAt": datetime.now(UTC).isoformat(),
+    }
 
 
 def create_manual_version(
@@ -144,6 +214,7 @@ def create_manual_version(
         version = create_version(
             database, case, user, MANUAL_VERSION_KIND, title, case["document"], session,
         )
+        copy_draft_annotations(database, case_id, version["id"], session)
         _touch_manual_case(database, case_id, revision, session)
         return version
 

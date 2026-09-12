@@ -244,7 +244,9 @@ def _accept_candidate(database, case, artifact, user, session) -> dict:
 
 def _candidate_ai_version(database, case, artifact, user, session) -> dict:
     """普通候选接受：整篇替换结果冻结为独立只读 AI 版本，当前稿不动。"""
-    from app.modules.cases.versions import AI_VERSION_KIND, create_version
+    from app.modules.cases.versions import (
+        AI_VERSION_KIND, copy_draft_annotations, create_version,
+    )
 
     if case["revision"] != artifact.base_revision:
         raise CaseError(409, "正文已更新，修订候选已过期")
@@ -252,12 +254,18 @@ def _candidate_ai_version(database, case, artifact, user, session) -> dict:
     record = create_version(
         database, case, user, AI_VERSION_KIND, case["title"], document, session,
     )
-    database.case_versions.update_one(
-        {"id": record["id"]},
-        {"$set": {"sourceRunId": artifact.run_id}},
-        session=session,
-    )
+    _link_candidate_version(database, case, artifact, record, session)
     return case
+
+
+def _link_candidate_version(database, case, artifact, record, session) -> None:
+    database.case_versions.update_one(
+        {"id": record["id"]}, {"$set": {"sourceRunId": artifact.run_id}}, session=session,
+    )
+    database.agent_artifacts.update_one(
+        {"id": artifact.id}, {"$set": {"versionId": record["id"]}}, session=session,
+    )
+    copy_draft_annotations(database, case["id"], record["id"], session)
 
 
 def _revision_mapping(case, document, steps):

@@ -319,8 +319,8 @@ function renderWithRail(rail) {
   });
 }
 
-async function renderVersionWorkbench() {
-  api.getCase.mockResolvedValue(caseFixture());
+async function renderVersionWorkbench(overrides = {}) {
+  api.getCase.mockResolvedValue(caseFixture(overrides));
   const wrapper = renderWithRail(VersionRailProbe);
   await flushPromises();
   return wrapper;
@@ -343,6 +343,13 @@ test("首 Tab 固定当前教师稿，历史版本以只读 Tab 打开且可关�
   expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();
 });
 
+test("非作者打开历史版本时不显示恢复入口", async () => {
+  const wrapper = await renderVersionWorkbench({ ownerId: "other-user" });
+  await wrapper.get('[data-testid="rail-open"]').trigger("click");
+  expect(wrapper.find(".version-paper-actions .version-return").exists()).toBe(true);
+  expect(wrapper.find(".version-paper-actions .version-restore").exists()).toBe(false);
+});
+
 async function openOverwriteDialog(wrapper) {
   await wrapper.get('[data-testid="rail-open"]').trigger("click");
   await wrapper.get("button.overwrite-entry").trigger("click");
@@ -356,7 +363,7 @@ test("确认覆盖调用 overwrite 接口并回首 Tab 继续编辑", async () =
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
   expect(dialog.props("versionLabel")).toContain("v1 · 首次提交");
-  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="确认恢复"]').trigger("click");
   await flushPromises();
 
   expect(api.lifecycleCase).toHaveBeenCalledWith(
@@ -370,7 +377,7 @@ test("确认覆盖调用 overwrite 接口并回首 Tab 继续编辑", async () =
 test("取消覆盖不发任何请求且停留在只读 Tab", async () => {
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
-  await dialog.get('button[aria-label="取消覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="取消恢复"]').trigger("click");
   await flushPromises();
 
   expect(api.lifecycleCase).not.toHaveBeenCalled();
@@ -382,7 +389,7 @@ test("覆盖冲突时关闭对话框、提示并回刷服务端状态", async ()
   api.getCase.mockResolvedValue(caseFixture({ revision: 7 }));
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
-  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="确认恢复"]').trigger("click");
   await flushPromises();
 
   expect(wrapper.findComponent(OverwriteConfirmDialog).props("open")).toBe(false);
