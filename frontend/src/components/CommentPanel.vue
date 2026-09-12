@@ -8,15 +8,12 @@ import { api } from "../api.js";
 const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
-  selection: { type: Object, default: null },
   annotationRefreshToken: { type: Number, default: 0 },
-  beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits([
   "annotations", "ask-ai", "case-revised", "clear-writing-context",
 ]);
 const annotations = ref([]);
-const content = ref("");
 const error = ref("");
 const loading = ref(true);
 const saving = ref(false);
@@ -31,19 +28,6 @@ const resolvedCount = computed(() => annotations.value.filter(({ status }) => st
 const visibleAnnotations = computed(() => annotations.value.filter(({ status }) => (
   showResolved.value ? status === "resolved" : status !== "resolved"
 )));
-
-const canCompose = computed(() => Boolean(
-  props.user && (
-    (props.user.id === props.caseRecord.ownerId && props.caseRecord.workflowStatus === "draft")
-    || (props.user.role === "admin" && props.caseRecord.workflowStatus === "reviewing")
-  ),
-));
-const canCreate = computed(() => Boolean(
-  canCompose.value && props.selection?.quote && props.selection?.section
-  && props.selection?.quoteHash && props.selection?.from < props.selection?.to
-  && props.selection?.revision === props.caseRecord.revision,
-));
-const creationSource = computed(() => props.user?.role === "admin" ? "admin" : "manual");
 
 function announce() {
   emit("annotations", annotations.value.filter(({ status }) => status !== "resolved"));
@@ -73,41 +57,6 @@ async function loadAnnotations() {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
   } finally {
     if (generation === loadGeneration) loading.value = false;
-  }
-}
-
-function createPayload() {
-  const fields = ["from", "to", "quote", "quoteHash", "section", "revision"];
-  return {
-    ...Object.fromEntries(fields.map((field) => [field, props.selection[field]])),
-    content: content.value.trim(),
-    source: creationSource.value,
-  };
-}
-
-function showCreated(annotation) {
-  annotations.value = [...annotations.value.filter((row) => row.id !== annotation.id), annotation];
-  content.value = "";
-  announce();
-}
-
-async function addAnnotation() {
-  if (!canCreate.value || !content.value.trim() || saving.value) return;
-  const caseId = props.caseRecord.id;
-  saving.value = true; error.value = "";
-  try {
-    if (await props.beforeAnnotationMutation() === false) return;
-    if (!canCreate.value) return;
-    const payload = createPayload();
-    const created = await api.createAnnotation(caseId, payload, props.user.csrfToken);
-    if (caseId !== props.caseRecord.id) return;
-    emit("clear-writing-context");
-    showCreated(created);
-    await loadAnnotations();
-  } catch (caught) {
-    if (caseId === props.caseRecord.id) error.value = caught.message || "批注添加失败";
-  } finally {
-    saving.value = false;
   }
 }
 
@@ -378,12 +327,6 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
           ><RotateCcw :size="14" />重新打开</button>
         </li>
       </ol>
-    </div>
-    <div v-if="canCompose" class="comment-composer">
-      <blockquote v-if="selection?.quote">{{ selection.quote }}</blockquote>
-      <p v-if="!canCreate" class="comment-selection-hint" role="status">请先在正文中选择一段文字</p>
-      <textarea v-model="content" aria-label="批注内容" :disabled="!canCreate || saving" placeholder="选择正文后添加批注" />
-      <button type="button" :disabled="!canCreate || !content.trim() || saving" @click="addAnnotation">添加批注</button>
     </div>
     <div v-if="error && annotations.length" class="comment-inline-error" role="alert">{{ error }}</div>
   </section>

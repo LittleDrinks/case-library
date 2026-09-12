@@ -71,7 +71,9 @@ async function addReviewAnnotation(page) {
   await page.getByRole("button", { name: "添加选区批注" }).click();
   const float = page.locator(".annotation-float");
   await float.getByLabel("批注内容").fill("请明确课程目标对应的评价标准。");
+  const annotationResponse = waitForAnnotationCreate(page, currentCaseId(page));
   await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  expect((await annotationResponse).request().postDataJSON()).toMatchObject({ source: "admin" });
   await expect(float).toContainText("请明确课程目标对应的评价标准。");
 }
 
@@ -258,6 +260,22 @@ test("审核批注随退回跨轮保留并由作者解决", async ({ page }) => 
 
 test("教师可在桌面创建并在移动端刷新编辑删除手工批注", async ({ page }) => {
   await manualAnnotationScenario(page);
+});
+
+test("管理员作为草稿作者从浮窗创建手工批注", async ({ page }) => {
+  const marker = `管理员草稿批注 ${Date.now()}`;
+  await login(page, "admin", "admin123");
+  const created = await createCase(page.context().request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  await selectManualAnnotation(page, marker);
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("管理员作者意见");
+  const annotationResponse = waitForAnnotationCreate(page, created.id);
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  const response = await annotationResponse;
+  expect(response.ok()).toBe(true);
+  expect(response.request().postDataJSON()).toMatchObject({ quote: marker, source: "manual" });
 });
 
 test("选区失焦时浮窗保持淡红高亮，取消后清除临时标记", async ({ page }) => {

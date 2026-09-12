@@ -56,8 +56,7 @@ function positionTrigger(context) {
 }
 
 function clearSelection() {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
-  selectionFrame = 0;
+  cancelSelectionFrame();
   selectionBlocked = true;
   selectionRequest += 1;
   selection.value = null;
@@ -79,7 +78,7 @@ function collapseEditorSelection() {
   ));
 }
 
-// 状态观察：选区无效时只丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
+// 状态观察：原生选区变化先丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
 // selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
 // 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
 // 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
@@ -95,30 +94,45 @@ function clearCapturedSelection() {
   emit("writing-context", null);
 }
 
+function cancelSelectionFrame() {
+  if (!selectionFrame) return;
+  cancelAnimationFrame(selectionFrame);
+  selectionFrame = 0;
+}
+
 function validSelection(activeEditor) {
   const { from, to } = activeEditor.state.selection;
   const { $from, $to } = activeEditor.state.selection;
   return from < to && $from.sameParent($to) && $from.parent.isTextblock;
 }
 
-async function captureSelection({ editor: activeEditor }) {
-  const context = currentContext(activeEditor);
-  flushAnnotationRefresh(activeEditor);
-  if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()
-    || selectionNeedsSync(activeEditor)) {
-    discardSelection();
-    return;
-  }
-  selectionBlocked = false;
-  const request = ++selectionRequest;
-  clearCapturedSelection();
-  const quoteHash = await hashQuote(context.quote);
-  if (request !== selectionRequest || selectionBlocked) return;
+function selectionIsCapturable(activeEditor, context) {
+  return props.annotatable && validSelection(activeEditor) && context.quote.trim()
+    && !selectionNeedsSync(activeEditor);
+}
+
+function publishSelection(context, quoteHash) {
   const captured = { ...context, revision: props.revision, quoteHash };
   selection.value = captured;
   emit("selection", captured);
   emit("writing-context", captured);
   positionTrigger(context);
+}
+
+async function captureSelection({ editor: activeEditor }) {
+  const context = currentContext(activeEditor);
+  flushAnnotationRefresh(activeEditor);
+  if (!selectionIsCapturable(activeEditor, context)) {
+    discardSelection();
+    return;
+  }
+  cancelSelectionFrame();
+  selectionBlocked = false;
+  const request = ++selectionRequest;
+  clearCapturedSelection();
+  const quoteHash = await hashQuote(context.quote);
+  if (request !== selectionRequest || selectionBlocked) return;
+  publishSelection(context, quoteHash);
 }
 
 function domSelectionRange(activeEditor = editor.value) {
@@ -161,7 +175,7 @@ async function recaptureSelection() {
 }
 
 function scheduleSelectionCapture() {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  cancelSelectionFrame();
   selectionFrame = requestAnimationFrame(() => {
     selectionFrame = 0;
     if (editorHasDomSelection()) void recaptureSelection();
@@ -170,6 +184,7 @@ function scheduleSelectionCapture() {
 
 function handleSelectionChange() {
   if (!editorHasDomSelection()) return;
+  discardSelection();
   scheduleSelectionCapture();
 }
 
@@ -373,7 +388,7 @@ onMounted(() => {
   refreshAnnotationAnchors();
 });
 onBeforeUnmount(() => {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  cancelSelectionFrame();
   window.document.removeEventListener("selectionchange", handleSelectionChange);
 });
 

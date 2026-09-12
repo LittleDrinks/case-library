@@ -80,7 +80,7 @@ function payload() {
     section: props.draft.section,
     revision: props.draft.revision,
     content: content.value.trim(),
-    source: props.user?.role === "admin" ? "admin" : "manual",
+    source: props.caseRecord.workflowStatus === "reviewing" ? "admin" : "manual",
   };
 }
 

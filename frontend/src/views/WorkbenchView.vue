@@ -470,13 +470,6 @@ async function flushAutosave() {
   return autosave.state.value === "saved";
 }
 
-async function prepareAnnotationMutation() {
-  if (!await flushAutosave()) return false;
-  await canvasEditor.value?.recaptureSelection();
-  await nextTick();
-  return true;
-}
-
 function openDraftFloat() {
   floatThread.value = null;
   floatDraft.value = annotationSelection.value;
@@ -847,11 +840,9 @@ onBeforeUnmount(() => {
           :historical="historicalVersion"
           :read-only="assistantReadOnly"
           :editable="editable"
-          :selection="annotationSelection"
           :writing-context="writingContext"
           :history-refresh-key="historyRefreshKey"
           :before-attachment-mutation="prepareContentMutation"
-          :before-annotation-mutation="prepareAnnotationMutation"
           :annotation-refresh-token="annotationRefreshToken"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"

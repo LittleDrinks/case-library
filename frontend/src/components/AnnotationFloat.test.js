@@ -67,6 +67,19 @@ it("保存意见携带完整正式锚点且不触发任何AI请求", async () =>
   expect(wrapper.emitted("saved")[0][0]).toMatchObject({ id: "annotation-1" });
 });
 
+it("管理员作为草稿作者仍以手工来源保存批注", async () => {
+  api.createAnnotation.mockResolvedValue({ ...annotation, source: "manual", createdBy: "admin-1" });
+  const adminOwner = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  const ownedDraft = { ...caseRecord, ownerId: "admin-1" };
+  const wrapper = mountFloat({ caseRecord: ownedDraft, user: adminOwner, draft: selection });
+  await wrapper.get('[aria-label="批注内容"]').setValue("管理员作者意见");
+  await wrapper.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
+  await flushPromises();
+  expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+    content: "管理员作者意见", source: "manual",
+  }), "csrf");
+});
+
 it("取消关闭浮窗并清除挂起状态", async () => {
   const wrapper = mountFloat({ draft: selection });
   const cancel = wrapper.findAll("button").find((button) => button.text() === "取消");

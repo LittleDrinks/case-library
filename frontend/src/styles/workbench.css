@@ -381,8 +381,6 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-chat-panel .agent-answer td { padding: 9px 8px; border-bottom: 1px solid #e8dfd0; color: #9b8769; text-align: left; }
 .agent-chat-panel .agent-answer blockquote { margin: 16px 0; padding: 10px 12px; border-left: 2px solid #ceb78e; border-radius: 0 5px 5px 0; background: #f4eee3; }
 .agent-chat-panel .agent-answer blockquote p { color: #a08b6d; font-size: 11px; }
-.comment-composer { position: relative; display: grid; gap: 6px; flex: none; padding: 0 12px 12px; }
-.comment-composer textarea { width: 100%; min-height: 72px; padding: 10px 42px 10px 11px; border: 1px solid var(--line); border-radius: 6px; resize: none; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }
 .comment-view-switch { display: flex; gap: 4px; }
@@ -394,7 +392,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .comment-card header span { overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .comment-card header b { flex: none; color: var(--amber); font-size: 11px; font-weight: 600; }
 .comment-card header b.resolved { color: var(--green); }
-.comment-card blockquote, .comment-composer blockquote { margin: 0; padding: 7px 9px; border-left: 2px solid var(--brand); background: var(--paper); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.comment-card blockquote { margin: 0; padding: 7px 9px; border-left: 2px solid var(--brand); background: var(--paper); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
 .comment-card > p { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.65; }
 .comment-revisions { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
 .comment-revisions > b { color: var(--ink-2); font-size: 12px; }
@@ -412,12 +410,8 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .comment-replies svg { flex: none; margin-top: 2px; color: var(--ink-3); }
 .comment-thread-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .comment-thread-actions input { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; }
-.comment-thread-actions button, .comment-status-action, .comment-composer button { display: flex; min-height: 32px; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); }
+.comment-thread-actions button, .comment-status-action { display: flex; min-height: 32px; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); }
 .comment-status-action { justify-self: start; color: var(--brand); }
-.comment-composer { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
-.comment-composer textarea { padding-right: 11px; }
-.comment-composer button { border-color: var(--brand); background: var(--brand); color: #fff; }
-.comment-selection-hint { margin: 0; color: var(--ink-3); font-size: 12px; }
 .comment-inline-error { padding: 8px 12px; border-top: 1px solid #edc5cb; color: var(--red); font-size: 12px; }
 .folder-tabs { display: flex; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .folder-tabs button { flex: 1; padding: 7px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); }

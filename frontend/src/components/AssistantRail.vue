@@ -21,10 +21,8 @@ const props = defineProps({
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
-  selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
   annotationRefreshToken: { type: Number, default: 0 },
-  beforeAnnotationMutation: { type: Function, default: async () => true },
 });
 const emit = defineEmits([
   "select", "toggle", "case-refreshed", "mutation-state",
@@ -88,9 +86,7 @@ function select(tab) {
       v-else-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"
       :user="user"
-      :selection="selection"
       :annotation-refresh-token="annotationRefreshToken"
-      :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"
       @ask-ai="emit('ask-ai', $event)"
       @case-revised="emit('case-revised', $event)"
