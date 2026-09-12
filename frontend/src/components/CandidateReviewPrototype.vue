@@ -20,6 +20,27 @@ let nextThreadId = 1;
 const threadQuote = ref(""), overwriteOpen = ref(false), savedOriginal = ref(clone(props.caseRecord.document));
 const savedTimes = ref({});
 const popup = ref({ left: "0px", top: "0px" }), status = ref("");
+const commentPosition = ref({ left: "400px", top: "230px" });
+function positionComment(rect) {
+  const paper = document.querySelector(".prototype-paper")?.getBoundingClientRect();
+  const width = Math.min(390, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(rect?.right ?? paper?.right - width, (paper?.right ?? window.innerWidth) - width - 16, window.innerWidth - width - 12));
+  const top = Math.max(150, Math.min((rect?.bottom ?? 220) + 10, window.innerHeight - 380));
+  commentPosition.value = { left: `${left}px`, top: `${top}px`, maxHeight: `${window.innerHeight - top - 16}px` };
+}
+function locateComment(quote) {
+  const paper = document.querySelector(".prototype-paper .tiptap");
+  const walker = document.createTreeWalker(paper || document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while (quote && (node = walker.nextNode())) {
+    const start = node.textContent.indexOf(quote);
+    if (start < 0) continue;
+    node.parentElement.scrollIntoView({ block: "center" });
+    const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + quote.length);
+    positionComment(range.getBoundingClientRect()); return;
+  }
+  positionComment();
+}
 const variant = computed(() => route.query.variant === "B" ? "B" : "A");
 const historyExpanded = ref(false), versionName = ref(""), creatingVersion = ref(false);
 let hideTimer;
@@ -156,6 +177,8 @@ function seedExampleComment() {
   ] };
 }
 function startComment(section, quote) {
+  const selection = window.getSelection();
+  positionComment(selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null);
   selected.value = section; activeThread.value = null; draftAnchor.value = { section, quote };
   threadQuote.value = quote; note.value = ""; floating.value = true; selectionQuote.value = "";
 }
@@ -190,6 +213,7 @@ function decideRevision(message, value) {
 }
 function openThread(id) {
   const thread = shownThreads.value[id]; if (!thread) return;
+  locateComment(thread.quote);
   selected.value = thread.section; activeThread.value = id; draftAnchor.value = null;
   floating.value = true; selectionQuote.value = ""; threadQuote.value = ""; note.value = "";
 }
@@ -247,7 +271,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
     </aside>
     <div v-if="selectionQuote" class="prototype-selection-toolbar" :style="popup" @mousedown.prevent><button @click="copySelection">复制</button><button @click="askAI">就此提问</button><button v-if="tab === 'original'" @click="leaveSelectionComment">留批注</button><button v-if="tab === 'original' && commentThreads[activeThread]?.stale" @click="commentThreads[activeThread].quote = selectionQuote; commentThreads[activeThread].stale = false; selectionQuote = ''">重新定位此批注</button></div>
     <div v-if="overwriteOpen" class="prototype-pick-backdrop"><section class="prototype-pick-dialog" role="dialog" aria-label="覆盖版本警告"><h2>恢复“{{ activeTitle }}”？</h2><p class="overwrite-warning">先保存当前正文和批注，再恢复所选历史版本的正文、批注与讨论状态。恢复操作会新增记录，已有历史保持不变。</p><button class="prototype-primary" @click="overwriteVersion">确认恢复</button><button @click="overwriteOpen = false">取消</button><small class="prototype-muted">原型操作，仅本页生效</small></section></div>
-    <aside v-if="floating" class="prototype-comment-float" role="dialog" aria-label="批注与关联修改"><header><div><MessageSquareText :size="16" /><b>{{ draftAnchor ? "新增批注" : "批注与修改" }}</b></div><button aria-label="关闭批注浮窗" @click="floating = false"><X :size="17" /></button></header><div class="prototype-comment-scroll"><small class="prototype-muted">{{ current?.title }}</small><p v-if="draftAnchor" class="prototype-muted">输入意见并发送后，这条批注才会加入列表。</p><article v-for="(message, i) in threadMessages" :key="i" :class="['prototype-thread-message', message.kind === 'human' ? 'comment-opinion' : 'comment-revision']"><b v-if="message.kind === 'human'">我</b><b v-else><Sparkles :size="14" />AI · 第 {{ message.round }} 轮修改</b><blockquote v-if="message.quote" class="thread-message-quote">{{ message.quote }}</blockquote><p>{{ message.text }}</p><template v-if="message.kind === 'revision'"><details><summary>修改依据与说明</summary><p>针对上方意见调整表达。淡红删除线标出原词，淡绿下划线标出建议用词。采用前保留原文。</p><p>进一步讨论时可以引用具体文字，说明要保留或继续修改的部分。每轮意见与建议都会保留；最新建议等待确认，先前建议仍可回看。这里是交互演示，未调用真实 AI。</p></details><div v-if="message.decision === 'pending' && tab === 'original'" class="prototype-floating-decisions"><button class="prototype-primary" :disabled="commentThreads[activeThread]?.stale" @click="decideRevision(message, 'accepted')"><Check :size="14" />采用并解决</button><button @click="decideRevision(message, 'rejected')">保留原文</button></div><small v-else class="prototype-resolution">{{ message.decision === 'accepted' ? '已接受修改' : message.decision === 'rejected' ? '已保留原文' : '已有后续建议 · 保留供回看' }}</small></template></article></div><footer v-if="tab === 'original'"><p v-if="commentThreads[activeThread]?.stale" class="overwrite-warning">原文已变化，请重新选中文字定位。</p><div v-if="threadQuote" class="prototype-quote-chip"><span>引用选区：{{ threadQuote.slice(0, 120) }}</span><button @click="threadQuote = ''"><X :size="13" /></button></div><textarea v-model="note" aria-label="原型批注意见" placeholder="补充意见，或继续询问 AI…" /><div class="comment-compose-actions"><button v-if="activeThread" class="comment-resolve" @click="resolveThread"><Check :size="13" />解决批注</button><button class="comment-save" :disabled="!note.trim()" @click="addOpinion(false)">保存意见</button><button class="prototype-primary" :disabled="!note.trim()" @click="addOpinion(true)"><Sparkles :size="13" />询问 AI</button></div></footer></aside>
+    <aside v-if="floating" class="prototype-comment-float" :style="commentPosition" role="dialog" aria-label="批注与关联修改"><header><div><MessageSquareText :size="16" /><b>{{ draftAnchor ? "新增批注" : "批注与修改" }}</b></div><button aria-label="关闭批注浮窗" @click="floating = false"><X :size="17" /></button></header><div class="prototype-comment-scroll"><small class="prototype-muted">{{ current?.title }}</small><p v-if="draftAnchor" class="prototype-muted">输入意见并发送后，这条批注才会加入列表。</p><article v-for="(message, i) in threadMessages" :key="i" :class="['prototype-thread-message', message.kind === 'human' ? 'comment-opinion' : 'comment-revision']"><b v-if="message.kind === 'human'">我</b><b v-else><Sparkles :size="14" />AI · 第 {{ message.round }} 轮修改</b><blockquote v-if="message.quote" class="thread-message-quote">{{ message.quote }}</blockquote><p>{{ message.text }}</p><template v-if="message.kind === 'revision'"><details><summary>修改依据与说明</summary><p>针对上方意见调整表达。淡红删除线标出原词，淡绿下划线标出建议用词。采用前保留原文。</p><p>进一步讨论时可以引用具体文字，说明要保留或继续修改的部分。每轮意见与建议都会保留；最新建议等待确认，先前建议仍可回看。这里是交互演示，未调用真实 AI。</p></details><div v-if="message.decision === 'pending' && tab === 'original'" class="prototype-floating-decisions"><button class="prototype-primary" :disabled="commentThreads[activeThread]?.stale" @click="decideRevision(message, 'accepted')"><Check :size="14" />采用并解决</button><button @click="decideRevision(message, 'rejected')">保留原文</button></div><small v-else class="prototype-resolution">{{ message.decision === 'accepted' ? '已接受修改' : message.decision === 'rejected' ? '已保留原文' : '已有后续建议 · 保留供回看' }}</small></template></article></div><footer v-if="tab === 'original'"><p v-if="commentThreads[activeThread]?.stale" class="overwrite-warning">原文已变化，请重新选中文字定位。</p><div v-if="threadQuote" class="prototype-quote-chip"><span>引用选区：{{ threadQuote.slice(0, 120) }}</span><button @click="threadQuote = ''"><X :size="13" /></button></div><textarea v-model="note" aria-label="原型批注意见" placeholder="补充意见，或继续询问 AI…" /><div class="comment-compose-actions"><button v-if="activeThread" class="comment-resolve" @click="resolveThread"><Check :size="13" />解决批注</button><button class="comment-save" :disabled="!note.trim()" @click="addOpinion(false)">保存意见</button><button class="prototype-primary" :disabled="!note.trim()" @click="addOpinion(true)"><Sparkles :size="13" />询问 AI</button></div></footer></aside>
     <div class="prototype-switcher"><span>交互原型 · {{ versions.length }} 版本 / {{ Object.keys(commentThreads).length }} 批注 · {{ tab === "original" ? "当前稿" : "只读历史" }}</span><button @click="switchVariant"><ArrowLeft :size="16" /></button><b>{{ variant === 'A' ? 'A · 版本与编辑' : 'B · 浮动批注精修' }}</b><button @click="switchVariant"><ArrowRight :size="16" /></button></div>
   </div>
 </template>
@@ -456,4 +480,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .comment-resolve { margin-right:auto; background:transparent; color:#8b8174; border:0; }
 .comment-save { background:white; border:1px solid #e7dfd3; color:#716658; }
 .comment-compose-actions button:disabled { opacity:.4; }
+
+.prototype-comment-float { right:auto; max-height:min(560px, calc(100vh - 170px)); width:min(390px, calc(100vw - 24px)); }
 </style>
