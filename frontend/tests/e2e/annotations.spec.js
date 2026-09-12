@@ -71,7 +71,7 @@ async function addReviewAnnotation(page) {
   await page.getByRole("button", { name: "添加选区批注" }).click();
   const float = page.locator(".annotation-float");
   await float.getByLabel("批注内容").fill("请明确课程目标对应的评价标准。");
-  const annotationResponse = waitForAnnotationCreate(page, currentCaseId(page));
+  const annotationResponse = waitForAnnotationCreate(page, page.url().split("/").pop());
   await float.getByRole("button", { name: "保存意见", exact: true }).click();
   expect((await annotationResponse).request().postDataJSON()).toMatchObject({ source: "admin" });
   await expect(float).toContainText("请明确课程目标对应的评价标准。");
