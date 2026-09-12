@@ -371,15 +371,7 @@ def _assert_restore_history(
     assert restored[version_note["id"]]["id"] != version_note["id"]
 
 
-def test_restore_keeps_current_work_and_appends_restore_record(client: TestClient) -> None:
-    auth = login(client).json()
-    case, changed, annotated_version, draft_note, version_note = _restore_current_work(
-        client, auth,
-    )
-    _assert_restore_history(
-        client, case, changed, annotated_version, draft_note, version_note,
-    )
-
+def _assert_restored_submission_annotations(client, case, draft_note, version_note) -> None:
     notes = client.get(f"/api/cases/{case['id']}/annotations").json()
     by_id = {row["id"]: row for row in notes}
     assert draft_note["id"] not in by_id
@@ -394,6 +386,17 @@ def test_restore_keeps_current_work_and_appends_restore_record(client: TestClien
     assert restored_review["id"] != version_note["id"]
     assert restored_draft.get("versionId") is None
     assert restored_review.get("versionId") is None
+
+
+def test_restore_keeps_current_work_and_appends_restore_record(client: TestClient) -> None:
+    auth = login(client).json()
+    case, changed, annotated_version, draft_note, version_note = _restore_current_work(
+        client, auth,
+    )
+    _assert_restore_history(
+        client, case, changed, annotated_version, draft_note, version_note,
+    )
+    _assert_restored_submission_annotations(client, case, draft_note, version_note)
     fresh = client.get(f"/api/cases/{case['id']}").json()
     assert fresh["document"] == annotated_version["document"]
 
