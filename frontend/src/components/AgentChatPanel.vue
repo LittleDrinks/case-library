@@ -251,12 +251,8 @@ watch(() => threadState.value?.latestRun?.status, (current, previous) => {
     pendingWriteSync = false;
     void refreshCaseAfterWrite();
   }
-  if (threadSwitchDepth || !pendingHydratedVersionIds.size) return;
-  const ids = [...pendingHydratedVersionIds];
-  pendingHydratedVersionIds.clear();
-  ids.forEach((id) => {
-    void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
-  });
+  if (threadSwitchDepth) return;
+  drainPendingHydratedVersions();
 });
 watch(artifacts, () => {
   void refreshSources();
@@ -329,9 +325,21 @@ function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
 }
 
-function finishThreadSwitch() {
+function drainPendingHydratedVersions() {
+  if (!pendingHydratedVersionIds.size
+    || !["completed", "failed", "cancelled"].includes(threadState.value?.latestRun?.status)) return;
+  const ids = [...pendingHydratedVersionIds];
+  pendingHydratedVersionIds.clear();
+  ids.forEach((id) => {
+    void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
+  });
+}
+
+function finishThreadSwitch(previousThreadId) {
   threadSwitchDepth -= 1;
-  if (!threadSwitchDepth) syncGeneratedVersions();
+  if (threadSwitchDepth) return;
+  syncGeneratedVersions();
+  if (previousThreadId === threadId.value) drainPendingHydratedVersions();
 }
 
 async function restoreScroll(id) {
@@ -342,14 +350,14 @@ async function restoreScroll(id) {
 async function chooseThread(id) {
   stopThreadsPolling();
   if (id !== threadId.value) {
+    const previousThreadId = threadId.value;
     threadSwitchDepth += 1;
     versionOpenGeneration += 1;
-    pendingHydratedVersionIds.clear();
     emit("clear-writing-context");
     try {
       await selectThread(id);
     } finally {
-      finishThreadSwitch();
+      finishThreadSwitch(previousThreadId);
     }
   }
   mode.value = "chat";
@@ -358,14 +366,14 @@ async function chooseThread(id) {
 
 async function addThread() {
   stopThreadsPolling();
+  const previousThreadId = threadId.value;
   threadSwitchDepth += 1;
   versionOpenGeneration += 1;
-  pendingHydratedVersionIds.clear();
   emit("clear-writing-context");
   try {
     await createThread();
   } finally {
-    finishThreadSwitch();
+    finishThreadSwitch(previousThreadId);
   }
   mode.value = "chat";
   await restoreScroll(threadId.value);
