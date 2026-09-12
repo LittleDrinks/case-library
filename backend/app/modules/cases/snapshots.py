@@ -23,9 +23,7 @@ from app.modules.cases.versions import (
     FORMAL_VERSION_KINDS,
     MANUAL_VERSION_KIND,
     RESTORE_VERSION_KIND,
-    copy_draft_annotations,
     create_version,
-    freeze_draft_annotations,
     restore_draft_annotations,
     snapshot_annotations,
 )
@@ -106,7 +104,7 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
     materials = snapshot_materials(database, case["id"], session)
     case_sources = snapshot_case_sources(database, case["id"], session)
     snapshot = _record(case, user, attachments, materials, case_sources, kind)
-    snapshot["annotations"] = snapshot_annotations(database, case["id"], None, session)
+    snapshot["annotations"] = snapshot_annotations(database, case["id"], session)
     database.case_snapshots.insert_one(snapshot, session=session)
     return _clean(snapshot)
 
@@ -154,9 +152,8 @@ def overwrite_draft(database: Database, case: dict, user: dict, target_id, sessi
         database, locked, user, MANUAL_VERSION_KIND, RESTORE_BASELINE_TITLE,
         locked["document"], session,
     )
-    freeze_draft_annotations(database, locked["id"], baseline["id"], session)
     restored = _restore_assets(database, locked, target, session)
-    restore_draft_annotations(database, case["id"], target["id"], session)
+    restore_draft_annotations(database, case["id"], target, session)
     _append_restore_record(database, restored, user, target, session)
     return {
         "case": internal_case_view(restored, user),
@@ -191,5 +188,4 @@ def _append_restore_record(database, restored: dict, user: dict, target: dict, s
         f"恢复：{target['title']}", target["document"], session,
         restored_from_id=target["id"],
     )
-    copy_draft_annotations(database, restored["id"], record["id"], session)
     return record

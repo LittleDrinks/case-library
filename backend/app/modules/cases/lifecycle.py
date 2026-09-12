@@ -21,7 +21,6 @@ from app.modules.case_materials.service import snapshot_materials
 from app.modules.search.outbox import SearchOutbox
 from app.modules.cases.versions import (
     FORMAL_VERSION_KINDS,
-    freeze_draft_annotations,
     next_version_number,
     snapshot_annotations,
 )
@@ -76,7 +75,7 @@ def _version(
         "kind": "submission", "title": case["title"],
         "summary": case.get("summary", ""), "document": case["document"],
         "attachments": attachments, "materials": materials,
-        "caseSources": case_sources, "annotations": snapshot_annotations(database, case["id"], None, session),
+        "caseSources": case_sources, "annotations": snapshot_annotations(database, case["id"], session),
         "metadata": case_metadata(case),
         "sourceRevision": case["revision"], "createdBy": user["id"], "createdAt": now,
     }
@@ -113,7 +112,6 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.case_versions.insert_one(version, session=session)
-    freeze_draft_annotations(database, case["id"], version["id"], session)
     database.lifecycle_events.insert_one(event, session=session)
     return _result(updated, version, event, user)
 
@@ -154,6 +152,13 @@ def _clean(record: dict) -> dict:
         cleaned["materials"] = []
     if "caseSources" not in cleaned:
         cleaned["caseSources"] = []
+    return cleaned
+
+
+def _history_version(record: dict, case: dict, user: dict) -> dict:
+    cleaned = _clean(record)
+    if case["ownerId"] != user["id"]:
+        cleaned["annotations"] = []
     return cleaned
 
 
@@ -543,6 +548,6 @@ def get_history(database: Database, case_id: str, user: dict) -> dict:
     events = database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1)
     return {
         "caseId": case_id,
-        "versions": [_clean(row) for row in versions],
+        "versions": [_history_version(row, case, user) for row in versions],
         "events": [_clean(row) for row in events],
     }

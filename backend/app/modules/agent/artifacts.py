@@ -242,15 +242,12 @@ def _candidate_ai_version(database, case, artifact, user, session) -> dict:
 
 
 def _link_candidate_version(database, case, artifact, record, session) -> None:
-    from app.modules.cases.versions import copy_draft_annotations
-
     database.case_versions.update_one(
         {"id": record["id"]}, {"$set": {"sourceRunId": artifact.run_id}}, session=session,
     )
     database.agent_artifacts.update_one(
         {"id": artifact.id}, {"$set": {"versionId": record["id"]}}, session=session,
     )
-    copy_draft_annotations(database, case["id"], record["id"], session)
 
 
 def _resolved_document(case: dict, artifact: AgentArtifact) -> tuple[dict, list[dict]]:

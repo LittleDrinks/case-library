@@ -36,9 +36,9 @@ def next_version_number(database: Database, case_id: str, session) -> int:
     return (row or {}).get("number", 0) + 1
 
 
-def snapshot_annotations(database, case_id: str, version_id, session=None) -> list[dict]:
+def snapshot_annotations(database, case_id: str, session=None) -> list[dict]:
     rows = database.annotations.find(
-        {"caseId": case_id, "versionId": version_id}, session=session,
+        {"caseId": case_id, "versionId": None}, session=session,
     )
     return [_snapshot_copy(row) for row in rows]
 
@@ -49,36 +49,21 @@ def _snapshot_copy(row: dict) -> dict:
     return snapshot
 
 
-def freeze_draft_annotations(database, case_id: str, version_id: str, session) -> None:
-    database.annotations.update_many(
-        {"caseId": case_id, "versionId": None},
-        {"$set": {"versionId": version_id}}, session=session,
-    )
-
-
-def copy_draft_annotations(database, case_id: str, version_id: str, session) -> None:
-    rows = database.annotations.find({"caseId": case_id, "versionId": None}, session=session)
-    copies = [_version_copy(row, case_id, version_id) for row in rows]
-    if copies:
-        database.annotations.insert_many(copies, session=session)
-
-
-def _version_copy(row: dict, case_id: str, version_id: str) -> dict:
-    copy = _snapshot_copy(row)
-    copy.update({"id": new_id("an"), "caseId": case_id, "versionId": version_id})
-    return copy
-
-
 def restore_draft_annotations(
-    database: Database, case_id: str, target_version_id: str, session,
+    database: Database, case_id: str, target: dict, session,
 ) -> None:
     database.annotations.delete_many(
         {"caseId": case_id, "versionId": None}, session=session,
     )
-    rows = database.annotations.find(
-        {"caseId": case_id, "versionId": target_version_id}, session=session,
-    )
-    restored = [_restore_annotation(row, case_id) for row in rows]
+    if target["kind"] == "submission":
+        rows = database.annotations.find(
+            {"caseId": case_id, "versionId": target["id"],
+             "source": {"$in": ["admin", "ai"]}}, session=session,
+        )
+        snapshots = list(rows)
+    else:
+        snapshots = target.get("annotations", [])
+    restored = [_restore_annotation(row, case_id) for row in snapshots]
     if restored:
         database.annotations.insert_many(restored, session=session)
 
@@ -145,7 +130,6 @@ def _write_eligible(case: dict | None, write: dict, run) -> bool:
 def _insert(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
     version = _record(database, case, run, document, source_revision, session)
     database.case_versions.insert_one(version, session=session)
-    copy_draft_annotations(database, case["id"], version["id"], session)
     return version
 
 
@@ -198,7 +182,7 @@ def _version_record_base(
         "number": next_version_number(database, case["id"], session), "kind": kind,
         "title": title, "summary": case.get("summary", ""), "document": document,
         "attachments": attachments, "materials": materials, "caseSources": case_sources,
-        "annotations": snapshot_annotations(database, case["id"], None, session),
+        "annotations": snapshot_annotations(database, case["id"], session),
         "metadata": case_metadata(case), "sourceRevision": source_revision,
         "createdBy": created_by, "createdAt": datetime.now(UTC).isoformat(),
     }
@@ -214,7 +198,6 @@ def create_manual_version(
         version = create_version(
             database, case, user, MANUAL_VERSION_KIND, title, case["document"], session,
         )
-        copy_draft_annotations(database, case_id, version["id"], session)
         _touch_manual_case(database, case_id, revision, session)
         return version
 

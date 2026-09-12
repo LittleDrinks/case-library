@@ -309,24 +309,26 @@ def test_only_one_proposal_per_run(client: TestClient) -> None:
 # ---- 决定门禁、幂等、相反决定 ----
 
 
+def _assert_repeated_accept_conflicts(database, case, thread, artifact, user) -> None:
+    first = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, user, "accepted",
+    )
+    replay = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, user, "accepted",
+    )
+    assert first["artifact"].status == replay["artifact"].status == "accepted"
+    with pytest.raises(CaseError) as excinfo:
+        artifacts.decide_artifact(database, case["id"], thread.id, artifact.id, user, "rejected")
+    assert excinfo.value.status_code == 409
+
+
 def test_repeat_same_decision_replays_opposite_conflicts(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database, repository, thread, run = _locked_run(client, auth, case, SECOND)
     artifact = _propose(database, case, run)
     _publish(database, repository, run, artifact)
-    first = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    replay = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert first["artifact"].status == replay["artifact"].status == "accepted"
-    with pytest.raises(CaseError) as excinfo:
-        artifacts.decide_artifact(
-            database, case["id"], thread.id, artifact.id, auth["user"], "rejected",
-        )
-    assert excinfo.value.status_code == 409
+    _assert_repeated_accept_conflicts(database, case, thread, artifact, auth["user"])
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
     assert database.case_versions.count_documents({"caseId": case["id"], "kind": "ai"}) == 1
 
@@ -354,6 +356,18 @@ def test_accept_replaces_only_selected_range(client: TestClient) -> None:
     _assert_range_accepted(database, case, thread, artifact, auth)
 
 
+def _assert_mapped_acceptance(database, case, thread, artifact, auth) -> None:
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+    assert result["artifact"].version_id
+    current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
+    assert current["revision"] == 2
+    version = database.case_versions.find_one({"id": result["artifact"].version_id}, {"_id": 0})
+    assert version["kind"] == "ai" and version["document"] != current["document"]
+
+
 def test_accept_maps_pending_artifact_after_unrelated_save(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
@@ -365,15 +379,7 @@ def test_accept_maps_pending_artifact_after_unrelated_save(client: TestClient) -
     row = database.agent_artifacts.find_one({"id": artifact.id})
     assert row["baseRevision"] == 2
     assert row["target"] == {"from": 13, "to": 21, "quote": PARAGRAPHS[1]}
-    result = artifacts.decide_artifact(
-        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
-    )
-    assert result["artifact"].status == "accepted"
-    assert result["artifact"].version_id
-    current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
-    assert current["revision"] == 2
-    version = database.case_versions.find_one({"id": result["artifact"].version_id}, {"_id": 0})
-    assert version["kind"] == "ai" and version["document"] != current["document"]
+    _assert_mapped_acceptance(database, case, thread, artifact, auth)
 
 
 def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
