@@ -29,7 +29,6 @@ from app.modules.agent.repository import (
 )
 from app.modules.agent.source_reader import revalidate_sources
 from app.modules.cases.service import CaseError, case_view
-from app.modules.cases.snapshots import record_snapshot
 
 
 def _now() -> datetime:
@@ -223,30 +222,14 @@ def _verify_writer(case: dict, user: dict) -> None:
         raise CaseError(409, "案例当前不可编辑")
 
 
-def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, session) -> dict:
-    if case["revision"] != artifact.base_revision:
-        raise CaseError(409, "正文已更新，修订候选已过期")
-    document, steps = _resolved_document(case, artifact)
-    mapping = _revision_mapping(case, document, steps)
-    record_snapshot(database, case, user, "pre_agent_decision", session)
-    return _commit_revision(database, case, document, steps, mapping, artifact.id, session)
-
-
 def _accept_candidate(database, case, artifact, user, session) -> dict:
-    """接受候选：批注修订仍并入当前稿；普通候选独立成只读 AI 版本。
-
-    普通候选接受不改当前教师稿，revision 不动；文档重建基于运行基线正文。
-    """
-    if artifact.annotation_id:
-        return _apply_revision(database, case, artifact, user, session)
+    """普通候选独立成只读 AI 版本，不改当前教师稿或 revision。"""
     return _candidate_ai_version(database, case, artifact, user, session)
 
 
 def _candidate_ai_version(database, case, artifact, user, session) -> dict:
     """普通候选接受：整篇替换结果冻结为独立只读 AI 版本，当前稿不动。"""
-    from app.modules.cases.versions import (
-        AI_VERSION_KIND, copy_draft_annotations, create_version,
-    )
+    from app.modules.cases.versions import AI_VERSION_KIND, create_version
 
     if case["revision"] != artifact.base_revision:
         raise CaseError(409, "正文已更新，修订候选已过期")
@@ -259,6 +242,8 @@ def _candidate_ai_version(database, case, artifact, user, session) -> dict:
 
 
 def _link_candidate_version(database, case, artifact, record, session) -> None:
+    from app.modules.cases.versions import copy_draft_annotations
+
     database.case_versions.update_one(
         {"id": record["id"]}, {"$set": {"sourceRunId": artifact.run_id}}, session=session,
     )
@@ -266,30 +251,6 @@ def _link_candidate_version(database, case, artifact, record, session) -> None:
         {"id": artifact.id}, {"$set": {"versionId": record["id"]}}, session=session,
     )
     copy_draft_annotations(database, case["id"], record["id"], session)
-
-
-def _revision_mapping(case, document, steps):
-    from app.modules.annotations.service import document_mapping
-
-    return document_mapping(case["document"], document, steps)
-
-
-def _commit_revision(database, case, document, steps, mapping, artifact_id, session) -> dict:
-    updated = database.cases.find_one_and_update(
-        {"id": case["id"], "revision": case["revision"]},
-        {"$set": {"document": document, "updatedAt": _now().isoformat()},
-         "$inc": {"revision": 1}},
-        return_document=ReturnDocument.AFTER, session=session,
-    )
-    if not updated:
-        raise CaseError(409, "案例状态已变化")
-    from app.modules.annotations.service import reconcile_document_annotations
-
-    reconcile_document_annotations(
-        database, case["id"], case["document"], document, updated["revision"],
-        steps, session, mapping, artifact_id,
-    )
-    return updated
 
 
 def _resolved_document(case: dict, artifact: AgentArtifact) -> tuple[dict, list[dict]]:

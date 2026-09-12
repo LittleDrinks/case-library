@@ -195,7 +195,7 @@ def _formal_version_copy(client, auth, case, database, live, artifact):
     )
     assert frozen and frozen["id"] != live["id"]
     assert frozen["revisions"] == live["revisions"]
-    return version
+    return version, frozen
 
 
 def _reject_ai_artifact(client, auth, case, artifact) -> None:
@@ -213,14 +213,14 @@ def test_formal_version_keeps_independent_annotation_revisions(client: TestClien
     auth = login(client).json()
     case, annotation = _annotation_case(client, auth)
     database, live, artifact = _real_ai_revision(client, auth, case, annotation)
-    version = _formal_version_copy(client, auth, case, database, live, artifact)
+    version, frozen_before = _formal_version_copy(client, auth, case, database, live, artifact)
     _reject_ai_artifact(client, auth, case, artifact)
     live_after = database.annotations.find_one({"id": annotation["id"]}, {"_id": 0})
     assert live_after["revisions"][0]["status"] == "rejected"
     frozen_after = database.annotations.find_one(
         {"caseId": case["id"], "versionId": version["id"]}, {"_id": 0},
     )
-    assert frozen_after and frozen_after["revisions"] == live["revisions"]
+    assert frozen_after and frozen_after["revisions"] == frozen_before["revisions"]
 
 
 def _assert_manual_version_owner_only(client, case) -> None:
