@@ -55,14 +55,13 @@ def restore_draft_annotations(
     database.annotations.delete_many(
         {"caseId": case_id, "versionId": None}, session=session,
     )
+    snapshots = list(target.get("annotations", []))
     if target["kind"] == "submission":
         rows = database.annotations.find(
             {"caseId": case_id, "versionId": target["id"],
              "source": {"$in": ["admin", "ai"]}}, session=session,
         )
-        snapshots = list(rows)
-    else:
-        snapshots = target.get("annotations", [])
+        snapshots.extend(rows)
     restored = [_restore_annotation(row, case_id) for row in snapshots]
     if restored:
         database.annotations.insert_many(restored, session=session)
