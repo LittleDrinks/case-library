@@ -159,12 +159,22 @@ async function expectAnnotationIdentity(page, first, second) {
   await expectAnnotationDetails(page, second, "待处理");
 }
 
+async function openAnnotationFloat(page, annotation) {
+  await page.locator(".annotation-anchor[data-annotation-id=\"" + annotation.id + "\"]").click();
+  const float = page.locator(".annotation-float");
+  await expect(float).toBeVisible();
+  await expect(float.locator(".float-quote")).toHaveText(annotation.quote);
+  return float;
+}
+
 async function resolveFirstAnnotation(page, first, second) {
-  await page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]").click();
-  await expect(page.locator(".comment-card[data-annotation-id=\"" + second.id + "\"]")).toBeInViewport();
-  await page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]").getByRole("button", { name: "标记解决" }).click();
+  await openAnnotationFloat(page, second);
+  const firstFloat = await openAnnotationFloat(page, first);
+  await firstFloat.getByRole("button", { name: "解决批注" }).click();
+  await expect(page.locator(".annotation-float")).toHaveCount(0);
   await expect(page.locator(".comment-card[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
   await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + first.id + "\"]")).toHaveCount(0);
+  await expect(page.locator(".annotation-anchor[data-annotation-id=\"" + second.id + "\"]")).toHaveText(second.quote);
   await expectAnnotationDetails(page, second, "待处理");
   await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await expectAnnotationDetails(page, first, "已解决");
