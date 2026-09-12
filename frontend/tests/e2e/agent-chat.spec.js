@@ -49,9 +49,7 @@ async function configureChat(page) {
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
-  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
+  await openChatPanel(page);
 }
 
 async function sendChat(page, text) {
@@ -62,6 +60,29 @@ async function sendChat(page, text) {
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.locator(".ai-message.assistant").last()).toContainText(ANSWER, { timeout: 15000 });
   await streamResponse;
+}
+
+async function sendGenerationAndWaitForPersistence(page, caseId, text) {
+  const streamResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/stream")
+  ));
+  await page.getByLabel("向 AI 提问").fill(text);
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await streamResponse;
+  await expect.poll(async () => {
+    const snapshot = await chatSnapshot(page, caseId);
+    const persistedAnswer = snapshot.messages.some((message) => (
+      message.role === "assistant"
+      && message.parts.some((part) => part.type === "text" && part.text?.includes(ANSWER))
+    ));
+    return { activeRun: snapshot.activeRun, status: snapshot.latestRun?.status, persistedAnswer };
+  }, { timeout: 15_000 }).toEqual({ activeRun: null, status: "completed", persistedAnswer: true });
+}
+
+async function openChatPanel(page) {
+  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
 async function chatSnapshot(page, caseId) {
@@ -144,18 +165,76 @@ async function assertSavedAiVersion(page, caseId) {
 
 async function openAiVersion(page, version) {
   await page.getByLabel("版本历史").click();
-  await expect(page.getByText(`AI版本 v${version.number} · ${version.title}`)).toBeVisible();
-  await page.getByRole("button", { name: `打开 AI版本 v${version.number} · ${version.title} 版本` }).click();
+  const historyButton = page.getByRole("button", {
+    name: `查看历史版本 AI版本 v${version.number} · ${version.title}`,
+    exact: true,
+  });
+  await expect(historyButton).toBeVisible();
+  await historyButton.click();
   await expect(page.getByText(`AI生成版本 v${version.number} · 只读`)).toBeVisible();
   await expect(page.locator(".version-paper .canvas-editor")).toHaveAttribute("contenteditable", "false");
 }
 
-async function overwriteAiVersion(page, version) {
-  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
-  await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
-  await page.getByRole("button", { name: "确认覆盖" }).click();
+async function selectCurrentDraft(page) {
+  await page.locator(".version-tabs").hover();
+  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
+  await expect(draftTab).toBeVisible();
+  await draftTab.click();
+  await expect(draftTab).toHaveAttribute("aria-selected", "true");
+}
+
+async function assertCurrentDraft(page, version) {
+  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
+  await expect(draftTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".version-paper")).toHaveCount(0);
+  await expect(page.getByLabel("案例标题")).toBeVisible();
   await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await expect(page.locator(".canvas-editor").first()).toHaveAttribute("contenteditable", "true");
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+}
+
+function versionIdentity(history) {
+  return history.versions.map(({ id, number, kind }) => ({ id, number, kind }));
+}
+
+async function expectHistoryUnchanged(page, caseId, before) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
+  expect(response.ok()).toBe(true);
+  const after = await response.json();
+  expect(after.versions).toHaveLength(before.versions.length);
+  expect(versionIdentity(after)).toEqual(versionIdentity(before));
+  return after;
+}
+
+async function assertRestoredHistory(page, caseId, version, beforeCase) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
+  expect(response.ok()).toBe(true);
+  const history = await response.json();
+  expect(history.versions).toHaveLength(3);
+  expect(history.versions[0]).toEqual(expect.objectContaining({ id: version.id, number: 1, kind: "ai", document: version.document }));
+  expect(history.versions[1]).toEqual(expect.objectContaining({
+    number: 2, kind: "manual", title: "恢复前的当前稿", document: beforeCase.document,
+    sourceRevision: beforeCase.revision,
+  }));
+  expect(history.versions[2]).toEqual(expect.objectContaining({ number: 3, kind: "restore", restoredFromId: version.id, document: version.document }));
+  return history;
+}
+
+async function overwriteAiVersion(page, caseId, version) {
+  const beforeResponse = await page.context().request.get(`/api/cases/${caseId}`);
+  expect(beforeResponse.ok()).toBe(true);
+  const before = await beforeResponse.json();
+  await page.locator(".version-paper-actions .version-restore").click();
+  await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
+  const restoreResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname.endsWith("/lifecycle")
+    && response.request().postDataJSON()?.command === "overwrite"
+  ));
+  await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+  expect((await restoreResponse).ok()).toBe(true);
+  await assertCurrentDraft(page, version);
+  return assertRestoredHistory(page, caseId, version, before);
 }
 
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
@@ -176,17 +255,18 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   await reloadAndAssertChat(page, created.id, persisted);
 });
 
-test("完整生成通过真实 Run 保存 AI 版本并可只读打开、覆盖和刷新", async ({ page }) => {
+test("完整生成通过真实 Run 保存 AI 版本并可只读打开、恢复和刷新", async ({ page }) => {
   await login(page);
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "请完整生成全文");
+  await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
-  await overwriteAiVersion(page, version);
+  await overwriteAiVersion(page, created.id, version);
   await page.reload();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await selectCurrentDraft(page);
+  await assertCurrentDraft(page, version);
   const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
   expect(history.versions[0].id).toBe(version.id);
 });
@@ -203,17 +283,15 @@ async function undoCount(page) {
   return page.getByTestId("agent-undo-write").count();
 }
 
-async function unauthorizedWriteKeepsDraft(page, created) {
+async function unauthorizedWriteKeepsDraft(page, created, historyBefore) {
   await selectDraftRange(page, "AI生成正文");
   await sendChat(page, "帮我把这段话写入正文试试");
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
   expect(await undoCount(page)).toBe(0);
-  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  return history;
+  return expectHistoryUnchanged(page, created.id, historyBefore);
 }
 
-async function authorizedWriteAndUndo(page, created, version) {
+async function authorizedWriteAndUndo(page, created, version, historyBefore) {
   await selectDraftRange(page, "AI生成正文");
   await sendChat(page, "请直接写入替换选中文字");
   await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
@@ -221,10 +299,10 @@ async function authorizedWriteAndUndo(page, created, version) {
   await page.getByTestId("agent-undo-write").click();
   await expect(page.getByTestId("agent-write-undone")).toBeVisible();
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  expect(history.versions[0].id).toBe(version.id);
-  expect(history.versions[0].kind).toBe("ai");
+  const history = await expectHistoryUnchanged(page, created.id, historyBefore);
+  const aiVersion = history.versions.find(({ id }) => id === version.id);
+  expect(aiVersion).toBeDefined();
+  expect(aiVersion.kind).toBe("ai");
 }
 
 test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page }) => {
@@ -232,15 +310,17 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "请完整生成全文");
+  await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
-  await overwriteAiVersion(page, version);
+  const restoredHistory = await overwriteAiVersion(page, created.id, version);
   await page.reload();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await selectCurrentDraft(page);
+  await assertCurrentDraft(page, version);
+  await openChatPanel(page);
 
-  await unauthorizedWriteKeepsDraft(page, created);
-  await authorizedWriteAndUndo(page, created, version);
+  const afterUnauthorized = await unauthorizedWriteKeepsDraft(page, created, restoredHistory);
+  await authorizedWriteAndUndo(page, created, version, afterUnauthorized);
 });
 
 async function submitMessage(page, text) {

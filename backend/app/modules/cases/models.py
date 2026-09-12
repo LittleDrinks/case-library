@@ -49,6 +49,15 @@ class CasePatch(BaseModel):
         return self
 
 
+class ManualVersionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(
+        min_length=1, max_length=200,
+    )
+    revision: int = Field(ge=1)
+
+
 class LifecycleCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

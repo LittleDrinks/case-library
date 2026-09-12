@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
+import { AlertTriangle, ArrowLeft, Copy, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
+import AnnotationFloat from "../components/AnnotationFloat.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -16,7 +17,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
-import { documentOutline, normalizeDocument } from "../lib/document.js";
+import { documentOutline, documentText, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
@@ -50,8 +51,9 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 let annotationLoadGeneration = 0;
-const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
+const floatDraft = ref(null);
+const floatThread = ref(null);
 const annotationRunWatches = new Map();
 let pendingSteps = [];
 let annotationRunPoll = null;
@@ -198,7 +200,7 @@ async function persist(payload) {
   const documentChanged = Boolean(payload.steps?.length);
   const saved = await api.saveCase(caseId(), payload, session.csrfToken);
   pendingSteps.splice(0, payload.steps?.length || 0);
-  clearWritingContext();
+  // CanvasEditor revalidates the live DOM/PM selection against this saved document.
   revision.value = saved.revision;
   caseRecord.value = { ...caseRecord.value, revision: saved.revision };
   crashDraft.saved(payload);
@@ -231,7 +233,10 @@ function handleSaveConflict(error) {
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) clearWritingContext();
+  if (invalidate) {
+    clearWritingContext();
+    closeAnnotationFloat();
+  }
   pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
@@ -252,7 +257,7 @@ async function loadAnnotations() {
   try {
     const rows = await api.listAnnotations(caseId());
     if (generation !== annotationLoadGeneration) return;
-    annotations.value = rows.filter(({ status }) => status !== "resolved");
+    applyAnnotations(rows.filter(({ status }) => status !== "resolved"));
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
@@ -260,6 +265,11 @@ async function loadAnnotations() {
 function applyAnnotations(rows) {
   annotationLoadGeneration += 1;
   annotations.value = rows;
+  // AI 轮询等刷新到达时，仍打开的浮窗线程同步到最新同 ID 行，修订轮即时可见。
+  if (floatThread.value) {
+    floatThread.value = rows.find((row) => row.id === floatThread.value.id)
+      || floatThread.value;
+  }
 }
 
 async function refreshAnnotations() {
@@ -443,6 +453,12 @@ function locateHeading(order) {
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function selectRailTool(tool) {
+  if (contentMutationBusy.value) return;
+  closeAnnotationFloat();
+  selectTool(tool);
+}
+
 function selectTool(tool) {
   activeTool.value = readerMode.value && tool === "comments" ? "ai" : tool;
   drawerOpen.value = true;
@@ -460,17 +476,66 @@ async function flushAutosave() {
   return autosave.state.value === "saved";
 }
 
-async function prepareAnnotationMutation() {
+function openDraftFloat() {
+  if (contentMutationBusy.value) return;
+  selectTool("comments");
+  floatThread.value = null;
+  floatDraft.value = annotationSelection.value;
+}
+
+// 浮窗保存门禁：flush 后正文可能已变（persist 会塌陷选区），不能依赖重捕获。
+// 校验待提交锚点仍映射到当前文档同一位置/引文且 revision 最新；无效则拒绝，不绕门禁。
+async function prepareFloatSave() {
+  if (!floatDraft.value) return false;
   if (!await flushAutosave()) return false;
-  await canvasEditor.value?.recaptureSelection();
   await nextTick();
+  const anchor = canvasEditor.value?.getPendingAnchor?.();
+  if (!anchor) {
+    // 锚点已被正文改写/删除丢弃：清挂起状态并拒绝，绝不带着过期锚点提交。
+    floatDraft.value = null;
+    return false;
+  }
+  floatDraft.value = { ...floatDraft.value, ...anchor, revision: revision.value };
   return true;
 }
 
-function openAnnotation(id) {
+function floatReplied(updated) {
+  floatThread.value = updated;
+  void refreshAnnotations();
+}
+
+function openThreadFloat(id) {
+  if (contentMutationBusy.value) return;
   selectTool("comments");
-  focusedAnnotationId.value = "";
-  void nextTick(() => { focusedAnnotationId.value = id; });
+  floatDraft.value = null;
+  floatThread.value = annotations.value.find((row) => row.id === id) || null;
+}
+
+function closeAnnotationFloat() {
+  floatDraft.value = null;
+  floatThread.value = null;
+}
+
+function floatSaved(created) {
+  floatDraft.value = null;
+  floatThread.value = created;
+  void refreshAnnotations();
+}
+
+function floatResolved() {
+  closeAnnotationFloat();
+  void refreshAnnotations();
+}
+
+async function floatRevised(caseValue) {
+  closeAnnotationFloat();
+  await applyRevisedCase(caseValue);
+}
+
+
+function askFloatAi(annotation) {
+  // 浮窗保持打开：AI 修订完成后轮询刷新经 applyAnnotations 同步同 ID 线程。
+  askAnnotationAi(annotation);
 }
 
 function askAnnotationAi(annotation) {
@@ -572,7 +637,7 @@ function refreshVersionHistory() {
 }
 
 function requestOverwrite() {
-  if (headerBusyAction.value || !activeVersion.value) return;
+  if (headerBusyAction.value || !activeVersion.value || !overwriteAllowed.value) return;
   actionNotice.value = "";
   overwriteTarget.value = activeVersion.value;
 }
@@ -583,7 +648,7 @@ function cancelOverwrite() {
 
 async function overwriteBaseline() {
   if (await flushAutosave()) return revision.value;
-  actionNotice.value = "正文尚未保存，未执行覆盖。";
+  actionNotice.value = "正文尚未保存，未执行恢复。";
   return null;
 }
 
@@ -593,12 +658,35 @@ async function overwriteSucceeded(result) {
   overwriteTarget.value = null;
   crashDraft.load(result.case);
   await refreshAnnotations();
+  refreshVersionHistory();
+}
+
+async function handleVersionCreated() {
+  try {
+    syncCaseRevision(await api.getCase(caseId()));
+    refreshVersionHistory();
+  } catch (error) {
+    actionNotice.value = error.message || "版本已保存，但案例状态刷新失败";
+  }
 }
 
 function overwriteFailed(error) {
   overwriteTarget.value = null;
-  actionNotice.value = error.message || "覆盖失败";
+  actionNotice.value = error.message || "恢复失败";
   if (error.status === 409) void refreshLifecycleState();
+}
+
+async function copyVersion() {
+  if (!activeVersion.value || !navigator.clipboard?.writeText) {
+    actionNotice.value = "当前环境不支持复制，请使用浏览器复制功能";
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(documentText(activeVersion.value.document));
+    actionNotice.value = `已复制${versionLabel(activeVersion.value)}正文`;
+  } catch {
+    actionNotice.value = "复制失败，请使用浏览器复制功能";
+  }
 }
 
 async function performOverwrite() {
@@ -671,7 +759,7 @@ onBeforeUnmount(() => {
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
-        @tool="selectTool"
+        @tool="selectRailTool"
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
@@ -747,19 +835,25 @@ onBeforeUnmount(() => {
                 :editable="editable"
                 :annotatable="annotatable"
                 :annotations="annotations"
+                :pending-anchor="floatDraft"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="writingContext = $event"
-                @annotate="selectTool('comments')"
-                @annotation-click="openAnnotation"
+                @annotate="openDraftFloat"
+                @annotation-click="openThreadFloat"
               />
             </article>
           </template>
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
               <h2>{{ activeVersion.title }}</h2>
-              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，覆盖后可在当前教师稿继续编辑</p>
+              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，恢复后可在当前教师稿继续编辑</p>
+              <div class="version-paper-actions">
+                <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />返回当前教师稿</button>
+                <button type="button" class="version-copy" @click="copyVersion"><Copy :size="14" aria-hidden="true" />复制正文</button>
+                <button v-if="overwriteAllowed" type="button" class="version-restore" @click="requestOverwrite"><RefreshCw :size="14" aria-hidden="true" />恢复此版本</button>
+              </div>
             </header>
             <CanvasEditor
               :key="activeVersion.id"
@@ -784,14 +878,12 @@ onBeforeUnmount(() => {
           :historical="historicalVersion"
           :read-only="assistantReadOnly"
           :editable="editable"
-          :selection="annotationSelection"
           :writing-context="writingContext"
           :history-refresh-key="historyRefreshKey"
+          :history-available="historyAvailable"
           :before-attachment-mutation="prepareContentMutation"
-          :before-annotation-mutation="prepareAnnotationMutation"
-          :focus-annotation-id="focusedAnnotationId"
           :annotation-refresh-token="annotationRefreshToken"
-          @select="selectTool"
+          @select="selectRailTool"
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"
@@ -806,6 +898,22 @@ onBeforeUnmount(() => {
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"
+          @version-created="handleVersionCreated"
+        />
+        <AnnotationFloat
+          v-if="(floatDraft || floatThread) && !readerMode && !historicalVersion"
+          :case-record="caseRecord"
+          :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :draft="floatDraft"
+          :thread="floatThread"
+          :before-save="prepareFloatSave"
+          @close="closeAnnotationFloat"
+          @saved="floatSaved"
+          @resolved="floatResolved"
+          @case-revised="floatRevised"
+          @ask-ai="askFloatAi"
+          @replied="floatReplied"
+          @mutation-state="contentMutationBusy = $event"
         />
       </div>
     </template>

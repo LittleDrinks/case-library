@@ -405,10 +405,13 @@ def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]
 
 
 def _list_query(case: dict, user: dict) -> dict:
-    """私人讨论仅案例作者可见；管理员只读版本绑定的审核批注，不泄漏个人修订。"""
+    """私人讨论仅案例作者可见；管理员只读真实审核批注。"""
     if case["ownerId"] == user["id"]:
         return {"caseId": case["id"]}
-    return {"caseId": case["id"], "versionId": {"$ne": None}}
+    return {
+        "caseId": case["id"], "versionId": {"$ne": None},
+        "source": {"$in": ["admin", "ai"]},
+    }
 
 
 def _get_annotation(database: Database, case_id: str, annotation_id: str, session=None) -> dict:

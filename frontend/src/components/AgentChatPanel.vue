@@ -25,7 +25,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "case-revised", "versions-updated", "clear-writing-context", "annotations-refresh",
-  "annotation-run",
+  "annotation-run", "open-version",
 ]);
 
 const {
@@ -56,10 +56,15 @@ const sourceChecks = new Map();
 let sourceGeneration = 0;
 const syncedWrites = new Set();
 const syncedVersions = new Set();
+const pendingVersionOpenIds = new Set();
+const versionOpenInFlightIds = new Set();
 const undoingWrites = reactive(new Set());
 const localUndoneWrites = reactive(new Set());
 let pendingWriteSync = false;
 let hydratedWriteThread = "";
+let hydratedVersionThread = "";
+let versionOpenGeneration = 0;
+let threadSwitchDepth = 0;
 
 function sourceRefs() {
   const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
@@ -242,21 +247,30 @@ watch(messages, () => {
 // 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
 // 批注修订在完成事务才可见，但批注刷新由 WorkbenchView 跟踪（切面板/线程后本组件会卸载）。
 watch(() => threadState.value?.latestRun?.status, (current, previous) => {
-  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)
-      || !pendingWriteSync) return;
-  pendingWriteSync = false;
-  void refreshCaseAfterWrite();
+  if (previous !== "active" || !["completed", "failed", "cancelled"].includes(current)) return;
+  if (pendingWriteSync) {
+    pendingWriteSync = false;
+    void refreshCaseAfterWrite();
+  }
+  if (threadSwitchDepth) return;
+  drainPendingVersionOpens();
 });
 watch(artifacts, () => {
   void refreshSources();
   if (nearBottom.value) void scrollToLatest();
 }, { deep: true });
-watch(threadId, () => {
+watch(threadId, (current, previous) => {
+  if (current === previous) return;
+  versionOpenGeneration += 1;
   syncedWrites.clear();
   syncedVersions.clear();
+  pendingVersionOpenIds.clear();
+  versionOpenInFlightIds.clear();
   pendingWriteSync = false;
   hydratedWriteThread = "";
+  hydratedVersionThread = "";
   refreshSourcePermissions();
+  syncGeneratedVersions();
 });
 watch(() => props.open, (open, wasOpen) => {
   if (open && !wasOpen) refreshSourcePermissions();
@@ -303,6 +317,9 @@ function closeThreads() {
 }
 
 onBeforeUnmount(() => {
+  versionOpenGeneration += 1;
+  pendingVersionOpenIds.clear();
+  versionOpenInFlightIds.clear();
   stopThreadsPolling();
   window.removeEventListener("focus", refreshSourcePermissions);
   document.removeEventListener("visibilitychange", refreshOnVisible);
@@ -310,6 +327,28 @@ onBeforeUnmount(() => {
 
 function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
+}
+
+function drainPendingVersionOpens() {
+  if (!pendingVersionOpenIds.size) return;
+  const ids = [...pendingVersionOpenIds].filter((id) => !versionOpenInFlightIds.has(id));
+  ids.forEach((id) => {
+    void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
+  });
+}
+
+function retryInvalidatedVersionOpen(versionId, generation, requestedThreadId) {
+  if (!versionId || !pendingVersionOpenIds.has(versionId)
+    || generation === versionOpenGeneration || requestedThreadId !== threadId.value
+    || threadSwitchDepth) return;
+  void openHistoryVersion(versionId, "", versionOpenGeneration, threadId.value);
+}
+
+function finishThreadSwitch(previousThreadId) {
+  threadSwitchDepth -= 1;
+  if (threadSwitchDepth) return;
+  syncGeneratedVersions();
+  if (previousThreadId === threadId.value) drainPendingVersionOpens();
 }
 
 async function restoreScroll(id) {
@@ -320,8 +359,15 @@ async function restoreScroll(id) {
 async function chooseThread(id) {
   stopThreadsPolling();
   if (id !== threadId.value) {
+    const previousThreadId = threadId.value;
+    threadSwitchDepth += 1;
+    versionOpenGeneration += 1;
     emit("clear-writing-context");
-    await selectThread(id);
+    try {
+      await selectThread(id);
+    } finally {
+      finishThreadSwitch(previousThreadId);
+    }
   }
   mode.value = "chat";
   await restoreScroll(id);
@@ -329,8 +375,15 @@ async function chooseThread(id) {
 
 async function addThread() {
   stopThreadsPolling();
+  const previousThreadId = threadId.value;
+  threadSwitchDepth += 1;
+  versionOpenGeneration += 1;
   emit("clear-writing-context");
-  await createThread();
+  try {
+    await createThread();
+  } finally {
+    finishThreadSwitch(previousThreadId);
+  }
   mode.value = "chat";
   await restoreScroll(threadId.value);
 }
@@ -349,12 +402,49 @@ function statusText() {
 
 async function acceptArtifact(artifactId) {
   decideError.value = "";
+  const artifact = artifacts.value.find((item) => item.id === artifactId);
   try {
     const result = await decide(artifactId, "accepted");
     emit("case-revised", result.case);
+    await openArtifactVersion(artifact, result);
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
   }
+}
+
+function historyVersion(history, versionId, runId) {
+  return (history.versions || []).find((item) => (
+    (versionId && item.id === versionId) || (runId && item.sourceRunId === runId)
+  ));
+}
+
+function acknowledgeVersionOpen(version) {
+  pendingVersionOpenIds.delete(version.id);
+  emit("open-version", version);
+}
+
+async function openHistoryVersion(
+  versionId = "", runId = "", generation = versionOpenGeneration,
+  requestedThreadId = threadId.value,
+) {
+  const requestKey = versionId || runId;
+  if (requestKey && versionOpenInFlightIds.has(requestKey)) return;
+  if (requestKey) versionOpenInFlightIds.add(requestKey);
+  try {
+    const history = await api.caseHistory(props.caseRecord.id);
+    if (generation !== versionOpenGeneration || requestedThreadId !== threadId.value) return;
+    const version = historyVersion(history, versionId, runId);
+    if (version) acknowledgeVersionOpen(version);
+  } catch { /* 时间线刷新仍由父级处理 */ }
+  finally {
+    if (requestKey) versionOpenInFlightIds.delete(requestKey);
+    retryInvalidatedVersionOpen(versionId, generation, requestedThreadId);
+  }
+}
+
+async function openArtifactVersion(artifact, result) {
+  const versionId = result?.versionId || result?.artifact?.versionId || "";
+  if (versionId || artifact?.runId) await openHistoryVersion(versionId, artifact?.runId);
 }
 
 function writtenWriteIds() {
@@ -395,14 +485,40 @@ function syncWrittenDocuments() {
   if (!waitingForTerminal) void refreshCaseAfterWrite();
 }
 
-function syncGeneratedVersions() {
-  const ids = messages.value.flatMap((message) => message.parts || [])
+function generatedVersionEntries() {
+  const entries = messages.value.flatMap((message) => (message.parts || [])
     .filter((part) => ["tool-propose_document", "tool-write_document"].includes(part.type)
       && part.output?.versionId)
-    .map((part) => part.output.versionId);
-  const fresh = ids.filter((id) => !syncedVersions.has(id));
-  fresh.forEach((id) => syncedVersions.add(id));
+    .map((part) => ({
+      id: part.output.versionId,
+      runId: message.runId || message.metadata?.agentRunId || "",
+    })));
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
+}
+
+function hydrateGeneratedVersions(entries) {
+  hydratedVersionThread = threadId.value;
+  const activeRunId = threadState.value.activeRun?.id;
+  entries.forEach(({ id, runId }) => {
+    syncedVersions.add(id);
+    if (activeRunId && runId === activeRunId) pendingVersionOpenIds.add(id);
+  });
+}
+
+function syncGeneratedVersions() {
+  if (threadSwitchDepth || !threadId.value || !threadState.value) return;
+  const entries = generatedVersionEntries();
+  if (hydratedVersionThread !== threadId.value) {
+    hydrateGeneratedVersions(entries);
+    return;
+  }
+  const fresh = entries.filter(({ id }) => !syncedVersions.has(id));
+  fresh.forEach(({ id }) => syncedVersions.add(id));
   if (fresh.length) emit("versions-updated");
+  fresh.forEach(({ id }) => {
+    pendingVersionOpenIds.add(id);
+    void openHistoryVersion(id, "", versionOpenGeneration, threadId.value);
+  });
 }
 
 async function refreshCaseAfterWrite() {

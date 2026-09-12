@@ -163,6 +163,24 @@ async function expectOwnWorkbench(page) {
   await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
 }
 
+async function expectConflictAfterExternalPatch(page, request, auth, original) {
+  await expect(page.getByLabel("案例标题")).toHaveValue(original.title);
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+  const newerTitle = `较新版本 ${Date.now()}`;
+  const newerResponse = await request.patch("/api/cases/c-draft-1", {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { title: newerTitle, revision: original.revision },
+  });
+  expect(newerResponse.ok()).toBe(true);
+  const newer = await newerResponse.json();
+  expect(newer.title).toBe(newerTitle);
+  expect(newer.revision).toBe(original.revision + 1);
+  const saveResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/cases/c-draft-1");
+  await page.getByLabel("案例标题").fill("旧页面内容");
+  expect((await saveResponse).status()).toBe(409);
+  await expect(page.locator(".conflict-banner")).toContainText("本页内容尚未保存", { timeout: 5000 });
+}
+
 async function downloadDocx(page) {
   const pending = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出 DOCX" }).click();
@@ -296,6 +314,44 @@ async function uploadWorkbenchEvidence(page) {
   await expect(page.locator(".attachment-copy span")).toContainText("校内访问");
 }
 
+async function addWorkbenchAnnotation(page, marker, content) {
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill(content);
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText(content);
+  await expect(page.locator(".annotation-anchor")).toHaveText(marker);
+}
+
+async function beginHeldWorkbenchUpload(page, caseId) {
+  const held = await holdAttachmentUpload(page, caseId);
+  await page.getByLabel("选择附件").setInputFiles({
+    name: "互斥验证.txt", mimeType: "text/plain", buffer: Buffer.from("locked"),
+  });
+  await held.started;
+  return held;
+}
+
+async function assertAnnotationBlockedDuringUpload(page) {
+  await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
+  await page.locator(".annotation-anchor").click();
+  await expect(page.locator(".assistant-tabs button.active")).toHaveText("附件");
+  await expect(page.locator(".attachment-panel")).toBeVisible();
+  await expect(page.locator(".annotation-float")).toHaveCount(0);
+}
+
+async function assertAnnotationReopensAfterUpload(page, content) {
+  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toBeEditable();
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByLabel("选择附件")).toBeEnabled();
+  await page.locator(".annotation-anchor").click();
+  await expect(page.locator(".assistant-tabs button.active")).toHaveText("批注");
+  await expect(page.locator(".annotation-float")).toContainText(content);
+}
+
 async function downloadAndDeleteEvidence(page) {
   const pending = page.waitForEvent("download");
   await page.getByRole("link", { name: "下载课堂证据.txt" }).click();
@@ -409,12 +465,7 @@ test("旧标签页不会覆盖新的工作版本", async ({ page }) => {
   const auth = await (await request.get("/api/auth/session")).json();
 
   try {
-    await request.patch("/api/cases/c-draft-1", {
-      headers: { "X-CSRF-Token": auth.csrfToken },
-      data: { title: `较新版本 ${Date.now()}`, revision: original.revision },
-    });
-    await page.getByLabel("案例标题").fill("旧页面内容");
-    await expect(page.locator(".conflict-banner")).toContainText("本页内容尚未保存", { timeout: 5000 });
+    await expectConflictAfterExternalPatch(page, request, auth, original);
   } finally {
     await restoreCase(request, original);
   }
@@ -531,20 +582,16 @@ test("提交请求在途锁定编辑器并保留提交前正文", async ({ page 
 
 test("附件请求在途锁定正文避免与自动保存竞争", async ({ page }) => {
   await login(page);
-  const created = await createCase(page.context().request, `附件互斥 ${Date.now()}`);
+  const marker = `附件互斥 ${Date.now()}`;
+  const annotationContent = "附件交错已有批注";
+  const created = await createCase(page.context().request, marker);
   await page.goto(`/#/workbench/${created.id}`);
+  await addWorkbenchAnnotation(page, marker, annotationContent);
   await openAttachments(page);
-  const held = await holdAttachmentUpload(page, created.id);
-
-  await page.getByLabel("选择附件").setInputFiles({
-    name: "互斥验证.txt", mimeType: "text/plain", buffer: Buffer.from("locked"),
-  });
-  await held.started;
-  try {
-    await expect(page.getByLabel("案例标题")).toHaveAttribute("readonly", "");
-    await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  } finally { held.release(); }
-  await expect(page.getByText("互斥验证.txt", { exact: true })).toBeVisible();
+  const held = await beginHeldWorkbenchUpload(page, created.id);
+  try { await assertAnnotationBlockedDuringUpload(page); }
+  finally { held.release(); }
+  await assertAnnotationReopensAfterUpload(page, annotationContent);
 });
 
 test("作者在草稿工作台上传、下载并删除附件", async ({ page }) => {
@@ -601,7 +648,7 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
 
 async function openHistoryTimeline(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
-  await page.getByRole("button", { name: /^打开 v1 · .+ 版本$/ }).click();
+  await page.getByRole("button", { name: /^查看历史版本 v1 · .+$/ }).click();
 }
 
 async function stageFrozenVersion(page, request, marker) {
@@ -614,22 +661,20 @@ async function stageFrozenVersion(page, request, marker) {
 }
 
 async function overwriteDialogStep(page, action) {
-  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
-  await page.getByRole("button", { name: action }).click();
+  await page.locator(".version-paper-actions .version-restore").click();
+  await page.getByRole("button", { name: action, exact: true }).click();
 }
 
 async function addDraftAnnotation(page, marker) {
   await page.getByRole("tab", { name: "当前教师稿" }).click();
   await page.locator(".canvas-editor p", { hasText: marker }).selectText();
   await page.getByRole("button", { name: "添加选区批注" }).click();
-  await page.getByLabel("批注内容").fill("覆盖前的草稿批注");
-  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("恢复前的草稿批注");
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText("恢复前的草稿批注");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
-}
-
-async function expectNoAnnotations(page) {
-  await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
-  await expect(page.locator(".comment-card")).toHaveCount(0);
 }
 
 async function expectReadOnlyVersionTab(page, marker) {
@@ -647,19 +692,25 @@ async function editDraftAndOpenHistory(page, marker) {
   await openHistoryTimeline(page);
 }
 
-test("作者从版本时间线打开只读 Tab，取消与确认覆盖行为正确", async ({ page }) => {
+async function expectRestoredTimeline(page, marker) {
+  await expect(page.locator(".version-timeline")).toContainText("恢复前的当前稿");
+  await expect(page.locator(".version-timeline")).toContainText(`恢复：${marker}`);
+}
+
+test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正确", async ({ page }) => {
   await login(page);
   const request = page.context().request;
-  const marker = `版本覆盖 ${Date.now()}`;
+  const marker = `版本恢复 ${Date.now()}`;
   await stageFrozenVersion(page, request, marker);
 
   await editDraftAndOpenHistory(page, marker);
   await expectReadOnlyVersionTab(page, marker);
 
-  await overwriteDialogStep(page, "取消覆盖");
+  await overwriteDialogStep(page, "取消恢复");
   await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
 
-  await overwriteDialogStep(page, "确认覆盖");
+  await overwriteDialogStep(page, "确认恢复");
+  await expectRestoredTimeline(page, marker);
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
 });
@@ -679,29 +730,73 @@ test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async (
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
 });
 
-test("覆盖历史版本后清除草稿批注并刷新一致", async ({ page }) => {
+test("作者可在历史面板手动创建命名版本", async ({ page }) => {
   await login(page);
   const request = page.context().request;
-  const marker = `覆盖批注清理 ${Date.now()}`;
-  await stageFrozenVersion(page, request, marker);
-  await addDraftAnnotation(page, marker);
-  await openHistoryTimeline(page); await overwriteDialogStep(page, "确认覆盖");
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expectNoAnnotations(page);
-  const rows = await (await request.get(`/api/cases/${page.url().split("/").pop()}/annotations`)).json();
-  expect(rows).toHaveLength(0);
-  await page.reload();
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expectNoAnnotations(page);
+  const created = await createCase(request, `手动版本 ${Date.now()}`);
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.getByRole("button", { name: "版本历史" }).click();
+  await page.getByRole("button", { name: "新建版本", exact: true }).click();
+  await page.getByLabel("版本名称").fill("补充教学目标");
+  await page.getByRole("button", { name: "保存版本", exact: true }).click();
+  await expect(page.getByRole("button", { name: "查看历史版本 v1 · 补充教学目标" })).toBeVisible();
+  const history = await (await request.get(`/api/cases/${created.id}/history`)).json();
+  expect(history.versions).toEqual([
+    expect.objectContaining({ kind: "manual", title: "补充教学目标", number: 1 }),
+  ]);
 });
 
-test("覆盖请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {
+test("历史版本 Tab 悬停展开且折叠后仍可见返回恢复入口", async ({ page }) => {
   await login(page);
   const request = page.context().request;
-  const created = await stageFrozenVersion(page, request, `覆盖在途 ${Date.now()}`);
+  await stageFrozenVersion(page, request, `Tab 悬停 ${Date.now()}`);
+  const tabs = page.locator(".version-tabs");
+  const toggle = tabs.locator(".version-tabs-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await page.locator(".version-paper-head h2").hover();
+  await tabs.hover();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(tabs.getByRole("tab", { name: "当前教师稿" })).toBeVisible();
+  await expect(page.locator(".version-paper-actions .version-restore")).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".version-paper-actions .version-return")).toBeVisible();
+  await expect(page.locator(".version-paper-actions .version-restore")).toBeVisible();
+});
+
+async function expectPreservedDraftAnnotation(page, request, caseId) {
+  await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
+  const history = await (await request.get(`/api/cases/${caseId}/history`)).json();
+  const baseline = history.versions.find((row) => row.title === "恢复前的当前稿");
+  expect(baseline.annotations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ content: "恢复前的草稿批注" }),
+  ]));
+  const rows = await (await request.get(`/api/cases/${caseId}/annotations`)).json();
+  expect(rows.some((row) => row.content === "恢复前的草稿批注")).toBe(false);
+}
+
+test("恢复历史版本后保留恢复前草稿批注且当前面板刷新一致", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const marker = `恢复批注保留 ${Date.now()}`;
+  const created = await stageFrozenVersion(page, request, marker);
+  await addDraftAnnotation(page, marker);
+  await openHistoryTimeline(page); await overwriteDialogStep(page, "确认恢复");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectPreservedDraftAnnotation(page, request, created.id);
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expectPreservedDraftAnnotation(page, request, created.id);
+});
+
+test("恢复请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const created = await stageFrozenVersion(page, request, `恢复在途 ${Date.now()}`);
   const held = await holdLifecycle(page, created.id, "overwrite");
-  await page.getByRole("button", { name: "覆盖当前教师稿" }).click();
-  const confirm = page.getByRole("button", { name: "确认覆盖" });
+  await page.locator(".version-paper-actions .version-restore").click();
+  const confirm = page.getByRole("button", { name: "确认恢复", exact: true });
   await confirm.click();
   try {
     await expect(confirm).toBeDisabled();

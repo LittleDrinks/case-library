@@ -56,6 +56,7 @@ vi.mock("../api.js", () => ({
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    createAnnotation: vi.fn(),
     agentThread: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
@@ -232,11 +233,11 @@ test("审核模式按钮来自服务端动作而非本地状态推断", async ()
   expect(wrapper.find('button[aria-label="通过发布"]').exists()).toBe(false);
 });
 
-function renderWorkbenchWithEditor() {
+function renderWorkbenchWithEditor(rail = true) {
   return mount(WorkbenchView, {
     global: { stubs: {
       SiteHeader: true, OutlinePanel: true, teleport: true,
-      AssistantRail: true, RouterLink: { template: "<a><slot /></a>" },
+      AssistantRail: rail, RouterLink: { template: "<a><slot /></a>" },
     } },
   });
 }
@@ -319,8 +320,8 @@ function renderWithRail(rail) {
   });
 }
 
-async function renderVersionWorkbench() {
-  api.getCase.mockResolvedValue(caseFixture());
+async function renderVersionWorkbench(overrides = {}) {
+  api.getCase.mockResolvedValue(caseFixture(overrides));
   const wrapper = renderWithRail(VersionRailProbe);
   await flushPromises();
   return wrapper;
@@ -343,6 +344,13 @@ test("首 Tab 固定当前教师稿，历史版本以只读 Tab 打开且可关�
   expect(wrapper.get("textarea.document-title").attributes("readonly")).toBeUndefined();
 });
 
+test("非作者打开历史版本时不显示恢复入口", async () => {
+  const wrapper = await renderVersionWorkbench({ ownerId: "other-user" });
+  await wrapper.get('[data-testid="rail-open"]').trigger("click");
+  expect(wrapper.find(".version-paper-actions .version-return").exists()).toBe(true);
+  expect(wrapper.find(".version-paper-actions .version-restore").exists()).toBe(false);
+});
+
 async function openOverwriteDialog(wrapper) {
   await wrapper.get('[data-testid="rail-open"]').trigger("click");
   await wrapper.get("button.overwrite-entry").trigger("click");
@@ -356,7 +364,7 @@ test("确认覆盖调用 overwrite 接口并回首 Tab 继续编辑", async () =
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
   expect(dialog.props("versionLabel")).toContain("v1 · 首次提交");
-  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="确认恢复"]').trigger("click");
   await flushPromises();
 
   expect(api.lifecycleCase).toHaveBeenCalledWith(
@@ -370,7 +378,7 @@ test("确认覆盖调用 overwrite 接口并回首 Tab 继续编辑", async () =
 test("取消覆盖不发任何请求且停留在只读 Tab", async () => {
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
-  await dialog.get('button[aria-label="取消覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="取消恢复"]').trigger("click");
   await flushPromises();
 
   expect(api.lifecycleCase).not.toHaveBeenCalled();
@@ -382,7 +390,7 @@ test("覆盖冲突时关闭对话框、提示并回刷服务端状态", async ()
   api.getCase.mockResolvedValue(caseFixture({ revision: 7 }));
   const wrapper = await renderVersionWorkbench();
   const dialog = await openOverwriteDialog(wrapper);
-  await dialog.get('button[aria-label="确认覆盖"]').trigger("click");
+  await dialog.get('button[aria-label="确认恢复"]').trigger("click");
   await flushPromises();
 
   expect(wrapper.findComponent(OverwriteConfirmDialog).props("open")).toBe(false);
@@ -403,7 +411,7 @@ test("读者模式不渲染版本 Tab 栏", async () => {
 });
 
 const annotationRailStub = {
-  name: "AssistantRailStub", emits: ["annotation-run"],
+  name: "AssistantRailStub", props: ["active"], emits: ["annotation-run", "select", "mutation-state"],
   template: `<button data-testid="rail-annotation-run" type="button"
     @click="$emit('annotation-run', 'thread-9')">run</button>`,
 };
@@ -582,3 +590,169 @@ test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
   await flushPromises();
   expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
 });
+
+async function openDraftFloat(wrapper, canvas) {
+  canvas.vm.$emit("selection", {
+    from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+  });
+  canvas.vm.$emit("annotate");
+  await flushPromises();
+  expect(wrapper.get(".annotation-float")).toBeTruthy();
+}
+
+function emitAnnotationEntry(canvas, event) {
+  if (event === "annotate") {
+    canvas.vm.$emit("selection", {
+      from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+    });
+  }
+  canvas.vm.$emit(event, event === "annotation-click" ? "annotation-1" : undefined);
+}
+
+async function editOpenDraft(canvas, wrapper) {
+  canvas.get(".canvas-editor p").element.textContent = "正文后缀";
+  await canvas.get(".canvas-editor").trigger("input");
+  await flushPromises();
+  const float = wrapper.get(".annotation-float");
+  await float.get('[aria-label="批注内容"]').setValue("编辑后保存");
+  await float.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
+  await flushPromises();
+}
+
+test("编辑后立即保存批注：dirty flush 后仍按映射锚点提交最新修订", async () => {
+  api.createAnnotation.mockResolvedValue({
+    id: "annotation-new", caseId: "case-1", from: 1, to: 3, quote: "正文",
+    quoteHash: "h", section: "正文", revision: 4, anchorState: "active",
+    status: "pending", content: "编辑后保存", source: "manual", createdBy: "user-1",
+    createdAt: "2026-09-13T00:00:00Z", replies: [],
+  });
+  const wrapper = await renderDraftWorkspace();
+  const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+  await openDraftFloat(wrapper, canvas);
+  await editOpenDraft(canvas, wrapper);
+  expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+    from: 1, to: 3, quote: "正文", revision: 4, content: "编辑后保存",
+  }), "csrf-token");
+  expect(api.saveCase).toHaveBeenCalledTimes(1);
+  wrapper.unmount();
+});
+
+function annotationThread(overrides = {}) {
+  return {
+    id: "annotation-1", from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文",
+    revision: 3, anchorState: "active", status: "pending", content: "旧意见",
+    createdBy: "user-1", replies: [], revisions: [], ...overrides,
+  };
+}
+
+async function openAnnotationThread(wrapper) {
+  wrapper.findComponent({ name: "CanvasEditor" }).vm.$emit("annotation-click", "annotation-1");
+  await flushPromises();
+  expect(wrapper.get(".annotation-float").text()).toContain("旧意见");
+}
+
+async function finishAnnotationRun(wrapper) {
+  wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", "thread-9");
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(4000);
+  await flushPromises();
+}
+
+async function renderPollingWorkspace() {
+  const thread = annotationThread();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValueOnce([thread]).mockResolvedValueOnce([
+    annotationThread({ content: "更新意见", replies: [{ id: "reply-1", content: "第二轮" }] }),
+  ]);
+  api.agentThread.mockResolvedValueOnce({ id: "thread-9", activeRun: { id: "run-1" } })
+    .mockResolvedValue({ id: "thread-9", activeRun: null, latestRun: { status: "completed" } });
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  return wrapper;
+}
+
+test("AI轮询完成后同步仍打开的浮窗线程", async () => {
+  vi.useFakeTimers();
+  try {
+    const wrapper = await renderPollingWorkspace();
+    await openAnnotationThread(wrapper);
+    await finishAnnotationRun(wrapper);
+    expect(wrapper.get(".annotation-float").text()).toContain("更新意见");
+    expect(wrapper.get(".annotation-float").text()).toContain("第二轮");
+    wrapper.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+
+test("从批注浮窗切换历史面板后清除遮挡", async () => {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotationThread()]);
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  await openAnnotationThread(wrapper);
+  wrapper.getComponent(annotationRailStub).vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(false);
+  wrapper.unmount();
+});
+
+async function annotationWorkspace() {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotationThread()]);
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  return wrapper;
+}
+
+test("历史面板打开后点正文批注切换到批注工具", async () => {
+  const wrapper = await annotationWorkspace();
+  const rail = wrapper.getComponent(annotationRailStub);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(rail.props("active")).toBe("history");
+  await openAnnotationThread(wrapper);
+  expect(rail.props("active")).toBe("comments");
+  wrapper.unmount();
+});
+
+test("浮窗保存中不能切换工具且完成后可以切换", async () => {
+  const wrapper = await annotationWorkspace();
+  await openAnnotationThread(wrapper);
+  const float = wrapper.findComponent({ name: "AnnotationFloat" });
+  const rail = wrapper.getComponent(annotationRailStub);
+  float.vm.$emit("mutation-state", true);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(true);
+  expect(rail.props("active")).toBe("comments");
+  float.vm.$emit("mutation-state", false);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(false);
+  expect(rail.props("active")).toBe("history");
+  wrapper.unmount();
+});
+
+
+for (const event of ["annotate", "annotation-click"]) {
+  test(`附件请求在途时不能通过 ${event} 切换批注工具`, async () => {
+    const wrapper = await annotationWorkspace();
+    const rail = wrapper.getComponent(annotationRailStub);
+    const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+    emitAnnotationEntry(canvas, event);
+    rail.vm.$emit("select", "files");
+    rail.vm.$emit("mutation-state", true);
+    emitAnnotationEntry(canvas, event);
+    await flushPromises();
+    expect(rail.props("active")).toBe("files");
+    expect(wrapper.find(".annotation-float").exists()).toBe(false);
+    rail.vm.$emit("mutation-state", false);
+    emitAnnotationEntry(canvas, event);
+    await flushPromises();
+    expect(rail.props("active")).toBe("comments");
+    expect(wrapper.find(".annotation-float").exists()).toBe(true);
+    wrapper.unmount();
+  });
+}

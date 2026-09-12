@@ -123,18 +123,18 @@ async function dragSelectText(page, value) {
 }
 
 async function selectAnnotationText(page, value) {
-  await expect(page.locator(".comment-composer > blockquote")).toHaveCount(0);
   await dragSelectText(page, value);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
-  await expect(page.locator(".comment-composer > blockquote")).toHaveText(value);
 }
 
 async function addAnnotation(page, quote = TARGET_TEXT) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
   await selectAnnotationText(page, quote);
   await page.getByRole("button", { name: "添加选区批注" }).click();
-  await page.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
-  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText("请依据资料收紧这一段表述。");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
   const response = await page.context().request.get(
     `/api/cases/${await currentCaseId(page)}/annotations`,
@@ -192,8 +192,12 @@ async function sendRequest(page) {
 async function acceptedViaApi(page, caseId) {
   const caseApi = await page.context().request.get(`/api/cases/${caseId}`);
   const persisted = await caseApi.json();
-  expect(persisted.revision).toBe(2);
-  expect(persisted.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  expect(persisted.revision).toBe(1);
+  expect(persisted.document.content[1].content[0].text).toBe(TARGET_TEXT);
+  const history = await (await page.context().request.get(`/api/cases/${caseId}/history`)).json();
+  const ai = history.versions.find((version) => version.kind === "ai");
+  expect(ai?.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  return ai;
 }
 
 async function reloadRestoresTracer(page, caseId) {
@@ -444,10 +448,17 @@ test("批注讨论生成中切到批注面板：后台完成后当前历史自�
 });
 
 async function acceptAndVerify(page, caseId) {
+  const response = page.waitForResponse((item) => (
+    item.request().method() === "POST" && new URL(item.url()).pathname.endsWith("/decision")
+  ));
   await page.getByTestId("agent-accept").click();
-  const artifact = page.getByTestId("agent-artifact");
-  await expect(artifact).toHaveAttribute("data-artifact-status", "accepted", { timeout: 15_000 });
-  await acceptedViaApi(page, caseId);
+  const accepted = await response;
+  expect(accepted.ok()).toBe(true);
+  expect((await accepted.json()).artifact.status).toBe("accepted");
+  const version = await acceptedViaApi(page, caseId);
+  const tab = page.getByRole("tab", { name: `AI版本 v${version.number} · ${version.title}` });
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".version-paper")).toContainText(REPLACEMENT_MARK);
 }
 
 async function adminSession(playwright) {
