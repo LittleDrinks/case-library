@@ -211,7 +211,6 @@ async function reloadRestoresTracer(page, caseId) {
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
   await expect(artifact).toContainText(REPLACEMENT_MARK);
   await expect(artifact).toContainText("原文：第二段：教学目标需要更明确的评价依据。");
-  await expect(page.getByRole("tab", { name: /AI版本 v\d+ · / })).toBeVisible();
 }
 
 async function prepareTracer(page, playwright) {
@@ -452,7 +451,10 @@ async function acceptAndVerify(page, caseId) {
   await page.getByTestId("agent-accept").click();
   const artifact = page.getByTestId("agent-artifact");
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted", { timeout: 15_000 });
-  await acceptedViaApi(page, caseId);
+  const version = await acceptedViaApi(page, caseId);
+  const tab = page.getByRole("tab", { name: `AI版本 v${version.number} · ${version.title}` });
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".version-paper")).toContainText(REPLACEMENT_MARK);
 }
 
 async function adminSession(playwright) {
