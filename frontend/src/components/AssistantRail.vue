@@ -35,7 +35,7 @@ const emit = defineEmits([
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
-  { id: "history", label: "历史", icon: History },
+  { id: "history", label: "历史版本", icon: History },
   { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];

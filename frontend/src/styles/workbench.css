@@ -204,20 +204,23 @@
 .assistant-tabs { display: flex; flex: none; gap: 2px; min-height: 40px; padding: 4px 10px 0; border-bottom: 1px solid #ece7df; background: transparent; }
 .assistant-tabs button {
   display: flex;
-  min-width: 96px;
+  min-width: 0;
+  flex: 1 1 0;
   height: 43px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 12px;
+  gap: 4px;
+  padding: 0 4px;
   border: 1px solid transparent;
   border-radius: 6px 6px 0 0;
   background: transparent;
   color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .assistant-tabs button.active { border-bottom-color: var(--brand); color: var(--brand); }
 .assistant-tabs button b { font-weight: 500; }
-.assistant-tabs .drawer-toggle { display: none; min-width: 38px; margin-left: auto; }
+.assistant-tabs .drawer-toggle { display: none; flex: 0 0 auto; min-width: 38px; margin-left: auto; }
 .assistant-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
 .panel-head { min-height: 50px; padding: 15px 14px; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
 .panel-scroll { flex: 1; min-height: 0; overflow: auto; }

@@ -163,6 +163,24 @@ async function expectOwnWorkbench(page) {
   await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
 }
 
+async function expectConflictAfterExternalPatch(page, request, auth, original) {
+  await expect(page.getByLabel("案例标题")).toHaveValue(original.title);
+  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+  const newerTitle = `较新版本 ${Date.now()}`;
+  const newerResponse = await request.patch("/api/cases/c-draft-1", {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { title: newerTitle, revision: original.revision },
+  });
+  expect(newerResponse.ok()).toBe(true);
+  const newer = await newerResponse.json();
+  expect(newer.title).toBe(newerTitle);
+  expect(newer.revision).toBe(original.revision + 1);
+  const saveResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/cases/c-draft-1");
+  await page.getByLabel("案例标题").fill("旧页面内容");
+  expect((await saveResponse).status()).toBe(409);
+  await expect(page.locator(".conflict-banner")).toContainText("本页内容尚未保存", { timeout: 5000 });
+}
+
 async function downloadDocx(page) {
   const pending = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出 DOCX" }).click();
@@ -447,12 +465,7 @@ test("旧标签页不会覆盖新的工作版本", async ({ page }) => {
   const auth = await (await request.get("/api/auth/session")).json();
 
   try {
-    await request.patch("/api/cases/c-draft-1", {
-      headers: { "X-CSRF-Token": auth.csrfToken },
-      data: { title: `较新版本 ${Date.now()}`, revision: original.revision },
-    });
-    await page.getByLabel("案例标题").fill("旧页面内容");
-    await expect(page.locator(".conflict-banner")).toContainText("本页内容尚未保存", { timeout: 5000 });
+    await expectConflictAfterExternalPatch(page, request, auth, original);
   } finally {
     await restoreCase(request, original);
   }

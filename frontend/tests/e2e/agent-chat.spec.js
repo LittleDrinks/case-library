@@ -175,12 +175,54 @@ async function openAiVersion(page, version) {
   await expect(page.locator(".version-paper .canvas-editor")).toHaveAttribute("contenteditable", "false");
 }
 
+async function selectCurrentDraft(page) {
+  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
+  await expect(draftTab).toBeVisible();
+  await draftTab.click();
+  await expect(draftTab).toHaveAttribute("aria-selected", "true");
+}
+
+async function assertCurrentDraft(page, version) {
+  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
+  await expect(draftTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".version-paper")).toHaveCount(0);
+  await expect(page.getByLabel("案例标题")).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await expect(page.locator(".canvas-editor").first()).toHaveAttribute("contenteditable", "true");
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+}
+
+function versionIdentity(history) {
+  return history.versions.map(({ id, number, kind }) => ({ id, number, kind }));
+}
+
+async function expectHistoryUnchanged(page, caseId, before) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
+  expect(response.ok()).toBe(true);
+  const after = await response.json();
+  expect(after.versions).toHaveLength(before.versions.length);
+  expect(versionIdentity(after)).toEqual(versionIdentity(before));
+  return after;
+}
+
 async function overwriteAiVersion(page, version) {
   await page.locator(".version-paper-actions .version-restore").click();
   await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
+  const restoreResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname.endsWith("/lifecycle")
+    && response.request().postDataJSON()?.command === "overwrite"
+  ));
   await page.getByRole("button", { name: "确认恢复", exact: true }).click();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  expect((await restoreResponse).ok()).toBe(true);
+  await assertCurrentDraft(page, version);
+  const history = await (await page.context().request.get(`/api/cases/${version.caseId}/history`)).json();
+  expect(history.versions).toHaveLength(2);
+  expect(history.versions).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: version.id, kind: "ai" }),
+    expect.objectContaining({ kind: "manual", title: "恢复前的当前稿" }),
+  ]));
+  return history;
 }
 
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
@@ -206,12 +248,13 @@ test("完整生成通过真实 Run 保存 AI 版本并可只读打开、恢复�
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "请完整生成全文");
+  await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
   await overwriteAiVersion(page, version);
   await page.reload();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await selectCurrentDraft(page);
+  await assertCurrentDraft(page, version);
   const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
   expect(history.versions[0].id).toBe(version.id);
 });
@@ -228,17 +271,15 @@ async function undoCount(page) {
   return page.getByTestId("agent-undo-write").count();
 }
 
-async function unauthorizedWriteKeepsDraft(page, created) {
+async function unauthorizedWriteKeepsDraft(page, created, historyBefore) {
   await selectDraftRange(page, "AI生成正文");
   await sendChat(page, "帮我把这段话写入正文试试");
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
   expect(await undoCount(page)).toBe(0);
-  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  return history;
+  return expectHistoryUnchanged(page, created.id, historyBefore);
 }
 
-async function authorizedWriteAndUndo(page, created, version) {
+async function authorizedWriteAndUndo(page, created, version, historyBefore) {
   await selectDraftRange(page, "AI生成正文");
   await sendChat(page, "请直接写入替换选中文字");
   await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
@@ -246,10 +287,10 @@ async function authorizedWriteAndUndo(page, created, version) {
   await page.getByTestId("agent-undo-write").click();
   await expect(page.getByTestId("agent-write-undone")).toBeVisible();
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  expect(history.versions[0].id).toBe(version.id);
-  expect(history.versions[0].kind).toBe("ai");
+  const history = await expectHistoryUnchanged(page, created.id, historyBefore);
+  const aiVersion = history.versions.find(({ id }) => id === version.id);
+  expect(aiVersion).toBeDefined();
+  expect(aiVersion.kind).toBe("ai");
 }
 
 test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page }) => {
@@ -260,13 +301,14 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
-  await overwriteAiVersion(page, version);
+  const restoredHistory = await overwriteAiVersion(page, version);
   await page.reload();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
+  await selectCurrentDraft(page);
+  await assertCurrentDraft(page, version);
   await openChatPanel(page);
 
-  await unauthorizedWriteKeepsDraft(page, created);
-  await authorizedWriteAndUndo(page, created, version);
+  const afterUnauthorized = await unauthorizedWriteKeepsDraft(page, created, restoredHistory);
+  await authorizedWriteAndUndo(page, created, version, afterUnauthorized);
 });
 
 async function submitMessage(page, text) {

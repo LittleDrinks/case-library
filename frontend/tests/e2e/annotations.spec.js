@@ -101,7 +101,10 @@ async function openDraft(page, marker) {
   await login(page);
   const created = await createCase(page.context().request, marker);
   await page.goto(`/#/workbench/${created.id}`);
-  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  const editor = page.locator(".canvas-editor.ProseMirror");
+  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await expect(page.locator(".save-state")).toHaveText("已保存");
+  await expect(editor).toContainText(marker);
   return created;
 }
 
@@ -111,16 +114,36 @@ async function selectManualAnnotation(page, marker) {
   await page.getByRole("button", { name: "添加选区批注" }).click();
 }
 
+function domSelectionPoints(node, text) {
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT); const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const source = nodes.map(({ nodeValue }) => nodeValue).join(""); const start = source.indexOf(text);
+  if (start < 0) return null;
+  const point = (offset) => {
+    let index = 0;
+    for (const current of nodes) {
+      if (offset <= index + current.length) return [current, offset - index];
+      index += current.length;
+    }
+    return null;
+  };
+  const range = document.createRange();
+  range.setStart(...point(start)); range.setEnd(...point(start + text.length));
+  const rects = [...range.getClientRects()];
+  const first = rects[0], last = rects.at(-1);
+  return { start: { x: first.left + 1, y: first.top + first.height / 2 }, end: { x: last.right - 1, y: last.top + last.height / 2 } };
+}
+
 async function selectSubstring(page, paragraph, value) {
-  await paragraph.selectText();
-  await page.keyboard.press("Home");
-  const offset = await paragraph.evaluate((node, text) => node.textContent.indexOf(text), value);
-  expect(offset).toBeGreaterThanOrEqual(0);
-  for (let index = 0; index < offset; index += 1) await page.keyboard.press("ArrowRight");
-  await page.keyboard.down("Shift");
-  for (let index = 0; index < value.length; index += 1) await page.keyboard.press("ArrowRight");
-  await page.keyboard.up("Shift");
+  await paragraph.scrollIntoViewIfNeeded();
+  const points = await paragraph.evaluate(domSelectionPoints, value);
+  expect(points).not.toBeNull();
+  await page.mouse.move(points.start.x, points.start.y);
+  await page.mouse.down();
+  await page.mouse.move(points.end.x, points.end.y, { steps: 2 });
+  await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
+  await expect(page.getByRole("button", { name: "添加选区批注" })).toBeEnabled();
 }
 
 async function addSelectedAnnotation(page, paragraph, quote, content) {
