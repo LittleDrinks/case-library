@@ -379,3 +379,35 @@ it("点击正文批注标记只发出打开事件", async () => {
   editor.view.someProp("handleClick", (handler) => handler(editor.view, 10));
   expect(wrapper.emitted("annotation-click")).toEqual([["annotation-1"]]);
 });
+
+it("挂起选区锚点在失焦塌陷后仍绘制高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+
+  clearDomSelection();
+  await framesSettled();
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(false);
+});
+
+it("正文不再包含挂起引文时丢弃临时高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.insertText("变化", 9, 13));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await nextTick();
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+});
+
+it("挂起锚点失效或清空后移除临时高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  await wrapper.setProps({ pendingAnchor: null });
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+  await wrapper.setProps({ pendingAnchor: { ...pending, quote: "其他文字" } });
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+  await wrapper.setProps({ pendingAnchor: { ...pending, quote: "案例原文" } });
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+});

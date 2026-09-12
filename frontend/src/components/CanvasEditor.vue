@@ -15,6 +15,7 @@ const props = defineProps({
   editable: { type: Boolean, default: true },
   annotatable: { type: Boolean, default: false },
   annotations: { type: Array, default: () => [] },
+  pendingAnchor: { type: Object, default: null },
   sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
@@ -196,9 +197,20 @@ function annotationAnchor(annotation, doc) {
   return quoteText(doc, from, to) === annotation.quote
     ? { from, to } : null;
 }
+function pendingAnchorRange(doc, pending) {
+  if (!pending) return null;
+  const { from, to } = pending;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
+  if (to > doc.content.size) return null;
+  try {
+    return quoteText(doc, from, to) === pending.quote ? { from, to } : null;
+  } catch {
+    return null;
+  }
+}
 
-function annotationDecorations(doc, annotations) {
-  return DecorationSet.create(doc, annotations.flatMap((annotation) => {
+function annotationDecorations(doc, annotations, pending = props.pendingAnchor) {
+  const marks = annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
     return range ? [Decoration.inline(
       range.from,
@@ -206,18 +218,41 @@ function annotationDecorations(doc, annotations) {
       { class: "annotation-anchor", "data-annotation-id": annotation.id },
       { annotationId: annotation.id },
     )] : [];
-  }));
+  });
+  const anchor = pendingAnchorRange(doc, pending);
+  if (anchor) {
+    marks.push(Decoration.inline(anchor.from, anchor.to, { class: "pending-anchor" }));
+  }
+  return DecorationSet.create(doc, marks);
+}
+
+function applyAnnotationAnchors(transaction, previous) {
+  const meta = transaction.getMeta(annotationKey);
+  if (meta !== undefined) {
+    return annotationDecorations(transaction.doc, meta.annotations, meta.pending);
+  }
+  return remapDecorations(previous, transaction);
+}
+
+function remapDecorations(previous, transaction) {
+  const mapped = previous.map(transaction.mapping, transaction.doc);
+  if (!transaction.docChanged) return mapped;
+  return rebuildPendingDecorations(mapped, transaction);
+}
+
+function rebuildPendingDecorations(mapped, transaction) {
+  const decorations = mapped.find();
+  const anchor = pendingAnchorRange(transaction.doc, props.pendingAnchor);
+  if (anchor) return mapped;
+  const kept = decorations.filter((decoration) => !decoration.spec.pendingAnchor);
+  return kept.length === decorations.length
+    ? mapped
+    : DecorationSet.create(transaction.doc, kept);
 }
 
 function clickedAnnotation(view, position) {
   const decorations = annotationKey.getState(view.state)?.find(position, position + 1) || [];
   return decorations.find((decoration) => decoration.spec.annotationId)?.spec.annotationId;
-}
-
-function applyAnnotationAnchors(transaction, previous) {
-  const annotations = transaction.getMeta(annotationKey);
-  if (annotations !== undefined) return annotationDecorations(transaction.doc, annotations);
-  return previous.map(transaction.mapping, transaction.doc);
 }
 
 const annotationExtension = Extension.create({
@@ -246,7 +281,9 @@ function refreshAnnotationAnchors(activeEditor = editor.value) {
     return;
   }
   annotationRefreshPending = false;
-  const transaction = activeEditor.state.tr.setMeta(annotationKey, props.annotations);
+  const transaction = activeEditor.state.tr.setMeta(
+    annotationKey, { annotations: props.annotations, pending: props.pendingAnchor },
+  );
   activeEditor.view.dispatch(transaction);
 }
 
@@ -282,6 +319,7 @@ function replaceDocument(document) {
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
 watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
+watch(() => props.pendingAnchor, () => refreshAnnotationAnchors());
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;

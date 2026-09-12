@@ -4,6 +4,7 @@ import { AlertTriangle, LoaderCircle, RefreshCw } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
+import AnnotationFloat from "../components/AnnotationFloat.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -52,6 +53,8 @@ const annotations = ref([]);
 let annotationLoadGeneration = 0;
 const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
+const floatDraft = ref(null);
+const floatThread = ref(null);
 const annotationRunWatches = new Map();
 let pendingSteps = [];
 let annotationRunPoll = null;
@@ -231,7 +234,10 @@ function handleSaveConflict(error) {
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) clearWritingContext();
+  if (invalidate) {
+    clearWritingContext();
+    closeAnnotationFloat();
+  }
   pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
@@ -400,6 +406,7 @@ function resizeTitle() {
 
 function changeDocument(value) {
   invalidateSelection();
+  floatDraft.value = null;
   document.value = value.document;
   pendingSteps.push(...(value.steps || []));
   crashDraft.queue();
@@ -471,6 +478,43 @@ function openAnnotation(id) {
   selectTool("comments");
   focusedAnnotationId.value = "";
   void nextTick(() => { focusedAnnotationId.value = id; });
+}
+
+function openDraftFloat() {
+  floatThread.value = null;
+  floatDraft.value = annotationSelection.value;
+}
+
+function openThreadFloat(id) {
+  floatDraft.value = null;
+  floatThread.value = annotations.value.find((row) => row.id === id) || null;
+}
+
+function closeAnnotationFloat() {
+  floatDraft.value = null;
+  floatThread.value = null;
+}
+
+function floatSaved(created) {
+  floatDraft.value = null;
+  floatThread.value = created;
+  void refreshAnnotations();
+}
+
+function floatResolved() {
+  closeAnnotationFloat();
+  void refreshAnnotations();
+}
+
+async function floatRevised(caseValue) {
+  closeAnnotationFloat();
+  await applyRevisedCase(caseValue);
+}
+
+function askFloatAi(annotation) {
+  const target = annotations.value.find((row) => row.id === annotation.id) || annotation;
+  closeAnnotationFloat();
+  askAnnotationAi(target);
 }
 
 function askAnnotationAi(annotation) {
@@ -747,12 +791,13 @@ onBeforeUnmount(() => {
                 :editable="editable"
                 :annotatable="annotatable"
                 :annotations="annotations"
+                :pending-anchor="floatDraft"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="writingContext = $event"
-                @annotate="selectTool('comments')"
-                @annotation-click="openAnnotation"
+                @annotate="openDraftFloat"
+                @annotation-click="openThreadFloat"
               />
             </article>
           </template>
@@ -806,6 +851,19 @@ onBeforeUnmount(() => {
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"
+        />
+        <AnnotationFloat
+          v-if="(floatDraft || floatThread) && !readerMode && !historicalVersion"
+          :case-record="caseRecord"
+          :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :draft="floatDraft"
+          :thread="floatThread"
+          @close="closeAnnotationFloat"
+          @saved="floatSaved"
+          @resolved="floatResolved"
+          @case-revised="floatRevised"
+          @ask-ai="askFloatAi"
+          @replied="void refreshAnnotations()"
         />
       </div>
     </template>
