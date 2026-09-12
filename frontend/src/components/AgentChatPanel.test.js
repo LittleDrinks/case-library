@@ -109,16 +109,26 @@ function generatedVersionResponse() {
   ]);
 }
 
-async function startGeneratedVersion(wrapper) {
+async function startGeneratedVersion(wrapper, waitForHistory = true) {
   await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
   await wrapper.get('[aria-label="发送"]').trigger("click");
-  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalled());
+  await vi.waitFor(() => expect(
+    waitForHistory ? api.caseHistory : fetch,
+  ).toHaveBeenCalled());
+  await flushPromises();
 }
 
 async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-list-open"]').trigger("click");
   await flushPromises();
   await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
+}
+
+async function resolveDelayedVersion(response, history) {
+  response.resolve(generatedVersionResponse());
+  await flushPromises();
+  history.resolve({ versions: [{ id: "cv-ai-new" }] });
+  await flushPromises();
 }
 
 function mountPanel(overrides = {}) {
@@ -230,9 +240,8 @@ it("drops a delayed generated-version open after the panel unmounts", async () =
 });
 
 it("drops a delayed generated-version open when switching threads", async () => {
-  const history = deferred();
-  const nextThread = deferred();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
+  const history = deferred(), nextThread = deferred(), response = deferred();
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
   api.caseHistory.mockReturnValue(history.promise);
   api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
   api.agentThread.mockImplementation((_, id) => (
@@ -240,13 +249,14 @@ it("drops a delayed generated-version open when switching threads", async () => 
   ));
   const wrapper = mountPanel();
   await flushPromises();
-  await startGeneratedVersion(wrapper);
+
+  await startGeneratedVersion(wrapper, false);
   await openOtherThread(wrapper);
-  history.resolve({ versions: [{ id: "cv-ai-new" }] });
-  await flushPromises();
+  await resolveDelayedVersion(response, history);
   expect(wrapper.emitted("open-version")).toBeUndefined();
   nextThread.resolve(emptyThread("thread-2"));
   await flushPromises();
+  expect(wrapper.emitted("open-version")).toBeUndefined();
 });
 
 it("refreshes the case after an in-flight write is hydrated", async () => {

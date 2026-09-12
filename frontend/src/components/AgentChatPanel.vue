@@ -63,6 +63,7 @@ let pendingWriteSync = false;
 let hydratedWriteThread = "";
 let hydratedVersionThread = "";
 let versionOpenGeneration = 0;
+let threadSwitchDepth = 0;
 
 function sourceRefs() {
   const parts = messages.value.flatMap((message) => (message.parts || []).flatMap(sourcesOf));
@@ -250,7 +251,7 @@ watch(() => threadState.value?.latestRun?.status, (current, previous) => {
     pendingWriteSync = false;
     void refreshCaseAfterWrite();
   }
-  if (!pendingHydratedVersionIds.size) return;
+  if (threadSwitchDepth || !pendingHydratedVersionIds.size) return;
   const ids = [...pendingHydratedVersionIds];
   pendingHydratedVersionIds.clear();
   ids.forEach((id) => {
@@ -328,6 +329,11 @@ function rememberScroll() {
   if (threadId.value) scrollPositions.set(threadId.value, conversation.value?.scrollTop ?? 0);
 }
 
+function finishThreadSwitch() {
+  threadSwitchDepth -= 1;
+  if (!threadSwitchDepth) syncGeneratedVersions();
+}
+
 async function restoreScroll(id) {
   await nextTick();
   if (conversation.value) conversation.value.scrollTop = scrollPositions.get(id) ?? 0;
@@ -336,9 +342,15 @@ async function restoreScroll(id) {
 async function chooseThread(id) {
   stopThreadsPolling();
   if (id !== threadId.value) {
+    threadSwitchDepth += 1;
     versionOpenGeneration += 1;
+    pendingHydratedVersionIds.clear();
     emit("clear-writing-context");
-    await selectThread(id);
+    try {
+      await selectThread(id);
+    } finally {
+      finishThreadSwitch();
+    }
   }
   mode.value = "chat";
   await restoreScroll(id);
@@ -346,9 +358,15 @@ async function chooseThread(id) {
 
 async function addThread() {
   stopThreadsPolling();
+  threadSwitchDepth += 1;
   versionOpenGeneration += 1;
+  pendingHydratedVersionIds.clear();
   emit("clear-writing-context");
-  await createThread();
+  try {
+    await createThread();
+  } finally {
+    finishThreadSwitch();
+  }
   mode.value = "chat";
   await restoreScroll(threadId.value);
 }
@@ -455,7 +473,7 @@ function hydrateGeneratedVersions(entries) {
 }
 
 function syncGeneratedVersions() {
-  if (!threadId.value || !threadState.value) return;
+  if (threadSwitchDepth || !threadId.value || !threadState.value) return;
   const entries = generatedVersionEntries();
   if (hydratedVersionThread !== threadId.value) {
     hydrateGeneratedVersions(entries);
