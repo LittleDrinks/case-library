@@ -8,7 +8,7 @@ const props = defineProps({
   user: { type: Object, default: null },
   draft: { type: Object, default: null },
   thread: { type: Object, default: null },
-  // 保存前门禁：先 flush autosave 再重捕获精确选区；拒绝时返回 falsy。
+  // 保存前门禁：先 flush autosave，再由 Workbench 校验 Decoration 映射锚点；拒绝时返回 falsy。
   beforeSave: { type: Function, default: async () => true },
 });
 const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai", "replied"]);

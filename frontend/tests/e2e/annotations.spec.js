@@ -279,16 +279,16 @@ function waitForAnnotationCreate(page, caseId) {
 }
 
 async function saveDirtyAnnotation(page, caseId, marker) {
-  const paragraph = page.locator(".canvas-editor p", { hasText: marker });
-  const saved = waitForCaseSave(page, caseId);
+  const paragraph = page.locator(".canvas-editor p", { hasText: marker }), saved = waitForCaseSave(page, caseId);
   await paragraph.click();
   await page.keyboard.press("End");
   await page.keyboard.type(" 先保存正文");
-  await selectManualAnnotation(page, marker);
+  await selectSubstring(page, paragraph, marker);
+  await openDirtyFloat(page);
   await page.getByLabel("批注内容").fill("dirty 后保存批注");
-  const annotation = waitForAnnotationCreate(page, caseId);
+  const annotationRequest = waitForAnnotationCreate(page, caseId);
   await page.getByRole("button", { name: "保存意见", exact: true }).click();
-  const [saveResponse, annotationResponse] = await Promise.all([saved, annotation]);
+  const [saveResponse, annotationResponse] = await Promise.all([saved, annotationRequest]);
   expect(saveResponse.ok()).toBe(true);
   expect(annotationResponse.ok()).toBe(true);
   const savedCase = await saveResponse.json();
@@ -296,6 +296,11 @@ async function saveDirtyAnnotation(page, caseId, marker) {
     quote: marker, revision: savedCase.revision,
   });
   await expect(page.locator(".annotation-anchor")).toHaveText(marker);
+}
+
+async function openDirtyFloat(page) {
+  await expect(page.getByRole("button", { name: "添加选区批注" })).toBeEnabled();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
 }
 
 test("正文 dirty 时从浮窗保存批注先提交最新正文再提交锚点", async ({ page }) => {

@@ -594,8 +594,8 @@ async function openDraftFloat(wrapper, canvas) {
 }
 
 async function editOpenDraft(canvas, wrapper) {
-  canvas.vm.editor.commands.setTextSelection(3);
-  canvas.vm.editor.commands.insertContent("后缀");
+  canvas.get(".canvas-editor p").element.textContent = "正文后缀";
+  await canvas.get(".canvas-editor").trigger("input");
   await flushPromises();
   const float = wrapper.get(".annotation-float");
   await float.get('[aria-label="批注内容"]').setValue("编辑后保存");
