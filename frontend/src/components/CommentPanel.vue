@@ -69,7 +69,7 @@ async function loadAnnotations() {
   try {
     const next = props.user ? await api.listAnnotations(props.caseRecord.id) : [];
     if (generation !== loadGeneration) return;
-    annotations.value = next.filter(({ versionId }) => versionId == null);
+    annotations.value = next;
     announce();
     void focusAnnotation(props.focusAnnotationId);
   } catch (caught) {

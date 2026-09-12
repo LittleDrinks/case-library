@@ -252,9 +252,7 @@ async function loadAnnotations() {
   try {
     const rows = await api.listAnnotations(caseId());
     if (generation !== annotationLoadGeneration) return;
-    annotations.value = rows.filter(({ status, versionId }) => (
-      versionId == null && status !== "resolved"
-    ));
+    annotations.value = rows.filter(({ status }) => status !== "resolved");
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
