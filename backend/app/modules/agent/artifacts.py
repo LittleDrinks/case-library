@@ -174,7 +174,7 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
     if decision == "accepted":
         if not revalidate_sources(database, user, case_id, artifact.sources):
             raise CaseError(409, "修订依据当前不可读，候选已过期")
-        case = _apply_revision(database, case, artifact, user, session)
+        case = _accept_candidate(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
 
 
@@ -230,6 +230,34 @@ def _apply_revision(database, case: dict, artifact: AgentArtifact, user: dict, s
     mapping = _revision_mapping(case, document, steps)
     record_snapshot(database, case, user, "pre_agent_decision", session)
     return _commit_revision(database, case, document, steps, mapping, artifact.id, session)
+
+
+def _accept_candidate(database, case, artifact, user, session) -> dict:
+    """接受候选：批注修订仍并入当前稿；普通候选独立成只读 AI 版本。
+
+    普通候选接受不改当前教师稿，revision 不动；文档重建基于运行基线正文。
+    """
+    if artifact.annotation_id:
+        return _apply_revision(database, case, artifact, user, session)
+    return _candidate_ai_version(database, case, artifact, user, session)
+
+
+def _candidate_ai_version(database, case, artifact, user, session) -> dict:
+    """普通候选接受：整篇替换结果冻结为独立只读 AI 版本，当前稿不动。"""
+    from app.modules.cases.versions import AI_VERSION_KIND, create_version
+
+    if case["revision"] != artifact.base_revision:
+        raise CaseError(409, "正文已更新，修订候选已过期")
+    document, _steps = _resolved_document(case, artifact)
+    record = create_version(
+        database, case, user, AI_VERSION_KIND, case["title"], document, session,
+    )
+    database.case_versions.update_one(
+        {"id": record["id"]},
+        {"$set": {"sourceRunId": artifact.run_id}},
+        session=session,
+    )
+    return case
 
 
 def _revision_mapping(case, document, steps):

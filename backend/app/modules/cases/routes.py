@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.core.dependencies import get_database, get_settings
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
 from app.modules.cases.lifecycle import execute_lifecycle, get_history
-from app.modules.cases.models import CaseCreate, CasePatch, LifecycleCommand
+from app.modules.cases.models import (
+    CaseCreate,
+    CasePatch,
+    LifecycleCommand,
+    ManualVersionCreate,
+)
 from app.modules.cases.published import PublishedCaseReader, find_version, version_readable
 from app.modules.cases.service import (
     CaseError,
@@ -19,6 +24,7 @@ from app.modules.cases.service import (
     update_case,
 )
 from app.modules.cases.sources import ordered_entries
+from app.modules.cases.versions import create_manual_version
 from app.modules.documents import build_case_docx
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -158,6 +164,19 @@ def history(
     user: dict = Depends(require_user),
 ):
     return get_history(database, case_id, user)
+
+
+@router.post("/{case_id}/versions")
+def create_version(
+    case_id: str,
+    body: ManualVersionCreate,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+):
+    return create_manual_version(
+        database, case_id, body.title, user, body.revision,
+    )
 
 
 def _reader_case(database, case_id: str, user: dict | None) -> dict:

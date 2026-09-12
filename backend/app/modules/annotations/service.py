@@ -411,6 +411,46 @@ def _list_query(case: dict, user: dict) -> dict:
     return {"caseId": case["id"], "versionId": {"$ne": None}}
 
 
+RESTORED_FIELDS = (
+    "quote", "section", "content", "source", "from_", "to", "quoteHash",
+    "revision", "status", "replies", "revisions",
+)
+
+
+def restore_draft_annotations(
+    database: Database, case_id: str, target_version_id: str, session,
+) -> None:
+    """恢复闭环的批注迁移：当前工作稿批注替换为目标版本当时批注。
+
+    目标版本批注（versionId=该版本）复制为工作稿批注（versionId=None），
+    保留讨论线程、解决状态与修订历史；恢复前工作稿批注随之删除。
+    """
+    database.annotations.delete_many(
+        {"caseId": case_id, "versionId": None}, session=session,
+    )
+    rows = database.annotations.find(
+        {"caseId": case_id, "versionId": target_version_id}, session=session,
+    )
+    restored = [_restore_copy(row, case_id) for row in rows]
+    if restored:
+        database.annotations.insert_many(restored, session=session)
+
+
+def _restore_copy(row: dict, case_id: str) -> dict:
+    copy = {
+        "id": f"an-{secrets.token_hex(8)}",
+        "caseId": case_id,
+        "versionId": None,
+        "restoredFromId": row["id"],
+        "createdBy": row["createdBy"],
+        "createdAt": _now(),
+    }
+    for field in RESTORED_FIELDS:
+        if row.get(field) is not None:
+            copy[field] = row[field]
+    return copy
+
+
 def _get_annotation(database: Database, case_id: str, annotation_id: str, session=None) -> dict:
     annotation = _find(database.annotations, {"id": annotation_id, "caseId": case_id}, session)
     if not annotation:
