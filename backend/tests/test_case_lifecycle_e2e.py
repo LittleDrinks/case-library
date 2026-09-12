@@ -236,7 +236,7 @@ def test_owner_reopens_only_a_hidden_published_case() -> None:
     assert status == 200
     assert reopened["case"]["workflowStatus"] == "draft"
     assert reopened["case"]["publicationStatus"] == "hidden"
-    edited = patch_title(owner, owner_csrf, reopened["case"], "重开后修改")
+    edited = patch_case(owner, owner_csrf, reopened["case"], "重开后修改")
     assert edited["title"] == "重开后修改"
     assert request(build_opener(), "GET", f"/api/cases/{case['id']}")[0] == 404
 
@@ -256,7 +256,7 @@ def test_owner_withdraws_even_after_review_starts() -> None:
         submittedVersionId=started["case"]["submittedVersionId"],
     )
     assert transition(admin, admin_csrf, case["id"], stale)[0] == 409
-    edited = patch_title(owner, csrf, withdrawn["case"], "撤回后修改")
+    edited = patch_case(owner, csrf, withdrawn["case"], "撤回后修改")
     second = submit_case(owner, csrf, edited)
     _start_review(admin, admin_csrf, case["id"], second)
     assert_lifecycle_history(owner, case["id"])
@@ -323,19 +323,33 @@ def test_non_owner_cannot_probe_case_revision_through_lifecycle() -> None:
     )
 
 
-def patch_title(opener, csrf: str, case: dict, title: str) -> dict:
+def patch_case(
+    opener, csrf: str, case: dict, title: str,
+    document: dict | None = None, steps: list[dict] | None = None,
+) -> dict:
+    body = {"title": title, "revision": case["revision"]}
+    if document is not None:
+        body.update({"document": document, "steps": steps})
     status, saved = request(
         opener,
         "PATCH",
         f"/api/cases/{case['id']}",
-        {
-            "title": title,
-            "revision": case["revision"],
-        },
+        body,
         csrf,
     )
     assert status == 200
     return saved
+
+
+def _different_document_patch() -> tuple[dict, list[dict]]:
+    text = "覆盖前的不同正文"
+    document = {
+        "type": "doc",
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
+    }
+    steps = [{"stepType": "replace", "from": 1, "to": 1 + len("教学案例正文"),
+              "slice": {"content": [{"type": "text", "text": text}]} }]
+    return document, steps
 
 
 def _assert_overwrite_history(history: dict, submitted: dict, changed: dict) -> None:
@@ -356,7 +370,11 @@ def test_owner_overwrites_the_working_draft_with_a_submitted_version() -> None:
     case = create_case(owner, csrf, f"overwrite-{uuid.uuid4().hex}")
     submitted = _transition_ok(owner, csrf, case["id"], "submit", case)
     withdrawn = _withdraw(owner, csrf, case["id"], submitted["case"])
-    changed = patch_title(owner, csrf, withdrawn["case"], "覆盖后标题")
+    changed_document, steps = _different_document_patch()
+    changed = patch_case(
+        owner, csrf, withdrawn["case"], "覆盖后标题", changed_document, steps,
+    )
+    assert changed["document"] != submitted["version"]["document"]
     overwritten = _overwrite(owner, csrf, case["id"], changed, submitted["version"]["id"])
 
     assert overwritten["case"]["title"] == case["title"]
