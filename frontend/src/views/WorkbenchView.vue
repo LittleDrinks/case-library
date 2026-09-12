@@ -477,6 +477,7 @@ async function flushAutosave() {
 }
 
 function openDraftFloat() {
+  if (contentMutationBusy.value) return;
   selectTool("comments");
   floatThread.value = null;
   floatDraft.value = annotationSelection.value;
@@ -504,6 +505,7 @@ function floatReplied(updated) {
 }
 
 function openThreadFloat(id) {
+  if (contentMutationBusy.value) return;
   selectTool("comments");
   floatDraft.value = null;
   floatThread.value = annotations.value.find((row) => row.id === id) || null;

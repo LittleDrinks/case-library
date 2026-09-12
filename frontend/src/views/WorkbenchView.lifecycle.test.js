@@ -725,3 +725,22 @@ test("浮窗保存中不能切换工具且完成后可以切换", async () => {
   expect(rail.props("active")).toBe("history");
   wrapper.unmount();
 });
+
+
+for (const event of ["annotate", "annotation-click"]) {
+  test(`附件请求在途时不能通过 ${event} 切换批注工具`, async () => {
+    const wrapper = await annotationWorkspace();
+    const rail = wrapper.getComponent(annotationRailStub);
+    const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+    rail.vm.$emit("select", "attachments");
+    rail.vm.$emit("mutation-state", true);
+    canvas.vm.$emit(event, "annotation-1");
+    await flushPromises();
+    expect(rail.props("active")).toBe("attachments");
+    expect(wrapper.find(".annotation-float").exists()).toBe(false);
+    rail.vm.$emit("mutation-state", false);
+    await openAnnotationThread(wrapper);
+    expect(rail.props("active")).toBe("comments");
+    wrapper.unmount();
+  });
+}
