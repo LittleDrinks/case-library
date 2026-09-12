@@ -192,8 +192,12 @@ async function sendRequest(page) {
 async function acceptedViaApi(page, caseId) {
   const caseApi = await page.context().request.get(`/api/cases/${caseId}`);
   const persisted = await caseApi.json();
-  expect(persisted.revision).toBe(2);
-  expect(persisted.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  expect(persisted.revision).toBe(1);
+  expect(persisted.document.content[1].content[0].text).toBe(TARGET_TEXT);
+  const history = await (await page.context().request.get(`/api/cases/${caseId}/history`)).json();
+  const ai = history.versions.find((version) => version.kind === "ai");
+  expect(ai?.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  return ai;
 }
 
 async function reloadRestoresTracer(page, caseId) {
@@ -207,6 +211,7 @@ async function reloadRestoresTracer(page, caseId) {
   await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
   await expect(artifact).toContainText(REPLACEMENT_MARK);
   await expect(artifact).toContainText("原文：第二段：教学目标需要更明确的评价依据。");
+  await expect(page.getByRole("tab", { name: /AI版本 v\d+ · / })).toBeVisible();
 }
 
 async function prepareTracer(page, playwright) {
