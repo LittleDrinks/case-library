@@ -18,7 +18,6 @@ const saving = ref(false);
 const error = ref("");
 
 const isDraft = computed(() => Boolean(props.draft));
-// 与 CommentPanel.canCompose 同一判定：作者草稿或审核中管理员，不放开他人草稿。
 const canCompose = computed(() => Boolean(
   props.user && (
     (props.user.id === props.caseRecord.ownerId && props.caseRecord.workflowStatus === "draft")
