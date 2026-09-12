@@ -210,15 +210,14 @@ it("审核批注列表允许作者和管理员讨论，但私人批注不泄露�
   const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
   api.listAnnotations.mockResolvedValue([review]);
   api.replyAnnotation.mockResolvedValue({ ...review, replies: [{ id: "reply-1", content: "收到" }] });
-  const reviewPanel = await mountPanel({
-    caseRecord: { ...caseRecord, workflowStatus: "reviewing" }, user: admin, selection: null,
-  });
+  const reviewPanel = await mountPanel({ caseRecord: { ...caseRecord, workflowStatus: "reviewing" }, user: admin });
   await reviewPanel.get('[aria-label="回复批注"]').setValue("收到");
   await reviewPanel.get(".comment-thread-actions button").trigger("click");
   await flushPromises();
   expect(api.replyAnnotation).toHaveBeenCalledWith(
     caseRecord.id, review.id, { content: "收到" }, admin.csrfToken,
   );
+  expect(reviewPanel.findAll("button").map((button) => button.text())).not.toContain("让 AI 修订");
 
   api.listAnnotations.mockResolvedValue([annotation]);
   const privatePanel = await mountPanel({ user: admin, selection: null });

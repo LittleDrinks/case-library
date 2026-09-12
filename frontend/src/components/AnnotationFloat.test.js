@@ -172,6 +172,7 @@ it("作者可回复绑定版本的管理员审核批注", async () => {
   expect(api.replyAnnotation).toHaveBeenCalledWith(
     "case-1", "annotation-1", { content: "已回复" }, "csrf",
   );
+  expect(wrapper.findAll("button").map((button) => button.text())).not.toContain("询问AI");
 });
 
 it("审核中管理员可填写并保存审核批注，source 为 admin", async () => {

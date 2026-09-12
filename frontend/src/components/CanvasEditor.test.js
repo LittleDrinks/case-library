@@ -29,14 +29,14 @@ async function setup(options = {}) {
   return { wrapper, context };
 }
 
-function selectDomRange(textNode, length, start = 0) {
+function selectDomRange(textNode, length, start = 0, notify = true) {
   const range = globalThis.document.createRange();
   range.setStart(textNode, start);
   range.setEnd(textNode, start + length);
   const browserSelection = globalThis.getSelection();
   browserSelection.removeAllRanges();
   browserSelection.addRange(range);
-  globalThis.document.dispatchEvent(new Event("selectionchange"));
+  if (notify) globalThis.document.dispatchEvent(new Event("selectionchange"));
 }
 
 function clearDomSelection() {
@@ -322,6 +322,38 @@ it("悬挂的选区摘要完成时不得写回已被收起的选区", async () =
     vi.unstubAllGlobals();
   }
 });
+
+async function startDelayedSelection(wrapper, digestResolvers) {
+  await framesSettled();
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
+  selectDomRange(wrapper.get(".canvas-editor p").element.firstChild, 3, 0, false);
+  void wrapper.vm.recaptureSelection();
+  await vi.waitUntil(() => digestResolvers.length > 0, { interval: 10 });
+}
+
+function finishDelayedSelection(digestResolvers) {
+  digestResolvers.splice(0).forEach((resolve) => resolve(new Uint8Array(32).buffer));
+}
+
+it("新选区摘要未完成时隐藏旧批注触发器，完成后才发布新锚点", async () => {
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  await selectParagraph(wrapper);
+  const digestResolvers = [];
+  vi.stubGlobal("crypto", { subtle: { digest: () => new Promise((resolve) => digestResolvers.push(resolve)) } });
+  try {
+    await startDelayedSelection(wrapper, digestResolvers);
+    await nextTick();
+    expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+    finishDelayedSelection(digestResolvers);
+    await vi.waitUntil(() => (wrapper.emitted("selection") ?? [])
+      .some(([event]) => event?.quote === "案例原"), { interval: 10 });
+    expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("正文插入由编辑器映射批注标记并上报原生 steps", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,

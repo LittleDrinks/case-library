@@ -131,6 +131,14 @@ function canReply(annotation) {
   return annotation.createdBy === props.user?.id && props.caseRecord.ownerId === props.user?.id;
 }
 
+function canAskAi(annotation) {
+  return Boolean(
+    canDiscuss(annotation) && annotation.createdBy === props.user?.id
+      && props.user?.id === props.caseRecord.ownerId
+      && props.caseRecord.workflowStatus === "draft",
+  );
+}
+
 function latestPendingRevision(annotation) {
   return [...(annotation.revisions || [])].reverse()
     .find((revision) => revision.status === "pending");
@@ -151,7 +159,7 @@ function revisionStatus(status) {
 }
 
 function askAi(annotation) {
-  if (canDiscuss(annotation)) emit("ask-ai", annotation);
+  if (canAskAi(annotation)) emit("ask-ai", annotation);
 }
 
 function beginEdit(annotation) {
@@ -348,7 +356,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
             @click="setStatus(annotation, 'resolved')"
           ><Check :size="14" />标记解决</button>
           <button
-            v-if="canDiscuss(annotation)"
+            v-if="canAskAi(annotation)"
             class="comment-status-action"
             type="button"
             :disabled="saving"

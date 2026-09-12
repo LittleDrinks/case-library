@@ -41,6 +41,11 @@ const canDiscuss = computed(() => {
   }
   return props.user?.id === props.thread.createdBy;
 });
+const canAskAi = computed(() => Boolean(
+  canDiscuss.value && props.user?.id === props.thread?.createdBy
+    && props.user?.id === props.caseRecord.ownerId
+    && props.caseRecord.workflowStatus === "draft",
+));
 const latestRevision = computed(() => (
   [...(props.thread?.revisions || [])].reverse()
     .find((revision) => revision.status === "pending") || null
@@ -241,7 +246,7 @@ function revisionStatus(status) {
             @click="save()"
           >保存意见</button>
           <button
-            v-if="canDiscuss"
+            v-if="canAskAi"
             type="button"
             :disabled="saving || !content.trim()"
             @click="save({ askAi: true })"

@@ -85,9 +85,14 @@ function collapseEditorSelection() {
 // 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
 function discardSelection() {
   selectionRequest += 1;
+  clearCapturedSelection();
+}
+
+function clearCapturedSelection() {
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
   emit("selection", null);
+  emit("writing-context", null);
 }
 
 function validSelection(activeEditor) {
@@ -102,11 +107,11 @@ async function captureSelection({ editor: activeEditor }) {
   if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()
     || selectionNeedsSync(activeEditor)) {
     discardSelection();
-    emit("writing-context", null);
     return;
   }
   selectionBlocked = false;
   const request = ++selectionRequest;
+  clearCapturedSelection();
   const quoteHash = await hashQuote(context.quote);
   if (request !== selectionRequest || selectionBlocked) return;
   const captured = { ...context, revision: props.revision, quoteHash };
