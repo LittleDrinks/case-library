@@ -176,6 +176,17 @@ def _assert_atomic_decision(database, case_id: str, artifact: dict, version_id: 
     assert [event["type"] for event in events].count("artifact.decided") == 1
 
 
+def _accept_idempotently(client: httpx.Client, csrf: str, case_id: str, artifact: dict) -> str:
+    first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
+    assert first.status_code == 200, first.text
+    duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
+    assert duplicate.status_code == 200
+    first_view, duplicate_view = first.json(), duplicate.json()
+    assert duplicate_view["artifact"]["status"] == "accepted"
+    assert duplicate_view["artifact"]["versionId"] == first_view["artifact"]["versionId"]
+    return first_view["artifact"]["versionId"]
+
+
 def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, dict]:
     _publish_skill()
     _wait_for_catalog(client)
@@ -221,14 +232,8 @@ def test_accept_creates_independent_version_and_replays_decision():
     try:
         database = mongo.get_default_database()
         case_id, _run, artifact = _tracer_case(client, csrf, database)
-        first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
-        assert first.status_code == 200, first.text
-        duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
-        assert duplicate.status_code == 200
-        first_view, duplicate_view = first.json(), duplicate.json()
-        assert duplicate_view["artifact"]["status"] == "accepted"
-        assert duplicate_view["artifact"]["versionId"] == first_view["artifact"]["versionId"]
-        _assert_atomic_decision(database, case_id, artifact, first_view["artifact"]["versionId"])
+        version_id = _accept_idempotently(client, csrf, case_id, artifact)
+        _assert_atomic_decision(database, case_id, artifact, version_id)
         snapshot = client.get(f"/api/cases/{case_id}/agent/thread").json()
         assert [row["status"] for row in snapshot["artifacts"]] == ["accepted"]
         assert snapshot["latestRun"]["status"] == "completed"
