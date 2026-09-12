@@ -453,6 +453,11 @@ function locateHeading(order) {
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function selectRailTool(tool) {
+  closeAnnotationFloat();
+  selectTool(tool);
+}
+
 function selectTool(tool) {
   activeTool.value = readerMode.value && tool === "comments" ? "ai" : tool;
   drawerOpen.value = true;
@@ -749,7 +754,7 @@ onBeforeUnmount(() => {
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
-        @tool="selectTool"
+        @tool="selectRailTool"
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
@@ -873,7 +878,7 @@ onBeforeUnmount(() => {
           :history-available="historyAvailable"
           :before-attachment-mutation="prepareContentMutation"
           :annotation-refresh-token="annotationRefreshToken"
-          @select="selectTool"
+          @select="selectRailTool"
           @toggle="drawerOpen = !drawerOpen"
           @case-refreshed="applyAttachmentCase"
           @case-restored="applyCase"

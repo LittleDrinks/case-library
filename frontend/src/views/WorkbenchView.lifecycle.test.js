@@ -675,3 +675,16 @@ test("AI轮询完成后同步仍打开的浮窗线程", async () => {
     vi.useRealTimers();
   }
 });
+
+
+test("从批注浮窗切换历史面板后清除遮挡", async () => {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotationThread()]);
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  await openAnnotationThread(wrapper);
+  wrapper.getComponent(annotationRailStub).vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(false);
+  wrapper.unmount();
+});
