@@ -642,6 +642,11 @@ async function editDraftAndOpenHistory(page, marker) {
   await openHistoryTimeline(page);
 }
 
+async function expectRestoredTimeline(page, marker) {
+  await expect(page.locator(".version-timeline")).toContainText("恢复前的当前稿");
+  await expect(page.locator(".version-timeline")).toContainText(`恢复：${marker}`);
+}
+
 test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正确", async ({ page }) => {
   await login(page);
   const request = page.context().request;
@@ -655,6 +660,7 @@ test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正�
   await expect(page.getByText(`提交版本 v1 · 只读`)).toBeVisible();
 
   await overwriteDialogStep(page, "确认恢复");
+  await expectRestoredTimeline(page, marker);
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
 });
@@ -698,6 +704,7 @@ test("历史版本 Tab 悬停展开且折叠后仍可见返回恢复入口", asy
   const toggle = tabs.locator(".version-tabs-toggle");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await page.locator(".version-paper-head h2").hover();
   await tabs.hover();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(tabs.getByRole("tab", { name: "当前教师稿" })).toBeVisible();

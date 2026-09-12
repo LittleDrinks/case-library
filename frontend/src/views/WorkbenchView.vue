@@ -595,6 +595,7 @@ async function overwriteSucceeded(result) {
   overwriteTarget.value = null;
   crashDraft.load(result.case);
   await refreshAnnotations();
+  refreshVersionHistory();
 }
 
 async function handleVersionCreated() {
