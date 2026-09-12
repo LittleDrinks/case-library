@@ -176,6 +176,7 @@ async function openAiVersion(page, version) {
 }
 
 async function selectCurrentDraft(page) {
+  await page.locator(".version-tabs").hover();
   const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
   await expect(draftTab).toBeVisible();
   await draftTab.click();
@@ -205,13 +206,16 @@ async function expectHistoryUnchanged(page, caseId, before) {
   return after;
 }
 
-async function assertRestoredHistory(page, caseId, version, beforeDocument) {
+async function assertRestoredHistory(page, caseId, version, beforeCase) {
   const response = await page.context().request.get(`/api/cases/${caseId}/history`);
   expect(response.ok()).toBe(true);
   const history = await response.json();
   expect(history.versions).toHaveLength(3);
   expect(history.versions[0]).toEqual(expect.objectContaining({ id: version.id, number: 1, kind: "ai", document: version.document }));
-  expect(history.versions[1]).toEqual(expect.objectContaining({ number: 2, kind: "manual", title: "恢复前的当前稿", document: beforeDocument }));
+  expect(history.versions[1]).toEqual(expect.objectContaining({
+    number: 2, kind: "manual", title: "恢复前的当前稿", document: beforeCase.document,
+    sourceRevision: beforeCase.revision,
+  }));
   expect(history.versions[2]).toEqual(expect.objectContaining({ number: 3, kind: "restore", restoredFromId: version.id, document: version.document }));
   return history;
 }
@@ -230,7 +234,7 @@ async function overwriteAiVersion(page, caseId, version) {
   await page.getByRole("button", { name: "确认恢复", exact: true }).click();
   expect((await restoreResponse).ok()).toBe(true);
   await assertCurrentDraft(page, version);
-  return assertRestoredHistory(page, caseId, version, before.document);
+  return assertRestoredHistory(page, caseId, version, before);
 }
 
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {

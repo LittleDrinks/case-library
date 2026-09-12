@@ -66,6 +66,10 @@ function directWriteVersionSnapshot() {
   return result;
 }
 
+function completedSnapshot(value) {
+  return { ...value, latestRun: { id: "run-1", status: "completed" } };
+}
+
 function streamResponse(chunks) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
@@ -91,6 +95,30 @@ function answerResponse() {
     'data: {"type":"finish","finishReason":"stop"}\n\n',
     "data: [DONE]\n\n",
   ]);
+}
+
+function generatedVersionResponse() {
+  return streamResponse([
+    'data: {"type":"start","messageId":"message-live"}\n\n',
+    'data: {"type":"start-step"}\n\n',
+    'data: {"type":"tool-input-available","toolCallId":"version-1","toolName":"propose_document","input":{}}\n\n',
+    'data: {"type":"tool-output-available","toolCallId":"version-1","output":{"status":"created","versionId":"cv-ai-new"}}\n\n',
+    'data: {"type":"finish-step"}\n\n',
+    'data: {"type":"finish","finishReason":"stop"}\n\n',
+    "data: [DONE]\n\n",
+  ]);
+}
+
+async function startGeneratedVersion(wrapper) {
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalled());
+}
+
+async function openOtherThread(wrapper) {
+  await wrapper.get('[data-testid="agent-thread-list-open"]').trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
 }
 
 function mountPanel(overrides = {}) {
@@ -149,24 +177,76 @@ it("hydrates an undone write from the server snapshot", async () => {
   expect(wrapper.find('[data-testid="agent-undo-write"]').exists()).toBe(false);
 });
 
-it("notifies the workbench when a saved AI version appears", async () => {
-  api.agentThread.mockResolvedValue(versionSnapshot());
+it("does not reopen a completed AI version when the panel hydrates or remounts", async () => {
+  api.agentThread.mockResolvedValue(completedSnapshot(versionSnapshot()));
   api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-1", sourceRunId: "run-1" }] });
   const wrapper = mountPanel();
   await flushPromises();
 
-  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
-  expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-1", sourceRunId: "run-1" }]]);
+  expect(wrapper.emitted("versions-updated")).toBeUndefined();
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+  wrapper.unmount();
+  const remounted = mountPanel();
+  await flushPromises();
+  expect(remounted.emitted("open-version")).toBeUndefined();
 });
 
-it("notifies the workbench when a direct full write saves an AI version", async () => {
-  api.agentThread.mockResolvedValue(directWriteVersionSnapshot());
+it("does not reopen a hydrated direct-write AI version", async () => {
+  api.agentThread.mockResolvedValue(completedSnapshot(directWriteVersionSnapshot()));
   api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-2" }] });
   const wrapper = mountPanel();
   await flushPromises();
 
-  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
-  expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-2" }]]);
+  expect(wrapper.emitted("versions-updated")).toBeUndefined();
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+});
+
+it("opens a newly generated AI version once after hydration", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
+  api.caseHistory.mockResolvedValue({ versions: [{ id: "cv-ai-new" }] });
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await vi.waitFor(() => expect(wrapper.emitted("open-version")).toEqual([[{ id: "cv-ai-new" }]]));
+  expect(wrapper.emitted("open-version")).toHaveLength(1);
+});
+
+it("drops a delayed generated-version open after the panel unmounts", async () => {
+  const history = deferred();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
+  api.caseHistory.mockReturnValue(history.promise);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("生成全文");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await vi.waitFor(() => expect(api.caseHistory).toHaveBeenCalled());
+  wrapper.unmount();
+  history.resolve({ versions: [{ id: "cv-ai-new" }] });
+  await flushPromises();
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+});
+
+it("drops a delayed generated-version open when switching threads", async () => {
+  const history = deferred();
+  const nextThread = deferred();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(generatedVersionResponse()));
+  api.caseHistory.mockReturnValue(history.promise);
+  api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
+  api.agentThread.mockImplementation((_, id) => (
+    id === "thread-2" ? nextThread.promise : Promise.resolve(structuredClone(snapshot))
+  ));
+  const wrapper = mountPanel();
+  await flushPromises();
+  await startGeneratedVersion(wrapper);
+  await openOtherThread(wrapper);
+  history.resolve({ versions: [{ id: "cv-ai-new" }] });
+  await flushPromises();
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+  nextThread.resolve(emptyThread("thread-2"));
+  await flushPromises();
 });
 
 it("refreshes the case after an in-flight write is hydrated", async () => {

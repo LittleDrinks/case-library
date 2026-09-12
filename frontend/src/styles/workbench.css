@@ -626,6 +626,8 @@ a.agent-artifact-source:hover { text-decoration: underline; }
   .assistant-tabs { min-height: 49px; padding: 3px 5px 0; }
   .assistant-tabs button { flex: 1; min-width: 0; height: 45px; padding: 0 5px; }
   .assistant-tabs .drawer-toggle { display: grid; flex: 0 0 38px; place-items: center; }
+  .assistant-tabs > button:not(.drawer-toggle) > svg { display: none; }
+  .assistant-tabs > button:not(.drawer-toggle) { gap: 0; padding: 0 1px; font-size: 11px; }
   .panel-head { min-height: 42px; padding: 11px 12px; }
   .compose-footnote span:last-child { display: none; }
   .capability { font-size: 10px; gap: 4px; }
