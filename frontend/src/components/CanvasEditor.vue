@@ -15,6 +15,7 @@ const props = defineProps({
   editable: { type: Boolean, default: true },
   annotatable: { type: Boolean, default: false },
   annotations: { type: Array, default: () => [] },
+  pendingAnchor: { type: Object, default: null },
   sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
@@ -55,8 +56,7 @@ function positionTrigger(context) {
 }
 
 function clearSelection() {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
-  selectionFrame = 0;
+  cancelSelectionFrame();
   selectionBlocked = true;
   selectionRequest += 1;
   selection.value = null;
@@ -78,15 +78,26 @@ function collapseEditorSelection() {
   ));
 }
 
-// 状态观察：选区无效时只丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
+// 状态观察：原生选区变化先丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
 // selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
 // 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
 // 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
 function discardSelection() {
   selectionRequest += 1;
+  clearCapturedSelection();
+}
+
+function clearCapturedSelection() {
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
   emit("selection", null);
+  emit("writing-context", null);
+}
+
+function cancelSelectionFrame() {
+  if (!selectionFrame) return;
+  cancelAnimationFrame(selectionFrame);
+  selectionFrame = 0;
 }
 
 function validSelection(activeEditor) {
@@ -95,24 +106,33 @@ function validSelection(activeEditor) {
   return from < to && $from.sameParent($to) && $from.parent.isTextblock;
 }
 
-async function captureSelection({ editor: activeEditor }) {
-  const context = currentContext(activeEditor);
-  flushAnnotationRefresh(activeEditor);
-  if (!props.annotatable || !validSelection(activeEditor) || !context.quote.trim()
-    || selectionNeedsSync(activeEditor)) {
-    discardSelection();
-    emit("writing-context", null);
-    return;
-  }
-  selectionBlocked = false;
-  const request = ++selectionRequest;
-  const quoteHash = await hashQuote(context.quote);
-  if (request !== selectionRequest || selectionBlocked) return;
+function selectionIsCapturable(activeEditor, context) {
+  return props.annotatable && validSelection(activeEditor) && context.quote.trim()
+    && !selectionNeedsSync(activeEditor);
+}
+
+function publishSelection(context, quoteHash) {
   const captured = { ...context, revision: props.revision, quoteHash };
   selection.value = captured;
   emit("selection", captured);
   emit("writing-context", captured);
   positionTrigger(context);
+}
+
+async function captureSelection({ editor: activeEditor }) {
+  const context = currentContext(activeEditor);
+  flushAnnotationRefresh(activeEditor);
+  if (!selectionIsCapturable(activeEditor, context)) {
+    discardSelection();
+    return;
+  }
+  cancelSelectionFrame();
+  selectionBlocked = false;
+  const request = ++selectionRequest;
+  clearCapturedSelection();
+  const quoteHash = await hashQuote(context.quote);
+  if (request !== selectionRequest || selectionBlocked) return;
+  publishSelection(context, quoteHash);
 }
 
 function domSelectionRange(activeEditor = editor.value) {
@@ -155,7 +175,7 @@ async function recaptureSelection() {
 }
 
 function scheduleSelectionCapture() {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  cancelSelectionFrame();
   selectionFrame = requestAnimationFrame(() => {
     selectionFrame = 0;
     if (editorHasDomSelection()) void recaptureSelection();
@@ -164,6 +184,7 @@ function scheduleSelectionCapture() {
 
 function handleSelectionChange() {
   if (!editorHasDomSelection()) return;
+  discardSelection();
   scheduleSelectionCapture();
 }
 
@@ -196,9 +217,20 @@ function annotationAnchor(annotation, doc) {
   return quoteText(doc, from, to) === annotation.quote
     ? { from, to } : null;
 }
+function pendingAnchorRange(doc, pending) {
+  if (!pending) return null;
+  const { from, to } = pending;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
+  if (to > doc.content.size) return null;
+  try {
+    return quoteText(doc, from, to) === pending.quote ? { from, to } : null;
+  } catch {
+    return null;
+  }
+}
 
-function annotationDecorations(doc, annotations) {
-  return DecorationSet.create(doc, annotations.flatMap((annotation) => {
+function annotationMarks(doc, annotations) {
+  return annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
     return range ? [Decoration.inline(
       range.from,
@@ -206,18 +238,72 @@ function annotationDecorations(doc, annotations) {
       { class: "annotation-anchor", "data-annotation-id": annotation.id },
       { annotationId: annotation.id },
     )] : [];
-  }));
+  });
+}
+
+function pendingMarks(doc, pending, previous) {
+  const anchor = pendingAnchorRange(doc, pending);
+  if (anchor) return [Decoration.inline(
+      anchor.from, anchor.to, { class: "pending-anchor" }, { pendingAnchor: true },
+    )];
+  if (previous && pending) {
+    // 正文变化后位置/引文不再匹配：沿映射回迁旧 pending 装饰供审查，不再按旧选区重捕获。
+    return previous.find(undefined, undefined, (spec) => spec.pendingAnchor);
+  }
+  return [];
+}
+
+function annotationDecorations(doc, annotations, pending = props.pendingAnchor, previous = null) {
+  return DecorationSet.create(doc, [
+    ...annotationMarks(doc, annotations), ...pendingMarks(doc, pending, previous),
+  ]);
+}
+
+function applyAnnotationAnchors(transaction, previous) {
+  const meta = transaction.getMeta(annotationKey);
+  if (meta !== undefined) {
+    return annotationDecorations(transaction.doc, meta.annotations, meta.pending, previous);
+  }
+  return remapDecorations(previous, transaction);
+}
+
+function remapDecorations(previous, transaction) {
+  const mapped = previous.map(transaction.mapping, transaction.doc);
+  if (!transaction.docChanged) return mapped;
+  // DecorationSet.map 已完成位置映射与删除合并；此处只在映射后坐标校验原引文：
+  // 同一引文偏移（如前置插入）→ 保留，保存门禁可过；引文被改写 → pending 失效丢弃。
+  const quote = props.pendingAnchor?.quote;
+  const kept = mapped.find().filter((decoration) => {
+    if (!decoration.spec.pendingAnchor) return true;
+    try {
+      return transaction.doc.textBetween(decoration.from, decoration.to, "\n", "\n") === quote;
+    } catch {
+      return false;
+    }
+  });
+  return kept.length === mapped.find().length
+    ? mapped
+    : DecorationSet.create(transaction.doc, kept);
+}
+
+function pendingDecoration() {
+  const decorations = annotationKey.getState(editor.value?.state)?.find() || [];
+  return decorations.find((decoration) => decoration.spec.pendingAnchor);
+}
+
+function getPendingAnchor() {
+  if (!editor.value || !props.pendingAnchor) return null;
+  const decoration = pendingDecoration();
+  if (!decoration) return null;
+  const quote = quoteText(editor.value.state.doc, decoration.from, decoration.to);
+  return quote === props.pendingAnchor.quote
+    ? { from: decoration.from, to: decoration.to, quote }
+    : null;
 }
 
 function clickedAnnotation(view, position) {
   const decorations = annotationKey.getState(view.state)?.find(position, position + 1) || [];
   return decorations.find((decoration) => decoration.spec.annotationId)?.spec.annotationId;
-}
-
-function applyAnnotationAnchors(transaction, previous) {
-  const annotations = transaction.getMeta(annotationKey);
-  if (annotations !== undefined) return annotationDecorations(transaction.doc, annotations);
-  return previous.map(transaction.mapping, transaction.doc);
 }
 
 const annotationExtension = Extension.create({
@@ -246,7 +332,9 @@ function refreshAnnotationAnchors(activeEditor = editor.value) {
     return;
   }
   annotationRefreshPending = false;
-  const transaction = activeEditor.state.tr.setMeta(annotationKey, props.annotations);
+  const transaction = activeEditor.state.tr.setMeta(
+    annotationKey, { annotations: props.annotations, pending: props.pendingAnchor },
+  );
   activeEditor.view.dispatch(transaction);
 }
 
@@ -282,6 +370,7 @@ function replaceDocument(document) {
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
 watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
+watch(() => props.pendingAnchor, () => refreshAnnotationAnchors());
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
   if (value) return;
@@ -299,7 +388,7 @@ onMounted(() => {
   refreshAnnotationAnchors();
 });
 onBeforeUnmount(() => {
-  if (selectionFrame) cancelAnimationFrame(selectionFrame);
+  cancelSelectionFrame();
   window.document.removeEventListener("selectionchange", handleSelectionChange);
 });
 
@@ -318,7 +407,7 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ clearSelection, recaptureSelection, insertCitation });
+defineExpose({ clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
 </script>
 
 <template>

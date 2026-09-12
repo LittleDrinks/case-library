@@ -5,7 +5,7 @@ import { api } from "../api.js";
 
 vi.mock("../api.js", () => ({
   api: {
-    listAnnotations: vi.fn(), createAnnotation: vi.fn(), updateAnnotation: vi.fn(),
+    listAnnotations: vi.fn(), updateAnnotation: vi.fn(),
     deleteAnnotation: vi.fn(), replyAnnotation: vi.fn(), setAnnotationStatus: vi.fn(),
     mergeAnnotation: vi.fn(),
   },
@@ -15,15 +15,10 @@ const caseRecord = {
   id: "case-1", ownerId: "user-1", workflowStatus: "draft", revision: 4,
 };
 const user = { id: "user-1", role: "user", csrfToken: "csrf" };
-const selection = {
-  from: 9, to: 16, quote: "选中的正文", section: "一、教学说明",
-  quoteHash: "hash", revision: 4,
-};
 const annotation = {
-  id: "annotation-1", caseId: "case-1", quote: selection.quote,
-  section: selection.section, content: "原始批注", source: "manual",
-  from: selection.from, to: selection.to, quoteHash: selection.quoteHash,
-  revision: selection.revision, status: "pending", replies: [], createdBy: user.id,
+  id: "annotation-1", caseId: "case-1", quote: "选中的正文",
+  section: "一、教学说明", content: "原始批注", source: "manual",
+  from: 9, to: 16, quoteHash: "hash", revision: 4, status: "pending", replies: [], createdBy: user.id,
   createdAt: "2026-08-26T00:00:00Z",
 };
 const revisedAnnotation = {
@@ -47,14 +42,13 @@ const resolvedDiscussion = {
 beforeEach(() => {
   vi.clearAllMocks();
   api.listAnnotations.mockResolvedValue([]);
-  api.createAnnotation.mockResolvedValue(annotation);
   api.updateAnnotation.mockResolvedValue({ ...annotation, content: "已编辑批注" });
   api.deleteAnnotation.mockResolvedValue(null);
 });
 
 async function mountPanel(overrides = {}) {
   const wrapper = mount(CommentPanel, {
-    props: { caseRecord, user, selection, ...overrides },
+    props: { caseRecord, user, ...overrides },
   });
   await flushPromises();
   return wrapper;
@@ -66,64 +60,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-it("没有有效选区时禁用手动批注输入并给出提示", async () => {
-  const wrapper = await mountPanel({ selection: null });
-  expect(wrapper.get('[aria-label="批注内容"]').attributes("disabled")).toBeDefined();
-  expect(wrapper.text()).toContain("请先在正文中选择一段文字");
-});
-
-it("作者创建批注时发送完整锚点并立即更新列表", async () => {
-  api.listAnnotations.mockResolvedValueOnce([]).mockResolvedValueOnce([annotation]);
+it("批注面板只保留列表管理，不提供第二个选区创建入口", async () => {
   const wrapper = await mountPanel();
-  await wrapper.get('[aria-label="批注内容"]').setValue("请补充依据");
-  const addButton = wrapper.findAll("button").find((button) => button.text() === "添加批注");
-  await addButton.trigger("click");
-  await flushPromises();
-  expect(api.createAnnotation).toHaveBeenCalledWith(
-    caseRecord.id,
-    expect.objectContaining({ ...selection, content: "请补充依据", source: "manual" }),
-    user.csrfToken,
-  );
-  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
-  expect(wrapper.text()).toContain("原始批注");
-});
-
-it("批注加载替换列表时仍显示已成功创建的批注", async () => {
-  const list = deferred();
-  const refreshed = deferred();
-  const create = deferred();
-  api.listAnnotations.mockReturnValueOnce(list.promise).mockReturnValueOnce(refreshed.promise);
-  api.createAnnotation.mockReturnValueOnce(create.promise);
-  const wrapper = mount(CommentPanel, { props: { caseRecord, user, selection } });
-  await wrapper.get('[aria-label="批注内容"]').setValue("并发批注");
-  const addButton = wrapper.findAll("button").find((button) => button.text() === "添加批注");
-  await addButton.trigger("click");
-  list.resolve([]);
-  await flushPromises();
-  create.resolve(annotation);
-  await flushPromises();
-  refreshed.resolve([annotation]);
-  await flushPromises();
-  expect(wrapper.find(".comment-card").exists()).toBe(true);
-});
-
-it("旧列表晚于创建后的刷新返回时不覆盖新批注", async () => {
-  const initial = deferred();
-  const refreshed = deferred();
-  const create = deferred();
-  api.listAnnotations.mockReturnValueOnce(initial.promise).mockReturnValueOnce(refreshed.promise);
-  api.createAnnotation.mockReturnValueOnce(create.promise);
-  const wrapper = mount(CommentPanel, { props: { caseRecord, user, selection } });
-  await wrapper.get('[aria-label="批注内容"]').setValue("并发批注");
-  const addButton = wrapper.findAll("button").find((button) => button.text() === "添加批注");
-  await addButton.trigger("click");
-  create.resolve(annotation);
-  await flushPromises();
-  refreshed.resolve([annotation]);
-  await flushPromises();
-  initial.resolve([]);
-  await flushPromises();
-  expect(wrapper.find(".comment-card").exists()).toBe(true);
+  expect(wrapper.find(".comment-composer").exists()).toBe(false);
+  expect(wrapper.find('[aria-label="批注内容"]').exists()).toBe(false);
 });
 
 it("案例切换后忽略旧案例的批注加载结果", async () => {
@@ -132,7 +72,7 @@ it("案例切换后忽略旧案例的批注加载结果", async () => {
   const oldAnnotation = { ...annotation, content: "旧案例批注" };
   const nextAnnotation = { ...annotation, id: "annotation-2", caseId: "case-2", content: "新案例批注" };
   api.listAnnotations.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-  const wrapper = mount(CommentPanel, { props: { caseRecord, user, selection } });
+  const wrapper = mount(CommentPanel, { props: { caseRecord, user } });
   await wrapper.setProps({ caseRecord: { ...caseRecord, id: "case-2" } });
   second.resolve([nextAnnotation]);
   await flushPromises();
@@ -173,21 +113,6 @@ it("关闭期间迟到的批注列表不会把已解决批注重新打开", asyn
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([]);
 });
 
-it("创建成功后刷新失败仍显示已保存批注且不能重复提交空输入", async () => {
-  api.listAnnotations.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("批注加载失败"));
-  const wrapper = await mountPanel();
-  await wrapper.get('[aria-label="批注内容"]').setValue("请补充依据");
-  const addButton = wrapper.findAll("button").find((button) => button.text() === "添加批注");
-  await addButton.trigger("click");
-  await flushPromises();
-  expect(wrapper.findAll(".comment-card")).toHaveLength(1);
-  expect(wrapper.text()).toContain("原始批注");
-  expect(wrapper.text()).toContain("批注加载失败");
-  expect(wrapper.get('[aria-label="批注内容"]').element.value).toBe("");
-  await addButton.trigger("click");
-  expect(api.createAnnotation).toHaveBeenCalledTimes(1);
-});
-
 it("作者可以编辑并删除自己的未解决批注", async () => {
   api.listAnnotations.mockResolvedValue([annotation]);
   const wrapper = await mountPanel();
@@ -203,6 +128,25 @@ it("作者可以编辑并删除自己的未解决批注", async () => {
   await flushPromises();
   expect(api.deleteAnnotation).toHaveBeenCalledWith(caseRecord.id, annotation.id, user.csrfToken);
   expect(wrapper.find(".comment-card").exists()).toBe(false);
+});
+
+it("审核批注列表允许作者和管理员讨论，但私人批注不泄露给管理员", async () => {
+  const review = { ...annotation, versionId: "cv-1", createdBy: "admin-1" };
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  api.listAnnotations.mockResolvedValue([review]);
+  api.replyAnnotation.mockResolvedValue({ ...review, replies: [{ id: "reply-1", content: "收到" }] });
+  const reviewPanel = await mountPanel({ caseRecord: { ...caseRecord, workflowStatus: "reviewing" }, user: admin });
+  await reviewPanel.get('[aria-label="回复批注"]').setValue("收到");
+  await reviewPanel.get(".comment-thread-actions button").trigger("click");
+  await flushPromises();
+  expect(api.replyAnnotation).toHaveBeenCalledWith(
+    caseRecord.id, review.id, { content: "收到" }, admin.csrfToken,
+  );
+  expect(reviewPanel.findAll("button").map((button) => button.text())).not.toContain("让 AI 修订");
+
+  api.listAnnotations.mockResolvedValue([annotation]);
+  const privatePanel = await mountPanel({ user: admin });
+  expect(privatePanel.find('[aria-label="回复批注"]').exists()).toBe(false);
 });
 
 it("已解决历史的陈旧锚点不显示待处理警告", async () => {

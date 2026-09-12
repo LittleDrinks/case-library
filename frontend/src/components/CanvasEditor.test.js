@@ -29,14 +29,14 @@ async function setup(options = {}) {
   return { wrapper, context };
 }
 
-function selectDomRange(textNode, length, start = 0) {
+function selectDomRange(textNode, length, start = 0, notify = true) {
   const range = globalThis.document.createRange();
   range.setStart(textNode, start);
   range.setEnd(textNode, start + length);
   const browserSelection = globalThis.getSelection();
   browserSelection.removeAllRanges();
   browserSelection.addRange(range);
-  globalThis.document.dispatchEvent(new Event("selectionchange"));
+  if (notify) globalThis.document.dispatchEvent(new Event("selectionchange"));
 }
 
 function clearDomSelection() {
@@ -322,6 +322,96 @@ it("悬挂的选区摘要完成时不得写回已被收起的选区", async () =
     vi.unstubAllGlobals();
   }
 });
+
+async function startDelayedSelection(wrapper, digestResolvers) {
+  await framesSettled();
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
+  selectDomRange(wrapper.get(".canvas-editor p").element.firstChild, 3, 0, false);
+  void wrapper.vm.recaptureSelection();
+  await vi.waitUntil(() => digestResolvers.length > 0, { interval: 10 });
+}
+
+function finishDelayedSelection(digestResolvers) {
+  digestResolvers.splice(0).forEach((resolve) => resolve(new Uint8Array(32).buffer));
+}
+
+function stubQuoteDigests(pending) {
+  vi.stubGlobal("crypto", {
+    subtle: {
+      digest: (_algorithm, bytes) => new Promise((resolve) => pending.push({
+        quote: new TextDecoder().decode(bytes), resolve,
+      })),
+    },
+  });
+}
+
+function startOldSelection(wrapper, paragraph, pending) {
+  selectDomRange(paragraph.firstChild, 4, 0, false);
+  void wrapper.vm.recaptureSelection();
+  const digest = pending.find(({ quote }) => quote === "案例原文");
+  expect(digest).toBeDefined();
+  return digest;
+}
+
+async function invalidateOldSelection(wrapper, editor, paragraph, digest) {
+  selectDomRange(paragraph.firstChild, 3, 0, false);
+  expect(globalThis.getSelection().toString()).toBe("案例原");
+  expect(editor.state.selection.from).toBe(9);
+  expect(editor.state.selection.to).toBe(13);
+  globalThis.document.dispatchEvent(new Event("selectionchange"));
+  expect(globalThis.getSelection().toString()).toBe("案例原");
+  digest.resolve(new Uint8Array(32).buffer);
+  await nextTick();
+  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+}
+
+async function publishNewSelection(wrapper, editor, pending) {
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
+  const digests = pending.filter(({ quote }) => quote === "案例原");
+  expect(digests.length).toBeGreaterThan(0);
+  digests.forEach(({ resolve }) => resolve(new Uint8Array(32).buffer));
+  await Promise.resolve(); await nextTick(); await nextTick();
+  expect(wrapper.emitted("selection").at(-1)[0]).toMatchObject({ quote: "案例原" });
+  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+}
+
+it("新选区摘要未完成时隐藏旧批注触发器，完成后才发布新锚点", async () => {
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  await selectParagraph(wrapper);
+  const digestResolvers = [];
+  vi.stubGlobal("crypto", { subtle: { digest: () => new Promise((resolve) => digestResolvers.push(resolve)) } });
+  try {
+    await startDelayedSelection(wrapper, digestResolvers);
+    await nextTick();
+    expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+    finishDelayedSelection(digestResolvers);
+    await vi.waitUntil(() => (wrapper.emitted("selection") ?? [])
+      .some(([event]) => event?.quote === "案例原"), { interval: 10 });
+    expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("原生新选区在编辑器同步前立即作废旧摘要，之后只发布新锚点", async () => {
+  const { wrapper } = await setup({ annotatable: true, revision: 3 });
+  globalThis.document.body.appendChild(wrapper.element);
+  await selectParagraph(wrapper);
+  await framesSettled();
+  const pending = [];
+  stubQuoteDigests(pending);
+  try {
+    const editor = wrapper.vm.editor;
+    const paragraph = wrapper.get(".canvas-editor p").element;
+    const oldDigest = startOldSelection(wrapper, paragraph, pending);
+    await invalidateOldSelection(wrapper, editor, paragraph, oldDigest);
+    await publishNewSelection(wrapper, editor, pending);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("正文插入由编辑器映射批注标记并上报原生 steps", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,
@@ -378,4 +468,51 @@ it("点击正文批注标记只发出打开事件", async () => {
   const { editor } = wrapper.vm;
   editor.view.someProp("handleClick", (handler) => handler(editor.view, 10));
   expect(wrapper.emitted("annotation-click")).toEqual([["annotation-1"]]);
+});
+
+it("挂起选区锚点在失焦塌陷后仍绘制高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+
+  clearDomSelection();
+  await framesSettled();
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(false);
+});
+
+it("正文不再包含挂起引文时丢弃临时高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  const editor = wrapper.vm.editor;
+  editor.view.dispatch(editor.state.tr.insertText("变化", 9, 13));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await nextTick();
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+});
+
+it("正文前置编辑映射后挂起锚点仍通过保存校验", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文", revision: 3 };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  const editor = wrapper.vm.editor;
+  // 前置插入 2 字符（模拟保存前编辑）：装饰链把 pending 映射到新位置，校验仍通过。
+  editor.view.dispatch(editor.state.tr.insertText("前置", 9, 9));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(wrapper.vm.getPendingAnchor()).toBeTruthy();
+  const mapped = wrapper.findAll(".pending-anchor");
+  expect(mapped).toHaveLength(1);
+  expect(mapped[0].text()).toBe("案例原文");
+  expect(wrapper.vm.getPendingAnchor()).toMatchObject({ quote: "案例原文" });
+  expect(wrapper.vm.getPendingAnchor().from).toBeGreaterThan(9);
+});
+
+it("挂起锚点失效或清空后移除临时高亮", async () => {
+  const pending = { from: 9, to: 13, quote: "案例原文" };
+  const { wrapper } = await setup({ revision: 3, pendingAnchor: pending });
+  await wrapper.setProps({ pendingAnchor: null });
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+  await wrapper.setProps({ pendingAnchor: { ...pending, quote: "其他文字" } });
+  expect(wrapper.find(".pending-anchor").exists()).toBe(false);
+  await wrapper.setProps({ pendingAnchor: { ...pending, quote: "案例原文" } });
+  expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
 });

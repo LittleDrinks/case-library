@@ -6,7 +6,7 @@ const props = {
   active: "ai", open: true, caseRecord: { id: "case-1", revision: 1 }, user: null,
   historyAvailable: true,
   editable: true, beforeAttachmentMutation: vi.fn(), beforeVersionMutation: vi.fn(),
-  selection: null, writingContext: null,
+  writingContext: null,
 };
 
 function render(overrides = {}) {

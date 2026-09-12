@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, Copy, LoaderCircle, RefreshCw } from "@lucide
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
+import AnnotationFloat from "../components/AnnotationFloat.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -50,8 +51,9 @@ const annotationSelection = ref(null);
 const writingContext = ref(null);
 const annotations = ref([]);
 let annotationLoadGeneration = 0;
-const focusedAnnotationId = ref("");
 const annotationRefreshToken = ref(0);
+const floatDraft = ref(null);
+const floatThread = ref(null);
 const annotationRunWatches = new Map();
 let pendingSteps = [];
 let annotationRunPoll = null;
@@ -231,7 +233,10 @@ function handleSaveConflict(error) {
 }
 
 function applyCase(value, invalidate = true) {
-  if (invalidate) clearWritingContext();
+  if (invalidate) {
+    clearWritingContext();
+    closeAnnotationFloat();
+  }
   pendingSteps = [];
   caseRecord.value = value;
   title.value = value.title;
@@ -252,7 +257,7 @@ async function loadAnnotations() {
   try {
     const rows = await api.listAnnotations(caseId());
     if (generation !== annotationLoadGeneration) return;
-    annotations.value = rows.filter(({ status }) => status !== "resolved");
+    applyAnnotations(rows.filter(({ status }) => status !== "resolved"));
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
@@ -260,6 +265,11 @@ async function loadAnnotations() {
 function applyAnnotations(rows) {
   annotationLoadGeneration += 1;
   annotations.value = rows;
+  // AI 轮询等刷新到达时，仍打开的浮窗线程同步到最新同 ID 行，修订轮即时可见。
+  if (floatThread.value) {
+    floatThread.value = rows.find((row) => row.id === floatThread.value.id)
+      || floatThread.value;
+  }
 }
 
 async function refreshAnnotations() {
@@ -460,17 +470,62 @@ async function flushAutosave() {
   return autosave.state.value === "saved";
 }
 
-async function prepareAnnotationMutation() {
+function openDraftFloat() {
+  floatThread.value = null;
+  floatDraft.value = annotationSelection.value;
+}
+
+// 浮窗保存门禁：flush 后正文可能已变（persist 会塌陷选区），不能依赖重捕获。
+// 校验待提交锚点仍映射到当前文档同一位置/引文且 revision 最新；无效则拒绝，不绕门禁。
+async function prepareFloatSave() {
+  if (!floatDraft.value) return false;
   if (!await flushAutosave()) return false;
-  await canvasEditor.value?.recaptureSelection();
   await nextTick();
+  const anchor = canvasEditor.value?.getPendingAnchor?.();
+  if (!anchor) {
+    // 锚点已被正文改写/删除丢弃：清挂起状态并拒绝，绝不带着过期锚点提交。
+    floatDraft.value = null;
+    return false;
+  }
+  floatDraft.value = { ...floatDraft.value, ...anchor, revision: revision.value };
   return true;
 }
 
-function openAnnotation(id) {
-  selectTool("comments");
-  focusedAnnotationId.value = "";
-  void nextTick(() => { focusedAnnotationId.value = id; });
+function floatReplied(updated) {
+  floatThread.value = updated;
+  void refreshAnnotations();
+}
+
+function openThreadFloat(id) {
+  floatDraft.value = null;
+  floatThread.value = annotations.value.find((row) => row.id === id) || null;
+}
+
+function closeAnnotationFloat() {
+  floatDraft.value = null;
+  floatThread.value = null;
+}
+
+function floatSaved(created) {
+  floatDraft.value = null;
+  floatThread.value = created;
+  void refreshAnnotations();
+}
+
+function floatResolved() {
+  closeAnnotationFloat();
+  void refreshAnnotations();
+}
+
+async function floatRevised(caseValue) {
+  closeAnnotationFloat();
+  await applyRevisedCase(caseValue);
+}
+
+
+function askFloatAi(annotation) {
+  // 浮窗保持打开：AI 修订完成后轮询刷新经 applyAnnotations 同步同 ID 线程。
+  askAnnotationAi(annotation);
 }
 
 function askAnnotationAi(annotation) {
@@ -770,12 +825,13 @@ onBeforeUnmount(() => {
                 :editable="editable"
                 :annotatable="annotatable"
                 :annotations="annotations"
+                :pending-anchor="floatDraft"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="writingContext = $event"
-                @annotate="selectTool('comments')"
-                @annotation-click="openAnnotation"
+                @annotate="openDraftFloat"
+                @annotation-click="openThreadFloat"
               />
             </article>
           </template>
@@ -812,13 +868,10 @@ onBeforeUnmount(() => {
           :historical="historicalVersion"
           :read-only="assistantReadOnly"
           :editable="editable"
-          :selection="annotationSelection"
           :writing-context="writingContext"
           :history-refresh-key="historyRefreshKey"
           :history-available="historyAvailable"
           :before-attachment-mutation="prepareContentMutation"
-          :before-annotation-mutation="prepareAnnotationMutation"
-          :focus-annotation-id="focusedAnnotationId"
           :annotation-refresh-token="annotationRefreshToken"
           @select="selectTool"
           @toggle="drawerOpen = !drawerOpen"
@@ -836,6 +889,20 @@ onBeforeUnmount(() => {
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"
           @version-created="handleVersionCreated"
+        />
+        <AnnotationFloat
+          v-if="(floatDraft || floatThread) && !readerMode && !historicalVersion"
+          :case-record="caseRecord"
+          :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :draft="floatDraft"
+          :thread="floatThread"
+          :before-save="prepareFloatSave"
+          @close="closeAnnotationFloat"
+          @saved="floatSaved"
+          @resolved="floatResolved"
+          @case-revised="floatRevised"
+          @ask-ai="askFloatAi"
+          @replied="floatReplied"
         />
       </div>
     </template>
