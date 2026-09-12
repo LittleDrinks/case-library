@@ -454,6 +454,7 @@ function locateHeading(order) {
 }
 
 function selectRailTool(tool) {
+  if (contentMutationBusy.value) return;
   closeAnnotationFloat();
   selectTool(tool);
 }
@@ -476,6 +477,7 @@ async function flushAutosave() {
 }
 
 function openDraftFloat() {
+  selectTool("comments");
   floatThread.value = null;
   floatDraft.value = annotationSelection.value;
 }
@@ -502,6 +504,7 @@ function floatReplied(updated) {
 }
 
 function openThreadFloat(id) {
+  selectTool("comments");
   floatDraft.value = null;
   floatThread.value = annotations.value.find((row) => row.id === id) || null;
 }
@@ -908,6 +911,7 @@ onBeforeUnmount(() => {
           @case-revised="floatRevised"
           @ask-ai="askFloatAi"
           @replied="floatReplied"
+          @mutation-state="contentMutationBusy = $event"
         />
       </div>
     </template>

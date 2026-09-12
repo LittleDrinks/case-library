@@ -243,3 +243,19 @@ it("草稿保存前经过 beforeSave 门禁并携带新捕获锚点", async () =
     from: 15, to: 19,
   }), "csrf");
 });
+
+
+it("保存请求期间同步忙状态并在完成后解除", async () => {
+  let finish;
+  api.createAnnotation.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  const wrapper = mountFloat({ draft: selection });
+  await wrapper.get('[aria-label="批注内容"]').setValue("意见");
+  await wrapper.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
+  await flushPromises();
+  expect(wrapper.emitted("mutation-state")).toEqual([[true]]);
+  finish(annotation);
+  await flushPromises();
+  expect(wrapper.emitted("saved")[0][0]).toEqual(annotation);
+  expect(wrapper.emitted("mutation-state")).toEqual([[true], [false]]);
+  wrapper.unmount();
+});

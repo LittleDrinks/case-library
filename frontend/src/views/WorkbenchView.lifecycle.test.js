@@ -411,7 +411,7 @@ test("读者模式不渲染版本 Tab 栏", async () => {
 });
 
 const annotationRailStub = {
-  name: "AssistantRailStub", emits: ["annotation-run"],
+  name: "AssistantRailStub", props: ["active"], emits: ["annotation-run", "select"],
   template: `<button data-testid="rail-annotation-run" type="button"
     @click="$emit('annotation-run', 'thread-9')">run</button>`,
 };
@@ -686,5 +686,42 @@ test("从批注浮窗切换历史面板后清除遮挡", async () => {
   wrapper.getComponent(annotationRailStub).vm.$emit("select", "history");
   await flushPromises();
   expect(wrapper.find(".annotation-float").exists()).toBe(false);
+  wrapper.unmount();
+});
+
+async function annotationWorkspace() {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotationThread()]);
+  const wrapper = renderWorkbenchWithEditor(annotationRailStub);
+  await flushPromises();
+  return wrapper;
+}
+
+test("历史面板打开后点正文批注切换到批注工具", async () => {
+  const wrapper = await annotationWorkspace();
+  const rail = wrapper.getComponent(annotationRailStub);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(rail.props("active")).toBe("history");
+  await openAnnotationThread(wrapper);
+  expect(rail.props("active")).toBe("comments");
+  wrapper.unmount();
+});
+
+test("浮窗保存中不能切换工具且完成后可以切换", async () => {
+  const wrapper = await annotationWorkspace();
+  await openAnnotationThread(wrapper);
+  const float = wrapper.findComponent({ name: "AnnotationFloat" });
+  const rail = wrapper.getComponent(annotationRailStub);
+  float.vm.$emit("mutation-state", true);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(true);
+  expect(rail.props("active")).toBe("comments");
+  float.vm.$emit("mutation-state", false);
+  rail.vm.$emit("select", "history");
+  await flushPromises();
+  expect(wrapper.find(".annotation-float").exists()).toBe(false);
+  expect(rail.props("active")).toBe("history");
   wrapper.unmount();
 });

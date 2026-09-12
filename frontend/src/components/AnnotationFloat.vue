@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Check, MessageSquareText, Sparkles, X } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -11,11 +11,13 @@ const props = defineProps({
   // 保存前门禁：先 flush autosave，再由 Workbench 校验 Decoration 映射锚点；拒绝时返回 falsy。
   beforeSave: { type: Function, default: async () => true },
 });
-const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai", "replied"]);
+const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai", "replied", "mutation-state"]);
 
 const content = ref("");
 const saving = ref(false);
 const error = ref("");
+watch(saving, (busy) => emit("mutation-state", busy), { flush: "sync" });
+onBeforeUnmount(() => emit("mutation-state", false));
 
 const isDraft = computed(() => Boolean(props.draft));
 const canCompose = computed(() => Boolean(
