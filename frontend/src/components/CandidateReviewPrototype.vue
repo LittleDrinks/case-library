@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, ArrowRight, Check, MessageSquareText, Sparkles, X, History, FileText, Paperclip } from "@lucide/vue";
-import { generateJSON } from "@tiptap/core";
+import { generateJSON, getSchema } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { diffChars } from "diff";
 import CanvasEditor from "./CanvasEditor.vue";
@@ -59,6 +59,25 @@ function sectionThreads(index) { return threadList.value.filter(thread => thread
 
 const timeline = computed(() => versions.value);
 const shownThreads = computed(() => tab.value === "original" ? commentThreads.value : activeVersion.value?.comments || {});
+const highlightedAnnotations = computed(() => {
+  if (!activeDocument.value) return [];
+  const document = getSchema([StarterKit]).nodeFromJSON(activeDocument.value);
+  const found = [];
+  for (const thread of Object.values(shownThreads.value)) {
+    if (thread.resolved || thread.stale || !thread.quote) continue;
+    document.descendants((node, position) => {
+      if (!node.isText || found.some(item => item.id === thread.id)) return;
+      const index = node.text.indexOf(thread.quote);
+      if (index >= 0) found.push({ id: thread.id, from: position + index, to: position + index + thread.quote.length, quote: thread.quote, revision: 0 });
+    });
+  }
+  return found;
+});
+function clickHighlightedComment(event) {
+  const mark = event.target.closest('[data-prototype-comment]');
+  if (!mark || window.getSelection()?.toString().trim()) return;
+  openThread(mark.dataset.prototypeComment);
+}
 function groupBlock(result, block) {
   if (block.type === "heading" || !result.length) result.push({ title: block.type === "heading" ? block.text : "正文", blocks: [] });
   result.at(-1).blocks.push(block);
@@ -254,8 +273,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
     <nav class="prototype-outline"><small>本文目录</small><button v-for="(section, i) in sections" :key="i" :class="{ current: selected === i }" @click="locate(i)">{{ i === 0 ? "标题" : section.title }}</button></nav>
     <main class="canvas-column prototype-canvas">
       <div class="history-hover-zone" @mouseenter="showHistory" @mouseleave="hideHistory" @focusin="showHistory" @focusout="hideHistory"><button class="history-handle" :aria-expanded="historyExpanded" @click="historyExpanded = !historyExpanded"><span class="history-grip"></span><span>{{ tab === "original" ? "当前教师稿" : activeTitle }}</span><span class="history-count">{{ opened.length + 1 }} 个标签 · 悬停展开</span></button><div class="history-collapse" :class="{ expanded: historyExpanded }"><div class="prototype-version-tabs"><button class="pinned-teacher-tab" role="tab" :aria-selected="tab === 'original'" :class="{ active: tab === 'original' }" @click="tab = 'original'"><FileText :size="14" />当前教师稿</button><div class="prototype-open-tabs" role="tablist"><div v-for="version in opened" :key="version.id" class="prototype-tab-chip" :class="{ active: tab === version.id }"><button role="tab" :aria-selected="tab === version.id" @click="tab = version.id">{{ version.title }}</button><button class="close-version-tab" :aria-label="`关闭${version.title}`" @click="closeVersion(version.id)"><X :size="12" /></button></div></div><button class="version-history-entry" @click="panel = 'versions'"><History :size="15" />历史版本</button></div></div></div>
-      <article class="document-paper prototype-paper" @mouseup="captureSelection">
-        <template v-if="activeDocument"><div class="prototype-document-note">{{ activeTitle }} · {{ tab === "original" ? "可编辑" : "历史稿 · 只读" }} <button v-if="tab !== 'original'" @click="tab = 'original'">返回当前稿</button><button v-if="tab !== 'original'" @click="overwriteOpen = true">恢复此版本</button></div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :editable="tab === 'original'" @change="saveDocument" /></template>
+      <article class="document-paper prototype-paper" @mouseup="captureSelection" @click="clickHighlightedComment">
+        <template v-if="activeDocument"><div class="prototype-document-note">{{ activeTitle }} · {{ tab === "original" ? "可编辑" : "历史稿 · 只读" }} <button v-if="tab !== 'original'" @click="tab = 'original'">返回当前稿</button><button v-if="tab !== 'original'" @click="overwriteOpen = true">恢复此版本</button></div><CanvasEditor v-if="activeDocument" :key="tab" :document="activeDocument" :annotations="highlightedAnnotations" :editable="tab === 'original'" @change="saveDocument" /></template>
 
       </article>
     </main>
@@ -482,4 +501,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", keySwitch));
 .comment-compose-actions button:disabled { opacity:.4; }
 
 .prototype-comment-float { right:auto; max-height:min(560px, calc(100vh - 170px)); width:min(390px, calc(100vw - 24px)); }
+
+.prototype-paper :deep(.annotation-anchor[data-prototype-comment]) { background:rgba(202,47,59,.13); color:inherit; border-bottom:1px solid rgba(202,47,59,.23); border-radius:3px; cursor:pointer; box-decoration-break:clone; transition:background .15s ease; }
+.prototype-paper :deep(.annotation-anchor[data-prototype-comment]:hover) { background:rgba(202,47,59,.23); }
 </style>

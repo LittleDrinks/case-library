@@ -128,7 +128,7 @@ function annotationAnchor(annotation, document) {
 function annotationDecorations(document, annotations) {
   return DecorationSet.create(document, annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, document);
-    return range ? [Decoration.inline(range.from, range.to, { class: "annotation-anchor" })] : [];
+    return range ? [Decoration.inline(range.from, range.to, { class: "annotation-anchor", "data-prototype-comment": annotation.id })] : [];
   }));
 }
 
