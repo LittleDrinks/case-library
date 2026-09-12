@@ -205,7 +205,21 @@ async function expectHistoryUnchanged(page, caseId, before) {
   return after;
 }
 
-async function overwriteAiVersion(page, version) {
+async function assertRestoredHistory(page, caseId, version, beforeDocument) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
+  expect(response.ok()).toBe(true);
+  const history = await response.json();
+  expect(history.versions).toHaveLength(3);
+  expect(history.versions[0]).toEqual(expect.objectContaining({ id: version.id, number: 1, kind: "ai", document: version.document }));
+  expect(history.versions[1]).toEqual(expect.objectContaining({ number: 2, kind: "manual", title: "恢复前的当前稿", document: beforeDocument }));
+  expect(history.versions[2]).toEqual(expect.objectContaining({ number: 3, kind: "restore", restoredFromId: version.id, document: version.document }));
+  return history;
+}
+
+async function overwriteAiVersion(page, caseId, version) {
+  const beforeResponse = await page.context().request.get(`/api/cases/${caseId}`);
+  expect(beforeResponse.ok()).toBe(true);
+  const before = await beforeResponse.json();
   await page.locator(".version-paper-actions .version-restore").click();
   await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
   const restoreResponse = page.waitForResponse((response) => (
@@ -216,13 +230,7 @@ async function overwriteAiVersion(page, version) {
   await page.getByRole("button", { name: "确认恢复", exact: true }).click();
   expect((await restoreResponse).ok()).toBe(true);
   await assertCurrentDraft(page, version);
-  const history = await (await page.context().request.get(`/api/cases/${version.caseId}/history`)).json();
-  expect(history.versions).toHaveLength(2);
-  expect(history.versions).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: version.id, kind: "ai" }),
-    expect.objectContaining({ kind: "manual", title: "恢复前的当前稿" }),
-  ]));
-  return history;
+  return assertRestoredHistory(page, caseId, version, before.document);
 }
 
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
@@ -251,7 +259,7 @@ test("完整生成通过真实 Run 保存 AI 版本并可只读打开、恢复�
   await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
-  await overwriteAiVersion(page, version);
+  await overwriteAiVersion(page, created.id, version);
   await page.reload();
   await selectCurrentDraft(page);
   await assertCurrentDraft(page, version);
@@ -301,7 +309,7 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
   const version = await assertSavedAiVersion(page, created.id);
   await openAiVersion(page, version);
-  const restoredHistory = await overwriteAiVersion(page, version);
+  const restoredHistory = await overwriteAiVersion(page, created.id, version);
   await page.reload();
   await selectCurrentDraft(page);
   await assertCurrentDraft(page, version);
