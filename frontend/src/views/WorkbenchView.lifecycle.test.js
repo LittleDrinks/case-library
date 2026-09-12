@@ -56,6 +56,7 @@ vi.mock("../api.js", () => ({
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
+    createAnnotation: vi.fn(),
     agentThread: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
@@ -581,4 +582,39 @@ test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
   resolveCatalog(readerTagCatalog);
   await flushPromises();
   expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
+});
+
+test("编辑后立即保存批注：flush 塌陷选区仍按映射锚点提交最新修订", async () => {
+  vi.useFakeTimers();
+  try {
+    api.createAnnotation.mockResolvedValue({
+      id: "annotation-new", caseId: "case-1", from: 12, to: 16, quote: "正文",
+      quoteHash: "h", section: "正文", revision: 4, anchorState: "active",
+      status: "pending", content: "编辑后保存", source: "manual", createdBy: "user-1",
+      createdAt: "2026-09-13T00:00:00Z", replies: [],
+    });
+    const wrapper = await renderDraftWorkspace();
+    const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+    const editor = canvas.vm.editor;
+    editor.commands.insertContent("编辑 ");
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.saveCase).toHaveBeenCalledTimes(1);
+
+    // 选区在编辑前捕获（正文偏移 3 字符），映射后仍指向同一"正文"引文。
+    await wrapper.setData({ floatDraft: {
+      from: 9, to: 13, quote: "正文", quoteHash: "h",
+      section: "正文", revision: 3, sameBlock: true,
+    } });
+    const float = wrapper.getComponent({ name: "AnnotationFloat" });
+    await float.get('[aria-label="批注内容"]').setValue("编辑后保存");
+    await float.findAll("button").find((button) => button.text() === "保存意见").trigger("click");
+    await vi.advanceTimersByTimeAsync(50);
+    await flushPromises();
+    expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
+      from: 9, to: 13, quote: "正文", revision: 4, content: "编辑后保存",
+    }), "csrf-token");
+    wrapper.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });

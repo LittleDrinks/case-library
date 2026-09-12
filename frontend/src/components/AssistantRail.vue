@@ -23,7 +23,6 @@ const props = defineProps({
   beforeAttachmentMutation: { type: Function, required: true },
   selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
-  focusAnnotationId: { type: String, default: "" },
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
@@ -90,7 +89,6 @@ function select(tab) {
       :case-record="caseRecord"
       :user="user"
       :selection="selection"
-      :focus-annotation-id="focusAnnotationId"
       :annotation-refresh-token="annotationRefreshToken"
       :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"

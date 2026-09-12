@@ -16,7 +16,6 @@ const emit = defineEmits(["close", "saved", "resolved", "case-revised", "ask-ai"
 const content = ref("");
 const saving = ref(false);
 const error = ref("");
-const replyText = ref("");
 
 const isDraft = computed(() => Boolean(props.draft));
 // 与 CommentPanel.canCompose 同一判定：作者草稿或审核中管理员，不放开他人草稿。
@@ -30,16 +29,29 @@ const canResolve = computed(() => Boolean(
   props.thread && props.user?.id === props.caseRecord.ownerId
     && props.thread.status === "pending",
 ));
-const canDiscuss = computed(() => Boolean(
-  props.thread && props.user?.id === props.thread.createdBy
-    && props.thread.status === "pending"
-    && (props.thread.anchorState || "active") === "active",
-));
+// 与服务端 _require_reply_actor 对齐：审核批注（绑定版本）作者与管理员均可讨论；
+// 私人批注仅批注作者可回复。讨论还需批注未解决且锚点有效。
+const canDiscuss = computed(() => {
+  if (!props.thread || props.thread.status !== "pending") return false;
+  if ((props.thread.anchorState || "active") !== "active") return false;
+  if (props.thread.versionId != null) {
+    return Boolean(props.user) && (
+      props.user.id === props.caseRecord.ownerId || props.user.role === "admin"
+    );
+  }
+  return props.user?.id === props.thread.createdBy;
+});
 const latestRevision = computed(() => (
   [...(props.thread?.revisions || [])].reverse()
     .find((revision) => revision.status === "pending") || null
 ));
-const canAdopt = computed(() => Boolean(canDiscuss.value && latestRevision.value));
+// 服务端仅批注作者可合并修订；管理员讨论但不拥有采用权。
+const canAdopt = computed(() => Boolean(
+  props.user?.id === props.thread?.createdBy
+    && props.thread.status === "pending"
+    && (props.thread.anchorState || "active") === "active"
+    && latestRevision.value,
+));
 
 function close() {
   if (saving.value) return;
@@ -91,8 +103,8 @@ async function saveDraft({ askAi = false } = {}) {
   });
 }
 
-// 既有线程：追加意见走回复接口，返回完整线程即时回流浮窗。
-async function saveThreadOpinion() {
+// 既有线程：追加意见走回复接口，返回完整线程即时回流浮窗；询问AI=意见保存成功后再请求。
+async function saveThreadOpinion({ askAi = false } = {}) {
   const value = content.value.trim();
   if (!canDiscuss.value || !value || saving.value) return;
   await runMutation(async () => {
@@ -101,6 +113,7 @@ async function saveThreadOpinion() {
     );
     content.value = "";
     emit("replied", updated);
+    if (askAi) emit("ask-ai", updated);
   });
 }
 

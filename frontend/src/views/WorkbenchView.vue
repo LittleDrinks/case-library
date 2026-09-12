@@ -265,6 +265,11 @@ async function loadAnnotations() {
 function applyAnnotations(rows) {
   annotationLoadGeneration += 1;
   annotations.value = rows;
+  // AI 轮询等刷新到达时，仍打开的浮窗线程同步到最新同 ID 行，修订轮即时可见。
+  if (floatThread.value) {
+    floatThread.value = rows.find((row) => row.id === floatThread.value.id)
+      || floatThread.value;
+  }
 }
 
 async function refreshAnnotations() {
@@ -478,12 +483,18 @@ function openDraftFloat() {
   floatDraft.value = annotationSelection.value;
 }
 
-// 浮窗保存前沿用旧可靠门禁：先 flush autosave，再重捕获精确选区替换旧 draft。
+// 浮窗保存门禁：flush 后正文可能已变（persist 会塌陷选区），不能依赖重捕获。
+// 校验待提交锚点仍映射到当前文档同一位置/引文且 revision 最新；无效则拒绝，不绕门禁。
 async function prepareFloatSave() {
+  if (!floatDraft.value) return false;
   if (!await flushAutosave()) return false;
-  await canvasEditor.value?.recaptureSelection();
   await nextTick();
-  if (annotationSelection.value && floatDraft.value) floatDraft.value = annotationSelection.value;
+  if (!canvasEditor.value?.validatePendingAnchor?.()) {
+    // 锚点已被正文改写/删除丢弃：清挂起状态并拒绝，绝不带着过期锚点提交。
+    floatDraft.value = null;
+    return false;
+  }
+  floatDraft.value = { ...floatDraft.value, revision: revision.value };
   return true;
 }
 
@@ -518,10 +529,10 @@ async function floatRevised(caseValue) {
   await applyRevisedCase(caseValue);
 }
 
+
 function askFloatAi(annotation) {
-  const target = annotations.value.find((row) => row.id === annotation.id) || annotation;
-  closeAnnotationFloat();
-  askAnnotationAi(target);
+  // 浮窗保持打开：AI 修订完成后轮询刷新经 applyAnnotations 同步同 ID 线程。
+  askAnnotationAi(annotation);
 }
 
 function askAnnotationAi(annotation) {

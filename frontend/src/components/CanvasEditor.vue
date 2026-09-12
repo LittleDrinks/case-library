@@ -209,7 +209,7 @@ function pendingAnchorRange(doc, pending) {
   }
 }
 
-function annotationDecorations(doc, annotations, pending = props.pendingAnchor) {
+function annotationDecorations(doc, annotations, pending = props.pendingAnchor, previous = null) {
   const marks = annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
     return range ? [Decoration.inline(
@@ -221,7 +221,12 @@ function annotationDecorations(doc, annotations, pending = props.pendingAnchor) 
   });
   const anchor = pendingAnchorRange(doc, pending);
   if (anchor) {
-    marks.push(Decoration.inline(anchor.from, anchor.to, { class: "pending-anchor" }));
+    marks.push(Decoration.inline(
+      anchor.from, anchor.to, { class: "pending-anchor" }, { pendingAnchor: true },
+    ));
+  } else if (previous && pending) {
+    // 正文变化后位置/引文不再匹配：沿映射回迁旧 pending 装饰供审查，不再按旧选区重捕获。
+    marks.push(...previous.find(undefined, undefined, (spec) => spec.pendingAnchor));
   }
   return DecorationSet.create(doc, marks);
 }
@@ -229,7 +234,7 @@ function annotationDecorations(doc, annotations, pending = props.pendingAnchor) 
 function applyAnnotationAnchors(transaction, previous) {
   const meta = transaction.getMeta(annotationKey);
   if (meta !== undefined) {
-    return annotationDecorations(transaction.doc, meta.annotations, meta.pending);
+    return annotationDecorations(transaction.doc, meta.annotations, meta.pending, previous);
   }
   return remapDecorations(previous, transaction);
 }
@@ -237,17 +242,28 @@ function applyAnnotationAnchors(transaction, previous) {
 function remapDecorations(previous, transaction) {
   const mapped = previous.map(transaction.mapping, transaction.doc);
   if (!transaction.docChanged) return mapped;
-  return rebuildPendingDecorations(mapped, transaction);
-}
-
-function rebuildPendingDecorations(mapped, transaction) {
-  const decorations = mapped.find();
-  const anchor = pendingAnchorRange(transaction.doc, props.pendingAnchor);
-  if (anchor) return mapped;
-  const kept = decorations.filter((decoration) => !decoration.spec.pendingAnchor);
-  return kept.length === decorations.length
+  // DecorationSet.map 已完成位置映射与删除合并；此处只在映射后坐标校验原引文：
+  // 同一引文偏移（如前置插入）→ 保留，保存门禁可过；引文被改写 → pending 失效丢弃。
+  const quote = props.pendingAnchor?.quote;
+  const kept = mapped.find().filter((decoration) => {
+    if (!decoration.spec.pendingAnchor) return true;
+    try {
+      return transaction.doc.textBetween(decoration.from, decoration.to, "\n", "\n") === quote;
+    } catch {
+      return false;
+    }
+  });
+  return kept.length === mapped.find().length
     ? mapped
     : DecorationSet.create(transaction.doc, kept);
+}
+
+// 保存门禁校验：直接读取 annotationAnchors 插件状态中的 pending 装饰。
+// 装饰链已按正文编辑映射其位置（正文改写/删除时被丢弃），此处只做存在性校验。
+function validatePendingAnchor() {
+  if (!editor.value) return false;
+  const state = annotationKey.getState(editor.value.state);
+  return Boolean(state?.find().some((decoration) => decoration.spec.pendingAnchor));
 }
 
 function clickedAnnotation(view, position) {
@@ -356,7 +372,7 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ clearSelection, recaptureSelection, insertCitation });
+defineExpose({ clearSelection, recaptureSelection, insertCitation, validatePendingAnchor });
 </script>
 
 <template>

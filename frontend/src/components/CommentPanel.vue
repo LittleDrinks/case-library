@@ -9,7 +9,6 @@ const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
   selection: { type: Object, default: null },
-  focusAnnotationId: { type: String, default: "" },
   annotationRefreshToken: { type: Number, default: 0 },
   beforeAnnotationMutation: { type: Function, default: async () => true },
 });
@@ -71,7 +70,6 @@ async function loadAnnotations() {
     if (generation !== loadGeneration) return;
     annotations.value = next;
     announce();
-    void focusAnnotation(props.focusAnnotationId);
   } catch (caught) {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
   } finally {
@@ -117,14 +115,6 @@ async function addAnnotation() {
 function setCardRef(id, element) {
   if (element) cardRefs.set(id, element);
   else cardRefs.delete(id);
-}
-
-async function focusAnnotation(id) {
-  if (!id) return;
-  const target = annotations.value.find((annotation) => annotation.id === id);
-  if (target) showResolved.value = target.status === "resolved";
-  await nextTick();
-  cardRefs.get(id)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
 }
 
 function canEdit(annotation) {
@@ -256,7 +246,6 @@ async function merge(annotation) {
 
 watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
 watch(() => props.annotationRefreshToken, loadAnnotations);
-watch(() => props.focusAnnotationId, (id) => { void focusAnnotation(id); });
 </script>
 
 <template>

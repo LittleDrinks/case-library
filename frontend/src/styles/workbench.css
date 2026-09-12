@@ -640,21 +640,17 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .float-revision-card > p { margin: 8px 0 0; font-size: 12px; line-height: 1.7; }
 .float-revision-card > small { display: block; margin-top: 6px; color: var(--ink-3); font-size: 11px; }
 .float-replies { margin: 12px 0 0; padding-left: 16px; color: var(--ink-2); font-size: 12px; line-height: 1.8; }
-.float-reply-row { display: flex; gap: 6px; margin-top: 12px; }
-.float-reply-row input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
-.float-reply-row button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 11px; }
 .float-error { margin: 8px 16px 0; color: var(--red); font-size: 11px; }
 .annotation-float > footer { flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--line-soft); background: #fcfaf6; border-radius: 0 0 12px 12px; }
 .float-compose textarea { box-sizing: border-box; width: 100%; min-height: 64px; max-height: 130px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font: 12px/1.7 sans-serif; resize: vertical; }
 .float-compose-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.float-compose-actions button, .float-thread-actions button {
+.float-compose-actions button {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   padding: 6px 9px; border: 1px solid #e7dfd3; border-radius: 6px;
   background: #fff; color: #716658; font-size: 11px; white-space: nowrap;
 }
-.float-compose-actions button:disabled, .float-thread-actions button:disabled { opacity: .4; }
+.float-compose-actions button:disabled { opacity: .4; }
 .float-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-.float-thread-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 @media (max-width: 780px) {
   .annotation-float { right: 12px; top: 160px; max-height: calc(100vh - 190px); }
 }
