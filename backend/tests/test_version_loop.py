@@ -463,3 +463,16 @@ def test_overwrite_cancel_keeps_current_work_untouched(client: TestClient) -> No
         row for row in _history(client, case["id"])["versions"]
         if row["kind"] in ("manual", "restore")
     ]
+
+
+def test_delete_history_preserves_current_draft(client: TestClient):
+    auth = login(client).json()
+    case, saved = _manual_version_fixture(client, auth)
+    version = _create_manual_version(client, auth, case, saved).json()
+    url = f"/api/cases/{case['id']}/versions/{version['id']}"
+    assert client.delete(url).status_code == 403
+    response = client.delete(url, headers={"X-CSRF-Token": auth["csrfToken"]})
+    assert response.status_code == 200
+    assert _history(client, case['id'])["versions"] == []
+    assert client.get(f"/api/cases/{case['id']}").json()["document"] == saved["document"]
+    assert client.delete(url, headers={"X-CSRF-Token": auth["csrfToken"]}).status_code == 404

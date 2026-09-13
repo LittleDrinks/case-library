@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { FileText, History, X } from "@lucide/vue";
+import { FileText, X } from "@lucide/vue";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -25,21 +25,8 @@ function collapse() {
   }, 450);
 }
 
-function toggle() {
-  if (visible.value) expanded.value = false;
-  else expand();
-}
-
-function handleTouchStart(event) {
-  if (!event.target.closest?.(".version-tabs-toggle")) expand();
-}
-
 function handleFocusOut(event) {
   if (!event.currentTarget.contains(event.relatedTarget)) collapse();
-}
-
-function handleKeydown(event) {
-  if (["Enter", " "].includes(event.key)) { event.preventDefault(); toggle(); }
 }
 
 watch(() => props.active, (active) => { if (active !== "draft") expand(); }, { immediate: true });
@@ -53,20 +40,10 @@ onBeforeUnmount(() => clearTimeout(closeTimer));
     aria-label="版本 Tab"
     @mouseenter="expand"
     @mouseleave="collapse"
-    @touchstart.passive="handleTouchStart"
+    @touchstart.passive="expand"
     @focusin="expand"
     @focusout="handleFocusOut"
   >
-    <button
-      class="version-tabs-toggle"
-      type="button"
-      :disabled="disabled"
-      :aria-expanded="visible"
-      :aria-label="visible ? '收起版本 Tab' : '展开版本 Tab'"
-      @click="toggle"
-      @keydown="handleKeydown"
-    ><History :size="14" /><span>历史版本</span><small>{{ tabs.length + 1 }}</small></button>
-    <div class="version-tabs-content">
       <button
         class="draft-tab"
         type="button"
@@ -76,6 +53,7 @@ onBeforeUnmount(() => clearTimeout(closeTimer));
         :class="{ active: active === 'draft' }"
         @click="emit('select', 'draft')"
       ><FileText :size="14" />当前教师稿</button>
+    <div class="version-tabs-content">
       <div class="version-open-tabs" role="tablist" aria-label="已打开的历史版本">
         <div
           v-for="tab in tabs"

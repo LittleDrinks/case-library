@@ -233,3 +233,25 @@ def _reject_manual_version(database, case_id: str, user: dict, session) -> None:
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅工作版本可创建版本")
     raise RevisionConflict(case["revision"])
+
+
+def delete_history_version(database, case_id: str, version_id: str, user: dict):
+    def remove(session):
+        case = database.cases.find_one({"id": case_id}, session=session)
+        _check_delete_version(case, version_id, user)
+        query = {"caseId": case_id, "id": version_id, "kind": {"$in": list(FORMAL_VERSION_KINDS)}}
+        if not database.case_versions.delete_one(query, session=session).deleted_count:
+            raise CaseError(404, "历史版本不存在")
+        database.annotations.delete_many({"caseId": case_id, "versionId": version_id}, session=session)
+        database.cases.update_one({"id": case_id}, {"$set": {"updatedAt": datetime.now(UTC).isoformat()}}, session=session)
+        return {"id": version_id}
+    return run_transaction(database, remove)
+
+
+def _check_delete_version(case, version_id: str, user: dict):
+    if not case:
+        raise CaseError(404, "案例不存在")
+    if case["ownerId"] != user["id"]:
+        raise CaseError(403, "仅案例作者可删除历史版本")
+    if version_id in (case.get("publishedVersionId"), case.get("submittedVersionId")):
+        raise CaseError(409, "审核中或已发布的版本不可删除")

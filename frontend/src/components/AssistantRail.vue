@@ -31,6 +31,7 @@ const emit = defineEmits([
   "sources-retry", "clear-writing-context", "insert-citation",
   "open-version", "versions-updated",
   "version-created",
+  "version-deleted",
 ]);
 
 const tabs = [
@@ -123,6 +124,7 @@ function select(tab) {
       :csrf-token="user?.csrfToken || ''"
       @open-version="emit('open-version', $event)"
       @version-created="emit('version-created', $event)"
+      @version-deleted="emit('version-deleted', $event)"
     />
   </aside>
 </template>

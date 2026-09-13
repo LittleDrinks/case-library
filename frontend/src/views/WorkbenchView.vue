@@ -899,6 +899,7 @@ onBeforeUnmount(() => {
           @open-version="openVersionTab"
           @versions-updated="refreshVersionHistory"
           @version-created="handleVersionCreated"
+          @version-deleted="closeVersionTab"
         />
         <AnnotationFloat
           v-if="(floatDraft || floatThread) && !readerMode && !historicalVersion"

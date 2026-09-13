@@ -10,8 +10,10 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
   csrfToken: { type: String, default: "" },
 });
-const emit = defineEmits(["open-version", "version-created"]);
+const emit = defineEmits(["open-version", "version-created", "version-deleted"]);
 const versions = ref([]);
+const deleting = ref(false);
+const deleteTarget = ref(null);
 const loading = ref(true);
 const error = ref("");
 const formOpen = ref(false);
@@ -20,6 +22,22 @@ const creating = ref(false);
 const createError = ref("");
 
 const timeline = computed(() => [...versions.value].sort((left, right) => right.number - left.number));
+
+async function deleteVersion() {
+  deleting.value = true;
+  try {
+    const id = deleteTarget.value.id;
+    await api.deleteHistoryVersion(props.caseRecord.id, id, props.csrfToken);
+    versions.value = versions.value.filter((version) => version.id !== id);
+    deleteTarget.value = null;
+    emit("version-deleted", id);
+  } catch (caught) {
+    error.value = caught.message || "删除失败";
+    deleteTarget.value = null;
+  } finally {
+    deleting.value = false;
+  }
+}
 
 function time(value) {
   return new Date(value).toLocaleString("zh-CN", {
@@ -93,12 +111,11 @@ onMounted(loadHistory);
           <button class="primary" type="submit" :disabled="creating"><Save :size="14" aria-hidden="true" />{{ creating ? "保存中" : "保存版本" }}</button>
         </footer>
       </form>
-      <p class="version-note">提交、完整生成、接受 AI 建议或手动命名后会生成历史版本。</p>
       <div v-if="loading" class="panel-empty"><History :size="24" /><span>正在加载版本</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
         <span>{{ error }}</span><button type="button" @click="loadHistory">重试</button>
       </div>
-      <p v-else-if="!timeline.length" class="version-note">还没有历史版本；提交、完整生成、接受 AI 建议或手动命名后会显示。</p>
+      <p v-else-if="!timeline.length" class="version-note">暂无历史版本</p>
       <ol v-else class="version-timeline">
         <li v-for="version in timeline" :key="version.id">
           <span class="timeline-dot" aria-hidden="true" />
@@ -109,8 +126,21 @@ onMounted(loadHistory);
           <button type="button" :aria-label="`查看历史版本 ${versionLabel(version)}`" @click="emit('open-version', version)">
             查看历史版本
           </button>
+          <button v-if="editable" type="button" :aria-label="`删除历史版本 ${versionLabel(version)}`" @click="deleteTarget = version">删除</button>
         </li>
       </ol>
     </div>
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="version-delete-backdrop" @click.self="!deleting && (deleteTarget = null)">
+        <section class="version-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="version-delete-title">
+          <h3 id="version-delete-title">确认删除？</h3>
+          <p>{{ versionLabel(deleteTarget) }}</p>
+          <footer>
+            <button type="button" :disabled="deleting" @click="deleteTarget = null">取消</button>
+            <button type="button" class="primary" :disabled="deleting" @click="deleteVersion">{{ deleting ? "删除中" : "删除" }}</button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

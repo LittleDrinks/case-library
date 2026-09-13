@@ -51,26 +51,10 @@ it("没有可打开的版本时只显示固定的教师稿 Tab", () => {
   expect(wrapper.findAll('[role="tab"]')).toHaveLength(1);
 });
 
-it("版本栏支持悬停展开、延迟收起及触屏键盘打开", async () => {
+it("悬停展开且首按钮始终是当前教师稿", async () => {
   const wrapper = render();
-  const toggle = wrapper.get("button.version-tabs-toggle");
-  expect(toggle.attributes("aria-expanded")).toBe("false");
-
-  await wrapper.get("nav.version-tabs").trigger("mouseenter");
-  expect(toggle.attributes("aria-expanded")).toBe("true");
-  await wrapper.get("nav.version-tabs").trigger("mouseleave");
-  expect(toggle.attributes("aria-expanded")).toBe("true");
-  await wrapper.get("nav.version-tabs").trigger("touchstart");
-  expect(toggle.attributes("aria-expanded")).toBe("true");
-  await toggle.trigger("click");
-  expect(toggle.attributes("aria-expanded")).toBe("false");
-  await assertCollapsedToggleWorks(toggle);
-});
-
-it("历史版本激活时可折叠 Tab 且仍由外部页面提供恢复入口", async () => {
-  const wrapper = render({ active: "cv-1" });
-  expect(wrapper.get("button.version-tabs-toggle").attributes("aria-expanded")).toBe("true");
-  await wrapper.get("button.version-tabs-toggle").trigger("click");
-  expect(wrapper.get("button.version-tabs-toggle").attributes("aria-expanded")).toBe("false");
-  expect(wrapper.get("button.overwrite-entry").text()).toContain("恢复此版本");
+  expect(wrapper.findAll("button")[0].text()).toBe("当前教师稿");
+  expect(wrapper.find(".version-tabs-toggle").exists()).toBe(false);
+  await wrapper.get("nav").trigger("mouseenter");
+  expect(wrapper.get("nav").classes()).toContain("expanded");
 });

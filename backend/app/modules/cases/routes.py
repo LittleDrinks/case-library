@@ -24,7 +24,7 @@ from app.modules.cases.service import (
     update_case,
 )
 from app.modules.cases.sources import ordered_entries
-from app.modules.cases.versions import create_manual_version
+from app.modules.cases.versions import create_manual_version, delete_history_version
 from app.modules.documents import build_case_docx
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -177,6 +177,16 @@ def create_version(
     return create_manual_version(
         database, case_id, body.title, user, body.revision,
     )
+
+
+@router.delete("/{case_id}/versions/{version_id}")
+def delete_version(
+    case_id: str, version_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+):
+    return delete_history_version(database, case_id, version_id, user)
 
 
 def _reader_case(database, case_id: str, user: dict | None) -> dict:
