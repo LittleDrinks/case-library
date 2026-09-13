@@ -122,7 +122,8 @@ def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
 
 def _restore_case(database, case: dict, target: dict, session) -> dict:
     fields = {key: target["metadata"].get(key) for key in CASE_METADATA_FIELDS}
-    fields.update({key: target[key] for key in ("title", "summary", "document")})
+    # 版本 title 是版本名称（如手动版本名、恢复记录名），不是文章标题，恢复不改标题。
+    fields.update({key: target[key] for key in ("summary", "document")})
     fields["updatedAt"] = _now()
     query = {
         "id": case["id"],

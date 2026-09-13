@@ -335,6 +335,22 @@ def test_manual_version_requires_owner_and_draft(client: TestClient) -> None:
     _assert_manual_version_owner_only(client, case)
     _assert_manual_version_requires_draft(client, case)
 
+def test_restore_manual_version_keeps_case_title(client: TestClient) -> None:
+    auth = login(client, "user", "user123").json()
+    case, saved = _manual_version_fixture(client, auth)
+    version = _create_manual_version(client, auth, case, saved).json()
+    saved = client.get(f"/api/cases/{case['id']}").json()
+    changed = _save_content(client, auth, saved, "手动正文 恢复前新写")
+    response = _lifecycle(
+        client, auth, changed, "overwrite", targetId=version["id"],
+    )
+    assert response.status_code == 200
+    fresh = client.get(f"/api/cases/{case['id']}").json()
+    assert fresh["title"] == "手动版本案例"
+    assert fresh["document"] == version["document"]
+    rows = _history(client, case["id"])["versions"]
+    assert rows[-1]["title"].startswith("恢复：补充教学目标")
+
 
 def _restore_current_work(client, auth):
     case, version = _frozen_version(client, auth, "恢复闭环")

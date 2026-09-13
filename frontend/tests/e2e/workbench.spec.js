@@ -749,22 +749,36 @@ test("作者可在历史面板手动创建命名版本", async ({ page }) => {
 
 test("历史版本 Tab 悬停展开且折叠后仍可见返回恢复入口", async ({ page }) => {
   await login(page);
-  const request = page.context().request;
-  await stageFrozenVersion(page, request, `Tab 悬停 ${Date.now()}`);
+  const marker = `Tab 悬停 ${Date.now()}`;
+  await stageFrozenVersion(page, page.context().request, marker);
   const tabs = page.locator(".version-tabs");
-  const toggle = tabs.locator(".version-tabs-toggle");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  const label = `v1 · ${marker}`;
+
+  await expectCollapsedTabBar(page, tabs, label);
+  await expectHoverExpandAndClose(page, tabs, label, marker);
+});
+
+async function expectCollapsedTabBar(page, tabs, label) {
+  const draftTab = tabs.getByRole("tab", { name: "当前教师稿" });
+  const chip = tabs.getByRole("tab", { name: label });
+  await expect(draftTab).toBeVisible();
+  await expect(chip).toBeVisible();
   await page.locator(".version-paper-head h2").hover();
-  await tabs.hover();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await expect(tabs.getByRole("tab", { name: "当前教师稿" })).toBeVisible();
-  await expect(page.locator(".version-paper-actions .version-restore")).toBeVisible();
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(tabs).not.toHaveClass(/expanded/, { timeout: 2000 });
+  await expect(chip).toBeHidden();
+  await expect(draftTab).toBeVisible();
   await expect(page.locator(".version-paper-actions .version-return")).toBeVisible();
   await expect(page.locator(".version-paper-actions .version-restore")).toBeVisible();
-});
+}
+
+async function expectHoverExpandAndClose(page, tabs, label, marker) {
+  const chip = tabs.getByRole("tab", { name: label });
+  await tabs.hover();
+  await expect(tabs).toHaveClass(/expanded/);
+  await expect(chip).toBeVisible();
+  await tabs.getByRole("button", { name: `关闭 ${label}` }).click();
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+}
 
 async function expectPreservedDraftAnnotation(page, request, caseId) {
   await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
