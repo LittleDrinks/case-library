@@ -541,7 +541,8 @@ function askFloatAi(annotation) {
 
 function updateWritingContext(context) {
   const current = writingContext.value;
-  if (current?.annotationId && context?.from === current.from && context?.to === current.to
+  if (current?.annotationId && context?.annotationId === current.annotationId
+      && context?.from === current.from && context?.to === current.to
       && context?.quote === current.quote) return;
   writingContext.value = context;
 }

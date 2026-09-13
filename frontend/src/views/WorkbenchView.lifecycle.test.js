@@ -675,6 +675,25 @@ test("真实编辑器重捕获保留批注 AI 关联，切线程清除关联", a
   wrapper.unmount();
 });
 
+test("相同正文范围的新上下文会替换旧批注关联", async () => {
+  api.getCase.mockResolvedValue(caseFixture());
+  const wrapper = render(annotationAiRailStub);
+  await flushPromises();
+  const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+  const rail = wrapper.getComponent(annotationAiRailStub);
+  const range = { from: 1, to: 3, quote: "正文", sameBlock: true };
+  canvas.vm.$emit("writing-context", { ...range, annotationId: "an-old" });
+  await flushPromises();
+  expect(rail.props("writingContext")).toMatchObject({ annotationId: "an-old" });
+  canvas.vm.$emit("writing-context", range);
+  await flushPromises();
+  expect(rail.props("writingContext")).not.toHaveProperty("annotationId");
+  canvas.vm.$emit("writing-context", { ...range, annotationId: "an-new" });
+  await flushPromises();
+  expect(rail.props("writingContext")).toMatchObject({ annotationId: "an-new" });
+  wrapper.unmount();
+});
+
 async function finishAnnotationRun(wrapper) {
   wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", "thread-9");
   await flushPromises();
