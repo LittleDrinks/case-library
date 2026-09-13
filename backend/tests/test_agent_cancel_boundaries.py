@@ -185,25 +185,6 @@ def _assert_review_cancelled(database, thread_id: str, run) -> None:
     _assert_no_assistant(database, thread_id)
 
 
-def _gated_run(app, account: dict, thread_id: str, model,
-               case_id: str = DRAFT_CASE):
-    """公共路径发起阻塞 Run 并等待激活；返回控制柄（release/future/pool）。"""
-    future, pool = _post_async(app, account, thread_id, model, case_id)
-    assert future_done_or_active(app, thread_id, future)
-    return future, pool
-
-
-def future_done_or_active(app, thread_id: str, future):
-    database = app.state.database
-    end = time.monotonic() + 10
-    while time.monotonic() < end:
-        if database.agent_runs.find_one(
-                {"threadId": thread_id, "status": "active"}):
-            return True
-        Event().wait(0.02)
-    raise AssertionError("run did not become active")
-
-
 def test_cancel_before_generation_delivers_nothing(client: TestClient) -> None:
     auth = _login(client)
     thread_id = _thread_id(client)

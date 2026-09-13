@@ -44,6 +44,10 @@ class ThreadNotFoundError(Exception):
     pass
 
 
+class _CompletionFenceLost(RuntimeError):
+    pass
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -441,7 +445,7 @@ class AgentRepository:
     def _complete_tx(self, run_id: str, owner_id: str | None, attempt) -> bool:
         try:
             return attempt()
-        except RuntimeError:
+        except _CompletionFenceLost:
             # 完成在落库时被取消越过（_finish_query 失配）：上一事务已整体
             # 回滚（assistant 等半成品不可见），在新事务收敛为显式取消。
             return self.cancel_run(run_id, owner_id)
@@ -573,7 +577,7 @@ class AgentRepository:
         if resources is not None:
             fields["resources"] = resources
         if not self._finish_record(run.id, "completed", fields, session, owner_id):
-            raise RuntimeError("AI 运行已结束")
+            raise _CompletionFenceLost("AI 运行已结束")
         self._clear_active(run.thread_id, run.id, session)
         self._append_event(run.thread_id, "run.completed", run.id, fields, session)
 
