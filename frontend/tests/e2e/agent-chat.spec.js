@@ -279,8 +279,13 @@ async function selectDraftRange(page, text) {
     .toContain(text);
 }
 
+async function waitSelectionAttached(page) {
+  await expect(page.getByTestId("message-selection")).toBeVisible();
+}
+
 async function directWriteAndUndo(page, created, version, historyBefore, message) {
   await selectDraftRange(page, "AI生成正文");
+  await waitSelectionAttached(page);
   await sendChat(page, message);
   await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
   const undo = page.getByTestId("agent-undo-write").last();
@@ -292,27 +297,25 @@ async function directWriteAndUndo(page, created, version, historyBefore, message
   const aiVersion = history.versions.find(({ id }) => id === version.id);
   expect(aiVersion).toBeDefined();
   expect(aiVersion.kind).toBe("ai");
-  return history;
 }
 
-test("自然直接写入表述写当前稿并撤销，独立 AI 版本保留", async ({ page }) => {
-  await login(page);
-  await configureChat(page);
-  const created = await createCase(page);
-  await openChat(page, created.id);
-  await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
-  const version = await assertSavedAiVersion(page, created.id);
-  await openAiVersion(page, version);
-  const restoredHistory = await overwriteAiVersion(page, created.id, version);
-  await page.reload();
-  await selectCurrentDraft(page);
-  await assertCurrentDraft(page, version);
-  await openChatPanel(page);
-  const afterFirst = await directWriteAndUndo(
-    page, created, version, restoredHistory, "帮我把这段话写入正文试试");
-  await directWriteAndUndo(
-    page, created, version, afterFirst, "请直接写入替换选中文字");
-});
+for (const message of ["帮我把这段话写入正文试试", "请直接写入替换选中文字"]) {
+  test(`自然直接写入「${message}」写当前稿并撤销，独立 AI 版本保留`, async ({ page }) => {
+    await login(page);
+    await configureChat(page);
+    const created = await createCase(page);
+    await openChat(page, created.id);
+    await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
+    const version = await assertSavedAiVersion(page, created.id);
+    await openAiVersion(page, version);
+    const restoredHistory = await overwriteAiVersion(page, created.id, version);
+    await page.reload();
+    await selectCurrentDraft(page);
+    await assertCurrentDraft(page, version);
+    await openChatPanel(page);
+    await directWriteAndUndo(page, created, version, restoredHistory, message);
+  });
+}
 
 async function submitMessage(page, text) {
   await page.getByLabel("向 AI 提问").fill(text);
