@@ -446,7 +446,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .version-count { display: inline-grid; min-width: 20px; height: 20px; padding: 0 5px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-3); font-size: 11px; font-weight: 600; }
 .version-head > button, .version-create-form button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 12px; }
 .version-head > button:hover, .version-create-form button:hover { border-color: var(--brand); color: var(--brand); }
-.version-create-form { display: grid; gap: 7px; padding: 12px; border-bottom: 1px solid var(--line-soft); background: var(--paper); }
+.version-create-form { display: grid; gap: 12px; padding: 0; }
 .version-create-form label { color: var(--ink-2); font-size: 12px; font-weight: 600; }
 .version-create-form input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); }
 .version-create-form input:focus { border-color: var(--brand); outline: 2px solid rgba(165, 111, 54, .16); }
@@ -681,3 +681,10 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .version-delete-dialog h3 { margin: 0 0 12px; }
 .version-delete-dialog p { color: var(--ink-3); }
 .version-delete-dialog footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+.version-actions { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.version-timeline .version-actions button { flex-shrink: 0; white-space: nowrap; }
+.version-actions button:last-child { color: var(--brand); }
+.version-delete-dialog button { padding: 7px 14px; border: 1px solid var(--line); border-radius: 6px; background: #fff; white-space: nowrap; }
+.version-delete-dialog button.primary { color: #fff; background: var(--brand); border-color: var(--brand); }
+@media (max-width: 480px) { .version-create-form { min-width: 0; } .el-dialog { max-width: calc(100vw - 32px); } }

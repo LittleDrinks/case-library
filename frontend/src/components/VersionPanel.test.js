@@ -1,4 +1,4 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, it, vi } from "vitest";
 import VersionPanel from "./VersionPanel.vue";
 import { api } from "../api.js";
@@ -59,8 +59,10 @@ it("命名版本表单保存后折叠并通知工作台同步 revision", async (
   await flushPromises();
 
   await wrapper.get('button[aria-label="新建版本"]').trigger("click");
-  await wrapper.get("#version-title").setValue("补充教学目标");
-  await wrapper.get(".version-create-form").trigger("submit");
+  await flushPromises();
+  const dialog = new DOMWrapper(document.querySelector(".el-dialog"));
+  await dialog.get("#version-title").setValue("补充教学目标");
+  await dialog.get(".version-create-form").trigger("submit");
   await flushPromises();
 
   expect(api.createManualVersion).toHaveBeenCalledWith("case-1", "补充教学目标", 3, "csrf");

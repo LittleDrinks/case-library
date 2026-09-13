@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import { History, Plus, Save, X } from "@lucide/vue";
+import { ElDialog } from "element-plus";
 import { api } from "../api.js";
 import { versionLabel } from "../lib/version.js";
 
@@ -102,15 +103,6 @@ onMounted(loadHistory);
       </button>
     </div>
     <div class="panel-scroll">
-      <form v-if="formOpen" class="version-create-form" @submit.prevent="saveVersion">
-        <label for="version-title">版本名称</label>
-        <input id="version-title" v-model="versionTitle" maxlength="80" autocomplete="off" placeholder="例如：补充教学目标" />
-        <p v-if="createError" class="version-create-error" role="alert">{{ createError }}</p>
-        <footer>
-          <button type="button" @click="cancelCreate"><X :size="14" aria-hidden="true" />取消</button>
-          <button class="primary" type="submit" :disabled="creating"><Save :size="14" aria-hidden="true" />{{ creating ? "保存中" : "保存版本" }}</button>
-        </footer>
-      </form>
       <div v-if="loading" class="panel-empty"><History :size="24" /><span>正在加载版本</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
         <span>{{ error }}</span><button type="button" @click="loadHistory">重试</button>
@@ -123,13 +115,28 @@ onMounted(loadHistory);
             <small>{{ time(version.createdAt) }}</small>
             <b>{{ versionLabel(version) }}</b>
           </div>
+          <div class="version-actions">
           <button type="button" :aria-label="`查看历史版本 ${versionLabel(version)}`" @click="emit('open-version', version)">
             查看历史版本
           </button>
           <button v-if="editable" type="button" :aria-label="`删除历史版本 ${versionLabel(version)}`" @click="deleteTarget = version">删除</button>
+          </div>
         </li>
       </ol>
     </div>
+    <ElDialog :model-value="formOpen" title="新建版本" width="420px" align-center append-to-body
+      :close-on-click-modal="!creating" :close-on-press-escape="!creating" :show-close="!creating"
+      @update:model-value="cancelCreate">
+      <form class="version-create-form" @submit.prevent="saveVersion">
+        <label for="version-title">版本名称</label>
+        <input id="version-title" v-model="versionTitle" maxlength="80" autocomplete="off" placeholder="例如：补充教学目标" />
+        <p v-if="createError" class="version-create-error" role="alert">{{ createError }}</p>
+        <footer>
+          <button type="button"  :disabled="creating" @click="cancelCreate"><X :size="14" aria-hidden="true" />取消</button>
+          <button class="primary" type="submit" :disabled="creating"><Save :size="14" aria-hidden="true" />{{ creating ? "保存中" : "保存版本" }}</button>
+        </footer>
+      </form>
+    </ElDialog>
     <Teleport to="body">
       <div v-if="deleteTarget" class="version-delete-backdrop" @click.self="!deleting && (deleteTarget = null)">
         <section class="version-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="version-delete-title">

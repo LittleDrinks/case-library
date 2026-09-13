@@ -108,8 +108,7 @@ it("关闭期间迟到的批注列表不会把已解决批注重新打开", asyn
   await flushPromises();
 
   expect(wrapper.findAll(".comment-card")).toHaveLength(0);
-  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
-  expect(wrapper.get('[data-annotation-id="annotation-1"]').text()).toContain("已解决");
+  expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([]);
 });
 
@@ -152,9 +151,8 @@ it("审核批注列表允许作者和管理员讨论，但私人批注不泄露�
 it("已解决历史的陈旧锚点不显示待处理警告", async () => {
   api.listAnnotations.mockResolvedValue([{ ...resolvedDiscussion, anchorState: "changed" }]);
   const wrapper = await mountPanel();
-  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
-  const card = wrapper.get('[data-annotation-id="annotation-resolved"]');
-  expect(card.text()).toContain("已解决");
+  expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
+  expect(wrapper.find('[data-annotation-id="annotation-resolved"]').exists()).toBe(false);
   expect(wrapper.text()).not.toContain("原文已变动，旧修订不可合并");
   expect(wrapper.text()).not.toContain("原文已删除");
 });
@@ -179,7 +177,7 @@ it("关闭批注后清除仍在正文与 AI 间绑定的选区", async () => {
   expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
 });
 
-it("默认列表隐藏已解决批注并从正文标记事件剔除，历史入口显示完整讨论", async () => {
+it("默认列表隐藏已解决批注并从正文标记事件剔除且不提供已解决入口", async () => {
   api.listAnnotations.mockResolvedValue([annotation, resolvedDiscussion]);
   const wrapper = await mountPanel();
 
@@ -188,9 +186,7 @@ it("默认列表隐藏已解决批注并从正文标记事件剔除，历史入�
   expect(wrapper.find('[data-annotation-id="annotation-resolved"]').exists()).toBe(false);
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation]);
 
-  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
-  expect(wrapper.find('[data-annotation-id="annotation-resolved"]').text()).toContain("已完成处理");
-  expect(wrapper.find('[data-annotation-id="annotation-1"]').exists()).toBe(false);
+  expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation]);
 });
 
@@ -203,7 +199,7 @@ it("草稿继续显示前轮审核批注及正文标记", async () => {
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation, review]);
 });
 
-it("直接关闭后从默认列表与正文标记移除，并可从历史入口回看", async () => {
+it("直接关闭后从默认列表与正文标记移除", async () => {
   api.listAnnotations.mockResolvedValue([annotation]);
   api.setAnnotationStatus.mockResolvedValue({ ...resolvedDiscussion, id: annotation.id });
   const wrapper = await mountPanel();
@@ -213,8 +209,7 @@ it("直接关闭后从默认列表与正文标记移除，并可从历史入口�
 
   expect(wrapper.find('[data-annotation-id="annotation-1"]').exists()).toBe(false);
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([]);
-  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
-  expect(wrapper.get('[data-annotation-id="annotation-1"]').text()).toContain("已完成处理");
+  expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
 });
 
 it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
@@ -232,6 +227,5 @@ it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
   expect(api.mergeAnnotation).toHaveBeenCalledWith(caseRecord.id, annotation.id, user.csrfToken);
   expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ revision: 5 });
   expect(wrapper.find('[data-annotation-id="annotation-1"]').exists()).toBe(false);
-  await wrapper.get('[aria-label="查看已解决批注"]').trigger("click");
-  expect(wrapper.get('[data-annotation-id="annotation-1"]').text()).toContain("已解决");
+  expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
 });

@@ -20,13 +20,11 @@ const saving = ref(false);
 const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
-const showResolved = ref(false);
 let loadGeneration = 0;
 
 const pendingCount = computed(() => annotations.value.filter(({ status }) => status !== "resolved").length);
-const resolvedCount = computed(() => annotations.value.filter(({ status }) => status === "resolved").length);
 const visibleAnnotations = computed(() => annotations.value.filter(({ status }) => (
-  showResolved.value ? status === "resolved" : status !== "resolved"
+  status !== "resolved"
 )));
 
 function announce() {
@@ -217,31 +215,13 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
   <section class="assistant-panel comment-panel">
     <div class="panel-head">
       <b>批注</b>
-      <div class="comment-view-switch" role="tablist" aria-label="批注视图">
-        <button
-          class="comment-view-tab"
-          :class="{ active: !showResolved }"
-          type="button"
-          role="tab"
-          :aria-selected="!showResolved"
-          @click="showResolved = false"
-        >待处理 {{ pendingCount }}</button>
-        <button
-          class="comment-view-tab"
-          :class="{ active: showResolved }"
-          type="button"
-          role="tab"
-          aria-label="查看已解决批注"
-          :aria-selected="showResolved"
-          @click="showResolved = true"
-        >已解决 {{ resolvedCount }}</button>
-      </div>
+      <span class="comment-pending-count">待处理 {{ pendingCount }}</span>
     </div>
     <div class="panel-scroll">
       <div v-if="loading" class="panel-empty">正在加载批注</div>
       <div v-else-if="error && !annotations.length" class="attachment-error" role="alert">{{ error }}</div>
       <div v-else-if="!visibleAnnotations.length" class="panel-empty">
-        <MessageSquareText :size="24" /><span>{{ showResolved ? "暂无已解决批注" : "暂无批注" }}</span>
+        <MessageSquareText :size="24" /><span>暂无批注</span>
       </div>
       <ol v-else class="comment-list">
         <li
