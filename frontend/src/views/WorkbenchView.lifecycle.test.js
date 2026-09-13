@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import WorkbenchView from "./WorkbenchView.vue";
 import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
@@ -56,8 +56,8 @@ vi.mock("../api.js", () => ({
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
-    createAnnotation: vi.fn(),
-    agentThread: vi.fn(),
+    createAnnotation: vi.fn(), deleteAnnotation: vi.fn(),
+    agentThread: vi.fn(), aiSettings: vi.fn(), listSkills: vi.fn(),
     listSources: vi.fn().mockResolvedValue({ entries: [] }),
     caseHistory: vi.fn().mockResolvedValue({ versions: [], events: [] }),
     listTagGroups: vi.fn().mockResolvedValue([]),
@@ -100,6 +100,8 @@ beforeEach(() => {
   state.route.query = {};
   state.user = { id: "user-1", role: "user" };
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 test("草稿作者的动作按钮由服务端 availableActions 驱动", async () => {
   const wrapper = await renderCase();
@@ -645,11 +647,148 @@ function annotationThread(overrides = {}) {
   };
 }
 
+const annotationAiRailStub = {
+  name: "AnnotationAiRailStub",
+  props: ["writingContext", "promptRequest"],
+  emits: ["ask-ai", "clear-writing-context"],
+  template: "<div />",
+};
+
+function renderWorkbenchWithRealRail() {
+  return mount(WorkbenchView, {
+    global: { stubs: {
+      SiteHeader: true, OutlinePanel: true, teleport: true,
+      AgentArtifactCard: true, AgentResourceTrace: true, AgentSourcePicker: true,
+      AgentThreadList: true, AttachmentPanel: true,
+      PublicSourceList: true, VersionPanel: true,
+      RouterLink: { template: "<a><slot /></a>" },
+    } },
+  });
+}
+
+function railTab(wrapper, label) {
+  return wrapper.findComponent({ name: "AssistantRail" })
+    .findAll(".assistant-tabs > button").find((button) => button.text().includes(label));
+}
+
+async function openRailComments(wrapper) {
+  await railTab(wrapper, "批注").trigger("click");
+  await flushPromises();
+  return wrapper.findComponent({ name: "AssistantRail" }).findComponent({ name: "CommentPanel" });
+}
+
+async function askAiFromComments(wrapper) {
+  const comments = await openRailComments(wrapper);
+  await comments.findAll("button").find((button) => button.text().includes("让 AI 修订")).trigger("click");
+  await flushPromises();
+  return wrapper.findComponent({ name: "AssistantRail" }).findComponent({ name: "AgentChatPanel" });
+}
+
+async function deleteFromComments(wrapper) {
+  const comments = await openRailComments(wrapper);
+  await comments.get('[aria-label="删除批注"]').trigger("click");
+  await flushPromises();
+}
+
+async function editAgentPrompt(chat, annotation) {
+  const composer = chat.get('[aria-label="向 AI 提问"]');
+  await vi.waitFor(() => expect(composer.element.value).toContain(annotation.content));
+  const edited = `${composer.element.value}\n\n用户编辑后的修订要求`;
+  await composer.setValue(edited);
+  return edited;
+}
+
+async function sendAgentPrompt(chat, fetchMock) {
+  await chat.get('[aria-label="发送"]').trigger("click");
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  return JSON.parse(fetchMock.mock.calls.at(-1)[1].body).messages.at(-1).parts;
+}
+
+function agentStream() {
+  return new Response('data: {"type":"start","messageId":"message-2"}\n\ndata: [DONE]\n\n', {
+    headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+  });
+}
+
+function setupRealChat(annotation) {
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotation]);
+  api.deleteAnnotation.mockResolvedValue(null);
+  api.agentThread.mockResolvedValue({ id: "thread-1", messages: [], artifacts: [], activeRun: null, latestRun: null });
+  api.aiSettings.mockResolvedValue({ configured: true, effectiveModel: "test-model" });
+  api.listSkills.mockResolvedValue([]);
+  const fetchMock = vi.fn().mockResolvedValue(agentStream());
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+async function finishDeletedAnnotationSend(wrapper, chat, fetchMock, annotation, prompt) {
+  await deleteFromComments(wrapper);
+  expect(wrapper.findComponent({ name: "CanvasEditor" }).props("annotations")).toEqual([]);
+  expect(chat.props("writingContext")).toMatchObject({ from: annotation.from, to: annotation.to });
+  expect(chat.props("writingContext")).not.toHaveProperty("annotationId");
+  await railTab(wrapper, "AI").trigger("click");
+  await flushPromises();
+  expect(chat.get('[aria-label="向 AI 提问"]').element.value).toBe(prompt);
+  return sendAgentPrompt(chat, fetchMock);
+}
+
 async function openAnnotationThread(wrapper) {
   wrapper.findComponent({ name: "CanvasEditor" }).vm.$emit("annotation-click", "annotation-1");
   await flushPromises();
   expect(wrapper.get(".annotation-float").text()).toContain("旧意见");
 }
+
+test("真实编辑器重捕获保留批注 AI 关联，切线程清除关联", async () => {
+  const annotation = annotationThread();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotation]);
+  const wrapper = renderWorkbenchWithEditor(annotationAiRailStub);
+  await flushPromises();
+  wrapper.getComponent(annotationAiRailStub).vm.$emit("ask-ai", annotation);
+  await flushPromises();
+  expect(wrapper.getComponent(annotationAiRailStub).props("writingContext"))
+    .toMatchObject({ annotationId: annotation.id, from: annotation.from, to: annotation.to });
+  expect(wrapper.getComponent(annotationAiRailStub).props("promptRequest").text).toContain(annotation.content);
+  wrapper.getComponent(annotationAiRailStub).vm.$emit("clear-writing-context");
+  await flushPromises();
+  expect(wrapper.getComponent(annotationAiRailStub).props("writingContext")).toBe(null);
+  wrapper.unmount();
+});
+
+test("真实辅助栏删除批注刷新编辑器时解除 AI 关联并保留预填提示", async () => {
+  const annotation = annotationThread();
+  const fetchMock = setupRealChat(annotation);
+  const wrapper = renderWorkbenchWithRealRail();
+  await flushPromises();
+  const chat = await askAiFromComments(wrapper);
+  const prompt = await editAgentPrompt(chat, annotation);
+  expect(chat.props("writingContext")).toMatchObject({ annotationId: annotation.id });
+  const parts = await finishDeletedAnnotationSend(wrapper, chat, fetchMock, annotation, prompt);
+  expect(parts).toContainEqual({ type: "data-selection", data: { from: annotation.from, to: annotation.to } });
+  expect(parts).not.toContainEqual({ type: "data-annotation", data: { id: annotation.id } });
+  expect(parts.find((part) => part.type === "text")?.text).toContain("用户编辑后的修订要求");
+  wrapper.unmount();
+});
+
+test("相同正文范围的新上下文会替换旧批注关联", async () => {
+  api.getCase.mockResolvedValue(caseFixture());
+  const wrapper = render(annotationAiRailStub);
+  await flushPromises();
+  const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+  const rail = wrapper.getComponent(annotationAiRailStub);
+  const range = { from: 1, to: 3, quote: "正文", sameBlock: true };
+  canvas.vm.$emit("writing-context", { ...range, annotationId: "an-old" });
+  await flushPromises();
+  expect(rail.props("writingContext")).toMatchObject({ annotationId: "an-old" });
+  canvas.vm.$emit("writing-context", range);
+  await flushPromises();
+  expect(rail.props("writingContext")).not.toHaveProperty("annotationId");
+  canvas.vm.$emit("writing-context", { ...range, annotationId: "an-new" });
+  await flushPromises();
+  expect(rail.props("writingContext")).toMatchObject({ annotationId: "an-new" });
+  wrapper.unmount();
+});
 
 async function finishAnnotationRun(wrapper) {
   wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", "thread-9");

@@ -28,6 +28,7 @@ let selectionBlocked = false;
 let selectionRequest = 0;
 let selectionFrame = 0;
 let annotationRefreshPending = false;
+let selectedAnnotation = null;
 
 function sectionName(activeEditor, position) {
   let section = "正文";
@@ -43,7 +44,24 @@ function writingContext(activeEditor, from, to) {
   const section = sectionName(activeEditor, from);
   const quote = quoteText(activeEditor.state.doc, from, to);
   const sameBlock = activeEditor.state.doc.resolve(from).sameParent(activeEditor.state.doc.resolve(to));
-  return { section, quote, from, to, sameBlock };
+  const context = { section, quote, from, to, sameBlock };
+  return annotationMatchesContext(context) ? { ...context, annotationId: selectedAnnotation.id } : context;
+}
+
+function annotationMatchesRange(range) {
+  return Boolean(selectedAnnotation && range
+    && selectedAnnotation.from === range.from && selectedAnnotation.to === range.to);
+}
+
+function annotationMatchesContext(context) {
+  return annotationMatchesRange(context) && selectedAnnotation.quote === context.quote;
+}
+
+function shouldPreserveAnnotation(activeEditor, context) {
+  const domRange = domSelectionRange(activeEditor);
+  if (!domRange) return annotationMatchesContext(context);
+  return annotationMatchesRange(domRange)
+    && (!validSelection(activeEditor) || annotationMatchesContext(context));
 }
 
 function positionTrigger(context) {
@@ -59,6 +77,7 @@ function clearSelection() {
   cancelSelectionFrame();
   selectionBlocked = true;
   selectionRequest += 1;
+  selectedAnnotation = null;
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
   collapseEditorSelection();
@@ -82,16 +101,17 @@ function collapseEditorSelection() {
 // selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
 // 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
 // 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
-function discardSelection() {
+function discardSelection(preserveWritingContext = false) {
   selectionRequest += 1;
-  clearCapturedSelection();
+  if (!preserveWritingContext) selectedAnnotation = null;
+  clearCapturedSelection(preserveWritingContext);
 }
 
-function clearCapturedSelection() {
+function clearCapturedSelection(preserveWritingContext = false) {
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
   emit("selection", null);
-  emit("writing-context", null);
+  if (!preserveWritingContext) emit("writing-context", null);
 }
 
 function cancelSelectionFrame() {
@@ -130,14 +150,16 @@ function publishSelection(context, quoteHash) {
 async function captureSelection({ editor: activeEditor }) {
   const context = currentContext(activeEditor);
   flushAnnotationRefresh(activeEditor);
+  const preserveWritingContext = shouldPreserveAnnotation(activeEditor, context);
   if (!selectionIsCapturable(activeEditor, context)) {
-    discardSelection();
+    discardSelection(preserveWritingContext);
     return;
   }
   cancelSelectionFrame();
   selectionBlocked = false;
   const request = ++selectionRequest;
-  clearCapturedSelection();
+  if (!preserveWritingContext) selectedAnnotation = null;
+  clearCapturedSelection(preserveWritingContext);
   const quoteHash = await hashQuote(context.quote);
   if (request !== selectionRequest || selectionBlocked) return;
   publishSelection(context, quoteHash);
@@ -182,6 +204,27 @@ async function recaptureSelection() {
   await captureSelection({ editor: editor.value });
 }
 
+function selectedAnnotationIsValid(activeEditor = editor.value) {
+  if (!selectedAnnotation || !activeEditor) return true;
+  return props.annotations.some((annotation) => {
+    const range = annotationAnchor(annotation, activeEditor.state.doc);
+    return annotation.id === selectedAnnotation.id
+      && range?.from === selectedAnnotation.from && range?.to === selectedAnnotation.to;
+  });
+}
+
+function invalidateSelectedAnnotation() {
+  const activeEditor = editor.value;
+  if (!selectedAnnotation || selectedAnnotationIsValid(activeEditor)) return;
+  selectedAnnotation = null;
+  selectionRequest += 1;
+  if (activeEditor && selectionIsCapturable(activeEditor, currentContext(activeEditor))) {
+    void recaptureSelection();
+    return;
+  }
+  discardSelection();
+}
+
 function scheduleSelectionCapture() {
   cancelSelectionFrame();
   selectionFrame = requestAnimationFrame(() => {
@@ -202,8 +245,13 @@ function preservePendingDomSelection() {
 }
 
 function handleSelectionChange() {
-  if (!editorHasDomSelection()) return;
-  discardSelection();
+  const range = domSelectionRange();
+  // Selection changes outside the editor (for example focusing the AI
+  // composer) do not change the document selection or its annotation link.
+  // Editor selection updates and explicit clears still pass through the
+  // editor callbacks below.
+  if (!range) return;
+  discardSelection(annotationMatchesRange(range));
   scheduleSelectionCapture();
 }
 
@@ -407,7 +455,10 @@ function replaceDocument(document) {
 
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
-watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
+watch(() => props.annotations, () => {
+  invalidateSelectedAnnotation();
+  refreshAnnotationAnchors();
+}, { deep: true });
 watch(() => props.pendingAnchor, () => refreshAnnotationAnchors());
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
@@ -452,6 +503,7 @@ function selectAnnotation(annotation) {
   if (!activeEditor || annotation.anchorState === "deleted" || annotation.anchorState === "changed") return false;
   const range = pendingAnchorRange(activeEditor.state.doc, annotation);
   if (!range) return false;
+  selectedAnnotation = { id: annotation.id, from: range.from, to: range.to, quote: annotation.quote };
   activeEditor.chain().setTextSelection(range).focus().scrollIntoView().run();
   return true;
 }

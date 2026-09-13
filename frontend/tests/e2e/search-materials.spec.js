@@ -220,7 +220,7 @@ async function assertMaterialAttached(page, title) {
   await expect(page).toHaveURL(/#\/workbench\/c-draft-1$/);
   await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   await page.getByRole("button", { name: /素材 1/ }).click();
-  await expect(page.getByText(title, { exact: true })).toBeVisible();
+  await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
 }
 
 async function enterCatalogFromWorkbench(page) {

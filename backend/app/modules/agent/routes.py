@@ -27,7 +27,7 @@ from app.modules.agent.models import (
     ArtifactTarget,
     write_view,
 )
-from app.modules.agent.writes import direct_write_requested, undo_write
+from app.modules.agent.writes import undo_write
 from app.modules.agent.recovery import (
     LiveBuffer,
     events_stream,
@@ -44,7 +44,6 @@ from app.modules.agent.service import RunContext, load_history
 from app.modules.agent.skills import (
     bound_skill_capability,
     domain_capability,
-    full_generation_requested,
     reader_capability,
 )
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
@@ -615,24 +614,23 @@ def _start_context(
 
 
 def _run_lock_for(conversation: Conversation, plan: RunPlan):
-    """Run 创建即冻结写入控制信息：基线修订号、锁定选区与直接写入授权。
+    """Run 创建即冻结写入控制信息：基线修订号与锁定选区。
 
-    授权只来自服务端对当前教师消息文本的判定；读者对话永不授权。
+    是否直接写入由模型结合完整对话理解并选择工具；服务端不解析消息文本。
     审核对话锁定当前待审提交版本，撤回或再提交后旧 Run 基线失效。
     """
     if conversation.reader:
-        return None, None, False, (
+        return None, None, (
             conversation.case.get("submittedVersionId") if conversation.review else None
         )
     plan.selections = _document_selections(
         conversation.case.get("document") or {}, plan.parts
     )
     base_revision, target = _run_lock(conversation.case, plan)
-    write_authorized = direct_write_requested(plan.prompt)
     submitted_version_id = (
         conversation.case.get("submittedVersionId") if conversation.review else None
     )
-    return base_revision, target, write_authorized, submitted_version_id
+    return base_revision, target, submitted_version_id
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
@@ -667,9 +665,6 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state, secret_path=settings.app_secret_file,
         store=request.app.state.blob_store, version_id=conversation.version_id,
-        full_generation_allowed=(
-            not conversation.reader and full_generation_requested(plan.prompt)
-        ),
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
     )
@@ -735,7 +730,7 @@ def _resolve_selection(document: dict, data: object) -> dict:
 
 def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                skill_bindings: list[dict[str, str]],
-               lock: tuple = (None, None, False, None)) -> AgentRun:
+               lock=(None, None, None)) -> AgentRun:
     try:
         return _create_run(
             repository, thread, user_id, plan, assistant_id, lease, worker_id,
@@ -755,7 +750,7 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                 skill_bindings: list[dict[str, str]],
-                lock: tuple = (None, None, False, None)):
+                lock=(None, None, None)):
     run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock, plan.annotation_id)
     if plan.retry_message_id:
         run = repository.retry_run(
@@ -773,12 +768,12 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
 
 def _run_fields(lease, worker_id, skill_bindings, lock, annotation_id=None):
     quota_ids = lease.quota_ids if lease else ()
-    base_revision, target, write_authorized, submitted_version_id = lock
+    base_revision, target, submitted_version_id = lock
     return {
         "owner_id": worker_id, "quota_ids": quota_ids,
         "skill_bindings": skill_bindings,
         "base_revision": base_revision, "target": target,
-        "write_authorized": write_authorized, "annotation_id": annotation_id,
+        "annotation_id": annotation_id,
         "submitted_version_id": submitted_version_id,
     }
 

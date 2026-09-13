@@ -207,7 +207,7 @@ async function expectWorkbenchMaterial(page, title) {
   await page.getByRole("link", { name: "返回当前案例" }).click();
   await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   await page.getByRole("button", { name: /素材 1/ }).click();
-  await expect(page.getByText(title, { exact: true })).toBeVisible();
+  await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
 }
 
 async function reviewImportedCandidates(page, marker, filename, rejected, title) {

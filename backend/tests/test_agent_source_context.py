@@ -141,7 +141,7 @@ def _assert_selection_context(context: str) -> None:
     assert "服务端已按当前正文验证的原生位置" in context
     assert "from=11，to=19，原文：第二段需要修订。" in context
     assert "不得自行计算或调整位置，也不得要求作者填写字符位置" in context
-    assert "把该位置原样作为修订工具的 start 和 end" in context
+    assert "把上述 from、to 原样作为 start、end" in context
 
 
 def _assert_pending_target(database, case_id: str) -> None:

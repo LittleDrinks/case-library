@@ -140,7 +140,7 @@ def _role_prompts(reader: bool, review: bool) -> str:
         return prompt_text("review-agent.md")
     if reader:
         return prompt_text("reader-agent.md")
-    return "\n\n".join((prompt_text("case-agent.md"), prompt_text("revision-task.md")))
+    return prompt_text("case-agent.md")
 
 
 def case_instructions(

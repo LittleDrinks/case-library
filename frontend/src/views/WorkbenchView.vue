@@ -541,7 +541,8 @@ function askFloatAi(annotation) {
 
 function updateWritingContext(context) {
   const current = writingContext.value;
-  if (current?.annotationId && context?.from === current.from && context?.to === current.to
+  if (current?.annotationId && context?.annotationId === current.annotationId
+      && context?.from === current.from && context?.to === current.to
       && context?.quote === current.quote) return;
   writingContext.value = context;
 }
@@ -552,7 +553,10 @@ function selectAnnotationText(annotation) {
 
 function askAnnotationAi(annotation) {
   if (!annotation || annotation.createdBy !== session.user?.id) return;
-  selectAnnotationText(annotation);
+  if (!selectAnnotationText(annotation)) {
+    clearWritingContext();
+    return;
+  }
   promptRequest.value = { text: `请根据这条批注修订选中的正文：${annotation.content}。\n保留原意和其他内容，给出可供我确认的修改建议。` };
   writingContext.value = {
     annotationId: annotation.id,

@@ -9,6 +9,7 @@ const mounted = [];
 
 afterEach(() => {
   while (mounted.length) mounted.pop().unmount();
+  globalThis.getSelection()?.removeAllRanges();
 });
 
 const caseDocument = {
@@ -46,6 +47,10 @@ function selectDomRange(textNode, length, start = 0, notify = true) {
   if (notify) globalThis.document.dispatchEvent(new Event("selectionchange"));
 }
 
+function paragraphTextNode(paragraph) {
+  return paragraph.querySelector(".annotation-anchor")?.firstChild ?? paragraph.firstChild;
+}
+
 function clearDomSelection() {
   globalThis.getSelection().removeAllRanges();
   globalThis.document.dispatchEvent(new Event("selectionchange"));
@@ -63,6 +68,36 @@ async function selectParagraph(wrapper, length = 4) {
   await wrapper.vm.recaptureSelection();
   await vi.waitUntil(() => emitted().length > known, { interval: 20 });
   await nextTick();
+}
+
+async function waitForWritingContext(wrapper, predicate) {
+  await vi.waitUntil(() => (wrapper.emitted("writing-context") ?? [])
+    .some(([context]) => predicate(context)), { interval: 10 });
+}
+
+async function selectAnnotationAndWait(wrapper, annotation) {
+  expect(wrapper.vm.selectAnnotation(annotation)).toBe(true);
+  await wrapper.vm.recaptureSelection();
+  await waitForWritingContext(wrapper, (context) => context?.annotationId === annotation.id);
+}
+
+async function deleteSelectedAnnotation(wrapper, annotation) {
+  await selectAnnotationAndWait(wrapper, annotation);
+  wrapper.vm.editor.commands.deleteSelection();
+  await nextTick();
+  expectUnlinkedWritingContext(wrapper);
+  wrapper.vm.clearSelection();
+  clearDomSelection();
+}
+
+function expectUnlinkedWritingContext(wrapper) {
+  expect(wrapper.emitted("writing-context").at(-1)[0]).not.toHaveProperty("annotationId");
+}
+
+function clearAndExpectWritingContextNull(wrapper) {
+  wrapper.vm.clearSelection();
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toBeNull();
+  clearDomSelection();
 }
 
 // tiptap vue-3 的 state 是双 rAF 去抖 ref，工具栏启用态需等两帧后才刷新。
@@ -88,6 +123,55 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   expect(captured).toMatchObject({ quote: "案例原文", revision: 3, from: 9, to: 13 });
   expect(captured.quoteHash).toHaveLength(64);
   expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+});
+
+it("批注选区重捕获保留关联，改选和显式清除会解除", async () => {
+  const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
+  const { wrapper } = await setup({ annotatable: true, revision: 3, annotations: [annotation] });
+  document.body.appendChild(wrapper.element);
+  await selectAnnotationAndWait(wrapper, annotation);
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  const editor = wrapper.vm.editor;
+  selectDomRange(paragraphTextNode(paragraph), 4);
+  await wrapper.vm.recaptureSelection();
+  await waitForWritingContext(wrapper, (context) => context?.annotationId === annotation.id);
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
+  selectDomRange(paragraphTextNode(paragraph), 3);
+  await wrapper.vm.recaptureSelection();
+  await waitForWritingContext(wrapper, (context) => context?.quote === "案例原" && !context.annotationId);
+  expectUnlinkedWritingContext(wrapper);
+  clearAndExpectWritingContextNull(wrapper);
+  await deleteSelectedAnnotation(wrapper, annotation);
+});
+
+it("编辑 AI 输入框时 selectionchange 不清除当前批注关联", async () => {
+  const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
+  const { wrapper } = await setup({ annotatable: true, annotations: [annotation] });
+  document.body.appendChild(wrapper.element);
+  await selectAnnotationAndWait(wrapper, annotation);
+  const composer = document.createElement("textarea");
+  document.body.appendChild(composer);
+  composer.focus();
+  document.dispatchEvent(new Event("selectionchange"));
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toMatchObject({ annotationId: annotation.id });
+  expect(wrapper.get(".annotation-anchor").text()).toBe(annotation.quote);
+  composer.remove();
+});
+
+it("批注刷新移除当前关联时保留正文选区但解除关联", async () => {
+  const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
+  const { wrapper } = await setup({ annotatable: true, annotations: [annotation] });
+  document.body.appendChild(wrapper.element);
+  await selectAnnotationAndWait(wrapper, annotation);
+  await wrapper.setProps({ annotations: [] });
+  await vi.waitUntil(() => {
+    const context = wrapper.emitted("writing-context")?.at(-1)?.[0];
+    return context?.from === annotation.from && context?.to === annotation.to && !context.annotationId;
+  }, { interval: 10 });
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toMatchObject({
+    from: annotation.from, to: annotation.to, quote: annotation.quote,
+  });
+  expect(wrapper.find(".annotation-anchor").exists()).toBe(false);
 });
 
 it("选中文字可关联资料，工具栏可取消引用", async () => {

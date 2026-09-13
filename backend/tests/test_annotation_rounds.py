@@ -364,7 +364,7 @@ def _seed_real_run(database, marker: str) -> None:
     database.agent_runs.insert_one({
         "id": f"r-{marker}", "threadId": f"t-{marker}", "userId": "u1",
         "userMessageId": "m", "assistantMessageId": "am", "status": "active",
-        "skillBindings": [], "readOnly": False, "writeAuthorized": True,
+        "skillBindings": [], "readOnly": False,
         "baseRevision": 1, "annotationId": f"an-{marker}", "resources": [],
         "toolTimings": {}, "startedAt": datetime.now(UTC),
     })

@@ -253,15 +253,13 @@ def _assert_follow_up_run_completes(client: TestClient, auth: dict,
     assert run["status"] == "completed", run
 
 
-def _cancelled_run_with_base(client: TestClient, auth: dict, case: dict,
-                             write_authorized: bool):
+def _cancelled_run_with_base(client: TestClient, auth: dict, case: dict):
     database = client.app.state.database
     repository = AgentRepository(database)
     thread = repository.default_thread(case["id"], auth["user"]["id"])
     run = repository.start_run(
         thread, auth["user"]["id"], [{"type": "text", "text": "x"}], {},
         f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
-        write_authorized=write_authorized,
     )
     assert repository.request_cancel(run.id) is not None
     return database, thread, run
@@ -273,7 +271,7 @@ def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
 
     auth = _login(client)
     case = _create_case(client, auth, _document("原稿保持。"))
-    database, _thread, run = _cancelled_run_with_base(client, auth, case, True)
+    database, _thread, run = _cancelled_run_with_base(client, auth, case)
     with pytest.raises(CaseError):
         writes.apply_write(database, case["id"], run.id, "document",
                            DRAFT_BLOCKS, auth["user"], "取消后写入")
@@ -286,7 +284,7 @@ def test_cancel_request_freezes_document_candidate_path(client: TestClient) -> N
 
     auth = _login(client)
     case = _create_case(client, auth, _document())
-    database, thread, run = _cancelled_run_with_base(client, auth, case, False)
+    database, thread, run = _cancelled_run_with_base(client, auth, case)
     with pytest.raises(CaseError):
         artifacts.propose_document_artifact(
             database, case["id"], thread.id, run.id,

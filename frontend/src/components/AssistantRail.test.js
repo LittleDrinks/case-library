@@ -70,6 +70,32 @@ async function switchThroughPanels(wrapper, panel, request) {
   await wrapper.setProps({ active: "ai", promptRequest: request });
 }
 
+const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+
+async function openSkillPopover(wrapper) {
+  await wrapper.get('[data-testid="skill-picker-toggle"]').trigger("click");
+  await settle();
+  return document.querySelector(".skill-popover");
+}
+
+function streamAnswer() {
+  return new Response('data: {"type":"start","messageId":"message-2"}\n\ndata: [DONE]\n\n', {
+    headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+  });
+}
+
+async function sendComposer(wrapper, composer) {
+  await composer.setValue("用户编辑后的修订要求");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+}
+
+function expectAnnotationPost(fetch) {
+  const parts = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+  expect(parts).toContainEqual({ type: "data-selection", data: { from: 9, to: 13 } });
+  expect(parts).toContainEqual({ type: "data-annotation", data: { id: "an-1" } });
+  expect(parts).toContainEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
+}
+
 it("uses the persistent Agent chat as the only AI entry", () => {
   const wrapper = render();
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).exists()).toBe(true);
@@ -95,6 +121,24 @@ it("keeps the AI draft while switching through integrated rail panels", async ()
   await switchThroughPanels(wrapper, panel, request);
   expect(wrapper.get('[aria-label="向 AI 提问"]').element.value).toBe("已有问题\n\n请按批注修订");
   expect(fetch).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it("sends annotation context through the real rail chat after editable prefill", async () => {
+  const fetch = vi.fn().mockResolvedValue(streamAnswer());
+  vi.stubGlobal("fetch", fetch);
+  api.listSkills.mockResolvedValue([{ id: "skill-pub", version: "v1", name: "思政案例生成", description: "按模板生成教学案例" }]);
+  const wrapper = renderWithRealChat({ writingContext: { annotationId: "an-1", from: 9, to: 13, sameBlock: true, quote: "第二段原文" }, promptRequest: { text: "请根据批注修订选中的正文" } });
+  await flushPromises();
+  const composer = wrapper.get('[aria-label="向 AI 提问"]');
+  expect(fetch).not.toHaveBeenCalled();
+  expect(composer.element.value).toContain("请根据批注修订选中的正文");
+  const panel = await openSkillPopover(wrapper);
+  panel.querySelector('[data-testid="skill-option"]').click();
+  await flushPromises();
+  await sendComposer(wrapper, composer);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+  expectAnnotationPost(fetch);
   wrapper.unmount();
 });
 
