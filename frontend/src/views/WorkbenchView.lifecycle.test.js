@@ -645,11 +645,35 @@ function annotationThread(overrides = {}) {
   };
 }
 
+const annotationAiRailStub = {
+  name: "AnnotationAiRailStub",
+  props: ["writingContext", "promptRequest"],
+  emits: ["ask-ai", "clear-writing-context"],
+  template: "<div />",
+};
+
 async function openAnnotationThread(wrapper) {
   wrapper.findComponent({ name: "CanvasEditor" }).vm.$emit("annotation-click", "annotation-1");
   await flushPromises();
   expect(wrapper.get(".annotation-float").text()).toContain("旧意见");
 }
+
+test("真实编辑器重捕获保留批注 AI 关联，切线程清除关联", async () => {
+  const annotation = annotationThread();
+  api.getCase.mockResolvedValue(caseFixture());
+  api.listAnnotations.mockResolvedValue([annotation]);
+  const wrapper = renderWorkbenchWithEditor(annotationAiRailStub);
+  await flushPromises();
+  wrapper.getComponent(annotationAiRailStub).vm.$emit("ask-ai", annotation);
+  await flushPromises();
+  expect(wrapper.getComponent(annotationAiRailStub).props("writingContext"))
+    .toMatchObject({ annotationId: annotation.id, from: annotation.from, to: annotation.to });
+  expect(wrapper.getComponent(annotationAiRailStub).props("promptRequest").text).toContain(annotation.content);
+  wrapper.getComponent(annotationAiRailStub).vm.$emit("clear-writing-context");
+  await flushPromises();
+  expect(wrapper.getComponent(annotationAiRailStub).props("writingContext")).toBe(null);
+  wrapper.unmount();
+});
 
 async function finishAnnotationRun(wrapper) {
   wrapper.getComponent(annotationRailStub).vm.$emit("annotation-run", "thread-9");
