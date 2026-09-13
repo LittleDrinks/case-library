@@ -91,6 +91,10 @@ def _text_model(text: str):
     return TestModel(custom_output_text=text, call_tools=[])
 
 
+def _reject_output(*_args):
+    raise RuntimeError("output validation failed")
+
+
 def _gated_model(reached: Event | None, release: Event, *texts: str):
     """确定性阻塞模型：产出前置文本后阻塞，release 后产出收尾文本。"""
     head, tail = (texts or ("前半", "后半"))
@@ -199,6 +203,44 @@ def test_cancel_before_generation_delivers_nothing(client: TestClient) -> None:
         _assert_no_assistant(client.app.state.database, thread_id)
     finally:
         _shutdown(future, pool, release)
+    _assert_follow_up_run_completes(client, auth, thread_id)
+
+
+def _validation_failure_run(client: TestClient, monkeypatch):
+    entered, release = Event(), Event()
+    original = AgentRepository.fail_run
+
+    def pause_before_failed_terminal(repository, run_id, owner_id=None):
+        entered.set()
+        assert release.wait(15), "test did not release failed terminal write"
+        return original(repository, run_id, owner_id)
+
+    monkeypatch.setattr(AgentRepository, "fail_run", pause_before_failed_terminal)
+    monkeypatch.setattr(service, "_assistant_ui", _reject_output)
+    auth = _login(client)
+    thread_id = _thread_id(client)
+    future, pool = _post_async(client.app, AUTHOR, thread_id, _text_model("失败"))
+    assert entered.wait(10), "service did not reach failed terminal boundary"
+    _await_active(client.app.state.database, thread_id)
+    return auth, thread_id, future, pool, release
+
+
+def test_validation_failure_cancel_converges_and_allows_follow_up(
+        client: TestClient, monkeypatch) -> None:
+    auth, thread_id, future, pool, release = _validation_failure_run(client, monkeypatch)
+    database = client.app.state.database
+    try:
+        stopped = client.post(
+            f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
+        assert stopped.status_code == 200
+        assert stopped.json()["status"] == "cancelling"
+    finally:
+        _shutdown(future, pool, release)
+    run = database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
+    thread = database.agent_threads.find_one({"id": thread_id}, {"_id": 0})
+    assert run["status"] == "cancelled", run
+    assert thread["activeRunId"] is None, thread
+    monkeypatch.undo()
     _assert_follow_up_run_completes(client, auth, thread_id)
 
 

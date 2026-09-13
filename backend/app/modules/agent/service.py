@@ -272,8 +272,7 @@ async def _monitor(context: RunContext, owner_task) -> None:
 def _monitor_failed(context: RunContext) -> None:
     context.failed = True
     try:
-        if not context.repository.fail_run(context.run.id, context.worker_id):
-            context.lost = True
+        _terminal(context, context.repository.fail_run, cancel_on_conflict=True)
     except Exception:
         context.lost = True
 
@@ -318,7 +317,7 @@ def _finalize(context: RunContext) -> None:
         elif status == "cancelled":
             _terminal(context, context.repository.cancel_run)
         else:
-            _terminal(context, context.repository.fail_run)
+            _terminal(context, context.repository.fail_run, cancel_on_conflict=True)
     except Exception:
         _monitor_failed(context)
     finally:
@@ -368,9 +367,13 @@ def _revoke_reader(context: RunContext) -> None:
         context.token.cancel()
 
 
-def _terminal(context: RunContext, finish) -> None:
+def _terminal(context: RunContext, finish, cancel_on_conflict=False) -> None:
     if not finish(context.run.id, context.worker_id):
-        context.lost = True
+        if cancel_on_conflict and context.repository.cancel_run(
+                context.run.id, context.worker_id):
+            context.cancelled = True
+        else:
+            context.lost = True
 
 
 def _release_lease(context: RunContext) -> None:
