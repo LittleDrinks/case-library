@@ -120,7 +120,6 @@ def agent_run(client: TestClient, auth: dict, case: dict, target: ArtifactTarget
     run = repository.start_run(
         thread, auth["user"]["id"], [{"type": "text", "text": "直接写入"}], {},
         "assistant-anchor-test", base_revision=case["revision"], target=target,
-        write_authorized=True,
     )
     return database, thread, run
 

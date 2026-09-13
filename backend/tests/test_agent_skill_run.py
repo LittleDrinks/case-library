@@ -325,7 +325,7 @@ def test_baseline_without_skill_selection_stays_intact(client: TestClient) -> No
     response = _send_message(client, teacher, case["id"], None)
     assert response.status_code == 200, response.text
     run = _run_rows(client.app.state.database)[0]
-    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt"}
 
 
 def _revision_then_text_model() -> FunctionModel:
@@ -354,7 +354,7 @@ def _assert_plain_chat_artifact(client: TestClient, case: dict) -> None:
     assert artifact["target"] == {"from": 1, "to": 5, "quote": "第一段。"}
     run = database.agent_runs.find_one({}, {"_id": 0})
     assert run["skillBindings"] == []
-    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt"}
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt"}
 
 
 def test_plain_chat_without_skill_keeps_base_tools(client: TestClient) -> None:

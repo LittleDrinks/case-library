@@ -346,7 +346,7 @@ def test_run_binds_selected_published_skill(client: TestClient) -> None:
     version = client.app.state.database.skill_versions.find_one({"skillId": SKILL_ID})
     assert run["skillBindings"] == [{"kind": "skill", "id": SKILL_ID,
                                      "versionId": version["id"], "version": version["version"]}]
-    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "task-prompt", "skill"}
+    assert {row["kind"] for row in run["resources"]} == {"system-prompt", "skill"}
 
 
 def _assert_delayed_skill(calls: list) -> None:
@@ -492,7 +492,7 @@ def test_snapshot_restores_artifact_and_decision(client: TestClient, tracer_case
     assert snapshot["artifacts"][0]["status"] == "accepted"
     assert snapshot["latestRun"]["status"] == "completed"
     resources = {row["kind"] for row in snapshot["latestRun"]["resources"]}
-    assert resources == {"system-prompt", "task-prompt", "skill"}
+    assert resources == {"system-prompt", "skill"}
 
 
 def test_forged_skill_name_rejected_before_run(client: TestClient) -> None:

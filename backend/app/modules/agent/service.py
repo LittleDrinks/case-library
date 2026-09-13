@@ -15,7 +15,7 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -164,12 +164,15 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
 def _task_prompt(reader: bool, review: bool) -> str:
     if review:
         return REVIEW_PROMPT
-    return READER_PROMPT if reader else TASK_PROMPT
+    return READER_PROMPT if reader else SYSTEM_PROMPT
 
 
 def _run_resources(parts: list[dict], bounds: tuple = (), reader=False,
                    review=False) -> list[dict[str, str]]:
-    records = [resource_record(SYSTEM_PROMPT), resource_record(_task_prompt(reader, review))]
+    records = [resource_record(SYSTEM_PROMPT)]
+    task_prompt = _task_prompt(reader, review)
+    if task_prompt is not SYSTEM_PROMPT:
+        records.append(resource_record(task_prompt))
     loaded = {bound.skill_id for bound in bounds} if review else set(_loaded_capability_ids(parts))
     return [*records, *[bound.resource_record() for bound in bounds if bound.skill_id in loaded]]
 

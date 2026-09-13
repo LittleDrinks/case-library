@@ -77,11 +77,6 @@ class AgentRun(BaseModel):
         description="Run 创建时固化的已发布 Skill 版本凭据，失败/取消仍保留",
     )
     read_only: bool = Field(default=False, alias="readOnly")
-    write_authorized: bool = Field(
-        default=False, alias="writeAuthorized",
-        description="Run 创建时由服务端从教师当前消息文本判定的直接写入授权，"
-                    "不来自工具参数或模型自报",
-    )
     base_revision: int | None = Field(
         default=None, alias="baseRevision", ge=1,
         description="Run 创建时锁定的案例工作版本修订号，决定与提议均以此为基线",

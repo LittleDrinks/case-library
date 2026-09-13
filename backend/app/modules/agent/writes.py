@@ -1,21 +1,14 @@
-"""Agent 直接写入正文：教师明确指令下服务端执行、恰好一次、可撤销。
+"""Agent 直接写入正文：模型按对话选用工具，服务端校验执行、恰好一次、可撤销。
 
-写入授权不在工具参数或模型自报：由服务端在 Run 创建时从当前教师消息
-判定「直接肯定指令」并冻结在 Run 上（内化 langgraph interrupt 原则：
-可信授权状态先于写入且持久绑定操作；不引入新框架与二次确认）。判定
-按从句分析：引用、疑问、否定、条件与说明性提及不得授权，只有不含
-否定/疑问/条件标记的从句中的「直接＋写入类动词」才授权，例如「我要
-直接写入」授权而「不能直接写入」「是否可以直接写入」不授权。
-
+是否直接写入由模型结合完整对话理解并选择；服务端不解析中文措辞。
 写入时重验作者与工作版本门禁、Run 基线修订号、Thread 与目标案例绑定、
-授权标记与只读拒绝；范围守卫（整篇仅真空文档/未编辑模板，选区仅锁定
-范围）全部通过才写入；写入保留结构化块与撤销所需前后文档，撤销按修订
-号守卫精确恢复。
+只读拒绝；范围守卫（整篇仅真空文档/未编辑模板，选区仅锁定范围）全部
+通过才写入；写入保留结构化块与撤销所需前后文档，撤销按修订号守卫精
+确恢复。
 """
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,82 +23,6 @@ from app.modules.cases.service import CaseError
 from app.modules.cases.snapshots import record_snapshot
 
 SCOPES = ("document", "selection")
-# 核心指令词：直接＋写入类动词。
-_DIRECT_WRITE_CORE = re.compile(r"直接(?:写入|写进|修改|替换|插入|覆盖)")
-# 引号/括号内的提及是说明性引用，先剔除再判定。
-_QUOTED_SPANS = re.compile(
-    r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|【[^】]*】"
-    r'|"[^"]*"|\'[^\']*\'|（[^）]*）|\([^)]*\)'
-)
-_CLAUSE_SPLIT = re.compile(r"[。！？!?；;.\n]")
-_DISCOURSE_SPLIT = re.compile(r"[，,：:、]|但是|但|不过|而是")
-
-
-def message_clauses(text: str, *, split_discourse: bool = False) -> list[str]:
-    cleaned = _QUOTED_SPANS.sub("", text or "")
-    if split_discourse:
-        cleaned = _DISCOURSE_SPLIT.sub(".", cleaned)
-    return _CLAUSE_SPLIT.split(cleaned)
-
-
-# 从句内出现即否定，不得授权。
-_NEGATIONS = (
-    "不", "没", "未", "勿", "别", "免", "禁", "拒", "防", "慎", "莫",
-    "无需", "无须", "无法", "难以", "避免",
-)
-# 从句内出现即疑问/询问，不得授权。
-_QUESTIONS = (
-    "吗", "呢", "请问", "能不能", "是否", "可否", "能否", "如何", "怎么", "怎样",
-    "为何", "为什么", "什么", "哪",
-)
-# 从句内出现即条件假设，尚未成为指令，不得授权。
-_CONDITIONALS = ("如果", "假如", "假设", "若是", "要是", "一旦", "的话", "以后", "之后")
-# 直接写入作为名词被提及（功能/规则说明）而非指令时，不得授权。
-_MENTION_SUFFIXES = (
-    "功能", "按钮", "规则", "模式", "选项", "机制", "说明", "是什么",
-    "的意思", "的含义", "用法", "怎么用", "的结果", "的内容", "结果", "内容",
-)
-_MENTION_PREFIXES = (
-    "提示词", "需求", "验收", "文档", "说明", "解释", "含义", "意思", "介绍",
-    "理解", "撤销", "取消", "回滚", "撤回", "展示", "查看", "显示",
-)
-
-def direct_write_requested(text: str) -> bool:
-    """服务端从教师当前消息判定直接写入授权：仅直接肯定指令。
-
-    剔除引用后按标点拆从句；只有包含核心指令词且无否定、疑问、条件、
-    名词化提及标记的从句才授权。普通生成、润色与解释性文字一律不授权。
-    """
-    for clause in message_clauses(text):
-        match = _DIRECT_WRITE_CORE.search(clause)
-        if match is None:
-            continue
-        if _contains(clause, _QUESTIONS + _CONDITIONALS) or _negates_core(clause, match):
-            continue
-        if _is_mention(clause):
-            continue
-        return True
-    return False
-
-
-def _contains(clause: str, tokens) -> bool:
-    return any(token in clause for token in tokens)
-
-
-def _negates_core(clause: str, match: re.Match) -> bool:
-    separators = "，,：:、"
-    start = max(clause.rfind(separator, 0, match.start()) for separator in separators) + 1
-    ends = [clause.find(separator, match.end()) for separator in separators]
-    end = min((value for value in ends if value >= 0), default=len(clause))
-    return _contains(clause[start:end], _NEGATIONS)
-
-
-def _is_mention(clause: str) -> bool:
-    match = _DIRECT_WRITE_CORE.search(clause)
-    after = clause[match.end():match.end() + 8]
-    before = clause[max(0, match.start() - 12):match.start()]
-    return (_contains(after, _MENTION_SUFFIXES)
-            or _contains(before, _MENTION_PREFIXES))
 
 
 def _now() -> datetime:
@@ -299,7 +216,7 @@ def _writable_case(database, case_id, user, session) -> dict:
 
 
 def _writable_run(database, run_id, case_id, user, session) -> dict:
-    """Run 必须活跃、属当前用户、非只读、经 Thread 绑定到目标案例且已授权。"""
+    """Run 必须活跃、属当前用户、非只读、经 Thread 绑定到目标案例。"""
     run = database.agent_runs.find_one({"id": run_id}, session=session)
     if not run or run["userId"] != user["id"] or run["status"] != "active":
         raise CaseError(409, "运行已结束，不能直接写入")
@@ -310,10 +227,6 @@ def _writable_run(database, run_id, case_id, user, session) -> dict:
     )
     if not thread or thread["caseId"] != case_id or thread["ownerId"] != user["id"]:
         raise CaseError(404, "对话不存在")
-    if not run.get("writeAuthorized"):
-        raise CaseError(
-            403, "本条消息没有明确的直接写入指令，不能直接写入；请改为候选供教师确认"
-        )
     if run.get("baseRevision") is None:
         raise CaseError(422, "运行缺少正文基线，不能直接写入")
     return run

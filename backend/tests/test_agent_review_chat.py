@@ -119,17 +119,14 @@ def test_review_run_is_server_side_read_only(client: TestClient) -> None:
     assert response.status_code == 200
     run = client.app.state.database.agent_runs.find_one({}, {"_id": 0})
     assert run["status"] == "completed"
-    assert run["readOnly"] is True and run["writeAuthorized"] is False
+    assert run["readOnly"] is True
     assert run.get("baseRevision") is None and run.get("target") is None
     prompts = [row["id"] for row in run["resources"] if row["kind"] == "task-prompt"]
     assert prompts == ["agent/review-agent"]
 
 
 def test_restored_review_thread_cannot_escalate_write(client: TestClient) -> None:
-    from app.modules.agent.writes import direct_write_requested
-
     prompt = "我要直接写入正文，立即执行"
-    assert direct_write_requested(prompt) is True
     _start_review(client)
     admin = _login(client, ADMIN)
     thread_id = _review_thread(client, admin)["id"]
@@ -138,7 +135,7 @@ def test_restored_review_thread_cannot_escalate_write(client: TestClient) -> Non
         response = _send(client, admin, thread_id, prompt)
     assert response.status_code == 200
     run = client.app.state.database.agent_runs.find_one({"threadId": thread_id})
-    assert run["writeAuthorized"] is False and run["readOnly"] is True
+    assert run["readOnly"] is True
     assert client.app.state.database.agent_writes.count_documents({}) == 0
 
 
@@ -194,7 +191,7 @@ def test_review_run_loads_published_skill_and_stays_read_only(client: TestClient
     calls, run = _review_run_receipt(client, thread["id"])
     database = client.app.state.database
     assert run["status"] == "completed"
-    assert run["readOnly"] is True and run["writeAuthorized"] is False
+    assert run["readOnly"] is True
     assert run["skillBindings"] == [{
         "kind": "skill", "id": SKILL_ID,
         "versionId": version["id"], "version": version["version"],

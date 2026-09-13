@@ -59,6 +59,21 @@ def _model_view(row: dict | None, model_type: type[ModelT]) -> ModelT | None:
     return model_type.model_validate(_without_id(row))
 
 
+_RUN_PROJECTION = frozenset(
+    field.alias or name for name, field in AgentRun.model_fields.items()
+)
+
+
+def _run_view(row: dict | None) -> AgentRun | None:
+    """按当前运行模型字段读取数据库行。"""
+    if row is None:
+        return None
+    return AgentRun.model_validate({
+        key: value for key, value in row.items()
+        if key != "_id" and key in _RUN_PROJECTION
+    })
+
+
 class AgentRepository:
     def __init__(self, database) -> None:
         self.database = database
@@ -137,16 +152,15 @@ class AgentRepository:
         return [_model_view(row, AgentMessage) for row in rows]
 
     def active_run(self, thread_id: str, session=None) -> AgentRun | None:
-        row = self.database.agent_runs.find_one(
+        return _run_view(self.database.agent_runs.find_one(
             {"threadId": thread_id, "status": "active"}, session=session
-        )
-        return _model_view(row, AgentRun)
+        ))
 
     def runs(self, thread_id: str, session=None) -> list[AgentRun]:
         rows = self.database.agent_runs.find(
             {"threadId": thread_id}, session=session
         ).sort([("startedAt", ASCENDING), ("id", ASCENDING)])
-        return [_model_view(row, AgentRun) for row in rows]
+        return [run for row in rows if (run := _run_view(row)) is not None]
 
     def message(self, thread_id: str, message_id: str) -> AgentMessage | None:
         row = self.database.agent_messages.find_one(
@@ -155,12 +169,11 @@ class AgentRepository:
         return _model_view(row, AgentMessage)
 
     def latest_run(self, thread_id: str, session=None) -> AgentRun | None:
-        row = self.database.agent_runs.find_one(
+        return _run_view(self.database.agent_runs.find_one(
             {"threadId": thread_id},
             sort=[("startedAt", DESCENDING), ("id", DESCENDING)],
             session=session,
-        )
-        return _model_view(row, AgentRun)
+        ))
 
     def renew_run_owner(self, run_id: str, owner_id: str) -> dict | None:
         now = _now()
@@ -246,14 +259,13 @@ class AgentRepository:
         quota_ids: tuple[str, ...] = (), default_title: str | None = None,
         skill_bindings: list[dict[str, str]] | None = None,
         base_revision: int | None = None, target: ArtifactTarget | None = None,
-        write_authorized: bool = False,
         annotation_id: str | None = None,
     ) -> AgentRun:
         try:
             run = _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, skill_bindings, session, default_title,
-                base_revision, target, write_authorized, annotation_id,
+                base_revision, target, annotation_id,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -262,15 +274,14 @@ class AgentRepository:
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id,
         owner_id, quota_ids, skill_bindings, session, default_title=None,
-        base_revision=None, target=None, write_authorized: bool = False,
-        annotation_id: str | None = None,
+        base_revision=None, target=None, annotation_id: str | None = None,
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session, default_title)
         message, run = _new_run_documents(
             thread, user_id, parts, metadata, assistant_id, message_seq,
             client_request_id, run_id, message_id, owner_id, quota_ids,
-            skill_bindings, base_revision, target, write_authorized,
+            skill_bindings, base_revision, target,
             annotation_id,
         )
         self._insert_start_records(message, run, session)
@@ -281,13 +292,12 @@ class AgentRepository:
                   owner_id: str | None = None, quota_ids: tuple[str, ...] = (),
                   skill_bindings: list[dict[str, str]] | None = None,
                   base_revision: int | None = None, target: ArtifactTarget | None = None,
-                  write_authorized: bool = False,
                   annotation_id: str | None = None) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
             return _transaction(self.database, lambda session: self._retry_run(
                 thread, user_message_id, assistant_id, owner_id, quota_ids,
-                skill_bindings, base_revision, target, write_authorized, session,
+                skill_bindings, base_revision, target, session,
                 annotation_id,
             ))
         except DuplicateKeyError as error:
@@ -295,8 +305,7 @@ class AgentRepository:
 
     def _retry_run(
         self, thread, user_message_id, assistant_id, owner_id, quota_ids,
-        skill_bindings, base_revision, target, write_authorized, session,
-        annotation_id,
+        skill_bindings, base_revision, target, session, annotation_id,
     ) -> AgentRun:
         message = self.database.agent_messages.find_one(
             {"threadId": thread.id, "id": user_message_id, "role": "user"},
@@ -310,17 +319,17 @@ class AgentRepository:
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
             skill_bindings,
-            base_revision, target, write_authorized, session, annotation_id,
+            base_revision, target, session, annotation_id,
         )
 
     def _insert_retry_run(
         self, thread, message, assistant_id, run_id, owner_id, quota_ids,
-        skill_bindings, base_revision, target, write_authorized, session,
+        skill_bindings, base_revision, target, session,
         annotation_id,
     ) -> AgentRun:
         run = _new_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
-            skill_bindings, base_revision, target, write_authorized, annotation_id,
+            skill_bindings, base_revision, target, annotation_id,
         )
         self.database.agent_runs.insert_one(_run_document(run), session=session)
         self._append_event(
@@ -337,7 +346,7 @@ class AgentRepository:
             {"$set": {"cancelRequestedAt": _now()}},
             return_document=ReturnDocument.AFTER,
         )
-        return _model_view(row, AgentRun)
+        return _run_view(row)
 
     def _insert_start_records(
         self, message: AgentMessage, run: AgentRun, session
@@ -427,9 +436,8 @@ class AgentRepository:
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
                       artifact: AgentArtifact | None = None, write_record=None) -> bool:
-        run = _model_view(
-            self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session),
-            AgentRun,
+        run = _run_view(
+            self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session)
         )
         if not run:
             return False
@@ -588,7 +596,7 @@ class AgentRepository:
             return_document=ReturnDocument.AFTER,
             session=session,
         )
-        return _model_view(row, AgentRun)
+        return _run_view(row)
 
     def append_event(
         self, thread_id: str, event_type: ThreadEventType, run_id: str,
@@ -749,7 +757,7 @@ def _new_run_documents(
     owner_id: str | None, quota_ids: tuple[str, ...],
     skill_bindings: list[dict[str, str]] | None = None,
     base_revision: int | None = None, target: ArtifactTarget | None = None,
-    write_authorized: bool = False, annotation_id: str | None = None,
+    annotation_id: str | None = None,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     return (
@@ -757,7 +765,7 @@ def _new_run_documents(
         _new_active_run(
             thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
             owner_id, quota_ids, skill_bindings, base_revision, target,
-            write_authorized, annotation_id,
+            annotation_id,
         ),
     )
 
@@ -774,15 +782,14 @@ def _new_user_message(
 def _run_common_fields(
     thread, now, owner_id, quota_ids,
     skill_bindings: list[dict[str, str]] | None = None,
-    base_revision=None, target=None, write_authorized: bool = False,
+    base_revision=None, target=None,
     annotation_id: str | None = None,
 ) -> dict:
-    """活跃运行共享字段：只读、授权、基线与 owner 会话到期时间。"""
+    """活跃运行共享字段：只读、基线与 owner 会话到期时间。"""
     return {
         "status": "active", "started_at": now,
         "skill_bindings": list(skill_bindings or []),
         "read_only": thread.version_id is not None or thread.mode == REVIEW_MODE,
-        "write_authorized": write_authorized,
         "base_revision": base_revision, "target": target,
         "annotation_id": annotation_id,
         "owner_id": owner_id,
@@ -796,12 +803,12 @@ def _new_retry_run(
     owner_id: str | None, quota_ids: tuple[str, ...],
     skill_bindings: list[dict[str, str]] | None = None,
     base_revision: int | None = None, target: ArtifactTarget | None = None,
-    write_authorized: bool = False, annotation_id: str | None = None,
+    annotation_id: str | None = None,
 ) -> AgentRun:
     now = _now()
     fields = _run_common_fields(
         thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
-        write_authorized, annotation_id,
+        annotation_id,
     )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=thread.owner_id,
@@ -813,12 +820,12 @@ def _new_retry_run(
 def _new_active_run(
     thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
     owner_id, quota_ids, skill_bindings: list[dict[str, str]] | None = None,
-    base_revision=None, target=None, write_authorized: bool = False,
+    base_revision=None, target=None,
     annotation_id: str | None = None,
 ) -> AgentRun:
     fields = _run_common_fields(
         thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
-        write_authorized, annotation_id,
+        annotation_id,
     )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
