@@ -204,6 +204,27 @@ async function recaptureSelection() {
   await captureSelection({ editor: editor.value });
 }
 
+function selectedAnnotationIsValid(activeEditor = editor.value) {
+  if (!selectedAnnotation || !activeEditor) return true;
+  return props.annotations.some((annotation) => {
+    const range = annotationAnchor(annotation, activeEditor.state.doc);
+    return annotation.id === selectedAnnotation.id
+      && range?.from === selectedAnnotation.from && range?.to === selectedAnnotation.to;
+  });
+}
+
+function invalidateSelectedAnnotation() {
+  const activeEditor = editor.value;
+  if (!selectedAnnotation || selectedAnnotationIsValid(activeEditor)) return;
+  selectedAnnotation = null;
+  selectionRequest += 1;
+  if (activeEditor && selectionIsCapturable(activeEditor, currentContext(activeEditor))) {
+    void recaptureSelection();
+    return;
+  }
+  discardSelection();
+}
+
 function scheduleSelectionCapture() {
   cancelSelectionFrame();
   selectionFrame = requestAnimationFrame(() => {
@@ -434,7 +455,10 @@ function replaceDocument(document) {
 
 watch(() => props.document, replaceDocument, { deep: true });
 watch(() => props.editable, (editable) => editor.value?.setEditable(editable, false));
-watch(() => props.annotations, () => refreshAnnotationAnchors(), { deep: true });
+watch(() => props.annotations, () => {
+  invalidateSelectedAnnotation();
+  refreshAnnotationAnchors();
+}, { deep: true });
 watch(() => props.pendingAnchor, () => refreshAnnotationAnchors());
 watch(() => props.sources, () => refreshCitationNumbers(editor.value, props.sources), { deep: true });
 watch(() => props.annotatable, (value) => {
