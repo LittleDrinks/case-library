@@ -416,7 +416,7 @@ def test_review_run_rebased_then_completed_is_cancelled(
     _start_review(client)
     admin = _login(client, ADMIN)
     database = client.app.state.database
-    repository, _thread, run = _locked_review_run(database, admin)
+    repository, run = _locked_review_run(database, admin)
     _withdraw_pending_case(client.app)
     _resubmit_pending(client)
     assert repository.complete_run(
@@ -459,7 +459,7 @@ def _locked_review_run(database, auth: dict):
         f"assistant-{uuid.uuid4().hex}",
         submitted_version_id=case.get("submittedVersionId"),
     )
-    return repository, thread, run
+    return repository, run
 
 
 def _assistant_message_for(run) -> AgentMessage:
