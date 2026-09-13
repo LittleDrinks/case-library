@@ -279,33 +279,23 @@ async function selectDraftRange(page, text) {
     .toContain(text);
 }
 
-async function undoCount(page) {
-  return page.getByTestId("agent-undo-write").count();
-}
-
-async function unauthorizedWriteKeepsDraft(page, created, historyBefore) {
+async function directWriteAndUndo(page, created, version, historyBefore, message) {
   await selectDraftRange(page, "AI生成正文");
-  await sendChat(page, "帮我把这段话写入正文试试");
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  expect(await undoCount(page)).toBe(0);
-  return expectHistoryUnchanged(page, created.id, historyBefore);
-}
-
-async function authorizedWriteAndUndo(page, created, version, historyBefore) {
-  await selectDraftRange(page, "AI生成正文");
-  await sendChat(page, "请直接写入替换选中文字");
+  await sendChat(page, message);
   await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
-  await expect(page.getByTestId("agent-undo-write")).toBeVisible();
-  await page.getByTestId("agent-undo-write").click();
-  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  const undo = page.getByTestId("agent-undo-write").last();
+  await expect(undo).toBeVisible();
+  await undo.click();
+  await expect(page.getByTestId("agent-write-undone").last()).toBeVisible();
   await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
   const history = await expectHistoryUnchanged(page, created.id, historyBefore);
   const aiVersion = history.versions.find(({ id }) => id === version.id);
   expect(aiVersion).toBeDefined();
   expect(aiVersion.kind).toBe("ai");
+  return history;
 }
 
-test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page }) => {
+test("自然直接写入表述写当前稿并撤销，独立 AI 版本保留", async ({ page }) => {
   await login(page);
   await configureChat(page);
   const created = await createCase(page);
@@ -318,9 +308,10 @@ test("显式直接写入需授权且撤销保留独立 AI 版本", async ({ page
   await selectCurrentDraft(page);
   await assertCurrentDraft(page, version);
   await openChatPanel(page);
-
-  const afterUnauthorized = await unauthorizedWriteKeepsDraft(page, created, restoredHistory);
-  await authorizedWriteAndUndo(page, created, version, afterUnauthorized);
+  const afterFirst = await directWriteAndUndo(
+    page, created, version, restoredHistory, "帮我把这段话写入正文试试");
+  await directWriteAndUndo(
+    page, created, version, afterFirst, "请直接写入替换选中文字");
 });
 
 async function submitMessage(page, text) {
