@@ -14,14 +14,15 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
+import pytest
 from fastapi.testclient import TestClient
-from pydantic_ai import ModelResponse, ToolCallPart
-from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from app.modules.agent import service
+from app.modules.agent import artifacts, service, writes
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.runtime import agent
+from app.modules.cases.service import CaseError
 
 DRAFT_CASE = "c-draft-1"
 PENDING_CASE = "c-pending-1"
@@ -71,7 +72,6 @@ def _thread_id(client: TestClient, case_id: str = DRAFT_CASE,
     return response.json()["id"]
 
 
-
 def _post_async(app, client: TestClient, account: dict, thread_id: str, model,
                 case_id: str = DRAFT_CASE, mode: str | None = None):
     """在独立线程发起流式请求：TestClient/httpx 不允许跨线程共享连接，
@@ -85,11 +85,10 @@ def _post_async(app, client: TestClient, account: dict, thread_id: str, model,
     pool = ThreadPoolExecutor(max_workers=1)
     return pool.submit(send), pool
 
+
 def _text_model(text: str):
     """纯文本回答模型：不带工具调用（TestModel 默认会调 propose_document）。"""
     return TestModel(custom_output_text=text, call_tools=[])
-
-
 
 
 def _gated_model(reached: Event | None, release: Event, *texts: str):
@@ -102,25 +101,6 @@ def _gated_model(reached: Event | None, release: Event, *texts: str):
             reached.set()
         await asyncio.to_thread(release.wait, 30)
         yield tail
-
-    return FunctionModel(stream_function=stream)
-
-def _write_model(tool_call_id: str = "cancel-write") -> FunctionModel:
-    call = ModelResponse(parts=[ToolCallPart(
-        tool_name="write_document",
-        args={"scope": "document", "blocks": DRAFT_BLOCKS, "summary": "取消前写入"},
-    )])
-    issued: list[bool] = []
-
-    async def stream(_messages, _info):
-        if not issued:
-            issued.append(True)
-            yield {0: DeltaToolCall(
-                name="write_document",
-                json_args=json.dumps(call.parts[0].args_as_dict()),
-                tool_call_id=tool_call_id,
-            )}
-        yield "写入完成。"
 
     return FunctionModel(stream_function=stream)
 
@@ -179,11 +159,11 @@ def _start_review(client: TestClient) -> dict:
 def test_cancel_before_generation_delivers_nothing_and_allows_new_run(
         client: TestClient) -> None:
     auth = _login(client)
-    with agent.override(model=_text_model("迟到回答")):
-        thread_id = _thread_id(client)
-        reached, release = Event(), Event()
-        future, pool = _post_async(client.app, client, AUTHOR, thread_id,
-                                   _gated_model(reached, release))
+    thread_id = _thread_id(client)
+    reached, release = Event(), Event()
+    model = _gated_model(reached, release)
+    with agent.override(model=model):
+        future, pool = _post_async(client.app, client, AUTHOR, thread_id, model)
         try:
             assert reached.wait(10)
             _await_active(client.app.state.database, thread_id)
@@ -212,9 +192,9 @@ def test_cancel_before_generation_delivers_nothing_and_allows_new_run(
 
 def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
     """取消请求一旦落库，直接写入在提交边界被拒绝；案例正文保持不变。"""
-    auth = _login(client)
     from tests.test_agent_document_write import _create_case, _document
 
+    auth = _login(client)
     case = _create_case(client, auth, _document("原稿保持。"))
     database = client.app.state.database
     repository = AgentRepository(database)
@@ -226,18 +206,35 @@ def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
     )
     assert repository.request_cancel(run.id) is not None
 
-    from app.modules.cases.service import CaseError
-
-    raised = False
-    try:
-        from app.modules.agent import writes
-
+    with pytest.raises(CaseError):
         writes.apply_write(database, case["id"], run.id, "document",
                            DRAFT_BLOCKS, auth["user"], "取消后写入")
-    except CaseError:
-        raised = True
-    assert raised, "取消请求后的直接写入必须被拒绝"
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+
+
+def test_cancel_request_freezes_document_candidate_path(client: TestClient) -> None:
+    """取消请求落库后，整篇候选提议在同一提交边界被拒绝。"""
+    from tests.test_agent_document_write import _create_case, _document
+
+    auth = _login(client)
+    case = _create_case(client, auth, _document())
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    thread = repository.default_thread(case["id"], auth["user"]["id"])
+    run = repository.start_run(
+        thread, auth["user"]["id"], [{"type": "text", "text": "生成初稿"}], {},
+        f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
+    )
+    assert repository.request_cancel(run.id) is not None
+
+    with pytest.raises(CaseError):
+        artifacts.propose_document_artifact(
+            database, case["id"], thread.id, run.id,
+            DRAFT_BLOCKS, "取消后候选", [], auth["user"],
+        )
+    assert database.case_versions.count_documents(
+        {"caseId": case["id"], "kind": "ai"}) == 0
+    assert database.agent_artifacts.count_documents({}) == 0
 
 
 # ---- 重放一致性：取消后的恢复流给出 abort 终块并以 [DONE] 收尾 ----
@@ -332,13 +329,14 @@ def test_review_run_revoked_when_case_leaves_review(client: TestClient,
                                                     monkeypatch) -> None:
     monkeypatch.setattr(service, "RUN_HEARTBEAT_SECONDS", 0.01)
     _start_review(client)
-    admin = _login(client, ADMIN)
+    _login(client, ADMIN)
     thread_id = _thread_id(client, PENDING_CASE, mode="review")
     database = client.app.state.database
     reached, release = Event(), Event()
-    with agent.override(model=_gated_model(reached, release)):
+    model = _gated_model(reached, release)
+    with agent.override(model=model):
         future, pool = _post_async(client.app, client, ADMIN, thread_id,
-                                   _gated_model(reached, release), PENDING_CASE)
+                                   model, PENDING_CASE)
         try:
             assert reached.wait(10)
             _await_active(database, thread_id)
@@ -358,6 +356,8 @@ def test_review_run_revoked_when_case_leaves_review(client: TestClient,
             assert run["status"] == "cancelled", run
             assert database.agent_messages.count_documents(
                 {"threadId": thread_id, "role": "assistant"}) == 0
+            assert database.annotations.count_documents(
+                {"caseId": PENDING_CASE, "source": "ai"}) == 0
             assert database.case_versions.count_documents(
                 {"caseId": PENDING_CASE, "kind": "ai"}) == 0
         finally:
@@ -374,9 +374,10 @@ def test_review_run_revoked_when_admin_demoted(client: TestClient,
     thread_id = _thread_id(client, PENDING_CASE, mode="review")
     database = client.app.state.database
     reached, release = Event(), Event()
-    with agent.override(model=_gated_model(reached, release)):
+    model = _gated_model(reached, release)
+    with agent.override(model=model):
         future, pool = _post_async(client.app, client, ADMIN, thread_id,
-                                   _gated_model(reached, release), PENDING_CASE)
+                                   model, PENDING_CASE)
         try:
             assert reached.wait(10)
             _await_active(database, thread_id)

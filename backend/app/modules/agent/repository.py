@@ -453,18 +453,8 @@ class AgentRepository:
         )
 
     def _review_completion_allowed(self, case_id, user_id, run_id, session) -> bool:
-        """审核完成边界：案例仍待审、运行属主仍是有效管理员时才允许交付。"""
-        case = self.database.cases.find_one(
-            {"id": case_id, "workflowStatus": {"$in": list(REVIEWABLE_STATES)}},
-            {"_id": 1}, session=session,
-        )
-        if not case:
-            return False
-        user = self.database.users.find_one(
-            {"id": user_id, "role": "admin", "status": "active"}, {"_id": 1},
-            session=session,
-        )
-        return user is not None
+        """审核完成边界：复用共享交付谓词，与心跳撤销同口径。"""
+        return review_delivery_allowed(self.database, case_id, user_id, session)
 
     def _complete_records(
         self, run, assistant, session, owner_id, resources, artifact=None, write_record=None
@@ -937,6 +927,24 @@ def claim_run_write_path(database, run_id: str, path: str, session=None) -> bool
         session=session,
     )
     return result.matched_count == 1
+
+
+def review_delivery_allowed(database, case_id: str, user_id: str, session=None) -> bool:
+    """审核交付单一谓词：案例仍待审且运行属主仍是有效管理员。
+
+    心跳撤销（service._review_accessible）与完成事务围栏共用，口径只此一处。
+    """
+    case = database.cases.find_one(
+        {"id": case_id, "workflowStatus": {"$in": list(REVIEWABLE_STATES)}},
+        {"_id": 1}, session=session,
+    )
+    if not case:
+        return False
+    user = database.users.find_one(
+        {"id": user_id, "role": "admin", "status": "active"}, {"_id": 1},
+        session=session,
+    )
+    return user is not None
 
 
 def _case_revision(database, case_id: str, session) -> int | None:
