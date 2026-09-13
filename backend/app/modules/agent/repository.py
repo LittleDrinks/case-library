@@ -65,8 +65,7 @@ _RUN_PROJECTION = frozenset(
 
 
 def _run_view(row: dict | None) -> AgentRun | None:
-    """数据库行水合为 AgentRun；旧文档遗留字段（如 writeAuthorized）不在
-    模型字段白名单内，读取投影直接剔除，不迁移存量数据。"""
+    """按当前运行模型字段读取数据库行。"""
     if row is None:
         return None
     return AgentRun.model_validate({
