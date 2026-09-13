@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import {
-  Check, CornerUpLeft, MessageSquareText, Pencil, RotateCcw, Sparkles, Trash2, X,
+  Check, CornerUpLeft, MessageSquareText, Pencil, Sparkles, Trash2, X,
 } from "@lucide/vue";
 import { api } from "../api.js";
 
@@ -20,6 +20,7 @@ const saving = ref(false);
 const editingId = ref("");
 const editingContent = ref("");
 const replies = reactive({});
+const replyingId = ref("");
 let loadGeneration = 0;
 
 const pendingCount = computed(() => annotations.value.filter(({ status }) => status !== "resolved").length);
@@ -264,19 +265,21 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
             <button type="button" :disabled="saving || !editingContent.trim()" @click="saveEdit(annotation)"><Check :size="14" />保存批注</button>
             <button type="button" :disabled="saving" @click="cancelEdit"><X :size="14" />取消</button>
           </div>
-          <div v-else-if="canEdit(annotation)" class="comment-owner-actions">
-            <button type="button" aria-label="编辑批注" :disabled="saving" @click="beginEdit(annotation)"><Pencil :size="14" />编辑</button>
-            <button type="button" aria-label="删除批注" :disabled="saving" @click="removeAnnotation(annotation)"><Trash2 :size="14" />删除</button>
-          </div>
           <ul v-if="annotation.replies.length" class="comment-replies">
             <li v-for="item in annotation.replies" :key="item.id">
               <CornerUpLeft :size="13" /><span>{{ item.content }}</span>
             </li>
           </ul>
-          <div v-if="canReply(annotation)" class="comment-thread-actions">
+          <div v-if="canReply(annotation) && replyingId === annotation.id" class="comment-thread-actions">
             <input v-model="replies[annotation.id]" aria-label="回复批注" placeholder="回复" />
             <button type="button" :disabled="saving || !replies[annotation.id]?.trim()" @click="reply(annotation)">回复</button>
           </div>
+          <footer class="comment-actions">
+          <div v-if="canEdit(annotation) && editingId !== annotation.id" class="comment-owner-actions">
+            <button type="button" aria-label="编辑批注" :disabled="saving" @click="beginEdit(annotation)"><Pencil :size="14" />编辑</button>
+            <button type="button" aria-label="删除批注" :disabled="saving" @click="removeAnnotation(annotation)"><Trash2 :size="14" />删除</button>
+          </div>
+            <button v-if="canReply(annotation)" class="comment-reply-toggle" type="button" :aria-expanded="replyingId === annotation.id" @click="replyingId = replyingId === annotation.id ? '' : annotation.id"><CornerUpLeft :size="14" />回复</button>
           <button
             v-if="annotation.status === 'pending' && user?.id === caseRecord.ownerId"
             class="comment-status-action"
@@ -298,13 +301,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
             :disabled="saving"
             @click="merge(annotation)"
           ><Check :size="14" />合并并关闭</button>
-          <button
-            v-else-if="annotation.status === 'resolved' && user?.role === 'admin'"
-            class="comment-status-action"
-            type="button"
-            :disabled="saving"
-            @click="setStatus(annotation, 'pending')"
-          ><RotateCcw :size="14" />重新打开</button>
+          </footer>
         </li>
       </ol>
     </div>

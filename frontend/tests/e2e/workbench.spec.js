@@ -737,6 +737,7 @@ test("作者可在历史面板手动创建命名版本", async ({ page }) => {
   await page.goto(`/#/workbench/${created.id}`);
   await page.getByRole("button", { name: "版本历史" }).click();
   await page.getByRole("button", { name: "新建版本", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "新建版本" })).toBeInViewport({ ratio: 1 });
   await page.getByLabel("版本名称").fill("补充教学目标");
   await page.getByRole("button", { name: "保存版本", exact: true }).click();
   await expect(page.getByRole("button", { name: "查看历史版本 v1 · 补充教学目标" })).toBeVisible();

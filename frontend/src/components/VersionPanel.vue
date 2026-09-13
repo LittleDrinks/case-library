@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { History, Plus, Save, X } from "@lucide/vue";
 import { ElDialog } from "element-plus";
+import "element-plus/theme-chalk/el-dialog.css";
+import "element-plus/theme-chalk/el-overlay.css";
 import { api } from "../api.js";
 import { versionLabel } from "../lib/version.js";
 

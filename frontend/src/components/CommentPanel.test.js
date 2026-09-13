@@ -135,6 +135,7 @@ it("审核批注列表允许作者和管理员讨论，但私人批注不泄露�
   api.listAnnotations.mockResolvedValue([review]);
   api.replyAnnotation.mockResolvedValue({ ...review, replies: [{ id: "reply-1", content: "收到" }] });
   const reviewPanel = await mountPanel({ caseRecord: { ...caseRecord, workflowStatus: "reviewing" }, user: admin });
+  await reviewPanel.get(".comment-reply-toggle").trigger("click");
   await reviewPanel.get('[aria-label="回复批注"]').setValue("收到");
   await reviewPanel.get(".comment-thread-actions button").trigger("click");
   await flushPromises();
