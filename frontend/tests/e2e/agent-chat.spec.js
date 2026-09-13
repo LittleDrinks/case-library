@@ -279,13 +279,15 @@ async function selectDraftRange(page, text) {
     .toContain(text);
 }
 
-async function waitSelectionAttached(page) {
-  await expect(page.getByTestId("message-selection")).toBeVisible();
+async function waitSelectionAttached(page, quote) {
+  const chip = page.getByTestId("composer-selection");
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveAttribute("title", quote);
 }
 
 async function directWriteAndUndo(page, created, version, historyBefore, message) {
   await selectDraftRange(page, "AI生成正文");
-  await waitSelectionAttached(page);
+  await waitSelectionAttached(page, "AI生成正文");
   await sendChat(page, message);
   await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
   const undo = page.getByTestId("agent-undo-write").last();
