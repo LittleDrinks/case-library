@@ -552,7 +552,10 @@ function selectAnnotationText(annotation) {
 
 function askAnnotationAi(annotation) {
   if (!annotation || annotation.createdBy !== session.user?.id) return;
-  selectAnnotationText(annotation);
+  if (!selectAnnotationText(annotation)) {
+    clearWritingContext();
+    return;
+  }
   promptRequest.value = { text: `请根据这条批注修订选中的正文：${annotation.content}。\n保留原意和其他内容，给出可供我确认的修改建议。` };
   writingContext.value = {
     annotationId: annotation.id,

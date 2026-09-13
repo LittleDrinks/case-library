@@ -225,10 +225,11 @@ function preservePendingDomSelection() {
 
 function handleSelectionChange() {
   const range = domSelectionRange();
-  if (!range) {
-    discardSelection();
-    return;
-  }
+  // Selection changes outside the editor (for example focusing the AI
+  // composer) do not change the document selection or its annotation link.
+  // Editor selection updates and explicit clears still pass through the
+  // editor callbacks below.
+  if (!range) return;
   discardSelection(annotationMatchesRange(range));
   scheduleSelectionCapture();
 }

@@ -130,6 +130,22 @@ async function startGeneratedVersionRequest(wrapper) {
   await flushPromises();
 }
 
+async function sendComposerMessage(wrapper, text) {
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue(text);
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+}
+
+function postedParts(fetch) {
+  return JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+}
+
+function expectAnnotationParts(parts) {
+  expect(parts).toContainEqual({ type: "data-selection", data: { from: 9, to: 13 } });
+  expect(parts).toContainEqual({ type: "data-annotation", data: { id: "an-1" } });
+  expect(parts).toContainEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
+}
+
 async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-list-open"]').trigger("click");
   await flushPromises();
@@ -512,6 +528,35 @@ it("inserts a published skill into the pending message and sends it once", async
   expect(body.messages.at(-1).parts[1]).toEqual({ type: "data-skill", data: { skillId: "skill-pub" } });
   expect(wrapper.find('[data-testid="composer-skill-block"]').exists()).toBe(false);
   expect(wrapper.get('[aria-label="向 AI 提问"]').element.value).toBe("");
+});
+
+it("keeps annotation context through editable Skill prefill and manual send", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({
+    writingContext: { annotationId: "an-1", from: 9, to: 13, sameBlock: true, quote: "第二段原文", revision: 3 },
+    promptRequest: { text: "请根据批注修订选中的正文" },
+  });
+  await flushPromises();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(wrapper.get('[aria-label="向 AI 提问"]').element.value).toContain("请根据批注修订选中的正文");
+  const panel = await openSkillPopover(wrapper);
+  panel.querySelector('[data-testid="skill-option"]').click();
+  await flushPromises();
+  expect(fetch).not.toHaveBeenCalled();
+  await sendComposerMessage(wrapper, "用户编辑后的修订要求");
+  expectAnnotationParts(postedParts(fetch));
+});
+
+it("clears writing context when the real thread picker switches threads", async () => {
+  api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
+  api.agentThread.mockImplementation((_, id) => (
+    id === "thread-2" ? Promise.resolve(emptyThread("thread-2")) : Promise.resolve(structuredClone(snapshot))
+  ));
+  const wrapper = mountPanel({ writingContext: { annotationId: "an-1", from: 9, to: 13, sameBlock: true } });
+  await flushPromises();
+  await openOtherThread(wrapper);
+  expect(wrapper.emitted("clear-writing-context")).toHaveLength(1);
 });
 
 function restoredSnapshot() {

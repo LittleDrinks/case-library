@@ -144,6 +144,20 @@ it("批注选区重捕获保留关联，改选和显式清除会解除", async (
   await deleteSelectedAnnotation(wrapper, annotation);
 });
 
+it("编辑 AI 输入框时 selectionchange 不清除当前批注关联", async () => {
+  const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
+  const { wrapper } = await setup({ annotatable: true, annotations: [annotation] });
+  document.body.appendChild(wrapper.element);
+  await selectAnnotationAndWait(wrapper, annotation);
+  const composer = document.createElement("textarea");
+  document.body.appendChild(composer);
+  composer.focus();
+  document.dispatchEvent(new Event("selectionchange"));
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toMatchObject({ annotationId: annotation.id });
+  expect(wrapper.get(".annotation-anchor").text()).toBe(annotation.quote);
+  composer.remove();
+});
+
 it("选中文字可关联资料，工具栏可取消引用", async () => {
   const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
