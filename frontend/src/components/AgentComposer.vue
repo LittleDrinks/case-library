@@ -14,10 +14,11 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   threadId: { type: String, default: "" },
   writingContext: { type: Object, default: null },
+  promptRequest: { type: Object, default: null },
   skills: { type: Array, default: () => [] },
   catalog: { type: String, default: "loading" },
 });
-const emit = defineEmits(["send", "clear-selection", "reload-catalog"]);
+const emit = defineEmits(["send", "clear-selection", "reload-catalog", "prompt-inserted"]);
 const { sources, remove } = useConversationSources();
 const sourcePicker = ref(null);
 const draft = ref("");
@@ -35,6 +36,12 @@ const matchedSkills = computed(() => {
   return props.skills.filter((skill) => !term || `${skill.name} ${skill.id}`.toLowerCase().includes(term));
 });
 const canSend = computed(() => Boolean(draft.value.trim() && props.configured && !props.busy));
+
+watch(() => props.promptRequest, (request) => {
+  if (!request) return;
+  draft.value = [draft.value.trim(), request.text].filter(Boolean).join("\n\n");
+  emit("prompt-inserted");
+}, { immediate: true });
 
 function skillLabel(skill) {
   return skill.version ? `${skill.name}（${skill.version}）` : skill.name;

@@ -1,9 +1,9 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, it, vi } from "vitest";
 import VersionPanel from "./VersionPanel.vue";
 import { api } from "../api.js";
 
-vi.mock("../api.js", () => ({ api: { caseHistory: vi.fn() } }));
+vi.mock("../api.js", () => ({ api: { caseHistory: vi.fn(), createManualVersion: vi.fn(), deleteHistoryVersion: vi.fn() } }));
 
 const versions = [
   {
@@ -20,8 +20,10 @@ const versions = [
   },
 ];
 
-function render() {
-  return mount(VersionPanel, { props: { caseRecord: { id: "case-1" } } });
+function render(overrides = {}) {
+  return mount(VersionPanel, {
+    props: { caseRecord: { id: "case-1", revision: 3 }, editable: true, csrfToken: "csrf", ...overrides },
+  });
 }
 
 beforeEach(() => {
@@ -34,11 +36,11 @@ it("版本时间线按新到旧列出投稿版本并可打开只读 Tab", async 
   await flushPromises();
   const labels = wrapper.findAll(".version-timeline b").map((node) => node.text());
   expect(labels).toEqual(["AI版本 v3 · AI草稿", "v2 · 修改后重投", "v1 · 首次提交"]);
-  await wrapper.get('button[aria-label="打开 v1 · 首次提交 版本"]').trigger("click");
+  await wrapper.get('button[aria-label="查看历史版本 v1 · 首次提交"]').trigger("click");
   expect(wrapper.emitted("open-version")).toEqual([[versions[2]]]);
 });
 
-it("时间线不展示内部快照，也不提供手动创建版本入口", async () => {
+it("时间线不展示内部快照，并保留普通保存不建版本说明", async () => {
   api.caseHistory.mockResolvedValue({
     versions, events: [],
     snapshots: [{ id: "cs-internal", kind: "pre_agent_write" }],
@@ -47,7 +49,26 @@ it("时间线不展示内部快照，也不提供手动创建版本入口", asyn
   await flushPromises();
   expect(wrapper.text()).not.toContain("创建快照");
   expect(wrapper.text()).not.toContain("pre_agent_write");
-  expect(wrapper.text()).toContain("普通编辑与保存不新增版本");
+  expect(wrapper.text()).not.toContain("接受 AI 建议或手动命名后会生成历史版本");
+});
+
+it("命名版本表单保存后折叠并通知工作台同步 revision", async () => {
+  const created = { ...versions[0], id: "cv-manual", number: 4, kind: "manual", title: "补充教学目标" };
+  api.createManualVersion.mockResolvedValue(created);
+  const wrapper = render();
+  await flushPromises();
+
+  await wrapper.get('button[aria-label="新建版本"]').trigger("click");
+  await flushPromises();
+  const dialog = new DOMWrapper(document.querySelector(".el-dialog"));
+  await dialog.get("#version-title").setValue("补充教学目标");
+  await dialog.get(".version-create-form").trigger("submit");
+  await flushPromises();
+
+  expect(api.createManualVersion).toHaveBeenCalledWith("case-1", "补充教学目标", 3, "csrf");
+  expect(wrapper.find(".version-create-form").exists()).toBe(false);
+  expect(wrapper.findAll(".version-timeline b")[0].text()).toContain("补充教学目标");
+  expect(wrapper.emitted("version-created")).toEqual([[created]]);
 });
 
 it("投稿版本号变化后刷新时间线", async () => {
@@ -66,4 +87,23 @@ it("AI版本事件触发后刷新时间线", async () => {
   await wrapper.setProps({ refreshKey: 1 });
   await flushPromises();
   expect(api.caseHistory).toHaveBeenCalledTimes(2);
+});
+
+it("删除必须二次确认，取消不调用 API", async () => {
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get('button[aria-label="删除历史版本 v1 · 首次提交"]').trigger("click");
+  expect(api.deleteHistoryVersion).not.toHaveBeenCalled();
+  let dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog.textContent).toContain("确认删除？");
+  dialog.querySelector('footer button').click();
+  await flushPromises();
+  expect(api.deleteHistoryVersion).not.toHaveBeenCalled();
+  await wrapper.get('button[aria-label="删除历史版本 v1 · 首次提交"]').trigger("click");
+  document.querySelector('[role="alertdialog"] .primary').click();
+  await flushPromises();
+  expect(api.deleteHistoryVersion).toHaveBeenCalledWith("case-1", "cv-1", "csrf");
+  expect(wrapper.emitted("version-deleted")).toEqual([["cv-1"]]);
+  expect(wrapper.find('button[aria-label="删除历史版本 v1 · 首次提交"]').exists()).toBe(false);
+  wrapper.unmount();
 });

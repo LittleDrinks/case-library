@@ -177,3 +177,15 @@ it("offers clearing the writing-context chip from the strip", async () => {
   await wrapper.get('[aria-label="移除正文选区"]').trigger("click");
   expect(wrapper.emitted("clear-selection")).toHaveLength(1);
 });
+
+it("批注预设追加到未发送草稿且不会自动发送", async () => {
+  mountComposer();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("保留我的要求");
+  await wrapper.setProps({ promptRequest: { text: "请根据批注意见修订" } });
+  expect(wrapper.get('[aria-label="向 AI 提问"]').element.value).toBe("保留我的要求\n\n请根据批注意见修订");
+  expect(wrapper.emitted("send")).toBeUndefined();
+  expect(wrapper.emitted("prompt-inserted")).toHaveLength(1);
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("用户修改后的要求");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  expect(wrapper.emitted("send")[0][0].text).toBe("用户修改后的要求");
+});

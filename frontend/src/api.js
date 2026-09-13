@@ -207,6 +207,14 @@ export const api = {
     jsonOptions("POST", command, csrfToken),
   ),
   caseHistory: (id) => request(`/api/cases/${encodeURIComponent(id)}/history`),
+  deleteHistoryVersion: (id, versionId, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}`,
+    jsonOptions("DELETE", undefined, csrfToken),
+  ),
+  createManualVersion: (id, title, revision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(id)}/versions`,
+    jsonOptions("POST", { title, revision }, csrfToken),
+  ),
   listTagGroups: () => request("/api/tag-groups"),
   createTagGroup: (group, csrfToken) => request(
     "/api/tag-groups", jsonOptions("POST", group, csrfToken),

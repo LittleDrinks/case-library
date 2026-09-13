@@ -390,21 +390,31 @@ def _decide(client: TestClient, case_id: str, artifact_id: str, decision: str,
     )
 
 
-def test_accept_writes_revision_once_and_replays_decision(client: TestClient, tracer_case) -> None:
+def _assert_ai_acceptance(database, case_id, first, duplicate) -> None:
+    first_view = first.json()
+    duplicate_view = duplicate.json()
+    assert duplicate_view["artifact"]["status"] == "accepted"
+    version_id = first_view["artifact"]["versionId"]
+    assert version_id and duplicate_view["artifact"]["versionId"] == version_id
+    current = database.cases.find_one({"id": case_id}, {"_id": 0})
+    assert current["revision"] == 1
+    assert current["document"] == _document(*PARAGRAPHS)
+    version = database.case_versions.find_one({"id": version_id}, {"_id": 0})
+    assert version["kind"] == "ai"
+    assert REPLACEMENT in version["document"]["content"][1]["content"][0]["text"]
+    assert database.case_versions.count_documents({"caseId": case_id, "kind": "ai"}) == 1
+    assert database.case_snapshots.count_documents({"caseId": case_id}) == 0
+
+
+def test_accept_creates_ai_version_without_changing_draft(client: TestClient, tracer_case) -> None:
     artifact = _assert_pending_artifact(client, tracer_case)
     first = _decide(client, tracer_case["id"], artifact["id"], "accepted")
     assert first.status_code == 200, first.text
     duplicate = _decide(client, tracer_case["id"], artifact["id"], "accepted")
     assert duplicate.status_code == 200
-    assert duplicate.json()["artifact"]["status"] == "accepted"
     database = client.app.state.database
     case_id = tracer_case["id"]
-    current = database.cases.find_one({"id": case_id}, {"_id": 0})
-    assert current["revision"] == 2
-    assert REPLACEMENT in current["document"]["content"][1]["content"][0]["text"]
-    assert database.case_snapshots.count_documents(
-        {"caseId": case_id, "kind": "pre_agent_decision"}
-    ) == 1
+    _assert_ai_acceptance(database, case_id, first, duplicate)
     decided = _decided_events(database, case_id)
     assert len(decided) == 1 and decided[0]["payload"]["decision"] == "accepted"
 

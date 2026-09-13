@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronDown, ChevronUp, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
+import { ChevronDown, ChevronUp, History, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
@@ -18,24 +18,26 @@ const props = defineProps({
   open: { type: Boolean, required: true },
   caseRecord: { type: Object, required: true },
   historyRefreshKey: { type: Number, default: 0 },
+  historyAvailable: { type: Boolean, default: false },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
-  selection: { type: Object, default: null },
   writingContext: { type: Object, default: null },
-  focusAnnotationId: { type: String, default: "" },
+  promptRequest: { type: Object, default: null },
   annotationRefreshToken: { type: Number, default: 0 },
-  beforeAnnotationMutation: { type: Function, default: async () => true },
 });
-const emit = defineEmits([
+const emit = defineEmits(["prompt-inserted", "select-annotation",
   "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
   "sources-retry", "clear-writing-context", "insert-citation",
   "open-version", "versions-updated",
+  "version-created",
+  "version-deleted",
 ]);
 
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
+  { id: "history", label: "历史版本", icon: History },
   { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
@@ -52,7 +54,7 @@ function select(tab) {
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
-        v-show="!readOnly || tab.id !== 'comments'"
+        v-show="(tab.id !== 'history' || historyAvailable) && (!readOnly || tab.id !== 'comments')"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -65,10 +67,11 @@ function select(tab) {
     </nav>
 
     <div v-if="historical && active === 'ai'" class="assistant-panel panel-empty">
-      <span>历史版本只读，请先覆盖当前教师稿后使用 AI</span>
+      <span>历史版本只读，请先恢复此版本后使用 AI</span>
     </div>
     <AgentChatPanel
-      v-else-if="active === 'ai' && (!readOnly || user)"
+      v-if="!historical && (!readOnly || user)"
+      v-show="active === 'ai'"
       :key="versionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
@@ -76,30 +79,31 @@ function select(tab) {
       :read-only="readOnly"
       :review="review"
       :writing-context="writingContext"
+      :prompt-request="promptRequest"
+      @prompt-inserted="emit('prompt-inserted')"
       @case-revised="emit('case-revised', $event)"
       @annotations-refresh="emit('annotations-refresh')"
+      @open-version="emit('open-version', $event)"
       @versions-updated="emit('versions-updated')"
       @annotation-run="emit('annotation-run', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />
-    <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
+    <div v-if="!historical && readOnly && !user && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
     </div>
     <CommentPanel
-      v-else-if="!readOnly && active === 'comments'"
+      v-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"
       :user="user"
-      :selection="selection"
-      :focus-annotation-id="focusAnnotationId"
       :annotation-refresh-token="annotationRefreshToken"
-      :before-annotation-mutation="beforeAnnotationMutation"
       @annotations="emit('annotations', $event)"
       @ask-ai="emit('ask-ai', $event)"
+      @select-annotation="emit('select-annotation', $event)"
       @case-revised="emit('case-revised', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />
 
-    <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
+    <div v-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
       <PublicSourceList
         :sources="sources"
         :loading="sourcesLoading"
@@ -108,7 +112,7 @@ function select(tab) {
       />
     </div>
     <AttachmentPanel
-      v-else-if="active === 'files'"
+      v-if="!readOnly && active === 'files'"
       :case-record="caseRecord"
       :user="user"
       :editable="editable"
@@ -118,10 +122,14 @@ function select(tab) {
       @insert-citation="emit('insert-citation', $event)"
     />
     <VersionPanel
-      v-else-if="active === 'history'"
+      v-if="active === 'history'"
       :case-record="caseRecord"
       :refresh-key="historyRefreshKey"
+      :editable="editable && historyAvailable"
+      :csrf-token="user?.csrfToken || ''"
       @open-version="emit('open-version', $event)"
+      @version-created="emit('version-created', $event)"
+      @version-deleted="emit('version-deleted', $event)"
     />
   </aside>
 </template>

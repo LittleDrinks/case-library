@@ -157,18 +157,34 @@ def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str,
     )
 
 
-def _assert_atomic_decision(database, case_id: str, artifact: dict) -> None:
+def _assert_atomic_decision(database, case_id: str, artifact: dict, version_id: str) -> None:
     current = database.cases.find_one({"id": case_id}, {"_id": 0})
-    assert current["revision"] == 2
-    assert REPLACEMENT_MARK in current["document"]["content"][1]["content"][0]["text"]
+    assert current["revision"] == 1
+    assert current["document"] == _document(*PARAGRAPHS)
+    version = database.case_versions.find_one(
+        {"id": version_id, "caseId": case_id}, {"_id": 0}
+    )
+    assert version and version["kind"] == "ai"
+    assert REPLACEMENT_MARK in version["document"]["content"][1]["content"][0]["text"]
     assert database.case_snapshots.count_documents(
         {"caseId": case_id, "kind": "pre_agent_decision"}
-    ) == 1
+    ) == 0
     events = list(database.agent_thread_events.find(
         {"threadId": artifact["threadId"]}, {"_id": 0}
     ).sort("eventSeq", 1))
     assert [event["type"] for event in events].count("artifact.created") == 1
     assert [event["type"] for event in events].count("artifact.decided") == 1
+
+
+def _accept_idempotently(client: httpx.Client, csrf: str, case_id: str, artifact: dict) -> str:
+    first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
+    assert first.status_code == 200, first.text
+    duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
+    assert duplicate.status_code == 200
+    first_view, duplicate_view = first.json(), duplicate.json()
+    assert duplicate_view["artifact"]["status"] == "accepted"
+    assert duplicate_view["artifact"]["versionId"] == first_view["artifact"]["versionId"]
+    return first_view["artifact"]["versionId"]
 
 
 def _tracer_case(client: httpx.Client, csrf: str, database) -> tuple[str, dict, dict]:
@@ -210,18 +226,14 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
         _close_e2e(client, mongo)
 
 
-def test_accept_writes_revision_snapshot_and_replays_decision():
+def test_accept_creates_independent_version_and_replays_decision():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:
         database = mongo.get_default_database()
         case_id, _run, artifact = _tracer_case(client, csrf, database)
-        first = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
-        assert first.status_code == 200, first.text
-        duplicate = _accept(client, csrf, case_id, artifact["id"], artifact["threadId"])
-        assert duplicate.status_code == 200
-        assert duplicate.json()["artifact"]["status"] == "accepted"
-        _assert_atomic_decision(database, case_id, artifact)
+        version_id = _accept_idempotently(client, csrf, case_id, artifact)
+        _assert_atomic_decision(database, case_id, artifact, version_id)
         snapshot = client.get(f"/api/cases/{case_id}/agent/thread").json()
         assert [row["status"] for row in snapshot["artifacts"]] == ["accepted"]
         assert snapshot["latestRun"]["status"] == "completed"
@@ -238,10 +250,12 @@ def _concurrent_accepts(client, csrf, case_id, artifact, database):
         ]
         responses = [future.result(timeout=30) for future in futures]
     assert [response.status_code for response in responses] == [200, 200]
-    _assert_atomic_decision(database, case_id, artifact)
+    version_ids = {response.json()["artifact"]["versionId"] for response in responses}
+    assert len(version_ids) == 1
+    _assert_atomic_decision(database, case_id, artifact, version_ids.pop())
 
 
-def test_concurrent_accept_writes_revision_exactly_once():
+def test_concurrent_accept_creates_one_independent_version():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:

@@ -154,6 +154,7 @@ class AgentArtifact(BaseModel):
     sources: list[SourceRef] = Field(default_factory=list)
     decided_by: str | None = Field(default=None, alias="decidedBy")
     decided_at: datetime | None = Field(default=None, alias="decidedAt")
+    version_id: str | None = Field(default=None, alias="versionId")
     created_at: datetime = Field(alias="createdAt")
 
 

@@ -302,9 +302,10 @@ def test_author_overwrites_draft_with_a_history_version(client: TestClient) -> N
     assert document_text(overwritten["case"]["document"]) == "冻结正文"
     assert overwritten["case"]["availableActions"] == ["submit", "overwrite"]
     history = client.get("/api/cases/c-draft-1/history").json()
-    assert [row["number"] for row in history["versions"]] == [1]
+    assert [row["number"] for row in history["versions"]] == [1, 2, 3]
     assert history["versions"][0]["id"] == submitted["version"]["id"]
     assert history["versions"][0]["document"] == submitted["version"]["document"]
+    assert [row["kind"] for row in history["versions"][1:]] == ["manual", "restore"]
 
 
 def _review_round_with_annotations(client, created: dict, owner: dict):

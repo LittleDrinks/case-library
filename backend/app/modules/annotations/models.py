@@ -98,5 +98,6 @@ class AnnotationView(BaseModel):
     anchorState: AnchorState | None = None
     replies: list[AnnotationReplyView]
     revisions: list[AnnotationRevisionView] | None = None
+    restoredFromId: str | None = None
     createdBy: str
     createdAt: str

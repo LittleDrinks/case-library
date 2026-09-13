@@ -123,18 +123,18 @@ async function dragSelectText(page, value) {
 }
 
 async function selectAnnotationText(page, value) {
-  await expect(page.locator(".comment-composer > blockquote")).toHaveCount(0);
   await dragSelectText(page, value);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
-  await expect(page.locator(".comment-composer > blockquote")).toHaveText(value);
 }
 
 async function addAnnotation(page, quote = TARGET_TEXT) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
   await selectAnnotationText(page, quote);
   await page.getByRole("button", { name: "添加选区批注" }).click();
-  await page.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
-  await page.getByRole("button", { name: "添加批注", exact: true }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
+  await float.getByRole("button", { name: "保存意见", exact: true }).click();
+  await expect(float).toContainText("请依据资料收紧这一段表述。");
+  await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(1);
   const response = await page.context().request.get(
     `/api/cases/${await currentCaseId(page)}/annotations`,
@@ -192,8 +192,12 @@ async function sendRequest(page) {
 async function acceptedViaApi(page, caseId) {
   const caseApi = await page.context().request.get(`/api/cases/${caseId}`);
   const persisted = await caseApi.json();
-  expect(persisted.revision).toBe(2);
-  expect(persisted.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  expect(persisted.revision).toBe(1);
+  expect(persisted.document.content[1].content[0].text).toBe(TARGET_TEXT);
+  const history = await (await page.context().request.get(`/api/cases/${caseId}/history`)).json();
+  const ai = history.versions.find((version) => version.kind === "ai");
+  expect(ai?.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  return ai;
 }
 
 async function reloadRestoresTracer(page, caseId) {
@@ -277,26 +281,24 @@ async function closeAnnotation(page) {
   const card = page.locator(".comment-card");
   await card.getByRole("button", { name: "标记解决" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(card).toContainText("已解决");
-  await expect(card).toContainText("已拒绝");
+  await expect(page.locator(".comment-panel .panel-empty")).toContainText("暂无批注");
 }
 
 function annotationCard(page, annotationId) {
   return page.locator(".comment-card[data-annotation-id=\"" + annotationId + "\"]");
 }
 
-async function expectResolvedAnnotation(page, caseId, annotationId) {
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  const card = annotationCard(page, annotationId);
-  await expect(card).toContainText("已解决");
+async function annotationThread(page, caseId, annotationId) {
   const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
-  expect(rows).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: annotationId, status: "resolved" }),
-  ]));
-  const history = card.locator(".comment-revisions");
-  await expect(history.locator("li")).toHaveCount(1);
-  await expect(history).toContainText("已拒绝");
+  const thread = rows.find((row) => row.id === annotationId);
+  expect(thread.status).toBe("resolved");
+  return thread;
+}
+
+async function expectResolvedAnnotation(page, caseId, annotationId) {
+  const history = (await annotationThread(page, caseId, annotationId)).revisions || [];
+  await expect(history).toHaveLength(1);
+  expect(history[0].status).toBe("rejected");
 }
 
 async function changeAnnotationTarget(page) {
@@ -314,32 +316,23 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await expectAnnotationHistory(page);
   await page.getByRole("button", { name: "合并并关闭" }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await assertResolvedHistoryWithoutStaleWarning(page, created, annotation);
 });
 
 async function assertResolvedHistoryWithoutStaleWarning(page, created, annotation) {
-  await expect(page.locator(".comment-card")).toContainText("已解决");
-  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
+  const revisions = (await annotationThread(page, created.id, annotation.id)).revisions || [];
+  expect(revisions).toHaveLength(2);
+  expect(revisions[0].status).toBe("expired");
+  expect(revisions[1].status).toBe("accepted");
+  expect(revisions[1].replacement).toContain(SECOND_REPLACEMENT_MARK);
   await page.reload();
   await page.getByRole("button", { name: "批注", exact: true }).click();
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(page.locator(".comment-card")).toContainText("已解决");
-  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
-  await expectReloadedMergeHistory(page, annotation.id);
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+  const merged = await annotationThread(page, created.id, annotation.id);
+  expect((merged.revisions || [])[1]?.replacement).toContain(SECOND_REPLACEMENT_MARK);
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
-}
-
-async function expectReloadedMergeHistory(page, annotationId) {
-  const mergedCard = annotationCard(page, annotationId);
-  await expect(mergedCard).toContainText("已解决");
-  await expect(mergedCard.locator(".comment-revisions li")).toHaveCount(2);
-  await expect(mergedCard.locator(".comment-revisions li").nth(0)).toContainText("已失效");
-  await expect(mergedCard.locator(".comment-revisions li").nth(1)).toContainText("已合并");
-  await expect(mergedCard.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
-  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
 }
 
 test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
@@ -419,8 +412,6 @@ test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, pl
   await expect(card.getByRole("button", { name: "合并并关闭" })).toBeVisible();
   await card.getByRole("button", { name: "合并并关闭" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(card).toContainText("已解决");
   const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
   const accepted = rows[0].revisions.find((revision) => revision.status === "accepted");
   const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
@@ -444,10 +435,17 @@ test("批注讨论生成中切到批注面板：后台完成后当前历史自�
 });
 
 async function acceptAndVerify(page, caseId) {
+  const response = page.waitForResponse((item) => (
+    item.request().method() === "POST" && new URL(item.url()).pathname.endsWith("/decision")
+  ));
   await page.getByTestId("agent-accept").click();
-  const artifact = page.getByTestId("agent-artifact");
-  await expect(artifact).toHaveAttribute("data-artifact-status", "accepted", { timeout: 15_000 });
-  await acceptedViaApi(page, caseId);
+  const accepted = await response;
+  expect(accepted.ok()).toBe(true);
+  expect((await accepted.json()).artifact.status).toBe("accepted");
+  const version = await acceptedViaApi(page, caseId);
+  const tab = page.getByRole("tab", { name: `AI版本 v${version.number} · ${version.title}` });
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".version-paper")).toContainText(REPLACEMENT_MARK);
 }
 
 async function adminSession(playwright) {

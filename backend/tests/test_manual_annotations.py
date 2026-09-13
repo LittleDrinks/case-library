@@ -154,3 +154,20 @@ def test_manual_annotation_permissions_leave_no_ghost_row(client: TestClient) ->
         json={"content": "越权修改"},
     )
     assert edited.status_code == 403
+
+
+def test_annotation_after_empty_paragraphs_uses_editor_positions(client: TestClient):
+    user = login(client, "user", "user123")
+    text = "课前阅读材料；分组讨论；小组代表发表核心观点"
+    doc = document(text)
+    doc["content"][1:1] = [{"type": "paragraph"} for _ in range(3)]
+    created = client.post("/api/cases", headers={"X-CSRF-Token": user["csrfToken"]},
+                          json={"title": "空段落后的批注", "document": doc})
+    assert created.status_code == 200
+    case = created.json()
+    payload = annotation_payload(text, ("", "", ""), case["revision"])
+    result = post_annotation(client, user, case, payload)
+    assert result.status_code == 201, result.text
+    assert result.json()["quote"] == text
+    rows = client.get(annotation_path(case["id"])).json()
+    assert rows[0]["anchorState"] == "active"
