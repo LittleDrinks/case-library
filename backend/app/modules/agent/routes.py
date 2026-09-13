@@ -618,14 +618,21 @@ def _run_lock_for(conversation: Conversation, plan: RunPlan):
     """Run 创建即冻结写入控制信息：基线修订号、锁定选区与直接写入授权。
 
     授权只来自服务端对当前教师消息文本的判定；读者对话永不授权。
+    审核对话锁定当前待审提交版本，撤回或再提交后旧 Run 基线失效。
     """
     if conversation.reader:
-        return None, None, False
+        return None, None, False, (
+            conversation.case.get("submittedVersionId") if conversation.review else None
+        )
     plan.selections = _document_selections(
         conversation.case.get("document") or {}, plan.parts
     )
     base_revision, target = _run_lock(conversation.case, plan)
-    return base_revision, target, direct_write_requested(plan.prompt)
+    write_authorized = direct_write_requested(plan.prompt)
+    submitted_version_id = (
+        conversation.case.get("submittedVersionId") if conversation.review else None
+    )
+    return base_revision, target, write_authorized, submitted_version_id
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
@@ -728,7 +735,7 @@ def _resolve_selection(document: dict, data: object) -> dict:
 
 def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                skill_bindings: list[dict[str, str]],
-               lock: tuple[int | None, ArtifactTarget | None, bool] = (None, None, False)) -> AgentRun:
+               lock: tuple = (None, None, False, None)) -> AgentRun:
     try:
         return _create_run(
             repository, thread, user_id, plan, assistant_id, lease, worker_id,
@@ -748,7 +755,7 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                 skill_bindings: list[dict[str, str]],
-                lock: tuple[int | None, ArtifactTarget | None, bool] = (None, None, False)):
+                lock: tuple = (None, None, False, None)):
     run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock, plan.annotation_id)
     if plan.retry_message_id:
         run = repository.retry_run(
@@ -766,12 +773,13 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
 
 def _run_fields(lease, worker_id, skill_bindings, lock, annotation_id=None):
     quota_ids = lease.quota_ids if lease else ()
-    base_revision, target, write_authorized = lock
+    base_revision, target, write_authorized, submitted_version_id = lock
     return {
         "owner_id": worker_id, "quota_ids": quota_ids,
         "skill_bindings": skill_bindings,
         "base_revision": base_revision, "target": target,
         "write_authorized": write_authorized, "annotation_id": annotation_id,
+        "submitted_version_id": submitted_version_id,
     }
 
 

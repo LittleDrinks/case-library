@@ -14,7 +14,11 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.repository import AgentRepository, review_delivery_allowed
+from app.modules.agent.repository import (
+    AgentRepository,
+    review_baseline_current,
+    review_delivery_allowed,
+)
 from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
@@ -341,11 +345,12 @@ def _complete(context: RunContext) -> None:
 
 
 def _review_accessible(context: RunContext) -> bool:
-    """审核运行按属主身份实时重验：撤审或降权/停用后不再产生新的审核输出。"""
+    """审核运行实时重验：撤审、降权/停用或基线越过即撤销，不再产生新输出。"""
     deps_user = context.deps.user if context.deps else None
     user_id = deps_user["id"] if deps_user else context.run.user_id
-    return review_delivery_allowed(
-        context.repository.database, context.case["id"], user_id
+    return (
+        review_delivery_allowed(context.repository.database, context.case["id"], user_id)
+        and review_baseline_current(context.repository.database, context.run.id)
     )
 
 

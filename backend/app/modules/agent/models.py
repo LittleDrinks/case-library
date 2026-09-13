@@ -90,6 +90,10 @@ class AgentRun(BaseModel):
         default=None,
         description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
     )
+    submitted_version_id: str | None = Field(
+        default=None, alias="submittedVersionId",
+        description="审核 Run 创建时锁定的待审提交版本；撤回或再提交后基线失效",
+    )
     annotation_id: str | None = Field(default=None, alias="annotationId")
     write_path: Literal["document", "direct_write"] | None = Field(
         default=None, alias="writePath", exclude=True,

@@ -12,6 +12,7 @@ import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from threading import Event
 
 import pytest
@@ -20,6 +21,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from app.modules.agent import artifacts, service, writes
+from app.modules.agent.models import AgentMessage
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.runtime import agent
 from app.modules.cases.service import CaseError
@@ -46,21 +48,19 @@ def _csrf(auth: dict) -> dict:
     return {"X-CSRF-Token": auth["csrfToken"]}
 
 
-def _post_body(text: str, message_id: str | None = None) -> dict:
+def _post_body(text: str) -> dict:
     return {
         "id": f"browser-{uuid.uuid4().hex}", "trigger": "submit-message",
-        "messages": [{"id": message_id or f"cancel-{uuid.uuid4().hex}",
-                      "role": "user",
+        "messages": [{"id": f"cancel-{uuid.uuid4().hex}", "role": "user",
                       "parts": [{"type": "text", "text": text}]}],
     }
 
 
 def _post(client: TestClient, auth: dict, thread_id: str, text: str,
-          case_id: str = DRAFT_CASE, message_id: str | None = None):
-    body = _post_body(text, message_id or f"cancel-{uuid.uuid4().hex}")
+          case_id: str = DRAFT_CASE):
     return client.post(
         f"/api/cases/{case_id}/agent/thread/{thread_id}/stream",
-        headers=_csrf(auth), json=body,
+        headers=_csrf(auth), json=_post_body(text),
     )
 
 
@@ -72,7 +72,7 @@ def _thread_id(client: TestClient, case_id: str = DRAFT_CASE,
     return response.json()["id"]
 
 
-def _post_async(app, client: TestClient, account: dict, thread_id: str, model,
+def _post_async(app, account: dict, thread_id: str, model,
                 case_id: str = DRAFT_CASE, mode: str | None = None):
     """在独立线程发起流式请求：TestClient/httpx 不允许跨线程共享连接，
     子线程内建独立 client 并重新登录（与 lifecycle 测试同一形状）。"""
@@ -153,41 +153,95 @@ def _start_review(client: TestClient) -> dict:
     return result["case"]
 
 
-# ---- 已合法交付内容保留：取消前已完整完成的运行不受后续取消影响 ----
+def _review_thread(client: TestClient):
+    _login(client, ADMIN)
+    return _thread_id(client, PENDING_CASE, mode="review"), client.app.state.database
 
 
-def test_cancel_before_generation_delivers_nothing_and_allows_new_run(
-        client: TestClient) -> None:
+def _cancel_and_await(client: TestClient, auth: dict, thread_id: str,
+                      case_id: str = DRAFT_CASE) -> dict:
+    path = f"/api/cases/{case_id}/agent/thread/{thread_id}/cancel"
+    stopped = client.post(path, headers=_csrf(auth))
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "cancelling"
+    run = _await_run(client.app.state.database, thread_id)
+    assert run is not None and run["status"] == "cancelled", run
+    return run
+
+
+def _shutdown(future, pool, release: Event) -> None:
+    release.set()
+    future.result(timeout=30)
+    pool.shutdown()
+
+
+def _assert_no_assistant(database, thread_id: str) -> None:
+    assert database.agent_messages.count_documents(
+        {"threadId": thread_id, "role": "assistant"}) == 0
+
+
+def _assert_review_cancelled(database, thread_id: str, run) -> None:
+    assert run is not None and run["status"] == "cancelled", run
+    _assert_no_assistant(database, thread_id)
+
+
+def _gated_run(app, account: dict, thread_id: str, model,
+               case_id: str = DRAFT_CASE):
+    """公共路径发起阻塞 Run 并等待激活；返回控制柄（release/future/pool）。"""
+    future, pool = _post_async(app, account, thread_id, model, case_id)
+    assert future_done_or_active(app, thread_id, future)
+    return future, pool
+
+
+def future_done_or_active(app, thread_id: str, future):
+    database = app.state.database
+    end = time.monotonic() + 10
+    while time.monotonic() < end:
+        if database.agent_runs.find_one(
+                {"threadId": thread_id, "status": "active"}):
+            return True
+        Event().wait(0.02)
+    raise AssertionError("run did not become active")
+
+
+def test_cancel_before_generation_delivers_nothing(client: TestClient) -> None:
     auth = _login(client)
     thread_id = _thread_id(client)
     reached, release = Event(), Event()
     model = _gated_model(reached, release)
-    with agent.override(model=model):
-        future, pool = _post_async(client.app, client, AUTHOR, thread_id, model)
-        try:
-            assert reached.wait(10)
-            _await_active(client.app.state.database, thread_id)
-            stopped = client.post(f"{THREAD_PATH}/{thread_id}/cancel",
-                                  headers=_csrf(auth))
-            assert stopped.status_code == 200
-            assert stopped.json()["status"] == "cancelling"
-            database = client.app.state.database
-            run = _await_run(database, thread_id)
-            assert run["status"] == "cancelled", run
-            assert run["error"] == "运行已取消"
-            assert database.agent_messages.count_documents(
-                {"threadId": thread_id, "role": "assistant"}) == 0
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    future, pool = _post_async(client.app, AUTHOR, thread_id, model)
+    try:
+        assert reached.wait(10)
+        _await_active(client.app.state.database, thread_id)
+        run = _cancel_and_await(client, auth, thread_id)
+        assert run["error"] == "运行已取消"
+        _assert_no_assistant(client.app.state.database, thread_id)
+    finally:
+        _shutdown(future, pool, release)
+    _assert_follow_up_run_completes(client, auth, thread_id)
 
-    # 后续合法运行可发起且完整交付
+
+def _assert_follow_up_run_completes(client: TestClient, auth: dict,
+                                    thread_id: str) -> None:
     with agent.override(model=_text_model("重新回答")):
         response = _post(client, auth, thread_id, "再来一次")
     assert response.status_code == 200
     run = _await_run(client.app.state.database, thread_id)
     assert run["status"] == "completed", run
+
+
+def _cancelled_run_with_base(client: TestClient, auth: dict, case: dict,
+                             write_authorized: bool):
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    thread = repository.default_thread(case["id"], auth["user"]["id"])
+    run = repository.start_run(
+        thread, auth["user"]["id"], [{"type": "text", "text": "x"}], {},
+        f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
+        write_authorized=write_authorized,
+    )
+    assert repository.request_cancel(run.id) is not None
+    return database, thread, run
 
 
 def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
@@ -196,16 +250,7 @@ def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
 
     auth = _login(client)
     case = _create_case(client, auth, _document("原稿保持。"))
-    database = client.app.state.database
-    repository = AgentRepository(database)
-    thread = repository.default_thread(case["id"], auth["user"]["id"])
-    run = repository.start_run(
-        thread, auth["user"]["id"], [{"type": "text", "text": "直接写入"}], {},
-        f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
-        write_authorized=True,
-    )
-    assert repository.request_cancel(run.id) is not None
-
+    database, _thread, run = _cancelled_run_with_base(client, auth, case, True)
     with pytest.raises(CaseError):
         writes.apply_write(database, case["id"], run.id, "document",
                            DRAFT_BLOCKS, auth["user"], "取消后写入")
@@ -218,15 +263,7 @@ def test_cancel_request_freezes_document_candidate_path(client: TestClient) -> N
 
     auth = _login(client)
     case = _create_case(client, auth, _document())
-    database = client.app.state.database
-    repository = AgentRepository(database)
-    thread = repository.default_thread(case["id"], auth["user"]["id"])
-    run = repository.start_run(
-        thread, auth["user"]["id"], [{"type": "text", "text": "生成初稿"}], {},
-        f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
-    )
-    assert repository.request_cancel(run.id) is not None
-
+    database, thread, run = _cancelled_run_with_base(client, auth, case, False)
     with pytest.raises(CaseError):
         artifacts.propose_document_artifact(
             database, case["id"], thread.id, run.id,
@@ -240,33 +277,30 @@ def test_cancel_request_freezes_document_candidate_path(client: TestClient) -> N
 # ---- 重放一致性：取消后的恢复流给出 abort 终块并以 [DONE] 收尾 ----
 
 
-def test_events_replay_after_cancel_ends_with_abort_chunk(
-        client: TestClient) -> None:
+def test_events_replay_after_cancel_ends_with_abort(client: TestClient) -> None:
     auth = _login(client)
     thread_id = _thread_id(client)
     reached, release = Event(), Event()
-    with agent.override(model=_gated_model(reached, release)):
-        future, pool = _post_async(client.app, client, AUTHOR, thread_id,
-                                   _gated_model(reached, release))
-        try:
-            assert reached.wait(10)
-            _await_active(client.app.state.database, thread_id)
-            assert client.post(f"{THREAD_PATH}/{thread_id}/cancel",
-                               headers=_csrf(auth)).status_code == 200
-            run = _await_run(client.app.state.database, thread_id)
-            assert run["status"] == "cancelled"
-            replay = client.get(
-                f"{THREAD_PATH}/{thread_id}/events", params={"afterSeq": 0}
-            )
-            assert replay.status_code == 200
-            chunks = _sse_chunks(replay)
-            assert chunks[-1] == {"type": "abort", "reason": "运行已取消"}
-            assert not any(chunk.get("type") == "finish" for chunk in chunks)
-            assert replay.text.endswith("data: [DONE]\n\n")
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    model = _gated_model(reached, release)
+    future, pool = _post_async(client.app, AUTHOR, thread_id, model)
+    try:
+        assert reached.wait(10)
+        _await_active(client.app.state.database, thread_id)
+        _cancel_and_await(client, auth, thread_id)
+        replay = client.get(
+            f"{THREAD_PATH}/{thread_id}/events", params={"afterSeq": 0})
+        chunks = _assert_cancel_replay(replay)
+        assert not any(chunk.get("type") == "finish" for chunk in chunks)
+    finally:
+        _shutdown(future, pool, release)
+
+
+def _assert_cancel_replay(replay) -> list:
+    assert replay.status_code == 200
+    chunks = _sse_chunks(replay)
+    assert chunks[-1] == {"type": "abort", "reason": "运行已取消"}
+    assert replay.text.endswith("data: [DONE]\n\n")
+    return chunks
 
 
 def test_cancelled_run_reports_readable_error_in_snapshot(
@@ -274,18 +308,14 @@ def test_cancelled_run_reports_readable_error_in_snapshot(
     auth = _login(client)
     thread_id = _thread_id(client)
     reached, release = Event(), Event()
-    with agent.override(model=_gated_model(reached, release)):
-        future, pool = _post_async(client.app, client, AUTHOR, thread_id,
-                                   _gated_model(reached, release))
-        try:
-            assert reached.wait(10)
-            client.post(f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
-            run = _await_run(client.app.state.database, thread_id)
-            assert run["status"] == "cancelled"
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    model = _gated_model(reached, release)
+    future, pool = _post_async(client.app, AUTHOR, thread_id, model)
+    try:
+        assert reached.wait(10)
+        _await_active(client.app.state.database, thread_id)
+        _cancel_and_await(client, auth, thread_id)
+    finally:
+        _shutdown(future, pool, release)
     snapshot = client.get(
         f"/api/cases/{DRAFT_CASE}/agent/threads/{thread_id}").json()
     assert snapshot["latestRun"]["status"] == "cancelled"
@@ -297,29 +327,29 @@ def test_repeated_cancel_requests_stay_idempotent(client: TestClient) -> None:
     auth = _login(client)
     thread_id = _thread_id(client)
     reached, release = Event(), Event()
-    with agent.override(model=_gated_model(reached, release)):
-        future, pool = _post_async(client.app, client, AUTHOR, thread_id,
-                                   _gated_model(reached, release))
-        try:
-            assert reached.wait(10)
-            _await_active(client.app.state.database, thread_id)
-            for _ in range(3):
-                stopped = client.post(f"{THREAD_PATH}/{thread_id}/cancel",
-                                      headers=_csrf(auth))
-                assert stopped.status_code == 200
-            run = _await_run(client.app.state.database, thread_id)
-            assert run["status"] == "cancelled"
-            cancelled_events = [event for event in _events(
-                client.app.state.database, thread_id)
-                if event["type"] == "run.cancelled"]
-            assert len(cancelled_events) == 1
-            again = client.post(f"{THREAD_PATH}/{thread_id}/cancel",
-                                headers=_csrf(auth))
-            assert again.json() == {"runId": None, "status": "idle"}
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    model = _gated_model(reached, release)
+    future, pool = _post_async(client.app, AUTHOR, thread_id, model)
+    try:
+        assert reached.wait(10)
+        _await_active(client.app.state.database, thread_id)
+        _cancel_and_await(client, auth, thread_id)
+        _assert_repeated_cancel_idle(client, auth, thread_id)
+    finally:
+        _shutdown(future, pool, release)
+
+
+def _assert_repeated_cancel_idle(client: TestClient, auth: dict,
+                                 thread_id: str) -> None:
+    for _ in range(2):
+        stopped = client.post(f"{THREAD_PATH}/{thread_id}/cancel",
+                              headers=_csrf(auth))
+        assert stopped.status_code == 200
+    cancelled = [event for event in _events(
+        client.app.state.database, thread_id)
+        if event["type"] == "run.cancelled"]
+    assert len(cancelled) == 1
+    again = client.post(f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
+    assert again.json() == {"runId": None, "status": "idle"}
 
 
 # ---- 审核失权：案例离开待审状态后运行撤销，不交付、不写入案例正文 ----
@@ -329,41 +359,20 @@ def test_review_run_revoked_when_case_leaves_review(client: TestClient,
                                                     monkeypatch) -> None:
     monkeypatch.setattr(service, "RUN_HEARTBEAT_SECONDS", 0.01)
     _start_review(client)
-    _login(client, ADMIN)
-    thread_id = _thread_id(client, PENDING_CASE, mode="review")
-    database = client.app.state.database
+    thread_id, database = _review_thread(client)
     reached, release = Event(), Event()
     model = _gated_model(reached, release)
-    with agent.override(model=model):
-        future, pool = _post_async(client.app, client, ADMIN, thread_id,
-                                   model, PENDING_CASE)
-        try:
-            assert reached.wait(10)
-            _await_active(database, thread_id)
-            # 作者撤回提交：案例离开待审状态，审核运行失去权限
-            from tests.test_case_workflow import _transition_json, login
-
-            with TestClient(client.app) as author_client:
-                author_auth = login(author_client, "user", "user123").json()
-                case = author_client.get(f"/api/cases/{PENDING_CASE}").json()
-                result = _transition_json(
-                    author_client, PENDING_CASE, author_auth["csrfToken"],
-                    "withdraw", case,
-                )
-            assert result["case"]["workflowStatus"] == "draft"
-
-            run = _await_run(database, thread_id)
-            assert run["status"] == "cancelled", run
-            assert database.agent_messages.count_documents(
-                {"threadId": thread_id, "role": "assistant"}) == 0
-            assert database.annotations.count_documents(
-                {"caseId": PENDING_CASE, "source": "ai"}) == 0
-            assert database.case_versions.count_documents(
-                {"caseId": PENDING_CASE, "kind": "ai"}) == 0
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    future, pool = _post_async(client.app, ADMIN, thread_id, model, PENDING_CASE)
+    try:
+        assert reached.wait(10)
+        _await_active(database, thread_id)
+        _withdraw_pending_case(client.app)
+        run = _await_run(database, thread_id)
+        _assert_review_cancelled(database, thread_id, run)
+        assert database.case_versions.count_documents(
+            {"caseId": PENDING_CASE, "kind": "ai"}) == 0
+    finally:
+        _shutdown(future, pool, release)
 
 
 def test_review_run_revoked_when_admin_demoted(client: TestClient,
@@ -375,40 +384,41 @@ def test_review_run_revoked_when_admin_demoted(client: TestClient,
     database = client.app.state.database
     reached, release = Event(), Event()
     model = _gated_model(reached, release)
-    with agent.override(model=model):
-        future, pool = _post_async(client.app, client, ADMIN, thread_id,
-                                   model, PENDING_CASE)
-        try:
-            assert reached.wait(10)
-            _await_active(database, thread_id)
-            database.users.update_one(
-                {"id": admin["user"]["id"]}, {"$set": {"role": "user"}}
-            )
-            run = _await_run(database, thread_id)
-            assert run is not None and run["status"] == "cancelled", run
-            assert database.agent_messages.count_documents(
-                {"threadId": thread_id, "role": "assistant"}) == 0
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
+    future, pool = _post_async(client.app, ADMIN, thread_id, model, PENDING_CASE)
+    try:
+        assert reached.wait(10)
+        _await_active(database, thread_id)
+        database.users.update_one(
+            {"id": admin["user"]["id"]}, {"$set": {"role": "user"}})
+        run = _await_run(database, thread_id)
+        _assert_review_cancelled(database, thread_id, run)
+    finally:
+        _shutdown(future, pool, release)
 
 
 def test_review_completion_blocked_after_case_leaves_review(
         client: TestClient, monkeypatch) -> None:
-    """提交边界竞态：运行完成事务与撤回并发时，完成被拒绝为取消。"""
+    """提交边界竞态：完成事务与撤回并发，围栏失配按取消收敛。"""
     monkeypatch.setattr(service, "RUN_HEARTBEAT_SECONDS", 0.01)
     _start_review(client)
     admin = _login(client, ADMIN)
     thread_id = _thread_id(client, PENDING_CASE, mode="review")
     database = client.app.state.database
+    _patch_withdraw_before_complete(database, monkeypatch)
+    with agent.override(model=_text_model("审核意见")):
+        response = _post(client, admin, thread_id, "审核请求", PENDING_CASE)
+    assert response.status_code == 200
+    run = _await_run(database, thread_id)
+    assert run is not None and run["status"] == "cancelled", run
+    _assert_no_assistant(database, thread_id)
 
+
+def _patch_withdraw_before_complete(database, monkeypatch) -> None:
     from app.modules.agent.repository import AgentRepository as Repo
 
     original = Repo.complete_run
 
     def _leave_then_complete(repo_self, run_id, *args, **kwargs):
-        case = database.cases.find_one({"id": PENDING_CASE})
         database.cases.update_one(
             {"id": PENDING_CASE},
             {"$set": {"workflowStatus": "draft"},
@@ -417,10 +427,63 @@ def test_review_completion_blocked_after_case_leaves_review(
         return original(repo_self, run_id, *args, **kwargs)
 
     monkeypatch.setattr(Repo, "complete_run", _leave_then_complete)
-    with agent.override(model=_text_model("审核意见")):
-        response = _post(client, admin, thread_id, "审核请求", PENDING_CASE)
-    assert response.status_code == 200
-    run = _await_run(database, thread_id)
-    assert run["status"] == "cancelled", run
+
+
+def test_review_run_rebased_then_completed_is_cancelled(
+        client: TestClient) -> None:
+    """撤回再提交后，旧审核 Run 锁定的提交基线失效，完成收敛为取消。"""
+    _start_review(client)
+    admin = _login(client, ADMIN)
+    database = client.app.state.database
+    repository, _thread, run = _locked_review_run(database, admin)
+    _withdraw_pending_case(client.app)
+    _resubmit_pending(client)
+    assert repository.complete_run(
+        run.id, _assistant_message_for(run), review_case_id=PENDING_CASE)
+    row = database.agent_runs.find_one({"id": run.id}, {"_id": 0})
+    assert row["status"] == "cancelled", row
     assert database.agent_messages.count_documents(
-        {"threadId": thread_id, "role": "assistant"}) == 0
+        {"threadId": run.thread_id, "role": "assistant"}) == 0
+
+
+def _withdraw_pending_case(app) -> None:
+    from tests.test_case_workflow import _transition_json, login
+
+    with TestClient(app) as author_client:
+        author_auth = login(author_client, "user", "user123").json()
+        case = author_client.get(f"/api/cases/{PENDING_CASE}").json()
+        result = _transition_json(
+            author_client, PENDING_CASE, author_auth["csrfToken"], "withdraw", case)
+    assert result["case"]["workflowStatus"] == "draft"
+
+
+def _resubmit_pending(client: TestClient) -> None:
+    from tests.test_case_workflow import _transition_json, login
+
+    with TestClient(client.app) as author_client:
+        author_auth = login(author_client, "user", "user123").json()
+        case = author_client.get(f"/api/cases/{PENDING_CASE}").json()
+        result = _transition_json(
+            author_client, PENDING_CASE, author_auth["csrfToken"], "submit", case)
+    assert result["case"]["workflowStatus"] == "pending"
+
+
+def _locked_review_run(database, auth: dict):
+    repository = AgentRepository(database)
+    case = database.cases.find_one({"id": PENDING_CASE})
+    thread = repository.default_thread(PENDING_CASE, auth["user"]["id"],
+                                       mode="review")
+    run = repository.start_run(
+        thread, auth["user"]["id"], [{"type": "text", "text": "审核"}], {},
+        f"assistant-{uuid.uuid4().hex}",
+        submitted_version_id=case.get("submittedVersionId"),
+    )
+    return repository, thread, run
+
+
+def _assistant_message_for(run) -> AgentMessage:
+    return AgentMessage(
+        id=run.assistant_message_id, thread_id=run.thread_id, run_id=run.id,
+        role="assistant", parts=[{"type": "text", "text": "过期审核意见"}],
+        created_at=datetime.now(UTC),
+    )
