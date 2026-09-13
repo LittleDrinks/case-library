@@ -524,9 +524,7 @@ def test_snapshot_hydrates_legacy_run_with_retired_fields(client: TestClient) ->
     repository = AgentRepository(database)
     thread_id = _thread_id(client)
     run = _await_run(database, thread_id)
-    database.agent_runs.update_one(
-        {"id": run["id"]}, {"$set": {"writeAuthorized": True}}
-    )
+    database.agent_runs.update_one({"id": run["id"]}, {"$set": {"writeAuthorized": True}})
 
     snapshot = client.get(f"/api/cases/c-draft-1/agent/threads/{thread_id}").json()
     assert snapshot["latestRun"]["id"] == run["id"]
