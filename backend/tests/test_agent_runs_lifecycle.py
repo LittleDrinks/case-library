@@ -513,8 +513,8 @@ def test_cancel_endpoint_is_forbidden_for_non_author(client: TestClient) -> None
 
 
 def test_snapshot_hydrates_legacy_run_with_retired_fields(client: TestClient) -> None:
-    """升级前 run 文档遗留已废弃字段（如 writeAuthorized）不阻断水合：快照、
-    取消、latest_run 按模型字段白名单读取，存量数据不迁移。"""
+    """升级前 run 文档遗留已废弃字段（如 writeAuthorized）不阻断水合：
+    快照与 latest_run 按模型字段白名单读取，存量数据不迁移。"""
     auth = _login(client)
     with client.app.state.agent.override(
         model=TestModel(custom_output_text="白名单回答", call_tools=[])
