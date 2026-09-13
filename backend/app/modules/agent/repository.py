@@ -22,6 +22,7 @@ from app.modules.agent.models import (
     ThreadEventType,
     write_view,
 )
+from app.modules.cases.lifecycle import WITHDRAWABLE_STATES as REVIEWABLE_STATES
 from app.modules.cases.published import version_readable
 from app.modules.cases.versions import create_ai_version, create_ai_version_from_write
 
@@ -40,6 +41,10 @@ class MessageNotFoundError(Exception):
 
 
 class ThreadNotFoundError(Exception):
+    pass
+
+
+class _CompletionFenceLost(RuntimeError):
     pass
 
 
@@ -260,21 +265,22 @@ class AgentRepository:
         skill_bindings: list[dict[str, str]] | None = None,
         base_revision: int | None = None, target: ArtifactTarget | None = None,
         annotation_id: str | None = None,
+        submitted_version_id: str | None = None,
     ) -> AgentRun:
         try:
-            run = _transaction(self.database, lambda session: self._start_run(
+            return _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, skill_bindings, session, default_title,
-                base_revision, target, annotation_id,
+                base_revision, target, annotation_id, submitted_version_id,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
-        return run
 
     def _start_run(
         self, thread, user_id, parts, metadata, assistant_id, client_request_id,
         owner_id, quota_ids, skill_bindings, session, default_title=None,
         base_revision=None, target=None, annotation_id: str | None = None,
+        submitted_version_id: str | None = None,
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session, default_title)
@@ -282,7 +288,7 @@ class AgentRepository:
             thread, user_id, parts, metadata, assistant_id, message_seq,
             client_request_id, run_id, message_id, owner_id, quota_ids,
             skill_bindings, base_revision, target,
-            annotation_id,
+            annotation_id, submitted_version_id,
         )
         self._insert_start_records(message, run, session)
         self._append_start_events(thread.id, run, message.id, session)
@@ -292,13 +298,14 @@ class AgentRepository:
                   owner_id: str | None = None, quota_ids: tuple[str, ...] = (),
                   skill_bindings: list[dict[str, str]] | None = None,
                   base_revision: int | None = None, target: ArtifactTarget | None = None,
-                  annotation_id: str | None = None) -> AgentRun:
+                  annotation_id: str | None = None,
+                  submitted_version_id: str | None = None) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
             return _transaction(self.database, lambda session: self._retry_run(
                 thread, user_message_id, assistant_id, owner_id, quota_ids,
-                skill_bindings, base_revision, target, session,
-                annotation_id,
+                skill_bindings, base_revision, target, session, annotation_id,
+                submitted_version_id,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -306,30 +313,36 @@ class AgentRepository:
     def _retry_run(
         self, thread, user_message_id, assistant_id, owner_id, quota_ids,
         skill_bindings, base_revision, target, session, annotation_id,
+        submitted_version_id,
     ) -> AgentRun:
-        message = self.database.agent_messages.find_one(
-            {"threadId": thread.id, "id": user_message_id, "role": "user"},
-            session=session,
-        )
-        if message is None:
-            raise MessageNotFoundError(user_message_id)
+        message = self._retry_message(thread, user_message_id, session)
         run_id = new_id("run")
         if self._reserve_active(thread, run_id, session, bump=False) is None:
             raise ActiveRunError
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
             skill_bindings,
-            base_revision, target, session, annotation_id,
+            base_revision, target, session, annotation_id, submitted_version_id,
         )
+
+    def _retry_message(self, thread, user_message_id: str, session):
+        message = self.database.agent_messages.find_one(
+            {"threadId": thread.id, "id": user_message_id, "role": "user"},
+            session=session,
+        )
+        if message is None:
+            raise MessageNotFoundError(user_message_id)
+        return message
 
     def _insert_retry_run(
         self, thread, message, assistant_id, run_id, owner_id, quota_ids,
         skill_bindings, base_revision, target, session,
         annotation_id,
+        submitted_version_id,
     ) -> AgentRun:
         run = _new_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
-            skill_bindings, base_revision, target, annotation_id,
+            skill_bindings, base_revision, target, annotation_id, submitted_version_id,
         )
         self.database.agent_runs.insert_one(_run_document(run), session=session)
         self._append_event(
@@ -420,35 +433,65 @@ class AgentRepository:
         self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
         resources: list[dict[str, str]] | None = None,
         reader_case_id: str | None = None, reader_version_id: str | None = None,
+        review_case_id: str | None = None,
         artifact: AgentArtifact | None = None,
         write_record: dict | None = None,
     ) -> bool:
-        return _transaction(
+        return self._complete_tx(run_id, owner_id, lambda: _transaction(
             self.database,
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
-                reader_case_id, reader_version_id,
+                reader_case_id, reader_version_id, review_case_id,
                 artifact,
                 write_record,
             ),
-        )
+        ))
+
+    def _complete_tx(self, run_id: str, owner_id: str | None, attempt) -> bool:
+        try:
+            return attempt()
+        except _CompletionFenceLost:
+            # 完成在落库时被取消越过（_finish_query 失配）：上一事务已整体
+            # 回滚（assistant 等半成品不可见），在新事务收敛为显式取消。
+            return self.cancel_run(run_id, owner_id)
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
+                      review_case_id=None,
                       artifact: AgentArtifact | None = None, write_record=None) -> bool:
         run = _run_view(
             self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session)
         )
         if not run:
             return False
-        if reader_case_id and not self._reader_completion_allowed(
-            reader_case_id, reader_version_id, run_id, session
+        if not self._delivery_fences_pass(
+            run, reader_case_id, reader_version_id, review_case_id, session,
         ):
             return self._finish_transaction(
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
             )
         return self._complete_records(
             run, assistant, session, owner_id, resources, artifact, write_record
+        )
+
+    def _delivery_fences_pass(self, run, reader_case_id, reader_version_id,
+                              review_case_id, session) -> bool:
+        """读者可见性与审核围栏（写冲突 + 基线）任一失守即拒绝完成。"""
+        if reader_case_id and not self._reader_completion_allowed(
+            reader_case_id, reader_version_id, run.id, session
+        ):
+            return False
+        if review_case_id and not self._review_completion_allowed(
+            review_case_id, run.user_id, run.id, session
+        ):
+            return False
+        return True
+
+    def _review_completion_allowed(self, case_id, user_id, run_id, session) -> bool:
+        """审核完成边界：写冲突围栏 + 锁定提交基线，与心跳撤销同口径。"""
+        return (
+            review_delivery_allowed(self.database, case_id, user_id, session)
+            and review_baseline_current(self.database, run_id, session)
         )
 
     def _complete_records(
@@ -538,7 +581,7 @@ class AgentRepository:
         if resources is not None:
             fields["resources"] = resources
         if not self._finish_record(run.id, "completed", fields, session, owner_id):
-            raise RuntimeError("AI 运行已结束")
+            raise _CompletionFenceLost("AI 运行已结束")
         self._clear_active(run.thread_id, run.id, session)
         self._append_event(run.thread_id, "run.completed", run.id, fields, session)
 
@@ -588,7 +631,7 @@ class AgentRepository:
         owner_id=None,
     ) -> AgentRun | None:
         row = self.database.agent_runs.find_one_and_update(
-            _active_query(run_id, owner_id),
+            _finish_query(run_id, status, owner_id),
             {
                 "$set": {"status": status, "finishedAt": _now(), **fields},
                 "$unset": _terminal_unset(),
@@ -758,6 +801,7 @@ def _new_run_documents(
     skill_bindings: list[dict[str, str]] | None = None,
     base_revision: int | None = None, target: ArtifactTarget | None = None,
     annotation_id: str | None = None,
+    submitted_version_id: str | None = None,
 ) -> tuple[AgentMessage, AgentRun]:
     now = _now()
     return (
@@ -765,7 +809,7 @@ def _new_run_documents(
         _new_active_run(
             thread, user_id, message_id, assistant_id, run_id, now, client_request_id,
             owner_id, quota_ids, skill_bindings, base_revision, target,
-            annotation_id,
+            annotation_id, submitted_version_id,
         ),
     )
 
@@ -784,6 +828,7 @@ def _run_common_fields(
     skill_bindings: list[dict[str, str]] | None = None,
     base_revision=None, target=None,
     annotation_id: str | None = None,
+    submitted_version_id: str | None = None,
 ) -> dict:
     """活跃运行共享字段：只读、基线与 owner 会话到期时间。"""
     return {
@@ -791,8 +836,8 @@ def _run_common_fields(
         "skill_bindings": list(skill_bindings or []),
         "read_only": thread.version_id is not None or thread.mode == REVIEW_MODE,
         "base_revision": base_revision, "target": target,
-        "annotation_id": annotation_id,
-        "owner_id": owner_id,
+        "annotation_id": annotation_id, "owner_id": owner_id,
+        "submitted_version_id": submitted_version_id,
         "owner_expires_at": now + _owner_delta() if owner_id else None,
         "quota_ids": quota_ids,
     }
@@ -804,11 +849,12 @@ def _new_retry_run(
     skill_bindings: list[dict[str, str]] | None = None,
     base_revision: int | None = None, target: ArtifactTarget | None = None,
     annotation_id: str | None = None,
+    submitted_version_id: str | None = None,
 ) -> AgentRun:
     now = _now()
     fields = _run_common_fields(
         thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
-        annotation_id,
+        annotation_id, submitted_version_id,
     )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=thread.owner_id,
@@ -822,10 +868,11 @@ def _new_active_run(
     owner_id, quota_ids, skill_bindings: list[dict[str, str]] | None = None,
     base_revision=None, target=None,
     annotation_id: str | None = None,
+    submitted_version_id: str | None = None,
 ) -> AgentRun:
     fields = _run_common_fields(
         thread, now, owner_id, quota_ids, skill_bindings, base_revision, target,
-        annotation_id,
+        annotation_id, submitted_version_id,
     )
     return AgentRun(
         id=run_id, thread_id=thread.id, user_id=user_id, user_message_id=message_id,
@@ -858,11 +905,18 @@ def _active_query(
     return query
 
 
-def _owned_query(run_id: str, owner_id: str, now: datetime) -> dict:
-    return {
-        "id": run_id, "status": "active", "ownerId": owner_id,
-        "ownerExpiresAt": {"$gt": now},
-    }
+def _finish_query(
+    run_id: str, status: TerminalRunStatus, owner_id: str | None,
+) -> dict:
+    """终态落库条件：completed/failed 不得越过已收到的取消请求。
+
+    request_cancel 落库 cancelRequestedAt 后，完成事务在本查询处失配，
+    事务回滚为空操作；取消自身（cancelled）不受该标志阻断。
+    """
+    query = _active_query(run_id, owner_id)
+    if status != "cancelled":
+        query["cancelRequestedAt"] = {"$exists": False}
+    return query
 
 
 def _owner_delta():
@@ -874,6 +928,13 @@ _RUN_FIELDS = (
     ("owner_expires_at", "ownerExpiresAt"),
     ("quota_ids", "quotaIds"),
 )
+
+
+def _owned_query(run_id: str, owner_id: str, now: datetime) -> dict:
+    return {
+        "id": run_id, "status": "active", "ownerId": owner_id,
+        "ownerExpiresAt": {"$gt": now},
+    }
 
 
 def _terminal_unset() -> dict[str, str]:
@@ -909,13 +970,66 @@ def transaction(database, callback):
 
 
 def claim_run_write_path(database, run_id: str, path: str, session=None) -> bool:
-    """为活跃 Run 原子选择唯一正文写入路径。"""
+    """为活跃且未收到取消请求的 Run 原子选择唯一正文写入路径。
+
+    取消请求一经落库（cancelRequestedAt），直接写入/整篇候选即被拒绝：
+    服务端停止交付的边界不晚于用户发出停止的时刻。
+    """
     result = database.agent_runs.update_one(
-        {"id": run_id, "status": "active", "writePath": {"$exists": False}},
+        {"id": run_id, "status": "active", "cancelRequestedAt": {"$exists": False},
+         "writePath": {"$exists": False}},
         {"$set": {"writePath": path}},
         session=session,
     )
     return result.matched_count == 1
+
+
+def review_delivery_allowed(database, case_id: str, user_id: str, session=None) -> bool:
+    """审核交付围栏：案例仍待审且运行属主仍是有效管理员。
+
+    两步均为真实写入（find_one_and_update no-op $set），与并发撤回/降权
+    形成写冲突：任一先提交，本事务按 Mongo 过时读语义回滚重试或失配。
+    心跳撤销（service._review_accessible）与完成事务围栏共用此口径。
+    """
+    if not _fence_review_case(database, case_id, session):
+        return False
+    return _fence_review_admin(database, user_id, session)
+
+
+def _fence_review_case(database, case_id: str, session) -> bool:
+    case = database.cases.find_one_and_update(
+        {"id": case_id, "workflowStatus": {"$in": list(REVIEWABLE_STATES)}},
+        {"$set": {"_reviewDeliveryFence": _now().isoformat()}},
+        {"_id": 1}, session=session,
+    )
+    return case is not None
+
+
+def _fence_review_admin(database, user_id: str, session) -> bool:
+    user = database.users.find_one_and_update(
+        {"id": user_id, "role": "admin", "status": "active"},
+        {"$set": {"_reviewDeliveryFence": _now().isoformat()}},
+        {"_id": 1}, session=session,
+    )
+    return user is not None
+
+
+def review_baseline_current(database, run_id: str, session=None) -> bool:
+    """审核 Run 基线校验：锁定的提交版本与案例当前待审提交一致。"""
+    run = database.agent_runs.find_one(
+        {"id": run_id}, {"submittedVersionId": 1, "threadId": 1}, session=session,
+    )
+    if not run or not run.get("submittedVersionId"):
+        return False
+    thread = database.agent_threads.find_one(
+        {"id": run["threadId"]}, {"caseId": 1}, session=session,
+    )
+    if not thread:
+        return False
+    case = database.cases.find_one(
+        {"id": thread["caseId"]}, {"submittedVersionId": 1}, session=session,
+    )
+    return bool(case and case.get("submittedVersionId") == run["submittedVersionId"])
 
 
 def _case_revision(database, case_id: str, session) -> int | None:

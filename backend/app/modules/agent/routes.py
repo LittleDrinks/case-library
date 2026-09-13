@@ -617,14 +617,20 @@ def _run_lock_for(conversation: Conversation, plan: RunPlan):
     """Run 创建即冻结写入控制信息：基线修订号与锁定选区。
 
     是否直接写入由模型结合完整对话理解并选择工具；服务端不解析消息文本。
+    审核对话锁定当前待审提交版本，撤回或再提交后旧 Run 基线失效。
     """
     if conversation.reader:
-        return None, None
+        return None, None, (
+            conversation.case.get("submittedVersionId") if conversation.review else None
+        )
     plan.selections = _document_selections(
         conversation.case.get("document") or {}, plan.parts
     )
     base_revision, target = _run_lock(conversation.case, plan)
-    return base_revision, target
+    submitted_version_id = (
+        conversation.case.get("submittedVersionId") if conversation.review else None
+    )
+    return base_revision, target, submitted_version_id
 
 
 def _run_context(request, database, settings, user, conversation: Conversation,
@@ -724,7 +730,7 @@ def _resolve_selection(document: dict, data: object) -> dict:
 
 def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                skill_bindings: list[dict[str, str]],
-               lock: tuple[int | None, ArtifactTarget | None] = (None, None)) -> AgentRun:
+               lock=(None, None, None)) -> AgentRun:
     try:
         return _create_run(
             repository, thread, user_id, plan, assistant_id, lease, worker_id,
@@ -744,7 +750,7 @@ def _start_run(repository, thread, user_id, plan, assistant_id, lease, worker_id
 
 def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_id,
                 skill_bindings: list[dict[str, str]],
-                lock: tuple[int | None, ArtifactTarget | None] = (None, None)):
+                lock=(None, None, None)):
     run_kwargs = _run_fields(lease, worker_id, skill_bindings, lock, plan.annotation_id)
     if plan.retry_message_id:
         run = repository.retry_run(
@@ -762,12 +768,13 @@ def _create_run(repository, thread, user_id, plan, assistant_id, lease, worker_i
 
 def _run_fields(lease, worker_id, skill_bindings, lock, annotation_id=None):
     quota_ids = lease.quota_ids if lease else ()
-    base_revision, target = lock
+    base_revision, target, submitted_version_id = lock
     return {
         "owner_id": worker_id, "quota_ids": quota_ids,
         "skill_bindings": skill_bindings,
         "base_revision": base_revision, "target": target,
         "annotation_id": annotation_id,
+        "submitted_version_id": submitted_version_id,
     }
 
 

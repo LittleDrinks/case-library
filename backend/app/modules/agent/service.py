@@ -14,7 +14,11 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.repository import AgentRepository
+from app.modules.agent.repository import (
+    AgentRepository,
+    review_baseline_current,
+    review_delivery_allowed,
+)
 from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
@@ -271,8 +275,7 @@ async def _monitor(context: RunContext, owner_task) -> None:
 def _monitor_failed(context: RunContext) -> None:
     context.failed = True
     try:
-        if not context.repository.fail_run(context.run.id, context.worker_id):
-            context.lost = True
+        _terminal(context, context.repository.fail_run, cancel_on_conflict=True)
     except Exception:
         context.lost = True
 
@@ -317,7 +320,7 @@ def _finalize(context: RunContext) -> None:
         elif status == "cancelled":
             _terminal(context, context.repository.cancel_run)
         else:
-            _terminal(context, context.repository.fail_run)
+            _terminal(context, context.repository.fail_run, cancel_on_conflict=True)
     except Exception:
         _monitor_failed(context)
     finally:
@@ -336,20 +339,26 @@ def _complete(context: RunContext) -> None:
                                  context.reader, context.review),
         reader_case_id=context.case["id"] if reader else None,
         reader_version_id=context.case.get("versionId") if reader else None,
+        review_case_id=context.case["id"] if context.review else None,
         artifact=artifact,
         write_record=context.deps.write_record if context.deps else None,
     ):
         context.lost = True
 
 
-def _review_case_present(database, case_id: str) -> bool:
-    """审核对话锚定当前待审工作稿：案例不存在即终止流，无已发布版语义。"""
-    return database.cases.find_one({"id": case_id}, {"_id": 1}) is not None
+def _review_accessible(context: RunContext) -> bool:
+    """审核运行实时重验：撤审、降权/停用或基线越过即撤销，不再产生新输出。"""
+    deps_user = context.deps.user if context.deps else None
+    user_id = deps_user["id"] if deps_user else context.run.user_id
+    return (
+        review_delivery_allowed(context.repository.database, context.case["id"], user_id)
+        and review_baseline_current(context.repository.database, context.run.id)
+    )
 
 
 def _reader_accessible(context: RunContext) -> bool:
     if context.review:
-        return _review_case_present(context.repository.database, context.case["id"])
+        return _review_accessible(context)
     return not context.reader or version_readable_by_id(
         context.repository.database, context.case["id"], context.case.get("versionId")
     )
@@ -361,9 +370,13 @@ def _revoke_reader(context: RunContext) -> None:
         context.token.cancel()
 
 
-def _terminal(context: RunContext, finish) -> None:
+def _terminal(context: RunContext, finish, cancel_on_conflict=False) -> None:
     if not finish(context.run.id, context.worker_id):
-        context.lost = True
+        if cancel_on_conflict and context.repository.cancel_run(
+                context.run.id, context.worker_id):
+            context.cancelled = True
+        else:
+            context.lost = True
 
 
 def _release_lease(context: RunContext) -> None:
