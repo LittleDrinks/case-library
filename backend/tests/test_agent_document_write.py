@@ -78,14 +78,13 @@ def _create_case(client: TestClient, auth: dict, document: dict | None = None) -
 
 
 def _locked_run(database, auth: dict, case: dict,
-                target: ArtifactTarget | None = None,
-                write_authorized: bool = True):
+                target: ArtifactTarget | None = None):
     repository = AgentRepository(database)
     thread = repository.default_thread(case["id"], auth["user"]["id"])
     run = repository.start_run(
         thread, auth["user"]["id"], [{"type": "text", "text": "写入"}], {},
         f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
-        target=target, write_authorized=write_authorized,
+        target=target,
     )
     return thread, run
 
@@ -134,35 +133,6 @@ def _canonical_artifact(client: TestClient, auth: dict):
         auth["user"],
     )
     return database, thread, case, run, artifact
-
-
-# ---- 直接写入授权：来自服务端冻结的教师消息判定，而非工具参数 ----
-
-
-_AUTHORIZED_WRITE_PHRASES = (
-    "我要直接写入", "直接写入", "请把初稿直接写入正文", "帮我直接写入吧",
-    "直接修改这一段", "先检索，然后直接写入", "直接替换成修订后的段落",
-    "直接开始生成，你能直接操纵我的草稿吗？直接写入。",
-    "不用先确认，直接写入",
-    "请直接写入，不要漏掉引用",
-)
-_DENIED_WRITE_PHRASES = (
-    "不能直接写入", "不可以直接写入", "不想直接写入", "无法直接写入",
-    "是否可以直接写入", "能不能直接写入", "可以直接写入吗", "如何直接写入",
-    "提示词里的“直接写入”是什么意思", "提示词里的直接写入是什么意思",
-    "解释直接写入", "直接写入的含义", "如果合适，直接写入",
-    "撤销直接写入", "把直接写入的结果展示给我看", "直接写入不行",
-    "直接写入功能很好用", "避免直接覆盖", "不要直接写入，先给我候选",
-    "如果需要就直接写入", "待审核通过之后直接写入", "帮我生成一份初稿",
-    "润色一下这个段落", "",
-)
-
-
-def test_direct_write_authorization_detected_from_message_text() -> None:
-    for text in _AUTHORIZED_WRITE_PHRASES:
-        assert writes.direct_write_requested(text) is True, text
-    for text in _DENIED_WRITE_PHRASES:
-        assert writes.direct_write_requested(text) is False, text
 
 
 def test_normalized_blocks_keep_real_storage_shape() -> None:
@@ -236,33 +206,18 @@ def test_blank_detection_only_allows_truly_empty_or_template(
     _assert_template_rewritable()
 
 
-def test_unauthorized_run_cannot_direct_write(client: TestClient) -> None:
+def test_completed_run_cannot_direct_write(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth, _document())
     database = client.app.state.database
-    _thread, run = _locked_run(database, auth, case, write_authorized=False)
-    assert database.agent_runs.find_one({"id": run.id})["writeAuthorized"] is False
+    _thread, run = _locked_run(database, auth, case)
+    AgentRepository(database).cancel_run(run.id)
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
             database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
         )
-    assert excinfo.value.status_code == 403
+    assert excinfo.value.status_code == 409
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
-    assert database.agent_writes.count_documents({}) == 0
-
-
-def test_write_document_tool_refuses_unauthorized_run(client: TestClient) -> None:
-    import asyncio
-
-    auth = _login(client)
-    case = _create_case(client, auth, _document())
-    database = client.app.state.database
-    _thread, run = _locked_run(database, auth, case, write_authorized=False)
-    deps = _deps(database, case, run, auth["user"])
-    with pytest.raises(ModelRetry) as excinfo:
-        asyncio.run(_call(deps, "document", DRAFT_BLOCKS, "初稿"))
-    assert "没有明确的直接写入指令" in str(excinfo.value)
-    assert deps.wrote is False
     assert database.agent_writes.count_documents({}) == 0
 
 
@@ -661,7 +616,7 @@ def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleN
     return SimpleNamespace(
         database=database, case_id=case["id"], thread_id=run.thread_id,
         run_id=run.id, user=user, proposed=None, wrote=wrote, evidence=[],
-        full_generation_allowed=True, annotation_id=None,
+        annotation_id=None,
     )
 
 
@@ -947,10 +902,6 @@ def _assert_streamed_write_persisted(database, case_id: str, thread_id: str):
     assert [node["type"] for node in updated["document"]["content"]] == [
         "heading", "paragraph", "bulletList",
     ]
-    run = database.agent_runs.find_one(
-        {"threadId": thread_id}, {"_id": 0, "toolTimings": 1, "writeAuthorized": 1}
-    )
-    assert run["writeAuthorized"] is True
     write = database.agent_writes.find_one({"threadId": thread_id}, {"_id": 0})
     assert write["status"] == "written"
     _assert_streamed_write_version(database, updated, thread_id, write)
@@ -982,10 +933,6 @@ def _undo_streamed_write(client, auth, case, thread_id: str, write) -> None:
 
 def _assert_normal_generation_did_not_write(
         database, case_id: str, thread_id: str) -> None:
-    run = database.agent_runs.find_one(
-        {"threadId": thread_id}, {"_id": 0, "writeAuthorized": 1}
-    )
-    assert run["writeAuthorized"] is False
     assert database.cases.find_one({"id": case_id})["revision"] == 1
     assert database.cases.find_one({"id": case_id})["document"] == {
         "type": "doc", "content": [],
@@ -1026,18 +973,6 @@ def test_cancelled_direct_write_does_not_create_a_completed_version(client: Test
     database, _thread, _case, write = _written_case(client, auth)
     assert AgentRepository(database).cancel_run(write["runId"])
     assert database.case_versions.count_documents({"sourceRunId": write["runId"]}) == 0
-
-
-def test_normal_generation_message_blocks_mistaken_direct_write(client: TestClient) -> None:
-    """普通生成请求即使模型误调用写工具，服务端也不落库。"""
-    auth = _login(client)
-    case = _create_case(client, auth, _document())
-    database = client.app.state.database
-    thread_id = _submit_with_text(
-        client, auth, case["id"], "帮我生成一份初稿", _write_then_text_model()
-    )
-    _await_run(database, thread_id, "completed")
-    _assert_normal_generation_did_not_write(database, case["id"], thread_id)
 
 
 def test_undo_api_rejects_non_author(client: TestClient) -> None:

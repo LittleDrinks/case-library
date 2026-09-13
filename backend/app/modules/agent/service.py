@@ -15,7 +15,7 @@ from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, resource_record
+from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
@@ -164,7 +164,7 @@ def _loaded_capability_ids(parts: list[dict]) -> list[str]:
 def _task_prompt(reader: bool, review: bool) -> str:
     if review:
         return REVIEW_PROMPT
-    return READER_PROMPT if reader else TASK_PROMPT
+    return READER_PROMPT if reader else SYSTEM_PROMPT
 
 
 def _run_resources(parts: list[dict], bounds: tuple = (), reader=False,
