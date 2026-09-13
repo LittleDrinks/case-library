@@ -49,6 +49,7 @@ const busyAction = ref("");
 const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
 const writingContext = ref(null);
+const promptRequest = ref(null);
 const annotations = ref([]);
 let annotationLoadGeneration = 0;
 const annotationRefreshToken = ref(0);
@@ -538,8 +539,21 @@ function askFloatAi(annotation) {
   askAnnotationAi(annotation);
 }
 
+function updateWritingContext(context) {
+  const current = writingContext.value;
+  if (current?.annotationId && context?.from === current.from && context?.to === current.to
+      && context?.quote === current.quote) return;
+  writingContext.value = context;
+}
+
+function selectAnnotationText(annotation) {
+  return canvasEditor.value?.selectAnnotation?.(annotation);
+}
+
 function askAnnotationAi(annotation) {
   if (!annotation || annotation.createdBy !== session.user?.id) return;
+  selectAnnotationText(annotation);
+  promptRequest.value = { text: `请根据这条批注修订选中的正文：${annotation.content}。\n保留原意和其他内容，给出可供我确认的修改建议。` };
   writingContext.value = {
     annotationId: annotation.id,
     from: annotation.from,
@@ -839,7 +853,7 @@ onBeforeUnmount(() => {
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
-                @writing-context="writingContext = $event"
+                @writing-context="updateWritingContext"
                 @annotate="openDraftFloat"
                 @annotation-click="openThreadFloat"
               />
@@ -847,7 +861,7 @@ onBeforeUnmount(() => {
           </template>
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
-              <h2>{{ activeVersion.title }}</h2>
+              <h2>{{ caseRecord.title }}</h2>
               <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，恢复后可在当前教师稿继续编辑</p>
               <div class="version-paper-actions">
                 <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />返回当前教师稿</button>
@@ -879,6 +893,8 @@ onBeforeUnmount(() => {
           :read-only="assistantReadOnly"
           :editable="editable"
           :writing-context="writingContext"
+          :prompt-request="promptRequest"
+          @prompt-inserted="promptRequest = null"
           :history-refresh-key="historyRefreshKey"
           :history-available="historyAvailable"
           :before-attachment-mutation="prepareContentMutation"
@@ -893,6 +909,7 @@ onBeforeUnmount(() => {
           @annotations-refresh="refreshAnnotationsAfterAi"
           @annotation-run="watchAnnotationRun"
           @ask-ai="askAnnotationAi"
+          @select-annotation="selectAnnotationText"
           @sources-retry="loadSources"
           @clear-writing-context="clearWritingContext"
           @insert-citation="insertSourceCitation"

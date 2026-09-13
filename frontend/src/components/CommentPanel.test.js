@@ -230,3 +230,12 @@ it("显示多轮 AI 修订并从批注面板合并最新轮", async () => {
   expect(wrapper.find('[data-annotation-id="annotation-1"]').exists()).toBe(false);
   expect(wrapper.find('[aria-label="查看已解决批注"]').exists()).toBe(false);
 });
+
+it("点击批注内容定位原文，操作按钮不触发卡片定位", async () => {
+  api.listAnnotations.mockResolvedValue([annotation]);
+  const wrapper = await mountPanel();
+  await wrapper.get(".comment-card blockquote").trigger("click");
+  expect(wrapper.emitted("select-annotation")).toEqual([[annotation]]);
+  await wrapper.get('[aria-label="编辑批注"]').trigger("click");
+  expect(wrapper.emitted("select-annotation")).toHaveLength(1);
+});

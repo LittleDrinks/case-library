@@ -447,7 +447,16 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
-defineExpose({ clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
+function selectAnnotation(annotation) {
+  const activeEditor = editor.value;
+  if (!activeEditor || annotation.anchorState === "deleted" || annotation.anchorState === "changed") return false;
+  const range = pendingAnchorRange(activeEditor.state.doc, annotation);
+  if (!range) return false;
+  activeEditor.chain().setTextSelection(range).focus().scrollIntoView().run();
+  return true;
+}
+
+defineExpose({ selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
 </script>
 
 <template>

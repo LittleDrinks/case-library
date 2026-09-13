@@ -11,7 +11,7 @@ const props = defineProps({
   annotationRefreshToken: { type: Number, default: 0 },
 });
 const emit = defineEmits([
-  "annotations", "ask-ai", "case-revised", "clear-writing-context",
+  "annotations", "ask-ai", "select-annotation", "case-revised", "clear-writing-context",
 ]);
 const annotations = ref([]);
 const error = ref("");
@@ -104,6 +104,11 @@ function revisionStatus(status) {
   return ({
     pending: "待决定", accepted: "已合并", rejected: "已拒绝", expired: "已失效",
   })[status] || status;
+}
+
+function selectCard(event, annotation) {
+  if (event.target.closest("button, input, textarea, a")) return;
+  emit("select-annotation", annotation);
 }
 
 function askAi(annotation) {
@@ -230,7 +235,9 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
           :key="annotation.id"
           class="comment-card"
           :data-annotation-id="annotation.id"
-          tabindex="-1"
+          tabindex="0"
+          @click="selectCard($event, annotation)"
+          @keydown.enter.self.prevent="emit('select-annotation', annotation)"
         >
           <header>
             <span>{{ annotation.section }}</span>

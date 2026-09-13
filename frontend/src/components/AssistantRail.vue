@@ -23,9 +23,10 @@ const props = defineProps({
   editable: { type: Boolean, required: true },
   beforeAttachmentMutation: { type: Function, required: true },
   writingContext: { type: Object, default: null },
+  promptRequest: { type: Object, default: null },
   annotationRefreshToken: { type: Number, default: 0 },
 });
-const emit = defineEmits([
+const emit = defineEmits(["prompt-inserted", "select-annotation",
   "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
   "sources-retry", "clear-writing-context", "insert-citation",
@@ -77,6 +78,8 @@ function select(tab) {
       :read-only="readOnly"
       :review="review"
       :writing-context="writingContext"
+      :prompt-request="promptRequest"
+      @prompt-inserted="emit('prompt-inserted')"
       @case-revised="emit('case-revised', $event)"
       @annotations-refresh="emit('annotations-refresh')"
       @open-version="emit('open-version', $event)"
@@ -94,6 +97,7 @@ function select(tab) {
       :annotation-refresh-token="annotationRefreshToken"
       @annotations="emit('annotations', $event)"
       @ask-ai="emit('ask-ai', $event)"
+      @select-annotation="emit('select-annotation', $event)"
       @case-revised="emit('case-revised', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />

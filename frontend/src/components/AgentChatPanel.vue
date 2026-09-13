@@ -22,8 +22,9 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
+  promptRequest: { type: Object, default: null },
 });
-const emit = defineEmits([
+const emit = defineEmits(["prompt-inserted",
   "case-revised", "versions-updated", "clear-writing-context", "annotations-refresh",
   "annotation-run", "open-version",
 ]);
@@ -792,6 +793,8 @@ function retryMessageHasAnnotation(messageId) {
         :busy="loading || sending || recovering"
         :thread-id="threadId || ''"
         :writing-context="writingContext"
+      :prompt-request="promptRequest"
+      @prompt-inserted="emit('prompt-inserted')"
         :skills="skills"
         :catalog="catalog"
         @send="sendMessage"
