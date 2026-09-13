@@ -225,7 +225,7 @@ async function overwriteAiVersion(page, caseId, version) {
   expect(beforeResponse.ok()).toBe(true);
   const before = await beforeResponse.json();
   await page.locator(".version-paper-actions .version-restore").click();
-  await expect(page.locator(".overwrite-warning")).toContainText(`AI版本 v${version.number} · ${version.title}`);
+  await expect(page.locator(".overwrite-target")).toContainText(`AI版本 v${version.number} · ${version.title}`);
   const restoreResponse = page.waitForResponse((response) => (
     response.request().method() === "POST"
     && new URL(response.url()).pathname.endsWith("/lifecycle")

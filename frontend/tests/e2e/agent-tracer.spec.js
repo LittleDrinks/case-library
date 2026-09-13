@@ -288,11 +288,15 @@ function annotationCard(page, annotationId) {
   return page.locator(".comment-card[data-annotation-id=\"" + annotationId + "\"]");
 }
 
-async function expectResolvedAnnotation(page, caseId, annotationId) {
+async function annotationThread(page, caseId, annotationId) {
   const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
   const thread = rows.find((row) => row.id === annotationId);
   expect(thread.status).toBe("resolved");
-  const history = thread.revisions || [];
+  return thread;
+}
+
+async function expectResolvedAnnotation(page, caseId, annotationId) {
+  const history = (await annotationThread(page, caseId, annotationId)).revisions || [];
   await expect(history).toHaveLength(1);
   expect(history[0].status).toBe("rejected");
 }
@@ -316,10 +320,7 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
 });
 
 async function assertResolvedHistoryWithoutStaleWarning(page, created, annotation) {
-  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
-  const thread = rows.find((row) => row.id === annotation.id);
-  expect(thread.status).toBe("resolved");
-  const revisions = thread.revisions || [];
+  const revisions = (await annotationThread(page, created.id, annotation.id)).revisions || [];
   expect(revisions).toHaveLength(2);
   expect(revisions[0].status).toBe("expired");
   expect(revisions[1].status).toBe("accepted");
@@ -327,9 +328,7 @@ async function assertResolvedHistoryWithoutStaleWarning(page, created, annotatio
   await page.reload();
   await page.getByRole("button", { name: "批注", exact: true }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
-  const reloaded = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
-  const merged = reloaded.find((row) => row.id === annotation.id);
-  expect(merged.status).toBe("resolved");
+  const merged = await annotationThread(page, created.id, annotation.id);
   expect((merged.revisions || [])[1]?.replacement).toContain(SECOND_REPLACEMENT_MARK);
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);

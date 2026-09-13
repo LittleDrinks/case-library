@@ -492,3 +492,17 @@ def test_delete_history_preserves_current_draft(client: TestClient):
     assert _history(client, case['id'])["versions"] == []
     assert client.get(f"/api/cases/{case['id']}").json()["document"] == saved["document"]
     assert client.delete(url, headers={"X-CSRF-Token": auth["csrfToken"]}).status_code == 404
+
+
+def test_delete_rejects_reviewing_and_published_references(client: TestClient):
+    auth = login(client, "user", "user123").json()
+    case, submitted = _frozen_version(client, auth, "删除保护")
+    headers = {"X-CSRF-Token": auth["csrfToken"]}
+    url = f"/api/cases/{case['id']}/versions/{submitted['id']}"
+    rejected = client.post(
+        f"/api/cases/{case['id']}/lifecycle", headers=headers,
+        json={"command": "submit", "revision": case["revision"]},
+    ).json()
+    assert rejected["version"]["id"] == submitted["id"]
+    assert client.delete(url, headers=headers).status_code == 409
+
