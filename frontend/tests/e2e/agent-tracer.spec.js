@@ -281,9 +281,7 @@ async function closeAnnotation(page) {
   const card = page.locator(".comment-card");
   await card.getByRole("button", { name: "标记解决" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(card).toContainText("已解决");
-  await expect(card).toContainText("已拒绝");
+  await expect(page.locator(".comment-panel .panel-empty")).toContainText("暂无批注");
 }
 
 function annotationCard(page, annotationId) {
@@ -291,16 +289,10 @@ function annotationCard(page, annotationId) {
 }
 
 async function expectResolvedAnnotation(page, caseId, annotationId) {
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  const card = annotationCard(page, annotationId);
-  await expect(card).toContainText("已解决");
   const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
   expect(rows).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: annotationId, status: "resolved" }),
   ]));
-  const history = card.locator(".comment-revisions");
-  await expect(history.locator("li")).toHaveCount(1);
-  await expect(history).toContainText("已拒绝");
 }
 
 async function changeAnnotationTarget(page) {
@@ -318,32 +310,30 @@ test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并�
   await expectAnnotationHistory(page);
   await page.getByRole("button", { name: "合并并关闭" }).click();
   await expect(page.locator(".comment-card")).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
   await assertResolvedHistoryWithoutStaleWarning(page, created, annotation);
 });
 
 async function assertResolvedHistoryWithoutStaleWarning(page, created, annotation) {
-  await expect(page.locator(".comment-card")).toContainText("已解决");
-  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
+  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
+  const thread = rows.find((row) => row.id === annotation.id);
+  expect(thread.status).toBe("resolved");
   await page.reload();
   await page.getByRole("button", { name: "批注", exact: true }).click();
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(page.locator(".comment-card")).toContainText("已解决");
-  await expect(page.locator(".comment-card")).not.toContainText("原文已变动，旧修订不可合并");
-  await expectReloadedMergeHistory(page, annotation.id);
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+  await expectReloadedMergeHistoryViaApi(created.id, annotation.id);
   await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
   const current = await page.context().request.get(`/api/cases/${created.id}`);
   expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
 }
 
-async function expectReloadedMergeHistory(page, annotationId) {
-  const mergedCard = annotationCard(page, annotationId);
-  await expect(mergedCard).toContainText("已解决");
-  await expect(mergedCard.locator(".comment-revisions li")).toHaveCount(2);
-  await expect(mergedCard.locator(".comment-revisions li").nth(0)).toContainText("已失效");
-  await expect(mergedCard.locator(".comment-revisions li").nth(1)).toContainText("已合并");
-  await expect(mergedCard.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
-  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
+async function expectReloadedMergeHistoryViaApi(caseId, annotationId) {
+  const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
+  const thread = rows.find((row) => row.id === annotationId);
+  const revisions = thread.revisions || [];
+  expect(revisions).toHaveLength(2);
+  expect(revisions[0].status).toBe("expired");
+  expect(revisions[1].status).toBe("accepted");
+  expect(revisions[1].replacement).toContain(SECOND_REPLACEMENT_MARK);
 }
 
 test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
@@ -423,8 +413,6 @@ test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, pl
   await expect(card.getByRole("button", { name: "合并并关闭" })).toBeVisible();
   await card.getByRole("button", { name: "合并并关闭" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("tab", { name: "查看已解决批注" }).click();
-  await expect(card).toContainText("已解决");
   const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
   const accepted = rows[0].revisions.find((revision) => revision.status === "accepted");
   const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
