@@ -70,7 +70,8 @@ function select(tab) {
       <span>历史版本只读，请先恢复此版本后使用 AI</span>
     </div>
     <AgentChatPanel
-      v-else-if="active === 'ai' && (!readOnly || user)"
+      v-if="!historical && (!readOnly || user)"
+      v-show="active === 'ai'"
       :key="versionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
@@ -87,11 +88,11 @@ function select(tab) {
       @annotation-run="emit('annotation-run', $event)"
       @clear-writing-context="emit('clear-writing-context')"
     />
-    <div v-else-if="readOnly && active === 'ai'" class="panel-empty">
+    <div v-if="!historical && readOnly && !user && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
     </div>
     <CommentPanel
-      v-else-if="!readOnly && active === 'comments'"
+      v-if="!readOnly && active === 'comments'"
       :case-record="caseRecord"
       :user="user"
       :annotation-refresh-token="annotationRefreshToken"
@@ -102,7 +103,7 @@ function select(tab) {
       @clear-writing-context="emit('clear-writing-context')"
     />
 
-    <div v-else-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
+    <div v-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
       <PublicSourceList
         :sources="sources"
         :loading="sourcesLoading"
@@ -111,7 +112,7 @@ function select(tab) {
       />
     </div>
     <AttachmentPanel
-      v-else-if="active === 'files'"
+      v-if="!readOnly && active === 'files'"
       :case-record="caseRecord"
       :user="user"
       :editable="editable"
@@ -121,7 +122,7 @@ function select(tab) {
       @insert-citation="emit('insert-citation', $event)"
     />
     <VersionPanel
-      v-else-if="active === 'history'"
+      v-if="active === 'history'"
       :case-record="caseRecord"
       :refresh-key="historyRefreshKey"
       :editable="editable && historyAvailable"

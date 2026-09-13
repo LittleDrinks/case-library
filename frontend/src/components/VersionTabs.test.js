@@ -11,15 +11,6 @@ function render(overrides = {}) {
   return mount(VersionTabs, { props: { tabs, active: "draft", ...overrides } });
 }
 
-async function assertCollapsedToggleWorks(toggle) {
-  await toggle.trigger("touchstart");
-  expect(toggle.attributes("aria-expanded")).toBe("false");
-  await toggle.trigger("click");
-  expect(toggle.attributes("aria-expanded")).toBe("true");
-  await toggle.trigger("keydown", { key: "Enter" });
-  expect(toggle.attributes("aria-expanded")).toBe("false");
-}
-
 it("首 Tab 固定为当前教师稿并默认选中", () => {
   const wrapper = render();
   const draft = wrapper.get("button.draft-tab");

@@ -215,6 +215,16 @@ def _assert_public_snapshot_rejected(client: TestClient, auth: dict, snapshot: s
         _assert_version_rejected(public_reader, "c-draft-1", snapshot)
 
 
+def _assert_public_version_delete_rejected(client, auth, reader, version_id: str) -> None:
+    rejected = client.delete(
+        f"/api/cases/c-draft-1/versions/{version_id}", headers=headers(auth),
+    )
+    assert rejected.status_code == 409
+    preserved = reader.get("/api/cases/c-draft-1/public", params={"versionId": version_id})
+    assert preserved.status_code == 200
+    assert preserved.json()["versionId"] == version_id
+
+
 def test_mount_pins_the_current_published_version(client: TestClient) -> None:
     auth = login(client)
     published = client.get("/api/cases/c-02/public").json()
@@ -424,6 +434,7 @@ def test_public_history_reads_v1_across_all_source_endpoints(client: TestClient)
     entries = responses["sources"].json()["entries"]
     assert [row["number"] for row in entries] == [1, 2]
     assert {row["sourceType"] for row in entries} == {"attachment", "material"}
+    _assert_public_version_delete_rejected(client, auth, reader, v1["id"])
     assert reader.get("/api/cases/c-draft-1/public").json()["title"] == "V2正文"
     assert v2["id"] != v1["id"]
 

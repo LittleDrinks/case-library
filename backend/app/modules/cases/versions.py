@@ -238,7 +238,7 @@ def _reject_manual_version(database, case_id: str, user: dict, session) -> None:
 def delete_history_version(database, case_id: str, version_id: str, user: dict):
     def remove(session):
         case = database.cases.find_one({"id": case_id}, session=session)
-        _check_delete_version(case, version_id, user)
+        _check_delete_version(database, case, version_id, user, session)
         query = {"caseId": case_id, "id": version_id, "kind": {"$in": list(FORMAL_VERSION_KINDS)}}
         if not database.case_versions.delete_one(query, session=session).deleted_count:
             raise CaseError(404, "历史版本不存在")
@@ -248,10 +248,17 @@ def delete_history_version(database, case_id: str, version_id: str, user: dict):
     return run_transaction(database, remove)
 
 
-def _check_delete_version(case, version_id: str, user: dict):
+def _check_delete_version(database, case, version_id: str, user: dict, session) -> None:
     if not case:
         raise CaseError(404, "案例不存在")
     if case["ownerId"] != user["id"]:
         raise CaseError(403, "仅案例作者可删除历史版本")
     if version_id in (case.get("publishedVersionId"), case.get("submittedVersionId")):
         raise CaseError(409, "审核中或已发布的版本不可删除")
+    if database.annotations.find_one(
+        {"caseId": case["id"], "versionId": version_id}, {"_id": 1}, session=session
+    ) or database.lifecycle_events.find_one(
+        {"caseId": case["id"], "action": "approve", "versionId": version_id},
+        {"_id": 1}, session=session,
+    ):
+        raise CaseError(409, "仍被审核或公开记录引用的版本不可删除")

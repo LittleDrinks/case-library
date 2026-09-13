@@ -496,13 +496,20 @@ def test_delete_history_preserves_current_draft(client: TestClient):
 
 def test_delete_rejects_reviewing_and_published_references(client: TestClient):
     auth = login(client, "user", "user123").json()
-    case, submitted = _frozen_version(client, auth, "删除保护")
+    case, _submitted = _frozen_version(client, auth, "删除保护")
     headers = {"X-CSRF-Token": auth["csrfToken"]}
-    url = f"/api/cases/{case['id']}/versions/{submitted['id']}"
-    rejected = client.post(
-        f"/api/cases/{case['id']}/lifecycle", headers=headers,
-        json={"command": "submit", "revision": case["revision"]},
-    ).json()
-    assert rejected["version"]["id"] == submitted["id"]
+    resubmitted = _lifecycle(client, auth, case, "submit").json()
+    url = f"/api/cases/{case['id']}/versions/{resubmitted['version']['id']}"
     assert client.delete(url, headers=headers).status_code == 409
 
+
+def test_delete_rejects_review_annotation_after_withdraw(client: TestClient):
+    auth = login(client, "user", "user123").json()
+    case, _ = _frozen_version(client, auth, "批注删除保护")
+    case, version, annotation = _version_annotation(client, auth, case)
+    owner = login(client, "user", "user123").json()
+    url = f"/api/cases/{case['id']}/versions/{version['id']}"
+    assert client.delete(url, headers={"X-CSRF-Token": owner["csrfToken"]}).status_code == 409
+    rows = client.get(f"/api/cases/{case['id']}/annotations").json()
+    kept = next(row for row in rows if row["id"] == annotation["id"])
+    assert kept["versionId"] == version["id"]
