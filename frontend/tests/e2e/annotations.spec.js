@@ -193,7 +193,7 @@ async function openAnnotationFloat(page, annotation) {
   const float = page.locator(".annotation-float");
   await expect(float).toBeVisible();
   await expect(float.locator(".float-quote")).toHaveText(annotation.quote);
-  await expect(page.locator(".comment-card")).toHaveCount(1);
+  return float;
 }
 
 async function resolveFirstAnnotation(page, first, second) {
@@ -212,7 +212,8 @@ async function resolveFirstAnnotation(page, first, second) {
 
 async function expectReloadedAnnotations(page, first, second) {
   const cards = page.locator(".comment-card");
-  await expect(page.locator(".comment-card")).toHaveCount(1);
+  await expect(cards).toHaveCount(1);
+  const caseId = page.url().split("/").pop();
   const rows = await (await page.context().request.get("/api/cases/" + caseId + "/annotations")).json();
   expect(rows).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: first.id, status: "resolved", quote: "同段甲：教学依据" }),

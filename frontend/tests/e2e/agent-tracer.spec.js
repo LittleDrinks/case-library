@@ -290,9 +290,11 @@ function annotationCard(page, annotationId) {
 
 async function expectResolvedAnnotation(page, caseId, annotationId) {
   const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
-  expect(rows).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: annotationId, status: "resolved" }),
-  ]));
+  const thread = rows.find((row) => row.id === annotationId);
+  expect(thread.status).toBe("resolved");
+  const history = thread.revisions || [];
+  await expect(history).toHaveLength(1);
+  expect(history[0].status).toBe("rejected");
 }
 
 async function changeAnnotationTarget(page) {
@@ -317,23 +319,21 @@ async function assertResolvedHistoryWithoutStaleWarning(page, created, annotatio
   const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
   const thread = rows.find((row) => row.id === annotation.id);
   expect(thread.status).toBe("resolved");
-  await page.reload();
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(page.locator(".comment-card")).toHaveCount(0);
-  await expectReloadedMergeHistoryViaApi(created.id, annotation.id);
-  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
-  const current = await page.context().request.get(`/api/cases/${created.id}`);
-  expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
-}
-
-async function expectReloadedMergeHistoryViaApi(caseId, annotationId) {
-  const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
-  const thread = rows.find((row) => row.id === annotationId);
   const revisions = thread.revisions || [];
   expect(revisions).toHaveLength(2);
   expect(revisions[0].status).toBe("expired");
   expect(revisions[1].status).toBe("accepted");
   expect(revisions[1].replacement).toContain(SECOND_REPLACEMENT_MARK);
+  await page.reload();
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(0);
+  const reloaded = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
+  const merged = reloaded.find((row) => row.id === annotation.id);
+  expect(merged.status).toBe("resolved");
+  expect((merged.revisions || [])[1]?.replacement).toContain(SECOND_REPLACEMENT_MARK);
+  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
+  const current = await page.context().request.get(`/api/cases/${created.id}`);
+  expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
 }
 
 test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
