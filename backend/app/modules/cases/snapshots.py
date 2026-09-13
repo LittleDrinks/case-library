@@ -30,6 +30,7 @@ from app.modules.cases.versions import (
 
 
 RESTORE_BASELINE_TITLE = "恢复前的当前稿"
+TITLE_SNAPSHOT_KINDS = frozenset({"submission", "ai"})
 
 
 def _now() -> str:
@@ -120,11 +121,20 @@ def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
     return target
 
 
-def _restore_case(database, case: dict, target: dict, session) -> dict:
+def _restore_fields(target: dict) -> dict:
+    """submission/ai 的 title 是文章标题快照，随恢复回写；manual/restore 的
+    title 是版本名称（手动命名/恢复记录名），不是文章标题，跳过回写。"""
     fields = {key: target["metadata"].get(key) for key in CASE_METADATA_FIELDS}
-    # 版本 title 是版本名称（如手动版本名、恢复记录名），不是文章标题，恢复不改标题。
-    fields.update({key: target[key] for key in ("summary", "document")})
+    if target["kind"] in TITLE_SNAPSHOT_KINDS:
+        fields["title"] = target["title"]
+    fields["summary"] = target["summary"]
+    fields["document"] = target["document"]
     fields["updatedAt"] = _now()
+    return fields
+
+
+def _restore_case(database, case: dict, target: dict, session) -> dict:
+    fields = _restore_fields(target)
     query = {
         "id": case["id"],
         "revision": case["revision"],
