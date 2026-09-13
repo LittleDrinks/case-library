@@ -20,6 +20,7 @@ from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
 from app.modules.ai.quota import AIQuotaError
 from app.modules.cases.published import version_readable_by_id
+from app.modules.cases.lifecycle import WITHDRAWABLE_STATES as REVIEWABLE_STATES
 
 
 RUN_HEARTBEAT_SECONDS = float(os.getenv("AGENT_RUN_HEARTBEAT_SECONDS", "5"))
@@ -333,6 +334,7 @@ def _complete(context: RunContext) -> None:
                                  context.reader, context.review),
         reader_case_id=context.case["id"] if reader else None,
         reader_version_id=context.case.get("versionId") if reader else None,
+        review_case_id=context.case["id"] if context.review else None,
         artifact=artifact,
         write_record=context.deps.write_record if context.deps else None,
     ):
@@ -340,16 +342,37 @@ def _complete(context: RunContext) -> None:
 
 
 def _review_case_present(database, case_id: str) -> bool:
-    """审核对话锚定当前待审工作稿：案例不存在即终止流，无已发布版语义。"""
-    return database.cases.find_one({"id": case_id}, {"_id": 1}) is not None
+    """审核对话锚定当前待审工作稿：案例已离开待审状态即终止流。"""
+    return database.cases.find_one(
+        {"id": case_id, "workflowStatus": {"$in": list(REVIEWABLE_STATES)}},
+        {"_id": 1},
+    ) is not None
+
+
+def _review_admin_valid(database, user_id: str) -> bool:
+    """审核运行按属主身份实时重验：降权或停用后不再产生新的审核输出。"""
+    return database.users.find_one(
+        {"id": user_id, "role": "admin", "status": "active"}, {"_id": 1}
+    ) is not None
+
+
+def _review_accessible(context: RunContext) -> bool:
+    deps_user = context.deps.user if context.deps else None
+    user_id = deps_user["id"] if deps_user else context.run.user_id
+    return (
+        _review_case_present(context.repository.database, context.case["id"])
+        and _review_admin_valid(context.repository.database, user_id)
+    )
 
 
 def _reader_accessible(context: RunContext) -> bool:
     if context.review:
-        return _review_case_present(context.repository.database, context.case["id"])
+        return _review_accessible(context)
     return not context.reader or version_readable_by_id(
         context.repository.database, context.case["id"], context.case.get("versionId")
     )
+
+
 
 
 def _revoke_reader(context: RunContext) -> None:

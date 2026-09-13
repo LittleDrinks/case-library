@@ -22,6 +22,7 @@ from app.modules.agent.models import (
     ThreadEventType,
     write_view,
 )
+from app.modules.cases.lifecycle import WITHDRAWABLE_STATES as REVIEWABLE_STATES
 from app.modules.cases.published import version_readable
 from app.modules.cases.versions import create_ai_version, create_ai_version_from_write
 
@@ -411,6 +412,7 @@ class AgentRepository:
         self, run_id: str, assistant: AgentMessage, owner_id: str | None = None,
         resources: list[dict[str, str]] | None = None,
         reader_case_id: str | None = None, reader_version_id: str | None = None,
+        review_case_id: str | None = None,
         artifact: AgentArtifact | None = None,
         write_record: dict | None = None,
     ) -> bool:
@@ -418,7 +420,7 @@ class AgentRepository:
             self.database,
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
-                reader_case_id, reader_version_id,
+                reader_case_id, reader_version_id, review_case_id,
                 artifact,
                 write_record,
             ),
@@ -426,6 +428,7 @@ class AgentRepository:
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
+                      review_case_id=None,
                       artifact: AgentArtifact | None = None, write_record=None) -> bool:
         run = _model_view(
             self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session),
@@ -439,9 +442,29 @@ class AgentRepository:
             return self._finish_transaction(
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
             )
+        if review_case_id and not self._review_completion_allowed(
+            review_case_id, run.user_id, run_id, session
+        ):
+            return self._finish_transaction(
+                run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
+            )
         return self._complete_records(
             run, assistant, session, owner_id, resources, artifact, write_record
         )
+
+    def _review_completion_allowed(self, case_id, user_id, run_id, session) -> bool:
+        """审核完成边界：案例仍待审、运行属主仍是有效管理员时才允许交付。"""
+        case = self.database.cases.find_one(
+            {"id": case_id, "workflowStatus": {"$in": list(REVIEWABLE_STATES)}},
+            {"_id": 1}, session=session,
+        )
+        if not case:
+            return False
+        user = self.database.users.find_one(
+            {"id": user_id, "role": "admin", "status": "active"}, {"_id": 1},
+            session=session,
+        )
+        return user is not None
 
     def _complete_records(
         self, run, assistant, session, owner_id, resources, artifact=None, write_record=None
@@ -902,9 +925,14 @@ def transaction(database, callback):
 
 
 def claim_run_write_path(database, run_id: str, path: str, session=None) -> bool:
-    """为活跃 Run 原子选择唯一正文写入路径。"""
+    """为活跃且未收到取消请求的 Run 原子选择唯一正文写入路径。
+
+    取消请求一经落库（cancelRequestedAt），直接写入/整篇候选即被拒绝：
+    服务端停止交付的边界不晚于用户发出停止的时刻。
+    """
     result = database.agent_runs.update_one(
-        {"id": run_id, "status": "active", "writePath": {"$exists": False}},
+        {"id": run_id, "status": "active", "cancelRequestedAt": {"$exists": False},
+         "writePath": {"$exists": False}},
         {"$set": {"writePath": path}},
         session=session,
     )
