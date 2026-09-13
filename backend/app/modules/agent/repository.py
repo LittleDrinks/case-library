@@ -59,6 +59,22 @@ def _model_view(row: dict | None, model_type: type[ModelT]) -> ModelT | None:
     return model_type.model_validate(_without_id(row))
 
 
+_RUN_PROJECTION = frozenset(
+    field.alias or name for name, field in AgentRun.model_fields.items()
+)
+
+
+def _run_view(row: dict | None) -> AgentRun | None:
+    """数据库行水合为 AgentRun；旧文档遗留字段（如 writeAuthorized）不在
+    模型字段白名单内，读取投影直接剔除，不迁移存量数据。"""
+    if row is None:
+        return None
+    return AgentRun.model_validate({
+        key: value for key, value in row.items()
+        if key != "_id" and key in _RUN_PROJECTION
+    })
+
+
 class AgentRepository:
     def __init__(self, database) -> None:
         self.database = database
@@ -137,16 +153,15 @@ class AgentRepository:
         return [_model_view(row, AgentMessage) for row in rows]
 
     def active_run(self, thread_id: str, session=None) -> AgentRun | None:
-        row = self.database.agent_runs.find_one(
+        return _run_view(self.database.agent_runs.find_one(
             {"threadId": thread_id, "status": "active"}, session=session
-        )
-        return _model_view(row, AgentRun)
+        ))
 
     def runs(self, thread_id: str, session=None) -> list[AgentRun]:
         rows = self.database.agent_runs.find(
             {"threadId": thread_id}, session=session
         ).sort([("startedAt", ASCENDING), ("id", ASCENDING)])
-        return [_model_view(row, AgentRun) for row in rows]
+        return [run for row in rows if (run := _run_view(row)) is not None]
 
     def message(self, thread_id: str, message_id: str) -> AgentMessage | None:
         row = self.database.agent_messages.find_one(
@@ -155,12 +170,11 @@ class AgentRepository:
         return _model_view(row, AgentMessage)
 
     def latest_run(self, thread_id: str, session=None) -> AgentRun | None:
-        row = self.database.agent_runs.find_one(
+        return _run_view(self.database.agent_runs.find_one(
             {"threadId": thread_id},
             sort=[("startedAt", DESCENDING), ("id", DESCENDING)],
             session=session,
-        )
-        return _model_view(row, AgentRun)
+        ))
 
     def renew_run_owner(self, run_id: str, owner_id: str) -> dict | None:
         now = _now()
@@ -333,7 +347,7 @@ class AgentRepository:
             {"$set": {"cancelRequestedAt": _now()}},
             return_document=ReturnDocument.AFTER,
         )
-        return _model_view(row, AgentRun)
+        return _run_view(row)
 
     def _insert_start_records(
         self, message: AgentMessage, run: AgentRun, session
@@ -423,9 +437,8 @@ class AgentRepository:
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
                       artifact: AgentArtifact | None = None, write_record=None) -> bool:
-        run = _model_view(
-            self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session),
-            AgentRun,
+        run = _run_view(
+            self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session)
         )
         if not run:
             return False
@@ -584,7 +597,7 @@ class AgentRepository:
             return_document=ReturnDocument.AFTER,
             session=session,
         )
-        return _model_view(row, AgentRun)
+        return _run_view(row)
 
     def append_event(
         self, thread_id: str, event_type: ThreadEventType, run_id: str,

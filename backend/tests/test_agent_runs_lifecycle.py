@@ -510,3 +510,26 @@ def test_cancel_endpoint_is_forbidden_for_non_author(client: TestClient) -> None
     assert response.status_code == 403
     events = client.get(f"{THREAD_PATH}/{thread_id}/events", params={"afterSeq": 0})
     assert events.status_code == 403
+
+
+def test_snapshot_hydrates_legacy_run_with_retired_fields(client: TestClient) -> None:
+    """升级前 run 文档遗留已废弃字段（如 writeAuthorized）不阻断水合：快照、
+    取消、latest_run 按模型字段白名单读取，存量数据不迁移。"""
+    auth = _login(client)
+    with client.app.state.agent.override(
+        model=TestModel(custom_output_text="白名单回答", call_tools=[])
+    ):
+        assert _post(client, auth, "水合测试").status_code == 200
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    thread_id = _thread_id(client)
+    run = _await_run(database, thread_id)
+    database.agent_runs.update_one(
+        {"id": run["id"]}, {"$set": {"writeAuthorized": True}}
+    )
+
+    snapshot = client.get(f"/api/cases/c-draft-1/agent/threads/{thread_id}").json()
+    assert snapshot["latestRun"]["id"] == run["id"]
+    assert all(row["id"] != run["id"] or "writeAuthorized" not in row
+               for row in snapshot["runs"])
+    assert repository.latest_run(thread_id).id == run["id"]
