@@ -763,6 +763,8 @@ async function expectCollapsedTabBar(page, tabs, label) {
   const chip = tabs.getByRole("tab", { name: label });
   await expect(draftTab).toBeVisible();
   await expect(chip).toBeVisible();
+  await tabs.hover();
+  await expect(tabs).toHaveClass(/expanded/);
   await page.locator(".version-paper-head h2").hover();
   await expect(tabs).not.toHaveClass(/expanded/, { timeout: 2000 });
   await expect(chip).toBeHidden();
