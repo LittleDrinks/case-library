@@ -31,10 +31,9 @@ const emit = defineEmits(["cancel", "confirm"]);
           </button>
         </header>
         <div class="overwrite-body">
-          <p class="overwrite-warning">
-            将用「{{ versionLabel }}」恢复当前教师稿：当前正文和批注会先保存为“恢复前的当前稿”，随后恢复目标版本的正文、批注讨论和状态。
-          </p>
-          <p class="overwrite-muted">其他历史版本不受影响；取消不会改变当前稿，确认后在当前教师稿继续编辑。</p>
+          <p class="overwrite-target">恢复为 <strong>{{ versionLabel }}</strong></p>
+          <p class="overwrite-description">当前正文和批注会先保存为“恢复前的当前稿”，随后恢复此版本的正文、批注讨论和状态。</p>
+          <p class="overwrite-muted">其他历史版本不受影响。</p>
           <p v-if="error" class="review-decision-error" role="alert">{{ error }}</p>
         </div>
         <footer>

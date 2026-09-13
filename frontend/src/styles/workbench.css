@@ -505,9 +505,13 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .version-paper-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font-size: 12px; }
 .version-paper-actions button:hover { border-color: var(--brand); color: var(--brand); }
 .version-paper-actions .version-copy { border-color: var(--brand); color: var(--brand); }
-.overwrite-dialog .overwrite-body { display: grid; gap: 10px; }
-.overwrite-warning { margin: 0; color: var(--red); font-size: 14px; line-height: 1.8; }
-.overwrite-muted { margin: 0; color: var(--ink-3); font-size: 12px; }
+.overwrite-dialog .overwrite-body { display: grid; gap: 12px; padding: 20px 24px; }
+.overwrite-target, .overwrite-description { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.overwrite-target strong { color: var(--ink); font-weight: 600; }
+.overwrite-muted { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+.review-decision-dialog.overwrite-dialog > header { padding: 20px 24px 16px; }
+.review-decision-dialog.overwrite-dialog > footer { padding: 0 24px 22px; gap: 10px; }
+.review-decision-dialog.overwrite-dialog { width: min(480px, 100%); }
 .conflict-banner { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 7px 18px; border-bottom: 1px solid #edc5cb; background: var(--brand-soft); color: var(--brand-strong); font-size: 13px; }
 .conflict-banner button, .page-state button { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid currentColor; border-radius: 5px; background: #fff; color: inherit; }
 .review-return-banner { margin: 12px auto 0; max-width: 760px; border: 1px solid #edc5cb; border-radius: 6px; }
