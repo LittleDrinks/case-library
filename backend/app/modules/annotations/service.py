@@ -93,7 +93,7 @@ def _node_size(node: dict) -> int:
     if node.get("text") is not None:
         return _utf16_size(node["text"])
     children = node.get("content", [])
-    return 1 if not children else 2 + sum(_node_size(child) for child in children)
+    return 1 if node.get("type") == "hardBreak" else 2 + sum(_node_size(child) for child in children)
 
 
 def _node_text(node: dict) -> str:
