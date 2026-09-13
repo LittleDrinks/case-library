@@ -115,7 +115,7 @@ def _artifact_view(artifact) -> dict:
 async def propose_document(
     ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str = ""
 ) -> dict:
-    """提议整篇 AI 历史稿候选；暂存运行结果，成功后落为只读版本，教师确认后才生效。"""
+    """提议整篇独立只读 AI 版本；暂存运行结果，运行成功即落版本，不改当前教师稿。"""
     if ctx.deps.annotation_id:
         raise ModelRetry("批注讨论只能提议选区修订")
     if ctx.deps.proposed is not None:

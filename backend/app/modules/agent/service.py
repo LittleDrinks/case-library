@@ -169,7 +169,10 @@ def _task_prompt(reader: bool, review: bool) -> str:
 
 def _run_resources(parts: list[dict], bounds: tuple = (), reader=False,
                    review=False) -> list[dict[str, str]]:
-    records = [resource_record(SYSTEM_PROMPT), resource_record(_task_prompt(reader, review))]
+    records = [resource_record(SYSTEM_PROMPT)]
+    task_prompt = _task_prompt(reader, review)
+    if task_prompt is not SYSTEM_PROMPT:
+        records.append(resource_record(task_prompt))
     loaded = {bound.skill_id for bound in bounds} if review else set(_loaded_capability_ids(parts))
     return [*records, *[bound.resource_record() for bound in bounds if bound.skill_id in loaded]]
 

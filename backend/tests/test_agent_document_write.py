@@ -931,22 +931,6 @@ def _undo_streamed_write(client, auth, case, thread_id: str, write) -> None:
     assert body["case"]["document"] == {"type": "doc", "content": []}
 
 
-def _assert_normal_generation_did_not_write(
-        database, case_id: str, thread_id: str) -> None:
-    assert database.cases.find_one({"id": case_id})["revision"] == 1
-    assert database.cases.find_one({"id": case_id})["document"] == {
-        "type": "doc", "content": [],
-    }
-    assert database.agent_writes.count_documents({}) == 0
-    # 误调用被服务端拒绝并回灌为工具错误，运行仍正常完成。
-    message = database.agent_messages.find_one(
-        {"threadId": thread_id, "role": "assistant"}
-    )
-    assert any(part.get("type") == "tool-write_document"
-               and part.get("state") == "output-error"
-               for part in message["parts"])
-
-
 def test_streamed_direct_write_lands_and_undo_api_restores(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth, _document())

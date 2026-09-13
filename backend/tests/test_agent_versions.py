@@ -4,7 +4,6 @@ import time
 import json
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
@@ -50,11 +49,6 @@ def _full_generation_model() -> FunctionModel:
     return FunctionModel(stream_function=stream)
 
 
-def _plain_chat_model() -> FunctionModel:
-    async def stream(_messages, _info):
-        yield "围绕正文继续讨论，不调用工具。"
-
-    return FunctionModel(stream_function=stream)
 
 
 def _await_completed(database, thread_id: str) -> None:
@@ -74,12 +68,11 @@ def _message_body(text: str, message_id: str) -> dict:
     }
 
 
-def _run_message(client: TestClient, auth: dict, case: dict, text: str, message_id: str,
-                 model: FunctionModel | None = None):
+def _run_message(client: TestClient, auth: dict, case: dict, text: str, message_id: str):
     from app.modules.agent.runtime import agent
 
     thread_id = client.get(f"/api/cases/{case['id']}/agent/thread").json()["id"]
-    with agent.override(model=model or _full_generation_model()):
+    with agent.override(model=_full_generation_model()):
         response = client.post(
             f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream",
             headers={"X-CSRF-Token": auth["csrfToken"]},
