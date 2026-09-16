@@ -22,14 +22,8 @@ function statusLabel(item) {
   if (item.kind === "revision") return item.status === "accepted" ? "已采用" : item.status === "rejected" ? "已拒绝" : "待处理";
   return item.resolved ? "已处理" : "";
 }
-// 折叠头点击：切换展开；展开态点击正文区域不再收起（避免文字选取/交互误收）。
+// 折叠/展开只由头部按钮切换；正文点击不收起（按钮自带 .stop，文字选取不受影响）。
 function onHeadClick(item) {
-  emit("toggle", item);
-}
-function onBodyClick(event, item) {
-  if (event.target.closest("button, input, textarea, a")) return;
-  const selection = window.getSelection();
-  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return;
   emit("toggle", item);
 }
 </script>
@@ -58,7 +52,7 @@ function onBodyClick(event, item) {
         <ChevronDown :size="13" class="ann-head-chev" :class="{ open: item.id === expandedId }" />
       </button>
       <template v-if="item.id === expandedId">
-        <div class="ann-body" @click="onBodyClick($event, item)">
+        <div class="ann-body">
           <p v-if="item.kind === 'comment'" class="ann-text">{{ item.text }}</p>
           <template v-else>
             <p class="rev-original"><s>{{ item.original }}</s></p>

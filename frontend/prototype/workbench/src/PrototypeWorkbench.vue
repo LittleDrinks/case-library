@@ -454,8 +454,13 @@ function runFormat(fn) {
   const ed = editor();
   if (ed) fn(ed);
 }
-// 侧轨 tab：点击当前 tab 回到 AI 面板；历史/审阅/资料打开各自浮层。
+// 侧轨 tab：AI tab 收起态下即恢复面板；其余 tab 打开各自浮层，再点回 AI。
 function onRailTab(id) {
+  if (id === "ai") {
+    store.ui.aiCollapsed = false;
+    store.railTab = "ai";
+    return;
+  }
   store.railTab = store.railTab === id ? "ai" : id;
 }
 const toolbarRow1 = [
@@ -533,11 +538,8 @@ function onAnnotateFromToolbar() {
       </section>
 
       <nav class="tool-rail">
-        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id }" :title="t.label" @click="onRailTab(t.id)">
+        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id && !store.ui.aiCollapsed }" :title="t.label" @click="onRailTab(t.id)">
           <component :is="t.icon" :size="17" />
-        </button>
-        <button v-if="store.ui.aiCollapsed" type="button" class="ai-restore" :class="{ active: store.railTab === 'ai' }" title="展开 AI 面板" aria-label="展开 AI 面板" @click="store.ui.aiCollapsed = false; store.railTab = 'ai'">
-          <Sparkles :size="17" />
         </button>
       </nav>
       <div v-if="store.railTab !== 'ai'" class="rail-pane-slot open">
