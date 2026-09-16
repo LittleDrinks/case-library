@@ -1,7 +1,7 @@
 <script setup>
 // 原型主组件：组装品牌行/菜单/双排工具栏 + 目录/纸面/批注轨 + AI面板/工具轨。
 // 所有 AI 请求经 /prototype-ai 代理到真实模型；文档与会话仅存内存。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   Bold, FolderOpen, Heading2, History, Italic, Link2, List, ListOrdered, MessageSquarePlus,
   Minus, Pilcrow, Quote, Redo2, Sparkles, Strikethrough, Undo2, Wand2,
@@ -132,7 +132,8 @@ function stackLaneItems(positioned) {
   for (const item of positioned) {
     if (item.top < lastBottom + 14) item.top = lastBottom + 14;
     const el = document.querySelector(`.ann-card[data-ann="${item.id}"]`);
-    const height = el ? el.offsetHeight : estimateCardHeight(item);
+    const height = el ? el.offsetHeight : (cardHeights[item.id] ?? estimateCardHeight(item));
+    cardHeights[item.id] = height;
     lastBottom = item.top + height;
   }
   return positioned;
@@ -150,7 +151,30 @@ function estimateCardHeight(item) {
   const base = item.kind === "revision" ? 118 : 96;
   return base + textLines * 19 + replies * 40;
 }
+
+// F1 修复：估算高度只够首帧占位；渲染完成后 nextTick 用真实 offsetHeight 重排，
+// 否则长修订卡实际比估算高，堆叠错位导致后渲染卡片盖住「采用/拒绝」按钮。
+const cardHeights = reactive({});
+let remeasureQueued = false;
+function remeasureLane() {
+  if (remeasureQueued) return;
+  remeasureQueued = true;
+  nextTick(() => {
+    remeasureQueued = false;
+    for (const item of lane.value) {
+      const el = document.querySelector(`.ann-card[data-ann="${item.id}"]`);
+      if (!el) continue;
+      const h = el.offsetHeight;
+      if (cardHeights[item.id] === h) continue;
+      cardHeights[item.id] = h;
+      remeasureLane(); // 高度变化触发 lane 重算，迭代至稳定（每轮只写变化项）
+    }
+  });
+}
 const lane = computed(() => laneItems());
+watch([lane, () => store.annotations.map((a) => `${a.id}:${a.status}:${a.resolved}:${a.replies?.length ?? 0}`).join(",")], remeasureLane, { deep: false });
+onMounted(remeasureLane);
+onBeforeUnmount(() => { remeasureQueued = false; });
 const sourceAnnotation = (item) => store.annotations.find((annotation) => annotation.id === item.id) || item;
 
 function locateAnnotation(ann) {
@@ -159,14 +183,16 @@ function locateAnnotation(ann) {
   if (!ok) showToast("原文已变化，锚点失效");
 }
 function resolveAnnotation(ann) {
-  ann.resolved = !ann.resolved;
+  const target = sourceAnnotation(ann);
+  target.resolved = !target.resolved;
   paperRef.value?.refresh();
 }
 function replyAnnotation(ann) {
   const text = prompt("回复批注（原型演示）：");
-  if (text?.trim()) {
-    ann.replies.push({ id: `r${Date.now()}`, author: "我", time: "刚刚", text: text.trim() });
-  }
+  if (!text?.trim()) return;
+  const target = sourceAnnotation(ann);
+  (target.replies ||= []).push({ id: `r${Date.now()}`, author: "我", time: "刚刚", text: text.trim() });
+  paperRef.value?.refresh();
 }
 async function addAnnotation(selection) {
   const text = prompt("批注内容（原型演示）：");
