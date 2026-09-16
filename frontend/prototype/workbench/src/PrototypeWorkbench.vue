@@ -4,7 +4,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   Bold, FolderOpen, Heading2, History, List, ListOrdered, MessageSquarePlus,
-  Pilcrow, Redo2, Sparkles, Undo2, Wand2, PanelLeft, PanelRightClose,
+  Pilcrow, Redo2, Sparkles, Undo2, Wand2, PanelLeft, PanelRightClose, PanelRightOpen,
 } from "@lucide/vue";
 import { store, activeThread, newThread } from "./store.js";
 import { findTextRange, mapAnchor, mapRevision, annotationQuote } from "./text-range.js";
@@ -481,15 +481,19 @@ function onAnnotateFromToolbar() {
           @remove-chip="removeChip"
           @new-thread="onNewThread"
           @open-ai-menu="openAiMenu"
-          @collapse="store.ui.aiCollapsed = true"
         />
         <div v-show="store.railTab !== 'ai'" class="auxiliary-panel">
-          <button type="button" class="aux-collapse" aria-label="收起辅助面板" title="收起辅助面板" @click="store.ui.aiCollapsed = true"><PanelRightClose :size="16" /></button>
           <RailPanes :tab="store.railTab" @open-thread="openThread" @new-thread="onNewThread" @preview="previewRevision" @accept="acceptRevision" @reject="rejectRevision" />
         </div>
       </section>
 
       <nav class="tool-rail" aria-label="辅助功能">
+        <button type="button" class="panel-toggle" :title="store.ui.aiCollapsed ? '展开右侧面板' : '收起右侧面板'"
+          :aria-label="store.ui.aiCollapsed ? '展开右侧面板' : '收起右侧面板'" :aria-expanded="!store.ui.aiCollapsed"
+          aria-controls="assistant-panel" @click="store.ui.aiCollapsed = !store.ui.aiCollapsed">
+          <component :is="store.ui.aiCollapsed ? PanelRightOpen : PanelRightClose" :size="17" />
+          <span>{{ store.ui.aiCollapsed ? '展开' : '收起' }}</span>
+        </button>
         <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id && !store.ui.aiCollapsed }" :title="store.ui.aiCollapsed ? `展开${t.label}` : t.label" :aria-label="t.label" :aria-expanded="store.railTab === t.id && !store.ui.aiCollapsed" aria-controls="assistant-panel" @click="onRailTab(t.id)">
           <component :is="t.icon" :size="17" />
         </button>

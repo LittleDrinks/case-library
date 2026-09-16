@@ -164,8 +164,6 @@ body { font: 13px/1.6 var(--sans); color: var(--ink); background: var(--bg); }
 .ai-head b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .new-chat { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: auto; padding: 3px 10px; border: 1px solid var(--brand); border-radius: 999px; background: #fff; color: var(--brand); font-size: 12px; cursor: pointer; }
 .new-chat:hover { background: var(--brand-soft); }
-.ai-collapse { display: grid; flex: none; width: 26px; height: 26px; place-items: center; margin-left: 2px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
-.ai-collapse:hover { background: var(--bg); color: var(--ink); }
 .ai-head b.title-flash { animation: title-in 0.6s ease-out; }
 @keyframes title-in { 0% { opacity: 0.2; color: var(--brand); } 100% { opacity: 1; } }
 .ai-welcome { display: flex; flex: 1; min-height: 100%; flex-direction: column; justify-content: flex-end; }
@@ -282,8 +280,7 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 .tool-rail button:hover::after, .tool-rail button:focus-visible::after { opacity: 1; transform: translateX(0); }
 .assist-area > .ai-pane, .auxiliary-panel { width: 400px; min-width: 0; height: 100%; }
 .auxiliary-panel { position: relative; display: flex; flex-direction: column; }
-.aux-collapse { position: absolute; top: 12px; right: 10px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 4px; background: transparent; }
-.rail-pane-head { padding-right: 44px; }
+.rail-pane-head { padding-right: 14px; }
 .ann-meta { color: #757b83; font-size: 11px; padding: 3px 0 8px; }
 .ann-head-sum { min-width: 0; color: #737983; }
 .ann-head-kind { color: #737983; }
@@ -329,3 +326,7 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 
 .toast-enter-active, .toast-leave-active { transition: opacity 180ms ease, transform 180ms ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 8px); }
+
+.tool-rail .panel-toggle { flex: none; height: 52px; gap: 3px; align-content: center; margin-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.panel-toggle span { font-size: 10px; line-height: 14px; }
+.tool-rail .panel-toggle:hover { background: var(--bg); color: var(--brand); }
