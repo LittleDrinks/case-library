@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "prototype:workbench": "vite --config prototype/workbench/vite.config.js",
     "preview": "vite preview --host 0.0.0.0",
     "check:function-lines": "node check-function-lines.mjs",
     "test": "npm run check:function-lines && vitest run",
