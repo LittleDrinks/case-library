@@ -6,23 +6,13 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 export const overlayKey = new PluginKey("prototypeOverlay");
 
-function findTextRange(doc, needle) {
-  if (!needle) return null;
-  let found = null;
-  doc.descendants((node, pos) => {
-    if (found || !node.isText || !node.text.includes(needle)) return;
-    const start = pos + node.text.indexOf(needle);
-    found = { from: start, to: start + needle.length };
-    return false;
-  });
-  return found;
-}
+import { findTextRange } from "./text-range.js";
 
 function annotationDecorations(doc, annotations) {
   const items = [];
   for (const ann of annotations) {
     if (ann.resolved && ann.kind === "comment") continue;
-    const range = ann.range || findTextRange(doc, ann.anchorQuote);
+    const range = ann.anchorMissing ? null : findTextRange(doc, ann.anchorQuote, ann.range);
     if (!range) continue;
     items.push(Decoration.inline(range.from, range.to, {
       class: `ann-anchor kind-${ann.kind}`,
@@ -36,7 +26,7 @@ function revisionDecorations(doc, revisions) {
   const items = [];
   for (const rev of revisions) {
     if (rev.status !== "pending") continue;
-    const range = rev.range || findTextRange(doc, rev.original);
+    const range = rev.anchorMissing ? null : findTextRange(doc, rev.original, rev.range);
     if (!range) continue;
     items.push(Decoration.inline(range.from, range.to, { class: "rev-del", "data-rev": rev.id }));
     items.push(Decoration.widget(range.to, () => {
@@ -52,7 +42,7 @@ function revisionDecorations(doc, revisions) {
 
 function chipDecoration(doc, chip) {
   if (!chip?.quote) return [];
-  const range = chip.range || findTextRange(doc, chip.quote);
+  const range = chip.anchorMissing ? null : findTextRange(doc, chip.quote, chip.range);
   if (!range) return [];
   return [Decoration.inline(range.from, range.to, { class: "chip-anchor" })];
 }

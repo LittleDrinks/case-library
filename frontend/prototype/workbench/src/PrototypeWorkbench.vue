@@ -4,9 +4,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   Bold, FolderOpen, Heading2, History, List, ListOrdered, MessageSquarePlus,
-  Pilcrow, Redo2, Sparkles, Undo2, Wand2,
+  Pilcrow, Redo2, Sparkles, Undo2, Wand2, PanelLeft, PanelRightClose,
 } from "@lucide/vue";
 import { store, activeThread, newThread } from "./store.js";
+import { findTextRange, mapAnchor, mapRevision, annotationQuote } from "./text-range.js";
+import { useAnnotationLayout } from "./annotation-layout.js";
 import { streamChat } from "./ai-client.js";
 import PaperEditor from "./PaperEditor.vue";
 import AnnotationLane from "./components/AnnotationLane.vue";
@@ -15,10 +17,12 @@ import RailPanes from "./components/RailPanes.vue";
 import AiCommandMenu from "./components/AiCommandMenu.vue";
 
 const paperRef = ref(null);
+const aiPaneRef = ref(null);
 const aiMenuOpen = ref(false);
 const activeAnnId = ref("");
-const outlineCollapsed = ref(false);
-const railOverlay = ref(false); // 窄屏时辅助区覆盖
+const outlineCollapsed = ref(window.innerWidth < 1600);
+const annotationDraft = ref(null);
+const aiMenuPosition = ref({});
 const toast = ref("");
 let toastTimer = 0;
 
@@ -29,7 +33,9 @@ const railTabs = [
   { id: "resources", label: "资料", icon: FolderOpen },
 ];
 
+const docEpoch = ref(0);
 const outlines = computed(() => {
+  void docEpoch.value;
   const ed = paperRef.value?.editor;
   if (!ed) return [];
   const items = [];
@@ -45,7 +51,7 @@ const editor = () => paperRef.value?.editor;
 
 const snapshot = computed(() => ({
   annotations: store.annotations,
-  revisions: store.annotations.filter((a) => a.kind === "revision"),
+  revisions: store.annotations.filter((a) => a.kind === "revision" && a.id === store.ui.previewId),
   chip: store.selectionChip,
 }));
 function safeActive(t) {
@@ -55,14 +61,22 @@ function onAskAi(selection) {
   attachChip(selection);
   store.ui.aiCollapsed = false; // 问AI自动展开面板，避免输入落到不可见区
   store.railTab = "ai";
+  nextTick(() => aiPaneRef.value?.focusComposer());
 }
-function onDocChange() {
-  const text = editor()?.state.doc.textBetween(0, editor().state.doc.content.size, "\n") || "";
-  for (const rev of store.annotations) {
-    if (rev.kind !== "revision" || rev.status !== "accepted") continue;
-    // Ctrl+Z 撤销采用后，原文回来则修订重新回到待处理，可再次采用
-    if (text.includes(rev.original)) rev.status = "pending";
+function onDocChange(transaction) {
+  docEpoch.value++;
+  if (transaction?.docChanged) {
+    for (const ann of store.annotations) {
+      if (ann.kind === "revision") mapRevision(transaction, ann);
+      else mapAnchor(transaction, ann, ann.anchorQuote);
+    }
+    const pending = store.runningJob?.revisionAnchor;
+    if (pending) mapAnchor(transaction, pending, pending.quote);
+    for (const anchor of [store.selectionChip, store.pendingSelection, annotationDraft.value]) {
+      if (anchor) mapAnchor(transaction, anchor, anchor.quote);
+    }
   }
+
 }
 const docPlainText = () => editor()?.state.doc.textBetween(0, editor().state.doc.content.size, "\n") || "";
 
@@ -96,12 +110,12 @@ function onSelectionChange(ed) {
   if (quote.trim()) store.pendingSelection = { quote, from, to };
 }
 function attachChip(selection) {
-  store.selectionChip = selection ? { ...selection } : null;
+  store.selectionChip = selection ? { ...selection, range: selection.range || { from: selection.from, to: selection.to } } : null;
   paperRef.value?.refresh();
 }
 function locateChip() {
   if (!store.selectionChip) return;
-  const ok = paperRef.value.focusQuote(store.selectionChip.quote);
+  const ok = paperRef.value.focusQuote(store.selectionChip.quote, store.selectionChip.range);
   if (!ok) showToast("原文已变化，定位失败");
 }
 function removeChip() {
@@ -110,97 +124,9 @@ function removeChip() {
 }
 
 // —— 批注 ——
-function findAnnotationRange(doc, quote) {
-  let range = null;
-  doc.descendants((node, pos) => {
-    if (range || !node.isText || !node.text.includes(quote)) return;
-    const start = pos + node.text.indexOf(quote);
-    range = { from: start, to: start + quote.length };
-  });
-  return range;
-}
+const findAnnotationRange = findTextRange;
+const { lane, lanePlaceholder, schedule: remeasureLane } = useAnnotationLayout(editor);
 
-function positionAnnotation(editorView, annotation) {
-  const range = findAnnotationRange(editorView.state.doc, annotation.anchorQuote);
-  let top = 40;
-  if (range) { try { top = editorView.coordsAtPos(range.from).top; } catch { top = 40; } }
-  return { ...annotation, top: Math.max(20, top - 8), range };
-}
-
-function stackLaneItems(positioned) {
-  positioned.sort((a, b) => a.top - b.top);
-  let lastBottom = 0;
-  for (const item of positioned) {
-    if (item.top < lastBottom + 14) item.top = lastBottom + 14;
-    const el = document.querySelector(`.ann-card[data-ann="${item.id}"]`);
-    const height = el ? el.offsetHeight : (cardHeights[item.id] ?? estimateCardHeight(item));
-    cardHeights[item.id] = height;
-    lastBottom = item.top + height;
-  }
-  return positioned;
-}
-
-function laneItems() {
-  const editorView = editor()?.view;
-  if (!editorView) return store.annotations.map((a, i) => ({ ...a, top: 40 + i * 120 }));
-  return stackLaneItems(store.annotations.map((annotation) => positionAnnotation(editorView, annotation)));
-}
-
-function estimateCardHeight(item) {
-  const textLines = Math.ceil((item.text || item.replacement || "").length / 22);
-  const replies = item.replies?.length || 0;
-  const base = item.kind === "revision" ? 118 : 96;
-  return base + textLines * 19 + replies * 40;
-}
-
-// F1 修复：估算高度只够首帧占位；渲染完成后 nextTick 用真实 offsetHeight 重排，
-// 否则长修订卡实际比估算高，堆叠错位导致后渲染卡片盖住「采用/拒绝」按钮。
-const cardHeights = reactive({});
-let remeasureQueued = false;
-const laneEpoch = ref(0);
-function remeasureLane() {
-  if (remeasureQueued) return;
-  remeasureQueued = true;
-  nextTick(() => {
-    remeasureQueued = false;
-    for (const item of lane.value) {
-      const el = document.querySelector(`.ann-card[data-ann="${item.id}"]`);
-      if (!el) continue;
-      const h = el.offsetHeight;
-      if (cardHeights[item.id] === h) continue;
-      cardHeights[item.id] = h;
-      laneEpoch.value++; // 高度变化：让 lane 重算（消费 epoch），再迭代至稳定
-      remeasureLane();
-    }
-    syncLanePlaceholder();
-  });
-}
-// lane 是 absolute 定位：按最尾卡底边撑出占位高度，保证 paper-scroll 能滚到最后一 条。
-const lanePlaceholder = ref(0);
-function syncLanePlaceholder() {
-  let maxBottom = 0;
-  for (const el of document.querySelectorAll(".ann-card")) {
-    maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight);
-  }
-  lanePlaceholder.value = maxBottom + 40;
-}
-// 展开动画/字体渲染后仍可能有 ±px 漂移：ResizeObserver 兜底重排。
-let laneResizeObserver = null;
-onMounted(() => {
-  laneResizeObserver = new ResizeObserver(() => remeasureLane());
-  const laneEl = document.querySelector(".ann-lane");
-  if (laneEl) laneResizeObserver.observe(laneEl);
-});
-onBeforeUnmount(() => {
-  laneResizeObserver?.disconnect();
-  remeasureQueued = false;
-});
-const lane = computed(() => {
-  laneSignature.value; laneEpoch.value; store.ui.expandedAnnId; // 展开/收起或高度修正后强制重排
-  return laneItems();
-});
-const laneSignature = computed(() => store.annotations.map((a) => `${a.id}:${a.status ?? ""}:${a.resolved ? 1 : 0}:${a.replies?.length ?? 0}`).join(","));
-watch([lane, laneSignature], remeasureLane, { deep: false });
 const sourceAnnotation = (item) => store.annotations.find((annotation) => annotation.id === item.id) || item;
 
 // 展开（同时只一条）：展开并滚动定位原文；再次点击收起（不移动正文位置）。
@@ -213,13 +139,13 @@ function toggleAnnotation(ann) {
   store.ui.expandedAnnId = target.id;
   activeAnnId.value = target.id;
   if (target.anchorQuote) {
-    const ok = paperRef.value?.focusQuote(target.anchorQuote);
+    const ok = paperRef.value?.focusQuote(annotationQuote(target), target.range);
     if (!ok) showToast("原文已变化，锚点失效");
   }
 }
 function locateAnnotation(ann) {
   activeAnnId.value = ann.id;
-  const ok = paperRef.value.focusQuote(ann.anchorQuote);
+  const ok = paperRef.value.focusQuote(ann.anchorQuote, ann.range);
   if (!ok) showToast("原文已变化，锚点失效");
 }
 function resolveAnnotation(ann) {
@@ -227,22 +153,28 @@ function resolveAnnotation(ann) {
   target.resolved = !target.resolved;
   paperRef.value?.refresh();
 }
-function replyAnnotation(ann) {
-  const text = prompt("回复批注（原型演示）：");
-  if (!text?.trim()) return;
-  const target = sourceAnnotation(ann);
-  (target.replies ||= []).push({ id: `r${Date.now()}`, author: "我", time: "刚刚", text: text.trim() });
+function replyAnnotation({ item, text }) {
+  const target = sourceAnnotation(item);
+  (target.replies ||= []).push({ id: crypto.randomUUID(), author: "我", time: "刚刚", text });
+}
+function addAnnotation(selection) {
+  if (!selection?.quote) return;
+  annotationDraft.value = { ...selection, range: selection.range || { from: selection.from, to: selection.to }, text: "" };
+  store.ui.expandedAnnId = "";
+}
+function saveAnnotation(text) {
+  const selection = annotationDraft.value;
+  if (selection.anchorMissing) { showToast("原文已变化，请重新选择批注内容"); return; }
+  const id = `a${Date.now()}`;
+  store.annotations.push({ id, author: "我", time: "刚刚", kind: "comment",
+    anchorQuote: selection.quote, range: selection.range,
+    text, resolved: false, replies: [] });
+  annotationDraft.value = null;
+  store.ui.expandedAnnId = id;
   paperRef.value?.refresh();
 }
-async function addAnnotation(selection) {
-  const text = prompt("批注内容（原型演示）：");
-  if (!text?.trim() || !selection?.quote) return;
-  const id = `a${Date.now()}`;
-  store.annotations.push({
-    id, author: "我", time: "刚刚", kind: "comment",
-    anchorQuote: selection.quote, text: text.trim(), resolved: false, replies: [],
-  });
-  store.ui.expandedAnnId = id; // 新批注自动展开接续，其余收起
+function previewRevision(item) {
+  store.ui.previewId = store.ui.previewId === item.id ? "" : item.id;
   paperRef.value?.refresh();
 }
 
@@ -250,30 +182,32 @@ async function addAnnotation(selection) {
 function acceptRevision(rev) {
   const target = sourceAnnotation(rev);
   const ed = editor();
-  target.range ||= findAnnotationRange(ed.state.doc, target.original);
+  target.range = target.anchorMissing ? null : findTextRange(ed.state.doc, target.original, target.range);
   if (!target.range) {
     showToast("原文已变化，修订失效");
     target.status = "stale";
     paperRef.value?.refresh();
     return;
   }
-  ed.chain().focus().insertContentAt(target.range, target.replacement).run();
+  ed.chain().focus().insertContentAt(target.range, { type: "text", text: target.replacement }).run();
+  store.ui.previewId = "";
   target.status = "accepted";
   paperRef.value?.refresh();
   showToast("已采用修订（Ctrl+Z 可撤销）");
 }
 function rejectRevision(rev) {
   sourceAnnotation(rev).status = "rejected";
+  store.ui.previewId = "";
   paperRef.value?.refresh();
   showToast("已拒绝修订");
 }
 
 // —— AI 执行（真实模型） ——
 function baseMessages(extra) {
-  const doc = docPlainText().slice(0, 4000);
+  const doc = docPlainText();
   return [
     { role: "system", content: "你是高校思政教学案例写作助手。回答用中文，简洁务实。当前是交互原型：文档仅存于内存。" },
-    { role: "system", content: `教学案例正文（节选）：\n${doc}` },
+    { role: "system", content: `教学案例正文：\n${doc}` },
     ...extra,
   ];
 }
@@ -316,15 +250,18 @@ function prepareChat(args) {
   const { text, skills, quote, mode = "chat", revisionOf, requestText = text } = args;
   const thread = activeThread() || (newThread(), activeThread());
   const job = startJob(mode);
+  job.threadId = thread.id;
+  job.revisionAnchor = args.revisionAnchor;
   const started = performance.now();
   const userMsg = { role: "user", text, requestText, quote: quote || store.selectionChip?.quote || "", skills: skills || [] };
   if (mode === "chat") thread.messages.push(userMsg);
   const history = thread.messages.filter((m) => m.role === "user" || m.role === "assistant").filter((m) => !m.error)
     .map((m) => ({ role: m.role, content: (m.quote ? `引用：“${m.quote}”\n` : "") + (m.requestText || m.text) }));
-  const assistantMsg = { role: "assistant", text: "", reasoning: "", model: store.modelId || store.aiConfig.defaultModel };
+  const assistantMsg = reactive({ role: "assistant", text: "", reasoning: "", model: store.modelId || store.aiConfig.defaultModel });
   if (mode === "chat") thread.messages.push(assistantMsg);
   else { Object.assign(assistantMsg, { role: "revision-card", status: "pending", original: revisionOf, text: "" }); thread.messages.push(assistantMsg); }
-  return { thread, job, started, mode, text, revisionOf, history, assistantMsg };
+  assistantMsg.retryArgs = { ...args };
+  return { thread, job, started, mode, text, revisionOf, history, assistantMsg, append: args.append };
 }
 
 async function requestModel(state) {
@@ -342,15 +279,18 @@ async function requestModel(state) {
 
 function recordRevision(result, state) {
   if (state.mode !== "revise") return;
-  const cleaned = result.text.trim().replace(/^["“]|["”]$/g, "");
+  const output = result.text.trim().replace(/^["“]|["”]$/g, "");
+  const cleaned = state.append ? state.revisionOf + output : output;
   state.assistantMsg.replacement = cleaned;
   if (!state.revisionOf || !cleaned) return;
   const id = `rev${Date.now()}`;
+  state.assistantMsg.annotationId = id;
   store.annotations.push({
-    id, author: "AI 助手", time: "刚刚", kind: "revision", status: "pending",
-    anchorQuote: state.revisionOf, original: state.revisionOf, replacement: cleaned,
+    id, author: "AI 助手", time: "刚刚", kind: "revision", status: state.job.revisionAnchor?.anchorMissing ? "stale" : "pending",
+    anchorQuote: state.revisionOf, original: state.revisionOf, replacement: cleaned, range: state.job.revisionAnchor?.range || findTextRange(editor().state.doc, state.revisionOf), anchorMissing: state.job.revisionAnchor?.anchorMissing || false,
     reason: "由 AI 命令生成（真实模型）", resolved: false, replies: [],
   });
+  store.ui.previewId = id;
   store.ui.expandedAnnId = id; // 新修订自动展开便于采用/拒绝，其余收起
   paperRef.value?.refresh();
 }
@@ -362,6 +302,9 @@ function markChatError(error, state) {
 }
 
 async function runChat(args) {
+  if (store.runningJob) { showToast("请等待当前回复完成，或先停止生成"); return; }
+  store.ui.aiCollapsed = false;
+  store.railTab = "ai";
   const state = prepareChat(args);
   try {
     const result = await requestModel(state);
@@ -375,8 +318,8 @@ async function runChat(args) {
 async function onSend(payload) {
   if (payload.retry) {
     const idx = activeThread().messages.indexOf(payload.retry);
-    if (idx >= 0) activeThread().messages.splice(idx, 1);
-    return runChat({ text: payload.retry.text, requestText: payload.retry.requestText, quote: payload.retry.quote, mode: "chat" });
+    if (idx >= 0) activeThread().messages.splice(Math.max(0, idx - 1), 2);
+    return runChat(payload.retry.retryArgs);
   }
   if (payload.via === "suggestion") {
     return runChat({ text: payload.text, mode: "chat" });
@@ -385,8 +328,6 @@ async function onSend(payload) {
   const quote = store.selectionChip?.quote || "";
   attachChip(null);
   await runChat({ text: payload.text, skills: payload.skills, quote, mode: "chat" });
-  store.selectionChip = null;
-  paperRef.value?.refresh();
 }
 
 function stopJob() {
@@ -400,6 +341,7 @@ function prefillCommand(selection) {
   store.ui.aiCollapsed = false;
   store.railTab = "ai";
   store.composerDraft = store.composerDraft ? `${store.composerDraft}\n` : "";
+  nextTick(() => aiPaneRef.value?.focusComposer());
   showToast("已带入选区，输入后发送");
 }
 
@@ -422,32 +364,34 @@ async function onCommandRun({ item, selection }) {
   const quote = commandQuote(selection);
   if (item.mode === "chat") return runChat({ text: item.label, requestText: commandPrompt(item, quote), quote, mode: "chat" });
   if (!quote) { showToast("请先选中要修改的文字"); return; }
-  return runChat({ text: revisionPrompt(item, quote), mode: "revise", revisionOf: quote });
+  const target = selection || store.selectionChip;
+  const range = target?.range || { from: target.from, to: target.to };
+  if (target?.anchorMissing || !findTextRange(editor().state.doc, quote, range)) { showToast("原文已变化，请重新选择修改范围"); return; }
+  return runChat({ text: revisionPrompt(item, quote), mode: "revise", revisionOf: quote, revisionAnchor: { quote, range }, append: item.id === "continue" });
 }
 
 function openThread(t) {
-  store.composerDraft = activeThread()?.draft || "";
-  if (activeThread()) activeThread().draft = "";
+  if (activeThread()) { activeThread().draft = store.composerDraft; activeThread().selectionChip = store.selectionChip; }
   store.activeThreadId = t.id;
+  attachChip(t.selectionChip || null);
   store.composerDraft = t.draft || "";
+  store.railTab = "ai";
+  store.ui.aiCollapsed = false;
 }
 watch(() => store.activeThreadId, () => {
   const t = activeThread();
   if (t) store.composerDraft = t.draft || "";
+  store.railTab = "ai";
+  store.ui.aiCollapsed = false;
 });
 watch(() => store.composerDraft, (v) => { const t = activeThread(); if (t) t.draft = v; });
 
-function renameThread(t) {
-  const name = prompt("重命名会话：", t.title);
-  if (name?.trim()) {
-    t.title = name.trim();
-    t.auto = false;
-    t.manualRenamed = true;
-    t.titleAnimation = false;
-  }
-}
 function onNewThread() {
+  if (activeThread()) activeThread().selectionChip = store.selectionChip;
   newThread();
+  attachChip(null);
+  store.railTab = "ai";
+  store.ui.aiCollapsed = false;
 }
 
 function runFormat(fn) {
@@ -456,12 +400,14 @@ function runFormat(fn) {
 }
 // 侧轨 tab：AI tab 收起态下即恢复面板；其余 tab 打开各自浮层，再点回 AI。
 function onRailTab(id) {
-  if (id === "ai") {
-    store.ui.aiCollapsed = false;
-    store.railTab = "ai";
-    return;
-  }
-  store.railTab = store.railTab === id ? "ai" : id;
+  store.ui.aiCollapsed = store.railTab === id && !store.ui.aiCollapsed;
+  store.railTab = id;
+}
+function openAiMenu(event) {
+  const rect = event?.rect || event?.currentTarget?.getBoundingClientRect?.();
+  aiMenuPosition.value = rect ? { left: `${Math.min(rect.left, innerWidth - 290)}px`, top: `${Math.max(90, Math.min(rect.bottom + 8, innerHeight - 460))}px` } : {};
+  if (event?.quote) store.pendingSelection = event;
+  aiMenuOpen.value = !aiMenuOpen.value;
 }
 const toolbarRow1 = [
   { icon: MessageSquarePlus, title: "批注（选中文字后）", run: () => onAnnotateFromToolbar() },
@@ -495,11 +441,13 @@ function onAnnotateFromToolbar() {
         <span class="brand-user">王老师（演示）</span>
       </span>
     </header>
-    <div class="toolbar-row main-toolbar">
-      <button v-for="t in toolbarRow2" :key="t.title" type="button" :title="t.title" :class="{ active: editor()?.isActive && safeActive(t) }" @mousedown.prevent="runFormat(t.run)"><component :is="t.icon" :size="15" /></button>
+    <div class="toolbar-row main-toolbar" role="toolbar" aria-label="文档格式">
+      <button type="button" title="文档目录" aria-label="文档目录" :aria-expanded="!outlineCollapsed" @click="outlineCollapsed = !outlineCollapsed"><PanelLeft :size="16" /></button>
       <span class="toolbar-divider" />
-      <button v-for="t in toolbarRow1" :key="t.title" type="button" :title="t.title" @mousedown.prevent="t.run()"><component :is="t.icon" :size="15" /></button>
-      <button type="button" class="ai-cmd-btn" title="AI 命令菜单" @mousedown.prevent="aiMenuOpen = !aiMenuOpen"><Sparkles :size="15" /><span class="caret" /></button>
+      <button v-for="t in toolbarRow2" :key="t.title" type="button" :title="t.title" :class="{ active: editor()?.isActive && safeActive(t) }" @mousedown.prevent @click="runFormat(t.run)"><component :is="t.icon" :size="15" /></button>
+      <span class="toolbar-divider" />
+      <button v-for="t in toolbarRow1" :key="t.title" type="button" :title="t.title" @mousedown.prevent @click="t.run()"><component :is="t.icon" :size="15" /></button>
+      <button type="button" class="ai-cmd-btn" title="AI 命令菜单" @click="openAiMenu"><Sparkles :size="15" /><span class="caret" /></button>
     </div>
     <div class="workspace" :class="{ 'outline-collapsed': outlineCollapsed, 'ai-collapsed': store.ui.aiCollapsed }">
       <aside class="outline-pane">
@@ -511,43 +459,45 @@ function onAnnotateFromToolbar() {
           </li>
         </ul>
       </aside>
-      <button v-if="outlineCollapsed" type="button" class="outline-expand" title="展开目录" @click="outlineCollapsed = false"><span class="chev right" /></button>
+
 
       <main class="doc-area">
         <div class="paper-scroll">
           <div class="document-paper">
             <h1 class="doc-title">{{ store.doc.title }}</h1>
             <p class="doc-byline">{{ store.doc.byline }}</p>
-            <PaperEditor ref="paperRef" :snapshot="snapshot" @selection-change="onSelectionChange" @annotate="addAnnotation" @ask-ai="onAskAi" @doc-change="onDocChange" />
+            <PaperEditor ref="paperRef" :snapshot="snapshot" @selection-change="onSelectionChange" @annotate="addAnnotation" @ask-ai="onAskAi" @doc-change="onDocChange" @anchor="toggleAnnotation" @open-ai-menu="openAiMenu" />
           </div>
-          <AnnotationLane :items="lane" :active-id="activeAnnId" :expanded-id="store.ui.expandedAnnId" :placeholder-height="lanePlaceholder" @toggle="toggleAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
+          <AnnotationLane :items="lane" :active-id="activeAnnId" :expanded-id="store.ui.expandedAnnId" :placeholder-height="lanePlaceholder" :draft="annotationDraft" :preview-id="store.ui.previewId" @save="saveAnnotation" @cancel="annotationDraft = null" @preview="previewRevision" @toggle="toggleAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
         </div>
       </main>
 
-      <section class="assist-area" v-show="!store.ui.aiCollapsed">
-        <AiPane
+      <section id="assistant-panel" class="assist-area" :inert="store.ui.aiCollapsed" :aria-hidden="store.ui.aiCollapsed">
+        <AiPane ref="aiPaneRef" v-show="store.railTab === 'ai'"
           @send="onSend"
+          @preview="previewRevision" @accept="acceptRevision" @reject="rejectRevision"
           @stop="stopJob"
           @locate-chip="locateChip"
           @remove-chip="removeChip"
           @new-thread="onNewThread"
-          @open-ai-menu="aiMenuOpen = true"
-          @rename-thread="renameThread"
+          @open-ai-menu="openAiMenu"
           @collapse="store.ui.aiCollapsed = true"
         />
+        <div v-show="store.railTab !== 'ai'" class="auxiliary-panel">
+          <button type="button" class="aux-collapse" aria-label="收起辅助面板" title="收起辅助面板" @click="store.ui.aiCollapsed = true"><PanelRightClose :size="16" /></button>
+          <RailPanes :tab="store.railTab" @open-thread="openThread" @new-thread="onNewThread" @preview="previewRevision" @accept="acceptRevision" @reject="rejectRevision" />
+        </div>
       </section>
 
-      <nav class="tool-rail">
-        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id && !store.ui.aiCollapsed }" :title="t.label" @click="onRailTab(t.id)">
+      <nav class="tool-rail" aria-label="辅助功能">
+        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id && !store.ui.aiCollapsed }" :title="store.ui.aiCollapsed ? `展开${t.label}` : t.label" :aria-label="t.label" :aria-expanded="store.railTab === t.id && !store.ui.aiCollapsed" aria-controls="assistant-panel" @click="onRailTab(t.id)">
           <component :is="t.icon" :size="17" />
         </button>
       </nav>
-      <div v-if="store.railTab !== 'ai'" class="rail-pane-slot open">
-        <RailPanes :tab="store.railTab" @open-thread="openThread" @new-thread="onNewThread" @rename-thread="renameThread" />
-      </div>
+
     </div>
 
-    <AiCommandMenu v-if="aiMenuOpen" class="ai-menu-float" :command="{ selection: store.pendingSelection }" @close="aiMenuOpen = false" @run="onCommandRun" />
-    <div v-if="toast" class="toast">{{ toast }}</div>
+    <AiCommandMenu v-if="aiMenuOpen" class="ai-menu-float" :style="aiMenuPosition" :command="{ selection: store.pendingSelection }" @close="aiMenuOpen = false" @run="onCommandRun" />
+    <Transition name="toast"><div v-if="toast" class="toast" role="status">{{ toast }}</div></Transition>
   </div>
 </template>

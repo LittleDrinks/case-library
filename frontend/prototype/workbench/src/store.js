@@ -32,7 +32,7 @@ export const store = reactive({
     },
     {
       id: "a2", author: "李编辑", time: "09-13 09:41", kind: "comment",
-      anchorQuote: "既做科学家，又做教育家",
+      anchorQuote: "二、既做科学家，又做教育家",
       text: "这里建议引用原文页码，并说明“两个身份”如何统一在办学实践中。",
       resolved: false, replies: [],
     },
@@ -55,7 +55,7 @@ export const store = reactive({
   modelId: "",
   webSearch: false, // Later：未接入，只展示不可用的说明
   thinking: false,
-  ui: { aiCollapsed: false, expandedAnnId: "" }, // AI面板收起态 / 当前展开的批注卡（其余折叠）
+  ui: { aiCollapsed: false, expandedAnnId: "", previewId: "" }, // AI面板收起态 / 当前展开的批注卡（其余折叠）
 });
 
 export function activeThread() {

@@ -1,13 +1,18 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
-import { PanelRightClose, Plus, Sparkles } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { Check, Eye, PanelRightClose, Plus, Sparkles, X } from "@lucide/vue";
 
 import { activeThread, store } from "../store.js";
 import AiComposer from "./AiComposer.vue";
 
-const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "open-ai-menu", "rename-thread", "collapse"]);
+const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "open-ai-menu", "rename-thread", "collapse", "accept", "reject", "preview"]);
 const scrollEl = ref(null);
 const titleFlash = ref(false);
+const composerRef = ref(null);
+const followBottom = ref(true);
+const scrollPositions = new Map();
+let titleTimer = 0;
+let titleFrame = 0;
 
 const thread = computed(() => activeThread());
 const elapsed = computed(() => {
@@ -21,33 +26,72 @@ const suggestions = [
   { id: "review", label: "审查文档" },
 ];
 
+function finishTitleFlash() {
+  titleFlash.value = false;
+}
 watch(() => thread.value?.titleAnimation, async (anim) => {
   if (!anim) return;
-  titleFlash.value = true;
-  await nextTick();
+  const target = thread.value;
+  target.titleAnimation = false;
+  clearTimeout(titleTimer);
+  cancelAnimationFrame(titleFrame);
   titleFlash.value = false;
-  thread.value.titleAnimation = false;
-});
-
-watch(() => thread.value?.messages.length, async () => {
   await nextTick();
-  if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight;
+  titleFrame = requestAnimationFrame(() => {
+    titleFlash.value = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    titleTimer = setTimeout(finishTitleFlash, 650);
+  });
 });
+function rememberScroll() {
+  const el = scrollEl.value;
+  if (!el) return;
+  followBottom.value = el.scrollHeight - el.clientHeight - el.scrollTop < 48;
+  if (thread.value) scrollPositions.set(thread.value.id, el.scrollTop);
+}
+async function followMessages() {
+  await nextTick();
+  if (followBottom.value && scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight;
+}
+watch(() => thread.value?.messages.map((m) => `${m.text || ""}${m.reasoning || ""}${m.error || ""}`).join("\n"), followMessages);
+watch(() => thread.value?.id, async (id) => {
+  clearTimeout(titleTimer); cancelAnimationFrame(titleFrame); finishTitleFlash();
+  await nextTick();
+  if (scrollEl.value) scrollEl.value.scrollTop = scrollPositions.get(id) ?? scrollEl.value.scrollHeight;
+  rememberScroll();
+});
+function send(payload) {
+  followBottom.value = true;
+  emit("send", payload);
+}
+function revision(msg) {
+  return store.annotations.find((item) => item.id === msg.annotationId) || msg;
+}
+function revisionStatus(msg) {
+  if (msg.aborted) return "已停止";
+  if (msg.error) return "请求失败";
+  if (!msg.annotationId) return msg.ms == null ? "正在生成修改建议…" : "没有可用的修改";
+  return { accepted: "已采用", rejected: "已拒绝", stale: "原文已变化", pending: "待你确认" }[revision(msg).status] || "待你确认";
+}
+function revisionError(msg) {
+  return msg.aborted ? "已停止生成，未应用任何修改。" : `请求失败：${msg.error}。请从 AI 命令菜单重新生成修改建议。`;
+}
+onBeforeUnmount(() => { clearTimeout(titleTimer); cancelAnimationFrame(titleFrame); });
+defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
 </script>
 
 <template>
   <section class="ai-pane">
     <header class="ai-head">
       <Sparkles :size="15" class="ai-head-ic" />
-      <b :class="{ 'title-flash': titleFlash }">{{ thread?.title || "AI" }}</b>
+      <b :title="thread?.title" :class="{ 'title-flash': titleFlash }" @animationend="finishTitleFlash">{{ thread?.title || "AI" }}</b>
       <small v-if="thread?.auto" class="ai-head-auto">AI 摘要</small>
       <button type="button" class="new-chat" @click="emit('new-thread')"><Plus :size="13" /> 新会话</button>
       <button type="button" class="ai-collapse" title="收起 AI 面板" aria-label="收起 AI 面板" @click="emit('collapse')"><PanelRightClose :size="15" /></button>
     </header>
-    <div ref="scrollEl" class="ai-messages">
+    <div ref="scrollEl" class="ai-messages" @scroll="rememberScroll">
       <div v-if="!thread || !thread.messages.length" class="ai-welcome">
         <div class="ai-welcome-actions">
-          <button v-for="s in suggestions" :key="s.id" type="button" class="ai-suggestion" @click="emit('send', { text: s.label, via: 'suggestion' })">
+          <button v-for="s in suggestions" :key="s.id" type="button" class="ai-suggestion" @click="send({ text: s.label, via: 'suggestion' })">
             <Sparkles :size="13" /> {{ s.label }}
           </button>
         </div>
@@ -64,27 +108,35 @@ watch(() => thread.value?.messages.length, async () => {
             <p>{{ msg.reasoning }}</p>
           </details>
           <p v-if="msg.text" class="pre-wrap">{{ msg.text }}</p>
-          <p v-if="msg.error" class="ai-msg-error">请求失败：{{ msg.error }} <button type="button" @click="emit('send', { retry: msg })">重试</button></p>
+          <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ msg.aborted ? "已停止生成，已收到的内容保留在这里。" : `请求失败：${msg.error}` }} <button v-if="!msg.aborted" type="button" @click="send({ retry: msg })">重试</button></p>
           <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s{{ msg.aborted ? " · 已停止" : "" }}</small>
         </div>
         <div v-else-if="msg.role === 'revision-card'" class="ai-msg assistant">
           <div class="ai-rev-card">
             <header><Sparkles :size="12" /> 修改建议（真实模型生成）</header>
-            <p class="rev-original"><s>{{ msg.original }}</s></p>
-            <p class="rev-replacement">{{ msg.replacement }}</p>
-            <small v-if="msg.reason">{{ msg.reason }}</small>
+            <p class="rev-original"><s>{{ revision(msg).original }}</s></p>
+            <p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p>
+            <small v-if="revision(msg).reason">{{ revision(msg).reason }}</small>
+            <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ revisionError(msg) }}</p>
             <footer>
-              <span class="tag" :class="msg.status">{{ msg.status === "accepted" ? "已采用" : msg.status === "rejected" ? "已拒绝" : "待处理" }}</span>
+              <span class="tag" :class="revision(msg).status">{{ revisionStatus(msg) }}</span>
+              <div v-if="msg.annotationId && revision(msg).status === 'pending'" class="rev-actions">
+                <button type="button" @click="emit('preview', revision(msg))"><Eye :size="12" /> 查看原文</button>
+                <button type="button" @click="emit('accept', revision(msg))"><Check :size="12" /> 采用</button>
+                <button type="button" @click="emit('reject', revision(msg))"><X :size="12" /> 保留原文</button>
+              </div>
+              <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s</small>
             </footer>
           </div>
         </div>
       </template>
     </div>
     <AiComposer
+      ref="composerRef"
       :busy="Boolean(store.runningJob)"
       :elapsed="elapsed"
       :model-supported-thinking="Boolean(store.aiConfig.thinking?.[store.modelId])"
-      @send="(payload) => emit('send', payload)"
+      @send="send"
       @stop="emit('stop')"
       @locate-chip="emit('locate-chip')"
       @remove-chip="emit('remove-chip')"
@@ -92,3 +144,10 @@ watch(() => thread.value?.messages.length, async () => {
     />
   </section>
 </template>
+
+<style scoped>
+.ai-msg-error.stopped { color: var(--ink-3); }
+.ai-head b { flex: 1; min-width: 0; }
+.ai-head-auto { flex: none; color: var(--ink-3); font-size: 10px; }
+.ai-msg { overflow-wrap: anywhere; }
+</style>

@@ -5,19 +5,20 @@ import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { MiniLink } from "./mini-link.js";
 import { overlayKey, OverlayExtension } from "./decorations.js";
 import SelectionBalloon from "./components/SelectionBalloon.vue";
+import { findTextRange } from "./text-range.js";
 import { initialDoc } from "./content.js";
 
 const props = defineProps({
   snapshot: { type: Object, required: true },
 });
-const emit = defineEmits(["selection-change", "annotate", "ask-ai", "doc-change"]);
+const emit = defineEmits(["selection-change", "annotate", "ask-ai", "doc-change", "anchor", "open-ai-menu"]);
 const editorEl = ref(null);
 let decorationsTick = 0;
 
 const editor = useEditor({
   content: initialDoc,
   extensions: [StarterKit, MiniLink, OverlayExtension.configure({ snapshot: () => props.snapshot })],
-  onUpdate: () => { emit("doc-change"); bumpDecorations(); },
+  onUpdate: ({ transaction }) => { emit("doc-change", transaction); bumpDecorations(); },
   onSelectionUpdate: () => emit("selection-change", editor.value),
 });
 
@@ -32,15 +33,8 @@ function bumpDecorations() {
 defineExpose({
   editor,
   refresh: bumpDecorations,
-  focusQuote(quote) {
-    const doc = editor.value.state.doc;
-    let found = null;
-    doc.descendants((node, pos) => {
-      if (found || !node.isText || !node.text.includes(quote)) return;
-      const start = pos + node.text.indexOf(quote);
-      found = { from: start, to: start + quote.length };
-      return false;
-    });
+  focusQuote(quote, range) {
+    const found = findTextRange(editor.value.state.doc, quote, range);
     if (!found) return false;
     const view = editor.value.view;
     view.dispatch(view.state.tr.setSelection(TextSelectionNear(view.state, found)).scrollIntoView());
@@ -52,6 +46,12 @@ defineExpose({
   },
 });
 
+function onAnchorClick(event) {
+  const id = event.target.closest("[data-ann]")?.dataset.ann;
+  const item = props.snapshot.annotations.find((a) => a.id === id);
+  if (item) emit("anchor", item);
+}
+
 // TextSelection 引入放底部避免与 SFC 编译器冲突
 import { TextSelection } from "@tiptap/pm/state";
 function TextSelectionNear(state, range) {
@@ -61,12 +61,13 @@ function TextSelectionNear(state, range) {
 
 <template>
   <div ref="editorEl" class="paper-wrap">
-    <EditorContent v-if="editor" :editor="editor" class="paper-editor" />
+    <EditorContent v-if="editor" :editor="editor" class="paper-editor" @click="onAnchorClick" />
     <SelectionBalloon
       v-if="editor"
       :editor="editor"
       @annotate="(sel) => emit('annotate', sel)"
       @ask-ai="(sel) => emit('ask-ai', sel)"
+      @open-ai-menu="(event) => emit('open-ai-menu', event)"
       @selection-change="(e) => emit('selection-change', e)"
     />
   </div>
