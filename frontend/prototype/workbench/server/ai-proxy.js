@@ -11,7 +11,6 @@ const ENV_CANDIDATES = [
 ];
 const ENV_FILE = ENV_CANDIDATES.find((file) => fs.existsSync(file)) || ENV_CANDIDATES[0];
 const MAX_BODY = 512 * 1024;
-const MAX_LOG_TEXT = 12000;
 const DEFAULT_EVENT_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "events.log");
 
 const HYBRID_THINKING = new Set([
@@ -68,14 +67,14 @@ function redactText(value, config) {
     .replace(/(["']?(?:api[_-]?key|authorization|base[_-]?url)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}]+)/gi, "$1<REDACTED>");
 }
 
-function sampleText(value, config, limit = MAX_LOG_TEXT) {
-  return redactText(value, config).slice(0, limit);
+function logText(value, config) {
+  return redactText(value, config);
 }
 
 function sampleMessages(messages, config) {
-  return (Array.isArray(messages) ? messages : []).slice(0, 12).map((message) => ({
+  return (Array.isArray(messages) ? messages : []).map((message) => ({
     role: message?.role,
-    content: sampleText(message?.content, config, 1800),
+    content: redactText(message?.content, config),
   }));
 }
 
@@ -149,19 +148,20 @@ function createUpstreamBody(body, model) {
   return upstreamBody;
 }
 
-async function pipeStream(upstream, res) {
+async function pipeStream(upstream, res, state) {
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
-  let bytes = 0; let sample = ""; let done = false;
+  let bytes = 0; let full = ""; let done = false;
   while (true) {
     const item = await reader.read();
     if (item.done) break;
     bytes += item.value.length;
-    sample = `${sample}${decoder.decode(item.value, { stream: true })}`.slice(-MAX_LOG_TEXT);
-    done ||= sample.includes("data: [DONE]");
+    full += decoder.decode(item.value, { stream: true });
+    state.partial = full; // 取消/失败时 proxyError 据此保留已收到部分
+    done ||= full.includes("data: [DONE]");
     if (!res.destroyed) res.write(item.value);
   }
-  return { bytes, sample, done };
+  return { bytes, full, done };
 }
 
 function logChat(state, details) {
@@ -169,7 +169,7 @@ function logChat(state, details) {
 }
 
 async function upstreamFailure(res, upstream, state) {
-  const response = sampleText(await upstream.text().catch(() => ""), state.config);
+  const response = logText(await upstream.text().catch(() => ""), state.config);
   logChat(state, { outcome: "upstream-error", status: upstream.status, response });
   res.statusCode = 502;
   res.setHeader("content-type", "application/json; charset=utf-8");
@@ -184,11 +184,11 @@ async function proxyChat(res, state, body) {
   });
   if (!upstream.ok || !upstream.body) return upstreamFailure(res, upstream, state);
   res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-prototype-abort": "1" });
-  const result = await pipeStream(upstream, res);
+  const result = await pipeStream(upstream, res, state);
   if (!res.destroyed && !res.writableEnded) res.end();
   logChat(state, {
     outcome: "complete", status: 200, thinking: Boolean(body.thinking && thinkingSupported(state.model)),
-    bytes: result.bytes, done: result.done, response: sampleText(result.sample, state.config),
+    bytes: result.bytes, done: result.done, response: logText(result.full, state.config),
   });
 }
 
@@ -197,7 +197,10 @@ function proxyError(res, error, state) {
   const timedOut = state.timedOut;
   logChat(state, {
     outcome: stopped ? "client-aborted" : timedOut ? "timeout" : "proxy-error",
-    error: stopped ? "client-abort" : timedOut ? "timeout" : sampleText(error?.message, state.config),
+    error: stopped ? "client-abort" : timedOut ? "timeout" : logText(error?.message, state.config),
+    ...(state.partial != null
+      ? { bytes: Buffer.byteLength(state.partial), partial: logText(state.partial, state.config) }
+      : {}),
   });
   if (res.headersSent) { if (!res.writableEnded) res.end(); return; }
   res.statusCode = stopped ? 499 : timedOut ? 504 : 502;
