@@ -23,21 +23,21 @@ export const store = reactive({
   },
   annotations: [
     {
-      id: "a1", author: "王老师", time: "09-12 14:02", kind: "comment",
+      id: "a1", author: "管理员", time: "09-12 14:02", kind: "comment",
       anchorQuote: "我不知道什么专业是热门的，我只知道国家需要什么，我就做什么",
       text: "这句名言建议补充出处年份（1952 年赴京途中对记者所言），并核对通行版本的措辞差异。",
       resolved: false, replies: [
-        { id: "a1r1", author: "李编辑", time: "09-12 15:10", text: "已查校史馆讲解词，通行版本确为“国家的需要就是我的专业”。" },
+        { id: "a1r1", author: "我", time: "09-12 15:10", text: "已查校史馆讲解词，通行版本确为“国家的需要就是我的专业”。" },
       ],
     },
     {
-      id: "a2", author: "李编辑", time: "09-13 09:41", kind: "comment",
+      id: "a2", author: "AI", time: "09-13 09:41", kind: "comment",
       anchorQuote: "二、既做科学家，又做教育家",
       text: "这里建议引用原文页码，并说明“两个身份”如何统一在办学实践中。",
       resolved: false, replies: [],
     },
     {
-      id: "a3", author: "王老师", time: "09-13 16:20", kind: "comment",
+      id: "a3", author: "我", time: "09-13 16:20", kind: "comment",
       anchorQuote: "科学家最重要的品质是爱国",
       text: "此处可加一句过渡，把个人选择与国家需要连接起来，避免论述断层。",
       resolved: false, replies: [],

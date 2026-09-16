@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onMounted, ref } from "vue";
-const props = defineProps({ label: { type: String, default: "写下批注" }, quote: { type: String, default: "" } });
+const props = defineProps({ label: { type: String, default: "写下批注" } });
 const emit = defineEmits(["save", "cancel"]);
 const text = ref("");
 const input = ref(null);
@@ -11,7 +11,6 @@ function save() {
 </script>
 <template>
   <form class="annotation-input" @submit.prevent="save" @keydown.esc.stop="emit('cancel')">
-    <blockquote v-if="quote">{{ quote }}</blockquote>
     <textarea ref="input" v-model="text" :aria-label="label" :placeholder="label" rows="3" @keydown.ctrl.enter.prevent="save" />
     <footer><span>Ctrl + Enter 发送</span><button type="button" @click="emit('cancel')">取消</button><button type="submit" :disabled="!text.trim()">发送</button></footer>
   </form>

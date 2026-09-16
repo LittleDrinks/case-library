@@ -12,10 +12,19 @@ import { useAnnotationLayout } from "./annotation-layout.js";
 import { streamChat } from "./ai-client.js";
 import PaperEditor from "./PaperEditor.vue";
 import AnnotationLane from "./components/AnnotationLane.vue";
+import PrototypeSwitcher from "./components/PrototypeSwitcher.vue";
 import AiPane from "./components/AiPane.vue";
 import RailPanes from "./components/RailPanes.vue";
 import AiCommandMenu from "./components/AiCommandMenu.vue";
 
+// 批注视觉原型：同一工作台用 ?variant=A/B/C 对比讨论卡片、极简边注、批注清单。
+const isPrototypeDev = import.meta.env.DEV;
+const initialVariant = new URLSearchParams(location.search).get("variant");
+const annotationVariant = ref(["A", "B", "C"].includes(initialVariant) ? initialVariant : "A");
+function switchAnnotationVariant(value) {
+  annotationVariant.value = value;
+  nextTick(remeasureLane);
+}
 const paperRef = ref(null);
 const aiPaneRef = ref(null);
 const aiMenuOpen = ref(false);
@@ -286,7 +295,7 @@ function recordRevision(result, state) {
   const id = `rev${Date.now()}`;
   state.assistantMsg.annotationId = id;
   store.annotations.push({
-    id, author: "AI 助手", time: "刚刚", kind: "revision", status: state.job.revisionAnchor?.anchorMissing ? "stale" : "pending",
+    id, author: "AI", time: "刚刚", kind: "revision", status: state.job.revisionAnchor?.anchorMissing ? "stale" : "pending",
     anchorQuote: state.revisionOf, original: state.revisionOf, replacement: cleaned, range: state.job.revisionAnchor?.range || findTextRange(editor().state.doc, state.revisionOf), anchorMissing: state.job.revisionAnchor?.anchorMissing || false,
     reason: "由 AI 命令生成（真实模型）", resolved: false, replies: [],
   });
@@ -430,7 +439,7 @@ function onAnnotateFromToolbar() {
 </script>
 
 <template>
-  <div class="wb">
+  <div class="wb" :class="`annotation-variant-${annotationVariant}`">
     <header class="brand-row">
       <img src="/logo.png" alt="上海大学" class="brand-logo" />
       <span class="brand-title">思政教学案例库 · 工作台</span>
@@ -438,7 +447,7 @@ function onAnnotateFromToolbar() {
       <span class="brand-right">
         <span class="doc-status">{{ store.doc.status }}</span>
         <span class="doc-save">{{ store.doc.savedAt }}</span>
-        <span class="brand-user">王老师（演示）</span>
+        <span class="brand-user">我</span>
       </span>
     </header>
     <div class="toolbar-row main-toolbar" role="toolbar" aria-label="文档格式">
@@ -468,7 +477,7 @@ function onAnnotateFromToolbar() {
             <p class="doc-byline">{{ store.doc.byline }}</p>
             <PaperEditor ref="paperRef" :snapshot="snapshot" @selection-change="onSelectionChange" @annotate="addAnnotation" @ask-ai="onAskAi" @doc-change="onDocChange" @anchor="toggleAnnotation" @open-ai-menu="openAiMenu" />
           </div>
-          <AnnotationLane :items="lane" :active-id="activeAnnId" :expanded-id="store.ui.expandedAnnId" :placeholder-height="lanePlaceholder" :draft="annotationDraft" :preview-id="store.ui.previewId" @save="saveAnnotation" @cancel="annotationDraft = null" @preview="previewRevision" @toggle="toggleAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
+          <AnnotationLane :variant="annotationVariant" :items="lane" :active-id="activeAnnId" :expanded-id="store.ui.expandedAnnId" :placeholder-height="lanePlaceholder" :draft="annotationDraft" :preview-id="store.ui.previewId" @save="saveAnnotation" @cancel="annotationDraft = null" @preview="previewRevision" @toggle="toggleAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
         </div>
       </main>
 
@@ -501,6 +510,7 @@ function onAnnotateFromToolbar() {
 
     </div>
 
+    <PrototypeSwitcher v-if="isPrototypeDev" :current="annotationVariant" :count="store.annotations.length" :expanded="store.ui.expandedAnnId" :resolved="store.annotations.filter(a => a.resolved).length" @change="switchAnnotationVariant" />
     <AiCommandMenu v-if="aiMenuOpen" class="ai-menu-float" :style="aiMenuPosition" :command="{ selection: store.pendingSelection }" @close="aiMenuOpen = false" @run="onCommandRun" />
     <Transition name="toast"><div v-if="toast" class="toast" role="status">{{ toast }}</div></Transition>
   </div>

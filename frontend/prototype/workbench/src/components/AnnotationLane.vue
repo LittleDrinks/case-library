@@ -1,11 +1,12 @@
 <script setup>
 import { ref } from "vue";
 import AnnotationInput from "./AnnotationInput.vue";
-import { Check, ChevronDown, MessageSquare, Pencil, Quote as QuoteIcon, Reply, X } from "@lucide/vue";
+import { Check, ChevronDown, MessageSquare, Pencil, Reply, X } from "@lucide/vue";
 
 // 段旁批注卡：默认折叠为紧凑摘要行，点头展开正文并定位原文；同一时刻最多展开一条。
 // expandedId（展开态）与 activeId（定位高亮态）分离：定位不强制展开。
 const props = defineProps({
+  variant: { type: String, default: "A" },
   draft: { type: Object, default: null },
   previewId: { type: String, default: "" },
   items: { type: Array, required: true }, // 注视 lane 排序后的卡片
@@ -16,6 +17,7 @@ const props = defineProps({
 const emit = defineEmits(["toggle", "resolve", "reply", "accept", "reject", "save", "cancel", "preview"]);
 
 const replying = ref("");
+const onlyOpen = ref(false);
 function saveReply(item, text) {
   emit("reply", { item, text });
   replying.value = "";
@@ -38,9 +40,11 @@ function onHeadClick(item) {
 </script>
 <template>
   <div class="ann-lane">
-    <div v-if="draft" class="annotation-draft"><b>新批注</b><AnnotationInput :quote="draft.quote" @save="(text) => emit('save', text)" @cancel="emit('cancel')" /></div>
+    <header v-if="variant === 'C'" class="ann-inbox-head"><div><b>批注</b><span>{{ items.filter(i => !i.resolved).length }} 条待处理</span></div><button type="button" :aria-pressed="onlyOpen" @click="onlyOpen = !onlyOpen">{{ onlyOpen ? '显示全部' : '仅待处理' }}</button></header>
+    <div v-if="draft" class="annotation-draft"><b>新批注</b><AnnotationInput @save="(text) => emit('save', text)" @cancel="emit('cancel')" /></div>
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
+      v-show="variant !== 'C' || !onlyOpen || !item.resolved"
 
       :key="item.id"
       :data-ann="item.id"
@@ -54,16 +58,19 @@ function onHeadClick(item) {
         :title="item.id === expandedId ? '收起' : '展开并定位原文'"
         @click.stop="onHeadClick(item)"
       >
-        <span class="ann-head-kind"><MessageSquare v-if="item.kind === 'comment'" :size="12" /><Pencil v-else :size="12" /> {{ kindLabel(item) }}</span>
+        <span v-if="variant === 'B'" class="ann-marker-number">{{ index + 1 }}</span>
+        <span class="ann-head-kind" :title="kindLabel(item)" :aria-label="kindLabel(item)"><MessageSquare v-if="item.kind === 'comment'" :size="13" /><Pencil v-else :size="13" /></span>
         <span class="author">{{ item.author }}</span>
         <span v-if="statusLabel(item)" class="ann-head-status">{{ statusLabel(item) }}</span>
-        <span class="ann-head-sum">{{ summary(item) }}</span>
-        <span v-if="item.replies?.length" class="ann-head-replies"><MessageSquare :size="10" /> {{ item.replies.length }}</span>
+        <time v-if="item.id === expandedId" class="ann-time">{{ item.time }}</time>
+        <span v-else class="ann-head-sum">{{ summary(item) }}</span>
+        <span v-if="item.replies?.length && item.id !== expandedId" class="ann-head-replies"><MessageSquare :size="10" /> {{ item.replies.length }}</span>
         <ChevronDown :size="13" class="ann-head-chev" :class="{ open: item.id === expandedId }" />
       </button>
+      <button v-if="item.id === expandedId && item.kind === 'comment'" class="ann-resolve-top" type="button" :aria-label="item.resolved ? '重新打开批注' : '解决批注'" :title="item.resolved ? '重新打开' : '解决批注'" @click.stop="emit('resolve', item)"><Check :size="15" /></button>
       <div class="ann-expansion" :inert="item.id !== expandedId" :aria-hidden="item.id !== expandedId">
         <div class="ann-body">
-          <div class="ann-meta">{{ item.author }} · {{ item.time }}<span v-if="item.anchorMissing"> · 原文已变化</span></div>
+          <div v-if="item.anchorMissing" class="ann-meta">原文已变化</div>
           <p v-if="item.kind === 'comment'" class="ann-text">{{ item.text }}</p>
           <template v-else>
             <p class="rev-original"><s>{{ item.original }}</s></p>
@@ -76,17 +83,15 @@ function onHeadClick(item) {
             </div>
             <div v-else class="rev-status"><Check v-if="item.status === 'accepted'" :size="11" /><X v-else :size="11" /> {{ item.status === "accepted" ? "已采用（可撤销）" : item.status === "stale" ? "原文已变化，请重新生成" : "已拒绝" }}</div>
           </template>
-          <blockquote v-if="item.kind === 'comment' && !item.resolved" class="ann-quote"><QuoteIcon :size="11" class="ann-quote-ic" /><span>“{{ item.anchorQuote }}”</span></blockquote>
           <ul v-if="item.replies?.length" class="ann-replies">
             <li v-for="r in item.replies" :key="r.id">
-              <b>{{ r.author }}</b> · {{ r.time }}<br />{{ r.text }}
+              <div class="ann-reply-head"><b>{{ r.author }}</b><time>{{ r.time }}</time></div>
+              <p>{{ r.text }}</p>
             </li>
           </ul>
           <footer v-if="item.kind === 'comment'" class="ann-card-foot">
-            <button v-if="!item.resolved" type="button" @click.stop="replying = item.id"><Reply :size="12" /> 回复</button>
-            <button type="button" @click.stop="emit('resolve', item)">
-              <Check :size="12" /> {{ item.resolved ? "重新打开" : "标记处理" }}
-            </button>
+            <button v-if="!item.resolved" type="button" @click.stop="replying = item.id"><Reply :size="13" /> 回复这条批注…</button>
+
           </footer>
           <AnnotationInput v-if="replying === item.id" label="回复批注" @save="(text) => saveReply(item, text)" @cancel="replying = ''" />
         </div>

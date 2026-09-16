@@ -86,14 +86,14 @@ body { font: 13px/1.6 var(--sans); color: var(--ink); background: var(--bg); }
 
 /* 段旁批注轨 */
 .ann-lane { position: relative; }
-.ann-card { transition: top 220ms cubic-bezier(.2,.7,.2,1), border-color 180ms, box-shadow 180ms; position: absolute; right: 0; width: 100%; max-width: 270px; margin-bottom: 10px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; box-shadow: 0 1px 2px rgba(38, 34, 31, 0.05); cursor: pointer; }
-.ann-card.active { border-color: rgba(186, 28, 34, 0.55); box-shadow: 0 0 0 2px var(--brand-soft); }
+.ann-card { transition: top 220ms cubic-bezier(.2,.7,.2,1), border-color 180ms, box-shadow 180ms; position: absolute; right: 0; width: 100%; max-width: 270px; margin-bottom: 10px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; box-shadow: 0 2px 6px rgba(38, 34, 31, 0.035); cursor: pointer; }
+.ann-card.active { border-color: #cbbdb6; box-shadow: 0 3px 12px rgba(38, 34, 31, 0.07); }
 .ann-card.resolved { opacity: 0.62; }
-.ann-head { display: flex; width: 100%; align-items: center; gap: 5px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: inherit; text-align: left; cursor: pointer; }
+.ann-head { display: flex; width: 100%; align-items: center; gap: 7px; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: inherit; text-align: left; cursor: pointer; }
 .ann-head:hover { background: var(--bg); }
 .ann-head-kind { display: inline-flex; flex: none; align-items: center; gap: 3px; color: var(--ink-3); font-size: 10px; }
 .ann-card.kind-revision .ann-head-kind { color: var(--brand); }
-.ann-head .author { flex: none; max-width: 64px; overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ann-head .author { flex: none; max-width: 64px; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .ann-head-status { flex: none; padding: 0 5px; border-radius: 3px; background: var(--bg); color: var(--ink-3); font-size: 10px; }
 .ann-card.kind-revision .ann-head-status { background: var(--brand-soft); color: var(--brand); }
 .ann-head-sum { flex: 1; overflow: hidden; font-size: 11px; color: var(--ink-3); text-overflow: ellipsis; white-space: nowrap; }
@@ -104,16 +104,14 @@ body { font: 13px/1.6 var(--sans); color: var(--ink); background: var(--bg); }
 .ann-card.expanded .ann-expansion { grid-template-rows: 1fr; opacity: 1; }
 .ann-body { min-height: 0; overflow: hidden; padding: 0 12px; cursor: default; }
 .ann-card.expanded .ann-body { padding-bottom: 12px; }
+.ann-card.expanded .ann-head { padding-top: 12px; padding-bottom: 12px; }
+.ann-time { margin-left: auto; font-size: 10px; color: #8b8b87; white-space: nowrap; }
 .ann-card.expanded { cursor: default; }
 .ann-lane-spacer { grid-column: 2; width: 100%; }
 .ann-card .author { color: var(--ink-2); font-weight: 600; }
 .kind-chip { margin-left: auto; padding: 1px 6px; border-radius: 3px; background: var(--bg); font-size: 10px; }
 .ann-card.kind-revision .kind-chip { background: var(--brand-soft); color: var(--brand); }
-.ann-text { margin: 0; font-size: 12px; line-height: 1.65; color: var(--ink); }
-.ann-quote { display: flex; align-items: flex-start; gap: 4px; margin: 8px 0 0; padding: 5px 8px; border-left: 2px solid #d6d8dc; background: #f4f5f6; color: #555b65; font-size: 12px; line-height: 1.6; }
-.ann-quote-ic { flex: none; margin-top: 3px; color: #7c838d; }
-.ann-replies { margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); list-style: none; font-size: 11px; color: var(--ink-2); }
-.ann-replies li + li { margin-top: 5px; }
+.ann-text { margin: 0; font-size: 13px; line-height: 1.8; color: var(--ink); }
 .ann-card-foot { display: flex; gap: 4px; margin-top: 8px; }
 .ann-card-foot button { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-3); font-size: 11px; }
 .ann-card-foot button:hover { background: var(--bg); color: var(--brand); }
@@ -286,7 +284,6 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 .ann-head-kind { color: #737983; }
 .annotation-draft { position: relative; z-index: 3; padding: 12px; border: 1px solid #d0b7b8; border-radius: 8px; background: #fff; box-shadow: var(--shadow-pop); animation: menu-in 180ms ease; }
 .annotation-input { margin-top: 10px; }
-.annotation-input blockquote { max-height: 90px; overflow-y: auto; margin: 0 0 10px; padding: 8px; border-left: 2px solid #d6d8dc; background: #f4f5f6; color: #555b65; font-size: 12px; }
 .annotation-input textarea { width: 100%; resize: vertical; padding: 8px; border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; }
 .annotation-input footer { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .annotation-input footer span { margin-right: auto; color: #777; font-size: 10px; }
@@ -330,3 +327,12 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 .tool-rail .panel-toggle { flex: none; height: 52px; gap: 3px; align-content: center; margin-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
 .panel-toggle span { font-size: 10px; line-height: 14px; }
 .tool-rail .panel-toggle:hover { background: var(--bg); color: var(--brand); }
+
+.ann-replies { margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid #efede9; list-style: none; font-size: 12px; color: var(--ink-2); }
+.ann-replies li + li { margin-top: 14px; }
+.ann-reply-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.ann-reply-head b { font-size: 11px; font-weight: 500; color: #555b58; }
+.ann-reply-head time { margin-left: auto; font-size: 10px; color: #8b8b87; }
+.ann-replies p { margin: 0; line-height: 1.75; }
+.ann-card-foot { padding-top: 6px; gap: 10px; }
+.ann-card-foot button { padding-left: 0; padding-right: 4px; color: #737872; }
