@@ -53,6 +53,7 @@ function safeActive(t) {
 }
 function onAskAi(selection) {
   attachChip(selection);
+  store.ui.aiCollapsed = false; // 问AI自动展开面板，避免输入落到不可见区
   store.railTab = "ai";
 }
 function onDocChange() {
@@ -171,18 +172,51 @@ function remeasureLane() {
       laneEpoch.value++; // 高度变化：让 lane 重算（消费 epoch），再迭代至稳定
       remeasureLane();
     }
+    syncLanePlaceholder();
   });
 }
+// lane 是 absolute 定位：按最尾卡底边撑出占位高度，保证 paper-scroll 能滚到最后一 条。
+const lanePlaceholder = ref(0);
+function syncLanePlaceholder() {
+  let maxBottom = 0;
+  for (const el of document.querySelectorAll(".ann-card")) {
+    maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight);
+  }
+  lanePlaceholder.value = maxBottom + 40;
+}
+// 展开动画/字体渲染后仍可能有 ±px 漂移：ResizeObserver 兜底重排。
+let laneResizeObserver = null;
+onMounted(() => {
+  laneResizeObserver = new ResizeObserver(() => remeasureLane());
+  const laneEl = document.querySelector(".ann-lane");
+  if (laneEl) laneResizeObserver.observe(laneEl);
+});
+onBeforeUnmount(() => {
+  laneResizeObserver?.disconnect();
+  remeasureQueued = false;
+});
 const lane = computed(() => {
-  laneSignature.value; laneEpoch.value; // 回复/状态变化或高度修正后强制重排
+  laneSignature.value; laneEpoch.value; store.ui.expandedAnnId; // 展开/收起或高度修正后强制重排
   return laneItems();
 });
 const laneSignature = computed(() => store.annotations.map((a) => `${a.id}:${a.status ?? ""}:${a.resolved ? 1 : 0}:${a.replies?.length ?? 0}`).join(","));
 watch([lane, laneSignature], remeasureLane, { deep: false });
-onMounted(remeasureLane);
-onBeforeUnmount(() => { remeasureQueued = false; });
 const sourceAnnotation = (item) => store.annotations.find((annotation) => annotation.id === item.id) || item;
 
+// 展开（同时只一条）：展开并滚动定位原文；再次点击收起（不移动正文位置）。
+function toggleAnnotation(ann) {
+  const target = sourceAnnotation(ann);
+  if (store.ui.expandedAnnId === target.id) {
+    store.ui.expandedAnnId = "";
+    return;
+  }
+  store.ui.expandedAnnId = target.id;
+  activeAnnId.value = target.id;
+  if (target.anchorQuote) {
+    const ok = paperRef.value?.focusQuote(target.anchorQuote);
+    if (!ok) showToast("原文已变化，锚点失效");
+  }
+}
 function locateAnnotation(ann) {
   activeAnnId.value = ann.id;
   const ok = paperRef.value.focusQuote(ann.anchorQuote);
@@ -203,10 +237,12 @@ function replyAnnotation(ann) {
 async function addAnnotation(selection) {
   const text = prompt("批注内容（原型演示）：");
   if (!text?.trim() || !selection?.quote) return;
+  const id = `a${Date.now()}`;
   store.annotations.push({
-    id: `a${Date.now()}`, author: "我", time: "刚刚", kind: "comment",
+    id, author: "我", time: "刚刚", kind: "comment",
     anchorQuote: selection.quote, text: text.trim(), resolved: false, replies: [],
   });
+  store.ui.expandedAnnId = id; // 新批注自动展开接续，其余收起
   paperRef.value?.refresh();
 }
 
@@ -309,11 +345,13 @@ function recordRevision(result, state) {
   const cleaned = result.text.trim().replace(/^["“]|["”]$/g, "");
   state.assistantMsg.replacement = cleaned;
   if (!state.revisionOf || !cleaned) return;
+  const id = `rev${Date.now()}`;
   store.annotations.push({
-    id: `rev${Date.now()}`, author: "AI 助手", time: "刚刚", kind: "revision", status: "pending",
+    id, author: "AI 助手", time: "刚刚", kind: "revision", status: "pending",
     anchorQuote: state.revisionOf, original: state.revisionOf, replacement: cleaned,
     reason: "由 AI 命令生成（真实模型）", resolved: false, replies: [],
   });
+  store.ui.expandedAnnId = id; // 新修订自动展开便于采用/拒绝，其余收起
   paperRef.value?.refresh();
 }
 
@@ -359,6 +397,7 @@ function stopJob() {
 // —— AI 命令菜单分发：prefill / chat / revise ——
 function prefillCommand(selection) {
   if (selection) attachChip(selection);
+  store.ui.aiCollapsed = false;
   store.railTab = "ai";
   store.composerDraft = store.composerDraft ? `${store.composerDraft}\n` : "";
   showToast("已带入选区，输入后发送");
@@ -415,6 +454,10 @@ function runFormat(fn) {
   const ed = editor();
   if (ed) fn(ed);
 }
+// 侧轨 tab：点击当前 tab 回到 AI 面板；历史/审阅/资料打开各自浮层。
+function onRailTab(id) {
+  store.railTab = store.railTab === id ? "ai" : id;
+}
 const toolbarRow1 = [
   { icon: MessageSquarePlus, title: "批注（选中文字后）", run: () => onAnnotateFromToolbar() },
 ];
@@ -453,7 +496,7 @@ function onAnnotateFromToolbar() {
       <button v-for="t in toolbarRow1" :key="t.title" type="button" :title="t.title" @mousedown.prevent="t.run()"><component :is="t.icon" :size="15" /></button>
       <button type="button" class="ai-cmd-btn" title="AI 命令菜单" @mousedown.prevent="aiMenuOpen = !aiMenuOpen"><Sparkles :size="15" /><span class="caret" /></button>
     </div>
-    <div class="workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
+    <div class="workspace" :class="{ 'outline-collapsed': outlineCollapsed, 'ai-collapsed': store.ui.aiCollapsed }">
       <aside class="outline-pane">
         <button type="button" class="outline-toggle" title="折叠目录" @click="outlineCollapsed = true"><span class="chev" /></button>
         <b class="outline-label">文档目录</b>
@@ -472,11 +515,11 @@ function onAnnotateFromToolbar() {
             <p class="doc-byline">{{ store.doc.byline }}</p>
             <PaperEditor ref="paperRef" :snapshot="snapshot" @selection-change="onSelectionChange" @annotate="addAnnotation" @ask-ai="onAskAi" @doc-change="onDocChange" />
           </div>
-          <AnnotationLane :items="lane" :active-id="activeAnnId" @locate="locateAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
+          <AnnotationLane :items="lane" :active-id="activeAnnId" :expanded-id="store.ui.expandedAnnId" :placeholder-height="lanePlaceholder" @toggle="toggleAnnotation" @resolve="resolveAnnotation" @reply="replyAnnotation" @accept="acceptRevision" @reject="rejectRevision" />
         </div>
       </main>
 
-      <section class="assist-area" :class="{ 'show-rail': store.railTab !== 'ai' }">
+      <section class="assist-area" v-show="!store.ui.aiCollapsed">
         <AiPane
           @send="onSend"
           @stop="stopJob"
@@ -485,12 +528,16 @@ function onAnnotateFromToolbar() {
           @new-thread="onNewThread"
           @open-ai-menu="aiMenuOpen = true"
           @rename-thread="renameThread"
+          @collapse="store.ui.aiCollapsed = true"
         />
       </section>
 
       <nav class="tool-rail">
-        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id }" :title="t.label" @click="store.railTab = t.id">
+        <button v-for="t in railTabs" :key="t.id" type="button" :class="{ active: store.railTab === t.id }" :title="t.label" @click="onRailTab(t.id)">
           <component :is="t.icon" :size="17" />
+        </button>
+        <button v-if="store.ui.aiCollapsed" type="button" class="ai-restore" :class="{ active: store.railTab === 'ai' }" title="展开 AI 面板" aria-label="展开 AI 面板" @click="store.ui.aiCollapsed = false; store.railTab = 'ai'">
+          <Sparkles :size="17" />
         </button>
       </nav>
       <div v-if="store.railTab !== 'ai'" class="rail-pane-slot open">

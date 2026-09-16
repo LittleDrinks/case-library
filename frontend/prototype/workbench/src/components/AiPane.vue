@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
-import { Plus, Sparkles } from "@lucide/vue";
+import { PanelRightClose, Plus, Sparkles } from "@lucide/vue";
 
 import { activeThread, store } from "../store.js";
 import AiComposer from "./AiComposer.vue";
 
-const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "open-ai-menu", "rename-thread"]);
+const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "open-ai-menu", "rename-thread", "collapse"]);
 const scrollEl = ref(null);
 const titleFlash = ref(false);
 
@@ -42,6 +42,7 @@ watch(() => thread.value?.messages.length, async () => {
       <b :class="{ 'title-flash': titleFlash }">{{ thread?.title || "AI" }}</b>
       <small v-if="thread?.auto" class="ai-head-auto">AI 摘要</small>
       <button type="button" class="new-chat" @click="emit('new-thread')"><Plus :size="13" /> 新会话</button>
+      <button type="button" class="ai-collapse" title="收起 AI 面板" aria-label="收起 AI 面板" @click="emit('collapse')"><PanelRightClose :size="15" /></button>
     </header>
     <div ref="scrollEl" class="ai-messages">
       <div v-if="!thread || !thread.messages.length" class="ai-welcome">

@@ -55,6 +55,7 @@ export const store = reactive({
   modelId: "",
   webSearch: false, // Later：未接入，只展示不可用的说明
   thinking: false,
+  ui: { aiCollapsed: false, expandedAnnId: "" }, // AI面板收起态 / 当前展开的批注卡（其余折叠）
 });
 
 export function activeThread() {

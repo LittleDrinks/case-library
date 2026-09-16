@@ -1,64 +1,90 @@
 <script setup>
-import { computed } from "vue";
-import { Check, MessageSquare, Pencil, Quote as QuoteIcon, Reply, X } from "@lucide/vue";
+import { Check, ChevronDown, MessageSquare, Pencil, Quote as QuoteIcon, Reply, X } from "@lucide/vue";
 
-// 段旁批注卡：评论与修订卡同列，点击定位原文，可回复/标记处理。
+// 段旁批注卡：默认折叠为紧凑摘要行，点头展开正文并定位原文；同一时刻最多展开一条。
+// expandedId（展开态）与 activeId（定位高亮态）分离：定位不强制展开。
 const props = defineProps({
   items: { type: Array, required: true }, // 注视 lane 排序后的卡片
   activeId: { type: String, default: "" },
+  expandedId: { type: String, default: "" },
+  placeholderHeight: { type: Number, default: 0 }, // lane 占位高度：保证 paper-scroll 能滚到最后一张卡
 });
-const emit = defineEmits(["locate", "resolve", "reply", "accept", "reject"]);
+const emit = defineEmits(["toggle", "resolve", "reply", "accept", "reject"]);
 
-// 卡片主体点击定位原文；按钮内部已 stop 不会到这里，再排除按钮与拖选文字，避免误定位。
-function onCardClick(event, item) {
-  if (event.target.closest("button, input, textarea, a")) return;
-  const selection = window.getSelection();
-  if (selection && selection.rangeCount > 0 && !selection.isCollapsed && item.anchorQuote && selection.toString() && item.anchorQuote.includes(selection.toString().trim())) return;
-  emit("locate", item);
+function summary(item) {
+  const body = item.kind === "revision" ? `${item.original} → ${item.replacement}` : item.text;
+  return body.length > 44 ? `${body.slice(0, 44)}…` : body;
 }
-
 function kindLabel(item) {
   return item.kind === "revision" ? "修改建议" : "评论";
+}
+function statusLabel(item) {
+  if (item.kind === "revision") return item.status === "accepted" ? "已采用" : item.status === "rejected" ? "已拒绝" : "待处理";
+  return item.resolved ? "已处理" : "";
+}
+// 折叠头点击：切换展开；展开态点击正文区域不再收起（避免文字选取/交互误收）。
+function onHeadClick(item) {
+  emit("toggle", item);
+}
+function onBodyClick(event, item) {
+  if (event.target.closest("button, input, textarea, a")) return;
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return;
+  emit("toggle", item);
 }
 </script>
 <template>
   <div class="ann-lane">
     <div
       v-for="item in items"
+
       :key="item.id"
       :data-ann="item.id"
-      :class="['ann-card', `kind-${item.kind}`, { active: item.id === activeId, resolved: item.resolved }]"
+      :class="['ann-card', `kind-${item.kind}`, { active: item.id === activeId, resolved: item.resolved, expanded: item.id === expandedId }]"
       :style="{ top: `${item.top}px` }"
-      @click="onCardClick($event, item)"
     >
-      <header>
+      <button
+        type="button"
+        class="ann-head"
+        :aria-expanded="item.id === expandedId"
+        :title="item.id === expandedId ? '收起' : '展开并定位原文'"
+        @click.stop="onHeadClick(item)"
+      >
+        <span class="ann-head-kind"><MessageSquare v-if="item.kind === 'comment'" :size="12" /><Pencil v-else :size="12" /> {{ kindLabel(item) }}</span>
         <span class="author">{{ item.author }}</span>
-        <span class="time">{{ item.time }}</span>
-        <span class="kind-chip">{{ kindLabel(item) }}</span>
-      </header>
-      <p v-if="item.kind === 'comment'" class="ann-text">{{ item.text }}</p>
-      <template v-else>
-        <p class="rev-original"><s>{{ item.original }}</s></p>
-        <p class="rev-replacement">{{ item.replacement }}</p>
-        <small v-if="item.reason" class="rev-reason">{{ item.reason }}</small>
-        <div v-if="item.status === 'pending'" class="rev-actions">
-          <button type="button" @click.stop="emit('accept', item)"><Check :size="12" /> 采用</button>
-          <button type="button" @click.stop="emit('reject', item)"><X :size="12" /> 拒绝</button>
+        <span v-if="statusLabel(item)" class="ann-head-status">{{ statusLabel(item) }}</span>
+        <span class="ann-head-sum">{{ summary(item) }}</span>
+        <span v-if="item.replies?.length" class="ann-head-replies"><MessageSquare :size="10" /> {{ item.replies.length }}</span>
+        <ChevronDown :size="13" class="ann-head-chev" :class="{ open: item.id === expandedId }" />
+      </button>
+      <template v-if="item.id === expandedId">
+        <div class="ann-body" @click="onBodyClick($event, item)">
+          <p v-if="item.kind === 'comment'" class="ann-text">{{ item.text }}</p>
+          <template v-else>
+            <p class="rev-original"><s>{{ item.original }}</s></p>
+            <p class="rev-replacement">{{ item.replacement }}</p>
+            <small v-if="item.reason" class="rev-reason">{{ item.reason }}</small>
+            <div v-if="item.status === 'pending'" class="rev-actions">
+              <button type="button" @click.stop="emit('accept', item)"><Check :size="12" /> 采用</button>
+              <button type="button" @click.stop="emit('reject', item)"><X :size="12" /> 拒绝</button>
+            </div>
+            <div v-else class="rev-status"><Check v-if="item.status === 'accepted'" :size="11" /><X v-else :size="11" /> {{ item.status === "accepted" ? "已采用（可撤销）" : "已拒绝" }}</div>
+          </template>
+          <blockquote v-if="item.kind === 'comment' && !item.resolved" class="ann-quote"><QuoteIcon :size="11" class="ann-quote-ic" /><span>“{{ item.anchorQuote }}”</span></blockquote>
+          <ul v-if="item.replies?.length" class="ann-replies">
+            <li v-for="r in item.replies" :key="r.id">
+              <b>{{ r.author }}</b> · {{ r.time }}<br />{{ r.text }}
+            </li>
+          </ul>
+          <footer v-if="item.kind === 'comment'" class="ann-card-foot">
+            <button v-if="!item.resolved" type="button" @click.stop="emit('reply', item)"><Reply :size="12" /> 回复</button>
+            <button type="button" @click.stop="emit('resolve', item)">
+              <Check :size="12" /> {{ item.resolved ? "重新打开" : "标记处理" }}
+            </button>
+          </footer>
         </div>
-        <div v-else class="rev-status"><Check v-if="item.status === 'accepted'" :size="11" /><X v-else :size="11" /> {{ item.status === "accepted" ? "已采用（可撤销）" : "已拒绝" }}</div>
       </template>
-      <blockquote v-if="item.kind === 'comment' && !item.resolved" class="ann-quote"><QuoteIcon :size="11" class="ann-quote-ic" /><span>“{{ item.anchorQuote }}”</span></blockquote>
-      <ul v-if="item.replies?.length" class="ann-replies">
-        <li v-for="r in item.replies" :key="r.id">
-          <b>{{ r.author }}</b> · {{ r.time }}<br />{{ r.text }}
-        </li>
-      </ul>
-      <footer v-if="item.kind === 'comment'" class="ann-card-foot">
-        <button v-if="!item.resolved" type="button" @click.stop="emit('reply', item)"><Reply :size="12" /> 回复</button>
-        <button type="button" @click.stop="emit('resolve', item)">
-          <Check :size="12" /> {{ item.resolved ? "重新打开" : "标记处理" }}
-        </button>
-      </footer>
     </div>
+    <div class="ann-lane-spacer" :style="{ height: `${placeholderHeight}px` }" aria-hidden="true" />
   </div>
 </template>
