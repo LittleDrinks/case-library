@@ -417,7 +417,6 @@ function runFormat(fn) {
 }
 const toolbarRow1 = [
   { icon: MessageSquarePlus, title: "批注（选中文字后）", run: () => onAnnotateFromToolbar() },
-  { icon: Sparkles, title: "AI 命令", run: () => { aiMenuOpen.value = true; } },
 ];
 const toolbarRow2 = [
   { icon: Bold, title: "加粗", active: (ed) => ed.isActive("bold"), run: (ed) => ed.chain().focus().toggleBold().run() },
