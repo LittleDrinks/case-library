@@ -337,8 +337,10 @@ async function onSend(payload) {
   if (payload.via === "suggestion") {
     return runChat({ text: payload.text, mode: "chat" });
   }
+  // 发送前快照选区引用：清 chip 后历史消息仍保留 quote（同一 quote 也作为模型上下文）。
+  const quote = store.selectionChip?.quote || "";
   attachChip(null);
-  await runChat({ text: payload.text, skills: payload.skills, mode: "chat" });
+  await runChat({ text: payload.text, skills: payload.skills, quote, mode: "chat" });
   store.selectionChip = null;
   paperRef.value?.refresh();
 }

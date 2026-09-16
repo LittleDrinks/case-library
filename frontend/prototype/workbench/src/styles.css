@@ -148,6 +148,8 @@ body { font: 13px/1.6 var(--sans); color: var(--ink); background: var(--bg); }
 .ai-head { display: flex; flex: none; align-items: center; gap: 8px; min-height: 46px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .ai-head-ic { color: var(--brand); }
 .ai-head b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.new-chat { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: auto; padding: 3px 10px; border: 1px solid var(--brand); border-radius: 999px; background: #fff; color: var(--brand); font-size: 12px; cursor: pointer; }
+.new-chat:hover { background: var(--brand-soft); }
 .ai-head b.title-flash { animation: title-in 0.6s ease-out; }
 @keyframes title-in { 0% { opacity: 0.2; color: var(--brand); } 100% { opacity: 1; } }
 .ai-welcome { display: flex; flex: 1; min-height: 100%; flex-direction: column; justify-content: flex-end; }
