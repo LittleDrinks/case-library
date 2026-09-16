@@ -3,8 +3,8 @@
 // 所有 AI 请求经 /prototype-ai 代理到真实模型；文档与会话仅存内存。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
-  Bold, FolderOpen, Heading2, History, Italic, Link2, List, ListOrdered, MessageSquarePlus,
-  Minus, Pilcrow, Quote, Redo2, Sparkles, Strikethrough, Undo2, Wand2,
+  Bold, FolderOpen, Heading2, History, List, ListOrdered, MessageSquarePlus,
+  Pilcrow, Redo2, Sparkles, Undo2, Wand2,
 } from "@lucide/vue";
 import { store, activeThread, newThread } from "./store.js";
 import { streamChat } from "./ai-client.js";
@@ -156,6 +156,7 @@ function estimateCardHeight(item) {
 // 否则长修订卡实际比估算高，堆叠错位导致后渲染卡片盖住「采用/拒绝」按钮。
 const cardHeights = reactive({});
 let remeasureQueued = false;
+const laneEpoch = ref(0);
 function remeasureLane() {
   if (remeasureQueued) return;
   remeasureQueued = true;
@@ -167,12 +168,17 @@ function remeasureLane() {
       const h = el.offsetHeight;
       if (cardHeights[item.id] === h) continue;
       cardHeights[item.id] = h;
-      remeasureLane(); // 高度变化触发 lane 重算，迭代至稳定（每轮只写变化项）
+      laneEpoch.value++; // 高度变化：让 lane 重算（消费 epoch），再迭代至稳定
+      remeasureLane();
     }
   });
 }
-const lane = computed(() => laneItems());
-watch([lane, () => store.annotations.map((a) => `${a.id}:${a.status}:${a.resolved}:${a.replies?.length ?? 0}`).join(",")], remeasureLane, { deep: false });
+const lane = computed(() => {
+  laneSignature.value; laneEpoch.value; // 回复/状态变化或高度修正后强制重排
+  return laneItems();
+});
+const laneSignature = computed(() => store.annotations.map((a) => `${a.id}:${a.status ?? ""}:${a.resolved ? 1 : 0}:${a.replies?.length ?? 0}`).join(","));
+watch([lane, laneSignature], remeasureLane, { deep: false });
 onMounted(remeasureLane);
 onBeforeUnmount(() => { remeasureQueued = false; });
 const sourceAnnotation = (item) => store.annotations.find((annotation) => annotation.id === item.id) || item;
@@ -414,15 +420,11 @@ const toolbarRow1 = [
   { icon: Sparkles, title: "AI 命令", run: () => { aiMenuOpen.value = true; } },
 ];
 const toolbarRow2 = [
+  { icon: Bold, title: "加粗", active: (ed) => ed.isActive("bold"), run: (ed) => ed.chain().focus().toggleBold().run() },
   { icon: Heading2, title: "二级标题", active: (ed) => ed.isActive("heading", { level: 2 }), run: (ed) => ed.chain().focus().toggleHeading({ level: 2 }).run() },
   { icon: Pilcrow, title: "正文", run: (ed) => ed.chain().focus().setParagraph().run() },
-  { icon: Bold, title: "加粗", active: (ed) => ed.isActive("bold"), run: (ed) => ed.chain().focus().toggleBold().run() },
-  { icon: Italic, title: "斜体", active: (ed) => ed.isActive("italic"), run: (ed) => ed.chain().focus().toggleItalic().run() },
-  { icon: Strikethrough, title: "删除线", active: (ed) => ed.isActive("strike"), run: (ed) => ed.chain().focus().toggleStrike().run() },
   { icon: List, title: "项目列表", active: (ed) => ed.isActive("bulletList"), run: (ed) => ed.chain().focus().toggleBulletList().run() },
   { icon: ListOrdered, title: "编号列表", active: (ed) => ed.isActive("orderedList"), run: (ed) => ed.chain().focus().toggleOrderedList().run() },
-  { icon: Quote, title: "引用", active: (ed) => ed.isActive("blockquote"), run: (ed) => ed.chain().focus().toggleBlockquote().run() },
-  { icon: Minus, title: "分隔线", run: (ed) => ed.chain().focus().setHorizontalRule().run() },
   { icon: Undo2, title: "撤销", run: (ed) => ed.chain().focus().undo().run() },
   { icon: Redo2, title: "重做", run: (ed) => ed.chain().focus().redo().run() },
 ];
@@ -439,28 +441,18 @@ function onAnnotateFromToolbar() {
     <header class="brand-row">
       <img src="/logo.png" alt="上海大学" class="brand-logo" />
       <span class="brand-title">思政教学案例库 · 工作台</span>
-      <span class="proto-badge">交互原型 · 文档仅内存 · AI 真实模型</span>
+      <span class="proto-badge">交互原型 · 数据仅存内存</span>
       <span class="brand-right">
         <span class="doc-status">{{ store.doc.status }}</span>
         <span class="doc-save">{{ store.doc.savedAt }}</span>
         <span class="brand-user">王老师（演示）</span>
       </span>
     </header>
-    <nav class="menu-row">
-      <span v-for="m in ['文件', '编辑', '视图', '插入', '格式', '工具', '帮助']" :key="m" class="menu-item">{{ m }}</span>
-      <span class="menu-right">{{ store.doc.title }}.docx · 1 / 3</span>
-    </nav>
-    <div class="toolbar-row insert-toolbar">
-      <button v-for="t in toolbarRow1" :key="t.title" type="button" :title="t.title" @mousedown.prevent="t.run()"><component :is="t.icon" :size="15" /></button>
-      <span class="toolbar-divider" />
-      <span class="toolbar-label">段落与格式</span>
-    </div>
     <div class="toolbar-row main-toolbar">
       <button v-for="t in toolbarRow2" :key="t.title" type="button" :title="t.title" :class="{ active: editor()?.isActive && safeActive(t) }" @mousedown.prevent="runFormat(t.run)"><component :is="t.icon" :size="15" /></button>
       <span class="toolbar-divider" />
+      <button v-for="t in toolbarRow1" :key="t.title" type="button" :title="t.title" @mousedown.prevent="t.run()"><component :is="t.icon" :size="15" /></button>
       <button type="button" class="ai-cmd-btn" title="AI 命令菜单" @mousedown.prevent="aiMenuOpen = !aiMenuOpen"><Sparkles :size="15" /><span class="caret" /></button>
-      <span class="toolbar-spacer" />
-      <span class="toolbar-page">1 / 3</span>
     </div>
     <div class="workspace" :class="{ 'outline-collapsed': outlineCollapsed }">
       <aside class="outline-pane">

@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { Check, MessageSquare, Pencil, Reply, X } from "@lucide/vue";
+import { Check, MessageSquare, Pencil, Quote as QuoteIcon, Reply, X } from "@lucide/vue";
 
 // 段旁批注卡：评论与修订卡同列，点击定位原文，可回复/标记处理。
 const props = defineProps({
@@ -45,9 +45,9 @@ function kindLabel(item) {
           <button type="button" @click.stop="emit('accept', item)"><Check :size="12" /> 采用</button>
           <button type="button" @click.stop="emit('reject', item)"><X :size="12" /> 拒绝</button>
         </div>
-        <div v-else class="rev-status">{{ item.status === "accepted" ? "已采用（可撤销）" : "已拒绝" }}</div>
+        <div v-else class="rev-status"><Check v-if="item.status === 'accepted'" :size="11" /><X v-else :size="11" /> {{ item.status === "accepted" ? "已采用（可撤销）" : "已拒绝" }}</div>
       </template>
-      <blockquote v-if="item.kind === 'comment' && !item.resolved" class="ann-quote">“{{ item.anchorQuote }}”</blockquote>
+      <blockquote v-if="item.kind === 'comment' && !item.resolved" class="ann-quote"><QuoteIcon :size="11" class="ann-quote-ic" /><span>“{{ item.anchorQuote }}”</span></blockquote>
       <ul v-if="item.replies?.length" class="ann-replies">
         <li v-for="r in item.replies" :key="r.id">
           <b>{{ r.author }}</b> · {{ r.time }}<br />{{ r.text }}
