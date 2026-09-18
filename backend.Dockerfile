@@ -53,6 +53,7 @@ FROM runtime-base AS test
 
 USER root
 COPY --from=test-deps /opt/venv /opt/venv
+COPY backend/pyproject.toml ./pyproject.toml
 COPY .env.example /app/.env.example
 COPY backend/tests ./tests
 COPY scripts/validate_production_config.py /app/scripts/validate_production_config.py
