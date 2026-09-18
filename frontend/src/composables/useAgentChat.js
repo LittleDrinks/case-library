@@ -284,21 +284,27 @@ async function retryChat(caseId, state, generation, messageId) {
   }
 }
 
-async function decideArtifact(caseId, state, generation, artifactId, decision) {
-  const threadId = state.threadId.value;
-  const result = await api.agentDecide(caseId, threadId, artifactId, decision, session.csrfToken);
+async function refreshAfterThreadMutation(caseId, state, generation, threadId, request) {
+  const result = await request(threadId);
   if (isCurrent(state, generation) && state.threadId.value === threadId) {
     await refreshSnapshot(caseId, state, generation, threadId);
   }
   return result;
 }
 
+async function decideArtifact(caseId, state, generation, artifactId, decision) {
+  const threadId = state.threadId.value;
+  return refreshAfterThreadMutation(caseId, state, generation, threadId,
+    (currentThreadId) => api.agentDecide(
+      caseId, currentThreadId, artifactId, decision, session.csrfToken,
+    ));
+}
+
 async function undoWrite(caseId, state, generation, threadId, writeId) {
-  const result = await api.agentUndoWrite(caseId, threadId, writeId, session.csrfToken);
-  if (isCurrent(state, generation) && state.threadId.value === threadId) {
-    await refreshSnapshot(caseId, state, generation, threadId);
-  }
-  return result;
+  return refreshAfterThreadMutation(caseId, state, generation, threadId,
+    (currentThreadId) => api.agentUndoWrite(
+      caseId, currentThreadId, writeId, session.csrfToken,
+    ));
 }
 
 async function renameThread(caseId, state, threadId, title) {

@@ -200,18 +200,19 @@ function selectExternal(event) {
 }
 
 function syncSearchRoute() {
-  query.value = String(route.query.q || "");
-  authority.value = String(route.query.authority || "");
-  materialType.value = String(route.query.materialType || "");
-  externalOnly.value = route.query.accessLevel === "public";
-  viewMode.value = route.query.view === "mounted" && caseId.value ? "mounted" : "all";
-  const restored = restoreMaterialReturn(route.query);
-  cursor.value = restored?.cursor || "";
-  page.value = restored?.page || 1;
-  total.value = restored?.total || 0;
-  facets.value = restored?.facets || {};
-  nextCursor.value = restored?.nextCursor || null;
-  previousCursor.value = restored?.previousCursor || null;
+  const routeState = { q: "", authority: "", materialType: "", accessLevel: "", view: "", ...route.query };
+  query.value = String(routeState.q || "");
+  authority.value = String(routeState.authority || "");
+  materialType.value = String(routeState.materialType || "");
+  externalOnly.value = routeState.accessLevel === "public";
+  viewMode.value = routeState.view === "mounted" && caseId.value ? "mounted" : "all";
+  const restored = restoreMaterialReturn(route.query) || {};
+  cursor.value = restored.cursor || "";
+  page.value = restored.page || 1;
+  total.value = restored.total || 0;
+  facets.value = restored.facets || {};
+  nextCursor.value = restored.nextCursor || null;
+  previousCursor.value = restored.previousCursor || null;
   load(cursor.value || null);
 }
 

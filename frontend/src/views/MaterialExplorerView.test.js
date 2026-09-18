@@ -74,6 +74,14 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("空值查询参数仍按空筛选处理", async () => {
+  route.query = { caseId: "case-1", q: null, authority: null, materialType: null };
+  route.fullPath = "/materials?caseId=case-1&q=null";
+  render();
+  await flushPromises();
+  expect(api.search).toHaveBeenCalledWith("", "material", null, 20, {});
+});
+
 test("受限素材不可选择且批量挂载只提交可访问项", async () => {
   const wrapper = render();
   await flushPromises();

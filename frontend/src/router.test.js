@@ -1,6 +1,8 @@
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 
 const sessionState = { user: null, csrfToken: "", ready: false };
+let restoreSessionMock;
+let resetId = 0;
 
 vi.mock("./api.js", () => ({ api: {} }));
 vi.mock("./session.js", () => ({
@@ -8,18 +10,10 @@ vi.mock("./session.js", () => ({
   restoreSession: (...args) => restoreSessionMock(...args),
 }));
 
-let restoreSessionMock;
-
-function freshRouter() {
-  vi.resetModules();
-  return import("./router.js").then((module) => module.router);
-}
+const { router } = await import("./router.js");
 
 async function navigate(to) {
-  window.location.hash = "";
-  const router = await freshRouter();
   await router.push(to);
-  await router.isReady();
   return router.currentRoute.value;
 }
 
@@ -31,12 +25,7 @@ function loggedIn(user = { id: "u-1", role: "teacher" }) {
   });
 }
 
-beforeAll(async () => {
-  // 预热视图编译缓存：首个测试前完成 router 模块的首载
-  await navigate({ name: "home" }).catch(() => {});
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   sessionState.user = null;
   sessionState.csrfToken = "";
   sessionState.ready = false;
@@ -44,10 +33,8 @@ beforeEach(() => {
     sessionState.ready = true;
     return null;
   });
-});
-
-afterEach(() => {
-  window.location.hash = "";
+  window.scrollTo = vi.fn();
+  await router.push({ name: "home", query: { _testReset: String(++resetId) } });
 });
 
 it("restores the session before judging a protected route", async () => {

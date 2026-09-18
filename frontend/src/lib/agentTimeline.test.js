@@ -61,6 +61,13 @@ describe("tool result summaries", () => {
   });
 });
 
+it("does not dispatch inherited object keys or hide artifact priority", () => {
+  expect(toolParamSummary({ type: "tool-toString", input: {} })).toBe("");
+  expect(toolResultSummary({
+    type: "tool-read_source", state: "output-available", output: { artifactId: "a-1", status: "ok" },
+  })).toBe("已创建修订候选，等待决定");
+});
+
 describe("document write result summaries", () => {
   it("reports AI versions without leaking payloads", () => {
     const propose = { type: "tool-propose_document", state: "output-available" };

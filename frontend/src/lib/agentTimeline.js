@@ -44,39 +44,44 @@ export function sourcesOf(part) {
   return part.state === "output-available" ? part.output?.sources || [] : [];
 }
 
-export function toolParamSummary(part) {
-  const input = part.input || {};
-  if (toolName(part) === "search_corpus") {
+const TOOL_PARAM_SUMMARIES = {
+  search_corpus: (input) => {
     const scope = input.kind && input.kind !== "all" ? `（范围：${input.kind}）` : "";
     return `检索词：${input.query ?? ""}${scope}`;
-  }
-  if (toolName(part) === "read_source") return `来源：${input.source_type || ""} ${input.source_id || ""}`;
-  if (toolName(part) === "propose_revision") {
-    return Number.isInteger(input.start) && Number.isInteger(input.end)
-      ? `目标：${input.start}–${input.end}` : "";
-  }
-  if (toolName(part) === "propose_document") return "范围：全文（AI版本）";
-  if (toolName(part) === "write_document") {
-    return input.scope === "selection" ? "范围：选区" : "范围：全文";
-  }
-  if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
-  return "";
+  },
+  read_source: (input) => `来源：${input.source_type || ""} ${input.source_id || ""}`,
+  propose_revision: (input) => Number.isInteger(input.start) && Number.isInteger(input.end)
+    ? `目标：${input.start}–${input.end}` : "",
+  propose_document: () => "范围：全文（AI版本）",
+  write_document: (input) => input.scope === "selection" ? "范围：选区" : "范围：全文",
+  list_tag_catalog: (input) => input.query ? `筛选：${input.query}` : "",
+};
+
+export function toolParamSummary(part) {
+  const name = toolName(part);
+  const summarize = Object.hasOwn(TOOL_PARAM_SUMMARIES, name) ? TOOL_PARAM_SUMMARIES[name] : null;
+  return summarize ? summarize(part.input || {}) : "";
 }
+
+const TOOL_RESULT_SUMMARIES = {
+  "tool-propose_document": documentResultSummary,
+  "tool-write_document": (output) => directWriteResultSummary(output),
+  "tool-search_corpus": (output) => output.artifactId ? null : output.sources?.length
+    ? `${output.sources.length} 条来源` : "依据不足，未找到可用来源",
+};
 
 export function toolResultSummary(part) {
   if (part.state === "output-error") return part.errorText || "执行失败";
   if (part.state !== "output-available") return "";
   const output = part.output || {};
-  if (part.type === "tool-propose_document") {
-    return documentResultSummary(output);
-  }
-  if (part.type === "tool-write_document") {
-    const summary = directWriteResultSummary(output);
-    if (summary !== null) return summary;
-  }
+  const summarize = Object.hasOwn(TOOL_RESULT_SUMMARIES, part.type)
+    ? TOOL_RESULT_SUMMARIES[part.type] : null;
+  const summary = summarize ? summarize(output) : null;
+  return summary !== null ? summary : genericResultSummary(output);
+}
+
+function genericResultSummary(output) {
   if (output.artifactId) return "已创建修订候选，等待决定";
-  if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
-  if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
   if (typeof output.status === "string" && output.status !== "ok") {
     return TOOL_STATUS_LABELS[output.status] || output.status;
   }
@@ -96,16 +101,18 @@ function documentResultSummary(output) {
   return output.status === "pending" ? "正在保存 AI 版本" : "";
 }
 
-export function sourceHref(source) {
-  const kind = source.kind || source.sourceType;
-  if (kind === "case") {
-    if (source.versionId && !source.sourceCaseId) return "";
-    if (source.sourceCaseId && !source.versionId) return "";
+const SOURCE_HREF_BUILDERS = {
+  case: (source) => {
+    if (Boolean(source.versionId) !== Boolean(source.sourceCaseId)) return "";
     const version = source.versionId ? `?versionId=${encodeURIComponent(source.versionId)}` : "";
     return `#/cases/${encodeURIComponent(source.sourceCaseId || source.id)}${version}`;
-  }
-  if (kind === "material") return `#/materials/${encodeURIComponent(source.id)}`;
-  return "";
+  },
+  material: (source) => `#/materials/${encodeURIComponent(source.id)}`,
+};
+
+export function sourceHref(source) {
+  const build = SOURCE_HREF_BUILDERS[source.kind || source.sourceType];
+  return build ? build(source) : "";
 }
 
 export function artifactStatus(artifact) {
