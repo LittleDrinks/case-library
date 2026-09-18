@@ -335,7 +335,7 @@ services:
       dockerfile: backend.Dockerfile
       target: test
     network_mode: none
-    command: ["sh", "-c", "ruff check --no-cache app tests && python -m pytest -q -n auto -c tests/pytest.ini -m 'not e2e'"]
+    command: ["sh", "-c", "ruff check --no-cache app tests /app/scripts /opt/case-library/wait_for_mongo.py && python -m pytest -q -n auto -c tests/pytest.ini -m 'not e2e'"]
 
   frontend-test:
     profiles: ["test"]

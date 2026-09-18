@@ -97,6 +97,12 @@ describe("stable references", () => {
     expect(sourceHref({ url: "https://evil.example/x" })).toBe("");
   });
 
+  it("ignores inherited source kinds", () => {
+    expect(sourceHref({ kind: "toString", id: "x" })).toBe("");
+    expect(sourceHref({ kind: "constructor", id: "x" })).toBe("");
+    expect(sourceHref({ sourceType: "valueOf", id: "x" })).toBe("");
+  });
+
   it("keeps a stable reference id per source", () => {
     expect(sourceRefId({ kind: "case", id: "c-42" })).toBe("case:c-42");
     expect(sourceRefId({ sourceType: "attachment", id: "a-1" })).toBe("attachment:a-1");

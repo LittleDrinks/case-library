@@ -111,7 +111,8 @@ const SOURCE_HREF_BUILDERS = {
 };
 
 export function sourceHref(source) {
-  const build = SOURCE_HREF_BUILDERS[source.kind || source.sourceType];
+  const kind = source.kind || source.sourceType;
+  const build = Object.hasOwn(SOURCE_HREF_BUILDERS, kind) ? SOURCE_HREF_BUILDERS[kind] : null;
   return build ? build(source) : "";
 }
 

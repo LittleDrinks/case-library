@@ -25,6 +25,12 @@ function loggedIn(user = { id: "u-1", role: "teacher" }) {
   });
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 beforeEach(async () => {
   sessionState.user = null;
   sessionState.csrfToken = "";
@@ -37,9 +43,17 @@ beforeEach(async () => {
   await router.push({ name: "home", query: { _testReset: String(++resetId) } });
 });
 
-it("restores the session before judging a protected route", async () => {
-  loggedIn();
-  const route = await navigate({ name: "my-cases" });
+it("waits for session restoration before judging a protected route", async () => {
+  const gate = deferred();
+  restoreSessionMock = vi.fn(() => gate.promise.then(() => {
+    sessionState.user = { id: "u-1", role: "teacher" };
+    sessionState.ready = true;
+  }));
+  const navigation = navigate({ name: "my-cases" });
+  await Promise.resolve();
+  expect(router.currentRoute.value.name).toBe("home");
+  gate.resolve();
+  const route = await navigation;
   expect(restoreSessionMock).toHaveBeenCalled();
   expect(route.name).toBe("my-cases");
 });
