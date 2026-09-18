@@ -357,36 +357,30 @@ async function restoreScroll(id) {
   if (conversation.value) conversation.value.scrollTop = scrollPositions.get(id) ?? 0;
 }
 
-async function chooseThread(id) {
+async function transitionThread(operation, targetId = null) {
   stopThreadsPolling();
-  if (id !== threadId.value) {
+  const switching = targetId === null || targetId !== threadId.value;
+  if (switching) {
     const previousThreadId = threadId.value;
     threadSwitchDepth += 1;
     versionOpenGeneration += 1;
     emit("clear-writing-context");
     try {
-      await selectThread(id);
+      await operation();
     } finally {
       finishThreadSwitch(previousThreadId);
     }
   }
   mode.value = "chat";
-  await restoreScroll(id);
+  await restoreScroll(targetId ?? threadId.value);
+}
+
+async function chooseThread(id) {
+  await transitionThread(() => selectThread(id), id);
 }
 
 async function addThread() {
-  stopThreadsPolling();
-  const previousThreadId = threadId.value;
-  threadSwitchDepth += 1;
-  versionOpenGeneration += 1;
-  emit("clear-writing-context");
-  try {
-    await createThread();
-  } finally {
-    finishThreadSwitch(previousThreadId);
-  }
-  mode.value = "chat";
-  await restoreScroll(threadId.value);
+  await transitionThread(createThread);
 }
 
 async function applyRename(id, title) {
