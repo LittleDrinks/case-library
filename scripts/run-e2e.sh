@@ -159,32 +159,41 @@ run_browser_suite() {
   test -n "$browser_spec" || run_tracer_browser_tests
 }
 
+# Bucket clearing needs a running backend-e2e container; after early setup
+# failures (images missing, mongo down) the project owns nothing in MinIO,
+# and teardown deletes the project's MinIO volume anyway.
 cleanup() {
   original_status=$?
   trap - EXIT INT TERM
   cleanup_status=0
-  clear_e2e_bucket || cleanup_status=1
+  if test "$setup_reached_app" = 1; then
+    clear_e2e_bucket || cleanup_status=1
+  fi
   teardown_e2e_resources || cleanup_status=1
   verify_e2e_resources_absent || cleanup_status=1
   test "$original_status" -ne 0 && exit "$original_status"
   exit "$cleanup_status"
 }
 
-trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+setup_reached_app=0
 : > "$lock_file"
 exec 9>"$lock_file"
 if ! flock -n 9; then
   echo "Another E2E run owns $compose_project (lock: $lock_file); waiting is not supported." >&2
   exit 2
 fi
+# Destructive cleanup is registered only after the lock is owned: a rejected
+# second invocation must never touch the owner's resources.
+trap cleanup EXIT
 preclean_e2e_resources
 scripts/ci-images.sh ensure mongo-init production-config-check
 compose up -d mongo1 mongo2 mongo3
 scripts/ci-images.sh ensure $ensure_services
 compose up -d --wait mongo-init
 drop_and_verify_database
+setup_reached_app=1
 case "$suite" in
   backend) run_backend_suite ;;
   browser) run_browser_suite ;;

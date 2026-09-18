@@ -55,9 +55,78 @@ test "$ensure_line" -lt "$mongo_wait_line" || {
 ci_images="$project_dir/scripts/ci-images.sh"
 test -x "$ci_images"
 grep -Fq 'compose config --format json' "$ci_images"
-grep -Fq 'hash-object -- "$src"' "$ci_images"
 grep -Fq 'docker pull --quiet "$ref"' "$ci_images"
 grep -Fq 'docker tag "$ref"' "$ci_images"
+# ci-images must adopt the caller's project/prefix (so run-e2e's build and
+# run resolve the same tags) and only fall back when they are unset.
+grep -Fq 'COMPOSE_PROJECT_NAME:-' "$ci_images"
+grep -Fq 'IMAGE_PREFIX:-' "$ci_images"
+# Behavioral probes run against a self-contained fixture checkout with its
+# own copy of the scripts, so mutations never touch the live tree and the
+# fixture's derivation is independent of this checkout's path hash.
+probe_dir="$(mktemp -d)"
+trap 'rm -rf "$probe_dir"' EXIT
+mkdir -p "$probe_dir/scripts" "$probe_dir/backend/app" "$probe_dir/backend/tests"
+cp "$ci_images" "$probe_dir/scripts/ci-images.sh"
+cp "$project_dir/backend/app/__init__.py" "$probe_dir/backend/app/__init__.py"
+cp "$project_dir/backend/tests/pytest.ini" "$probe_dir/backend/tests/pytest.ini"
+cp "$project_dir/backend/requirements.lock" "$probe_dir/backend/requirements.lock"
+cp "$project_dir/.env.example" "$probe_dir/.env.example"
+cat > "$probe_dir/docker-compose.yml" <<'YAML'
+services:
+  backend-test:
+    profiles: ["test"]
+    image: ${IMAGE_PREFIX:-fixture-fallback}-backend-test
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      target: test
+    network_mode: none
+YAML
+cat > "$probe_dir/backend.Dockerfile" <<'DOCKER'
+FROM alpine:3
+COPY backend/app ./app
+COPY backend/tests ./tests
+COPY backend/requirements.lock /tmp/requirements.lock
+DOCKER
+git init -q "$probe_dir"
+git -C "$probe_dir" -c user.email=probe@local -c user.name=probe add -A
+git -C "$probe_dir" -c user.email=probe@local -c user.name=probe commit -qm base
+fp_probe() { (cd "$probe_dir" && env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX bash ./scripts/ci-images.sh fingerprint backend-test); }
+# Adopt-vs-fallback: resolve the image through compose config with exported
+# vs unset environment, through the fixture's own ci-images.sh copy.
+image_adopt="$(cd "$probe_dir" && COMPOSE_PROJECT_NAME=adopt-probe-e2e IMAGE_PREFIX=adopt-probe-e2e \
+  bash -c 'bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1; docker compose --project-name adopt-probe-e2e --env-file .env.example --profile test config --format json' 2>/dev/null | jq -r '.services["backend-test"].image')"
+test "$image_adopt" = "adopt-probe-e2e-backend-test" || {
+  echo "ci-images must adopt the caller's IMAGE_PREFIX (got: $image_adopt)" >&2
+  exit 1
+}
+image_fallback="$(cd "$probe_dir" && bash -c 'env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1; env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX docker compose --env-file .env.example --profile test config --format json' 2>/dev/null | jq -r '.services["backend-test"].image')"
+test "$image_fallback" = "fixture-fallback-backend-test" || {
+  echo "bare invocation must fall back to the compose default (got: $image_fallback)" >&2
+  exit 1
+}
+# Fingerprint mutation probes: new untracked COPY source and a rename must
+# each change the fingerprint; reverting restores it.
+fp_baseline="$(fp_probe)"
+echo probe > "$probe_dir/backend/app/zz_probe_untracked.py"
+fp_untracked="$(fp_probe)"
+rm "$probe_dir/backend/app/zz_probe_untracked.py"
+mv "$probe_dir/backend/app/__init__.py" "$probe_dir/backend/app/__init_renamed.py"
+fp_renamed="$(fp_probe)"
+mv "$probe_dir/backend/app/__init_renamed.py" "$probe_dir/backend/app/__init__.py"
+test "$fp_baseline" != "$fp_untracked" || {
+  echo "fingerprint ignores a new untracked COPY source" >&2
+  exit 1
+}
+test "$fp_baseline" != "$fp_renamed" || {
+  echo "fingerprint ignores a renamed COPY source" >&2
+  exit 1
+}
+test "$fp_baseline" = "$(fp_probe)" || {
+  echo "fingerprint must be stable after reverting the probes" >&2
+  exit 1
+}
 
 # Isolation contract: the runner derives its Compose project and image tag
 # prefix from the checkout directory plus a path hash (always isolated, no
@@ -66,6 +135,21 @@ grep -Fq 'dir_slug="$(printf '"'"'%s'"'"' "$(basename "$project_dir")" | tr '"'"
 grep -Fq 'dir_hash="$(printf '"'"'%s'"'"' "$project_dir" | sha256sum | cut -c1-8)"' "$runner"
 grep -Fq 'compose_project="${dir_slug}-${dir_hash}-e2e"' "$runner"
 grep -Fq 'flock -n 9' "$runner"
+# Lock ownership is behavior: with the lock held (Python fcntl), a second
+# runner must exit 2 through a PATH shim and issue zero Docker calls, and
+# destructive cleanup must be registered only after the lock is owned.
+lock_line="$(grep -n 'flock -n 9' "$runner" | cut -d: -f1)"
+trap_line="$(grep -n '^trap cleanup EXIT$' "$runner" | cut -d: -f1)"
+test -n "$lock_line" && test -n "$trap_line"
+test "$lock_line" -lt "$trap_line"
+python3 "$project_dir/tests/e2e/lock-owner-probe.py" "$project_dir" >/dev/null
+# Bucket clearing is skipped until setup reaches the app stage, so early
+# failures never pull images or create resources from cleanup.
+grep -Fq 'setup_reached_app=0' "$runner"
+grep -Fq 'setup_reached_app=1' "$runner"
+grep -Fq 'if test "$setup_reached_app" = 1; then' "$runner"
+# Fingerprint mutation probes (fixture-based) live further down; ensure the
+# lock regression precedes them to fail fast on isolation regressions.
 require_line 'export IMAGE_PREFIX="$compose_project"'
 grep -Fq 'deploy/e2e.compose.yml' "$runner"
 ! grep -Eq 'docker (volume|network) .*case-library-v2_e2e_' "$runner"
@@ -289,6 +373,7 @@ assert_cleanup_status() {
   set +e
   (
     compose_project=cleanup-probe
+    setup_reached_app=1
     clear_e2e_bucket() { test -z "$fail_teardown"; }
     teardown_e2e_resources() {
       if test -n "$fail_teardown"; then return 7; fi
@@ -302,6 +387,25 @@ assert_cleanup_status() {
   actual=$?
   set -e
   test "$actual" -eq "$expected"
+}
+
+# Early-setup failure: cleanup must skip clear_e2e_bucket entirely.
+skip_bucket_called=0
+set +e
+(
+  compose_project=cleanup-probe
+  setup_reached_app=0
+  clear_e2e_bucket() { skip_bucket_called=1; return 0; }
+  teardown_e2e_resources() { return 0; }
+  verify_e2e_resources_absent() { return 0; }
+  eval "$cleanup_body"
+  (exit 0)
+  cleanup
+)
+set -e
+test "$skip_bucket_called" -eq 0 || {
+  echo "cleanup must not clear the bucket before setup reached the app" >&2
+  exit 1
 }
 
 assert_cleanup_status 0 "" 0

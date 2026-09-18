@@ -5,11 +5,12 @@
 # docker-compose.yml stays the single source of truth.
 set -euo pipefail
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-# Same derivation as scripts/run-e2e.sh: image tags are owned by this
-# checkout's Compose project, so builds never reuse another checkout's stale
-# local images.
-compose_project="$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e"
-IMAGE_PREFIX="$compose_project"
+# Image tags and the Compose project must match whoever calls us: when
+# scripts/run-e2e.sh (or Make) exports COMPOSE_PROJECT_NAME/IMAGE_PREFIX,
+# reuse them so builds and runs hit the same per-checkout tags. Only a bare
+# `scripts/ci-images.sh` invocation falls back to the local derivation.
+compose_project="${COMPOSE_PROJECT_NAME:-$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e}"
+IMAGE_PREFIX="${IMAGE_PREFIX:-$compose_project}"
 export IMAGE_PREFIX
 
 compose() {
@@ -64,14 +65,19 @@ fingerprint() {
   {
     printf '%s\n' "$2"
     cat "$1"
+    # Enumerate the files that would actually enter the build context (on
+    # disk, not the git index), and hash content plus relative path so new
+    # untracked files and renames change the fingerprint. Prune the same
+    # cache/ignore patterns .dockerignore excludes, so ignored churn never
+    # dirties the fingerprint.
     copy_sources "$1" | while IFS= read -r src; do
-      # Content, not the git index: uncommitted edits must change the
-      # fingerprint so a run never reuses an image built from old source.
       if test -d "$project_dir/$src"; then
-        git -C "$project_dir" ls-files -z -- "$src" | xargs -0 -n1 -I{} \
-          git -C "$project_dir" hash-object -- "{}"
+        (cd "$project_dir/$src" && find . -type d \( -name __pycache__ -o -name node_modules -o -name .git -o -name .venv \) -prune -o \
+          -type f ! -name '*.pyc' -print0 | LC_ALL=C sort -z |
+          xargs -0 -I{} sh -c 'git hash-object -- "$1"; printf "%s\n" "$1"' _ {})
       else
         git -C "$project_dir" hash-object -- "$src" || exit 1
+        printf '%s\n' "$src"
       fi
     done
   } | sha256sum | cut -d' ' -f1
@@ -123,13 +129,20 @@ ensure() {
   if test -z "${CI:-}"; then
     # A local tag is only trusted when it matches the current fingerprint;
     # otherwise a stale image from another checkout or old source would run.
-    local current=() svc
+    init_config
+    local current=() svc ref
     for svc in "$@"; do
       local_image_is_current "$svc" || current+=("$svc")
     done
     if test "${#current[@]}" -gt 0; then
       printf '[ci-images] fingerprint miss, building locally:%s\n' " ${current[*]}" >&2
       compose build "${current[@]}"
+      # Tag fresh builds with the fingerprint so the next ensure sees them
+      # as current (BuildKit cache makes the rebuild a no-op).
+      for svc in "${current[@]}"; do
+        ref="$(image_ref "$svc")" || continue
+        docker tag "$(service_image_name "$svc")" "$ref"
+      done
     fi
     return 0
   fi
