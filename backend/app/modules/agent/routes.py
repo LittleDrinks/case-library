@@ -175,13 +175,6 @@ def _conversation(
     return Conversation(published_view(case, version), version_id, True)
 
 
-def _editable_conversation(
-    database, case_id: str, user: dict, version_id: str | None, mode: str | None = None,
-):
-    conversation = _conversation(database, case_id, user, version_id, mode)
-    if not conversation.reader:
-        _editable_case(conversation.case)
-    return conversation
 
 
 def _thread_conversation(
@@ -493,9 +486,9 @@ def create_thread(
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ) -> AgentThreadSummary:
-    conversation = _editable_conversation(
-        database, case_id, user, body.versionId, body.mode
-    )
+    conversation = _conversation(database, case_id, user, body.versionId, body.mode)
+    if not conversation.reader:
+        _editable_case(conversation.case)
     repository = _repository(database)
     thread = repository.create_thread(
         case_id, user["id"], _valid_title(body.title), conversation.version_id,

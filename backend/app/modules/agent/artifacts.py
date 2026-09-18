@@ -173,7 +173,7 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
     if decision == "accepted":
         if not revalidate_sources(database, user, case_id, artifact.sources):
             raise CaseError(409, "修订依据当前不可读，候选已过期")
-        case = _accept_candidate(database, case, artifact, user, session)
+        case = _candidate_ai_version(database, case, artifact, user, session)
     return _save_decision(database, artifact, user, decision, session), case
 
 
@@ -222,9 +222,6 @@ def _verify_writer(case: dict, user: dict) -> None:
         raise CaseError(409, "案例当前不可编辑")
 
 
-def _accept_candidate(database, case, artifact, user, session) -> dict:
-    """普通候选独立成只读 AI 版本，不改当前教师稿或 revision。"""
-    return _candidate_ai_version(database, case, artifact, user, session)
 
 
 def _candidate_ai_version(database, case, artifact, user, session) -> dict:

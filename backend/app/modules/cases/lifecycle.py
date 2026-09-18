@@ -257,7 +257,7 @@ def _mark_withdrawn(database, case: dict, version: dict, now: str, session) -> d
 
 
 def _approve(database, case: dict, body: dict, user: dict, session) -> dict:
-    _require_review_conclusion(case, body)
+    _require_current_review_version(case, body)
     version, now = _submitted_version(database, case, session), _now()
     event = _event(case, user, version, now, "approve")
     database.lifecycle_events.insert_one(event, session=session)
@@ -276,7 +276,7 @@ def _require_active_review(case: dict) -> None:
         raise CaseError(409, "仅审核中的案例可产生审核结论")
 
 
-def _require_review_conclusion(case: dict, body: dict) -> None:
+def _require_current_review_version(case: dict, body: dict) -> None:
     _require_active_review(case)
     if body.get("submittedVersionId") != case.get("submittedVersionId"):
         raise CaseError(409, "待审版本已变化")
@@ -363,11 +363,6 @@ def _removed_material_keys(current: list[str], replaced: dict | None) -> list[st
     ]
 
 
-def _require_review_return(case: dict, body: dict) -> None:
-    _require_active_review(case)
-    if body.get("submittedVersionId") != case.get("submittedVersionId"):
-        raise CaseError(409, "待审版本已变化")
-
 
 def _review_annotation_ids(database, case: dict, version: dict, session) -> list[str]:
     rows = database.annotations.find(
@@ -425,7 +420,7 @@ def _mark_returned(database, case: dict, version: dict, event: dict, session) ->
 
 
 def _return_for_revision(database, case: dict, body: dict, user: dict, session) -> dict:
-    _require_review_return(case, body)
+    _require_current_review_version(case, body)
     version = _submitted_version(database, case, session)
     ids = _review_annotation_ids(database, case, version, session)
     event = _review_event(case, user, version, body, ids)

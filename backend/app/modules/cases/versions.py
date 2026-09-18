@@ -127,17 +127,12 @@ def _write_eligible(case: dict | None, write: dict, run) -> bool:
 
 
 def _insert(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
-    version = _record(database, case, run, document, source_revision, session)
-    database.case_versions.insert_one(version, session=session)
-    return version
-
-
-def _record(database, case: dict, run, document: dict, source_revision: int, session) -> dict:
     version = _version_record_base(
         database, case, AI_VERSION_KIND, case["title"], document,
         source_revision, run.user_id, session,
     )
     version["sourceRunId"] = run.id
+    database.case_versions.insert_one(version, session=session)
     return version
 
 
