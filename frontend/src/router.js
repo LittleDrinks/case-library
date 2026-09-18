@@ -106,21 +106,19 @@ export const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 });
 
-router.beforeEach(async (to) => {
-  if (to.meta.devOnly) return true;
-  await restoreSession();
+function redirectForRoute(to) {
   if (session.user?.mustChangePassword && to.name !== "password-change") return { name: "password-change" };
   if (to.meta.requiresAuth && !session.user) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
-  if (to.meta.requiresAdmin && session.user?.role !== "admin") {
-    return { name: "home" };
-  }
-  if (to.name === "password-change" && !session.user?.mustChangePassword) {
-    return { name: "home" };
-  }
-  if (to.name === "login" && session.user) {
-    return { name: "home" };
-  }
-  return true;
+  if (to.meta.requiresAdmin && session.user?.role !== "admin") return { name: "home" };
+  if (to.name === "password-change" && !session.user?.mustChangePassword) return { name: "home" };
+  if (to.name === "login" && session.user) return { name: "home" };
+  return null;
+}
+
+router.beforeEach(async (to) => {
+  if (to.meta.devOnly) return true;
+  await restoreSession();
+  return redirectForRoute(to) ?? true;
 });
