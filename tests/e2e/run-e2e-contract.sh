@@ -135,6 +135,11 @@ grep -Fq 'dir_slug="$(printf '"'"'%s'"'"' "$(basename "$project_dir")" | tr '"'"
 grep -Fq 'dir_hash="$(printf '"'"'%s'"'"' "$project_dir" | sha256sum | cut -c1-8)"' "$runner"
 grep -Fq 'compose_project="${dir_slug}-${dir_hash}-e2e"' "$runner"
 grep -Fq 'flock -n 9' "$runner"
+# Whole-entrypoint failure probe: with a PATH docker shim injecting a
+# failure at the mongo-init health wait, the runner after the failure must
+# only perform owned teardown (compose down) plus inventory inspections —
+# never run/up/build/pull (no bucket-clear container).
+python3 "$project_dir/tests/e2e/entrypoint-failure-probe.py" "$project_dir" >/dev/null
 # Lock ownership is behavior: with the lock held (Python fcntl), a second
 # runner must exit 2 through a PATH shim and issue zero Docker calls, and
 # destructive cleanup must be registered only after the lock is owned.
@@ -143,11 +148,12 @@ trap_line="$(grep -n '^trap cleanup EXIT$' "$runner" | cut -d: -f1)"
 test -n "$lock_line" && test -n "$trap_line"
 test "$lock_line" -lt "$trap_line"
 python3 "$project_dir/tests/e2e/lock-owner-probe.py" "$project_dir" >/dev/null
-# Bucket clearing is skipped until setup reaches the app stage, so early
-# failures never pull images or create resources from cleanup.
-grep -Fq 'setup_reached_app=0' "$runner"
-grep -Fq 'setup_reached_app=1' "$runner"
-grep -Fq 'if test "$setup_reached_app" = 1; then' "$runner"
+# Cleanup is ownership-only: no bucket-clear container in the teardown path.
+cleanup_body="$(sed -n '/^cleanup() {/,/^}/p' "$runner")"
+! printf '%s\n' "$cleanup_body" | grep -Fq 'clear_e2e_bucket' || {
+  echo "cleanup must not run the bucket-clear container; teardown deletes the owned MinIO volume" >&2
+  exit 1
+}
 # Fingerprint mutation probes (fixture-based) live further down; ensure the
 # lock regression precedes them to fail fast on isolation regressions.
 require_line 'export IMAGE_PREFIX="$compose_project"'
@@ -298,7 +304,6 @@ grep -Fq 'client.list_objects(bucket, recursive=True)' \
 cleanup_body="$(sed -n '/^cleanup() {/,/^}/p' "$runner")"
 verify_body="$(sed -n '/^verify_e2e_resources_absent() {/,/^}/p' "$runner")"
 printf '%s\n' "$verify_body" | grep -Fq 'com.docker.compose.project'
-printf '%s\n' "$cleanup_body" | grep -Fq 'clear_e2e_bucket'
 printf '%s\n' "$cleanup_body" | grep -Fq 'teardown_e2e_resources'
 printf '%s\n' "$cleanup_body" | grep -Fq 'verify_e2e_resources_absent'
 teardown_body="$(sed -n '/^teardown_e2e_resources() {/,/^}/p' "$runner")"
@@ -373,7 +378,6 @@ assert_cleanup_status() {
   set +e
   (
     compose_project=cleanup-probe
-    setup_reached_app=1
     clear_e2e_bucket() { test -z "$fail_teardown"; }
     teardown_e2e_resources() {
       if test -n "$fail_teardown"; then return 7; fi
@@ -387,25 +391,6 @@ assert_cleanup_status() {
   actual=$?
   set -e
   test "$actual" -eq "$expected"
-}
-
-# Early-setup failure: cleanup must skip clear_e2e_bucket entirely.
-skip_bucket_called=0
-set +e
-(
-  compose_project=cleanup-probe
-  setup_reached_app=0
-  clear_e2e_bucket() { skip_bucket_called=1; return 0; }
-  teardown_e2e_resources() { return 0; }
-  verify_e2e_resources_absent() { return 0; }
-  eval "$cleanup_body"
-  (exit 0)
-  cleanup
-)
-set -e
-test "$skip_bucket_called" -eq 0 || {
-  echo "cleanup must not clear the bucket before setup reached the app" >&2
-  exit 1
 }
 
 assert_cleanup_status 0 "" 0

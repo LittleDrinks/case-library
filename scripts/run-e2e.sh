@@ -159,16 +159,14 @@ run_browser_suite() {
   test -n "$browser_spec" || run_tracer_browser_tests
 }
 
-# Bucket clearing needs a running backend-e2e container; after early setup
-# failures (images missing, mongo down) the project owns nothing in MinIO,
-# and teardown deletes the project's MinIO volume anyway.
+# Teardown is ownership-only: compose down --volumes removes the isolated
+# MinIO volume together with the bucket data, so cleanup never spawns a
+# backend-e2e container (which would pull images or create resources after
+# a failure).
 cleanup() {
   original_status=$?
   trap - EXIT INT TERM
   cleanup_status=0
-  if test "$setup_reached_app" = 1; then
-    clear_e2e_bucket || cleanup_status=1
-  fi
   teardown_e2e_resources || cleanup_status=1
   verify_e2e_resources_absent || cleanup_status=1
   test "$original_status" -ne 0 && exit "$original_status"
@@ -177,7 +175,6 @@ cleanup() {
 
 trap 'exit 130' INT
 trap 'exit 143' TERM
-setup_reached_app=0
 : > "$lock_file"
 exec 9>"$lock_file"
 if ! flock -n 9; then
@@ -193,7 +190,6 @@ compose up -d mongo1 mongo2 mongo3
 scripts/ci-images.sh ensure $ensure_services
 compose up -d --wait mongo-init
 drop_and_verify_database
-setup_reached_app=1
 case "$suite" in
   backend) run_backend_suite ;;
   browser) run_browser_suite ;;
