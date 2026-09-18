@@ -6,6 +6,7 @@ database="case_library_failover"
 marker="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 uri="mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0"
 cd "$project_dir"
+compose_project="${FAILOVER_PROJECT_NAME:-case-library-v2-failover}"
 . "$project_dir/scripts/test-database.sh"
 
 compose() {

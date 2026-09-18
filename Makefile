@@ -2,7 +2,13 @@ comma := ,
 LOCAL_ENV := $(wildcard $(CURDIR)/.env)
 COMPOSE_ENV_FILES := $(CURDIR)/.env.example$(if $(LOCAL_ENV),$(comma)$(LOCAL_ENV))
 COMPOSE_DISABLE_ENV_FILE := 1
-export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
+# Same derivation as scripts/run-e2e.sh and scripts/ci-images.sh: unit-test
+# builds and runs use this checkout's image tags and Compose project, never
+# another stack's (the demo project name is case-library-v2 from
+# docker-compose.yml; the -e2e suffix keeps them apart).
+IMAGE_PREFIX := $(shell printf '%s' "$(notdir $(CURDIR))" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e
+COMPOSE_PROJECT_NAME := $(IMAGE_PREFIX)
+export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE IMAGE_PREFIX COMPOSE_PROJECT_NAME
 
 COMPOSE := docker compose
 E2E_SPEC ?= $(SPEC)
@@ -27,6 +33,7 @@ config-contract:
 	$(COMPOSE) --env-file .env.example config --quiet
 	tests/failover/compose-contract.sh
 	sh tests/e2e/run-e2e-contract.sh
+	sh tests/e2e/isolation-contract.sh
 	sh tests/ai/ai-smoke-contract.sh
 	sh tests/release/release-contract.sh
 	sh tests/failover/isolation-contract.sh

@@ -2,7 +2,7 @@
 set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-compose_project="case-library-v2"
+compose_project="$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-load"
 load_meili_volume="${compose_project}_load_meili_data"
 profile="${1:-smoke}"
 database="case_library_load"
@@ -183,8 +183,7 @@ compose up -d --wait mongo-init
 drop_test_database "$database"
 verify_load_cleanup
 if [ "${SKIP_BUILD:-false}" != "true" ]; then
-  compose build load-app load-frontend load-meilisearch
-  docker build -f deploy/k6.Dockerfile -t case-library-v2-load:latest .
+  compose build load-app load-frontend load-meilisearch load
 fi
 compose --profile load up -d --wait load-meilisearch
 compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=true load-search-init python -m app.cli.bootstrap

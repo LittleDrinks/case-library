@@ -1,0 +1,103 @@
+# Isolated E2E stack: own mongodb replica set, minio, meilisearch, networks
+# and image tags. scripts/run-e2e.sh always activates this overlay with a
+# project name derived from the checkout directory, so two independent
+# checkouts run the full E2E in parallel. Networks are auto-allocated by
+# Docker; services here must never join the demo database/edge/restore_test
+# networks, so every networks key is an override, not a merge.
+services:
+  mongo1:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes: !override
+      - e2e_mongo1_data:/data/db
+    networks: !override
+      e2e_database: {}
+    restart: "no"
+
+  mongo2:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes: !override
+      - e2e_mongo2_data:/data/db
+    networks: !override
+      e2e_database: {}
+    restart: "no"
+
+  mongo3:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes: !override
+      - e2e_mongo3_data:/data/db
+    networks: !override
+      e2e_database: {}
+    restart: "no"
+
+  minio:
+    volumes: !override
+      - e2e_minio_data:/data
+    networks: !override
+      e2e_database: {}
+    restart: "no"
+
+  mongo-init:
+    networks: !override
+      e2e_database: {}
+
+  e2e-search-init:
+    networks: !override
+      e2e_database: {}
+      e2e_test: {}
+
+  e2e-search-worker:
+    networks: !override
+      e2e_database: {}
+      e2e_test: {}
+
+  backend-e2e:
+    networks: !override
+      e2e_database: {}
+      e2e_test: {}
+
+  e2e-app:
+    networks: !override
+      e2e_database: {}
+      e2e_test:
+        aliases: ["app"]
+
+  agent-e2e-app:
+    networks: !override
+      e2e_database: {}
+      e2e_test:
+        aliases: ["agent-app"]
+
+  agent-e2e-loser:
+    networks: !override
+      e2e_database: {}
+      e2e_test:
+        aliases: ["agent-loser"]
+
+  agent-tracer-app:
+    networks: !override
+      e2e_database: {}
+      e2e_test:
+        aliases: ["agent-tracer-app"]
+
+  frontend:
+    ports: !reset []
+
+  app:
+    ports: !reset []
+
+networks:
+  e2e_database:
+    internal: true
+  e2e_test:
+    internal: true
+    ipam: !reset {}
+
+volumes:
+  e2e_mongo1_data:
+  e2e_mongo2_data:
+  e2e_mongo3_data:
+  e2e_minio_data:
+  e2e_meili_data:

@@ -5,7 +5,12 @@
 # docker-compose.yml stays the single source of truth.
 set -euo pipefail
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-compose_project="case-library-v2"
+# Same derivation as scripts/run-e2e.sh: image tags are owned by this
+# checkout's Compose project, so builds never reuse another checkout's stale
+# local images.
+compose_project="$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e"
+IMAGE_PREFIX="$compose_project"
+export IMAGE_PREFIX
 
 compose() {
   docker compose --project-name "$compose_project" \
@@ -60,7 +65,14 @@ fingerprint() {
     printf '%s\n' "$2"
     cat "$1"
     copy_sources "$1" | while IFS= read -r src; do
-      git -C "$project_dir" ls-files -s -- "$src" || exit 1
+      # Content, not the git index: uncommitted edits must change the
+      # fingerprint so a run never reuses an image built from old source.
+      if test -d "$project_dir/$src"; then
+        git -C "$project_dir" ls-files -z -- "$src" | xargs -0 -n1 -I{} \
+          git -C "$project_dir" hash-object -- "{}"
+      else
+        git -C "$project_dir" hash-object -- "$src" || exit 1
+      fi
     done
   } | sha256sum | cut -d' ' -f1
 }
@@ -74,9 +86,24 @@ image_ref() {
     "$(fingerprint "$project_dir/$dockerfile" "$target")"
 }
 
+local_image_is_current() {
+  local svc ref fingerprint_id
+  svc="$1"
+  docker image inspect "$(service_image_name "$svc")" >/dev/null 2>&1 || return 1
+  ref="$(image_ref "$svc")" || return 1
+  fingerprint_id="$(docker image inspect "$ref" --format '{{.Id}}' 2>/dev/null || true)"
+  if test -n "$fingerprint_id"; then
+    test "$fingerprint_id" = "$(docker image inspect "$(service_image_name "$svc")" --format '{{.Id}}')"
+    return $?
+  fi
+  return 1
+}
+
 try_pull() {
   local ref
-  docker image inspect "$(service_image_name "$1")" >/dev/null 2>&1 && return 0
+  if local_image_is_current "$1"; then
+    return 0
+  fi
   ref="$(image_ref "$1")" || return 1
   docker pull --quiet "$ref" && docker tag "$ref" "$(service_image_name "$1")"
 }
@@ -94,7 +121,16 @@ pull_missed() {
 ensure() {
   local missed status_dir
   if test -z "${CI:-}"; then
-    compose build "$@"
+    # A local tag is only trusted when it matches the current fingerprint;
+    # otherwise a stale image from another checkout or old source would run.
+    local current=() svc
+    for svc in "$@"; do
+      local_image_is_current "$svc" || current+=("$svc")
+    done
+    if test "${#current[@]}" -gt 0; then
+      printf '[ci-images] fingerprint miss, building locally:%s\n' " ${current[*]}" >&2
+      compose build "${current[@]}"
+    fi
     return 0
   fi
   init_config

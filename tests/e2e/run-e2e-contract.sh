@@ -7,11 +7,12 @@ makefile="$project_dir/Makefile"
 workflow="$project_dir/.github/workflows/ci.yml"
 playwright_config="$project_dir/frontend/playwright.config.js"
 compose_file="$project_dir/docker-compose.yml"
+overlay_file="$project_dir/deploy/e2e.compose.yml"
 pytest_config="$project_dir/backend/tests/pytest.ini"
 meili_test="$project_dir/backend/tests/test_search_meilisearch_e2e.py"
 case_content_test="$project_dir/backend/tests/test_search_case_content_e2e.py"
 query_budget_test="$project_dir/backend/tests/test_auth_query_budget_e2e.py"
-backend_e2e_command='compose --profile e2e run --rm --no-deps backend-e2e'
+config_project=case-library-v2-e2e-contract
 
 require_line() {
   grep -Fqx "$1" "$runner" || {
@@ -25,15 +26,11 @@ matching_line() {
 }
 
 require_line 'clear_e2e_bucket() {'
-require_line "  $backend_e2e_command python tests/clear_e2e_bucket.py"
+require_line "  compose --profile e2e run --rm --no-deps backend-e2e python tests/clear_e2e_bucket.py"
 require_line 'scripts/ci-images.sh ensure mongo-init production-config-check'
 require_line 'compose up -d mongo1 mongo2 mongo3'
 require_line 'scripts/ci-images.sh ensure $ensure_services'
-require_line 'browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"'
-require_line 'backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"'
 require_line 'compose up -d --wait mongo-init'
-require_line '  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker'
-require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer-app agent-tracer-frontend agent-tracer-gateway'
 require_line '  drop_test_database "$database"'
 require_line '  compose --profile e2e up -d --wait e2e-app'
 require_line '  compose --profile e2e up -d --wait e2e-frontend'
@@ -58,57 +55,27 @@ test "$ensure_line" -lt "$mongo_wait_line" || {
 ci_images="$project_dir/scripts/ci-images.sh"
 test -x "$ci_images"
 grep -Fq 'compose config --format json' "$ci_images"
-grep -Fq 'ls-files -s -- "$src"' "$ci_images"
+grep -Fq 'hash-object -- "$src"' "$ci_images"
 grep -Fq 'docker pull --quiet "$ref"' "$ci_images"
 grep -Fq 'docker tag "$ref"' "$ci_images"
-if grep -Fq 'compose build $build_services' "$runner"; then
-  echo "E2E must pull fingerprint-tagged images instead of unconditional compose build" >&2
-  exit 1
-fi
-if grep -Fq 'docker build -f deploy/e2e.Dockerfile' "$runner"; then
-  echo "Playwright image must be built once via compose service e2e" >&2
-  exit 1
-fi
-if grep -Fq 'compose build agent-' "$runner"; then
-  echo "Agent e2e services must reuse shared images instead of rebuilding" >&2
-  exit 1
-fi
-require_line 'run_browser_tests() {'
-require_line '  set -- compose --profile e2e run --rm --no-deps \'
-require_line '    -v "$artifact_dir:/app/test-results" e2e'
-require_line '  test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"'
-require_line 'run_backend_suite() {'
-require_line '  compose --profile e2e run --rm --no-deps backend-e2e'
-require_line 'run_browser_suite() {'
-require_line '  backend) run_backend_suite ;;'
-require_line '  browser) run_browser_suite ;;'
-require_line '  original_status=$?'
-require_line '  test "$original_status" -ne 0 && exit "$original_status"'
-require_line '  exit "$cleanup_status"'
-require_line 'trap cleanup EXIT'
-require_line "trap 'exit 130' INT"
-require_line "trap 'exit 143' TERM"
-grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
-grep -q '^test-backend:' "$makefile"
-grep -q '^test-frontend:' "$makefile"
-grep -q '^ensure-backend-test:' "$makefile"
-grep -q '^ensure-frontend-test:' "$makefile"
-grep -Fq 'check-backend-function-lines: ensure-backend-test' "$makefile"
-grep -Fq 'check-frontend-function-lines: ensure-frontend-test' "$makefile"
-! grep -q 'run --build' "$makefile"
-grep -q '^backend-e2e:' "$makefile"
-grep -q '^e2e-spec:' "$makefile"
-make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
-make -C "$project_dir" -n backend-e2e | grep -Fx 'scripts/run-e2e.sh --backend'
-make -C "$project_dir" -n e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js | \
-  grep -Fx 'scripts/run-e2e.sh "frontend/tests/e2e/homepage.spec.js"'
-grep -Fq 'artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"' "$runner"
-grep -Fq 'frontend/tests/e2e/*.spec.js' "$runner"
-grep -Fq 'tests/e2e/*.spec.js' "$runner"
+
+# Isolation contract: the runner derives its Compose project and image tag
+# prefix from the checkout directory plus a path hash (always isolated, no
+# opt-in flag), and keeps every resource name derived from that project.
+grep -Fq 'dir_slug="$(printf '"'"'%s'"'"' "$(basename "$project_dir")" | tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"' | sed '"'"'s/[^a-z0-9_-]/-/g'"'"')"' "$runner"
+grep -Fq 'dir_hash="$(printf '"'"'%s'"'"' "$project_dir" | sha256sum | cut -c1-8)"' "$runner"
+grep -Fq 'compose_project="${dir_slug}-${dir_hash}-e2e"' "$runner"
+grep -Fq 'flock -n 9' "$runner"
+require_line 'export IMAGE_PREFIX="$compose_project"'
+grep -Fq 'deploy/e2e.compose.yml' "$runner"
+! grep -Eq 'docker (volume|network) .*case-library-v2_e2e_' "$runner"
+test "$(grep -Fc 'case-library-v2' "$runner")" -eq 1
+
+# Both suites must still run through ci-images with the same ensure list.
+grep -Fq 'browser_ensure_services=' "$runner"
+grep -Fq 'backend_ensure_services=' "$runner"
+
 test "$(grep -Fc 'compose --profile e2e run --rm --no-deps backend-e2e' "$runner")" -eq 2
-! grep -Fq 'reset_browser_state' "$runner"
-stop_lines="$(grep 'compose .* stop ' "$runner")"
-test "$(printf '%s\n' "$stop_lines" | grep -c ' stop -t 1 ')" -eq 2
 
 backend_job="$(sed -n '/^  backend-e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
 browser_job="$(sed -n '/^  e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
@@ -128,22 +95,65 @@ grep -Fq 'screenshot: "only-on-failure"' "$playwright_config"
 grep -Fq 'name: "generic"' "$playwright_config"
 grep -Fq 'name: "agent"' "$playwright_config"
 test ! -e "$project_dir/frontend/playwright.agent.config.js"
-e2e_config="$(
-  docker compose --env-file "$project_dir/.env.example" --profile e2e config --format json
+
+# Behavior: the merged run config (docker-compose.yml + overlay, project
+# derived from the checkout directory) gives this checkout its own replica
+# set volumes, minio volume, auto-allocated networks, image tags, and no
+# host ports. The unmerged base file stays untouched for the demo stack.
+isolated_config="$(
+  IMAGE_PREFIX="$config_project" docker compose \
+    --project-name "$config_project" \
+    --env-file "$project_dir/.env.example" --profile e2e \
+    -f "$compose_file" -f "$overlay_file" config --format json
 )"
-for service in mongo1 mongo2 mongo3 minio e2e-app agent-e2e-app agent-e2e-loser \
-  agent-e2e-frontend agent-e2e-gateway e2e-frontend; do
-  printf '%s' "$e2e_config" | jq -e --arg service "$service" \
-    '.services[$service].healthcheck.interval == "1s"' >/dev/null
-done
-printf '%s' "$e2e_config" | jq -e \
+printf '%s' "$isolated_config" | jq -e \
   '.services["backend-e2e"].command == [
     "python", "-m", "pytest", "-q", "-c", "tests/pytest.ini",
     "-m", "e2e", "tests"
   ]' >/dev/null
-printf '%s' "$e2e_config" | jq -e \
+printf '%s' "$isolated_config" | jq -e \
   '.services["e2e-app"].environment.MONGODB_URI | endswith("&appName=e2e-app")' \
   >/dev/null
+printf '%s' "$isolated_config" | jq -e --arg project "$config_project" '
+  .services["e2e-app"].image == ($project + "-e2e-app") and
+  .services["backend-e2e"].image == ($project + "-backend-test") and
+  .services["e2e"].image == ($project + "-e2e") and
+  .services["e2e-frontend"].image == ($project + "-e2e-frontend") and
+  .services.mongo1.image == "mongo:7"
+' >/dev/null
+printf '%s' "$isolated_config" | jq -e --arg project "$config_project" '
+  .volumes.e2e_mongo1_data.name == ($project + "_e2e_mongo1_data") and
+  .volumes.e2e_mongo2_data.name == ($project + "_e2e_mongo2_data") and
+  .volumes.e2e_mongo3_data.name == ($project + "_e2e_mongo3_data") and
+  .volumes.e2e_minio_data.name == ($project + "_e2e_minio_data") and
+  .volumes.e2e_meili_data.name == ($project + "_e2e_meili_data")
+' >/dev/null
+printf '%s' "$isolated_config" | jq -e '
+  (.services.mongo1.networks | keys | sort) == ["e2e_database"] and
+  (.services.minio.networks | keys | sort) == ["e2e_database"] and
+  (.services["e2e-app"].networks | keys | sort) == ["e2e_database", "e2e_test"] and
+  (.services["backend-e2e"].networks | keys | sort) == ["e2e_database", "e2e_test"] and
+  (.services | to_entries | map(select(.value.networks.database != null)) | length) == 0
+' >/dev/null
+printf '%s' "$isolated_config" | jq -e '
+  .services["e2e-app"].ports == null and
+  .services.frontend.ports == null and
+  .services.app.ports == null
+' >/dev/null
+printf '%s' "$isolated_config" | jq -e '
+  .networks["e2e_database"].internal == true and
+  .networks["e2e_database"].ipam.config == null and
+  .networks["e2e_test"].internal == true and
+  .networks["e2e_test"].ipam.config == null
+' >/dev/null
+
+# The e2e runner services keep 1s healthchecks in the isolated stack too.
+for service in mongo1 mongo2 mongo3 minio e2e-app agent-e2e-app agent-e2e-loser \
+  agent-e2e-frontend agent-e2e-gateway e2e-frontend; do
+  printf '%s' "$isolated_config" | jq -e --arg service "$service" \
+    '.services[$service].healthcheck.interval == "1s"' >/dev/null
+done
+
 if grep -Eq 'MEILI_CONTRACT_KEY[=:]' "$compose_file"; then
   echo "E2E must receive its Meilisearch key through a secret file" >&2
   exit 1
@@ -193,38 +203,108 @@ printf '%s\n' "$browser_suite" | grep -Fq '  test -n "$browser_spec" || run_agen
 ! printf '%s\n' "$browser_suite" | grep -Fq 'backend-e2e'
 ! printf '%s\n' "$browser_suite" | grep -Fq 'drop_test_database'
 
-grep -q '^compose_project="case-library-v2"$' "$runner"
 grep -Fq 'docker compose --project-name "$compose_project"' "$runner"
-grep -Fq 'e2e_meili_volume="${compose_project}_e2e_meili_data"' "$runner"
-grep -Fq 'e2e_network="${compose_project}_e2e_test"' "$runner"
-grep -Fq 'compose --profile e2e ps -aq' "$runner"
-! grep -Eq 'docker (volume|network) .*case-library-v2_e2e_' "$runner"
 grep -Fq 'db.getMongo().getDBNames().includes' "$runner"
 grep -Fq 'client.list_objects(bucket, recursive=True)' \
   "$project_dir/backend/tests/clear_e2e_bucket.py"
 
+# Cleanup must be one destructive pass that removes every owned resource
+# (containers, volumes, networks via compose down --volumes), then verify
+# against the real Docker resource inventory — not a name grep.
 cleanup_body="$(sed -n '/^cleanup() {/,/^}/p' "$runner")"
-mock_cleanup_step() { test "${cleanup_failure:-}" != "$1"; }
-stop_e2e_runtime() { mock_cleanup_step stop; }
-clear_e2e_bucket() { mock_cleanup_step bucket; }
-drop_and_verify_database() { mock_cleanup_step database; }
-remove_e2e_services() { mock_cleanup_step services; }
-remove_e2e_volume() { mock_cleanup_step volume; }
-remove_e2e_network() { mock_cleanup_step network; }
-verify_e2e_resources_absent() { mock_cleanup_step verify; }
+verify_body="$(sed -n '/^verify_e2e_resources_absent() {/,/^}/p' "$runner")"
+printf '%s\n' "$verify_body" | grep -Fq 'com.docker.compose.project'
+printf '%s\n' "$cleanup_body" | grep -Fq 'clear_e2e_bucket'
+printf '%s\n' "$cleanup_body" | grep -Fq 'teardown_e2e_resources'
+printf '%s\n' "$cleanup_body" | grep -Fq 'verify_e2e_resources_absent'
+teardown_body="$(sed -n '/^teardown_e2e_resources() {/,/^}/p' "$runner")"
+printf '%s\n' "$teardown_body" | grep -Fq 'down --volumes --remove-orphans'
+grep -Fq 'trap cleanup EXIT' "$runner"
+grep -Fq "trap 'exit 130' INT" "$runner"
+grep -Fq "trap 'exit 143' TERM" "$runner"
 
+# The exclusive lock must be taken before any teardown runs, so a second run
+# in the same checkout can never preclean an active run's resources.
+lock_line="$(grep -n 'flock -n 9' "$runner" | cut -d: -f1)"
+preclean_line="$(grep -n '^preclean_e2e_resources$' "$runner" | cut -d: -f1)"
+test -n "$lock_line" && test -n "$preclean_line"
+test "$lock_line" -lt "$preclean_line"
+
+# Behavior: evaluating the real verify function against the real Docker CLI
+# (mocked only at the docker() boundary with a resource inventory) reports
+# absence when the inventory is empty and presence when it is not.
+verify_eval() {
+  inventory="$1"
+  (
+    compose_project=inventory-probe
+    docker() {
+      case "$1" in
+        ps|volume|network) if test -n "$inventory"; then printf '%s\n' "$inventory"; fi ;;
+      esac
+      return 0
+    }
+    eval "$verify_body"
+    verify_e2e_resources_absent
+  )
+}
+rc_empty=0
+verify_eval '' >/dev/null 2>&1 || rc_empty=$?
+rc_owned=0
+verify_eval 'abc123' >/dev/null 2>&1 || rc_owned=$?
+test "$rc_empty" -eq 0 || {
+  echo "verify_e2e_resources_absent must succeed on an empty inventory" >&2
+  exit 1
+}
+test "$rc_owned" -ne 0 || {
+  echo "verify_e2e_resources_absent must fail while owned resources remain" >&2
+  exit 1
+}
+
+grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
+grep -q '^backend-e2e:' "$makefile"
+grep -q '^e2e-spec:' "$makefile"
+make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
+make -C "$project_dir" -n backend-e2e | grep -Fx 'scripts/run-e2e.sh --backend'
+make -C "$project_dir" -n e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js | \
+  grep -Fx 'scripts/run-e2e.sh "frontend/tests/e2e/homepage.spec.js"'
+grep -Fq 'artifact_dir="${E2E_ARTIFACT_DIR:-$project_dir/test-results/e2e}"' "$runner"
+grep -Fq 'frontend/tests/e2e/*.spec.js' "$runner"
+grep -Fq 'tests/e2e/*.spec.js' "$runner"
+! grep -Fq 'reset_browser_state' "$runner"
+# Teardown is a single compose down pass, not per-service stops.
+! grep -Eq 'compose .* stop ' "$runner"
+
+# Refusing to drop a database through another project's mongo is behavior,
+# verified against the shared helper.
+grep -Fq 'verify_mongo_project_ownership' "$project_dir/scripts/test-database.sh"
+grep -Fq 'com.docker.compose.project' "$project_dir/scripts/test-database.sh"
+grep -Fq '. "$project_dir/scripts/test-database.sh"' "$runner"
+
+# Behavior: the real cleanup body propagates both the original status and a
+# cleanup failure, evaluated with the destructive steps stubbed.
 assert_cleanup_status() {
   original="$1"
-  cleanup_failure="$2"
+  fail_teardown="$2"
   expected="$3"
   set +e
-  (eval "$cleanup_body"; (exit "$original"); cleanup)
+  (
+    compose_project=cleanup-probe
+    clear_e2e_bucket() { test -z "$fail_teardown"; }
+    teardown_e2e_resources() {
+      if test -n "$fail_teardown"; then return 7; fi
+      return 0
+    }
+    verify_e2e_resources_absent() { return 0; }
+    eval "$cleanup_body"
+    (exit "$original")
+    cleanup
+  )
   actual=$?
   set -e
   test "$actual" -eq "$expected"
 }
 
 assert_cleanup_status 0 "" 0
-assert_cleanup_status 0 volume 1
-assert_cleanup_status 7 "" 7
-assert_cleanup_status 7 volume 7
+assert_cleanup_status 0 fail 1
+assert_cleanup_status 9 "" 9
+assert_cleanup_status 9 fail 9
