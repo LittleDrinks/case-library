@@ -8,6 +8,10 @@ services:
   mongo1:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     healthcheck:
       interval: 30s
       start_interval: 1s
@@ -20,6 +24,10 @@ services:
   mongo2:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     healthcheck:
       interval: 30s
       start_interval: 1s
@@ -32,6 +40,10 @@ services:
   mongo3:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     healthcheck:
       interval: 30s
       start_interval: 1s

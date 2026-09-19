@@ -286,6 +286,7 @@ for service in mongo1 mongo2 mongo3; do
     .services[$service].healthcheck.interval == "30s" and
     .services[$service].healthcheck.start_interval == "1s" and
     .services[$service].healthcheck.timeout == "4s" and
+    .services[$service].ulimits.nofile == {"soft": 64000, "hard": 64000} and
     .services[$service].command[-2:] == ["--wiredTigerCacheSizeGB", "0.25"]
   ' >/dev/null
 done
