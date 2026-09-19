@@ -112,6 +112,14 @@ def test_submission_freezes_extracted_attachment_text_without_exposing_it(
     database = client.app.state.database
     submitted = _submit(client, headers)
     _assert_frozen_search_text(database, attachment, submitted)
+    assert submitted["version"]["attachments"] == [attachment]
+    history = client.get("/api/cases/c-draft-1/history")
+    assert history.status_code == 200
+    version = next(
+        item for item in history.json()["versions"]
+        if item["id"] == submitted["version"]["id"]
+    )
+    assert version["attachments"] == [attachment]
 
 
 def test_author_can_upload_a_valid_docx_larger_than_search_text_limit(
