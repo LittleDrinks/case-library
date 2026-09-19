@@ -77,12 +77,17 @@ def test_chat_lease_renews_to_fixed_deadline_and_rejects_expiry_boundary(
     clock = [datetime(2026, 1, 1, 12, 0, tzinfo=UTC)]
     monkeypatch.setattr(quota, "_now", lambda: clock[0])
     lease = quota.acquire_chat_lease(store, "user-1", "https://one.example/v1")
+    acquired = list(store.ai_usage.find({"token": lease.token}))
+    assert len(acquired) == 3
+    assert {row["_id"] for row in acquired} == set(lease.quota_ids)
 
     renewal_now = clock[0] + timedelta(seconds=5)
     clock[0] = renewal_now
     lease.renew()
     expected = renewal_now + timedelta(seconds=quota.LEASE_SECONDS)
     renewed = list(store.ai_usage.find({"token": lease.token}))
+    assert len(renewed) == 3
+    assert {row["_id"] for row in renewed} == set(lease.quota_ids)
     assert all(_as_utc(row["expiresAt"]) == expected for row in renewed)
 
     clock[0] = expected
@@ -103,8 +108,6 @@ def test_chat_lease_renews_to_fixed_deadline_and_rejects_expiry_boundary(
 def test_reclaimable_normalizes_expiry_and_uses_missing_ttl_fallback() -> None:
     store = database()
     now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
-    future = {"_id": "future", "token": "old", "expiresAt": now + timedelta(seconds=1)}
-    exact = {"_id": "exact", "token": "old", "expiresAt": now}
     missing = {"_id": "missing", "token": "old"}
     naive_expired = {
         "_id": "naive", "token": "old",
@@ -115,8 +118,6 @@ def test_reclaimable_normalizes_expiry_and_uses_missing_ttl_fallback() -> None:
         "expiresAt": (now - timedelta(hours=1)).astimezone(timezone(timedelta(hours=2))),
     }
 
-    assert not quota._reclaimable(store, future, now)
-    assert quota._reclaimable(store, exact, now)
     assert quota._reclaimable(store, missing, now)
     assert quota._reclaimable(store, naive_expired, now)
     assert quota._reclaimable(store, offset_expired, now)
@@ -137,31 +138,31 @@ def test_claim_reclaims_expired_rows_but_fences_future_and_active_owners() -> No
         "id": "run-1", "status": "active", "ownerExpiresAt": now + timedelta(seconds=10),
     })
 
+    future_before = store.ai_usage.find_one({"_id": "future"}, {"_id": 0})
     assert not quota._claim(store, "future", "new-future", now)
+    assert store.ai_usage.find_one({"_id": "future"}, {"_id": 0}) == future_before
+
+    exact_before = store.ai_usage.find_one({"_id": "exact"}, {"_id": 0})
     assert quota._claim(store, "exact", "new-exact", now)
+    exact_after = store.ai_usage.find_one({"_id": "exact"}, {"_id": 0})
+    assert exact_after["token"] == "new-exact"
+    assert _as_utc(exact_after["expiresAt"]) == now + timedelta(seconds=quota.LEASE_SECONDS)
+    assert "runId" not in exact_after
+    assert exact_before["token"] == "old"
+
+    owned_before = store.ai_usage.find_one({"_id": "owned"}, {"_id": 0})
     assert not quota._claim(store, "owned", "new-owned", now)
+    assert store.ai_usage.find_one({"_id": "owned"}, {"_id": 0}) == owned_before
 
     store.agent_runs.update_one(
         {"id": "run-1"}, {"$set": {"ownerExpiresAt": now - timedelta(seconds=1)}}
     )
     assert quota._claim(store, "owned", "new-owned", now)
-
-
-def test_reclaimable_fences_expired_lease_with_active_run_owner() -> None:
-    store = database()
-    now = datetime.now(UTC)
-    row = {
-        "_id": "owned", "token": "old", "runId": "run-1",
-        "expiresAt": now - timedelta(seconds=1),
-    }
-    store.ai_usage.insert_one(row)
-    store.agent_runs.insert_one({
-        "id": "run-1", "status": "active", "ownerExpiresAt": now + timedelta(seconds=10),
-    })
-
-    assert not quota._reclaimable(store, row, now)
-
-def test_expired_lease_is_not_reclaimed_until_run_owner_expires(monkeypatch) -> None:
+    owned_after = store.ai_usage.find_one({"_id": "owned"}, {"_id": 0})
+    assert owned_after["token"] == "new-owned"
+    assert _as_utc(owned_after["expiresAt"]) == now + timedelta(seconds=quota.LEASE_SECONDS)
+    assert "runId" not in owned_after
+def test_expired_lease_is_not_reclaimed_until_run_owner_expires() -> None:
     store = database()
     now = datetime.now(UTC)
     quota_id = "concurrent:chat:provider:test:0"
@@ -170,8 +171,8 @@ def test_expired_lease_is_not_reclaimed_until_run_owner_expires(monkeypatch) -> 
         "expiresAt": now - timedelta(seconds=1),
     })
     store.agent_runs.insert_one({
-        "id": "run-1", "status": "active",
-        "ownerId": "worker-a", "ownerExpiresAt": now + timedelta(seconds=10),
+        "id": "run-1", "status": "active", "ownerId": "worker-a",
+        "ownerExpiresAt": now + timedelta(seconds=10),
     })
     assert not quota._claim(store, quota_id, "new", now)
     store.agent_runs.update_one(
