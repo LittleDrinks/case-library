@@ -83,6 +83,15 @@ jobs:
         run: make backend-e2e
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          E2E_ARTIFACT_DIR: ${{ runner.temp }}/backend-e2e-artifacts
+      - name: Upload backend E2E and Chinese Gherkin reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-e2e-reports
+          path: ${{ runner.temp }}/backend-e2e-artifacts/backend/
+          retention-days: 14
+          if-no-files-found: warn
 
   bdd-zh:
     name: Chinese BDD acceptance

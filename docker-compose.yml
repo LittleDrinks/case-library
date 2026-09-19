@@ -408,7 +408,7 @@ services:
       - database
       - e2e_test
     entrypoint: []
-    command: ["python", "-m", "pytest", "-q", "-c", "tests/pytest.ini", "-m", "e2e", "tests"]
+    command: ["python", "-m", "pytest", "-q", "-c", "tests/pytest.ini", "-m", "e2e", "tests", "--junitxml=/app/test-results/backend/report.xml", "--html=/app/test-results/backend/report.html", "--self-contained-html"]
 
   e2e-meilisearch:
     profiles: ["e2e"]
