@@ -14,7 +14,9 @@ Probes:
    stage, a gate holds it while the parent confirms readiness and sends
    SIGHUP. Required: exit exactly 129 AND the same owned teardown, even
    after a second HUP/TERM/INT during cleanup.
-3. trap-regression counter-example — with the runner's cleanup trap
+3. old-signal-trap counter-example — restoring the old signal handlers
+   must fail the same blocked-cleanup probe.
+4. trap-regression counter-example — with the runner's cleanup trap
    deleted (sed on the fixture copy), the HUP probe MUST fail; proves the
    probe is red against a cleanup-less runner.
 """
@@ -87,7 +89,9 @@ def write_shim(fail_stage=None, gate=False):
     the e2e-app stage until a release file appears (for HUP timing)."""
     shim = tmp / "docker"
     log = tmp / "docker-calls.log"
-    for path in (log, tmp / "at-gate", tmp / "release"):
+    for path in (log, *(tmp / name for name in (
+        "at-gate", "release", "cleanup-gate", "cleanup-release",
+    ))):
         path.unlink(missing_ok=True)
     fail_case = ""
     if fail_stage:
@@ -102,6 +106,12 @@ def write_shim(fail_stage=None, gate=False):
             'case " $* " in *' + GATE_STAGE + "*)\n"
             f'  touch "{tmp}/at-gate"\n'
             f'  while test ! -e "{tmp}/release"; do sleep 0.05; done\n'
+            ";; esac\n"
+            'case " $* " in *" down --volumes --remove-orphans "*)\n'
+            f'  if test -e "{tmp}/at-gate"; then\n'
+            f'    touch "{tmp}/cleanup-gate"\n'
+            f'    while test ! -e "{tmp}/cleanup-release"; do sleep 0.05; done\n'
+            '  fi\n'
             ";; esac\n"
         )
     shim.write_text(
@@ -214,8 +224,8 @@ import signal as _signal
 results = []
 make_fixture()
 
-def gate_ready(proc, timeout=30):
-    gate = tmp / "at-gate"
+def gate_ready(proc, timeout=30, name="at-gate"):
+    gate = tmp / name
     deadline = time.time() + timeout
     while time.time() < deadline and not gate.exists():
         if proc.poll() is not None:
@@ -237,26 +247,45 @@ finally:
 ok1 = verdict("first-e2e-app-failure", rc, lines, 37, "up -d --wait e2e-app")
 results.append(ok1)
 
-# Probe 2: HUP during suite, then repeated signals during owned cleanup.
-write_shim(gate=True)
-proc = None
-try:
+def repeated_cleanup_signals():
+    write_shim(gate=True)
     proc = spawn()
-    wait_for_call(proc, "up -d --wait e2e-app")
-    gate_ready(proc)
-    os.killpg(proc.pid, _signal.SIGHUP)
-    (tmp / "release").write_text("")
-    wait_for_call(proc, "down --volumes --remove-orphans")
-    for signal in (_signal.SIGHUP, _signal.SIGTERM, _signal.SIGINT):
-        os.killpg(proc.pid, signal)
-    rc = proc.wait(timeout=120)
-finally:
-    lines = read_calls()
-    if proc and proc.poll() is None:
-        proc.kill()
-        proc.wait()
+    try:
+        gate_ready(proc)
+        os.killpg(proc.pid, _signal.SIGHUP)
+        (tmp / "release").write_text("")
+        gate_ready(proc, name="cleanup-gate")
+        for signal in (_signal.SIGHUP, _signal.SIGTERM, _signal.SIGINT):
+            try:
+                os.killpg(proc.pid, signal)
+            except ProcessLookupError:
+                break
+        (tmp / "cleanup-release").write_text("")
+        return proc.wait(timeout=30), read_calls()
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, _signal.SIGKILL)
+            proc.wait()
+
+
+# The cleanup gate cannot be reached by the initial preclean invocation.
+rc, lines = repeated_cleanup_signals()
 ok2 = verdict("hup-during-suite-repeated-signals", rc, lines, 129, "up -d --wait e2e-app")
 results.append(ok2)
+
+runner = fixture / "scripts" / "run-e2e.sh"
+fixed_runner = runner.read_text()
+old_runner = fixed_runner.replace("trap - EXIT\n  trap '' INT TERM HUP", "trap - EXIT INT TERM")
+assert old_runner != fixed_runner
+runner.write_text(old_runner)
+rc, lines = repeated_cleanup_signals()
+ok_shape, problem = teardown_shape(lines, "up -d --wait e2e-app")
+report = {"label": "old-signal-trap-control", "exit": rc,
+          "teardown_ok": ok_shape, "teardown_problem": problem,
+          "detected_regression": not ok_shape}
+print(json.dumps(report))
+results.append(not ok_shape)
+runner.write_text(fixed_runner)
 
 # Probe 3 (negative control): delete the runner's cleanup traps; the HUP
 # probe must turn red (exit not 129 or teardown missing).
