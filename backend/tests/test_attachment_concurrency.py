@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
-from conftest import EmptySearchCatalog, ReadyCatalogState
+from tests.conftest import EmptySearchCatalog, ReadyCatalogState
 from tests.conftest import MemoryBlobStore
 
 

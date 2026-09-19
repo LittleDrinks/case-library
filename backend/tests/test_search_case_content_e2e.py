@@ -16,7 +16,7 @@ from app.modules.search.client import create_reader, wait_task
 from app.modules.search.indexer import CatalogRebuilder
 from app.modules.search.meilisearch import MeilisearchCatalog
 from app.modules.search.worker import WorkerHeartbeat
-from conftest import MemoryBlobStore, PassthroughSession, ReadyCatalogState
+from tests.conftest import MemoryBlobStore, PassthroughSession, ReadyCatalogState
 
 pytestmark = pytest.mark.e2e("MEILI_CONTRACT_URL", "MEILI_CONTRACT_KEY_FILE")
 

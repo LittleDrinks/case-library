@@ -13,7 +13,7 @@ from app.main import create_app
 from app.modules.search.client import CatalogHealth
 from app.modules.search.meilisearch import SearchUnavailable
 from app.modules.search.outbox import SearchOutbox
-from conftest import MemoryBlobStore, ReadyCatalogState
+from tests.conftest import MemoryBlobStore, ReadyCatalogState
 
 
 def test_health_and_constants_are_available(client: TestClient) -> None:

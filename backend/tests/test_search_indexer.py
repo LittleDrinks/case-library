@@ -19,7 +19,7 @@ from app.modules.search.models import SearchQuery
 from app.modules.search.outbox import SearchOutbox
 from app.modules.search.service import CatalogSearch, search_catalog
 from app.modules.search.worker import CatalogConsumer, WorkerHeartbeat
-from conftest import ReadyCatalogState
+from tests.conftest import ReadyCatalogState
 
 
 class MissingIndex(Exception):
