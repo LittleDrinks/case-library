@@ -124,9 +124,23 @@ def test_reimport_marks_exact_content_as_duplicate(client: TestClient) -> None:
     assert duplicate["duplicateOf"] == first["items"][0]["candidateId"]
 
 
+def _rar_fixture() -> Path:
+    """宿主：仓库根 assets/；backend-test 容器：构建期 COPY 到 /app/fixtures/。"""
+    candidates = [
+        Path(__file__).resolve().parents[2] / "assets" / "学习资料md.rar",
+        Path("/app/fixtures/学习资料md.rar"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "学习资料md.rar not found in: " + ", ".join(str(c) for c in candidates)
+    )
+
+
 def test_real_rar_creates_one_candidate_item_per_entry(client: TestClient) -> None:
     auth = login(client, "admin", "admin123")
-    fixture = Path("/app/fixtures/学习资料md.rar")
+    fixture = _rar_fixture()
     with fixture.open("rb") as archive:
         response = submit_import(
             client,

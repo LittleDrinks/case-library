@@ -274,24 +274,9 @@ def test_duplicate_resource_paths_rejected_before_any_write(client: TestClient) 
     assert client.app.state.blob_store.objects == {}
 
 
-def test_concurrent_uploads_allocate_distinct_versions(client: TestClient) -> None:
-    """并发上传同一 Skill：版本号原子分配，各得唯一 vN，无 DuplicateKeyError 漏出。"""
-    admin = _login(client, ADMIN)
-
-    def upload(index: int):
-        files = dict(FILES)
-        files[f"{SKILL_DIR}/{TEMPLATE_PATH}"] = f"# 模板规范 并发-{index}"
-        return _upload(client, admin, build_package(files))
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        responses = list(pool.map(upload, range(6)))
-    assert all(response.status_code == 201 for response in responses)
-    versions = sorted(
-        response.json()["version"]["version"] for response in responses
-    )
-    assert versions == [f"v{index}" for index in range(1, 7)]
-    listing = client.get("/api/admin/skills", headers=_csrf(admin)).json()[0]
-    assert len(listing["versions"]) == 6
+# 并发上传版本分配用例已迁移至 test_skill_platform_e2e.py（真实 MongoDB replica set）：
+# mongomock 4.3.0 的 find_one_and_update 非原子实现会使并发版本分配产生假阳性失败，
+# 真实 MongoDB 的 findOneAndUpdate 单文档原子操作不受影响，断言在 E2E 层原样保留。
 
 
 def test_late_finishing_upload_never_regresses_latest(
