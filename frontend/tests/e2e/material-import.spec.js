@@ -144,10 +144,12 @@ async function submitMaterialSearch(page, title) {
 async function searchApprovedMaterial(page, title) {
   const response = await submitMaterialSearch(page, title);
   if (response.ok()) return;
-  await waitForSearchMaterial(page.context().request, title);
-  const retry = page.waitForResponse(materialSearchResponse(title), { timeout: 5_000 });
-  await page.reload();
-  await readOkJson(await retry);
+  expect(response.status()).toBe(503);
+  await expect.poll(async () => {
+    const retry = page.waitForResponse(materialSearchResponse(title), { timeout: 5_000 });
+    await page.reload();
+    return (await retry).status();
+  }, { timeout: 15_000 }).toBe(200);
 }
 
 async function rejectFirstMaterialSearch(page, title) {
