@@ -145,11 +145,16 @@ async function searchApprovedMaterial(page, title) {
   const response = await submitMaterialSearch(page, title);
   if (response.ok()) return;
   expect(response.status()).toBe(503);
+  const retryStatuses = [];
   await expect.poll(async () => {
     const retry = page.waitForResponse(materialSearchResponse(title), { timeout: 5_000 });
     await page.reload();
-    return (await retry).status();
+    const status = (await retry).status();
+    retryStatuses.push(status);
+    return status;
   }, { timeout: 15_000 }).toBe(200);
+  expect(retryStatuses.slice(0, -1).every(status => status === 503),
+    `Unexpected material search responses: ${retryStatuses.join(", ")}`).toBe(true);
 }
 
 async function rejectFirstMaterialSearch(page, title) {

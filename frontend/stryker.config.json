@@ -13,7 +13,6 @@
   "coverageAnalysis": "perTest",
   "reporters": ["clear-text", "json", "progress"],
   "concurrency": 1,
-  "maxConcurrentTestRunners": 1,
   "timeoutMS": 20000,
   "tempDirName": "stryker-tmp",
   "cleanTempDir": true,
