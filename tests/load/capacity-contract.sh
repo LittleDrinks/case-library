@@ -74,6 +74,7 @@ test "$run_line" -lt "$worker_line"
 sh -n scripts/run-load.sh
 grep -Fq "trap '' INT TERM HUP" scripts/run-load.sh
 grep -Fq 'trap - EXIT' scripts/run-load.sh
+python3 tests/load/repeated-signal-probe.py "$project_dir" >/dev/null
 grep -Fq 'compose build load-app load-frontend' scripts/run-load.sh
 ! grep -Fq 'compose build app frontend' scripts/run-load.sh
 
