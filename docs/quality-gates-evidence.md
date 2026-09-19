@@ -33,7 +33,9 @@
 ## 后端覆盖率与变异运行
 安装 `backend/requirements-dev.lock` 到 Python 3.12 虚拟环境并激活。
 - 覆盖率：`cd backend && coverage run --branch --source=app -m pytest -c tests/pytest.ini -m 'not e2e' && coverage json && coverage report`。
-- 变异：仓库根目录执行 `make mutation-backend`。范围为全部 `backend/app`，使用全部非 E2E 测试，包含中文业务场景；一个子进程运行，互斥锁拒绝同 checkout 重入。
+- 变异：仓库根目录执行 `make mutation-backend`。输入为全部 `backend/app`，使用全部非 E2E 测试，包含中文业务场景；一个子进程运行，互斥锁拒绝同 checkout 重入。
+- mutmut 3.8.0 跳过多数带装饰器的函数，仅单个 `staticmethod` / `classmethod` 例外；路由和 Pydantic 校验器不能据此宣称已做变异验证。本轮 126 个输入 Python 文件中，89 个文件生成 30,233 个变异；未生成变异的文件与函数不计入分母，也不等同于已生成但无测试覆盖的变异。
+- 原始退出码随报告保留。mutmut 将 pytest 内部错误（退出码 3）归为 killed；强度分析须将其单列为错误，不能把环境或测试框架失败当作有效检出。
 - 结果入口必须同时满足 `backend/mutants/mutmut-run-status.json` 与 `backend/mutants/mutmut-cicd-stats.json`：status 必须为 `completed`，并记录本次 `head`、`scope`、转发的 `args` 和 `exit=0`；stats 必须是本次运行生成的有效 JSON。`partial`、`failed`、缺失/无效 status 或 stats 均不是完整结果；既有 `backend/mutants/**/*.meta` 变异缓存保留以支持续跑，不得用缓存替代当前报告。详情在 backend 目录执行 `mutmut results`、`mutmut show <id>`、`mutmut tests-for-mutant <id>`。定向重跑使用 `scripts/run-backend-mutation.sh <id>`。
 运行时创建的种子与脚本相对路径链接在退出或中断时清理；已有同名路径不会被覆盖。锁竞争不失效活动所有者的报告；初始化失败先失效本次所有者的旧 stats，再写入 failed status。正常退出只说明运行完成，存活、无覆盖、超时和错误仍需逐项审查，不能当作测试强度通过。
 
