@@ -87,20 +87,98 @@ def published_case_online(ctx, title):
     _lifecycle(admin, admin_csrf, case["id"], "approve",
                submittedVersionId=submitted.json()["submittedVersionId"])
 
+@given(parsers.parse('教师发布带私密附件"{title}"并经管理员审核上线'))
+def published_case_with_private_attachment(ctx, title):
+    unique_title = f"{title}-{uuid.uuid4().hex[:12]}"
+    teacher, teacher_csrf = _login("user", "user123")
+    case = _create_case(teacher, teacher_csrf, unique_title,
+                        f"{unique_title}的可检索正文")
+    ctx["cases"][title] = case
+    ctx["memo"]["current_case_id"] = case["id"]
+    ctx["memo"]["search_title"] = unique_title
+    private_keyword = f"attachmentsecret{uuid.uuid4().hex}"
+    ctx["memo"]["private_keyword"] = private_keyword
+    current = teacher.get(f"{_app_url()}/api/cases/{case['id']}", timeout=10)
+    assert current.status_code == 200, current.text
+    uploaded = teacher.post(
+        f"{_app_url()}/api/cases/{case['id']}/attachments",
+        headers={"X-CSRF-Token": teacher_csrf},
+        data={"accessLevel": "private", "revision": current.json()["revision"]},
+        files={"file": ("私密关键词.txt", private_keyword.encode(), "text/plain")},
+        timeout=10,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    ctx["memo"]["private_attachment_id"] = uploaded.json()["id"]
+    ctx["memo"]["authorized_client"] = teacher
+    _lifecycle(teacher, teacher_csrf, case["id"], "submit")
+    admin, admin_csrf = _login("admin", "admin123")
+    _lifecycle(admin, admin_csrf, case["id"], "start")
+    submitted = teacher.get(f"{_app_url()}/api/cases/{case['id']}", timeout=10)
+    assert submitted.status_code == 200, submitted.text
+    _lifecycle(admin, admin_csrf, case["id"], "approve",
+               submittedVersionId=submitted.json()["submittedVersionId"])
 
-def _poll_search_until(ctx, title: str, expect_hit: bool) -> list[tuple[str, str]]:
+
+@when(parsers.parse('教师检索私密附件关键词可见"{title}"'))
+def teacher_searches_private_attachment(ctx, title):
+    ctx["memo"]["authorized_search_rows"] = _poll_search_until(
+        ctx, title, expect_hit=True,
+        keyword=ctx["memo"]["private_keyword"],
+        client=ctx["memo"]["authorized_client"],
+    )
+    # 同一已发布案例的公开标题可见，确保匿名读取的是已同步的目录。
+    _poll_search_until(ctx, title, expect_hit=True)
+
+
+@when(parsers.parse('匿名检索私密附件关键词不可见"{title}"'))
+def anonymous_searches_private_attachment(ctx, title):
+    response = _public_search(ctx["memo"]["private_keyword"])
+    assert response.status_code == 200, response.text
+    ctx["memo"]["anonymous_search_rows"] = response.json()["items"]
+    assert ctx["cases"][title]["id"] not in [
+        row["id"] for row in response.json()["items"]
+    ]
+
+
+@then("授权检索命中案例且匿名读取私密附件被拒绝")
+def authorized_hit_anonymous_attachment_denied(ctx):
+    assert ctx["memo"]["current_case_id"] in [
+        row_id for row_id, _ in ctx["memo"]["authorized_search_rows"]
+    ]
+    assert ctx["memo"]["current_case_id"] not in [
+        row["id"] for row in ctx["memo"]["anonymous_search_rows"]
+    ]
+    attachment_path = (
+        f"{_app_url()}/api/cases/{ctx['memo']['current_case_id']}"
+        f"/attachments/{ctx['memo']['private_attachment_id']}/content"
+    )
+    authorized = ctx["memo"]["authorized_client"].get(attachment_path, timeout=10)
+    anonymous = requests.get(attachment_path, timeout=10)
+    assert authorized.status_code == 200, authorized.text
+    assert authorized.content == ctx["memo"]["private_keyword"].encode()
+    assert anonymous.status_code == 403, anonymous.text
+
+
+
+def _poll_search_until(
+    ctx, title: str, expect_hit: bool, *, keyword=None, client=requests,
+) -> list[tuple[str, str]]:
     case_id = ctx["cases"][title]["id"]
-    keyword = ctx["memo"]["search_title"]
+    expected_title = ctx["memo"]["search_title"]
+    keyword = keyword or expected_title
     deadline = time.monotonic() + SYNC_DEADLINE_SECONDS
     last_response = None
     while time.monotonic() < deadline:
-        response = _public_search(keyword)
+        response = client.get(
+            f"{_app_url()}/api/search",
+            params={"q": keyword, "kind": "case"}, timeout=10,
+        )
         last_response = response
-        # 目录同步期间检索可能 503，重试；其余状态在超时报告里暴露。
+        assert response.status_code in (200, 503), response.text
         if response.status_code == 200:
             rows = [(row["id"], row["title"])
                     for row in response.json()["items"]]
-            hit = (case_id, keyword) in rows
+            hit = (case_id, expected_title) in rows
             if hit == expect_hit:
                 return rows
         time.sleep(SYNC_POLL_INTERVAL)
