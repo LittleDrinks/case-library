@@ -62,12 +62,13 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
                 if "run" in call:
                     stages.append(Path(call[call.index("-v") + 1].split(":")[0]).name)
                 elif "rm" in call:
-                    stages.append("remove:" + call[-1])
+                    stages.append("remove:" + ",".join(call[call.index("-sf") + 1:]))
                 elif "up" in call:
                     stages.append("start:" + call[call.index("--wait") + 1])
             assert stages == [
-                "start:e2e-frontend", "generic", "bdd", "remove:e2e-frontend",
-                "start:agent-e2e-gateway", "agent", "remove:agent-e2e-app",
+                "start:e2e-frontend", "generic", "bdd", "remove:e2e-app,e2e-frontend",
+                "start:agent-e2e-gateway", "agent",
+                "remove:agent-e2e-gateway,agent-e2e-frontend,agent-e2e-app",
                 "start:agent-tracer-gateway", "tracer",
             ], stages
         else:
