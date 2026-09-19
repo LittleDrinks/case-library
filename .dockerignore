@@ -21,3 +21,14 @@ files/*
 !files/seed/
 !files/seed/book/
 !files/seed/book/zrbjf-2025.md
+
+# 测试与变异缓存
+backend/mutants
+mutants
+backend/.venv
+backend/.coverage*
+backend/.mutmut-cache*
+backend/htmlcov
+frontend/coverage
+frontend/stryker-tmp
+frontend/reports/mutation
