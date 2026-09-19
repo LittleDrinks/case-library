@@ -126,7 +126,6 @@ run_browser_tests() {
 }
 
 run_bdd_browser_tests() {
-  mkdir -p "$artifact_dir/bdd"
   compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir/bdd:/app/test-results" e2e npm run test:e2e:bdd
 }

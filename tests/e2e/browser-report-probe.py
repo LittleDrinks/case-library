@@ -41,16 +41,27 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
     compose.chmod(0o755)
     script = "set -eu\nstart_agent_app() { :; }\nclear_e2e_bucket() { :; }\n"
     script += functions + '\nrun_browser_suite\n'
-    for failure in (0, 42):
-        artifacts = directory / f"artifacts-{failure}"
+    for expected_status in (0, 42):
+        artifacts = directory / f"artifacts-{expected_status}"
         env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-                   artifact_dir=str(artifacts), browser_spec="", BDD_EXIT=str(failure))
+                   artifact_dir=str(artifacts), browser_spec="", BDD_EXIT=str(expected_status))
         result = subprocess.run(["sh", "-c", script], env=env, check=False)
-        assert result.returncode == failure, (failure, result.returncode)
+        assert result.returncode == expected_status, (expected_status, result.returncode)
         assert (artifacts / "generic/report.json").is_file()
         assert (artifacts / "bdd/cucumber-report/report.json").is_file()
         for suite in ("agent", "tracer"):
-            assert (artifacts / suite / "report.json").is_file() == (failure == 0)
+            assert (artifacts / suite / "report.json").is_file() == (expected_status == 0)
+    for spec, suite in (("homepage", "generic"), ("agent-chat", "agent"), ("agent-tracer", "tracer")):
+        artifacts = directory / f"single-{suite}"
+        artifacts.mkdir()
+        sentinel = artifacts / "previous-report.json"
+        sentinel.write_text("{}")
+        env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
+                   artifact_dir=str(artifacts), browser_spec=f"tests/e2e/{spec}.spec.js")
+        subprocess.run(["sh", "-c", script], env=env, check=True)
+        assert (artifacts / suite / "report.json").is_file()
+        assert not (artifacts / "report.json").exists()
+        assert sentinel.is_file()
     # Sidebar has two sequential Playwright invocations as well.
     artifacts = directory / "sidebar-artifacts"
     env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
