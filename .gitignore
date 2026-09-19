@@ -29,8 +29,10 @@ playwright-report/
 # Coverage and mutation output
 backend/.coverage
 backend/.coverage.*
+backend/.mutation.lock
 backend/.mutmut-cache*
 backend/mutants/
+backend/coverage.json
 backend/htmlcov/
 frontend/coverage/
 frontend/stryker-tmp/

@@ -14,7 +14,7 @@ TEST_COMPOSE_ARGS = --project-name case-library-test-$(shell printf '%s' "$(CURD
 TEST_IMAGE_PREFIX = case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8)
 E2E_SPEC ?= $(SPEC)
 
-.PHONY: up down logs config config-contract release-contract test test-backend test-frontend ensure-backend-test ensure-frontend-test backend-e2e e2e e2e-spec bdd-zh ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up down logs config config-contract release-contract test test-backend test-frontend mutation-backend ensure-backend-test ensure-frontend-test backend-e2e e2e e2e-spec bdd-zh ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
@@ -120,3 +120,6 @@ restore-drill:
 
 lock-backend:
 	scripts/lock-backend.sh
+
+mutation-backend:
+	scripts/run-backend-mutation.sh

@@ -28,6 +28,7 @@ mutants
 backend/.venv
 backend/.coverage*
 backend/.mutmut-cache*
+backend/coverage.json
 backend/htmlcov
 frontend/coverage
 frontend/stryker-tmp

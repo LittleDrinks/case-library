@@ -5,3 +5,5 @@ pytest-html==4.2.0
 mongomock==4.3.0
 ruff==0.12.8
 pytest-xdist==3.8.0
+mutmut==3.8.0
+coverage==7.16.1

@@ -29,3 +29,10 @@
 保留（有独立职责，不为指标删除）：
 - refreshVersionHistory（Vue 模板多路径共用命名入口）、lifecycleBody（统一修订号）、_run_view/_model_view（持久层→模型边界投影）、repository 完成围栏与 _persist_version（原子交付/版本联动）、lifecycle._write_case/_change_status（跨状态转换共享 CAS seam）、_commit_write/_restore_document 对（映射与持久化职责不同）、annotations/_transaction 与 materials/_transaction（各自模块内聚，未跨模块合并是因模块边界即领域边界）、PublishedCaseReader/version_readable（可见性策略）、CanvasEditor/CommentPanel 等高 cc 函数（权限谓词组合，改动需先有行为规格，本切片不动）。
 - 未改 Workbench 其余部分与 agent/repository.py 其余部分：本次确认的重复事务封装已合并；其余部分未改动。
+
+## 后端覆盖率与变异运行
+安装 `backend/requirements-dev.lock` 到 Python 3.12 虚拟环境并激活。
+- 覆盖率：`cd backend && coverage run --branch --source=app -m pytest -c tests/pytest.ini -m 'not e2e' && coverage json && coverage report`。
+- 变异：仓库根目录执行 `make mutation-backend`。范围为全部 `backend/app`，使用全部非 E2E 测试，包含中文业务场景；一个子进程运行，互斥锁拒绝同 checkout 重入。
+- 结果：`backend/mutants/mutmut-cicd-stats.json`；详情在 backend 目录执行 `mutmut results`、`mutmut show <id>`、`mutmut tests-for-mutant <id>`。定向重跑使用 `scripts/run-backend-mutation.sh <id>`。
+运行时创建的种子与脚本相对路径链接在退出或中断时清理；已有同名路径不会被覆盖。正常退出只说明运行完成，存活、无覆盖、超时和错误仍需逐项审查，不能当作测试强度通过。
