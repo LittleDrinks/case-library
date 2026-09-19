@@ -100,6 +100,9 @@ def test_read_source_material_hides_restricted_content_and_preserves_public_text
     assert public["status"] == "ok"
     assert public["content"] == "公开素材正文"
     assert public["usedSourceRef"]["id"] == public_id
+    assert public["usedSourceRef"]["kind"] == "material"
+    assert public["usedSourceRef"]["title"] == "公开素材"
+    assert public["usedSourceRef"]["location"] == f"material:{public_id}"
     assert private == {"status": "no_access", "detail": "当前身份无权读取该素材内容"}
 
 
@@ -123,6 +126,15 @@ def test_read_source_campus_material_requires_verified_identity(client: TestClie
     assert "校内素材正文" not in str(denied)
     assert allowed["status"] == "ok"
     assert allowed["content"] == "校内素材正文"
+
+
+def test_read_source_missing_material_reports_unavailable(client: TestClient) -> None:
+    result = read_source(
+        client.app.state.database, client.app.state.blob_store,
+        {"id": "u-user-demo", "role": "user", "campus_verified": True},
+        "c-draft-1", "material", "m-missing-source",
+    )
+    assert result == {"status": "unavailable", "detail": "素材不存在或已下线"}
 
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:
