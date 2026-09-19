@@ -16,6 +16,15 @@ PROBE = pathlib.Path(tempfile.mkdtemp(prefix="e2e-probe-"))
 project_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
 suite = sys.argv[2] if len(sys.argv) > 2 else "e2e"
 assert suite in {"e2e", "load"}
+source_dir = pathlib.Path(project_dir)
+fixture = PROBE / "checkout"
+(fixture / "scripts").mkdir(parents=True)
+for name in (f"run-{suite}.sh", "test-database.sh"):
+    shutil.copy2(source_dir / "scripts" / name, fixture / "scripts" / name)
+project_dir = str(fixture)
+sentinel = fixture / "test-results" / "load-smoke.txt"
+sentinel.parent.mkdir()
+sentinel.write_text("active owner's evidence\n")
 runner = pathlib.Path(project_dir) / "scripts" / f"run-{suite}.sh"
 
 tmp = tempfile.mkdtemp(prefix="e2e-lockprobe-")
@@ -54,6 +63,7 @@ result = subprocess.run(
 calls = pathlib.Path(tmp, "docker-calls.log")
 docker_calls = calls.read_text() if calls.exists() else ""
 owner.close()
+pathlib.Path(lock_path).unlink()
 
 report = {
     "exit": result.returncode,
@@ -61,10 +71,11 @@ report = {
     "stderr": result.stderr.strip(),
     "docker_calls": docker_calls.strip(),
     "docker_call_count": len([l for l in docker_calls.splitlines() if l.strip()]),
+    "owner_evidence_unchanged": sentinel.exists() and sentinel.read_text() == "active owner's evidence\n",
 }
 (PROBE / "lock-owner-probe-internal.json").write_text(json.dumps(report, indent=2))
 
-ok = result.returncode == 2 and report["docker_call_count"] == 0
+ok = result.returncode == 2 and report["docker_call_count"] == 0 and report["owner_evidence_unchanged"]
 print(json.dumps(report, indent=2))
 shutil.rmtree(tmp)
 shutil.rmtree(PROBE)
