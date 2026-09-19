@@ -189,19 +189,6 @@ async function downloadDocx(page) {
   return { download, bytes };
 }
 
-async function editAndVerifyAutosave(page, request, marker) {
-  await page.getByLabel("案例标题").fill(marker);
-  await expect(page.locator(".save-state")).toHaveText(/未保存|保存中/);
-  const { download } = await downloadDocx(page);
-  expect(download.suggestedFilename()).toBe("case-c-draft-1.docx");
-  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5000 });
-  const saved = await (await request.get("/api/cases/c-draft-1")).json();
-  expect(saved.title).toBe(marker);
-  await page.reload();
-  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
-  await capture(page, "workbench-desktop");
-}
-
 async function openMobileReview(page) {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
@@ -431,19 +418,6 @@ test("名单账号首登必须改密后才能进入工作台", async ({ page }) 
   await expectOwnWorkbench(page);
 });
 
-test("作者登录后编辑案例，自动保存并在刷新后恢复", async ({ page }) => {
-  await login(page);
-  const request = page.context().request;
-  const original = await (await request.get("/api/cases/c-draft-1")).json();
-  const marker = `端到端保存 ${Date.now()}`;
-
-  try {
-    await editAndVerifyAutosave(page, request, marker);
-  } finally {
-    await restoreCase(request, original);
-  }
-});
-
 test("客户端切换案例时重新绑定正文与草稿", async ({ page }) => {
   await login(page);
   const request = page.context().request;
@@ -484,6 +458,9 @@ test("导出前保存当前正文并下载有效 DOCX", async ({ page }) => {
     expect(bytes.subarray(0, 2).toString()).toBe("PK");
     await expect(page.locator(".save-state")).toHaveText("已保存");
     expect((await (await request.get("/api/cases/c-draft-1")).json()).title).toBe(marker);
+    await page.reload();
+    await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+    await capture(page, "workbench-desktop");
   } finally {
     await restoreCase(request, original);
   }
