@@ -1,6 +1,7 @@
 """Exercise real runner functions against a Compose output-directory stand-in."""
 from pathlib import Path
 import os
+import json
 import re
 import subprocess
 import tempfile
@@ -17,10 +18,13 @@ functions = "\n".join(
 )
 shim = '''#!/usr/bin/env python3
 import os
+import json
 from pathlib import Path
 import shutil
 import sys
 args = sys.argv[1:]
+with open(os.environ["PHASE_LOG"], "a") as stream:
+    stream.write(json.dumps(args) + "\\n")
 if "run" not in args:
     sys.exit(0)
 mount = Path(args[args.index("-v") + 1].split(":", 1)[0])
@@ -39,16 +43,35 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
     compose = directory / "compose"
     compose.write_text(shim)
     compose.chmod(0o755)
-    script = "set -eu\nstart_agent_app() { :; }\nclear_e2e_bucket() { :; }\n"
+    script = "set -eu\nstart_agent_app() { compose legacy-agent-start; }\nclear_e2e_bucket() { :; }\n"
     script += functions + '\nrun_browser_suite\n'
     for expected_status in (0, 42):
         artifacts = directory / f"artifacts-{expected_status}"
         env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-                   artifact_dir=str(artifacts), browser_spec="", BDD_EXIT=str(expected_status))
+                   PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec="", BDD_EXIT=str(expected_status))
+        (directory / "phase.jsonl").write_text("")
         result = subprocess.run(["sh", "-c", script], env=env, check=False)
         assert result.returncode == expected_status, (expected_status, result.returncode)
         assert (artifacts / "generic/report.json").is_file()
         assert (artifacts / "bdd/cucumber-report/report.json").is_file()
+        calls = [json.loads(line) for line in (directory / "phase.jsonl").read_text().splitlines()]
+        assert not any("legacy-agent-start" in call or "agent-e2e-loser" in call for call in calls)
+        if expected_status == 0:
+            stages = []
+            for call in calls:
+                if "run" in call:
+                    stages.append(Path(call[call.index("-v") + 1].split(":")[0]).name)
+                elif "rm" in call:
+                    stages.append("remove:" + call[-1])
+                elif "up" in call:
+                    stages.append("start:" + call[call.index("--wait") + 1])
+            assert stages == [
+                "start:e2e-frontend", "generic", "bdd", "remove:e2e-frontend",
+                "start:agent-e2e-gateway", "agent", "remove:agent-e2e-app",
+                "start:agent-tracer-gateway", "tracer",
+            ], stages
+        else:
+            assert not any("agent-e2e-gateway" in call or "agent-tracer-gateway" in call for call in calls)
         for suite in ("agent", "tracer"):
             assert (artifacts / suite / "report.json").is_file() == (expected_status == 0)
     for spec, suite in (("homepage", "generic"), ("agent-chat", "agent"), ("agent-tracer", "tracer")):
@@ -57,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
         sentinel = artifacts / "previous-report.json"
         sentinel.write_text("{}")
         env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-                   artifact_dir=str(artifacts), browser_spec=f"tests/e2e/{spec}.spec.js")
+                   PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec=f"tests/e2e/{spec}.spec.js")
         subprocess.run(["sh", "-c", script], env=env, check=True)
         assert (artifacts / suite / "report.json").is_file()
         assert not (artifacts / "report.json").exists()
@@ -65,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
     # Sidebar has two sequential Playwright invocations as well.
     artifacts = directory / "sidebar-artifacts"
     env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-               artifact_dir=str(artifacts), browser_spec="tests/e2e/agent-sidebar.spec.js")
+               PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec="tests/e2e/agent-sidebar.spec.js")
     subprocess.run(["sh", "-c", script], env=env, check=True)
     assert (artifacts / "sidebar/report.json").is_file()
     assert (artifacts / "sidebar-tracer/report.json").is_file()

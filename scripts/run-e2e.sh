@@ -131,7 +131,9 @@ run_bdd_browser_tests() {
 }
 
 run_agent_browser_tests() {
-  set -- compose --profile e2e run --rm \
+  compose --profile e2e rm -sf e2e-app e2e-frontend
+  compose --profile e2e up -d --wait agent-e2e-gateway --wait-timeout 120
+  set -- compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir/agent:/app/test-results" agent-e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   "$@"
@@ -145,7 +147,9 @@ run_sidebar_browser_tests() {
 }
 
 run_tracer_browser_tests() {
-  compose --profile e2e run --rm \
+  compose --profile e2e rm -sf agent-e2e-gateway agent-e2e-frontend agent-e2e-app
+  compose --profile e2e up -d --wait agent-tracer-gateway --wait-timeout 120
+  compose --profile e2e run --rm --no-deps \
     -v "$artifact_dir/tracer:/app/test-results" agent-tracer
 }
 
@@ -164,7 +168,7 @@ run_browser_suite() {
     mkdir -p "$artifact_dir/$report"
   done
   compose --profile e2e up -d --wait e2e-frontend --wait-timeout 120
-  start_agent_app
+  test -z "$browser_spec" || start_agent_app
   clear_e2e_bucket
   run_browser_tests
   test -n "$browser_spec" || run_bdd_browser_tests
