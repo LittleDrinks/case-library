@@ -125,6 +125,12 @@ run_browser_tests() {
   "$@"
 }
 
+run_bdd_browser_tests() {
+  mkdir -p "$artifact_dir/bdd"
+  compose --profile e2e run --rm --no-deps \
+    -v "$artifact_dir/bdd:/app/test-results" e2e npm run test:e2e:bdd
+}
+
 run_agent_browser_tests() {
   set -- compose --profile e2e run --rm \
     -v "$artifact_dir:/app/test-results" agent-e2e
@@ -156,6 +162,7 @@ run_browser_suite() {
   start_agent_app
   clear_e2e_bucket
   run_browser_tests
+  test -n "$browser_spec" || run_bdd_browser_tests
   test -n "$browser_spec" || run_agent_browser_tests
   test -n "$browser_spec" || run_tracer_browser_tests
 }
