@@ -8,7 +8,8 @@ import pytest
 from minio import Minio
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
-RAR_FIXTURE = Path("/app/fixtures/学习资料md.rar")
+RAR_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "materials.rar"
+EXPECTED_RAR_FILENAMES = {"lesson.md", "notes.txt"}
 pytestmark = pytest.mark.e2e(
     "CASE_LIBRARY_E2E_URL",
     "OBJECT_STORE_ENDPOINT",
@@ -116,17 +117,19 @@ def test_real_rar_import_is_durable_and_idempotent() -> None:
     admin, csrf = _login("admin", "admin123")
     first = _import_rar(admin, csrf)
     assert first.status_code == 201
-    assert first.json()["itemCount"] == 69
-    assert len(first.json()["items"]) == 69
+    assert first.json()["itemCount"] == len(EXPECTED_RAR_FILENAMES)
+    assert len(first.json()["items"]) == len(EXPECTED_RAR_FILENAMES)
+    assert {item["filename"] for item in first.json()["items"]} == EXPECTED_RAR_FILENAMES
     assert {item["status"] for item in first.json()["items"]} == {"candidate"}
-    assert _object_count() == 69
+    assert _object_count() == len(EXPECTED_RAR_FILENAMES)
 
     second = _import_rar(admin, csrf)
     assert second.status_code == 201
-    assert second.json()["itemCount"] == 69
-    assert len(second.json()["items"]) == 69
+    assert second.json()["itemCount"] == len(EXPECTED_RAR_FILENAMES)
+    assert len(second.json()["items"]) == len(EXPECTED_RAR_FILENAMES)
+    assert {item["filename"] for item in second.json()["items"]} == EXPECTED_RAR_FILENAMES
     assert {item["status"] for item in second.json()["items"]} == {"duplicate"}
-    assert _object_count() == 69
+    assert _object_count() == len(EXPECTED_RAR_FILENAMES)
     assert (
         admin.get(f"/api/admin/material-imports/{second.json()['id']}").json()
         == second.json()
