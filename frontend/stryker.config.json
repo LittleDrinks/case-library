@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/api/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vite.config.js",
+    "related": false
+  },
+  "mutate": [
+    "src/**/*.js",
+    "src/**/*.vue",
+    "!src/**/*.test.js"
+  ],
+  "coverageAnalysis": "perTest",
+  "reporters": ["clear-text", "json", "progress"],
+  "concurrency": 1,
+  "maxConcurrentTestRunners": 1,
+  "timeoutMS": 20000,
+  "tempDirName": "stryker-tmp",
+  "cleanTempDir": true,
+  "testRunnerNodeArgs": ["--max-old-space-size=1024"]
+}

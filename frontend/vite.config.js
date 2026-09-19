@@ -14,5 +14,12 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.js"],
     server: { deps: { inline: ["element-plus", "@popperjs/core"] } },
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{js,vue}"],
+      exclude: ["src/**/*.test.js"],
+      reporter: ["text", "json", "html", "lcov"],
+      reportsDirectory: "coverage",
+    },
   },
 });
