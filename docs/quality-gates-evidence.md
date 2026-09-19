@@ -1,16 +1,18 @@
-# 复杂度门禁与可读性交付证据（截至本切片）
+# 复杂度门禁与可读性交付证据（提交 4a46975）
 
-## 阈值依据：真实分布
-基准 36c725e 全仓库扫描，命令：
-- 后端：`cd backend && .venv/bin/ruff check --no-cache --select C901 --config 'lint.mccabe.max-complexity=1' --output-format concise app`（1412 个函数；cc 分布 1=706、2=401、3=190、4=66、5=38、6=7、7=4，最大 7）
-- 前端：`cd frontend && npx eslint --no-config-lookup -c eslint-sweep.mjs 'src/**/*.{js,vue}' --format json`（ESLint complexity 规则，113 文件；生产代码 cc>10 共 12 个，最大 19：MaterialExplorer 19、agentTimeline 17×2、router 15、AgentChatPanel 15/14/11 等）
-原始证据：/tmp/case-library-259-evidence/complexity-baseline.md、baseline-backend-complexity.json、baseline-frontend-complexity.json。
+## 阈值依据：本提交复现分布
+命令（全部在本工作区可直接运行，输出落在 /home/q2635/agent-results/case-library-259/）：
+- 后端：`cd backend && .venv/bin/ruff check --no-cache --select C901 --config 'lint.mccabe.max-complexity=1' --output-format concise app tests ../scripts/ai_smoke.py ../scripts/validate_production_config.py ../scripts/wait_for_mongo.py > /home/q2635/agent-results/case-library-259/backend-cc-full-sweep-4a46975.txt`
+  结果：1004 个函数 cc>1，分布 2=582、3=272、4=88、5=46、6=11、7=4、8=1（最大 8，`unsafe_name` scripts/validate_production_config.py）；app/modules 内最大 7。证据文件已持久化。
+- 前端：`cd frontend && npx eslint --no-config-lookup -c eslint.config.js --rule 'complexity: ["error", 1]' --format json 'src/**/*.{js,vue}' > /home/q2635/agent-results/case-library-259/frontend-cc-full-sweep-4a46975.json`
+  结果：114 文件、651 个 cc>1 函数，分布 2=268、3=164、4=78、5=53、6=32、7=22、8=15、9=4、10=5、11=4、12=1、13=1、14=3、15=1。顶格 6 个（≥12）：AgentChatPanel directSource 15 / openHistoryVersion 14、router.redirectForRoute 14、MaterialExplorer.syncSearchRoute 14、CanvasEditor.domSelectionRange 13、useAgentChat.stopChat 12。证据文件已持久化。
+- 说明：eslint-sweep.mjs 临时扫描脚本已随崩溃丢失且未入库，前端分布一律用入库的 eslint.config.js 加 `--rule complexity:["error",1]` 复现，与门禁同一解析管线（vue flat essential）。
 
 ## 阈值选择
-- 后端 max-complexity=10：高于现状最大值 7，给真实合并留空间；Ruff 官方默认同为 10。选 7 会把现状顶格函数锁死，逼出碎片化；选 15+ 则门禁失去约束力。分布上 cc≥8 当前为 0，10 是"防新增极端"而非"逼存量"。
-- 前端 complexity=15：现状 12 个 >10；15 覆盖除 3 个顶格外全部，3 个顶格（MaterialExplorer.syncSearchRoute 19、agentTimeline 两处 17）已在本切片重构为表驱动/规范化数据后降到 ≤11。15 是分布右尾的收敛点，不是机械拆分数。
-- 两语言计数口径不同（ESLint 计短路/可选链，Ruff 不计），不做同一数值对齐，只按各自分布选点。
-- 成本：门禁为静态扫描（Ruff <1s、ESLint <6s 本机），进 CI 不增加容器构建成本；旧行数门禁（两次容器 run）被完全移除。
+- 后端 max-complexity=10：模块内现状最大 7（scripts 工具 8 为一次性校验脚本）；10 高于全部现状、与 Ruff 默认一致，作用是拦新增极端而非逼存量合并碎片。选 7 会把现状顶格函数锁死。
+- 前端 complexity=15：现状 651 个 cc>1 中仅 4 个 ≥13；15 收敛右尾、保留真实权限/并发守卫组合（directSource 15、openHistoryVersion 14 为权限与并发守卫链，拆分只会制造转发）。重构后 agentTimeline 三处 17/17/10 已降到 ≤8。
+- 两语言计数口径不同（ESLint 计短路/可选链，Ruff 不计），不按同一数值对齐，各按分布选点。
+- 成本：Ruff <1s、ESLint ~4s（本机），CI 内随现有 test 镜像执行，无新增容器；旧"函数<20行"门禁（两次容器 run）完全移除。
 
 ## 复现命令（门禁）
 - 后端：`cd backend && .venv/bin/ruff check --no-cache app tests ../scripts/ai_smoke.py ../scripts/validate_production_config.py ../scripts/wait_for_mongo.py`（本地等价于镜像内 `ruff check --no-cache app tests /app/scripts /opt/case-library/wait_for_mongo.py`）
@@ -41,5 +43,7 @@
 - 本切片（overwrite 合并、transaction 合一、Dockerfile 去重）待运行测试：WorkbenchView.lifecycle.test.js、WorkbenchView 组件测试、backend tests/test_agent_threads.py、test_agent_chat.py、test_agent_runs_lifecycle.py、test_agent_cancel_boundaries.py、test_annotation_rounds.py（覆盖 snapshot/start/retry/complete/_finish/append_active_event 六个 transaction 调用点）、test_version_loop.py、test_case_workflow.py、make config。
 
 ## 已知未决
-- 变异测试：Stryker8.7.1 dry-run 通过（agentTimeline 360 mutants，2m46s 基线）；mutmut2.5.1 因 runner PATH 问题一次中断遗留 .mutmut-cache（未验证，不作为证据）；mutmut3 在本仓无 setup.cfg 配置时报 source_paths 缺失，需 setup.cfg 或迁移后评估。全套按模块执行尚未开始。
-- 前端 3 个 cc=15 顶格函数（AgentChatPanel directSource/openHistoryVersion、router.redirectForRoute 等）保留：权限/并发守卫组合，拆分将制造无收益间接层；门禁允许其存在，后续有行为规格再动。
+- 变异测试：Stryker8.7.1 dry-run 通过（agentTimeline 360 mutants，2m46s 基线）；mutmut2.5.1 cases 冒烟中断于 10 个变异（4 killed / 3 survived / 477 untested，源码已恢复 HEAD，cache 保留于 backend/.mutmut-cache，未验证不作为最终证据）。
+- 成本定位（已证实）：mutmut 基线 93s ≈ 每用例 setup ~1.7s，其中 seed_demo_users 5 账户 × bcrypt-12（实测 hash 0.284s/次，/home/q2635/agent-results/case-library-259/bcrypt-cost-probe.json）≈ 1.42s 是主导项；登录 verify ~0.3s/次 × 25-46 次为次要项。每变异需重跑该基线，487 变异 × ~93s 不可扩展。
+- 可执行方案（决策待定）：测试种子/fixture 层复用预计算哈希或低轮次真实 bcrypt（保持 checkpw 真实、生产 passwords.py 默认 12 轮不动、密码安全专项测试不削弱），预计把基线降到 <10s；配合 mutmut3 测试感知选择（当前 3.8.0 需 setup.cfg 提供 source_paths，需先补配置）。全套执行采用可扩展方案后再跑。
+- 存活变异检视：3 个 bad_survived 位于 lifecycle.py `_id(prefix)`（line34 两个：prefix 字面量变异常/变长度）与 `_require_admin`（line39 一个：403→404 状态码变异）。_id 前缀是内部 ID 命名空间，无公共合同约束其取值，属等价变异候选（记录依据，不计 killed）；403→404 改变了未授权语义，公共 API 合同（测试断言 403）应当能杀死它——当前两测试文件未覆盖 admin-only lifecycle 路由的 403 断言，属真实测试缺口，待全套执行后在公共 seam 补断言。
