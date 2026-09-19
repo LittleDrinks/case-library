@@ -2,3 +2,5 @@ node_modules/
 dist/
 test-results/
 playwright-report/
+.features-gen/**/*.spec.js
+.features-gen/**/*.spec.js.map

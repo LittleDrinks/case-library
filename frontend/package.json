@@ -13,7 +13,9 @@
     "check:complexity": "eslint --config eslint.config.js src",
     "test": "npm run check:complexity && vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "bddgen": "bddgen -c playwright.config.js",
+    "test:e2e": "bddgen -c playwright.config.js && playwright test",
+    "test:e2e:bdd": "bddgen -c playwright.config.js && playwright test --project=bdd"
   },
   "dependencies": {
     "@ai-sdk/vue": "3.0.272",
@@ -40,6 +42,7 @@
     "eslint-plugin-vue": "10.11.0",
     "fflate": "^0.8.3",
     "jsdom": "^26.1.0",
+    "playwright-bdd": "9.2.1",
     "vite": "^7.0.0",
     "vitest": "^3.2.4"
   }
