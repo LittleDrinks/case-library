@@ -122,6 +122,11 @@ def teacher_uploads_skill(ctx):
         "id": payload["skill"]["id"],
         "versionId": payload["version"]["id"],
     }
+    database = client_of(ctx).app.state.database
+    ctx["memo"]["skills_before_denied_write"] = {
+        name: list(database[name].find({}).sort("id", 1))
+        for name in ("skills", "skill_versions")
+    }
     response = _upload_skill(ctx, "教师")
     ctx["memo"]["upload_response"] = response
     ctx["memo"]["last_response"] = response
@@ -149,3 +154,8 @@ def skill_remains_unpublished(ctx):
     assert response.status_code == 200, response.text
     row = next(item for item in response.json() if item["id"] == skill["id"])
     assert row["publishedVersionId"] is None
+    database = client_of(ctx).app.state.database
+    assert {
+        name: list(database[name].find({}).sort("id", 1))
+        for name in ("skills", "skill_versions")
+    } == ctx["memo"]["skills_before_denied_write"]

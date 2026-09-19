@@ -101,6 +101,7 @@ def _send_with_skill(ctx, skill_id: str):
     thread_id = client_of(ctx).get(
         f"/api/cases/{case_id}/agent/thread", headers=csrf_headers(ctx, "教师")
     ).json()["id"]
+    ctx["memo"]["skill_thread_id"] = thread_id
     model = _skill_model(skill_id, _placeholder_tool_name(skill_id))
     parts = [
         {"type": "text", "text": "请按范例写一份教学设计"},
@@ -118,12 +119,12 @@ def _send_with_skill(ctx, skill_id: str):
     return response
 
 
-def _await_terminal_run(ctx, case_id: str, deadline: float = 10) -> dict | None:
+def _await_terminal_run(ctx, thread_id: str, deadline: float = 10) -> dict | None:
     database = client_of(ctx).app.state.database
     end = time.monotonic() + deadline
     while time.monotonic() < end:
         runs = list(database.agent_runs.find(
-            {"status": {"$ne": "active"}}, {"_id": 0}))
+            {"threadId": thread_id, "status": {"$ne": "active"}}, {"_id": 0}))
         if runs:
             return runs[-1]
         time.sleep(0.02)
@@ -146,8 +147,12 @@ def teacher_runs_skill(ctx):
     create_case(ctx, "教师", f"Skill运行案例 {time.time()}", "讨论正文")
     ctx["memo"]["last_response"] = _send_with_skill(ctx, SKILL_ID)
     if ctx["memo"]["last_response"].status_code == 200:
-        run = _await_terminal_run(ctx, ctx["memo"]["current_case_id"])
+        run = _await_terminal_run(ctx, ctx["memo"]["skill_thread_id"])
         assert run and run["status"] == "completed", run
+        ctx["memo"].setdefault("skill_run_ids", []).append(run["id"])
+        ctx["memo"].setdefault("skill_run_hashes", []).append(
+            ctx["memo"]["skill_version"]["packageSha256"]
+        )
 
 
 @then("绑定被拒绝且不产生运行记录")
@@ -178,8 +183,8 @@ def teacher_second_skill_run(ctx):
 def run_records_version_hash(ctx):
     version = ctx["memo"]["skill_version"]
     database = client_of(ctx).app.state.database
-    run = database.agent_runs.find_one({}, {"_id": 0, "resources": 1},
-                                       sort=[("_id", -1)])
+    run = database.agent_runs.find_one({"id": ctx["memo"]["skill_run_ids"][-1]})
+    assert run["status"] == "completed"
     records = {row["kind"]: row for row in run["resources"]}
     assert records["skill"]["id"] == SKILL_ID
     assert records["skill"]["version"] == version["version"]
@@ -190,9 +195,12 @@ def run_records_version_hash(ctx):
 def two_runs_record_both_hashes(ctx):
     version = ctx["memo"]["skill_version"]
     database = client_of(ctx).app.state.database
-    runs = list(database.agent_runs.find({}, {"_id": 0, "resources": 1})
+    runs = list(database.agent_runs.find({"id": {"$in": ctx["memo"]["skill_run_ids"]}})
                 .sort("_id", 1))
     assert len(runs) == 2, runs
-    hashes = [run["resources"][-1]["contentHash"] for run in runs]
+    assert all(run["status"] == "completed" for run in runs), runs
+    hashes = [next(row["contentHash"] for row in run["resources"] if row["kind"] == "skill")
+              for run in runs]
+    assert hashes == ctx["memo"]["skill_run_hashes"]
     assert hashes[0] != hashes[1]
     assert hashes[-1] == version["packageSha256"]

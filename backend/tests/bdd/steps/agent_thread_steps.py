@@ -108,6 +108,9 @@ def snapshot_has_history(ctx):
     messages = ctx["memo"]["snapshot"]["messages"]
     roles = [m["role"] for m in messages]
     assert roles == ["user", "assistant"], roles
+    texts = ["".join(part["text"] for part in message["parts"] if part["type"] == "text")
+             for message in messages]
+    assert texts == ["之前的问题", "历史回答内容。"]
 
 
 @when("AI正在回答时教师点击停止")

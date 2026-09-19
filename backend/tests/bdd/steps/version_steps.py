@@ -96,6 +96,8 @@ def case_with_history_and_changed_draft(ctx, title, name):
 def teacher_restores(ctx, name):
     case_id = ctx["memo"]["current_case_id"]
     version = ctx["cases"]["_versions"][name]
+    ctx["memo"]["before_restore_document"] = get_case(ctx, case_id)["document"]
+    ctx["memo"]["before_restore_ids"] = {row["id"] for row in _history(ctx, case_id)["versions"]}
     ctx["memo"]["last_response"] = lifecycle(
         ctx, "教师", case_id, "overwrite", targetId=version["id"]
     )
@@ -113,6 +115,11 @@ def restore_record_appended(ctx):
     history = _history(ctx, ctx["memo"]["current_case_id"])
     kinds = [row["kind"] for row in history["versions"]]
     assert kinds[-1] == "restore"
+    added = [row for row in history["versions"]
+             if row["id"] not in ctx["memo"]["before_restore_ids"]]
+    assert [row["kind"] for row in added] == ["manual", "restore"]
+    assert added[0]["title"] == "恢复前的当前稿"
+    assert added[0]["document"] == ctx["memo"]["before_restore_document"]
     frozen = ctx["cases"]["_versions"]
     ids = [row["id"] for row in history["versions"]]
     for version in frozen.values():

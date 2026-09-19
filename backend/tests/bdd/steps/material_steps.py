@@ -81,6 +81,9 @@ def duplicate_marked(ctx, status):
 
 @when(parsers.parse('教师尝试导入资料文件"{name}"'))
 def teacher_imports(ctx, name):
+    database = client_of(ctx).app.state.database
+    collections = ("material_import_jobs", "material_import_items", "material_candidates")
+    before = {name: list(database[name].find({}).sort("id", 1)) for name in collections}
     ctx["memo"]["teacher_import_response"] = client_of(ctx).post(
         "/api/admin/material-imports",
         headers=csrf_headers(ctx, "教师"),
@@ -88,6 +91,8 @@ def teacher_imports(ctx, name):
         files=[("files", (name, io.BytesIO(b"import content"), "text/plain"))],
     )
     ctx["memo"]["last_response"] = ctx["memo"]["teacher_import_response"]
+    after = {name: list(database[name].find({}).sort("id", 1)) for name in collections}
+    assert after == before
 
 
 

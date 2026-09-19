@@ -86,6 +86,7 @@ def published_and_public(ctx, status):
     case = response.json()["case"]
     assert case["workflowStatus"] == CASE_STATUS_ZH[status]
     assert case["publicationStatus"] == "public"
+    client_of(ctx).cookies.clear()
     public = client_of(ctx).get(f"/api/cases/{case['id']}/public")
     assert public.status_code == 200, public.text
     assert public.json()["id"] == case["id"]
@@ -194,6 +195,7 @@ def reopened_but_public_version_readable(ctx):
     case = response.json()["case"]
     assert case["workflowStatus"] == CASE_STATUS_ZH["草稿"]
     # 下线后公开阅读端按 publicationStatus!=public 拒绝（404），旧发布版本仍在历史中
+    client_of(ctx).cookies.clear()
     public = client_of(ctx).get(f"/api/cases/{case['id']}/public")
     assert public.status_code == 404
     history = client_of(ctx).get(
