@@ -52,11 +52,11 @@ function documentFor(marker) {
   };
 }
 
-async function createCase(page, marker) {
+async function createCase(page, marker, documentMarker = marker) {
   const auth = await sessionOf(page);
   const response = await page.context().request.post("/api/cases", {
     headers: { "X-CSRF-Token": auth.csrfToken },
-    data: { title: marker, document: documentFor(marker) },
+    data: { title: marker, document: documentFor(documentMarker) },
   });
   return jsonResponse(response);
 }
@@ -88,6 +88,16 @@ async function restoreCase(page, original) {
   });
 }
 
+async function wordDocumentText(page, xml) {
+  return page.evaluate((source) => {
+    const parsed = new DOMParser().parseFromString(source, "application/xml");
+    if (parsed.getElementsByTagName("parsererror").length) throw new Error("DOCX XML解析失败");
+    const namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    return Array.from(parsed.getElementsByTagNameNS(namespace, "t"), (node) => node.textContent || "")
+      .join("");
+  }, xml);
+}
+
 Given("教师打开登录页并输入演示账号", async ({ page }) => {
   await page.goto("/#/login");
   await page.getByLabel("用户名").fill("user");
@@ -117,8 +127,9 @@ Then("会话保持登录状态无需重新认证", async ({ page }) => {
 Given("教师登录并打开一个独立草稿工作台", async ({ page, $testInfo }) => {
   const state = stateOf($testInfo);
   await login(page);
-  const marker = `浏览器BDD独立草稿 ${Date.now()}`;
-  const created = await createCase(page, marker);
+  state.exportTitleMarker = `浏览器BDD DOCX标题 ${Date.now()} & 版式`;
+  state.exportBodyMarker = `浏览器BDD DOCX正文 ${Date.now()} <结构>`;
+  const created = await createCase(page, state.exportTitleMarker, state.exportBodyMarker);
   state.caseId = created.id;
   state.autosaveOriginal = created;
   await openWorkbench(page, created.id);
@@ -199,7 +210,7 @@ When("教师点击导出DOCX", async ({ page, $testInfo }) => {
   await state.download.saveAs(state.downloadPath);
 });
 
-Then("浏览器下载独立草稿的DOCX文件且为合法Word文档", async ({ $testInfo }) => {
+Then("浏览器下载独立草稿的DOCX文件且为合法Word文档", async ({ page, $testInfo }) => {
   const state = stateOf($testInfo);
   expect(state.download.suggestedFilename()).toBe(`case-${state.caseId}.docx`);
   const bytes = await readFile(state.downloadPath);
@@ -211,9 +222,12 @@ Then("浏览器下载独立草稿的DOCX文件且为合法Word文档", async ({ 
     "word/document.xml",
   ]));
   const types = new TextDecoder().decode(files["[Content_Types].xml"]);
-  const document = new TextDecoder().decode(files["word/document.xml"]);
+  const documentXml = new TextDecoder().decode(files["word/document.xml"]);
   expect(types).toContain(DOCX_TYPE);
-  expect(document).toContain("<w:document");
+  expect(documentXml).toContain("<w:document");
+  const documentText = await wordDocumentText(page, documentXml);
+  expect(documentText).toContain(state.exportTitleMarker);
+  expect(documentText).toContain(state.exportBodyMarker);
 });
 
 After(async ({ page, $testInfo }) => {
