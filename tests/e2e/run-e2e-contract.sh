@@ -93,17 +93,44 @@ git init -q "$probe_dir"
 git -C "$probe_dir" -c user.email=probe@local -c user.name=probe add -A
 git -C "$probe_dir" -c user.email=probe@local -c user.name=probe commit -qm base
 fp_probe() { (cd "$probe_dir" && env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX bash ./scripts/ci-images.sh fingerprint backend-test); }
-# Adopt-vs-fallback: resolve the image through compose config with exported
-# vs unset environment, through the fixture's own ci-images.sh copy.
-image_adopt="$(cd "$probe_dir" && COMPOSE_PROJECT_NAME=adopt-probe-e2e IMAGE_PREFIX=adopt-probe-e2e \
-  bash -c 'bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1; docker compose --project-name adopt-probe-e2e --env-file .env.example --profile test config --format json' 2>/dev/null | jq -r '.services["backend-test"].image')"
-test "$image_adopt" = "adopt-probe-e2e-backend-test" || {
-  echo "ci-images must adopt the caller's IMAGE_PREFIX (got: $image_adopt)" >&2
+# Adopt-vs-fallback must be observed through ci-images' own Docker calls,
+# not compose's env interpolation: a recording docker shim answers compose
+# config with a minimal valid JSON (no daemon access) and we assert the
+# --project-name ci-images chose. Fingerprint under the shim still fails at
+# image inspect (no such image) — expected; the log line is the evidence.
+mkdir -p "$probe_dir/bin"
+cat > "$probe_dir/bin/docker" <<SHIM
+#!/bin/sh
+printf '%s\n' "\$*" >> "$probe_dir/docker-calls.log"
+for a in "\$@"; do
+  case "\$a" in
+    --format)
+      printf '%s\n' '{"services": {"backend-test": {"build": {"dockerfile": "backend.Dockerfile", "target": "test"}, "image": "fixture-image"}}}'
+      exit 0
+      ;;
+  esac
+done
+exit 1
+SHIM
+chmod +x "$probe_dir/bin/docker"
+(
+  cd "$probe_dir"
+  PATH="$probe_dir/bin:$PATH" COMPOSE_PROJECT_NAME=adopt-probe-e2e IMAGE_PREFIX=adopt-probe-e2e \
+    bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1
+)
+grep -Fq -- '--project-name adopt-probe-e2e' "$probe_dir/docker-calls.log" || {
+  echo "ci-images must adopt the caller's COMPOSE_PROJECT_NAME" >&2
   exit 1
 }
-image_fallback="$(cd "$probe_dir" && bash -c 'env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1; env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX docker compose --env-file .env.example --profile test config --format json' 2>/dev/null | jq -r '.services["backend-test"].image')"
-test "$image_fallback" = "fixture-fallback-backend-test" || {
-  echo "bare invocation must fall back to the compose default (got: $image_fallback)" >&2
+: > "$probe_dir/docker-calls.log"
+(
+  cd "$probe_dir"
+  PATH="$probe_dir/bin:$PATH" env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX \
+    bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1
+)
+fixture_fallback_project="$(printf '%s' "$(basename "$probe_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e"
+grep -Fq -- "--project-name $fixture_fallback_project" "$probe_dir/docker-calls.log" || {
+  echo "bare invocation must fall back to the fixture-derived project ($fixture_fallback_project)" >&2
   exit 1
 }
 # Fingerprint mutation probes: new untracked COPY source and a rename must
