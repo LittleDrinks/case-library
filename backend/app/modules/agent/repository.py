@@ -202,7 +202,7 @@ class AgentRepository:
         return result.matched_count == 1
 
     def snapshot(self, thread: AgentThread) -> AgentSnapshot:
-        return _transaction(self.database, lambda session: self._snapshot(thread, session))
+        return transaction(self.database, lambda session: self._snapshot(thread, session))
 
     def _snapshot(self, thread: AgentThread, session) -> AgentSnapshot:
         current = self._snapshot_thread(thread.id, session)
@@ -268,7 +268,7 @@ class AgentRepository:
         submitted_version_id: str | None = None,
     ) -> AgentRun:
         try:
-            return _transaction(self.database, lambda session: self._start_run(
+            return transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, skill_bindings, session, default_title,
                 base_revision, target, annotation_id, submitted_version_id,
@@ -302,7 +302,7 @@ class AgentRepository:
                   submitted_version_id: str | None = None) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
-            return _transaction(self.database, lambda session: self._retry_run(
+            return transaction(self.database, lambda session: self._retry_run(
                 thread, user_message_id, assistant_id, owner_id, quota_ids,
                 skill_bindings, base_revision, target, session, annotation_id,
                 submitted_version_id,
@@ -437,7 +437,7 @@ class AgentRepository:
         artifact: AgentArtifact | None = None,
         write_record: dict | None = None,
     ) -> bool:
-        return self._complete_tx(run_id, owner_id, lambda: _transaction(
+        return self._complete_tx(run_id, owner_id, lambda: transaction(
             self.database,
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
@@ -606,7 +606,7 @@ class AgentRepository:
     def _finish(
         self, run_id: str, status: TerminalRunStatus, fields: dict, owner_id=None,
     ) -> bool:
-        return _transaction(
+        return transaction(
             self.database,
             lambda session: self._finish_transaction(
                 run_id, status, fields, session, owner_id
@@ -645,7 +645,7 @@ class AgentRepository:
         self, thread_id: str, event_type: ThreadEventType, run_id: str,
         payload: dict[str, object], owner_id: str | None = None,
     ) -> bool:
-        return _transaction(
+        return transaction(
             self.database,
             lambda session: self._append_active_event(
                 thread_id, event_type, run_id, payload, session, owner_id
@@ -959,14 +959,10 @@ def _thread_event(
     )
 
 
-def _transaction(database, callback):
-    with database.client.start_session() as session:
-        return session.with_transaction(callback)
-
-
 def transaction(database, callback):
     """在真实 replica set 事务中执行回调；测试替身下等价于直接调用。"""
-    return _transaction(database, callback)
+    with database.client.start_session() as session:
+        return session.with_transaction(callback)
 
 
 def claim_run_write_path(database, run_id: str, path: str, session=None) -> bool:

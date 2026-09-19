@@ -57,8 +57,6 @@ COPY backend/pyproject.toml ./pyproject.toml
 COPY .env.example /app/.env.example
 COPY backend/tests ./tests
 COPY scripts/validate_production_config.py /app/scripts/validate_production_config.py
-COPY scripts/ai_smoke.py /app/scripts/ai_smoke.py
-COPY scripts/wait_for_mongo.py /opt/case-library/wait_for_mongo.py
 COPY assets/学习资料md.rar /app/fixtures/学习资料md.rar
 ENV PYTEST_ADDOPTS="-p no:cacheprovider"
 USER app

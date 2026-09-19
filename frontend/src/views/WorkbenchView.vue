@@ -664,21 +664,6 @@ function cancelOverwrite() {
   overwriteTarget.value = null;
 }
 
-async function overwriteBaseline() {
-  if (await flushAutosave()) return revision.value;
-  actionNotice.value = "正文尚未保存，未执行恢复。";
-  return null;
-}
-
-async function overwriteSucceeded(result) {
-  applyCase(result.case);
-  activeTabId.value = "draft";
-  overwriteTarget.value = null;
-  crashDraft.load(result.case);
-  await refreshAnnotations();
-  refreshVersionHistory();
-}
-
 async function handleVersionCreated() {
   try {
     syncCaseRevision(await api.getCase(caseId()));
@@ -688,10 +673,30 @@ async function handleVersionCreated() {
   }
 }
 
-function overwriteFailed(error) {
-  overwriteTarget.value = null;
-  actionNotice.value = error.message || "恢复失败";
-  if (error.status === 409) void refreshLifecycleState();
+async function performOverwrite() {
+  const target = overwriteTarget.value;
+  if (!target || headerBusyAction.value) return;
+  busyAction.value = "overwrite";
+  try {
+    if (!await flushAutosave()) {
+      actionNotice.value = "正文尚未保存，未执行恢复。";
+      return;
+    }
+    const body = lifecycleBody("overwrite", { targetId: target.id });
+    const result = await api.lifecycleCase(caseId(), body, session.csrfToken);
+    applyCase(result.case);
+    activeTabId.value = "draft";
+    overwriteTarget.value = null;
+    crashDraft.load(result.case);
+    await refreshAnnotations();
+    refreshVersionHistory();
+  } catch (error) {
+    overwriteTarget.value = null;
+    actionNotice.value = error.message || "恢复失败";
+    if (error.status === 409) void refreshLifecycleState();
+  } finally {
+    busyAction.value = "";
+  }
 }
 
 async function copyVersion() {
@@ -704,21 +709,6 @@ async function copyVersion() {
     actionNotice.value = `已复制${versionLabel(activeVersion.value)}正文`;
   } catch {
     actionNotice.value = "复制失败，请使用浏览器复制功能";
-  }
-}
-
-async function performOverwrite() {
-  const target = overwriteTarget.value;
-  if (!target || headerBusyAction.value) return;
-  busyAction.value = "overwrite";
-  try {
-    if (await overwriteBaseline() === null) return;
-    const body = lifecycleBody("overwrite", { targetId: target.id });
-    await overwriteSucceeded(await api.lifecycleCase(caseId(), body, session.csrfToken));
-  } catch (error) {
-    overwriteFailed(error);
-  } finally {
-    busyAction.value = "";
   }
 }
 
