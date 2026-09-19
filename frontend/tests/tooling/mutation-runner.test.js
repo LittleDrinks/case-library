@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, mkdir, copyFile, writeFile, readFile, rm, symlink, realpath, access } from "node:fs/promises";
+import { mkdtemp, mkdir, copyFile, writeFile, readFile, readdir, rm, symlink, realpath, access } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,6 +42,31 @@ for (const status of [0, 42]) test(`mutation runner preserves exit ${status} and
     const scope = JSON.parse(await readFile(path.join(fixture, "reports/mutation/scope.json"), "utf8"));
     assert.equal(scope.files.length, 1);
     assert.notEqual(scope.files[0].sourceSha256, scope.files[0].mutationInputSha256);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ["compiler import", "temporary directory"]) test(`bootstrap failure in ${failure} invalidates old results`, async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "mutation-bootstrap-test-"));
+  try {
+    await mkdir(path.join(fixture, "tests/tooling"), { recursive: true });
+    await mkdir(path.join(fixture, "reports/mutation"), { recursive: true });
+    const temporary = path.join(fixture, "temporary");
+    await mkdir(temporary);
+    for (const name of ["mutation.js", "run-mutation.js"]) {
+      await copyFile(path.join(frontend, "tests/tooling", name), path.join(fixture, "tests/tooling", name));
+    }
+    await writeFile(path.join(fixture, "package.json"), '{"type":"module"}');
+    await writeFile(path.join(fixture, "reports/mutation/mutation.json"), '{"oldSuccess":true}');
+    const result = spawnSync(process.execPath, [path.join(fixture, "tests/tooling/run-mutation.js")], {
+      encoding: "utf8",
+      env: { ...process.env, TMPDIR: failure === "compiler import" ? temporary : path.join(fixture, "missing") },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, failure === "compiler import" ? /ERR_MODULE_NOT_FOUND/ : /ENOENT/);
+    await assert.rejects(access(path.join(fixture, "reports/mutation/mutation.json")), { code: "ENOENT" });
+    assert.deepEqual(await readdir(temporary), []);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

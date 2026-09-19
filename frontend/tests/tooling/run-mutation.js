@@ -4,11 +4,10 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileMutationComponent } from "./mutation.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const reports = path.join(root, "reports/mutation");
-const stage = await mkdtemp(path.join(tmpdir(), "case-library-mutation-"));
+let stage;
 const digest = value => createHash("sha256").update(value).digest("hex");
 let child;
 let interrupted;
@@ -32,7 +31,7 @@ async function sourceFiles(directory) {
 }
 
 async function prepare() {
-  await rm(reports, { recursive: true, force: true });
+  const { compileMutationComponent } = await import("./mutation.js");
   await mkdir(reports, { recursive: true });
   for (const filename of ["src", "public", "tests/tooling", "package.json", "vite.config.js", "mutation.config.js", "stryker.config.json"]) {
     await mkdir(path.dirname(path.join(stage, filename)), { recursive: true });
@@ -72,10 +71,12 @@ async function run() {
 }
 
 try {
+  await rm(reports, { recursive: true, force: true });
+  stage = await mkdtemp(path.join(tmpdir(), "case-library-mutation-"));
   await prepare();
   process.exitCode = interrupted ?? await run();
 } finally {
-  await rm(stage, { recursive: true, force: true });
+  if (stage) await rm(stage, { recursive: true, force: true });
   if (interrupted) process.exitCode = interrupted;
   for (const [signal, handler] of handlers) process.off(signal, handler);
 }
