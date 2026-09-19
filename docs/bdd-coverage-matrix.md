@@ -25,7 +25,8 @@
 | 审核开始后作者可撤回回到可编辑草稿 | 后端：test_case_workflow.py；浏览器：homepage.spec.js | 作者在审核开始后撤回回到工作稿 |
 | 退回必须写明原因，缺原因校验失败 | 后端：test_case_workflow.py；浏览器：annotations.spec.js | 审核退回必须写明原因 |
 | 带原因退回后作者可见反馈，重新提交清除反馈 | 后端：test_case_workflow.py | 管理员带原因退回后作者看到反馈并重新提交 |
-| 发布即锁定，作者不可再编辑已发布案例 | 后端：test_case_workflow.py；浏览器：homepage.spec.js | 已发布案例作者不可再编辑 |
+| 未另起工作稿时不能直接覆盖发布内容 | 后端：test_case_workflow.py；浏览器：homepage.spec.js | 未另起工作稿时不能直接覆盖发布内容 |
+| 作者直接另开工作稿，旧发布版持续公开；新稿审核通过后替换默认版本，原版本仍可读取 | 后端：test_case_workflow.py | 作者另开工作稿时旧发布版保持公开且新稿通过后替换默认版本 |
 | 管理员下线后作者可另起新稿且发布版本历史保留 | 后端：test_case_workflow.py | 管理员下线已发布案例后作者可另起新稿 |
 
 ## 4 版本隔离恢复（version_restore.feature）
@@ -77,7 +78,7 @@
 | 同一来源不可重复挂载（409） | 后端：test_case_sources.py | 重复挂载同一来源被拒绝 |
 | 正文已引用的来源删除被409拒绝 | 后端：test_case_sources.py、test_public_reference_count_e2e.py | 正文引用后删除来源被拒绝 |
 | 未被正文引用的来源可删除 | 后端：test_case_sources.py | 未引用的来源可以删除 |
-| 被引案例下线后引用条目锁定为不可读 | 后端：test_case_sources.py | 被引用案例下线后引用条目锁定内容 |
+| 被引案例下线后来源身份、名称与固定版本保留，内容不可读 | 后端：test_case_sources.py | 被引用案例下线后固定版本保留且内容不可读 |
 
 ## 10 标签搜索同步（tag_skill.feature + search.feature）
 | 业务规则 | 既有测试 | 中文Gherkin场景 |
@@ -121,7 +122,7 @@
 | 取消历史版本恢复 | 对话框取消后不提交恢复请求，正文与版本不变 |
 | DOCX 下载 | 浏览器下载、合法 OOXML、解码文档同时包含当前草稿唯一标题和正文 |
 ## 执行边界
-API 层有 59 个中文场景，使用 TestClient 与确定性数据库替身；`make bdd-zh` 生成 HTML/JUnit 报告。`make test-backend` 排除这组场景，避免同一流水线重复运行。
+API 层有 60 个中文场景，使用 TestClient 与确定性数据库替身；`make bdd-zh` 生成 HTML/JUnit 报告。`make test-backend` 排除这组场景，避免同一流水线重复运行。
 `make backend-e2e` 执行两项真实检索场景：应用 HTTP 写入、MongoDB 事务、outbox 消费、Meilisearch 查询。私密附件关键词仅存在于附件正文，先验证作者命中与匿名公开标题命中，再验证匿名私密关键词无命中和附件下载被拒绝。
 `make e2e` 执行四项浏览器中文场景；报告保存在独立 bdd 子目录。真实检索已通过后端 E2E；浏览器场景已随两套同提交的隔离环境并行完整通过。
 底层并发与协议测试保留：生命周期、AI 线程、批注轮次使用真实副本集；Skill 并发上传经 HTTP 验证唯一版本号与 latest 指针不回退；RAR 使用 `backend/tests/fixtures/materials.rar` 两条目自制样本验证真实解包与对象存储。中文场景不替代这些测试。

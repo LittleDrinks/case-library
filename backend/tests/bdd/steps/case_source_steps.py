@@ -112,12 +112,27 @@ def sources_exclude(ctx, source):
 def admin_hides_source_case(ctx, source):
     from tests.bdd.steps.common_steps import lifecycle
 
+    ctx["memo"]["sources_before_hide"] = _sources(ctx)
     response = lifecycle(ctx, "管理员", source, "hide")
     assert response.status_code == 200, response.text
 
 
-@then(parsers.parse('引用来源条目标记为不可读'))
+@then(parsers.parse('引用来源固定版本保留且内容不可读'))
 def source_entry_locked(ctx):
+    before = {
+        row["id"]: {
+            field: row[field]
+            for field in ("caseId", "title", "versionId", "versionNumber")
+        }
+        for row in ctx["memo"]["sources_before_hide"]
+    }
+    assert before
     rows = _sources(ctx)
-    assert rows, rows
-    assert all(row["contentAvailable"] is False for row in rows), rows
+    assert len(rows) == len(before)
+    assert {row["id"] for row in rows} == set(before)
+    for row in rows:
+        assert {
+            field: row[field]
+            for field in ("caseId", "title", "versionId", "versionNumber")
+        } == before[row["id"]]
+        assert row["contentAvailable"] is False

@@ -41,6 +41,7 @@ def published_case(ctx, title):
     approved = lifecycle(ctx, "管理员", case_id, "approve",
                          submittedVersionId=ctx["memo"]["submitted_version_id"])
     assert approved.status_code == 200, approved.text
+    ctx["memo"]["original_published_version"] = approved.json()["version"]
 
 
 @when(parsers.parse('教师提交"{title}"送审'))
@@ -204,3 +205,35 @@ def reopened_but_public_version_readable(ctx):
     assert history.status_code == 200
     actions = [row["action"] for row in history.json().get("events", [])]
     assert "approve" in actions
+
+
+@then("匿名读者仍看到原发布版本")
+def original_publication_stays_visible(ctx):
+    case_id = ctx["memo"]["current_case_id"]
+    original = ctx["memo"]["original_published_version"]
+    response = client_of(ctx).get(f"/api/cases/{case_id}/public", headers={"Cookie": ""})
+    assert response.status_code == 200, response.text
+    public = response.json()
+    assert public["publishedVersionId"] == original["id"]
+    assert public["title"] == original["title"]
+    assert public["document"] == original["document"]
+
+
+@then(parsers.parse('默认发布正文是"{text}"且原发布版本仍可读取'))
+def new_publication_preserves_original(ctx, text):
+    case_id = ctx["memo"]["current_case_id"]
+    original = ctx["memo"]["original_published_version"]
+    approved = ctx["memo"]["last_response"]
+    assert approved.status_code == 200, approved.text
+    public = client_of(ctx).get(f"/api/cases/{case_id}/public", headers={"Cookie": ""})
+    assert public.status_code == 200, public.text
+    assert public.json()["publishedVersionId"] == approved.json()["version"]["id"]
+    assert public.json()["publishedVersionId"] != original["id"]
+    assert public.json()["document"] == standard_document(text)
+    previous = client_of(ctx).get(
+        f"/api/cases/{case_id}/public", params={"versionId": original["id"]},
+        headers={"Cookie": ""},
+    )
+    assert previous.status_code == 200, previous.text
+    assert previous.json()["title"] == original["title"]
+    assert previous.json()["document"] == original["document"]
