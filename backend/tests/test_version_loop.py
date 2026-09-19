@@ -415,6 +415,34 @@ def test_restore_keeps_current_work_and_appends_restore_record(client: TestClien
     _assert_restored_submission_annotations(client, case, draft_note, version_note)
     fresh = client.get(f"/api/cases/{case['id']}").json()
     assert fresh["document"] == annotated_version["document"]
+    notes_path = f"/api/cases/{case['id']}/annotations"
+    notes = client.get(notes_path).json()
+    restored_review = next(
+        row for row in notes if row.get("restoredFromId") == version_note["id"]
+    )
+    restored_draft = next(
+        row for row in notes if row.get("restoredFromId") == draft_note["id"]
+    )
+    owner = login(client).json()
+    owner_reply = client.post(
+        f"{notes_path}/{restored_review['id']}/replies",
+        headers={"X-CSRF-Token": owner["csrfToken"]},
+        json={"content": "作者不得回复恢复后的管理员批注"},
+    )
+    assert owner_reply.status_code == 403
+    assert client.get(notes_path).json() == notes
+    draft_reply = client.post(
+        f"{notes_path}/{restored_draft['id']}/replies",
+        headers={"X-CSRF-Token": owner["csrfToken"]},
+        json={"content": "作者可以回复自己的私人批注"},
+    )
+    assert draft_reply.status_code == 200
+    assert any(
+        reply["content"] == "作者可以回复自己的私人批注"
+        for row in client.get(notes_path).json()
+        if row["id"] == restored_draft["id"]
+        for reply in row["replies"]
+    )
 
 
 def _resolve_discussion(client, auth, case, note) -> None:
