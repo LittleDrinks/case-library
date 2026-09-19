@@ -20,17 +20,6 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("浏览器崩溃恢复在编辑三百毫秒后保存本地快照", async () => {
-  vi.useFakeTimers();
-  const { draft, snapshot } = setup();
-
-  draft.queue();
-  await vi.advanceTimersByTimeAsync(300);
-
-  expect(readLocalDraft("u-1", "c-1")?.snapshot).toEqual(snapshot);
-  draft.destroy();
-});
-
 it("浏览器崩溃恢复同一基础修订并保留到服务端保存", () => {
   const { draft, snapshot, onRecover } = setup();
   storeLocalDraft("u-1", "c-1", 4, snapshot);

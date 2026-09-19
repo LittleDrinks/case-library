@@ -61,6 +61,8 @@ it("相同标题但不同正文不视为同一恢复稿", () => {
 });
 
 it("缺少恢复稿快照时不匹配", () => {
+  expect(sameDraft(null, { title: "标题", document: { type: "doc" } })).toBe(false);
+  expect(sameDraft(undefined, { title: "标题", document: { type: "doc" } })).toBe(false);
   expect(sameDraft({}, { title: "标题", document: { type: "doc" } })).toBe(false);
   expect(sameDraft({ snapshot: null }, { title: "标题", document: { type: "doc" } })).toBe(false);
 });
