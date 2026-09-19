@@ -86,6 +86,8 @@ def write_shim(fail_stage=None, gate=False):
     the e2e-app stage until a release file appears (for HUP timing)."""
     shim = tmp / "docker"
     log = tmp / "docker-calls.log"
+    for path in (log, tmp / "at-gate", tmp / "release"):
+        path.unlink(missing_ok=True)
     fail_case = ""
     if fail_stage:
         pattern = {
@@ -266,7 +268,7 @@ finally:
         proc.kill()
         proc.wait()
 ok_shape, _ = teardown_shape(lines, "up -d --wait e2e-app")
-ok3 = not (rc == 129 and ok_shape)
+ok3 = rc == -_signal.SIGHUP and not ok_shape
 report = {"label": "trap-regression-control", "exit": rc,
           "teardown_ok": ok_shape, "detected_regression": ok3}
 (PROBE / "trap-regression-control.json").write_text(json.dumps(report, indent=2))
