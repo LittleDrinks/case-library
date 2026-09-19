@@ -64,49 +64,87 @@ copy_sources() {
 }
 
 fingerprint() {
+  local source_list hash_input src status
+  source_list="$(mktemp)"
+  hash_input="$(mktemp)"
+  if ! copy_sources "$1" >"$source_list"; then
+    rm -f "$source_list" "$hash_input"
+    return 1
+  fi
   {
     printf '%s\n' "$2"
     cat "$1"
-    # CI fingerprint: conservatively covers what the build context sends.
-    # .dockerignore is hashed in full (any ignore-rule change invalidates),
-    # then every COPY source is walked on disk hashing content, relative
-    # path, file mode and symlink targets — matching Docker's context
-    # semantics (docs.docker.com/build/concepts/context/), where cache
-    # invalidation keys on content plus metadata. Pruned cache dirs mirror
-    # the repo .dockerignore; anything not pruned but ignored still
-    # invalidates conservatively, which is safe (never stale, at worst
-    # extra rebuilds).
+    # CI fingerprint conservatively covers every COPY source and the
+    # .dockerignore rules. Missing inputs are hard failures; image_ref must
+    # never manufacture a usable-looking tag from an incomplete context.
     if test -f "$project_dir/.dockerignore"; then
-      git -C "$project_dir" hash-object -- .dockerignore
+      git -C "$project_dir" hash-object -- .dockerignore || {
+        rm -f "$source_list" "$hash_input"
+        return 1
+      }
     fi
-    copy_sources "$1" | while IFS= read -r src; do
-      if test -d "$project_dir/$src"; then
-        # Enumerate regular files AND symlinks inside the source directory.
-        # BuildKit resolves symlinks through the context, so their targets
-        # must enter the fingerprint; hard-coded pruning only excludes the
-        # same cache dirs the repo .dockerignore excludes — everything else
-        # that is actually sent to the daemon is hashed (conservatively
-        # never stale, at worst an extra rebuild).
-        (cd "$project_dir/$src" && find . -type d \( -name __pycache__ -o -name node_modules -o -name .git -o -name .venv \) -prune -o \
-          \( -type f -o -type l \) ! -name '*.pyc' -print0 | LC_ALL=C sort -z |
-          xargs -0 -I{} sh -c 'git hash-object -- "$1"; stat -c "%a %s" "$1"; if test -L "$1"; then readlink "$1"; fi; printf "%s\n" "$1"' _ {})
+    while IFS= read -r src; do
+      test -e "$project_dir/$src" || test -L "$project_dir/$src" || {
+        echo "missing COPY source: $src" >&2
+        rm -f "$source_list" "$hash_input"
+        return 1
+      }
+      if test -d "$project_dir/$src" && test ! -L "$project_dir/$src"; then
+        (
+          cd "$project_dir/$src" || exit 1
+          # NUL-safe names; symlinks are hashed as link text, never
+          # dereferenced (including dangling and directory links).
+          find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z |
+            while IFS= read -r -d '' f; do
+              if test -L "$f"; then
+                printf 'symlink\0%s\0%s\0' "$src/$f" "$(readlink "$f")"
+                stat -c '%a %s' -- "$f" || exit 1
+              else
+                printf 'file\0%s\0' "$src/$f"
+                git hash-object -- "$f" || exit 1
+                stat -c '%a %s' -- "$f" || exit 1
+              fi
+            done
+        ) || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+      elif test -L "$project_dir/$src"; then
+        printf 'symlink\0%s\0%s\0' "$src" "$(readlink "$project_dir/$src")"
+        stat -c '%a %s' -- "$project_dir/$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
       else
-        git -C "$project_dir" hash-object -- "$src" || exit 1
-        if test -L "$project_dir/$src"; then readlink "$project_dir/$src"; fi
-        stat -c "%a %s" "$project_dir/$src" 2>/dev/null || true
-        printf '%s\n' "$src"
+        printf 'file\0%s\0' "$src"
+        git hash-object -- "$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+        stat -c '%a %s' -- "$project_dir/$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
       fi
-    done
-  } | sha256sum | cut -d' ' -f1
+    done <"$source_list"
+  } >"$hash_input" || status=$?
+  status="${status:-0}"
+  rm -f "$source_list"
+  test "$status" -eq 0 || {
+    rm -f "$hash_input"
+    return "$status"
+  }
+  sha256sum "$hash_input" | cut -d' ' -f1
+  rm -f "$hash_input"
 }
 
 image_ref() {
-  local spec dockerfile target
+  local spec dockerfile target fingerprint_id
   spec="$(service_build_spec "$1")"
   test -n "$spec" || return 1
   dockerfile="${spec%%|*}" target="${spec#*|}"
-  printf '%s/%s:%s' "$(registry)" "$(image_key "$dockerfile" "$target")" \
-    "$(fingerprint "$project_dir/$dockerfile" "$target")"
+  fingerprint_id="$(fingerprint "$project_dir/$dockerfile" "$target")" || return 1
+  printf '%s/%s:%s' "$(registry)" "$(image_key "$dockerfile" "$target")" "$fingerprint_id"
 }
 
 local_image_is_current() {
