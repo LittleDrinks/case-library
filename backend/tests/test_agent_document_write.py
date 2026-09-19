@@ -11,6 +11,7 @@ import json
 import time
 import uuid
 from types import SimpleNamespace
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -836,6 +837,24 @@ def test_visibility_masks_document_write_parts_and_blocks() -> None:
                                              "text": HIDDEN_REVISION}]
     kept = visible_parts(_visibility_gate(True), parts)
     assert kept == parts
+
+
+def test_visibility_masks_each_write_field_without_mutating_history() -> None:
+    from app.modules.agent.visibility import visible_parts
+
+    parts = _visibility_parts()
+    parts[1]["input"]["reason"] = "受限来源理由"
+    original = deepcopy(parts)
+
+    masked = visible_parts(_visibility_gate(False), parts)
+    write_input = masked[1]["input"]
+    assert write_input["summary"] == HIDDEN_REVISION
+    assert write_input["reason"] == HIDDEN_REVISION
+    assert write_input["blocks"] == [{"type": "paragraph", "text": HIDDEN_REVISION}]
+    assert parts == original
+
+    readable = visible_parts(_visibility_gate(True), parts)
+    assert readable == original
 
 
 # ---- 端到端：流式运行内直接写入 + 撤销接口 ----
