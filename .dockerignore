@@ -33,3 +33,5 @@ backend/htmlcov
 frontend/coverage
 frontend/stryker-tmp
 frontend/reports/mutation
+
+frontend/.mutation.lock

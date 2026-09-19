@@ -40,3 +40,6 @@
 ## 前端覆盖率与变异运行
 在 frontend 目录执行 `npm ci`，再运行 `npm run test:coverage` 或 `npm run test:mutation`。范围是 src 下全部 JS/Vue 生产文件，排除同目录的 `.test.js`。
 覆盖率 HTML/JSON/LCOV 写入 `frontend/coverage`；Stryker JSON 写入 `frontend/reports/mutation`。Stryker 使用 Vitest、逐测试覆盖分析与单个测试进程；无覆盖和存活变异保留在结果中。
+
+Vue 变异输入由已锁定的 Vue 编译器展开 script setup 与模板，保留 setup 绑定；JS 输入不变。编译在专有临时目录中进行，生产源码不改写，结束时删除该目录；同 checkout 使用文件锁拒绝并行写报告。
+`frontend/reports/mutation` 保留原始源码、编译后源码、逐文件 SHA-256 清单及 `mutation.json`。Vue 变异位置对应编译后代码，包含模板生成的渲染函数，不能与直接源码插桩的变异数量混为同一分母。文件加载失败会终止基线，不能计作成功测试。仅验证插桩基线：`npm run test:mutation -- --dryRunOnly`。

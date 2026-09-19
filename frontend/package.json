@@ -11,13 +11,14 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "check:complexity": "eslint --config eslint.config.js src",
-    "test": "npm run check:complexity && vitest run",
+    "test": "npm run check:complexity && npm run test:tooling && vitest run",
     "test:watch": "vitest",
     "bddgen": "bddgen -c playwright.config.js",
     "test:e2e": "bddgen -c playwright.config.js && playwright test",
     "test:e2e:bdd": "bddgen -c playwright.config.js && playwright test --project=bdd",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run"
+    "test:mutation": "flock -n .mutation.lock node tests/tooling/run-mutation.js",
+    "test:tooling": "node --test tests/tooling/*.test.js"
   },
   "dependencies": {
     "@ai-sdk/vue": "3.0.272",

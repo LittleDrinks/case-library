@@ -49,3 +49,5 @@ backups/
 .DS_Store
 *.log
 .venv/
+
+frontend/.mutation.lock
