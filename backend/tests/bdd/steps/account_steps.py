@@ -17,17 +17,25 @@ def session_shows_teacher(ctx):
 
 @when(parsers.parse('教师"小张"用错误密码登录'))
 def wrong_password_login(ctx):
-    ctx["memo"]["last_response"] = client_of(ctx).post(
+    response = client_of(ctx).post(
         "/api/auth/login", json={"username": "user", "password": "wrong-password"}
     )
+    ctx["memo"]["wrong_password_response"] = response
+    ctx["memo"]["last_response"] = response
 
 
 @then("登录被拒绝且不泄露账号是否存在")
 def login_rejected_generic(ctx):
-    response = ctx["memo"]["last_response"]
+    response = ctx["memo"]["wrong_password_response"]
     assert response.status_code == 401
-    assert response.json()["detail"] == "用户名或密码错误"
-
+    assert response.json() == {"detail": "用户名或密码错误"}
+    missing = client_of(ctx).post(
+        "/api/auth/login",
+        json={"username": "missing-user", "password": "wrong-password"},
+    )
+    assert (missing.status_code, missing.json()) == (
+        response.status_code, response.json()
+    )
 
 @when(parsers.parse('匿名访客请求案例"{case_id}"'))
 def anonymous_reads_case(ctx, case_id):

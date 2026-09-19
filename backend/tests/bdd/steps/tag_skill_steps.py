@@ -25,11 +25,12 @@ def teacher_saves_tags(ctx, tag1, tag2):
         ctx["memo"]["last_response"].text
 
 
-@then("案例标签去重后为两个不同的种子标签")
+@then("案例标签去重后保留唯一的种子标签")
 def tags_deduped(ctx):
     tag1, tag2 = ctx["memo"]["requested_tags"]
+    assert tag1 == tag2
     case = get_case(ctx, ctx["memo"]["current_case_id"])
-    assert case["tagIds"] == [tag1, tag2] and tag1 != tag2
+    assert case["tagIds"] == [tag1]
 
 
 @given(parsers.parse('管理员已建必填组"{group}"含标签"{tag_name}"'))
@@ -114,4 +115,37 @@ def teacher_reads_skill(ctx):
 
 @when("教师上传Skill压缩包")
 def teacher_uploads_skill(ctx):
-    ctx["memo"]["last_response"] = _upload_skill(ctx, "教师")
+    admin_response = _upload_skill(ctx, "管理员")
+    assert admin_response.status_code == 201, admin_response.text
+    payload = admin_response.json()
+    ctx["memo"]["skill"] = {
+        "id": payload["skill"]["id"],
+        "versionId": payload["version"]["id"],
+    }
+    response = _upload_skill(ctx, "教师")
+    ctx["memo"]["upload_response"] = response
+    ctx["memo"]["last_response"] = response
+    assert response.status_code == 403, response.text
+
+
+@when("教师尝试发布该Skill版本")
+def teacher_publishes_skill(ctx):
+    skill = ctx["memo"]["skill"]
+    ctx["memo"]["last_response"] = client_of(ctx).post(
+        f"/api/admin/skills/{skill['id']}/publish",
+        headers=csrf_headers(ctx, "教师"),
+        json={"versionId": skill["versionId"]},
+    )
+    assert ctx["memo"]["last_response"].status_code == 403, \
+        ctx["memo"]["last_response"].text
+
+
+@then("上传与发布均被拒绝且Skill未发布")
+def skill_remains_unpublished(ctx):
+    skill = ctx["memo"]["skill"]
+    response = client_of(ctx).get(
+        "/api/admin/skills", headers=csrf_headers(ctx, "管理员")
+    )
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json() if item["id"] == skill["id"])
+    assert row["publishedVersionId"] is None

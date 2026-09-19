@@ -2,14 +2,13 @@
 
 目录替身记录检索请求，断言用户可观察响应与权限域。
 """
-from __future__ import annotations
-
 from pytest_bdd import given, parsers, then, when
 
 from app.modules.search.meilisearch import (
     CatalogMetadata,
     CatalogPage,
     CatalogRequest,
+    Principal,
     SearchUnavailable,
 )
 
@@ -24,8 +23,6 @@ class RecordingCatalog:
             raise SearchUnavailable("检索目录正在同步")
 
     def search(self, request) -> CatalogPage:
-        if self.unavailable:
-            raise SearchUnavailable("检索目录正在同步")
         self.requests.append(request)
         metadata = None
         if request.include_metadata:
@@ -40,8 +37,6 @@ def _install(ctx) -> RecordingCatalog:
     ctx["client"].app.state.search_catalog = catalog
     ctx["memo"]["catalog"] = catalog
     return catalog
-
-
 @when(parsers.parse('教师以"{mode}"模式检索带两个标签的案例'))
 def teacher_searches_with_tags(ctx, mode):
     _install(ctx)
@@ -81,6 +76,7 @@ def catalog_unavailable(ctx):
     ctx["client"].post("/api/auth/login", json={"username": "user", "password": "user123"})
 
 
+
 @when("教师发起检索")
 def teacher_searches(ctx):
     ctx["memo"]["last_response"] = ctx["client"].get("/api/search")
@@ -93,9 +89,9 @@ def anonymous_searches(ctx):
     ctx["memo"]["last_response"] = ctx["client"].get("/api/search")
 
 
-@then("检索请求携带匿名用户域")
+@then("检索请求携带匿名权限域")
 def anonymous_scope_asserted(ctx):
     catalog = ctx["memo"]["catalog"]
     assert ctx["memo"]["last_response"].status_code == 200
     assert catalog.requests, "目录未收到检索请求"
-    assert catalog.requests[0].principal.user_id is None
+    assert catalog.requests[0].principal == Principal(None, "anonymous")

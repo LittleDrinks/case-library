@@ -86,6 +86,9 @@ def published_and_public(ctx, status):
     case = response.json()["case"]
     assert case["workflowStatus"] == CASE_STATUS_ZH[status]
     assert case["publicationStatus"] == "public"
+    public = client_of(ctx).get(f"/api/cases/{case['id']}/public")
+    assert public.status_code == 200, public.text
+    assert public.json()["id"] == case["id"]
 
 
 @when(parsers.parse('教师撤回"{title}"'))
@@ -131,6 +134,18 @@ def admin_rejects_with_reason(ctx, reason, title):
         ctx, "管理员", case_id, "reject", reasonType=reason,
         submittedVersionId=current["submittedVersionId"],
     )
+
+
+@when(parsers.parse('教师看到"{title}"的退回原因"{reason}"'))
+def teacher_sees_return_reason(ctx, title, reason):
+    case_id = ctx["cases"][title]["id"]
+    response = client_of(ctx).get(
+        "/api/cases?scope=mine", headers=csrf_headers(ctx, "教师")
+    )
+    assert response.status_code == 200, response.text
+    card = next(row for row in response.json() if row["id"] == case_id)
+    assert card["lastReview"]["action"] == "reject"
+    assert card["lastReview"]["reasonType"] == reason
 
 
 @when(parsers.parse('教师重新提交"{title}"'))

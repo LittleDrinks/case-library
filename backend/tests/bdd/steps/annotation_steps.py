@@ -95,6 +95,17 @@ def annotation_with_revision(ctx, title, quote):
     assert response.status_code == 200, response.text
 
 
+@given(parsers.parse('教师已在该批注追加"{content}"'))
+@when(parsers.parse('教师已在该批注追加"{content}"'))
+def teacher_replies_to_annotation(ctx, content):
+    case_id = ctx["memo"]["current_case_id"]
+    annotation = _annotation_row(ctx, case_id)
+    response = client_of(ctx).post(
+        f"/api/cases/{case_id}/annotations/{annotation['id']}/replies",
+        headers=csrf_headers(ctx, "教师"), json={"content": content},
+    )
+    assert response.status_code == 200, response.text
+    ctx["memo"]["last_annotation_response"] = response
 @when(parsers.parse('教师对"{quote}"挂批注"{content}"'))
 def teacher_annotates(ctx, quote, content):
     case = get_case(ctx, ctx["memo"]["current_case_id"])
@@ -161,8 +172,12 @@ def discussion_kept_anchor_changed(ctx, state):
     row = _annotation_row(ctx, case_id)
     assert row["anchorState"] == state, row
     assert row["quote"] == "需要打磨的论证"
-    assert row["content"]
-
+    assert [reply["content"] for reply in row["replies"]] == [
+        "第一轮讨论", "第二轮讨论",
+    ]
+    assert [reply["createdBy"] for reply in row["replies"]] == [
+        "u-user-demo", "u-user-demo",
+    ]
 
 @when(parsers.parse('AI针对该批注提出修订"{replacement}"'))
 def ai_proposes_revision(ctx, replacement):

@@ -81,13 +81,43 @@ def duplicate_marked(ctx, status):
 
 @when(parsers.parse('教师尝试导入资料文件"{name}"'))
 def teacher_imports(ctx, name):
-    ctx["memo"]["last_response"] = client_of(ctx).post(
+    ctx["memo"]["teacher_import_response"] = client_of(ctx).post(
         "/api/admin/material-imports",
         headers=csrf_headers(ctx, "教师"),
         data={"accessLevel": "public"},
         files=[("files", (name, io.BytesIO(b"import content"), "text/plain"))],
     )
+    ctx["memo"]["last_response"] = ctx["memo"]["teacher_import_response"]
 
+
+
+@when("教师尝试审核该资料候选")
+def teacher_reviews_candidate(ctx):
+    imported = _import_files(
+        ctx, "管理员", [("待越权审核.txt", "待越权审核内容".encode("utf-8"))]
+    )
+    item = imported.json()["items"][0]
+    ctx["memo"]["review_candidate_id"] = item["candidateId"]
+    ctx["memo"]["review_candidate_before"] = client_of(ctx).app.state.database.material_candidates.find_one(
+        {"id": item["candidateId"]}, {"_id": 0}
+    )
+    ctx["memo"]["last_response"] = client_of(ctx).post(
+        f"/api/admin/material-candidates/{item['candidateId']}/decision",
+        headers=csrf_headers(ctx, "教师"),
+        json={"decision": "approve", "title": "不应批准"},
+    )
+
+
+@then("导入与审核均被拒绝且候选未改变")
+def material_import_and_review_denied(ctx):
+    import_response = ctx["memo"]["teacher_import_response"]
+    assert import_response.status_code == 403, import_response.text
+    review_response = ctx["memo"]["last_response"]
+    assert review_response.status_code == 403, review_response.text
+    candidate = client_of(ctx).app.state.database.material_candidates.find_one(
+        {"id": ctx["memo"]["review_candidate_id"]}, {"_id": 0}
+    )
+    assert candidate == ctx["memo"]["review_candidate_before"]
 
 @when(parsers.parse('管理员以标题"{title}"批准该候选'))
 def admin_approves_candidate(ctx, title):

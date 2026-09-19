@@ -62,3 +62,9 @@ def test_concurrent_uploads_allocate_distinct_versions_on_replica_set() -> None:
             row for row in listing_response.json() if row["id"] == scope
         )
         assert len(skill["versions"]) == 6
+        assert skill["latestVersionNumber"] == 6
+        assert skill["latestVersionId"] == next(
+            response.json()["version"]["id"]
+            for response in responses
+            if response.json()["version"]["version"] == "v6"
+        )

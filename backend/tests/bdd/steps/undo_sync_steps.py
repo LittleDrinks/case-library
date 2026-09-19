@@ -152,5 +152,3 @@ def save_after_undo(ctx):
     updated = get_case(ctx, case_id)
     ctx["memo"]["document_after_edit"] = updated["document"]
     ctx["memo"]["revision_after_edit"] = updated["revision"]
-
-
