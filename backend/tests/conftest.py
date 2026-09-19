@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 import mongomock
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from pydantic_ai.models import override_allow_model_requests
 
 from app.core.config import Settings
 from app.main import create_app
+from app.modules.auth import seed as auth_seed
 from app.modules.search.meilisearch import (
     CatalogKey,
     CatalogMetadata,
@@ -163,7 +165,21 @@ def require_e2e_environment(request) -> None:
 
 
 @pytest.fixture
-def client(tmp_path) -> TestClient:
+def client(tmp_path, monkeypatch) -> TestClient:
+    """测试客户端：演示账号种子的哈希用低轮次真实 bcrypt。
+
+    只替换 seed 模块持有的 hash_password 引用（bcrypt.hashpw + 4 轮
+    gensalt，验证管线真实）；生产 passwords.hash_password、service 与
+    admin_bootstrap 的导入引用完全不变，登录 checkpw、用户改密与密码
+    合同测试均走生产默认 12 轮成本。
+    """
+    monkeypatch.setattr(
+        auth_seed,
+        "hash_password",
+        lambda password: bcrypt.hashpw(
+            password.encode(), bcrypt.gensalt(rounds=4)
+        ).decode(),
+    )
     database = _test_database()
     secret = tmp_path / "app-secret"
     secret.write_text("test-app-secret", encoding="utf-8")
