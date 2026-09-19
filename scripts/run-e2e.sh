@@ -102,7 +102,7 @@ preclean_e2e_resources() {
 }
 
 start_agent_app() {
-  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app
+  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app --wait-timeout 120
 }
 
 run_browser_tests() {
@@ -150,7 +150,7 @@ run_tracer_browser_tests() {
 }
 
 run_backend_suite() {
-  compose --profile e2e up -d --wait e2e-app
+  compose --profile e2e up -d --wait e2e-app --wait-timeout 120
   start_agent_app
   clear_e2e_bucket
   mkdir -p "$artifact_dir/backend"
@@ -163,7 +163,7 @@ run_browser_suite() {
   for report in generic bdd agent tracer sidebar sidebar-tracer; do
     mkdir -p "$artifact_dir/$report"
   done
-  compose --profile e2e up -d --wait e2e-frontend
+  compose --profile e2e up -d --wait e2e-frontend --wait-timeout 120
   start_agent_app
   clear_e2e_bucket
   run_browser_tests
@@ -202,7 +202,7 @@ preclean_e2e_resources
 scripts/ci-images.sh ensure mongo-init production-config-check
 compose up -d mongo1 mongo2 mongo3
 scripts/ci-images.sh ensure $ensure_services
-compose up -d --wait mongo-init
+compose up -d --wait mongo-init --wait-timeout 120
 drop_and_verify_database
 case "$suite" in
   backend) run_backend_suite ;;

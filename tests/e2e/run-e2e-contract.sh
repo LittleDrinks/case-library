@@ -36,16 +36,16 @@ require_line "  compose --profile e2e run --rm --no-deps backend-e2e python test
 require_line 'scripts/ci-images.sh ensure mongo-init production-config-check'
 require_line 'compose up -d mongo1 mongo2 mongo3'
 require_line 'scripts/ci-images.sh ensure $ensure_services'
-require_line 'compose up -d --wait mongo-init'
+require_line 'compose up -d --wait mongo-init --wait-timeout 120'
 require_line '  drop_test_database "$database"'
-require_line '  compose --profile e2e up -d --wait e2e-app'
-require_line '  compose --profile e2e up -d --wait e2e-frontend'
+require_line '  compose --profile e2e up -d --wait e2e-app --wait-timeout 120'
+require_line '  compose --profile e2e up -d --wait e2e-frontend --wait-timeout 120'
 require_line 'preclean_e2e_resources'
 e2e_runner_lines="$(cat "$runner")"
 ensure_boot_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure mongo-init production-config-check' | cut -d: -f1)
 mongo_bg_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d mongo1 mongo2 mongo3' | cut -d: -f1)
 ensure_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure $ensure_services' | cut -d: -f1)
-mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init' | cut -d: -f1)
+mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init --wait-timeout 120' | cut -d: -f1)
 test "$ensure_boot_line" -lt "$mongo_bg_line" || {
   echo "mongo-init and production-config-check images must exist before mongo up so mongo never triggers a local build" >&2
   exit 1
@@ -276,8 +276,18 @@ printf '%s' "$isolated_config" | jq -e '
   .networks["e2e_test"].ipam.config == null
 ' >/dev/null
 
-# The e2e runner services keep 1s healthchecks in the isolated stack too.
-for service in mongo1 mongo2 mongo3 minio e2e-app agent-e2e-app agent-e2e-loser \
+# Mongo probes stay fast during startup without repeatedly spawning mongosh.
+for service in mongo1 mongo2 mongo3; do
+  printf '%s' "$isolated_config" | jq -e --arg service "$service" '
+    .services[$service].healthcheck.interval == "30s" and
+    .services[$service].healthcheck.start_interval == "1s" and
+    .services[$service].healthcheck.timeout == "4s" and
+    .services[$service].command[-2:] == ["--wiredTigerCacheSizeGB", "0.25"]
+  ' >/dev/null
+done
+
+# Other probes remain lightweight and frequent.
+for service in minio e2e-app agent-e2e-app agent-e2e-loser \
   agent-e2e-frontend agent-e2e-gateway e2e-frontend; do
   printf '%s' "$isolated_config" | jq -e --arg service "$service" \
     '.services[$service].healthcheck.interval == "1s"' >/dev/null
