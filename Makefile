@@ -14,7 +14,7 @@ TEST_COMPOSE_ARGS = --project-name case-library-test-$(shell printf '%s' "$(CURD
 TEST_IMAGE_PREFIX = case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8)
 E2E_SPEC ?= $(SPEC)
 
-.PHONY: up down logs config config-contract release-contract test test-backend test-frontend ensure-backend-test ensure-frontend-test backend-e2e e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up down logs config config-contract release-contract test test-backend test-frontend ensure-backend-test ensure-frontend-test backend-e2e e2e e2e-spec bdd-zh ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
@@ -61,6 +61,20 @@ test-frontend: ensure-frontend-test
 
 backend-e2e:
 	scripts/run-e2e.sh --backend
+
+# 中文 Gherkin 业务验收：在 backend-test 容器内执行 features/ 全部轻量场景，
+# 生成中文可读 HTML 报告到宿主 backend/test-results/bdd-zh/（bind mount，可写）；
+# 失败退出码由 compose run 原样传播。真实资源场景（search_sync.feature，标记 e2e）
+# 由 backend-e2e 套件在隔离环境执行，不在此重复。
+bdd-zh: ensure-backend-test
+	mkdir -p backend/test-results/bdd-zh
+	chmod 0777 backend/test-results/bdd-zh
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm \
+	  -v "$(CURDIR)/backend/test-results/bdd-zh:/app/backend/test-results/bdd-zh" \
+	  backend-test \
+	  sh -ceu 'python -m pytest tests/bdd -v -m "not e2e" \
+	    --html=test-results/bdd-zh/report.html --self-contained-html \
+	    --junitxml=test-results/bdd-zh/report.xml'
 
 e2e:
 	scripts/run-e2e.sh $(if $(strip $(E2E_SPEC)),"$(E2E_SPEC)")

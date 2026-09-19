@@ -337,7 +337,7 @@ services:
       dockerfile: backend.Dockerfile
       target: test
     network_mode: none
-    command: ["sh", "-c", "ruff check --no-cache app tests /app/scripts /opt/case-library/wait_for_mongo.py && python -m pytest -q -n auto -c tests/pytest.ini -m 'not e2e'"]
+    command: ["sh", "-c", "ruff check --no-cache app tests /app/scripts /opt/case-library/wait_for_mongo.py && python -m pytest -q -n auto -c tests/pytest.ini -m 'not e2e' --ignore=tests/bdd"]
 
   frontend-test:
     profiles: ["test"]
@@ -389,6 +389,7 @@ services:
       target: test
     environment:
       CASE_LIBRARY_E2E_URL: http://e2e-app:8001
+      SEARCH_SYNC_E2E_URL: http://e2e-app:8001
       AGENT_CASE_LIBRARY_E2E_URL: http://agent-app:8001
       AGENT_CASE_LIBRARY_E2E_LOSER_URL: http://agent-loser:8001
       AGENT_TRACER_E2E_URL: http://agent-tracer-app:8001
@@ -411,7 +412,7 @@ services:
       - database
       - e2e_test
     entrypoint: []
-    command: ["python", "-m", "pytest", "-q", "-c", "tests/pytest.ini", "-m", "e2e", "tests"]
+    command: ["python", "-m", "pytest", "-q", "-c", "tests/pytest.ini", "-m", "e2e", "tests", "--junitxml=/app/test-results/backend/report.xml", "--html=/app/test-results/backend/report.html", "--self-contained-html"]
 
   e2e-meilisearch:
     profiles: ["e2e"]

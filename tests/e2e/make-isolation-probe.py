@@ -2,16 +2,21 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCKER_SHIM = """#!/bin/sh
-printf '%s|%s|%s\\n' "${COMPOSE_PROJECT_NAME-}" "${IMAGE_PREFIX-}" "$*" >> "$PROBE_LOG"
+DOCKER_SHIM = """#!/usr/bin/env python3
+import json, os, sys
+row = [os.environ.get("COMPOSE_PROJECT_NAME", ""), os.environ.get("IMAGE_PREFIX", ""), " ".join(sys.argv[1:])]
+with open(os.environ["PROBE_LOG"], "a") as log:
+    log.write(json.dumps(row) + "\\n")
 """
 
 
@@ -37,7 +42,7 @@ def run_target(path: Path, env: dict[str, str], target: str) -> list[list[str]]:
         ["make", target], cwd=path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, f"{target}: {result.stdout}\n{result.stderr}"
-    calls = [line.split("|", 2) for line in log.read_text().splitlines()]
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert calls, f"{target} must invoke Compose"
     return calls
 
@@ -46,9 +51,15 @@ def test_identity(calls: list[list[str]], target: str) -> str:
     builds = [row for row in calls if " build " in f" {row[2]} "]
     runs = [row for row in calls if " run " in f" {row[2]} "]
     assert len(builds) == len(runs) == 1, f"{target} must build and run its test service once"
-    service = {"test-backend": "backend-test", "test-frontend": "frontend-test"}[target]
+    service = {"test-backend": "backend-test", "test-frontend": "frontend-test", "bdd-zh": "backend-test"}[target]
     assert builds[0][2].endswith(f"build {service}"), f"{target} builds the wrong service"
-    assert runs[0][2].endswith(f"run --rm {service}"), f"{target} runs the wrong service"
+    if target == "bdd-zh":
+        args = shlex.split(runs[0][2])
+        run = args[args.index("run") + 1:]
+        assert run[:2] == ["--rm", "-v"], run
+        assert run[3:5] == [service, "sh"], f"{target} runs the wrong service"
+    else:
+        assert runs[0][2].endswith(f"run --rm {service}"), f"{target} runs the wrong service"
     prefix = builds[0][1]
     assert re.fullmatch(r"[a-z0-9][a-z0-9_-]*", prefix), f"invalid image prefix: {prefix}"
     assert prefix != "case-library-v2", "tests must not use the demo image prefix"
@@ -67,7 +78,8 @@ def main() -> None:
             env = make_fixture(path)
             backend = test_identity(run_target(path, env, "test-backend"), "test-backend")
             frontend = test_identity(run_target(path, env, "test-frontend"), "test-frontend")
-            assert backend == frontend, "test targets must share one checkout identity"
+            bdd = test_identity(run_target(path, env, "bdd-zh"), "bdd-zh")
+            assert backend == frontend == bdd, "test targets must share one checkout identity"
             identities.append(backend)
             for target in ("up", "down"):
                 for project, image, command in run_target(path, env, target):

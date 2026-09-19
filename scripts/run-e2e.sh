@@ -153,7 +153,10 @@ run_backend_suite() {
   compose --profile e2e up -d --wait e2e-app
   start_agent_app
   clear_e2e_bucket
-  compose --profile e2e run --rm --no-deps backend-e2e
+  mkdir -p "$artifact_dir/backend"
+  chmod 0777 "$artifact_dir/backend"
+  compose --profile e2e run --rm --no-deps \
+    -v "$artifact_dir:/app/test-results" backend-e2e
 }
 
 run_browser_suite() {

@@ -200,7 +200,7 @@ test "$(grep -Fc 'case-library-v2' "$runner")" -eq 1
 grep -Fq 'browser_ensure_services=' "$runner"
 grep -Fq 'backend_ensure_services=' "$runner"
 
-test "$(grep -Fc 'compose --profile e2e run --rm --no-deps backend-e2e' "$runner")" -eq 2
+test "$(grep -Fc 'compose --profile e2e run --rm --no-deps backend-e2e' "$runner")" -eq 1
 
 backend_job="$(sed -n '/^  backend-e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
 browser_job="$(sed -n '/^  e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
@@ -209,6 +209,9 @@ grep -Fqx '  group: ${{ github.workflow }}-${{ github.ref }}' "$workflow"
 grep -Fqx '  cancel-in-progress: true' "$workflow"
 printf '%s\n' "$backend_job" | grep -Fq '    name: Backend E2E'
 printf '%s\n' "$backend_job" | grep -Fq '        run: make backend-e2e'
+printf '%s\n' "$backend_job" | grep -Fq '          E2E_ARTIFACT_DIR: ${{ runner.temp }}/backend-e2e-artifacts'
+printf '%s\n' "$backend_job" | grep -Fq '        if: always()'
+printf '%s\n' "$backend_job" | grep -Fq '          path: ${{ runner.temp }}/backend-e2e-artifacts/backend/'
 ! printf '%s\n' "$backend_job" | grep -Fq '    needs:'
 printf '%s\n' "$browser_job" | grep -Fq '    name: E2E'
 printf '%s\n' "$browser_job" | grep -Fq '        run: make e2e'
@@ -234,7 +237,8 @@ isolated_config="$(
 printf '%s' "$isolated_config" | jq -e \
   '.services["backend-e2e"].command == [
     "python", "-m", "pytest", "-q", "-c", "tests/pytest.ini",
-    "-m", "e2e", "tests"
+    "-m", "e2e", "tests", "--junitxml=/app/test-results/backend/report.xml",
+    "--html=/app/test-results/backend/report.html", "--self-contained-html"
   ]' >/dev/null
 printf '%s' "$isolated_config" | jq -e \
   '.services["e2e-app"].environment.MONGODB_URI | endswith("&appName=e2e-app")' \
@@ -321,7 +325,7 @@ backend_suite="$(sed -n '/^run_backend_suite() {/,/^}/p' "$runner")"
 browser_suite="$(sed -n '/^run_browser_suite() {/,/^}/p' "$runner")"
 printf '%s\n' "$backend_suite" | grep -Fq '  clear_e2e_bucket'
 printf '%s\n' "$backend_suite" | grep -Fq '  start_agent_app'
-printf '%s\n' "$backend_suite" | grep -Fq '  compose --profile e2e run --rm --no-deps backend-e2e'
+printf '%s\n' "$backend_suite" | grep -Fq '    -v "$artifact_dir:/app/test-results" backend-e2e'
 printf '%s\n' "$browser_suite" | grep -Fq '  clear_e2e_bucket'
 printf '%s\n' "$browser_suite" | grep -Fq '  run_browser_tests'
 printf '%s\n' "$browser_suite" | grep -Fq '  test -n "$browser_spec" || run_bdd_browser_tests'
@@ -435,3 +439,5 @@ assert_cleanup_status 9 "" 9
 assert_cleanup_status 9 fail 9
 
 python3 "$project_dir/tests/e2e/browser-report-probe.py"
+
+require_line '    -v "$artifact_dir:/app/test-results" backend-e2e'
