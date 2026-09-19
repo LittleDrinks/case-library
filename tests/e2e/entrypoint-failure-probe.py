@@ -154,6 +154,8 @@ def teardown_shape(lines, after_stage):
         problems.append(f"expected exactly 1 owned down, saw {len(downs)}")
     elif not re.search(r"--project-name " + re.escape(owner) + r"(?: |$)", downs[0]):
         problems.append("teardown project differs from stage owner")
+    if downs and rest[0] != downs[0]:
+        problems.append("inventory inspection precedes teardown")
     if len(inspections) != 3:
         problems.append(f"expected 3 inventory inspections, saw {len(inspections)}")
     else:
@@ -324,6 +326,8 @@ inventories = [
 ]
 wrong_owner = [stage, "compose --project-name case-library-v2 down --volumes --remove-orphans", *inventories]
 results.append(not teardown_shape(wrong_owner, "up -d --wait e2e-app")[0])
+wrong_order = [stage, *inventories, "compose --project-name isolated down --volumes --remove-orphans"]
+results.append(not teardown_shape(wrong_order, "up -d --wait e2e-app")[0])
 
 shutil.rmtree(tmp, ignore_errors=True)
 shutil.rmtree(PROBE, ignore_errors=True)
