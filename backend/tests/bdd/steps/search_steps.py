@@ -23,6 +23,8 @@ class RecordingCatalog:
             raise SearchUnavailable("检索目录正在同步")
 
     def search(self, request) -> CatalogPage:
+        if self.unavailable:
+            raise SearchUnavailable("检索目录正在同步")
         self.requests.append(request)
         metadata = None
         if request.include_metadata:
@@ -37,6 +39,8 @@ def _install(ctx) -> RecordingCatalog:
     ctx["client"].app.state.search_catalog = catalog
     ctx["memo"]["catalog"] = catalog
     return catalog
+
+
 @when(parsers.parse('教师以"{mode}"模式检索带两个标签的案例'))
 def teacher_searches_with_tags(ctx, mode):
     _install(ctx)
@@ -74,7 +78,6 @@ def catalog_unavailable(ctx):
     catalog = _install(ctx)
     catalog.unavailable = True
     ctx["client"].post("/api/auth/login", json={"username": "user", "password": "user123"})
-
 
 
 @when("教师发起检索")
