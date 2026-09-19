@@ -20,10 +20,9 @@ from app.main import create_app
 # pytest 只为收集到的 conftest/测试模块注册 fixture；步骤定义模块被普通 import 时
 # 其 fixture 不进入 fixturemanager。这里在模块级把步骤模块的 stepdef fixture 对象
 # 并入本 conftest 的 globals，使其随 conftest 一起注册且对本目录树可见。
-# 真实资源步骤（search_sync_steps，依赖 e2e 环境变量）与浏览器步骤
-# （browser_steps，依赖 Playwright，由其 e2e 模块自行加载）不在此加载。
+# 真实检索步骤由 test_search_sync_e2e.py 加载。
 STEPS_DIR = Path(__file__).resolve().parent / "steps"
-DEFERRED_STEPS = {"search_sync_steps", "browser_steps"}
+DEFERRED_STEPS = {"search_sync_steps"}
 
 for _steps in sorted(STEPS_DIR.glob("*_steps.py")):
     if _steps.stem in DEFERRED_STEPS:
