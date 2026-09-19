@@ -127,16 +127,22 @@ def teardown_shape(lines, after_stage):
     """After the stage call, require the actual owned teardown: exactly one
     compose down --volumes --remove-orphans then exactly the three inventory
     inspections (ps/volume/network). Anything else, or nothing, fails."""
-    idx = len(lines) - 1 - next(
-        (i for i, l in enumerate(reversed(lines)) if after_stage in l), -1)
-    if idx < 0:
+    stages = [i for i, line in enumerate(lines) if after_stage in line]
+    if not stages:
         return False, "stage call not found"
+    idx = stages[-1]
+    owner_match = re.search(r"--project-name ([^ ]+)", lines[idx])
+    if not owner_match:
+        return False, "stage project not found"
+    owner = owner_match.group(1)
     rest = lines[idx + 1:]
     downs = [l for l in rest if "down --volumes --remove-orphans" in l]
     inspections = [l for l in rest if re.match(r"^(ps|volume|network) ", l)]
     problems = []
     if len(downs) != 1:
         problems.append(f"expected exactly 1 owned down, saw {len(downs)}")
+    elif not re.search(r"--project-name " + re.escape(owner) + r"(?: |$)", downs[0]):
+        problems.append("teardown project differs from stage owner")
     if len(inspections) != 3:
         problems.append(f"expected 3 inventory inspections, saw {len(inspections)}")
     else:
@@ -148,7 +154,10 @@ def teardown_shape(lines, after_stage):
             m = re.search(r"label=com\.docker\.compose\.project=([^ ]+)", l)
             if m:
                 projects.add(m.group(1))
-        if len(projects) != 1:
+        if projects != {owner} or any(
+            f"label=com.docker.compose.project={owner}" not in line
+            for line in inspections
+        ):
             problems.append(f"inventory inspections disagree on project: {projects}")
     leftover = [l for l in rest if l not in downs and l not in inspections]
     if leftover:
@@ -275,5 +284,14 @@ report = {"label": "trap-regression-control", "exit": rc,
 print(json.dumps(report))
 results.append(ok3)
 
+stage = "compose --project-name isolated up -d --wait e2e-app"
+inventories = [
+    f"{kind} --filter label=com.docker.compose.project=isolated"
+    for kind in ("ps", "volume", "network")
+]
+wrong_owner = [stage, "compose --project-name case-library-v2 down --volumes --remove-orphans", *inventories]
+results.append(not teardown_shape(wrong_owner, "up -d --wait e2e-app")[0])
+
 shutil.rmtree(tmp, ignore_errors=True)
+shutil.rmtree(PROBE, ignore_errors=True)
 sys.exit(0 if all(results) else 1)

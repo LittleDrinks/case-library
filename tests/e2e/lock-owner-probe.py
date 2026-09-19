@@ -4,6 +4,7 @@ an exclusive lock is held by a first owner, and must perform ZERO Docker
 mutations. A PATH shim records every docker invocation; the assertion is
 that the list stays empty. This probe never touches a real daemon."""
 import json
+import shutil
 import os
 import pathlib
 import stat
@@ -65,4 +66,6 @@ report = {
 
 ok = result.returncode == 2 and report["docker_call_count"] == 0
 print(json.dumps(report, indent=2))
+shutil.rmtree(tmp)
+shutil.rmtree(PROBE)
 sys.exit(0 if ok else 1)

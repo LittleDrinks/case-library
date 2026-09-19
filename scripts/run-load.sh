@@ -154,16 +154,9 @@ verify_load_cleanup() {
 
 case "$profile" in
   smoke|peak|resilience|rate|steady) ;;
-  reset-all)
-    mkdir -p "$results_dir"
-    reset_all_load_artifacts
-    exit 0
-    ;;
+  reset-all) ;;
   *) echo "Unknown load profile: $profile" >&2; exit 2 ;;
 esac
-
-mkdir -p "$results_dir"
-reset_load_artifacts
 
 cleanup() {
   original_status=$?
@@ -186,6 +179,12 @@ if ! flock -n 9; then
   echo "Another load run owns $compose_project (lock: $lock_file)" >&2
   exit 2
 fi
+mkdir -p "$results_dir"
+if test "$profile" = reset-all; then
+  reset_all_load_artifacts
+  exit 0
+fi
+reset_load_artifacts
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
