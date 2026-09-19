@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -35,6 +36,18 @@ if command == "run":
     meta.parent.mkdir(parents=True, exist_ok=True)
     value = None if mode == "partial" else 1
     meta.write_text(json.dumps({"exit_code_by_key": {"fake": value}}), encoding="utf-8")
+    if mode == "orphan":
+        child = os.fork()
+        if child == 0:
+            import signal
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            Path("orphan-ready").write_text(str(os.getpid()))
+            while True:
+                time.sleep(1)
+        while not Path("orphan-ready").exists():
+            time.sleep(0.01)
+        Path("orphan-group").write_text(str(os.getpgrp()))
+        raise SystemExit(7)
     if mode == "owner":
         Path("mutants/mutmut-cicd-stats.json").write_text("owner-report\n", encoding="utf-8")
         Path(os.environ["FAKE_MUTMUT_READY"]).touch()
@@ -238,7 +251,30 @@ def retired_source_metadata_contract() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def orphan_cleanup_contract() -> None:
+    root, backend, fake = fixture()
+    try:
+        result = run(root, fake, "orphan")
+        assert result.returncode == 7, result.stderr
+        child = int((backend / "orphan-ready").read_text())
+        stat = Path(f"/proc/{child}/stat")
+        assert not stat.exists() or stat.read_text().split()[2] == "Z", "owned child remains running"
+        assert status(backend)["status"] == "failed"
+        assert status(backend)["exit"] == 7
+        assert not (backend / "mutants/mutmut-cicd-stats.json").exists()
+        assert_links_clean(backend)
+    finally:
+        group = backend / "orphan-group"
+        if group.exists():
+            try:
+                os.killpg(int(group.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main() -> None:
+    orphan_cleanup_contract()
     success_contract()
     failure_contract()
     fixture_collision_contract()

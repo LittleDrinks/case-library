@@ -79,6 +79,10 @@ cleanup() {
   trap '' INT TERM HUP
   if test -n "$mutation_pid"; then
     kill -TERM -- "-$mutation_pid" 2>/dev/null || true
+    if kill -0 -- "-$mutation_pid" 2>/dev/null; then
+      sleep 1
+      kill -KILL -- "-$mutation_pid" 2>/dev/null || true
+    fi
     wait "$mutation_pid" 2>/dev/null || true
   fi
   for path in "${created_links[@]}"; do rm -- "$path"; done
@@ -110,7 +114,6 @@ status=0
 setsid python3 -m mutmut run --max-children 1 "${forwarded_args[@]}" &
 mutation_pid=$!
 wait "$mutation_pid" || status=$?
-mutation_pid=""
 
 if test "$status" -ne 0; then
   completion=failed
