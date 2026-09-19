@@ -843,14 +843,15 @@ def test_visibility_masks_each_write_field_without_mutating_history() -> None:
     from app.modules.agent.visibility import visible_parts
 
     parts = _visibility_parts()
-    parts[1]["input"]["reason"] = "受限来源理由"
     original = deepcopy(parts)
 
     masked = visible_parts(_visibility_gate(False), parts)
     write_input = masked[1]["input"]
     assert write_input["summary"] == HIDDEN_REVISION
-    assert write_input["reason"] == HIDDEN_REVISION
     assert write_input["blocks"] == [{"type": "paragraph", "text": HIDDEN_REVISION}]
+    proposal_input = masked[2]["input"]
+    assert proposal_input["reason"] == HIDDEN_REVISION
+    assert proposal_input["blocks"] == [{"type": "paragraph", "text": HIDDEN_REVISION}]
     assert parts == original
 
     readable = visible_parts(_visibility_gate(True), parts)
