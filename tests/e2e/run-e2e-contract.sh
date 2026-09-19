@@ -98,7 +98,7 @@ DOCKER
 git init -q "$probe_dir"
 git -C "$probe_dir" -c user.email=probe@local -c user.name=probe add -A
 git -C "$probe_dir" -c user.email=probe@local -c user.name=probe commit -qm base
-fp_probe() { (cd "$probe_dir" && env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX bash ./scripts/ci-images.sh fingerprint backend-test); }
+fp_probe() { (cd "$probe_dir" && env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX COMPOSE_FILE="$probe_dir/docker-compose.yml" bash ./scripts/ci-images.sh fingerprint backend-test); }
 # Adopt-vs-fallback must be observed through ci-images' own Docker calls,
 # not compose's env interpolation: a recording docker shim answers compose
 # config with a minimal valid JSON (no daemon access) and we assert the

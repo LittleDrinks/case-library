@@ -127,11 +127,11 @@ jobs:
         env:
           E2E_ARTIFACT_DIR: ${{ runner.temp }}/e2e-artifacts
           GITHUB_TOKEN: ${{ github.token }}
-      - name: Upload failed E2E artifacts
-        if: failure()
+      - name: Upload E2E and Chinese Gherkin reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failure-artifacts
+          name: e2e-reports
           path: ${{ runner.temp }}/e2e-artifacts
           retention-days: 14
           if-no-files-found: warn

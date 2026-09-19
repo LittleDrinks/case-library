@@ -53,7 +53,12 @@ if grep -Eq 'docker compose .* (backend-test|frontend-test)' "$ci"; then
 fi
 grep -Fq 'E2E_ARTIFACT_DIR:' "$ci"
 grep -Fq 'actions/upload-artifact@v4' "$ci"
-grep -Fq 'if: failure()' "$ci"
+ruby -e '
+  require "yaml"
+  steps = YAML.load_file(ARGV.fetch(0)).fetch("jobs").fetch("e2e").fetch("steps")
+  upload = steps.find { |step| step["uses"] == "actions/upload-artifact@v4" }
+  abort "E2E reports must survive successful runs" unless upload && upload["if"] == "always()"
+' "$ci"
 grep -Fq 'actions: read' "$release_workflow"
 grep -Fq 'packages: write' "$release_workflow"
 grep -Fq 'git fetch origin main:refs/remotes/origin/main --depth=1' "$release_workflow"
