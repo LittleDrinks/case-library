@@ -118,16 +118,18 @@ def _await_active(database, thread_id: str, deadline: float = 10) -> dict:
     raise AssertionError("run did not become active")
 
 
-def _await_terminal_event(database, thread_id: str, run_id: str, deadline: float = 10) -> dict:
+def _await_event(
+    database, thread_id: str, run_id: str, event_type: str, deadline: float = 10
+) -> dict:
     end = time.monotonic() + deadline
     while time.monotonic() < end:
         event = database.agent_thread_events.find_one(
-            {"threadId": thread_id, "runId": run_id, "type": "run.cancelled"}, {"_id": 0}
+            {"threadId": thread_id, "runId": run_id, "type": event_type}, {"_id": 0}
         )
         if event:
             return event
         Event().wait(0.02)
-    raise AssertionError("terminal event did not appear")
+    raise AssertionError(f"{event_type} event did not appear")
 
 
 def _await_thread_with_active(client: TestClient) -> str:
@@ -220,6 +222,7 @@ def _assert_terminal_completed(database, thread_id: str, run: dict) -> None:
     ))
     assert [row["role"] for row in messages] == ["user", "assistant"]
     assert messages[-1]["parts"][-1]["text"] == "前半后半"
+    _await_event(database, thread_id, run["id"], "run.completed")
     assert [event["type"] for event in _events(database, thread_id)] == [
         "message.created", "run.started", "message.created", "run.completed",
     ]
@@ -281,7 +284,7 @@ def test_explicit_stop_cancels_run_and_cancel_is_idempotent(client: TestClient) 
             thread_id = _stop_active_run(client, auth)
             database = client.app.state.database
             run = _await_run(database, thread_id)
-            _await_terminal_event(database, thread_id, run["id"])
+            _await_event(database, thread_id, run["id"], "run.cancelled")
             _assert_cancelled_run(database, thread_id, run)
             again = client.post(f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
             assert again.json() == {"runId": None, "status": "idle"}
