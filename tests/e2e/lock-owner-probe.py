@@ -11,8 +11,7 @@ import subprocess
 import sys
 import tempfile
 
-PROBE = pathlib.Path("/tmp/case-library-259-evidence")
-PROBE.mkdir(exist_ok=True)
+PROBE = pathlib.Path(tempfile.mkdtemp(prefix="e2e-probe-"))
 project_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
 runner = pathlib.Path(project_dir) / "scripts" / "run-e2e.sh"
 

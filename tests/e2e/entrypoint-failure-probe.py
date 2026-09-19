@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Whole-entrypoint failure probe: with a PATH shim standing in for Docker,
-inject a failing app-start stage and assert the runner performs only its
-owned teardown afterwards — no run/up/build/pull (in particular no
-backend-e2e bucket-clear container) after the failure. Never touches a real
-daemon."""
+inject a failure at the mongo-init health wait (the last shared-setup
+stage) and assert the runner performs only its owned teardown afterwards —
+no run/up/build/pull (in particular no backend-e2e bucket-clear container)
+after the failure. Never touches a real daemon."""
 import json
 import os
 import pathlib
@@ -13,8 +13,7 @@ import subprocess
 import sys
 import tempfile
 
-PROBE = pathlib.Path("/tmp/case-library-259-evidence")
-PROBE.mkdir(exist_ok=True)
+PROBE = pathlib.Path(tempfile.mkdtemp(prefix="e2e-probe-"))
 
 project_dir = sys.argv[1]
 runner = pathlib.Path(project_dir) / "scripts" / "run-e2e.sh"
@@ -35,10 +34,9 @@ shim.chmod(shim.stat().st_mode | stat.S_IEXEC)
 slug = re.sub(r"[^a-z0-9_-]", "-", pathlib.Path(project_dir).name.lower())
 digest = __import__("hashlib").sha256(str(pathlib.Path(project_dir).resolve()).encode()).hexdigest()[:8]
 lock_path = f"/tmp/case-library-e2e-{slug}-{digest}.lock"
-try:
-    pathlib.Path(lock_path).unlink()
-except FileNotFoundError:
-    pass
+# Never unlink the lock file: a live E2E run may own it, and deleting the
+# inode would let two runners hold "the lock" concurrently. Stale locks from
+# crashed probes are acceptable (flock is advisory and released on fd close).
 
 env = dict(os.environ)
 env["PATH"] = f"{tmp}:{env.get('PATH', '')}"
@@ -50,7 +48,7 @@ result = subprocess.run(
     timeout=120,
 )
 lines = [l for l in pathlib.Path(tmp, "docker-calls.log").read_text().splitlines() if l.strip()]
-# The injected failure happens at `compose up -d --wait e2e-app`. After it,
+# The injected failure happens at `compose up -d --wait mongo-init`. After it,
 # cleanup may only run compose down / ps/volume/network inspections — never
 # `run` (bucket clear), never build/pull.
 failure_index = next(

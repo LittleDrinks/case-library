@@ -405,7 +405,6 @@ assert_cleanup_status() {
   set +e
   (
     compose_project=cleanup-probe
-    clear_e2e_bucket() { test -z "$fail_teardown"; }
     teardown_e2e_resources() {
       if test -n "$fail_teardown"; then return 7; fi
       return 0
