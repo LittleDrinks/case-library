@@ -128,7 +128,7 @@ grep -Fq -- '--project-name adopt-probe-e2e' "$probe_dir/docker-calls.log" || {
   PATH="$probe_dir/bin:$PATH" env -u COMPOSE_PROJECT_NAME -u IMAGE_PREFIX \
     bash ./scripts/ci-images.sh fingerprint backend-test >/dev/null 2>&1
 )
-fixture_fallback_project="$(printf '%s' "$(basename "$probe_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e"
+fixture_fallback_project="case-library-test-$(printf '%s' "$(CDPATH= cd -- "$probe_dir" && pwd -P)" | sha256sum | cut -c1-8)"
 grep -Fq -- "--project-name $fixture_fallback_project" "$probe_dir/docker-calls.log" || {
   echo "bare invocation must fall back to the fixture-derived project ($fixture_fallback_project)" >&2
   exit 1
@@ -158,9 +158,10 @@ test "$fp_baseline" = "$(fp_probe)" || {
 # Isolation contract: the runner derives its Compose project and image tag
 # prefix from the checkout directory plus a path hash (always isolated, no
 # opt-in flag), and keeps every resource name derived from that project.
-grep -Fq 'dir_slug="$(printf '"'"'%s'"'"' "$(basename "$project_dir")" | tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"' | sed '"'"'s/[^a-z0-9_-]/-/g'"'"')"' "$runner"
-grep -Fq 'dir_hash="$(printf '"'"'%s'"'"' "$project_dir" | sha256sum | cut -c1-8)"' "$runner"
-grep -Fq 'compose_project="${dir_slug}-${dir_hash}-e2e"' "$runner"
+grep -Fq 'dir_slug="$(printf '"'"'%s'"'"' "$(basename "$project_dir")" | sed '"'"'s/^[.]//'"'"' | tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"' | sed '"'"'s/[^a-z0-9_-]/-/g'"'"')"' "$runner"
+grep -Fq 'dir_hash="$(printf '"'"'%s'"'"' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)"' "$runner"
+grep -Fq 'compose_project="case-library-e2e-${dir_slug}-${dir_hash}"' "$runner"
+grep -Fq "trap 'exit 129' HUP" "$runner"
 grep -Fq 'flock -n 9' "$runner"
 # Whole-entrypoint failure probe: with a PATH docker shim injecting a
 # failure at the mongo-init health wait, the runner after the failure must

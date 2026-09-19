@@ -9,9 +9,10 @@ project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 # the same checkout are serialized by an exclusive lock instead of tearing
 # down each other's resources. The demo stack keeps the name case-library-v2
 # from docker-compose.yml and is never touched.
-dir_slug="$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
-dir_hash="$(printf '%s' "$project_dir" | sha256sum | cut -c1-8)"
-compose_project="${dir_slug}-${dir_hash}-e2e"
+dir_slug="$(printf '%s' "$(basename "$project_dir")" | sed 's/^[.]//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+test -n "$dir_slug" || dir_slug="checkout"
+dir_hash="$(printf '%s' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)"
+compose_project="case-library-e2e-${dir_slug}-${dir_hash}"
 export COMPOSE_PROJECT_NAME="$compose_project"
 export IMAGE_PREFIX="$compose_project"
 export COMPOSE_FILE="${COMPOSE_FILE:-$project_dir/docker-compose.yml}:$project_dir/deploy/e2e.compose.yml"
@@ -175,6 +176,7 @@ cleanup() {
 
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 : > "$lock_file"
 exec 9>"$lock_file"
 if ! flock -n 9; then

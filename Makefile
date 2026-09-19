@@ -2,15 +2,16 @@ comma := ,
 LOCAL_ENV := $(wildcard $(CURDIR)/.env)
 COMPOSE_ENV_FILES := $(CURDIR)/.env.example$(if $(LOCAL_ENV),$(comma)$(LOCAL_ENV))
 COMPOSE_DISABLE_ENV_FILE := 1
-# Same derivation as scripts/run-e2e.sh and scripts/ci-images.sh: unit-test
-# builds and runs use this checkout's image tags and Compose project, never
-# another stack's (the demo project name is case-library-v2 from
-# docker-compose.yml; the -e2e suffix keeps them apart).
-IMAGE_PREFIX := $(shell printf '%s' "$(notdir $(CURDIR))" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e
-COMPOSE_PROJECT_NAME := $(IMAGE_PREFIX)
-export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE IMAGE_PREFIX COMPOSE_PROJECT_NAME
+export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 
 COMPOSE := docker compose
+# Test-only identity: a fixed "case-library-test-" prefix plus a hash of the
+# normalized absolute checkout path, so two checkouts never collide and the
+# demo stack (project case-library-v2 from docker-compose.yml) is untouched.
+# Exported ONLY in test targets — never globally, or `make up/down` would
+# rename the demo project.
+TEST_COMPOSE_ARGS = --project-name case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8) --env-file .env.example
+TEST_IMAGE_PREFIX = case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8)
 E2E_SPEC ?= $(SPEC)
 
 .PHONY: up down logs config config-contract release-contract test test-backend test-frontend ensure-backend-test ensure-frontend-test check-function-lines check-backend-function-lines check-frontend-function-lines backend-e2e e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
@@ -34,6 +35,7 @@ config-contract:
 	tests/failover/compose-contract.sh
 	sh tests/e2e/run-e2e-contract.sh
 	sh tests/e2e/isolation-contract.sh
+	python3 $(CURDIR)/tests/e2e/make-isolation-probe.py $(CURDIR)
 	sh tests/ai/ai-smoke-contract.sh
 	sh tests/release/release-contract.sh
 	sh tests/failover/isolation-contract.sh
@@ -42,28 +44,28 @@ release-contract:
 	sh tests/release/release-contract.sh
 
 test: check-function-lines
-	$(COMPOSE) --env-file .env.example --profile test run --rm backend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm frontend-test
 
 ensure-backend-test:
-	scripts/ci-images.sh ensure backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" scripts/ci-images.sh ensure backend-test
 
 ensure-frontend-test:
-	scripts/ci-images.sh ensure frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" scripts/ci-images.sh ensure frontend-test
 
 test-backend: check-backend-function-lines
-	$(COMPOSE) --env-file .env.example --profile test run --rm backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm backend-test
 
 test-frontend: check-frontend-function-lines
-	$(COMPOSE) --env-file .env.example --profile test run --rm frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm frontend-test
 
 check-function-lines: check-backend-function-lines check-frontend-function-lines
 
 check-backend-function-lines: ensure-backend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm backend-test python -c 'import ast,pathlib,sys; fs=sorted(f for p in (pathlib.Path("app"),pathlib.Path("tests")) for f in p.rglob("*.py")); bad=[f"{f}:{n.lineno} {n.name} ({n.end_lineno-n.lineno+1} lines)" for f in fs for n in ast.walk(ast.parse(f.read_text(),str(f))) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.end_lineno-n.lineno+1>=20]; print("Functions must be shorter than 20 lines:\\n"+"\\n".join(bad),file=sys.stderr) if bad else print("Function line check passed (maximum 19 lines)."); sys.exit(bool(bad))'
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm backend-test python -c 'import ast,pathlib,sys; fs=sorted(f for p in (pathlib.Path("app"),pathlib.Path("tests")) for f in p.rglob("*.py")); bad=[f"{f}:{n.lineno} {n.name} ({n.end_lineno-n.lineno+1} lines)" for f in fs for n in ast.walk(ast.parse(f.read_text(),str(f))) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.end_lineno-n.lineno+1>=20]; print("Functions must be shorter than 20 lines:\\n"+"\\n".join(bad),file=sys.stderr) if bad else print("Function line check passed (maximum 19 lines)."); sys.exit(bool(bad))'
 
 check-frontend-function-lines: ensure-frontend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm frontend-test npm run check:function-lines
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm frontend-test npm run check:function-lines
 
 backend-e2e:
 	scripts/run-e2e.sh --backend

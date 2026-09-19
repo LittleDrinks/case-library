@@ -2,7 +2,11 @@
 set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-compose_project="$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-load"
+dir_slug="$(printf '%s' "$(basename "$project_dir")" | sed 's/^[.]//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+test -n "$dir_slug" || dir_slug="checkout"
+dir_hash="$(printf '%s' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)"
+compose_project="case-library-load-${dir_slug}-${dir_hash}"
+lock_file="/tmp/case-library-load-${dir_slug}-${dir_hash}.lock"
 load_meili_volume="${compose_project}_load_meili_data"
 profile="${1:-smoke}"
 database="case_library_load"
@@ -177,6 +181,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
+# Serialize same-checkout load runs before any destructive step; a rejected
+# second invocation must never tear down the owner's resources.
+: > "$lock_file"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "Another load run owns $compose_project (lock: $lock_file)" >&2
+  exit 2
+fi
 compose --profile load rm -sf load load-frontend load-app load-search-worker load-search-init load-meilisearch >/dev/null 2>&1
 remove_load_volume
 compose up -d --wait mongo-init

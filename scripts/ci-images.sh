@@ -9,7 +9,9 @@ project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 # scripts/run-e2e.sh (or Make) exports COMPOSE_PROJECT_NAME/IMAGE_PREFIX,
 # reuse them so builds and runs hit the same per-checkout tags. Only a bare
 # `scripts/ci-images.sh` invocation falls back to the local derivation.
-compose_project="${COMPOSE_PROJECT_NAME:-$(printf '%s' "$(basename "$project_dir")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')-e2e}"
+# Bare invocations derive the same per-checkout identity the runners use:
+# fixed prefix + normalized absolute checkout path hash.
+compose_project="${COMPOSE_PROJECT_NAME:-${TEST_IMAGE_PREFIX:-case-library-test-$(printf '%s' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)}}"
 IMAGE_PREFIX="${IMAGE_PREFIX:-$compose_project}"
 export IMAGE_PREFIX
 
@@ -65,18 +67,33 @@ fingerprint() {
   {
     printf '%s\n' "$2"
     cat "$1"
-    # Enumerate the files that would actually enter the build context (on
-    # disk, not the git index), and hash content plus relative path so new
-    # untracked files and renames change the fingerprint. Prune the same
-    # cache/ignore patterns .dockerignore excludes, so ignored churn never
-    # dirties the fingerprint.
+    # CI fingerprint: conservatively covers what the build context sends.
+    # .dockerignore is hashed in full (any ignore-rule change invalidates),
+    # then every COPY source is walked on disk hashing content, relative
+    # path, file mode and symlink targets — matching Docker's context
+    # semantics (docs.docker.com/build/concepts/context/), where cache
+    # invalidation keys on content plus metadata. Pruned cache dirs mirror
+    # the repo .dockerignore; anything not pruned but ignored still
+    # invalidates conservatively, which is safe (never stale, at worst
+    # extra rebuilds).
+    if test -f "$project_dir/.dockerignore"; then
+      git -C "$project_dir" hash-object -- .dockerignore
+    fi
     copy_sources "$1" | while IFS= read -r src; do
       if test -d "$project_dir/$src"; then
+        # Enumerate regular files AND symlinks inside the source directory.
+        # BuildKit resolves symlinks through the context, so their targets
+        # must enter the fingerprint; hard-coded pruning only excludes the
+        # same cache dirs the repo .dockerignore excludes — everything else
+        # that is actually sent to the daemon is hashed (conservatively
+        # never stale, at worst an extra rebuild).
         (cd "$project_dir/$src" && find . -type d \( -name __pycache__ -o -name node_modules -o -name .git -o -name .venv \) -prune -o \
-          -type f ! -name '*.pyc' -print0 | LC_ALL=C sort -z |
-          xargs -0 -I{} sh -c 'git hash-object -- "$1"; printf "%s\n" "$1"' _ {})
+          \( -type f -o -type l \) ! -name '*.pyc' -print0 | LC_ALL=C sort -z |
+          xargs -0 -I{} sh -c 'git hash-object -- "$1"; stat -c "%a %s" "$1"; if test -L "$1"; then readlink "$1"; fi; printf "%s\n" "$1"' _ {})
       else
         git -C "$project_dir" hash-object -- "$src" || exit 1
+        if test -L "$project_dir/$src"; then readlink "$project_dir/$src"; fi
+        stat -c "%a %s" "$project_dir/$src" 2>/dev/null || true
         printf '%s\n' "$src"
       fi
     done
@@ -127,23 +144,11 @@ pull_missed() {
 ensure() {
   local missed status_dir
   if test -z "${CI:-}"; then
-    # A local tag is only trusted when it matches the current fingerprint;
-    # otherwise a stale image from another checkout or old source would run.
-    init_config
-    local current=() svc ref
-    for svc in "$@"; do
-      local_image_is_current "$svc" || current+=("$svc")
-    done
-    if test "${#current[@]}" -gt 0; then
-      printf '[ci-images] fingerprint miss, building locally:%s\n' " ${current[*]}" >&2
-      compose build "${current[@]}"
-      # Tag fresh builds with the fingerprint so the next ensure sees them
-      # as current (BuildKit cache makes the rebuild a no-op).
-      for svc in "${current[@]}"; do
-        ref="$(image_ref "$svc")" || continue
-        docker tag "$(service_image_name "$svc")" "$ref"
-      done
-    fi
+    # Local builds trust BuildKit's content cache: compose build compares
+    # actual build-context file contents and metadata per COPY (per Docker
+    # cache-invalidation semantics), so it never reuses stale layers from
+    # another checkout or old source. Hand-rolled fingerprinting is CI-only.
+    compose build "$@"
     return 0
   fi
   init_config

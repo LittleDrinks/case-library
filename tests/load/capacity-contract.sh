@@ -161,7 +161,7 @@ test "$stop_line" -lt "$drop_line"
 grep -q 'original_status=\$?' scripts/run-load.sh
 grep -q 'verify_load_cleanup' scripts/run-load.sh
 grep -q 'database_exists' scripts/run-load.sh
-grep -Fq '| tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"' | sed '"'"'s/[^a-z0-9_-]/-/g'"'"')-load"' scripts/run-load.sh
+grep -Fq 'compose_project="case-library-load-${dir_slug}-${dir_hash}"' scripts/run-load.sh
 grep -Fq 'basename "$project_dir"' scripts/run-load.sh
 ! grep -q '^compose_project="case-library-v2"$' scripts/run-load.sh || {
   echo "run-load.sh must derive its project name from the checkout directory" >&2

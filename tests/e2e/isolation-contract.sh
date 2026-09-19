@@ -65,17 +65,55 @@ for config in "$config_a" "$config_b"; do
   ' >/dev/null
 done
 
-# The real derivation logic (identical expression to the runners) yields
-# distinct project names for two sibling checkouts and never equals the demo
-# project name.
-dir_a="$project_dir"
-dir_b="$(dirname "$project_dir")/iso-b"
-full_a="${dir_a}-$(printf '%s' "$dir_a" | sha256sum | cut -c1-8)-e2e"
-full_b="${dir_b}-$(printf '%s' "$dir_b" | sha256sum | cut -c1-8)-e2e"
-test "$full_a" != "$full_b"
-test "$full_a" != case-library-v2
-test "$full_b" != case-library-v2
-case "$full_a" in *-e2e) ;; *) echo "project name must end in -e2e" >&2; exit 1 ;; esac
+# Exercise the real entry point in same-named hidden checkouts. Docker is
+# replaced only inside each private fixture; Compose config above is real.
+probe_root="$(mktemp -d)"
+trap 'rm -rf "$probe_root"' EXIT
+probe_a="$probe_root/one/.checkout"
+probe_b="$probe_root/two/.checkout"
+for fixture in "$probe_a" "$probe_b"; do
+  mkdir -p "$fixture/scripts" "$fixture/bin"
+  for script in run-e2e.sh ci-images.sh test-database.sh; do
+    cp "$project_dir/scripts/$script" "$fixture/scripts/$script"
+  done
+  cat > "$fixture/bin/docker" <<'SHIM'
+#!/bin/sh
+printf '%s|%s|%s\n' "$COMPOSE_PROJECT_NAME" "$IMAGE_PREFIX" "$*" >> "$ISOLATION_CALL_LOG"
+case " $* " in *" build "*) exit 73 ;; esac
+exit 0
+SHIM
+  chmod +x "$fixture/bin/docker"
+  status=0
+  (cd "$fixture" && CI= PATH="$fixture/bin:$PATH" \
+    ISOLATION_CALL_LOG="$fixture/calls.log" sh scripts/run-e2e.sh --backend \
+    > "$fixture/output.log" 2>&1) || status=$?
+  test "$status" -eq 73 || {
+    cat "$fixture/output.log" >&2
+    echo "entry point must reach the injected build failure (got $status)" >&2
+    exit 1
+  }
+  # Every Docker call must use the same exported identity; build invocation
+  # must pass it explicitly to Compose as well.
+  awk -F '|' '
+    NR == 1 { project = $1 }
+    $1 !~ /^[a-z0-9][a-z0-9_-]*$/ || $1 == "case-library-v2" { exit 1 }
+    $1 != project || $2 != project { exit 1 }
+    $3 ~ / build / {
+      if (index($3, "--project-name " project " ") == 0) exit 1
+      built = 1
+    }
+    END { if (!built) exit 1 }
+  ' "$fixture/calls.log" || {
+    echo "entry point must build with a legal, consistent test identity" >&2
+    exit 1
+  }
+done
+project_a_seen="$(head -1 "$probe_a/calls.log" | cut -d '|' -f 1)"
+project_b_seen="$(head -1 "$probe_b/calls.log" | cut -d '|' -f 1)"
+test "$project_a_seen" != "$project_b_seen" || {
+  echo "same-named checkouts must have different project and image identities" >&2
+  exit 1
+}
 
 # Every build service must carry an explicit per-prefix image tag.
 printf '%s' "$config_a" | jq -e '
