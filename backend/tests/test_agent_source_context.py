@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 import re
 
@@ -70,6 +71,60 @@ def test_read_source_rechecks_source_publication(client: TestClient) -> None:
                          "c-draft-1", "case", "src-22")
     assert result == {"status": "no_access", "detail": "来源案例内容当前不可读"}
 
+
+
+def test_read_source_material_hides_restricted_content_and_preserves_public_text(
+    client: TestClient,
+) -> None:
+    database = client.app.state.database
+    store = client.app.state.blob_store
+    public_id = "m-source-public"
+    private_id = "m-source-private"
+    store.objects["blob-public"] = "公开素材正文".encode()
+    store.objects["blob-private"] = "私密素材正文".encode()
+    database.materials.insert_many([
+        {
+            "id": public_id, "status": "active", "title": "公开素材",
+            "accessLevel": "public", "createdBy": "u-other",
+            "blobId": "blob-public", "filename": "public.txt", "mediaType": "text/plain",
+        },
+        {
+            "id": private_id, "status": "active", "title": "私密素材",
+            "accessLevel": "private", "createdBy": "u-other",
+            "blobId": "blob-private", "filename": "private.txt", "mediaType": "text/plain",
+        },
+    ])
+    user = {"id": "u-user-demo", "role": "user", "campus_verified": True}
+
+    public = read_source(database, store, user, "c-draft-1", "material", public_id)
+    private = read_source(database, store, user, "c-draft-1", "material", private_id)
+
+    assert public["status"] == "ok"
+    assert public["content"] == "公开素材正文"
+    assert public["usedSourceRef"]["id"] == public_id
+    assert private == {"status": "no_access", "detail": "当前身份无权读取该素材内容"}
+
+
+def test_read_source_campus_material_requires_verified_identity(client: TestClient) -> None:
+    database = client.app.state.database
+    store = client.app.state.blob_store
+    material_id = "m-source-campus"
+    store.objects["blob-campus"] = "校内素材正文".encode()
+    database.materials.insert_one({
+        "id": material_id, "status": "active", "title": "校内素材",
+        "accessLevel": "campus", "createdBy": "u-other",
+        "blobId": "blob-campus", "filename": "campus.txt", "mediaType": "text/plain",
+    })
+
+    unverified = {"id": "u-user-demo", "role": "user", "campus_verified": False}
+    verified = {"id": "u-user-demo", "role": "user", "campus_verified": True}
+    denied = read_source(database, store, unverified, "c-draft-1", "material", material_id)
+    allowed = read_source(database, store, verified, "c-draft-1", "material", material_id)
+
+    assert denied["status"] == "no_access"
+    assert "校内素材正文" not in str(denied)
+    assert allowed["status"] == "ok"
+    assert allowed["content"] == "校内素材正文"
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:
     auth = _auth(client)
