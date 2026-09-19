@@ -134,15 +134,16 @@ def run_case(name: str, restore_old_trap: bool) -> dict:
         paths["cleanup_release"].touch()
         returncode = process.wait(timeout=20)
     finally:
+        send_group(process, signal.SIGKILL)
         if process.poll() is None:
-            send_group(process, signal.SIGKILL)
             process.wait()
     shape_ok, shape = cleanup_shape(paths)
     return {"name": name, "old_trap": restore_old_trap, "exit": returncode, "shape": shape, "ok": returncode == 129 and shape_ok}
 
 
-results = [run_case("fixed", False), run_case("old-trap", True)]
-print(json.dumps({"fixed": results[0], "old_trap_negative_control": results[1]}, ensure_ascii=False))
-if results[0]["ok"] and not results[1]["ok"]:
-    sys.exit(0)
-sys.exit(1)
+try:
+    results = [run_case("fixed", False), run_case("old-trap", True)]
+    print(json.dumps({"fixed": results[0], "old_trap_negative_control": results[1]}, ensure_ascii=False))
+    sys.exit(0 if results[0]["ok"] and not results[1]["ok"] else 1)
+finally:
+    shutil.rmtree(ROOT)
