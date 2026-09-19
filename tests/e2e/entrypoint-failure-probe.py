@@ -12,7 +12,8 @@ Probes:
    three inventory inspections) with no other calls.
 2. hup-during-suite — no injected failure; the runner reaches the e2e-app
    stage, a gate holds it while the parent confirms readiness and sends
-   SIGHUP. Required: exit exactly 129 AND the same owned teardown.
+   SIGHUP. Required: exit exactly 129 AND the same owned teardown, even
+   after a second HUP/TERM/INT during cleanup.
 3. trap-regression counter-example — with the runner's cleanup trap
    deleted (sed on the fixture copy), the HUP probe MUST fail; proves the
    probe is red against a cleanup-less runner.
@@ -236,22 +237,25 @@ finally:
 ok1 = verdict("first-e2e-app-failure", rc, lines, 37, "up -d --wait e2e-app")
 results.append(ok1)
 
-# Probe 2: HUP delivered to the process group at the gate inside e2e-app.
+# Probe 2: HUP during suite, then repeated signals during owned cleanup.
 write_shim(gate=True)
 proc = None
 try:
     proc = spawn()
     wait_for_call(proc, "up -d --wait e2e-app")
     gate_ready(proc)
-    os.killpg(proc.pid, _signal.SIGHUP)  # reach shell + shim children
-    (tmp / "release").write_text("")  # unstick the gate wait AFTER HUP
+    os.killpg(proc.pid, _signal.SIGHUP)
+    (tmp / "release").write_text("")
+    wait_for_call(proc, "down --volumes --remove-orphans")
+    for signal in (_signal.SIGHUP, _signal.SIGTERM, _signal.SIGINT):
+        os.killpg(proc.pid, signal)
     rc = proc.wait(timeout=120)
 finally:
     lines = read_calls()
     if proc and proc.poll() is None:
         proc.kill()
         proc.wait()
-ok2 = verdict("hup-during-suite", rc, lines, 129, "up -d --wait e2e-app")
+ok2 = verdict("hup-during-suite-repeated-signals", rc, lines, 129, "up -d --wait e2e-app")
 results.append(ok2)
 
 # Probe 3 (negative control): delete the runner's cleanup traps; the HUP

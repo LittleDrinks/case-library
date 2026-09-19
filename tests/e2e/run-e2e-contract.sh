@@ -367,6 +367,8 @@ printf '%s\n' "$teardown_body" | grep -Fq 'down --volumes --remove-orphans'
 grep -Fq 'trap cleanup EXIT' "$runner"
 grep -Fq "trap 'exit 130' INT" "$runner"
 grep -Fq "trap 'exit 143' TERM" "$runner"
+grep -Fq "trap '' INT TERM HUP" "$runner"
+grep -Fq 'trap - EXIT' "$runner"
 
 # The exclusive lock must be taken before any teardown runs, so a second run
 # in the same checkout can never preclean an active run's resources.

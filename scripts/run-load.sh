@@ -142,7 +142,8 @@ esac
 
 cleanup() {
   original_status=$?
-  trap - EXIT INT TERM HUP
+  trap - EXIT
+  trap '' INT TERM HUP
   cleanup_status=0
   stop_resource_sampler || cleanup_status=$?
   compose --profile load down --volumes --remove-orphans --timeout 1 >/dev/null 2>&1 || cleanup_status=$?

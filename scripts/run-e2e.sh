@@ -178,7 +178,8 @@ run_browser_suite() {
 # a failure).
 cleanup() {
   original_status=$?
-  trap - EXIT INT TERM
+  trap - EXIT
+  trap '' INT TERM HUP
   cleanup_status=0
   teardown_e2e_resources || cleanup_status=1
   verify_e2e_resources_absent || cleanup_status=1
