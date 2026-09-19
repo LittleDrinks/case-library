@@ -65,7 +65,12 @@ async function configureE2EProvider(page) {
   await page.getByLabel("自定义模型服务").check();
   await page.getByLabel("Base URL").fill(E2E_PROVIDER);
   await page.getByLabel("API Key").fill(E2E_API_KEY);
+  const discoverResponse = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/api/ai/models/discover"
+  ));
   await page.getByRole("button", { name: "获取可用模型" }).click();
+  expect((await discoverResponse).ok()).toBe(true);
   const models = page.getByLabel("可用模型");
   await expect(models.locator("option")).toHaveText(["e2e-model-a", "e2e-model-b"]);
   await models.selectOption("e2e-model-a");
