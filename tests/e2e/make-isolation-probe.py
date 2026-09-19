@@ -45,8 +45,9 @@ def run_target(path: Path, env: dict[str, str], target: str) -> list[list[str]]:
 def test_identity(calls: list[list[str]], target: str) -> str:
     builds = [row for row in calls if " build " in f" {row[2]} "]
     runs = [row for row in calls if " run " in f" {row[2]} "]
-    assert builds and len(runs) == 1, f"{target} must build and run its test service once"
+    assert len(builds) == len(runs) == 1, f"{target} must build and run its test service once"
     service = {"test-backend": "backend-test", "test-frontend": "frontend-test"}[target]
+    assert builds[0][2].endswith(f"build {service}"), f"{target} builds the wrong service"
     assert runs[0][2].endswith(f"run --rm {service}"), f"{target} runs the wrong service"
     prefix = builds[0][1]
     assert re.fullmatch(r"[a-z0-9][a-z0-9_-]*", prefix), f"invalid image prefix: {prefix}"

@@ -263,7 +263,8 @@ sh tests/load/capacity-contract.sh
 grep -Fq 'load-search-init python -m app.cli.bootstrap' scripts/run-load.sh
 grep -Fq 'compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=false load-search-init' scripts/run-load.sh
 grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-load.sh
-grep -Fq 'docker volume rm "$load_meili_volume"' scripts/run-load.sh
+grep -Fq 'down --volumes --remove-orphans' scripts/run-load.sh
+grep -Fq 'com.docker.compose.project' scripts/run-load.sh
 grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-e2e.sh
 grep -Fq 'down --volumes --remove-orphans' scripts/run-e2e.sh
 grep -Fq 'com.docker.compose.project' scripts/run-e2e.sh
