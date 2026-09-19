@@ -46,12 +46,13 @@ async function configureChat(page) {
   expect(response.ok()).toBe(true);
 }
 
-async function openChat(page, caseId) {
+async function openChat(page, caseId, reload = false) {
   const loadedCase = page.waitForResponse((response) => (
     response.request().method() === "GET"
     && new URL(response.url()).pathname === `/api/cases/${caseId}`
   ));
-  await page.goto(`/#/workbench/${caseId}`);
+  if (reload) await page.reload();
+  else await page.goto(`/#/workbench/${caseId}`);
   expect((await loadedCase).ok()).toBe(true);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await openChatPanel(page);
@@ -148,8 +149,7 @@ async function expectCompletedProjection(page, caseId) {
 }
 
 async function reloadAndAssertChat(page, caseId, persisted) {
-  await page.reload();
-  await openChat(page, caseId);
+  await openChat(page, caseId, true);
   await expectPersistedChat(page);
   await expect.poll(() => browserChatProjection(page)).toEqual(projectionOf(persisted));
   await expect.poll(() => chatSnapshot(page, caseId)).toMatchObject(persisted);
@@ -380,8 +380,7 @@ test("page refresh mid-run resumes the server-owned run to terminal", async ({ p
   const created = await createCase(page);
   await openChat(page, created.id);
   await sendAndWaitActive(page, created.id, "慢速测试");
-  await page.reload();
-  await openChat(page, created.id);
+  await openChat(page, created.id, true);
   const persisted = await expectCompletedProjection(page, created.id);
   expect(persisted.activeRun).toBeNull();
   await expect.poll(() => browserChatProjection(page)).toMatchObject({
