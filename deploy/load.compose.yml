@@ -1,0 +1,6 @@
+# Every load project owns its database and Docker-allocated address pools.
+networks:
+  database:
+    ipam: !reset {}
+  load_test:
+    ipam: !reset {}

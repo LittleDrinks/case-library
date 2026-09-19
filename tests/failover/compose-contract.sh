@@ -62,7 +62,7 @@ for persistent_config in "$mongo1_config" "$mongo2_config" "$mongo3_config" "$me
   echo "$persistent_config" | grep -B2 -A2 'production-config-check:' | grep -q 'service_completed_successfully'
 done
 grep -q 'validate_production_config.py' backend.Dockerfile
-echo "$config_check" | grep -q 'image: case-library-v2-production-config-check'
+echo "$config_check" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-production-config-check"
 echo "$config_check" | grep -q 'target: production-config-check'
 echo "$production_check" | grep -q 'app_environment='
 echo "$production_check" | grep -q 'test "$${app_environment}" != production'
@@ -122,7 +122,7 @@ echo "$app_config" | grep -q 'source: meili_master_key'
 echo "$app_config" | grep -B2 -A2 'search-init:' | grep -q 'service_completed_successfully'
 echo "$app_config" | grep -B2 -A2 'search-worker:' | grep -q 'service_started'
 echo "$app_config" | grep -B2 -A2 'searxng:' | grep -q 'service_started'
-echo "$meili_config" | grep -q 'image: case-library-v2-meilisearch'
+echo "$meili_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-meilisearch"
 echo "$meili_config" | grep -q 'dockerfile: deploy/meilisearch.Dockerfile'
 echo "$meili_config" | grep -q 'source: meili_data'
 echo "$meili_config" | grep -q 'target: /meili_data'
@@ -131,7 +131,7 @@ if echo "$meili_config" | grep -q 'MEILI_MASTER_KEY:'; then
   echo "Meilisearch must receive its key through a secret file" >&2
   exit 1
 fi
-echo "$searxng_config" | grep -q 'image: case-library-v2-searxng'
+echo "$searxng_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-searxng"
 echo "$searxng_config" | grep -q 'dockerfile: deploy/searxng.Dockerfile'
 echo "$searxng_config" | grep -q 'source: searxng_data'
 echo "$searxng_config" | grep -q 'target: /var/cache/searxng'
@@ -150,11 +150,11 @@ echo "$search_init_config" | grep -q 'ENABLE_DEMO_SEED: "true"'
 echo "$search_worker_config" | grep -q 'app.modules.search.worker'
 echo "$search_worker_config" | grep -B2 -A2 'search-init:' | grep -q 'service_completed_successfully'
 echo "$e2e_app_config" | grep -q 'OBJECT_STORE_BUCKET: case-library-e2e'
-echo "$e2e_app_config" | grep -q 'image: case-library-v2-e2e-app'
-echo "$e2e_frontend_config" | grep -q 'image: case-library-v2-e2e-frontend'
+echo "$e2e_app_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-e2e-app"
+echo "$e2e_frontend_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-e2e-frontend"
 echo "$e2e_app_config" | grep -q 'SEARCH_URL: http://e2e-meilisearch:7700'
 echo "$e2e_app_config" | grep -q 'SEARCH_INDEX_UID: catalog_e2e'
-echo "$e2e_meili_config" | grep -q 'image: case-library-v2-e2e-meilisearch'
+echo "$e2e_meili_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-e2e-meilisearch"
 echo "$e2e_meili_config" | grep -q 'source: e2e_meili_data'
 echo "$e2e_init_config" | grep -q 'app.modules.search.rebuild'
 echo "$e2e_init_config" | grep -q 'APP_ENV: test'
@@ -168,11 +168,11 @@ if echo "$backend_e2e_config" | grep -Eq 'MEILI_CONTRACT_KEY[=:]'; then
   echo "Backend E2E must receive its Meilisearch key through a secret file" >&2
   exit 1
 fi
-echo "$load_app_config" | grep -q 'image: case-library-v2-load-app'
-echo "$load_frontend_config" | grep -q 'image: case-library-v2-load-frontend'
+echo "$load_app_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-load-app"
+echo "$load_frontend_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-load-frontend"
 echo "$load_app_config" | grep -q 'SEARCH_URL: http://load-meilisearch:7700'
 echo "$load_app_config" | grep -q 'SEARCH_INDEX_UID: catalog_load'
-echo "$load_meili_config" | grep -q 'image: case-library-v2-load-meilisearch'
+echo "$load_meili_config" | grep -q "image: ${IMAGE_PREFIX:-case-library-v2}-load-meilisearch"
 echo "$load_meili_config" | grep -q 'source: load_meili_data'
 echo "$load_init_config" | grep -q 'app.modules.search.rebuild'
 echo "$load_init_config" | grep -q 'APP_ENV: demo'
@@ -265,5 +265,6 @@ grep -Fq 'compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=false
 grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-load.sh
 grep -Fq 'docker volume rm "$load_meili_volume"' scripts/run-load.sh
 grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-e2e.sh
-grep -Fq 'docker volume rm "$e2e_meili_volume"' scripts/run-e2e.sh
+grep -Fq 'down --volumes --remove-orphans' scripts/run-e2e.sh
+grep -Fq 'com.docker.compose.project' scripts/run-e2e.sh
 grep -Fq 'getmeili/meilisearch:v1.45.1' deploy/meilisearch.Dockerfile

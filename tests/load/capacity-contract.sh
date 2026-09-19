@@ -154,17 +154,13 @@ test "$sampler_exit" -eq 7
 rm -f "$sampler_contract"
 trap - EXIT INT TERM
 
-cleanup_body="$(sed -n '/^cleanup() {/,/^}/p' scripts/run-load.sh)"
-stop_line="$(printf '%s\n' "$cleanup_body" | grep -n 'rm -sf load load-frontend load-app' | cut -d: -f1)"
-drop_line="$(printf '%s\n' "$cleanup_body" | grep -n 'drop_test_database' | cut -d: -f1)"
-test "$stop_line" -lt "$drop_line"
+python3 tests/e2e/lock-owner-probe.py "$project_dir" load >/dev/null
+python3 tests/load/isolation-probe.py "$project_dir"
 grep -q 'original_status=\$?' scripts/run-load.sh
 grep -q 'verify_load_cleanup' scripts/run-load.sh
-grep -q 'database_exists' scripts/run-load.sh
-grep -q '^compose_project="case-library-v2"$' scripts/run-load.sh
-grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-load.sh
-grep -Fq 'load_meili_volume="${compose_project}_load_meili_data"' scripts/run-load.sh
-! grep -q 'docker volume .*case-library-v2_load_meili_data' scripts/run-load.sh
+grep -Fq 'compose --profile load down --volumes --remove-orphans' scripts/run-load.sh
+grep -Fq 'export IMAGE_PREFIX="$compose_project"' scripts/run-load.sh
+grep -Fq 'export COMPOSE_PROJECT_NAME="$compose_project"' scripts/run-load.sh
 
 grep -q 'dropped_iterations.*count==0' tests/load/high-frequency.js
 grep -q 'selectedProfile === "rate"' tests/load/high-frequency.js

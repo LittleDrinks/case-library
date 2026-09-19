@@ -2,7 +2,7 @@ name: case-library-v2
 
 services:
   production-config-check:
-    image: case-library-v2-production-config-check
+    image: ${IMAGE_PREFIX:-case-library-v2}-production-config-check
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -95,6 +95,7 @@ services:
     stop_grace_period: 60s
 
   mongo-init:
+    image: ${IMAGE_PREFIX:-case-library-v2}-mongo-init
     build:
       context: .
       dockerfile: deploy/mongo-init.Dockerfile
@@ -138,7 +139,7 @@ services:
     stop_grace_period: 30s
 
   meilisearch:
-    image: case-library-v2-meilisearch
+    image: ${IMAGE_PREFIX:-case-library-v2}-meilisearch
     build:
       context: .
       dockerfile: deploy/meilisearch.Dockerfile
@@ -164,7 +165,7 @@ services:
     stop_grace_period: 30s
 
   searxng:
-    image: case-library-v2-searxng
+    image: ${IMAGE_PREFIX:-case-library-v2}-searxng
     build:
       context: .
       dockerfile: deploy/searxng.Dockerfile
@@ -192,7 +193,7 @@ services:
     stop_grace_period: 30s
 
   search-init:
-    image: case-library-v2-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -218,7 +219,7 @@ services:
     restart: "no"
 
   search-worker:
-    image: case-library-v2-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -241,7 +242,7 @@ services:
     stop_grace_period: 30s
 
   app:
-    image: case-library-v2-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -307,7 +308,7 @@ services:
     stop_grace_period: 30s
 
   frontend:
-    image: case-library-v2-frontend
+    image: ${IMAGE_PREFIX:-case-library-v2}-frontend
     build:
       context: .
       dockerfile: frontend.Dockerfile
@@ -330,6 +331,7 @@ services:
 
   backend-test:
     profiles: ["test"]
+    image: ${IMAGE_PREFIX:-case-library-v2}-backend-test
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -339,6 +341,7 @@ services:
 
   frontend-test:
     profiles: ["test"]
+    image: ${IMAGE_PREFIX:-case-library-v2}-frontend-test
     build:
       context: .
       dockerfile: frontend.Dockerfile
@@ -348,7 +351,7 @@ services:
 
   e2e:
     profiles: ["e2e"]
-    image: case-library-v2-e2e
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e
     build:
       context: .
       dockerfile: deploy/e2e.Dockerfile
@@ -363,6 +366,7 @@ services:
 
   e2e-ai-provider:
     profiles: ["e2e"]
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-ai-provider
     build:
       context: .
       dockerfile: deploy/fake-openai.Dockerfile
@@ -378,7 +382,7 @@ services:
 
   backend-e2e:
     profiles: ["e2e"]
-    image: case-library-v2-backend-test
+    image: ${IMAGE_PREFIX:-case-library-v2}-backend-test
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -411,7 +415,7 @@ services:
 
   e2e-meilisearch:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-meilisearch
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-meilisearch
     build:
       context: .
       dockerfile: deploy/meilisearch.Dockerfile
@@ -431,7 +435,7 @@ services:
 
   e2e-search-init:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -459,7 +463,7 @@ services:
 
   e2e-search-worker:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-app
     environment:
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority
       MONGODB_DB_NAME: case_library_e2e
@@ -479,7 +483,7 @@ services:
 
   e2e-app:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -533,7 +537,7 @@ services:
 
   agent-e2e-app:
     profiles: ["e2e"]
-    image: case-library-v2-backend-test
+    image: ${IMAGE_PREFIX:-case-library-v2}-backend-test
     environment:
       APP_ENV: test
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-app
@@ -588,7 +592,7 @@ services:
 
   agent-e2e-loser:
     profiles: ["e2e"]
-    image: case-library-v2-backend-test
+    image: ${IMAGE_PREFIX:-case-library-v2}-backend-test
     environment:
       APP_ENV: test
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-e2e-loser
@@ -643,7 +647,7 @@ services:
 
   agent-e2e-frontend:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-frontend
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-frontend
     depends_on:
       agent-e2e-app:
         condition: service_healthy
@@ -679,7 +683,7 @@ services:
 
   agent-e2e:
     profiles: ["e2e"]
-    image: case-library-v2-e2e
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e
     environment:
       PLAYWRIGHT_BASE_URL: http://agent-gateway
     depends_on:
@@ -691,7 +695,7 @@ services:
 
   agent-tracer-app:
     profiles: ["e2e"]
-    image: case-library-v2-backend-test
+    image: ${IMAGE_PREFIX:-case-library-v2}-backend-test
     environment:
       APP_ENV: test
       MONGODB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/case_library_e2e?replicaSet=rs0&retryWrites=true&w=majority&appName=agent-tracer-app
@@ -743,7 +747,7 @@ services:
 
   agent-tracer-frontend:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-frontend
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-frontend
     depends_on:
       agent-tracer-app:
         condition: service_healthy
@@ -779,7 +783,7 @@ services:
 
   agent-tracer:
     profiles: ["e2e"]
-    image: case-library-v2-e2e
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e
     environment:
       PLAYWRIGHT_BASE_URL: http://agent-tracer-gateway
     depends_on:
@@ -791,7 +795,7 @@ services:
 
   e2e-frontend:
     profiles: ["e2e"]
-    image: case-library-v2-e2e-frontend
+    image: ${IMAGE_PREFIX:-case-library-v2}-e2e-frontend
     build:
       context: .
       dockerfile: frontend.Dockerfile
@@ -810,7 +814,7 @@ services:
 
   load:
     profiles: ["load"]
-    image: case-library-v2-load
+    image: ${IMAGE_PREFIX:-case-library-v2}-load
     build:
       context: .
       dockerfile: deploy/k6.Dockerfile
@@ -856,7 +860,7 @@ services:
 
   load-meilisearch:
     profiles: ["load"]
-    image: case-library-v2-load-meilisearch
+    image: ${IMAGE_PREFIX:-case-library-v2}-load-meilisearch
     build:
       context: .
       dockerfile: deploy/meilisearch.Dockerfile
@@ -876,7 +880,7 @@ services:
 
   load-search-init:
     profiles: ["load"]
-    image: case-library-v2-load-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-load-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -904,7 +908,7 @@ services:
 
   load-search-worker:
     profiles: ["load"]
-    image: case-library-v2-load-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-load-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -930,7 +934,7 @@ services:
 
   load-app:
     profiles: ["load"]
-    image: case-library-v2-load-app
+    image: ${IMAGE_PREFIX:-case-library-v2}-load-app
     build:
       context: .
       dockerfile: backend.Dockerfile
@@ -980,7 +984,7 @@ services:
 
   load-frontend:
     profiles: ["load"]
-    image: case-library-v2-load-frontend
+    image: ${IMAGE_PREFIX:-case-library-v2}-load-frontend
     build:
       context: .
       dockerfile: frontend.Dockerfile
@@ -999,7 +1003,7 @@ services:
 
   backup-tools:
     profiles: ["ops"]
-    image: case-library-v2-backup-tools
+    image: ${IMAGE_PREFIX:-case-library-v2}-backup-tools
     build:
       context: .
       dockerfile: deploy/backup-tools.Dockerfile
@@ -1019,7 +1023,7 @@ services:
 
   restore-tools:
     profiles: ["restore"]
-    image: case-library-v2-backup-tools
+    image: ${IMAGE_PREFIX:-case-library-v2}-backup-tools
     build:
       context: .
       dockerfile: deploy/backup-tools.Dockerfile

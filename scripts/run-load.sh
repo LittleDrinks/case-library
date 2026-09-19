@@ -2,14 +2,19 @@
 set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-compose_project="case-library-v2"
-load_meili_volume="${compose_project}_load_meili_data"
+dir_slug="$(printf '%s' "$(basename "$project_dir")" | sed 's/^[.]//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+test -n "$dir_slug" || dir_slug="checkout"
+dir_hash="$(printf '%s' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)"
+compose_project="case-library-load-${dir_slug}-${dir_hash}"
+export COMPOSE_PROJECT_NAME="$compose_project"
+export IMAGE_PREFIX="$compose_project"
+export COMPOSE_FILE="$project_dir/docker-compose.yml:$project_dir/deploy/load.compose.yml"
+lock_file="/tmp/case-library-load-${dir_slug}-${dir_hash}.lock"
 profile="${1:-smoke}"
 database="case_library_load"
 mongo_uri="mongodb://mongo1:27017,mongo2:27017,mongo3:27017/$database?replicaSet=rs0"
 results_dir="$project_dir/test-results"
 resource_pid=""
-load_services="load load-frontend load-app load-search-worker load-search-init load-meilisearch"
 cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
@@ -122,69 +127,53 @@ capture_nginx() {
   return "$status"
 }
 
-remove_load_volume() {
-  if docker volume inspect "$load_meili_volume" >/dev/null 2>&1; then
-    docker volume rm "$load_meili_volume" >/dev/null
-  fi
-}
-
-database_exists() {
-  target="$1"
-  validate_test_database "$target"
-  query="print(db.getMongo().getDBNames().includes('$target'))"
-  compose exec -T mongo1 mongosh \
-    'mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0' \
-    --quiet --eval "$query"
-}
-
 verify_load_cleanup() {
-  remaining="$(compose --profile load ps -aq $load_services)"
-  test -z "$remaining" || { echo "Load containers remain: $remaining" >&2; return 1; }
-  ! docker volume inspect "$load_meili_volume" >/dev/null 2>&1 || {
-    echo "Load Meilisearch volume remains" >&2; return 1;
-  }
-  test "$(database_exists "$database")" = "false" || {
-    echo "Load database remains: $database" >&2; return 1;
-  }
+  containers="$(docker ps -aq --filter "label=com.docker.compose.project=$compose_project")" || return 1
+  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$compose_project")" || return 1
+  networks="$(docker network ls -q --filter "label=com.docker.compose.project=$compose_project")" || return 1
+  test -z "$containers$volumes$networks"
 }
 
 case "$profile" in
   smoke|peak|resilience|rate|steady) ;;
-  reset-all)
-    mkdir -p "$results_dir"
-    reset_all_load_artifacts
-    exit 0
-    ;;
+  reset-all) ;;
   *) echo "Unknown load profile: $profile" >&2; exit 2 ;;
 esac
 
-mkdir -p "$results_dir"
-reset_load_artifacts
-
 cleanup() {
   original_status=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   cleanup_status=0
   stop_resource_sampler || cleanup_status=$?
-  compose --profile load rm -sf load load-frontend load-app load-search-worker load-search-init load-meilisearch >/dev/null 2>&1 || cleanup_status=$?
-  remove_load_volume || cleanup_status=$?
-  drop_test_database "$database" || cleanup_status=$?
+  compose --profile load down --volumes --remove-orphans --timeout 1 >/dev/null 2>&1 || cleanup_status=$?
   verify_load_cleanup || cleanup_status=$?
   test "$original_status" -eq 0 || exit "$original_status"
   exit "$cleanup_status"
 }
 
+# Serialize same-checkout load runs before any destructive step; a rejected
+# second invocation must never tear down the owner's resources.
+: > "$lock_file"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "Another load run owns $compose_project (lock: $lock_file)" >&2
+  exit 2
+fi
+mkdir -p "$results_dir"
+if test "$profile" = reset-all; then
+  reset_all_load_artifacts
+  exit 0
+fi
+reset_load_artifacts
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-compose --profile load rm -sf load load-frontend load-app load-search-worker load-search-init load-meilisearch >/dev/null 2>&1
-remove_load_volume
-compose up -d --wait mongo-init
-drop_test_database "$database"
+trap 'exit 129' HUP
+compose --profile load down --volumes --remove-orphans --timeout 1 >/dev/null
 verify_load_cleanup
+compose up -d --wait mongo-init
 if [ "${SKIP_BUILD:-false}" != "true" ]; then
-  compose build load-app load-frontend load-meilisearch
-  docker build -f deploy/k6.Dockerfile -t case-library-v2-load:latest .
+  compose build load-app load-frontend load-meilisearch load
 fi
 compose --profile load up -d --wait load-meilisearch
 compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=true load-search-init python -m app.cli.bootstrap

@@ -5,6 +5,13 @@ COMPOSE_DISABLE_ENV_FILE := 1
 export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 
 COMPOSE := docker compose
+# Test-only identity: a fixed "case-library-test-" prefix plus a hash of the
+# normalized absolute checkout path, so two checkouts never collide and the
+# demo stack (project case-library-v2 from docker-compose.yml) is untouched.
+# Exported ONLY in test targets — never globally, or `make up/down` would
+# rename the demo project.
+TEST_COMPOSE_ARGS = --project-name case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8) --env-file .env.example
+TEST_IMAGE_PREFIX = case-library-test-$(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-8)
 E2E_SPEC ?= $(SPEC)
 
 .PHONY: up down logs config config-contract release-contract test test-backend test-frontend ensure-backend-test ensure-frontend-test backend-e2e e2e e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
@@ -27,6 +34,8 @@ config-contract:
 	$(COMPOSE) --env-file .env.example config --quiet
 	tests/failover/compose-contract.sh
 	sh tests/e2e/run-e2e-contract.sh
+	sh tests/e2e/isolation-contract.sh
+	python3 $(CURDIR)/tests/e2e/make-isolation-probe.py $(CURDIR)
 	sh tests/ai/ai-smoke-contract.sh
 	sh tests/release/release-contract.sh
 	sh tests/failover/isolation-contract.sh
@@ -35,20 +44,20 @@ release-contract:
 	sh tests/release/release-contract.sh
 
 test: ensure-backend-test ensure-frontend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm backend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm frontend-test
 
 ensure-backend-test:
-	scripts/ci-images.sh ensure backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" scripts/ci-images.sh ensure backend-test
 
 ensure-frontend-test:
-	scripts/ci-images.sh ensure frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" scripts/ci-images.sh ensure frontend-test
 
 test-backend: ensure-backend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm backend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm backend-test
 
 test-frontend: ensure-frontend-test
-	$(COMPOSE) --env-file .env.example --profile test run --rm frontend-test
+	IMAGE_PREFIX="$(TEST_IMAGE_PREFIX)" COMPOSE_PROJECT_NAME="$(TEST_IMAGE_PREFIX)" $(COMPOSE) $(TEST_COMPOSE_ARGS) --profile test run --rm frontend-test
 
 backend-e2e:
 	scripts/run-e2e.sh --backend

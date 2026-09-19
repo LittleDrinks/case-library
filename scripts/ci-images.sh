@@ -5,7 +5,15 @@
 # docker-compose.yml stays the single source of truth.
 set -euo pipefail
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-compose_project="case-library-v2"
+# Image tags and the Compose project must match whoever calls us: when
+# scripts/run-e2e.sh (or Make) exports COMPOSE_PROJECT_NAME/IMAGE_PREFIX,
+# reuse them so builds and runs hit the same per-checkout tags. Only a bare
+# `scripts/ci-images.sh` invocation falls back to the local derivation.
+# Bare invocations derive the same per-checkout identity the runners use:
+# fixed prefix + normalized absolute checkout path hash.
+compose_project="${COMPOSE_PROJECT_NAME:-${TEST_IMAGE_PREFIX:-case-library-test-$(printf '%s' "$(CDPATH= cd -- "$project_dir" && pwd -P)" | sha256sum | cut -c1-8)}}"
+IMAGE_PREFIX="${IMAGE_PREFIX:-$compose_project}"
+export IMAGE_PREFIX
 
 compose() {
   docker compose --project-name "$compose_project" \
@@ -56,27 +64,107 @@ copy_sources() {
 }
 
 fingerprint() {
+  local source_list hash_input src status
+  source_list="$(mktemp)"
+  hash_input="$(mktemp)"
+  if ! copy_sources "$1" >"$source_list"; then
+    rm -f "$source_list" "$hash_input"
+    return 1
+  fi
   {
     printf '%s\n' "$2"
     cat "$1"
-    copy_sources "$1" | while IFS= read -r src; do
-      git -C "$project_dir" ls-files -s -- "$src" || exit 1
-    done
-  } | sha256sum | cut -d' ' -f1
+    # CI fingerprint conservatively covers every COPY source and the
+    # .dockerignore rules. Missing inputs are hard failures; image_ref must
+    # never manufacture a usable-looking tag from an incomplete context.
+    if test -f "$project_dir/.dockerignore"; then
+      git -C "$project_dir" hash-object -- .dockerignore || {
+        rm -f "$source_list" "$hash_input"
+        return 1
+      }
+    fi
+    while IFS= read -r src; do
+      test -e "$project_dir/$src" || test -L "$project_dir/$src" || {
+        echo "missing COPY source: $src" >&2
+        rm -f "$source_list" "$hash_input"
+        return 1
+      }
+      if test -d "$project_dir/$src" && test ! -L "$project_dir/$src"; then
+        (
+          cd "$project_dir/$src" || exit 1
+          # NUL-safe names; symlinks are hashed as link text, never
+          # dereferenced (including dangling and directory links).
+          find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z |
+            while IFS= read -r -d '' f; do
+              if test -L "$f"; then
+                printf 'symlink\0%s\0%s\0' "$src/$f" "$(readlink "$f")"
+                stat -c '%a %s' -- "$f" || exit 1
+              else
+                printf 'file\0%s\0' "$src/$f"
+                git hash-object -- "$f" || exit 1
+                stat -c '%a %s' -- "$f" || exit 1
+              fi
+            done
+        ) || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+      elif test -L "$project_dir/$src"; then
+        printf 'symlink\0%s\0%s\0' "$src" "$(readlink "$project_dir/$src")"
+        stat -c '%a %s' -- "$project_dir/$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+      else
+        printf 'file\0%s\0' "$src"
+        git hash-object -- "$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+        stat -c '%a %s' -- "$project_dir/$src" || {
+          rm -f "$source_list" "$hash_input"
+          return 1
+        }
+      fi
+    done <"$source_list"
+  } >"$hash_input" || status=$?
+  status="${status:-0}"
+  rm -f "$source_list"
+  test "$status" -eq 0 || {
+    rm -f "$hash_input"
+    return "$status"
+  }
+  sha256sum "$hash_input" | cut -d' ' -f1
+  rm -f "$hash_input"
 }
 
 image_ref() {
-  local spec dockerfile target
+  local spec dockerfile target fingerprint_id
   spec="$(service_build_spec "$1")"
   test -n "$spec" || return 1
   dockerfile="${spec%%|*}" target="${spec#*|}"
-  printf '%s/%s:%s' "$(registry)" "$(image_key "$dockerfile" "$target")" \
-    "$(fingerprint "$project_dir/$dockerfile" "$target")"
+  fingerprint_id="$(fingerprint "$project_dir/$dockerfile" "$target")" || return 1
+  printf '%s/%s:%s' "$(registry)" "$(image_key "$dockerfile" "$target")" "$fingerprint_id"
+}
+
+local_image_is_current() {
+  local svc ref fingerprint_id
+  svc="$1"
+  docker image inspect "$(service_image_name "$svc")" >/dev/null 2>&1 || return 1
+  ref="$(image_ref "$svc")" || return 1
+  fingerprint_id="$(docker image inspect "$ref" --format '{{.Id}}' 2>/dev/null || true)"
+  if test -n "$fingerprint_id"; then
+    test "$fingerprint_id" = "$(docker image inspect "$(service_image_name "$svc")" --format '{{.Id}}')"
+    return $?
+  fi
+  return 1
 }
 
 try_pull() {
   local ref
-  docker image inspect "$(service_image_name "$1")" >/dev/null 2>&1 && return 0
+  if local_image_is_current "$1"; then
+    return 0
+  fi
   ref="$(image_ref "$1")" || return 1
   docker pull --quiet "$ref" && docker tag "$ref" "$(service_image_name "$1")"
 }
@@ -94,6 +182,10 @@ pull_missed() {
 ensure() {
   local missed status_dir
   if test -z "${CI:-}"; then
+    # Local builds trust BuildKit's content cache: compose build compares
+    # actual build-context file contents and metadata per COPY (per Docker
+    # cache-invalidation semantics), so it never reuses stale layers from
+    # another checkout or old source. Hand-rolled fingerprinting is CI-only.
     compose build "$@"
     return 0
   fi
