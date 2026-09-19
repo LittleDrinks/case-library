@@ -7,7 +7,10 @@
 services:
   mongo1:
     image: mongo:7
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    healthcheck:
+      interval: 30s
+      start_interval: 1s
     volumes: !override
       - e2e_mongo1_data:/data/db
     networks: !override
@@ -16,7 +19,10 @@ services:
 
   mongo2:
     image: mongo:7
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    healthcheck:
+      interval: 30s
+      start_interval: 1s
     volumes: !override
       - e2e_mongo2_data:/data/db
     networks: !override
@@ -25,7 +31,10 @@ services:
 
   mongo3:
     image: mongo:7
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    healthcheck:
+      interval: 30s
+      start_interval: 1s
     volumes: !override
       - e2e_mongo3_data:/data/db
     networks: !override

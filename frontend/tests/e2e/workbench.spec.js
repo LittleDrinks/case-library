@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { unzipSync } from "fflate";
 
 async function signIn(page, username, password) {
   await page.goto("/#/login");
@@ -456,6 +457,9 @@ test("导出前保存当前正文并下载有效 DOCX", async ({ page }) => {
     const { download, bytes } = await downloadDocx(page);
     expect(download.suggestedFilename()).toBe("case-c-draft-1.docx");
     expect(bytes.subarray(0, 2).toString()).toBe("PK");
+    const document = unzipSync(bytes)["word/document.xml"];
+    expect(document).toBeDefined();
+    expect(new TextDecoder().decode(document)).toContain(marker);
     await expect(page.locator(".save-state")).toHaveText("已保存");
     expect((await (await request.get("/api/cases/c-draft-1")).json()).title).toBe(marker);
     await page.reload();
