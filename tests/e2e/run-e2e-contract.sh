@@ -40,6 +40,10 @@ require_line 'compose up -d --wait mongo-init --wait-timeout 120'
 require_line '  drop_test_database "$database"'
 require_line '  compose --profile e2e up -d --wait e2e-app --wait-timeout 120'
 require_line '  compose --profile e2e up -d --wait e2e-frontend --wait-timeout 120'
+require_line '  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app --wait-timeout 120'
+printf '%s\n' "$e2e_runner_lines" | awk '
+  /^[[:space:]]*compose .*up .*--wait( |$)/ && !/--wait-timeout 120( |$)/ { exit 1 }
+'
 require_line 'preclean_e2e_resources'
 e2e_runner_lines="$(cat "$runner")"
 ensure_boot_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure mongo-init production-config-check' | cut -d: -f1)
