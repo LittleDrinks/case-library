@@ -47,7 +47,12 @@ async function configureChat(page) {
 }
 
 async function openChat(page, caseId) {
+  const loadedCase = page.waitForResponse((response) => (
+    response.request().method() === "GET"
+    && new URL(response.url()).pathname === `/api/cases/${caseId}`
+  ));
   await page.goto(`/#/workbench/${caseId}`);
+  expect((await loadedCase).ok()).toBe(true);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await openChatPanel(page);
 }
