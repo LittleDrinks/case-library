@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import json
 import re
 
@@ -72,7 +71,6 @@ def test_read_source_rechecks_source_publication(client: TestClient) -> None:
     assert result == {"status": "no_access", "detail": "来源案例内容当前不可读"}
 
 
-
 def test_read_source_material_hides_restricted_content_and_preserves_public_text(
     client: TestClient,
 ) -> None:
@@ -125,6 +123,7 @@ def test_read_source_campus_material_requires_verified_identity(client: TestClie
     assert "校内素材正文" not in str(denied)
     assert allowed["status"] == "ok"
     assert allowed["content"] == "校内素材正文"
+
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:
     auth = _auth(client)
