@@ -25,7 +25,7 @@ Vue 3、Tiptap/ProseMirror、FastAPI、MongoDB 副本集、Meilisearch 与 S3 �
 
 ## 单机演示
 
-宿主机只需 Docker Engine、Docker Compose、Make 和 POSIX shell，应用与测试依赖均在镜像中。
+Linux / WSL 宿主机需要 Docker Engine、Docker Compose、Make、Bash、Python 3.12 和 util-linux（`flock`、`setsid`）。应用及业务测试依赖在镜像中，配置与资源隔离探针使用宿主机 Python 标准库。
 
 首次启动：
 
