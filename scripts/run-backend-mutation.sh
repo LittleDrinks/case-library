@@ -73,18 +73,19 @@ if not values or any(value is None or value == 2 for value in values):
 PYTHON
 }
 
+finish_mutation_group() {
+  test -n "$mutation_pid" || return 0
+  kill -TERM -- "-$mutation_pid" 2>/dev/null || true
+  kill -KILL -- "-$mutation_pid" 2>/dev/null || true
+  wait "$mutation_pid" 2>/dev/null || true
+  mutation_pid=""
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
   trap '' INT TERM HUP
-  if test -n "$mutation_pid"; then
-    kill -TERM -- "-$mutation_pid" 2>/dev/null || true
-    if kill -0 -- "-$mutation_pid" 2>/dev/null; then
-      sleep 1
-      kill -KILL -- "-$mutation_pid" 2>/dev/null || true
-    fi
-    wait "$mutation_pid" 2>/dev/null || true
-  fi
+  finish_mutation_group
   for path in "${created_links[@]}"; do rm -- "$path"; done
   write_status "$completion" "$status" || true
   exit "$status"
@@ -114,6 +115,7 @@ status=0
 setsid python3 -m mutmut run --max-children 1 "${forwarded_args[@]}" &
 mutation_pid=$!
 wait "$mutation_pid" || status=$?
+finish_mutation_group
 
 if test "$status" -ne 0; then
   completion=failed

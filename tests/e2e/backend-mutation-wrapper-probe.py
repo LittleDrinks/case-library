@@ -41,7 +41,7 @@ if command == "run":
         if child == 0:
             import signal
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            Path("orphan-ready").write_text(str(os.getpid()))
+            Path("orphan-ready").write_text(json.dumps({"pid": os.getpid(), "start": Path(f"/proc/{os.getpid()}/stat").read_text().split()[21]}))
             while True:
                 time.sleep(1)
         while not Path("orphan-ready").exists():
@@ -256,7 +256,7 @@ def orphan_cleanup_contract() -> None:
     try:
         result = run(root, fake, "orphan")
         assert result.returncode == 7, result.stderr
-        child = int((backend / "orphan-ready").read_text())
+        child = json.loads((backend / "orphan-ready").read_text())["pid"]
         stat = Path(f"/proc/{child}/stat")
         assert not stat.exists() or stat.read_text().split()[2] == "Z", "owned child remains running"
         assert status(backend)["status"] == "failed"
@@ -264,12 +264,20 @@ def orphan_cleanup_contract() -> None:
         assert not (backend / "mutants/mutmut-cicd-stats.json").exists()
         assert_links_clean(backend)
     finally:
-        group = backend / "orphan-group"
-        if group.exists():
+        ready = backend / "orphan-ready"
+        if ready.exists():
+            child = json.loads(ready.read_text())
             try:
-                os.killpg(int(group.read_text()), signal.SIGKILL)
+                descriptor = os.pidfd_open(child["pid"])
             except ProcessLookupError:
                 pass
+            else:
+                try:
+                    stat = Path(f"/proc/{child['pid']}/stat")
+                    if stat.exists() and stat.read_text().split()[21] == child["start"]:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                finally:
+                    os.close(descriptor)
         shutil.rmtree(root, ignore_errors=True)
 
 
