@@ -219,6 +219,40 @@ def test_admin_cannot_edit_an_authors_working_version(client: TestClient) -> Non
     assert response.status_code == 403
 
 
+def test_non_admin_cannot_start_review(client: TestClient) -> None:
+    auth = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+
+    response = _transition(client, case["id"], auth["csrfToken"], "start", case)
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "仅管理员可执行此操作"}
+
+
+def test_submission_advances_revision_once_and_rejects_stale_follow_up(
+    client: TestClient,
+) -> None:
+    owner = login(client, "user", "user123").json()
+    case = client.get("/api/cases/c-draft-1").json()
+
+    submitted = _submit_case(client, owner, case)
+    current = submitted["case"]
+    stale_withdraw = _transition(
+        client, case["id"], owner["csrfToken"], "withdraw", case
+    )
+
+    assert current["revision"] == case["revision"] + 1
+    assert stale_withdraw.status_code == 409
+    assert stale_withdraw.json() == {
+        "detail": "案例已在其他位置更新",
+        "currentRevision": current["revision"],
+    }
+    assert client.get(f"/api/cases/{case['id']}").json() == current
+
+
+
+
+
 def test_case_creation_requires_csrf(client: TestClient) -> None:
     auth = login(client, "user", "user123").json()
     body = {"title": "新案例", "document": paragraph_document("正文")}
