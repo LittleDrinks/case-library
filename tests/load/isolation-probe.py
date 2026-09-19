@@ -24,7 +24,12 @@ for project in ("case-library-load-proof-a", "case-library-load-proof-b"):
         if name == "load" or name.startswith("load-"):
             assert service["image"].startswith(project + "-"), name
     for name in ("database", "load_test"):
+        assert config["networks"][name]["name"] == f"{project}_{name}", name
+        assert not config["networks"][name].get("external"), name
         assert not config["networks"][name].get("ipam", {}).get("config"), name
+    for name in ("mongo1_data", "mongo2_data", "mongo3_data", "minio_data", "load_meili_data"):
+        assert config["volumes"][name]["name"] == f"{project}_{name}", name
+        assert not config["volumes"][name].get("external"), name
 
 with tempfile.TemporaryDirectory(prefix="load-isolation-") as temporary:
     fixture = Path(temporary)
