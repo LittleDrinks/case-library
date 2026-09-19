@@ -433,3 +433,5 @@ assert_cleanup_status 0 "" 0
 assert_cleanup_status 0 fail 1
 assert_cleanup_status 9 "" 9
 assert_cleanup_status 9 fail 9
+
+python3 "$project_dir/tests/e2e/browser-report-probe.py"

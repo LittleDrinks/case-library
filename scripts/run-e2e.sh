@@ -108,18 +108,18 @@ start_agent_app() {
 run_browser_tests() {
   if test "$browser_spec" = "tests/e2e/agent-sidebar.spec.js"; then run_sidebar_browser_tests; return; fi
   set -- compose --profile e2e run --rm --no-deps \
-    -v "$artifact_dir:/app/test-results" e2e
+    -v "$artifact_dir/generic:/app/test-results" e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   if test "$browser_spec" = "tests/e2e/agent-chat.spec.js" ||
      test "$browser_spec" = "tests/e2e/agent-threads.spec.js" ||
      test "$browser_spec" = "tests/e2e/agent-source-proof.spec.js"; then
     set -- compose --profile e2e run --rm \
-      -v "$artifact_dir:/app/test-results" agent-e2e
+      -v "$artifact_dir/agent:/app/test-results" agent-e2e
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   fi
   if test "$browser_spec" = "tests/e2e/agent-tracer.spec.js" ||
      test "$browser_spec" = "tests/e2e/agent-annotation-rounds.spec.js"; then
-    set -- compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" agent-tracer
+    set -- compose --profile e2e run --rm -v "$artifact_dir/tracer:/app/test-results" agent-tracer
     test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   fi
   "$@"
@@ -133,21 +133,21 @@ run_bdd_browser_tests() {
 
 run_agent_browser_tests() {
   set -- compose --profile e2e run --rm \
-    -v "$artifact_dir:/app/test-results" agent-e2e
+    -v "$artifact_dir/agent:/app/test-results" agent-e2e
   test -z "$browser_spec" || set -- "$@" npm run test:e2e -- "$browser_spec"
   "$@"
 }
 
 run_sidebar_browser_tests() {
-  compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" \
+  compose --profile e2e run --rm -v "$artifact_dir/sidebar:/app/test-results" \
     agent-e2e npm run test:e2e -- --project=sidebar
-  compose --profile e2e run --rm -v "$artifact_dir:/app/test-results" \
+  compose --profile e2e run --rm -v "$artifact_dir/sidebar-tracer:/app/test-results" \
     agent-tracer npm run test:e2e -- --project=sidebar-tracer
 }
 
 run_tracer_browser_tests() {
   compose --profile e2e run --rm \
-    -v "$artifact_dir:/app/test-results" agent-tracer
+    -v "$artifact_dir/tracer:/app/test-results" agent-tracer
 }
 
 run_backend_suite() {
@@ -158,6 +158,9 @@ run_backend_suite() {
 }
 
 run_browser_suite() {
+  for report in generic bdd agent tracer sidebar sidebar-tracer; do
+    mkdir -p "$artifact_dir/$report"
+  done
   compose --profile e2e up -d --wait e2e-frontend
   start_agent_app
   clear_e2e_bucket
