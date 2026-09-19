@@ -15,7 +15,9 @@
     "test:watch": "vitest",
     "bddgen": "bddgen -c playwright.config.js",
     "test:e2e": "bddgen -c playwright.config.js && playwright test",
-    "test:e2e:bdd": "bddgen -c playwright.config.js && playwright test --project=bdd"
+    "test:e2e:bdd": "bddgen -c playwright.config.js && playwright test --project=bdd",
+    "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "@ai-sdk/vue": "3.0.272",

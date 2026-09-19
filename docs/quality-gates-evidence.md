@@ -36,3 +36,7 @@
 - 变异：仓库根目录执行 `make mutation-backend`。范围为全部 `backend/app`，使用全部非 E2E 测试，包含中文业务场景；一个子进程运行，互斥锁拒绝同 checkout 重入。
 - 结果：`backend/mutants/mutmut-cicd-stats.json`；详情在 backend 目录执行 `mutmut results`、`mutmut show <id>`、`mutmut tests-for-mutant <id>`。定向重跑使用 `scripts/run-backend-mutation.sh <id>`。
 运行时创建的种子与脚本相对路径链接在退出或中断时清理；已有同名路径不会被覆盖。正常退出只说明运行完成，存活、无覆盖、超时和错误仍需逐项审查，不能当作测试强度通过。
+
+## 前端覆盖率与变异运行
+在 frontend 目录执行 `npm ci`，再运行 `npm run test:coverage` 或 `npm run test:mutation`。范围是 src 下全部 JS/Vue 生产文件，排除同目录的 `.test.js`。
+覆盖率 HTML/JSON/LCOV 写入 `frontend/coverage`；Stryker JSON 写入 `frontend/reports/mutation`。Stryker 使用 Vitest、逐测试覆盖分析与单个测试进程；无覆盖和存活变异保留在结果中。
