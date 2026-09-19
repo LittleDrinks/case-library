@@ -8,6 +8,24 @@ import sys
 import tempfile
 
 root = Path(sys.argv[1]).resolve()
+for project in ("case-library-load-proof-a", "case-library-load-proof-b"):
+    env = dict(
+        os.environ,
+        COMPOSE_PROJECT_NAME=project,
+        IMAGE_PREFIX=project,
+        COMPOSE_FILE=f"{root}/docker-compose.yml:{root}/deploy/load.compose.yml",
+    )
+    config = json.loads(subprocess.check_output(
+        ["docker", "compose", "--env-file", str(root / ".env.example"),
+         "--profile", "load", "config", "--format", "json"],
+        env=env, text=True,
+    ))
+    for name, service in config["services"].items():
+        if name == "load" or name.startswith("load-"):
+            assert service["image"].startswith(project + "-"), name
+    for name in ("database", "load_test"):
+        assert not config["networks"][name].get("ipam", {}).get("config"), name
+
 with tempfile.TemporaryDirectory(prefix="load-isolation-") as temporary:
     fixture = Path(temporary)
     (fixture / "scripts").mkdir()
