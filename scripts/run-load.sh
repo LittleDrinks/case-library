@@ -167,7 +167,7 @@ reset_load_artifacts
 
 cleanup() {
   original_status=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   cleanup_status=0
   stop_resource_sampler || cleanup_status=$?
   compose --profile load rm -sf load load-frontend load-app load-search-worker load-search-init load-meilisearch >/dev/null 2>&1 || cleanup_status=$?
@@ -178,10 +178,6 @@ cleanup() {
   exit "$cleanup_status"
 }
 
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
 # Serialize same-checkout load runs before any destructive step; a rejected
 # second invocation must never tear down the owner's resources.
 : > "$lock_file"
@@ -190,6 +186,10 @@ if ! flock -n 9; then
   echo "Another load run owns $compose_project (lock: $lock_file)" >&2
   exit 2
 fi
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 compose --profile load rm -sf load load-frontend load-app load-search-worker load-search-init load-meilisearch >/dev/null 2>&1
 remove_load_volume
 compose up -d --wait mongo-init

@@ -13,7 +13,9 @@ import tempfile
 
 PROBE = pathlib.Path(tempfile.mkdtemp(prefix="e2e-probe-"))
 project_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-runner = pathlib.Path(project_dir) / "scripts" / "run-e2e.sh"
+suite = sys.argv[2] if len(sys.argv) > 2 else "e2e"
+assert suite in {"e2e", "load"}
+runner = pathlib.Path(project_dir) / "scripts" / f"run-{suite}.sh"
 
 tmp = tempfile.mkdtemp(prefix="e2e-lockprobe-")
 shim = pathlib.Path(tmp) / "docker"
@@ -34,7 +36,7 @@ import re
 
 slug = re.sub(r"[^a-z0-9_-]", "-", os.path.basename(project_dir).lower())
 digest = hashlib.sha256(project_dir.encode()).hexdigest()[:8]
-lock_path = f"/tmp/case-library-e2e-{slug}-{digest}.lock"
+lock_path = f"/tmp/case-library-{suite}-{slug}-{digest}.lock"
 
 owner = open(lock_path, "w")
 fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)

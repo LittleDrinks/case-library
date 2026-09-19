@@ -176,6 +176,7 @@ trap_line="$(grep -n '^trap cleanup EXIT$' "$runner" | cut -d: -f1)"
 test -n "$lock_line" && test -n "$trap_line"
 test "$lock_line" -lt "$trap_line"
 python3 "$project_dir/tests/e2e/lock-owner-probe.py" "$project_dir" >/dev/null
+python3 "$project_dir/tests/e2e/lock-owner-probe.py" "$project_dir" load >/dev/null
 # Cleanup is ownership-only: no bucket-clear container in the teardown path.
 cleanup_body="$(sed -n '/^cleanup() {/,/^}/p' "$runner")"
 ! printf '%s\n' "$cleanup_body" | grep -Fq 'clear_e2e_bucket' || {
