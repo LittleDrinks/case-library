@@ -558,3 +558,49 @@ def test_mount_defaults_to_newest_published_version_after_republish(
     mounted = mount_source(client, login(client), "c-02").json()
     assert mounted["versionId"] == current
     assert mounted["versionNumber"] == 2
+
+
+def test_overwrite_restores_only_target_case_sources_without_duplicates(
+    client: TestClient,
+) -> None:
+    auth = login(client)
+    other = client.post("/api/cases", headers=headers(auth), json={"title": "另一案例"})
+    assert other.status_code == 200, other.text
+    other_id = other.json()["id"]
+    other_path = f"/api/cases/{other_id}/case-sources"
+    mounted_other = client.post(
+        other_path, headers=headers(auth),
+        json={"sourceCaseId": "c-02", "revision": other.json()["revision"]},
+    )
+    assert mounted_other.status_code == 201, mounted_other.text
+    other_sources = client.get(other_path).json()
+    assert len(other_sources) == 1
+
+    target_b = mount_source(client, auth, "c-05").json()
+    submitted = _submit_version(client, auth, "c-draft-1")
+    withdrawn = client.post(
+        "/api/cases/c-draft-1/lifecycle", headers=headers(auth),
+        json={"command": "withdraw", "revision": revision(client)},
+    )
+    assert withdrawn.status_code == 200, withdrawn.text
+    assert delete_source(
+        client, auth, f"/api/cases/c-draft-1/case-sources/{target_b['id']}"
+    ).status_code == 204
+    current_a = mount_source(client, auth, "c-02")
+    assert current_a.status_code == 201, current_a.text
+    assert current_a.json()["caseId"] == "c-02"
+
+    for _ in range(2):
+        restored = client.post(
+            "/api/cases/c-draft-1/lifecycle", headers=headers(auth),
+            json={
+                "command": "overwrite", "revision": revision(client),
+                "targetId": submitted["version"]["id"],
+            },
+        )
+        assert restored.status_code == 200, restored.text
+        rows = client.get("/api/cases/c-draft-1/case-sources").json()
+        assert [(row["caseId"], row["versionId"]) for row in rows] == [
+            ("c-05", target_b["versionId"]),
+        ]
+        assert client.get(other_path).json() == other_sources
