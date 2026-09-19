@@ -27,6 +27,17 @@ test("ordinary components need no compiler macro transformation", () => {
   assert.equal(compileMutationComponent(ordinary, "Example.vue"), ordinary);
 });
 
+for (const script of ["", '<script>export default { props: ["ready"] };</script>']) {
+  test(`template logic becomes JavaScript with ${script ? "ordinary script" : "no script"}`, () => {
+    const compiled = compileMutationComponent(`${script}<template><span>{{ ready ? 'yes' : 'no' }}</span></template>`, "Choice.vue");
+    const { descriptor, errors } = parse(compiled);
+    assert.deepEqual(errors, []);
+    assert.equal(descriptor.template, null);
+    assert.match(descriptor.script.content, /\? 'yes' : 'no'/);
+    assert.doesNotThrow(() => compileScript(descriptor, { id: "probe" }));
+  });
+}
+
 test("invalid components fail instead of disappearing from the mutation scope", () => {
   assert.throws(() => compileMutationComponent('<script setup>const = ;</script>', "Broken.vue"));
 });

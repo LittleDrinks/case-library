@@ -2,7 +2,8 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/api/schema/stryker-schema.json",
   "testRunner": "vitest",
   "vitest": {
-    "configFile": "mutation.config.js"
+    "configFile": "mutation.config.js",
+    "related": true
   },
   "mutate": [
     "src/**/*.js",
@@ -10,10 +11,16 @@
     "!src/**/*.test.js"
   ],
   "coverageAnalysis": "perTest",
-  "reporters": ["clear-text", "json", "progress"],
+  "reporters": [
+    "clear-text",
+    "json",
+    "progress"
+  ],
   "concurrency": 1,
   "timeoutMS": 20000,
   "tempDirName": "stryker-tmp",
   "cleanTempDir": true,
-  "testRunnerNodeArgs": ["--max-old-space-size=1024"]
+  "testRunnerNodeArgs": [
+    "--max-old-space-size=1024"
+  ]
 }

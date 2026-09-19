@@ -21,6 +21,9 @@ for (const status of [0, 42]) test(`mutation runner preserves exit ${status} and
     await writeFile(path.join(fixture, "package.json"), '{"type":"module"}');
     for (const name of ["vite.config.js", "mutation.config.js"]) await writeFile(path.join(fixture, name), "export default {};");
     await writeFile(path.join(fixture, "stryker.config.json"), "{}");
+    await mkdir(path.join(fixture, "reports/mutation/original-src"), { recursive: true });
+    await writeFile(path.join(fixture, "reports/mutation/mutation.json"), '{"oldSuccess":true}');
+    await writeFile(path.join(fixture, "reports/mutation/original-src/removed.js"), "stale");
     const original = '<script setup>defineProps({ name: String });</script><template><span /></template>';
     await writeFile(path.join(fixture, "src/Example.vue"), original);
     const cli = `const fs=require('node:fs');
@@ -33,6 +36,8 @@ for (const status of [0, 42]) test(`mutation runner preserves exit ${status} and
     assert.equal(result.status, status, result.stderr);
     const stage = await readFile(path.join(fixture, "stage-path"), "utf8");
     await assert.rejects(access(stage), { code: "ENOENT" });
+    await assert.rejects(access(path.join(fixture, "reports/mutation/mutation.json")), { code: "ENOENT" });
+    await assert.rejects(access(path.join(fixture, "reports/mutation/original-src/removed.js")), { code: "ENOENT" });
     assert.equal(await readFile(path.join(fixture, "src/Example.vue"), "utf8"), original);
     const scope = JSON.parse(await readFile(path.join(fixture, "reports/mutation/scope.json"), "utf8"));
     assert.equal(scope.files.length, 1);

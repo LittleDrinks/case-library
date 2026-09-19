@@ -4,9 +4,11 @@ import { parse, compileScript, compileTemplate, rewriteDefault, MagicString } fr
 export function compileMutationComponent(source, filename) {
   const { descriptor, errors } = parse(source, { filename });
   if (errors.length) throw new AggregateError(errors, `Cannot parse ${filename}`);
-  if (!descriptor.scriptSetup) return source;
+  if (!descriptor.scriptSetup && !descriptor.template) return source;
   const id = createHash("sha256").update(filename).digest("hex").slice(0, 8);
-  const script = compileScript(descriptor, { id });
+  const script = descriptor.scriptSetup || descriptor.script
+    ? compileScript(descriptor, { id })
+    : { content: "export default {};", bindings: {} };
   const template = compileTemplate({
     source: descriptor.template?.content || "", filename, id,
     scoped: descriptor.styles.some(style => style.scoped),

@@ -32,6 +32,7 @@ async function sourceFiles(directory) {
 }
 
 async function prepare() {
+  await rm(reports, { recursive: true, force: true });
   await mkdir(reports, { recursive: true });
   for (const filename of ["src", "public", "tests/tooling", "package.json", "vite.config.js", "mutation.config.js", "stryker.config.json"]) {
     await mkdir(path.dirname(path.join(stage, filename)), { recursive: true });
