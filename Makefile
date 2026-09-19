@@ -34,7 +34,7 @@ config-contract:
 	$(COMPOSE) --env-file .env.example config --quiet
 	tests/failover/compose-contract.sh
 	sh tests/e2e/run-e2e-contract.sh
-	backend/.venv/bin/python tests/e2e/backend-mutation-wrapper-probe.py
+	python3 tests/e2e/backend-mutation-wrapper-probe.py
 	sh tests/e2e/isolation-contract.sh
 	python3 $(CURDIR)/tests/e2e/make-isolation-probe.py $(CURDIR)
 	sh tests/ai/ai-smoke-contract.sh
