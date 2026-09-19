@@ -125,22 +125,13 @@ def test_reimport_marks_exact_content_as_duplicate(client: TestClient) -> None:
 
 
 def _rar_fixture() -> Path:
-    """宿主：仓库根 assets/；backend-test 容器：构建期 COPY 到 /app/fixtures/。"""
-    candidates = [
-        Path(__file__).resolve().parents[2] / "assets" / "学习资料md.rar",
-        Path("/app/fixtures/学习资料md.rar"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "学习资料md.rar not found in: " + ", ".join(str(c) for c in candidates)
-    )
+    return Path(__file__).resolve().parent / "fixtures" / "materials.rar"
 
 
 def test_real_rar_creates_one_candidate_item_per_entry(client: TestClient) -> None:
     auth = login(client, "admin", "admin123")
     fixture = _rar_fixture()
+    expected_filenames = {"lesson.md", "notes.txt"}
     with fixture.open("rb") as archive:
         response = submit_import(
             client,
@@ -153,8 +144,9 @@ def test_real_rar_creates_one_candidate_item_per_entry(client: TestClient) -> No
     assert response.status_code == 201
     job = response.json()
     assert job["status"] == "succeeded"
-    assert job["itemCount"] == 69
-    assert len(job["items"]) == 69
+    assert job["itemCount"] == len(expected_filenames)
+    assert len(job["items"]) == len(expected_filenames)
+    assert {item["filename"] for item in job["items"]} == expected_filenames
     assert all(item["status"] == "candidate" for item in job["items"])
     assert all(item["filename"] != fixture.name for item in job["items"])
 
