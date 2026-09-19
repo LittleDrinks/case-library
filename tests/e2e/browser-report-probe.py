@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
         sentinel = artifacts / "previous-report.json"
         sentinel.write_text("{}")
         env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-                   PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec=f"tests/e2e/{spec}.spec.js")
+                   PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec=f"tests/e2e/{spec}.spec.js", AGENT_EXIT="0", BDD_EXIT="0")
         subprocess.run(["sh", "-c", script], env=env, check=True)
         assert (artifacts / suite / "report.json").is_file()
         assert not (artifacts / "report.json").exists()
@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix="browser-report-probe-") as tmp:
     # Sidebar has two sequential Playwright invocations as well.
     artifacts = directory / "sidebar-artifacts"
     env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
-               PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec="tests/e2e/agent-sidebar.spec.js")
+               PHASE_LOG=str(directory / "phase.jsonl"), artifact_dir=str(artifacts), browser_spec="tests/e2e/agent-sidebar.spec.js", AGENT_EXIT="0", BDD_EXIT="0")
     subprocess.run(["sh", "-c", script], env=env, check=True)
     assert (artifacts / "sidebar/report.json").is_file()
     assert (artifacts / "sidebar-tracer/report.json").is_file()

@@ -136,6 +136,7 @@ def restore_with_stale_revision(ctx, name):
     case_id = ctx["memo"]["current_case_id"]
     case = get_case(ctx, case_id)
     version = ctx["cases"]["_versions"][name]
+    ctx["memo"]["before_restore_history"] = _history(ctx, case_id)
     ctx["memo"]["last_response"] = client_of(ctx).post(
         f"/api/cases/{case_id}/lifecycle", headers=csrf_headers(ctx, "教师"),
         json={"command": "overwrite", "revision": case["revision"] + 5,
@@ -149,10 +150,10 @@ def draft_unchanged_after_failed_restore(ctx, title):
     assert document_text(case["document"]) == f"{title}的最新改动"
 
 
-@then("版本历史没有新增恢复记录")
-def no_restore_record(ctx):
+@then("版本历史保持不变")
+def history_unchanged_after_failed_restore(ctx):
     history = _history(ctx, ctx["memo"]["current_case_id"])
-    assert all(row["kind"] != "restore" for row in history["versions"])
+    assert history == ctx["memo"]["before_restore_history"]
 
 
 @given(parsers.parse('教师的"{title}"存在手动命名版本"{name}"'))
