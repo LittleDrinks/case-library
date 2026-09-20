@@ -397,8 +397,11 @@ def test_reader_stream_is_cancelled_when_publication_is_hidden(client: TestClien
     future, pool = _reader_post_async(client.app, "撤权测试", _gated_reader_model(reached, release))
     try:
         assert reached.wait(10)
-        with TestClient(client.app) as admin_client:
+        admin_client = TestClient(client.app)
+        try:
             _hide_case(admin_client, CASE)
+        finally:
+            admin_client.close()
         release.set()
         response = future.result(timeout=15)
         run = client.app.state.database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
@@ -417,8 +420,11 @@ def test_reader_completion_rechecks_visibility_after_final_check(client, monkeyp
     future, pool = _reader_post_async(client.app, "尾部撤权测试", TestModel(custom_output_text="回答"))
     try:
         assert entered.wait(10)
-        with TestClient(client.app) as admin_client:
+        admin_client = TestClient(client.app)
+        try:
             _hide_case(admin_client, CASE)
+        finally:
+            admin_client.close()
         release.set()
         _assert_reader_completion_cancelled(client, future)
     finally:
