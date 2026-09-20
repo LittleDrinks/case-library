@@ -470,11 +470,14 @@ def test_review_run_rebased_then_completed_is_cancelled(
 def _withdraw_pending_case(app) -> None:
     from tests.test_case_workflow import _transition_json, login
 
-    with TestClient(app) as author_client:
+    author_client = TestClient(app)
+    try:
         author_auth = login(author_client, "user", "user123").json()
         case = author_client.get(f"/api/cases/{PENDING_CASE}").json()
         result = _transition_json(
             author_client, PENDING_CASE, author_auth["csrfToken"], "withdraw", case)
+    finally:
+        author_client.close()
     assert result["case"]["workflowStatus"] == "draft"
 
 
