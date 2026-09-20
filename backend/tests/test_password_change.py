@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
+
 from fastapi.testclient import TestClient
 
 CURRENT_PASSWORD = "Demo-10000001-2026!"
 NEW_PASSWORD = "Roster-Changed-2026!"
+FIRST_NEW_PASSWORD = "Candidate-Changed-2026!"
+SECOND_NEW_PASSWORD = "Candidate-Other-2026!"
 
 
 def login(client: TestClient, username: str, password: str):
@@ -133,3 +138,53 @@ def test_password_change_rejects_the_current_password(client: TestClient) -> Non
     assert response.status_code == 422
     assert response.json() == {"detail": "新密码不能与当前密码相同"}
     assert client.get("/api/auth/session").status_code == 200
+
+
+def test_concurrent_password_change_returns_one_success_and_one_cas_conflict(
+    client, monkeypatch
+) -> None:
+    first = login(client, "10000001", CURRENT_PASSWORD).json()
+
+    with TestClient(client.app) as second_client:
+        second = login(second_client, "10000001", CURRENT_PASSWORD).json()
+        database = client.app.state.database
+        original = database.users.find_one_and_update
+        entered_cas = Barrier(2)
+        serialize_cas = Lock()
+        cas_calls = []
+
+        def synchronized_cas(*args, **kwargs):
+            cas_calls.append(True)
+            entered_cas.wait(timeout=5)
+            with serialize_cas:
+                return original(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(database.users, "find_one_and_update", synchronized_cas)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(
+                        change_password, client, first["csrfToken"],
+                        CURRENT_PASSWORD, FIRST_NEW_PASSWORD,
+                    ),
+                    pool.submit(
+                        change_password, second_client, second["csrfToken"],
+                        CURRENT_PASSWORD, SECOND_NEW_PASSWORD,
+                    ),
+                ]
+                responses = [future.result(timeout=10) for future in futures]
+
+    assert len(cas_calls) == 2
+    assert sorted(response.status_code for response in responses) == [204, 409]
+    conflict = next(response for response in responses if response.status_code == 409)
+    assert conflict.json() == {"detail": "密码已在其他位置更新"}
+
+    winner_password = (
+        FIRST_NEW_PASSWORD if responses[0].status_code == 204 else SECOND_NEW_PASSWORD
+    )
+    loser_password = (
+        SECOND_NEW_PASSWORD if responses[0].status_code == 204 else FIRST_NEW_PASSWORD
+    )
+    assert login(client, "10000001", winner_password).status_code == 200
+    assert login(client, "10000001", loser_password).status_code == 401
+    assert login(client, "10000001", CURRENT_PASSWORD).status_code == 401

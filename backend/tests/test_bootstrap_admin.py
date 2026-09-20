@@ -63,3 +63,30 @@ def test_connected_cli_rejects_non_production(monkeypatch: pytest.MonkeyPatch) -
             ["--username", "principal", "--name", "首任管理员"],
             input_stream=StringIO(f"{STRONG_PASSWORD}\n"),
         )
+
+
+def test_bootstrap_admin_login_and_session_expose_verified_admin_identity(client) -> None:
+    database = client.app.state.database
+    created = bootstrap_admin(
+        database, "bootstrap-candidate-admin", "候选管理员",
+        "Candidate-Admin-2026!",
+    )
+
+    login_response = client.post(
+        "/api/auth/login",
+        json={"username": created["username"], "password": "Candidate-Admin-2026!"},
+    )
+    assert login_response.status_code == 200
+    login_user = login_response.json()["user"]
+    assert login_user == {
+        "id": created["id"],
+        "username": "bootstrap-candidate-admin",
+        "name": "候选管理员",
+        "role": "admin",
+        "mustChangePassword": False,
+        "campusVerified": True,
+    }
+
+    session_response = client.get("/api/auth/session")
+    assert session_response.status_code == 200
+    assert session_response.json()["user"] == login_user
