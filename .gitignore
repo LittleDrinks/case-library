@@ -37,6 +37,7 @@ backend/htmlcov/
 frontend/coverage/
 frontend/stryker-tmp/
 frontend/reports/mutation/
+frontend/.mutation-cache/
 
 # 运行时数据
 data/
