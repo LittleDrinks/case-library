@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.modules.ai.service import AIConfigurationError, resolve_provider
@@ -108,6 +109,27 @@ def test_custom_url_change_requires_a_new_key(client: TestClient, tmp_path) -> N
     response = save_custom(client, auth["csrfToken"], "", "https://other.invalid/v1/")
     assert response.status_code == 422
     assert response.json()["detail"] == "Base URL 变更后必须提供新的 API 密钥"
+
+
+@pytest.mark.parametrize("secret_location", ["empty", "missing"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_unavailable_app_secret_rejects_save_without_changing_settings(
+    client: TestClient, tmp_path, secret_location: str, existing: bool,
+) -> None:
+    configure_app_secret(client, tmp_path)
+    auth = login(client)
+    if existing:
+        assert save_custom(client, auth["csrfToken"]).status_code == 200
+    records = client.app.state.database.ai_user_settings
+    before = records.find_one({"_id": auth["user"]["id"]})
+    secret_path = "" if secret_location == "empty" else str(tmp_path / "missing-secret")
+    client.app.state.settings = replace(
+        client.app.state.settings, app_secret_file=secret_path,
+    )
+    response = save_custom(client, auth["csrfToken"], "replacement-test-key")
+    assert response.status_code == 422
+    assert response.json()["detail"] == "应用密钥不可用"
+    assert records.find_one({"_id": auth["user"]["id"]}) == before
 
 
 def test_broken_custom_secret_is_not_replaced_by_platform(client: TestClient, tmp_path) -> None:
