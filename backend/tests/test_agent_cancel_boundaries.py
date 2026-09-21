@@ -26,6 +26,8 @@ from app.modules.agent.repository import AgentRepository
 from app.modules.agent.runtime import agent
 from app.modules.cases.service import CaseError
 
+from app.modules.agent.recovery import LiveBuffer
+
 DRAFT_CASE = "c-draft-1"
 PENDING_CASE = "c-pending-1"
 THREAD_PATH = f"/api/cases/{DRAFT_CASE}/agent/thread"
@@ -182,6 +184,38 @@ def _shutdown(future, pool, release: Event) -> None:
 def _assert_no_assistant(database, thread_id: str) -> None:
     assert database.agent_messages.count_documents(
         {"threadId": thread_id, "role": "assistant"}) == 0
+
+
+class _EncodedChunk:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def encode(self, sdk_version: int) -> str:
+        assert sdk_version == 6
+        return self.value
+
+
+async def _next_chunk(stream):
+    return await asyncio.wait_for(stream.__anext__(), timeout=2)
+
+
+def test_live_buffer_streams_each_published_batch_once_and_finishes() -> None:
+    async def scenario() -> None:
+        buffer = LiveBuffer()
+        stream = buffer.stream()
+
+        await buffer.publish(_EncodedChunk("第一批"))
+        assert await _next_chunk(stream) == 'data: 第一批\n\n'
+
+        await buffer.publish(_EncodedChunk("第二批"))
+        assert await _next_chunk(stream) == 'data: 第二批\n\n'
+
+        await buffer.close()
+        assert await _next_chunk(stream) == 'data: [DONE]\n\n'
+        with pytest.raises(StopAsyncIteration):
+            await _next_chunk(stream)
+
+    asyncio.run(scenario())
 
 
 def _assert_review_cancelled(database, thread_id: str, run) -> None:
