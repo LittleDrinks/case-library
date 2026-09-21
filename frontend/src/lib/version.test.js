@@ -6,7 +6,7 @@ describe("versionPaperLabel", () => {
     expect(versionPaperLabel({ kind: "ai" })).toBe("AI生成版本");
   });
 
-  it("labels every non-AI version as a submission version", () => {
+  it("labels submission versions", () => {
     expect(versionPaperLabel({ kind: "submission" })).toBe("提交版本");
   });
 });
