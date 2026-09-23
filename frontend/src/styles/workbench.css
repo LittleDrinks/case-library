@@ -244,9 +244,8 @@
 .collect-source-done p { margin: 0; color: var(--ink-2); }
 .collect-source-done a { display: flex; height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: #fff; text-decoration: none; }
 .ai-status { display: flex; min-height: 26px; flex: none; align-items: center; gap: 7px; padding: 3px 12px; border-bottom: 1px solid #ece7df; background: transparent; color: #a18d74; font-size: 11px; }
-.ai-status > span:first-child:not(.ai-status-dot) { margin-right: auto; color: var(--ink-2); }
+.ai-status > span:first-child { margin-right: auto; color: var(--ink-2); }
 .ai-status a { margin-left: auto; color: var(--brand); text-decoration: none; }
-.ai-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .ai-conversation { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; padding: 16px 14px; overflow-x: hidden; overscroll-behavior: contain; }
 .ai-conversation .panel-empty { min-height: 175px; }
 .ai-message { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); max-width: 92%; gap: 5px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font-size: 13px; line-height: 1.9; }
@@ -386,9 +385,6 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .agent-chat-panel .agent-answer blockquote p { color: #a08b6d; font-size: 11px; }
 .comment-panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 .comment-panel .panel-head span { color: var(--ink-3); font-size: 12px; }
-.comment-view-switch { display: flex; gap: 4px; }
-.comment-view-tab { padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-3); font-size: 11px; }
-.comment-view-tab.active { border-color: var(--line); background: var(--paper); color: var(--brand); font-weight: 650; }
 .comment-list { display: grid; gap: 10px; margin: 0; padding: 12px; list-style: none; }
 .comment-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .comment-card header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
