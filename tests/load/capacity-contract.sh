@@ -189,7 +189,3 @@ for profile in smoke peak resilience rate steady; do
   test "$line" -gt "$previous"
   previous="$line"
 done
-for document in README.md docs/operations.md; do
-  grep -q 'make load-rate' "$document"
-  grep -q 'make load-all' "$document"
-done

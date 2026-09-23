@@ -11,6 +11,7 @@ skills-lock.json
 .kimi/
 .codex/
 .claude/
+.omp/
 .pi/
 .scratch/
 docs/agents/
@@ -21,7 +22,6 @@ __pycache__/
 *.pyc
 
 # Frontend and browser tests
-frontend/node_modules/
 frontend/dist/
 test-results/
 playwright-report/
@@ -36,4 +36,15 @@ backups/
 # 系统与编辑器
 .DS_Store
 *.log
-.venv/
+
+# LSP 本地安装（uv tool / npm -g 由工具注入到仓库内时忽略）
+.uv-tools/
+.npm-global/
+node_modules/
+.lsp/
+pyrightconfig.json.tmp
+.ruff_cache/
+.pytest_cache/
+.venv*/
+frontend/.node_modules-old/
+frontend/jsconfig.json
