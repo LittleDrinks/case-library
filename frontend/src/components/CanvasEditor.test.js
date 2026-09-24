@@ -56,6 +56,31 @@ function clearDomSelection() {
   globalThis.document.dispatchEvent(new Event("selectionchange"));
 }
 
+function pressEditorKey(editor, key) {
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  editor.view.dom.dispatchEvent(event);
+  return event;
+}
+
+function adjacentCitationDocument(firstSource, secondSource) {
+  const citation = (source) => ({
+    type: "citation",
+    attrs: { sourceType: source.sourceType, sourceId: source.id },
+  });
+  return {
+    type: "doc",
+    content: [{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Before " },
+        { type: "text", text: "first", marks: [{ type: "bold" }, citation(firstSource)] },
+        { type: "text", text: "second", marks: [{ type: "bold" }, citation(secondSource)] },
+        { type: "text", text: " after" },
+      ],
+    }],
+  };
+}
+
 async function selectParagraph(wrapper, length = 4) {
   const editor = wrapper.vm.editor;
   editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(
@@ -222,6 +247,132 @@ it("光标锚点引用可整段取消且无残留", async () => {
   expect(nodes.every((node) => !node.marks)).toBe(true);
   await framesSettled();
   expect(cancel.attributes("disabled")).toBeDefined();
+});
+
+it("Backspace 删除引用正文标记并保留正文与资料区来源", async () => {
+  const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  await selectParagraph(wrapper);
+  expect(wrapper.vm.insertCitation(source)).toBe("linked");
+
+  const editor = wrapper.vm.editor;
+  editor.commands.setTextSelection(13);
+  const event = pressEditorKey(editor, "Backspace");
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(true);
+  expect(editor.state.doc.child(1).textContent).toBe("案例原文");
+  expect(editor.getJSON().content[1].content[0].marks).toBeUndefined();
+  expect(wrapper.props("sources")).toEqual([source]);
+});
+
+it.each([
+  ["Backspace", 11],
+  ["Delete", 9],
+])("%s 在引用正文边界删除标记且保留后续普通正文", async (key, position) => {
+  const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  await selectParagraph(wrapper, 2);
+  expect(wrapper.vm.insertCitation(source)).toBe("linked");
+
+  const editor = wrapper.vm.editor;
+  editor.commands.setTextSelection(position);
+  const event = pressEditorKey(editor, key);
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(true);
+  expect(editor.state.doc.child(1).textContent).toBe("案例原文");
+  expect(editor.getJSON().content[1].content.flatMap((node) => node.marks ?? [])).not.toContainEqual(
+    { type: "citation", attrs: { sourceType: source.sourceType, sourceId: source.id } },
+  );
+  expect(wrapper.props("sources")).toEqual([source]);
+});
+
+it.each([
+  ["甲", 13, "source-b"],
+  ["乙", 19, "source-a"],
+])("相邻粗体不同来源引用%s末尾 Backspace 只取消目标", async (_, position, remainingSourceId) => {
+  const sourceA = { sourceType: "case", id: "source-a", number: 1, title: "来源甲" };
+  const sourceB = { sourceType: "case", id: "source-b", number: 2, title: "来源乙" };
+  const sources = [sourceA, sourceB];
+  const { wrapper } = await setup({
+    annotatable: true,
+    document: adjacentCitationDocument(sourceA, sourceB),
+    sources,
+  });
+  const editor = wrapper.vm.editor;
+
+  editor.commands.setTextSelection(position);
+  const event = pressEditorKey(editor, "Backspace");
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(true);
+  expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
+  expect(editor.getJSON().content[0].content
+    .flatMap((node) => node.marks ?? [])
+    .filter((mark) => mark.type === "citation")
+    .map((mark) => mark.attrs.sourceId)).toEqual([remainingSourceId]);
+  expect(wrapper.props("sources")).toEqual(sources);
+});
+
+it("相邻粗体不同来源引用内部取消只移除当前来源标记", async () => {
+  const sourceA = { sourceType: "case", id: "source-a", number: 1, title: "来源甲" };
+  const sourceB = { sourceType: "case", id: "source-b", number: 2, title: "来源乙" };
+  const sources = [sourceA, sourceB];
+  const { wrapper } = await setup({
+    annotatable: true,
+    document: adjacentCitationDocument(sourceA, sourceB),
+    sources,
+  });
+  const editor = wrapper.vm.editor;
+
+  editor.commands.setTextSelection(15);
+  await framesSettled();
+  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+
+  expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
+  expect(editor.getJSON().content[0].content
+    .flatMap((node) => node.marks ?? [])
+    .filter((mark) => mark.type === "citation")
+    .map((mark) => mark.attrs.sourceId)).toEqual([sourceA.id]);
+  expect(wrapper.props("sources")).toEqual(sources);
+});
+
+it.each(["Backspace", "Delete"])("引用正文内部按 %s 不触发整段引用移除", async (key) => {
+  const source = { sourceType: "attachment", id: "att-1", number: 1, title: "图示" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  await selectParagraph(wrapper);
+  expect(wrapper.vm.insertCitation(source)).toBe("linked");
+
+  const editor = wrapper.vm.editor;
+  editor.commands.setTextSelection(11);
+  const event = pressEditorKey(editor, key);
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(false);
+  expect(editor.state.doc.child(1).textContent).toBe("案例原文");
+  expect(editor.getJSON().content[1].content[0].marks).toEqual([
+    { type: "citation", attrs: { sourceType: source.sourceType, sourceId: source.id } },
+  ]);
+  expect(wrapper.props("sources")).toEqual([source]);
+});
+
+it.each([
+  ["Delete", 13],
+  ["Backspace", 14],
+])("%s 在空引用锚点的对应边界删除锚点且保留相邻正文", async (key, position) => {
+  const source = { sourceType: "case", id: "src-1", number: 1, title: "引用案例" };
+  const { wrapper } = await setup({ annotatable: true, sources: [source] });
+  const editor = await insertAnchorAtEnd(wrapper, source);
+
+  editor.commands.setTextSelection(position);
+  const event = pressEditorKey(editor, key);
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(true);
+  expect(editor.state.doc.child(1).textContent).toBe("案例原文");
+  expect(editor.getJSON().content[1].content).toEqual([{ type: "text", text: "案例原文" }]);
+  expect(wrapper.props("sources")).toEqual([source]);
 });
 
 it("引用锚点后的后续输入不带引用标记", async () => {
