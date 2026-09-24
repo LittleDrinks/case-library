@@ -48,6 +48,12 @@ services:
         - type=gha,scope=frontend-test
       cache_to:
         - type=gha,mode=max,scope=frontend-test
+  minio:
+    build:
+      cache_from:
+        - type=gha,scope=minio
+      cache_to:
+        - type=gha,mode=max,scope=minio
   mongo-init:
     build:
       cache_from:

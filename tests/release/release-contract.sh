@@ -31,7 +31,7 @@ for service in \
 do
   printf '%s\n' "$config" | grep -qx "  $service:"
 done
-for image in app frontend mongo-init meilisearch; do
+for image in app frontend mongo-init meilisearch minio; do
   printf '%s\n' "$config" | grep -q "ghcr.io/littledrinks/case-library-$image:example"
 done
 printf '%s\n' "$config" | grep -q 'service_completed_successfully'
@@ -64,7 +64,7 @@ grep -Fq -- '-alpha\.' "$release_workflow"
 grep -Fq 'alpha-v\1/' "$release_workflow"
 grep -Fq '"$DISPLAY_NAME"' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
-for image in app frontend mongo_init meilisearch; do
+for image in app frontend mongo_init meilisearch minio; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
 done
 
@@ -72,6 +72,7 @@ CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app:v2.0.0-alpha.1" \
 CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend:v2.0.0-alpha.1" \
 CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init:v2.0.0-alpha.1" \
 CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch:v2.0.0-alpha.1" \
+CASE_LIBRARY_MINIO_IMAGE="ghcr.io/littledrinks/case-library-minio:v2.0.0-alpha.1" \
   "$project_dir/scripts/package-release.sh" v2.0.0-alpha.1 "$temporary/release"
 
 test -f "$temporary/release/case-library-deploy.tar.gz"
@@ -118,6 +119,7 @@ assert_installed() {
   grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$root/.env"
   grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v2.0.0-alpha.1" "$root/images.env"
   grep -Fq "CASE_LIBRARY_APP_IMAGE=ghcr.io/littledrinks/case-library-app:v2.0.0-alpha.1" "$root/images.env"
+  grep -Fq "CASE_LIBRARY_MINIO_IMAGE=ghcr.io/littledrinks/case-library-minio:v2.0.0-alpha.1" "$root/images.env"
   grep -Fq 'config --quiet' "$log"
   grep -Fq 'pull' "$log"
   startup_command='up -d --wait --force-recreate production-config-check mongo-init'

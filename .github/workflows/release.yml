@@ -65,6 +65,7 @@ jobs:
             echo "frontend=ghcr.io/$repository-frontend"
             echo "mongo_init=ghcr.io/$repository-mongo-init"
             echo "meilisearch=ghcr.io/$repository-meilisearch"
+            echo "minio=ghcr.io/$repository-minio"
           } >> "$GITHUB_OUTPUT"
       - id: app
         uses: docker/build-push-action@v7
@@ -123,12 +124,27 @@ jobs:
             org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
           cache-from: type=gha,scope=meilisearch
           cache-to: type=gha,mode=max,scope=meilisearch
+      - id: minio
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/minio.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.images.outputs.minio }}:${{ needs.validate-tag.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
+          cache-from: type=gha,scope=minio
+          cache-to: type=gha,mode=max,scope=minio
       - name: Package deployment bundle
         env:
           CASE_LIBRARY_APP_IMAGE: ${{ steps.images.outputs.app }}:${{ needs.validate-tag.outputs.version }}
           CASE_LIBRARY_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}:${{ needs.validate-tag.outputs.version }}
           CASE_LIBRARY_MONGO_INIT_IMAGE: ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
           CASE_LIBRARY_MEILISEARCH_IMAGE: ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
+          CASE_LIBRARY_MINIO_IMAGE: ${{ steps.images.outputs.minio }}:${{ needs.validate-tag.outputs.version }}
           VERSION: ${{ needs.validate-tag.outputs.version }}
         run: scripts/package-release.sh "$VERSION" "$RUNNER_TEMP/release"
       - name: Publish GitHub Release

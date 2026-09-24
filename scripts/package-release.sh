@@ -7,6 +7,7 @@ output_dir="${2:?output directory is required}"
 : "${CASE_LIBRARY_FRONTEND_IMAGE:?CASE_LIBRARY_FRONTEND_IMAGE is required}"
 : "${CASE_LIBRARY_MONGO_INIT_IMAGE:?CASE_LIBRARY_MONGO_INIT_IMAGE is required}"
 : "${CASE_LIBRARY_MEILISEARCH_IMAGE:?CASE_LIBRARY_MEILISEARCH_IMAGE is required}"
+: "${CASE_LIBRARY_MINIO_IMAGE:?CASE_LIBRARY_MINIO_IMAGE is required}"
 
 printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' || {
   echo "Version must be vX.Y.Z-alpha.N" >&2
@@ -26,6 +27,7 @@ printf '%s\n' \
   "CASE_LIBRARY_APP_IMAGE=$CASE_LIBRARY_APP_IMAGE" \
   "CASE_LIBRARY_FRONTEND_IMAGE=$CASE_LIBRARY_FRONTEND_IMAGE" \
   "CASE_LIBRARY_MONGO_INIT_IMAGE=$CASE_LIBRARY_MONGO_INIT_IMAGE" \
-  "CASE_LIBRARY_MEILISEARCH_IMAGE=$CASE_LIBRARY_MEILISEARCH_IMAGE" > "$temporary/images.env"
+  "CASE_LIBRARY_MEILISEARCH_IMAGE=$CASE_LIBRARY_MEILISEARCH_IMAGE" \
+  "CASE_LIBRARY_MINIO_IMAGE=$CASE_LIBRARY_MINIO_IMAGE" > "$temporary/images.env"
 tar -C "$temporary" -czf "$output_dir/case-library-deploy.tar.gz" .
 cp "$temporary/update.sh" "$output_dir/update.sh"
