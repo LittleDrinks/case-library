@@ -1,11 +1,5 @@
 # CI-only override: BuildKit gha layer cache, one scope per service (v2 index is replace-per-scope).
 services:
-  app:
-    build:
-      cache_from:
-        - type=gha,scope=app
-      cache_to:
-        - type=gha,mode=max,scope=app
   backend-e2e:
     build:
       cache_from:
@@ -48,30 +42,12 @@ services:
         - type=gha,scope=e2e-meilisearch
       cache_to:
         - type=gha,mode=max,scope=e2e-meilisearch
-  e2e-search-init:
-    build:
-      cache_from:
-        - type=gha,scope=e2e-search-init
-      cache_to:
-        - type=gha,mode=max,scope=e2e-search-init
-  frontend:
-    build:
-      cache_from:
-        - type=gha,scope=frontend
-      cache_to:
-        - type=gha,mode=max,scope=frontend
   frontend-test:
     build:
       cache_from:
         - type=gha,scope=frontend-test
       cache_to:
         - type=gha,mode=max,scope=frontend-test
-  meilisearch:
-    build:
-      cache_from:
-        - type=gha,scope=meilisearch
-      cache_to:
-        - type=gha,mode=max,scope=meilisearch
   mongo-init:
     build:
       cache_from:
@@ -84,15 +60,3 @@ services:
         - type=gha,scope=production-config-check
       cache_to:
         - type=gha,mode=max,scope=production-config-check
-  search-init:
-    build:
-      cache_from:
-        - type=gha,scope=search-init
-      cache_to:
-        - type=gha,mode=max,scope=search-init
-  search-worker:
-    build:
-      cache_from:
-        - type=gha,scope=search-worker
-      cache_to:
-        - type=gha,mode=max,scope=search-worker

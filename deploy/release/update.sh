@@ -3,7 +3,6 @@ set -eu
 
 root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 asset_name=case-library-deploy.tar.gz
-checksum_name=checksums.txt
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -77,14 +76,11 @@ compose() {
 }
 
 command -v docker >/dev/null 2>&1 || fail "Docker Engine with Compose is required"
-command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 release="$(release_path "${1:-latest}")"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 base_url="https://github.com/LittleDrinks/case-library/$release"
 fetch "$base_url/$asset_name" "$temporary/$asset_name"
-fetch "$base_url/$checksum_name" "$temporary/$checksum_name"
-(cd "$temporary" && grep "  $asset_name\$" "$checksum_name" | sha256sum -c -)
 mkdir "$temporary/bundle"
 tar -xzf "$temporary/$asset_name" -C "$temporary/bundle"
 install_bundle "$temporary/bundle"

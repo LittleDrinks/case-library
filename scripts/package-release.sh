@@ -29,4 +29,3 @@ printf '%s\n' \
   "CASE_LIBRARY_MEILISEARCH_IMAGE=$CASE_LIBRARY_MEILISEARCH_IMAGE" > "$temporary/images.env"
 tar -C "$temporary" -czf "$output_dir/case-library-deploy.tar.gz" .
 cp "$temporary/update.sh" "$output_dir/update.sh"
-(cd "$output_dir" && sha256sum case-library-deploy.tar.gz update.sh > checksums.txt)

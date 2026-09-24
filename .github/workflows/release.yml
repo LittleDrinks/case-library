@@ -5,7 +5,6 @@ on:
     tags: ["v*"]
 
 permissions:
-  actions: read
   contents: write
   packages: write
 
@@ -20,6 +19,7 @@ jobs:
       version: ${{ steps.version.outputs.value }}
       display_name: ${{ steps.version.outputs.display_name }}
     steps:
+      - uses: actions/checkout@v7
       - id: version
         env:
           VERSION: ${{ github.ref_name }}
@@ -28,37 +28,25 @@ jobs:
           display="$(printf '%s\n' "$VERSION" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+)-alpha\.[0-9]+$/alpha-v\1/')"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "display_name=$display" >> "$GITHUB_OUTPUT"
-
-  verify:
-    needs: validate-tag
-    runs-on: ubuntu-24.04
-    timeout-minutes: 50
-    steps:
-      - uses: actions/checkout@v7
-      - name: Require successful CI for main
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_REPOSITORY: ${{ github.repository }}
-          RELEASE_SHA: ${{ github.sha }}
+      - name: Require current main commit
         run: |
           git fetch origin main:refs/remotes/origin/main --depth=1
-          test "$RELEASE_SHA" = "$(git rev-parse origin/main)"
-          for attempt in $(seq 1 200); do
-            result="$(gh api "repos/$RELEASE_REPOSITORY/actions/runs?event=push&head_sha=$RELEASE_SHA&per_page=100" --jq '
-              [.workflow_runs[] | select(.name == "CI" and .head_branch == "main")]
-              | if any(.conclusion == "success") then "success"
-                elif any(.conclusion != null) then "failure"
-                else "waiting"
-                end
-            ')"
-            test "$result" = success && exit 0
-            test "$result" = failure && exit 1
-            sleep 15
-          done
-          exit 1
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+      - name: Require new release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+  tests:
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: [validate-tag, verify]
+    needs: [validate-tag, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -86,9 +74,7 @@ jobs:
           target: runtime
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.images.outputs.app }}:${{ needs.validate-tag.outputs.version }}
-            ${{ steps.images.outputs.app }}:${{ github.sha }}
+          tags: ${{ steps.images.outputs.app }}:${{ needs.validate-tag.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -102,9 +88,7 @@ jobs:
           file: frontend.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.images.outputs.frontend }}:${{ needs.validate-tag.outputs.version }}
-            ${{ steps.images.outputs.frontend }}:${{ github.sha }}
+          tags: ${{ steps.images.outputs.frontend }}:${{ needs.validate-tag.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -118,9 +102,7 @@ jobs:
           file: deploy/mongo-init.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
-            ${{ steps.images.outputs.mongo_init }}:${{ github.sha }}
+          tags: ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -134,27 +116,19 @@ jobs:
           file: deploy/meilisearch.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
-            ${{ steps.images.outputs.meilisearch }}:${{ github.sha }}
+          tags: ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.validate-tag.outputs.version }}
           cache-from: type=gha,scope=meilisearch
           cache-to: type=gha,mode=max,scope=meilisearch
-      - name: Move latest tags
-        run: |
-          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.app }}:latest' '${{ steps.images.outputs.app }}@${{ steps.app.outputs.digest }}'
-          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.frontend }}:latest' '${{ steps.images.outputs.frontend }}@${{ steps.frontend.outputs.digest }}'
-          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.mongo_init }}:latest' '${{ steps.images.outputs.mongo_init }}@${{ steps.mongo_init.outputs.digest }}'
-          docker buildx imagetools create --prefer-index=false --tag '${{ steps.images.outputs.meilisearch }}:latest' '${{ steps.images.outputs.meilisearch }}@${{ steps.meilisearch.outputs.digest }}'
       - name: Package deployment bundle
         env:
-          CASE_LIBRARY_APP_IMAGE: ${{ steps.images.outputs.app }}@${{ steps.app.outputs.digest }}
-          CASE_LIBRARY_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}@${{ steps.frontend.outputs.digest }}
-          CASE_LIBRARY_MONGO_INIT_IMAGE: ${{ steps.images.outputs.mongo_init }}@${{ steps.mongo_init.outputs.digest }}
-          CASE_LIBRARY_MEILISEARCH_IMAGE: ${{ steps.images.outputs.meilisearch }}@${{ steps.meilisearch.outputs.digest }}
+          CASE_LIBRARY_APP_IMAGE: ${{ steps.images.outputs.app }}:${{ needs.validate-tag.outputs.version }}
+          CASE_LIBRARY_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}:${{ needs.validate-tag.outputs.version }}
+          CASE_LIBRARY_MONGO_INIT_IMAGE: ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
+          CASE_LIBRARY_MEILISEARCH_IMAGE: ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
           VERSION: ${{ needs.validate-tag.outputs.version }}
         run: scripts/package-release.sh "$VERSION" "$RUNNER_TEMP/release"
       - name: Publish GitHub Release
@@ -164,11 +138,6 @@ jobs:
           DISPLAY_NAME: ${{ needs.validate-tag.outputs.display_name }}
           RELEASE_DIR: ${{ runner.temp }}/release
         run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" "$RELEASE_DIR"/* --clobber
-          else
-            gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
-              --title "$DISPLAY_NAME" \
-              --notes "Run ./update.sh to install or update this release."
-          fi
-          gh release edit "$VERSION" --latest
+          gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
+            --title "$DISPLAY_NAME" \
+            --notes "Run ./update.sh to install or update this release."

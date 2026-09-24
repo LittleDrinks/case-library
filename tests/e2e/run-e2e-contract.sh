@@ -26,45 +26,36 @@ matching_line() {
 
 require_line 'clear_e2e_bucket() {'
 require_line "  $backend_e2e_command python tests/clear_e2e_bucket.py"
-require_line 'scripts/ci-images.sh ensure mongo-init production-config-check'
+require_line 'compose build mongo-init production-config-check'
 require_line 'compose up -d mongo1 mongo2 mongo3'
-require_line 'scripts/ci-images.sh ensure $ensure_services'
-require_line 'browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"'
-require_line 'backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"'
+require_line 'compose --profile e2e build $build_services'
+require_line 'browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"'
+require_line 'backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"'
 require_line 'compose up -d --wait mongo-init'
 require_line '  compose --profile e2e stop -t 1 e2e-frontend e2e-app e2e-search-worker'
 require_line '  compose --profile e2e stop -t 1 agent-e2e-app agent-e2e-loser agent-e2e-frontend agent-e2e-gateway agent-tracer-app agent-tracer-frontend agent-tracer-gateway'
 require_line '  drop_test_database "$database"'
-require_line '  compose --profile e2e up -d --wait e2e-app'
-require_line '  compose --profile e2e up -d --wait e2e-frontend'
+require_line '  compose --profile e2e up -d --wait e2e-app agent-e2e-app agent-e2e-loser agent-tracer-app'
+require_line '  compose --profile e2e up -d --wait $services'
 require_line 'preclean_e2e_resources'
 e2e_runner_lines="$(cat "$runner")"
-ensure_boot_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure mongo-init production-config-check' | cut -d: -f1)
+build_boot_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose build mongo-init production-config-check' | cut -d: -f1)
 mongo_bg_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d mongo1 mongo2 mongo3' | cut -d: -f1)
-ensure_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'scripts/ci-images.sh ensure $ensure_services' | cut -d: -f1)
+build_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose --profile e2e build $build_services' | cut -d: -f1)
 mongo_wait_line=$(printf '%s\n' "$e2e_runner_lines" | grep -nFx 'compose up -d --wait mongo-init' | cut -d: -f1)
-test "$ensure_boot_line" -lt "$mongo_bg_line" || {
-  echo "mongo-init and production-config-check images must exist before mongo up so mongo never triggers a local build" >&2
+test "$build_boot_line" -lt "$mongo_bg_line" || {
+  echo "Mongo boot image build must finish before mongo up" >&2
   exit 1
 }
-test "$mongo_bg_line" -lt "$ensure_line" || {
-  echo "Remaining image pulls must overlap the mongo replica set boot" >&2
+test "$mongo_bg_line" -lt "$build_line" || {
+  echo "Remaining image builds must overlap the mongo replica set boot" >&2
   exit 1
 }
-test "$ensure_line" -lt "$mongo_wait_line" || {
-  echo "Mongo health wait must come after image ensure" >&2
+test "$build_line" -lt "$mongo_wait_line" || {
+  echo "Mongo health wait must come after image builds" >&2
   exit 1
 }
-ci_images="$project_dir/scripts/ci-images.sh"
-test -x "$ci_images"
-grep -Fq 'compose config --format json' "$ci_images"
-grep -Fq 'ls-files -s -- "$src"' "$ci_images"
-grep -Fq 'docker pull --quiet "$ref"' "$ci_images"
-grep -Fq 'docker tag "$ref"' "$ci_images"
-if grep -Fq 'compose build $build_services' "$runner"; then
-  echo "E2E must pull fingerprint-tagged images instead of unconditional compose build" >&2
-  exit 1
-fi
+test ! -e "$project_dir/scripts/ci-images.sh"
 if grep -Fq 'docker build -f deploy/e2e.Dockerfile' "$runner"; then
   echo "Playwright image must be built once via compose service e2e" >&2
   exit 1
@@ -81,7 +72,7 @@ require_line 'run_backend_suite() {'
 require_line '  compose --profile e2e run --rm --no-deps backend-e2e'
 require_line 'run_browser_suite() {'
 require_line '  backend) run_backend_suite ;;'
-require_line '  browser) run_browser_suite ;;'
+require_line '  browser|generic|agent) run_browser_suite ;;'
 require_line '  original_status=$?'
 require_line '  test "$original_status" -ne 0 && exit "$original_status"'
 require_line '  exit "$cleanup_status"'
@@ -91,14 +82,16 @@ require_line "trap 'exit 143' TERM"
 grep -Fq 'E2E_SPEC ?= $(SPEC)' "$makefile"
 grep -q '^test-backend:' "$makefile"
 grep -q '^test-frontend:' "$makefile"
-grep -q '^ensure-backend-test:' "$makefile"
-grep -q '^ensure-frontend-test:' "$makefile"
-grep -Fq 'check-backend-function-lines: ensure-backend-test' "$makefile"
-grep -Fq 'check-frontend-function-lines: ensure-frontend-test' "$makefile"
+grep -Fq 'build backend-test' "$makefile"
+grep -Fq 'build frontend-test' "$makefile"
 ! grep -q 'run --build' "$makefile"
 grep -q '^backend-e2e:' "$makefile"
+grep -q '^e2e-generic:' "$makefile"
+grep -q '^e2e-agent:' "$makefile"
 grep -q '^e2e-spec:' "$makefile"
 make -C "$project_dir" -n e2e | grep -Eq '^scripts/run-e2e\.sh[[:space:]]*$'
+make -C "$project_dir" -n e2e-generic | grep -Fx 'scripts/run-e2e.sh --generic'
+make -C "$project_dir" -n e2e-agent | grep -Fx 'scripts/run-e2e.sh --agent'
 make -C "$project_dir" -n backend-e2e | grep -Fx 'scripts/run-e2e.sh --backend'
 make -C "$project_dir" -n e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js | \
   grep -Fx 'scripts/run-e2e.sh "frontend/tests/e2e/homepage.spec.js"'
@@ -112,6 +105,7 @@ test "$(printf '%s\n' "$stop_lines" | grep -c ' stop -t 1 ')" -eq 2
 
 backend_job="$(sed -n '/^  backend-e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
 browser_job="$(sed -n '/^  e2e:$/,/^  [a-z][a-z-]*:$/p' "$workflow")"
+agent_job="$(sed -n '/^  e2e-agent:$/,$p' "$workflow")"
 grep -Fqx 'concurrency:' "$workflow"
 grep -Fqx '  group: ${{ github.workflow }}-${{ github.ref }}' "$workflow"
 grep -Fqx '  cancel-in-progress: true' "$workflow"
@@ -119,8 +113,11 @@ printf '%s\n' "$backend_job" | grep -Fq '    name: Backend E2E'
 printf '%s\n' "$backend_job" | grep -Fq '        run: make backend-e2e'
 ! printf '%s\n' "$backend_job" | grep -Fq '    needs:'
 printf '%s\n' "$browser_job" | grep -Fq '    name: E2E'
-printf '%s\n' "$browser_job" | grep -Fq '        run: make e2e'
+printf '%s\n' "$browser_job" | grep -Fq '        run: make e2e-generic'
 ! printf '%s\n' "$browser_job" | grep -Fq '    needs:'
+printf '%s\n' "$agent_job" | grep -Fq '    name: Agent E2E'
+printf '%s\n' "$agent_job" | grep -Fq '        run: make e2e-agent'
+! printf '%s\n' "$agent_job" | grep -Fq '    needs:'
 grep -Fq 'outputDir: "test-results"' "$playwright_config"
 grep -Fq '["json", { outputFile: "test-results/report.json" }]' "$playwright_config"
 grep -Fq 'trace: "retain-on-failure"' "$playwright_config"
@@ -185,11 +182,14 @@ fi
 backend_suite="$(sed -n '/^run_backend_suite() {/,/^}/p' "$runner")"
 browser_suite="$(sed -n '/^run_browser_suite() {/,/^}/p' "$runner")"
 printf '%s\n' "$backend_suite" | grep -Fq '  clear_e2e_bucket'
-printf '%s\n' "$backend_suite" | grep -Fq '  start_agent_app'
+printf '%s\n' "$backend_suite" | grep -Fq '  compose --profile e2e up -d --wait e2e-app agent-e2e-app agent-e2e-loser agent-tracer-app'
 printf '%s\n' "$backend_suite" | grep -Fq '  compose --profile e2e run --rm --no-deps backend-e2e'
 printf '%s\n' "$browser_suite" | grep -Fq '  clear_e2e_bucket'
-printf '%s\n' "$browser_suite" | grep -Fq '  run_browser_tests'
-printf '%s\n' "$browser_suite" | grep -Fq '  test -n "$browser_spec" || run_agent_browser_tests'
+printf '%s\n' "$browser_suite" | grep -Fq '  test "$suite" = agent || run_browser_tests'
+printf '%s\n' "$browser_suite" | grep -Fq '    run_agent_browser_tests'
+printf '%s\n' "$browser_suite" | grep -Fq '    run_tracer_browser_tests'
+printf '%s\n' "$browser_suite" | grep -Fq '    generic) services="e2e-frontend"'
+printf '%s\n' "$browser_suite" | grep -Fq '    agent) services="agent-e2e-app agent-e2e-loser agent-tracer-app"'
 ! printf '%s\n' "$browser_suite" | grep -Fq 'backend-e2e'
 ! printf '%s\n' "$browser_suite" | grep -Fq 'drop_test_database'
 
@@ -212,6 +212,7 @@ remove_e2e_services() { mock_cleanup_step services; }
 remove_e2e_volume() { mock_cleanup_step volume; }
 remove_e2e_network() { mock_cleanup_step network; }
 verify_e2e_resources_absent() { mock_cleanup_step verify; }
+compose() { test "$1" = down && mock_cleanup_step down; }
 
 assert_cleanup_status() {
   original="$1"
@@ -226,5 +227,7 @@ assert_cleanup_status() {
 
 assert_cleanup_status 0 "" 0
 assert_cleanup_status 0 volume 1
+assert_cleanup_status 0 down 1
 assert_cleanup_status 7 "" 7
 assert_cleanup_status 7 volume 7
+assert_cleanup_status 7 down 7

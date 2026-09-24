@@ -11,12 +11,13 @@ cd "$project_dir"
 . "$project_dir/scripts/test-database.sh"
 
 suite=browser
-if test "${1:-}" = "--backend"; then
-  suite=backend
-  shift
-fi
+case "${1:-}" in
+  --backend) suite=backend; shift ;;
+  --generic) suite=generic; shift ;;
+  --agent) suite=agent; shift ;;
+esac
 test "$#" -le 1 || {
-  echo "Usage: scripts/run-e2e.sh [--backend | frontend/tests/e2e/<name>.spec.js]" >&2
+  echo "Usage: scripts/run-e2e.sh [--backend | --generic | --agent | frontend/tests/e2e/<name>.spec.js]" >&2
   exit 2
 }
 requested_spec="${1:-}"
@@ -40,11 +41,11 @@ resolve_spec() {
 
 browser_spec=""
 test -z "$requested_spec" || browser_spec="$(resolve_spec "$requested_spec")"
-browser_ensure_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e mongo-init production-config-check"
-backend_ensure_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch mongo-init production-config-check"
+browser_build_services="e2e-app e2e-frontend backend-e2e e2e-ai-provider e2e-meilisearch e2e"
+backend_build_services="e2e-app backend-e2e e2e-ai-provider e2e-meilisearch"
 case "$suite" in
-  backend) ensure_services="$backend_ensure_services" ;;
-  browser) ensure_services="$browser_ensure_services" ;;
+  backend) build_services="$backend_build_services" ;;
+  browser|generic|agent) build_services="$browser_build_services" ;;
 esac
 
 compose() {
@@ -104,10 +105,6 @@ preclean_e2e_resources() {
   verify_e2e_resources_absent
 }
 
-start_agent_app() {
-  compose --profile e2e up -d --force-recreate --no-deps --wait agent-e2e-app agent-e2e-loser agent-tracer-app
-}
-
 run_browser_tests() {
   if test "$browser_spec" = "tests/e2e/agent-sidebar.spec.js"; then run_sidebar_browser_tests; return; fi
   set -- compose --profile e2e run --rm --no-deps \
@@ -148,19 +145,24 @@ run_tracer_browser_tests() {
 }
 
 run_backend_suite() {
-  compose --profile e2e up -d --wait e2e-app
-  start_agent_app
+  compose --profile e2e up -d --wait e2e-app agent-e2e-app agent-e2e-loser agent-tracer-app
   clear_e2e_bucket
   compose --profile e2e run --rm --no-deps backend-e2e
 }
 
 run_browser_suite() {
-  compose --profile e2e up -d --wait e2e-frontend
-  start_agent_app
+  case "$suite" in
+    generic) services="e2e-frontend" ;;
+    agent) services="agent-e2e-app agent-e2e-loser agent-tracer-app" ;;
+    browser) services="e2e-frontend agent-e2e-app agent-e2e-loser agent-tracer-app" ;;
+  esac
+  compose --profile e2e up -d --wait $services
   clear_e2e_bucket
-  run_browser_tests
-  test -n "$browser_spec" || run_agent_browser_tests
-  test -n "$browser_spec" || run_tracer_browser_tests
+  test "$suite" = agent || run_browser_tests
+  if test "$suite" != generic && test -z "$browser_spec"; then
+    run_agent_browser_tests
+    run_tracer_browser_tests
+  fi
 }
 
 cleanup() {
@@ -174,6 +176,7 @@ cleanup() {
   remove_e2e_volume || cleanup_status=1
   remove_e2e_network || cleanup_status=1
   verify_e2e_resources_absent || cleanup_status=1
+  compose down || cleanup_status=1
   test "$original_status" -ne 0 && exit "$original_status"
   exit "$cleanup_status"
 }
@@ -182,12 +185,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 preclean_e2e_resources
-scripts/ci-images.sh ensure mongo-init production-config-check
+compose build mongo-init production-config-check
 compose up -d mongo1 mongo2 mongo3
-scripts/ci-images.sh ensure $ensure_services
+compose --profile e2e build $build_services
 compose up -d --wait mongo-init
 drop_and_verify_database
 case "$suite" in
   backend) run_backend_suite ;;
-  browser) run_browser_suite ;;
+  browser|generic|agent) run_browser_suite ;;
 esac

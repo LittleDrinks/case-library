@@ -32,7 +32,7 @@ do
   printf '%s\n' "$config" | grep -qx "  $service:"
 done
 for image in app frontend mongo-init meilisearch; do
-  printf '%s\n' "$config" | grep -q "ghcr.io/littledrinks/case-library-$image:latest"
+  printf '%s\n' "$config" | grep -q "ghcr.io/littledrinks/case-library-$image:example"
 done
 printf '%s\n' "$config" | grep -q 'service_completed_successfully'
 printf '%s\n' "$config" | grep -q 'source: mongo1_data'
@@ -41,10 +41,10 @@ printf '%s\n' "$config" | grep -q 'source: meili_data'
 ci="$project_dir/.github/workflows/ci.yml"
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -Fq 'workflow_call:' "$ci"
-for job in config backend-test frontend-test e2e; do
+for job in config backend-test frontend-test e2e e2e-agent; do
   grep -Fq "  $job:" "$ci"
 done
-for command in 'make config' 'make test-backend' 'make test-frontend' 'make e2e'; do
+for command in 'make config' 'make test-backend' 'make test-frontend' 'make e2e-generic' 'make e2e-agent'; do
   grep -Fq "$command" "$ci"
 done
 if grep -Eq 'docker compose .* (backend-test|frontend-test)' "$ci"; then
@@ -54,12 +54,12 @@ fi
 grep -Fq 'E2E_ARTIFACT_DIR:' "$ci"
 grep -Fq 'actions/upload-artifact@v4' "$ci"
 grep -Fq 'if: failure()' "$ci"
-grep -Fq 'actions: read' "$release_workflow"
 grep -Fq 'packages: write' "$release_workflow"
 grep -Fq 'git fetch origin main:refs/remotes/origin/main --depth=1' "$release_workflow"
-grep -Fq 'head_sha=$RELEASE_SHA' "$release_workflow"
-grep -Fq '.head_branch == "main"' "$release_workflow"
-grep -Fq '.conclusion == "success"' "$release_workflow"
+grep -Fq '    uses: ./.github/workflows/ci.yml' "$release_workflow"
+grep -Fq '    needs: [validate-tag, tests]' "$release_workflow"
+grep -Fq 'gh release view "$GITHUB_REF_NAME"' "$release_workflow"
+! grep -Fq -- '--clobber' "$release_workflow"
 grep -Fq -- '-alpha\.' "$release_workflow"
 grep -Fq 'alpha-v\1/' "$release_workflow"
 grep -Fq '"$DISPLAY_NAME"' "$release_workflow"
@@ -68,16 +68,15 @@ for image in app frontend mongo_init meilisearch; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
 done
 
-digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app@$digest" \
-CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend@$digest" \
-CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init@$digest" \
-CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch@$digest" \
+CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app:v2.0.0-alpha.1" \
+CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend:v2.0.0-alpha.1" \
+CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init:v2.0.0-alpha.1" \
+CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch:v2.0.0-alpha.1" \
   "$project_dir/scripts/package-release.sh" v2.0.0-alpha.1 "$temporary/release"
 
 test -f "$temporary/release/case-library-deploy.tar.gz"
 test -f "$temporary/release/update.sh"
-(cd "$temporary/release" && sha256sum -c checksums.txt)
+test ! -e "$temporary/release/checksums.txt"
 tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './compose.yaml'
 tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './images.env'
 tar -tzf "$temporary/release/case-library-deploy.tar.gz" | grep -qx './update.sh'
@@ -96,10 +95,7 @@ while test "$#" -gt 0; do
   esac
 done
 printf '%s\n' "$url" >> "$CURL_LOG"
-case "$url" in
-  *checksums.txt) cp "$RELEASE_FIXTURE/checksums.txt" "$output" ;;
-  *) cp "$RELEASE_FIXTURE/case-library-deploy.tar.gz" "$output" ;;
-esac
+cp "$RELEASE_FIXTURE/case-library-deploy.tar.gz" "$output"
 EOF
 cat > "$temporary/fake-bin/docker" <<'EOF'
 #!/bin/sh
@@ -121,6 +117,7 @@ assert_installed() {
   grep -Eq '^APP_SECRET=.{64}$' "$root/.env"
   grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$root/.env"
   grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v2.0.0-alpha.1" "$root/images.env"
+  grep -Fq "CASE_LIBRARY_APP_IMAGE=ghcr.io/littledrinks/case-library-app:v2.0.0-alpha.1" "$root/images.env"
   grep -Fq 'config --quiet' "$log"
   grep -Fq 'pull' "$log"
   startup_command='up -d --wait --force-recreate production-config-check mongo-init'
@@ -133,7 +130,7 @@ grep -Fq 'releases/latest/download/case-library-deploy.tar.gz' "$temporary/curl.
 install_run v2.0.0-alpha.1 "$temporary/server-selector"
 assert_installed "$temporary/server-selector" "$temporary/docker.log"
 grep -Fq 'releases/download/v2.0.0-alpha.1/case-library-deploy.tar.gz' "$temporary/curl.log"
-grep -Fq 'releases/download/v2.0.0-alpha.1/checksums.txt' "$temporary/curl.log"
+test "$(wc -l < "$temporary/curl.log")" -eq 1
 if grep -Fq 'releases/latest/download' "$temporary/curl.log"; then
   echo "Explicit selector must not use the latest download path" >&2
   exit 1

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { waitForCatalogSynced } from "./catalog-ready.js";
 
 const QUESTION = "资料区验收：请依据已选资料回答。";
+const MATERIAL_ID = "m-kcsz";
 
 async function login(page) {
   await page.goto("/#/login?redirect=/workbench/c-draft-1");
@@ -46,19 +46,6 @@ async function createCaseViaApi(page, title) {
   });
   expect(response.ok()).toBe(true);
   return response.json();
-}
-
-async function firstAvailableMaterial(request) {
-  await waitForCatalogSynced(request);
-  const rows = async () => {
-    const response = await request.get("/api/search", {
-      params: { q: "", kind: "material", pageSize: 50 },
-    });
-    const items = response.ok() ? (await response.json()).items : [];
-    return items.filter((row) => row.contentAvailable !== false);
-  };
-  await expect.poll(async () => (await rows()).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
-  return (await rows())[0];
 }
 
 async function currentRevision(page, caseId) {
@@ -119,11 +106,11 @@ async function reopenPanel(page) {
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
 }
 
-async function assertOrderedSourceParts(page, caseId, material) {
+async function assertOrderedSourceParts(page, caseId, materialId) {
   expect(await persistedPartTypes(page, caseId)).toEqual(["text", "data-source"]);
   expect(await userPartSequence(page)).toEqual(["text", "message-source"]);
   const chip = page.getByTestId("message-source");
-  const href = new RegExp(`/api/materials/${material.id}/content$`);
+  const href = new RegExp(`/api/materials/${materialId}/content$`);
   await expect(chip.locator("a")).toHaveAttribute("href", href);
 }
 
@@ -139,15 +126,14 @@ test("选中来源消息按 part 顺序渲染，卸载后重开撤下链接并�
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
-  const material = await firstAvailableMaterial(page.context().request);
   const created = await createCaseViaApi(page, `Source Proof ${Date.now()}`);
-  await mountMaterial(page, created.id, material.id);
+  await mountMaterial(page, created.id, MATERIAL_ID);
   await page.goto(`/#/workbench/${created.id}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
   await configureProviderChat(page);
   await openChat(page);
   await selectSingleSource(page);
   await sendQuestion(page, QUESTION);
-  await assertOrderedSourceParts(page, created.id, material);
-  await assertUnmountHidesLink(page, created.id, material.id);
+  await assertOrderedSourceParts(page, created.id, MATERIAL_ID);
+  await assertUnmountHidesLink(page, created.id, MATERIAL_ID);
 });

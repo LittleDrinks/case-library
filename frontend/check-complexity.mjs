@@ -5,6 +5,7 @@ import { parse } from "@babel/parser"
 import { parse as parseVue } from "@vue/compiler-sfc"
 
 const frontendRoot = new URL(".", import.meta.url).pathname
+const maxComplexity = 11
 const extensions = new Set([".js", ".mjs", ".vue"])
 const functionTypes = new Set([
   "ArrowFunctionExpression", "FunctionDeclaration", "FunctionExpression",
@@ -24,11 +25,27 @@ function functionName(node) {
   return node.type === "ArrowFunctionExpression" ? "<arrow>" : "<anonymous>"
 }
 
+function complexity(node) {
+  let score = 1
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return
+    if (value !== node && functionTypes.has(value.type)) return
+    if (["IfStatement", "ForStatement", "ForInStatement", "ForOfStatement",
+      "WhileStatement", "DoWhileStatement", "CatchClause", "ConditionalExpression",
+      "SwitchCase"].includes(value.type)) score += 1
+    for (const child of Object.values(value)) {
+      if (child?.type || Array.isArray(child)) visit(child)
+    }
+  }
+  visit(node.body)
+  return score
+}
+
 function visit(node, file, violations) {
   if (!node || typeof node !== "object") return
   if (functionTypes.has(node.type)) {
-    const lines = node.loc.end.line - node.loc.start.line + 1
-    if (lines >= 20) violations.push(`${file}:${node.loc.start.line} ${functionName(node)} (${lines} lines)`)
+    const score = complexity(node)
+    if (score > maxComplexity) violations.push(`${file}:${node.loc.start.line} ${functionName(node)} (${score})`)
   }
   for (const value of Object.values(node)) {
     if (Array.isArray(value)) value.forEach((child) => visit(child, file, violations))
@@ -64,8 +81,8 @@ function main() {
   const files = [ownFile, ...roots.flatMap(filesUnder).filter((file) => extensions.has(extname(file)))]
   const violations = []
   for (const file of files) inspect(file, violations)
-  if (!violations.length) return console.log("Function line check passed (maximum 19 lines).")
-  console.error(["Functions must be shorter than 20 lines:", ...violations].join("\n"))
+  if (!violations.length) return console.log(`Cyclomatic complexity check passed (maximum ${maxComplexity}).`)
+  console.error([`Functions must have cyclomatic complexity <= ${maxComplexity}:`, ...violations].join("\n"))
   process.exitCode = 1
 }
 

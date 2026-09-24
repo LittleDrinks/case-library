@@ -10,8 +10,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check:function-lines": "node check-function-lines.mjs",
-    "test": "npm run check:function-lines && vitest run",
+    "check:complexity": "node check-complexity.mjs",
+    "test": "npm run check:complexity && vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
