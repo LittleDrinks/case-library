@@ -1,5 +1,5 @@
 import { Extension, Mark, getMarkRange, mergeAttributes } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 export const citationNumbersKey = new PluginKey("citationNumbers");
@@ -34,6 +34,13 @@ export const CitationMark = Mark.create({
       "data-citation-source": `${sourceType}:${sourceId}`,
       class: "citation-mark",
     }), 0];
+  },
+  addKeyboardShortcuts() {
+    return {
+      ArrowRight: () => movePastCitationNumber(this.editor),
+      Backspace: () => removeCitationAtBoundary(this.editor, "Backspace"),
+      Delete: () => removeCitationAtBoundary(this.editor, "Delete"),
+    };
   },
 });
 
@@ -82,10 +89,71 @@ export function removeCitation(editor) {
   const range = selection.empty
     ? getMarkRange(selection.$from, state.schema.marks.citation)
     : { from: selection.from, to: selection.to };
+  return removeCitationRange(editor, range, selection.from);
+}
+
+function removeCitationAtBoundary(editor, key) {
+  const { state } = editor;
+  if (!editor.isEditable || !state.selection.empty) return false;
+  const range = key === "Backspace"
+    ? citationRangeBefore(state, state.selection.from)
+    : citationRangeAfter(state, state.selection.from);
+  const boundary = key === "Backspace" ? range?.to : range?.from;
+  if (!range || state.selection.from !== boundary) return false;
+  return removeCitationRange(editor, range, state.selection.from);
+}
+
+function movePastCitationNumber(editor) {
+  const { state, view } = editor;
+  const { selection } = state;
+  if (!editor.isEditable || !selection.empty) return false;
+  const previous = citationRangeBefore(state, selection.from);
+  const range = previous?.to === selection.from ? previous : citationRangeAfter(state, selection.from);
+  if (!range) return false;
+  const isAnchor = anchorOnly(state.doc, range);
+  if (!previous && (!isAnchor || range.from !== selection.from)) return false;
+  const before = isAnchor ? range.from : range.to;
+  if (selection.from !== before) return false;
+
+  const browserSelection = window.getSelection();
+  if (!browserSelection?.isCollapsed) return false;
+  const currentDomPosition = view.domAtPos(before, -1);
+  if (browserSelection?.anchorNode !== currentDomPosition.node
+    || browserSelection.anchorOffset !== currentDomPosition.offset) return false;
+
+  if (selection.from !== range.to) {
+    view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, range.to)));
+  }
+  const afterNumber = view.domAtPos(range.to, 1);
+  browserSelection.collapse(afterNumber.node, afterNumber.offset);
+  return true;
+}
+
+function citationRangeBefore(state, position) {
+  const type = state.schema.marks.citation;
+  return position > 0 && type
+    ? getMarkRange(state.doc.resolve(position - 1), type)
+    : null;
+}
+
+function citationRangeAfter(state, position) {
+  const type = state.schema.marks.citation;
+  return type ? getMarkRange(state.doc.resolve(position), type) : null;
+}
+
+function removeCitationRange(editor, range, restorePosition) {
+  if (!range) return false;
+  const { state } = editor;
   if (anchorOnly(state.doc, range)) {
     return editor.chain().focus().deleteRange(range).run();
   }
-  return editor.chain().focus().unsetMark("citation", { extendEmptyMarkRange: true }).run();
+  const { selection } = state;
+  if (!selection.empty) return editor.chain().focus().unsetMark("citation").run();
+  return editor.chain().focus()
+    .setTextSelection(range)
+    .unsetMark("citation")
+    .setTextSelection(restorePosition)
+    .run();
 }
 
 function citationMarkKey(mark) {
