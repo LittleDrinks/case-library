@@ -1,6 +1,6 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { AlertTriangle, ArrowLeft, Copy, LoaderCircle, RefreshCw } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from "vue";
+import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, RefreshCw, X } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
@@ -44,7 +44,7 @@ const loadError = ref("");
 const conflict = ref(null);
 const activeTool = ref("ai");
 const drawerOpen = ref(false);
-const actionNotice = ref("");
+const actionNotice = shallowRef(null);
 const busyAction = ref("");
 const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
@@ -66,6 +66,8 @@ const activeTabId = ref("draft");
 const overwriteTarget = ref(null);
 const historyRefreshKey = ref(0);
 const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
+const ACTION_NOTICE_DURATION = 3000;
+let actionNoticeTimeout = null;
 
 const activeVersion = computed(() => (
   openVersionTabs.value.find((tab) => tab.id === activeTabId.value) || null
@@ -422,13 +424,38 @@ const CITATION_NOTICES = {
   unpositioned: "请先在正文点击插入位置，或选中一段文字",
 };
 
+function clearActionNotice() {
+  if (actionNoticeTimeout !== null) {
+    clearTimeout(actionNoticeTimeout);
+    actionNoticeTimeout = null;
+  }
+  actionNotice.value = null;
+}
+
+function showActionNotice(message, type = "error") {
+  clearActionNotice();
+  const notice = { message, type };
+  actionNotice.value = notice;
+  if (type === "success") {
+    actionNoticeTimeout = setTimeout(() => {
+      if (actionNotice.value !== notice) return;
+      actionNotice.value = null;
+      actionNoticeTimeout = null;
+    }, ACTION_NOTICE_DURATION);
+  }
+}
+
 function insertSourceCitation(row) {
   const status = onDraftTab.value
     ? (canvasEditor.value?.insertCitation(row) ?? "unpositioned")
     : "readonly";
-  actionNotice.value = CITATION_NOTICES[status] ?? (status === "linked"
+  if (CITATION_NOTICES[status]) {
+    showActionNotice(CITATION_NOTICES[status]);
+    return;
+  }
+  showActionNotice(status === "linked"
     ? `已将选区关联引用〔${row.number}〕`
-    : `已插入引用〔${row.number}〕`);
+    : `已插入引用〔${row.number}〕`, "success");
 }
 
 function changeTags(next) {
@@ -468,7 +495,7 @@ function selectTool(tool) {
 async function prepareLifecycle(command) {
   if (command !== "submit") return true;
   if (await flushAutosave()) return true;
-  actionNotice.value = "正文尚未保存，未执行提交。";
+  showActionNotice("正文尚未保存，未执行提交。");
   return false;
 }
 
@@ -576,7 +603,7 @@ function requestLifecycle(command) {
     void performLifecycle(command);
     return;
   }
-  actionNotice.value = "";
+  clearActionNotice();
   decisionCommand.value = command;
 }
 
@@ -589,7 +616,7 @@ function lifecycleBody(command, details) {
 
 async function performLifecycle(command, details = {}) {
   if (headerBusyAction.value) return false;
-  actionNotice.value = "";
+  clearActionNotice();
   busyAction.value = command;
   try {
     if (!await prepareLifecycle(command)) return false;
@@ -598,7 +625,7 @@ async function performLifecycle(command, details = {}) {
     applyCase(result.case);
     return true;
   } catch (error) {
-    actionNotice.value = error.message || "操作失败";
+    showActionNotice(error.message || "操作失败");
     if (error.status === 409) await refreshLifecycleState();
     return false;
   } finally {
@@ -619,7 +646,7 @@ async function confirmDecision(details) {
 }
 
 function cancelDecision() {
-  actionNotice.value = "";
+  clearActionNotice();
   decisionCommand.value = "";
 }
 
@@ -655,7 +682,7 @@ function refreshVersionHistory() {
 
 function requestOverwrite() {
   if (headerBusyAction.value || !activeVersion.value || !overwriteAllowed.value) return;
-  actionNotice.value = "";
+  clearActionNotice();
   overwriteTarget.value = activeVersion.value;
 }
 
@@ -665,7 +692,7 @@ function cancelOverwrite() {
 
 async function overwriteBaseline() {
   if (await flushAutosave()) return revision.value;
-  actionNotice.value = "正文尚未保存，未执行恢复。";
+  showActionNotice("正文尚未保存，未执行恢复。");
   return null;
 }
 
@@ -683,26 +710,26 @@ async function handleVersionCreated() {
     syncCaseRevision(await api.getCase(caseId()));
     refreshVersionHistory();
   } catch (error) {
-    actionNotice.value = error.message || "版本已保存，但案例状态刷新失败";
+    showActionNotice(error.message || "版本已保存，但案例状态刷新失败");
   }
 }
 
 function overwriteFailed(error) {
   overwriteTarget.value = null;
-  actionNotice.value = error.message || "恢复失败";
+  showActionNotice(error.message || "恢复失败");
   if (error.status === 409) void refreshLifecycleState();
 }
 
 async function copyVersion() {
   if (!activeVersion.value || !navigator.clipboard?.writeText) {
-    actionNotice.value = "当前环境不支持复制，请使用浏览器复制功能";
+    showActionNotice("当前环境不支持复制，请使用浏览器复制功能");
     return;
   }
   try {
     await navigator.clipboard.writeText(documentText(activeVersion.value.document));
-    actionNotice.value = `已复制${versionLabel(activeVersion.value)}正文`;
+    showActionNotice(`已复制${versionLabel(activeVersion.value)}正文`, "success");
   } catch {
-    actionNotice.value = "复制失败，请使用浏览器复制功能";
+    showActionNotice("复制失败，请使用浏览器复制功能");
   }
 }
 
@@ -732,9 +759,9 @@ function startDownload() {
 
 async function exportCase() {
   if (readerMode.value) { startDownload(); return; }
-  actionNotice.value = "";
+  clearActionNotice();
   if (!await flushAutosave()) {
-    actionNotice.value = "正文尚未保存，未生成导出文件。";
+    showActionNotice("正文尚未保存，未生成导出文件。");
     return;
   }
   startDownload();
@@ -751,6 +778,7 @@ onMounted(() => {
   loadTagCatalog();
 });
 onBeforeUnmount(() => {
+  clearActionNotice();
   if (!readerMode.value) crashDraft.flush();
   crashDraft.destroy();
   if (!readerMode.value) void autosave.flush();
@@ -783,7 +811,7 @@ onBeforeUnmount(() => {
       <ReviewDecisionDialog
         :command="decisionCommand"
         :busy="busyAction === decisionCommand"
-        :error="decisionCommand ? actionNotice : ''"
+        :error="decisionCommand && actionNotice?.type === 'error' ? actionNotice.message : ''"
         @cancel="cancelDecision"
         @confirm="confirmDecision"
       />
@@ -791,7 +819,7 @@ onBeforeUnmount(() => {
         :open="Boolean(overwriteTarget)"
         :version-label="overwriteTarget ? versionLabel(overwriteTarget) : ''"
         :busy="busyAction === 'overwrite'"
-        :error="overwriteTarget && busyAction === 'overwrite' ? actionNotice : ''"
+        :error="overwriteTarget && busyAction === 'overwrite' && actionNotice?.type === 'error' ? actionNotice.message : ''"
         @cancel="cancelOverwrite"
         @confirm="performOverwrite"
       />
@@ -800,8 +828,25 @@ onBeforeUnmount(() => {
         <span>案例已在其他页面更新，本页内容尚未保存。</span>
         <button type="button" @click="loadCase">重新载入</button>
       </div>
-      <div v-else-if="actionNotice" class="conflict-banner" role="alert"><AlertTriangle :size="17" />{{ actionNotice }}</div>
-      <div v-else-if="autosave.state.value === 'error'" class="conflict-banner" role="alert">
+      <div
+        v-if="actionNotice && !decisionCommand && !(overwriteTarget && busyAction === 'overwrite')"
+        class="action-notice"
+        :class="`action-notice-${actionNotice.type}`"
+        :role="actionNotice.type === 'success' ? 'status' : 'alert'"
+      >
+        <Check v-if="actionNotice.type === 'success'" :size="17" aria-hidden="true" />
+        <AlertTriangle v-else :size="17" aria-hidden="true" />
+        <span>{{ actionNotice.message }}</span>
+        <button
+          v-if="actionNotice.type === 'success'"
+          class="action-notice-close"
+          type="button"
+          aria-label="关闭成功提示"
+          title="关闭成功提示"
+          @click="clearActionNotice"
+        ><X :size="16" aria-hidden="true" /></button>
+      </div>
+      <div v-if="autosave.state.value === 'error'" class="conflict-banner" role="alert">
         <AlertTriangle :size="17" />自动保存失败，正在重试。
       </div>
       <div class="canvas-workspace" :class="{ 'outline-collapsed': outlineCollapsed }">

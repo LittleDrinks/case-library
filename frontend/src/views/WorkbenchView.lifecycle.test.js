@@ -5,6 +5,7 @@ import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
 import { useConversationSources } from "../composables/useConversationSources.js";
 import { api } from "../api.js";
+import { clearLocalDraft } from "../lib/localDraft.js";
 
 const AssistantRailProbe = {
   name: "AssistantRailProbe",
@@ -37,6 +38,29 @@ const VersionRailProbe = {
   },
   template: `<div data-testid="version-probe">
     <button data-testid="rail-open" type="button" @click="$emit('open-version', version)">打开版本</button>
+  </div>`,
+};
+
+const ActionNoticeRailProbe = {
+  name: "ActionNoticeRailProbe",
+  emits: ["open-version", "insert-citation"],
+  setup() {
+    return { version: versionFixture() };
+  },
+  template: `<div>
+    <button data-testid="notice-open-version" type="button" @click="$emit('open-version', version)">打开版本</button>
+    <button data-testid="notice-insert-citation" type="button" @click="$emit('insert-citation', { sourceType: 'case', id: 'src-1', number: 1 })">插入引用</button>
+  </div>`,
+};
+
+const ActionNoticeEditorProbe = {
+  name: "CanvasEditor",
+  emits: ["change"],
+  setup(_props, { expose }) {
+    expose({ insertCitation: () => "inserted" });
+  },
+  template: `<div class="canvas-editor">
+    <button data-testid="notice-edit" type="button" @click="$emit('change', { document: { type: 'doc', content: [] }, steps: [] })">编辑</button>
   </div>`,
 };
 
@@ -187,13 +211,22 @@ test("退回草稿展示最近审核意见", async () => {
 });
 
 test("提交校验失败展示服务端消息", async () => {
-  const wrapper = await renderCase();
-  api.lifecycleCase.mockRejectedValue(
-    Object.assign(new Error("正文不能为空；必填标签组未选择标签：学科"), { status: 422 }),
-  );
-  await wrapper.get('button[aria-label="提交审核"]').trigger("click");
-  await flushPromises();
-  expect(wrapper.text()).toContain("正文不能为空；必填标签组未选择标签：学科");
+  vi.useFakeTimers();
+  let wrapper;
+  try {
+    wrapper = await renderCase();
+    api.lifecycleCase.mockRejectedValue(
+      Object.assign(new Error("正文不能为空；必填标签组未选择标签：学科"), { status: 422 }),
+    );
+    await wrapper.get('button[aria-label="提交审核"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(wrapper.get('.action-notice[role="alert"]').text())
+      .toContain("正文不能为空；必填标签组未选择标签：学科");
+  } finally {
+    wrapper?.unmount();
+    vi.useRealTimers();
+  }
 });
 
 test("动作冲突后自动刷新服务端状态", async () => {
@@ -206,6 +239,65 @@ test("动作冲突后自动刷新服务端状态", async () => {
   await flushPromises();
   expect(api.getCase).toHaveBeenCalledTimes(2);
   expect(wrapper.find('button[aria-label="提交审核"]').exists()).toBe(true);
+  expect(wrapper.get('.action-notice[role="alert"]').text()).toContain("案例状态已变化");
+});
+
+test("复制与插入引用共用可关闭的成功提示，旧计时器不清除新提示", async () => {
+  vi.useFakeTimers();
+  let wrapper;
+  try {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    clearLocalDraft("user-1", "case-1");
+    api.getCase.mockResolvedValue(caseFixture({ lastReview: {
+      action: "reject", reasonType: "事实待核实", summary: "补充来源", versionNumber: 2,
+    } }));
+    api.saveCase.mockRejectedValue(Object.assign(new Error("revision conflict"), { status: 409 }));
+    wrapper = mount(WorkbenchView, {
+      global: { stubs: {
+        SiteHeader: true, CanvasEditor: ActionNoticeEditorProbe, OutlinePanel: true,
+        teleport: true, AssistantRail: ActionNoticeRailProbe,
+        RouterLink: { template: "<a><slot /></a>" },
+      } },
+    });
+    await flushPromises();
+    await wrapper.get('[data-testid="notice-edit"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(1000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('.conflict-banner[role="alert"]').text())
+      .toContain("案例已在其他页面更新");
+
+    await wrapper.get('[data-testid="notice-open-version"]').trigger("click");
+    await wrapper.get(".version-copy").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("冻结版本正文");
+    expect(wrapper.get('.action-notice[role="status"]').classes()).toContain("action-notice-success");
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await wrapper.get("button.draft-tab").trigger("click");
+    await wrapper.get('[data-testid="notice-insert-citation"]').trigger("click");
+    expect(wrapper.get('.action-notice[role="status"]').text()).toContain("已插入引用〔1〕");
+    await vi.advanceTimersByTimeAsync(1000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.action-notice[role="status"]').exists()).toBe(true);
+    await wrapper.get('[aria-label="关闭成功提示"]').trigger("click");
+    expect(wrapper.find(".action-notice").exists()).toBe(false);
+
+    await wrapper.get('[data-testid="notice-insert-citation"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(2999);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.action-notice[role="status"]').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".action-notice").exists()).toBe(false);
+    expect(wrapper.get('.conflict-banner[role="alert"]').text())
+      .toContain("案例已在其他页面更新");
+    expect(wrapper.get(".review-return-banner").text()).toContain("事实待核实");
+  } finally {
+    wrapper?.unmount();
+    clearLocalDraft("user-1", "case-1");
+    vi.useRealTimers();
+  }
 });
 
 test("审核模式下退回只需原因类型，不强制批注", async () => {
