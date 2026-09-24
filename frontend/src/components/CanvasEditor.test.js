@@ -57,16 +57,12 @@ function clearDomSelection() {
 }
 
 async function selectParagraph(wrapper, length = 4) {
-  // captureSelection 异步 emit；等待本轮新增的非空 selection 事件，避免 CI 调度竞态。
-  const emitted = () => wrapper.emitted("selection")?.filter((event) => event[0]) ?? [];
-  const known = emitted().length;
   const editor = wrapper.vm.editor;
   editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(
     editor.state.doc, 9, 9 + length,
   )));
   selectDomRange(wrapper.get(".canvas-editor p").element.firstChild, length);
-  await wrapper.vm.recaptureSelection();
-  await vi.waitUntil(() => emitted().length > known, { interval: 20 });
+  wrapper.vm.recaptureSelection();
   await nextTick();
 }
 
@@ -121,7 +117,6 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   await selectParagraph(wrapper);
   const captured = wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0];
   expect(captured).toMatchObject({ quote: "案例原文", revision: 3, from: 9, to: 13 });
-  expect(captured.quoteHash).toHaveLength(64);
   expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
 });
 
@@ -423,122 +418,6 @@ it("相同 quote 的不同 DOM 位置不会被当作当前编辑器选区", asyn
   expect(globalThis.getSelection().toString()).toBe("案例原文");
   expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
 });
-// 启动一次悬挂中的摘要捕获，再把选区收起为光标（观察路径）。
-async function suspendDigestAndCollapse(wrapper, pending) {
-  const editor = wrapper.vm.editor;
-  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 13)));
-  void wrapper.vm.recaptureSelection();
-  await vi.waitUntil(() => pending.length > 0, { interval: 10 });
-  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9)));
-  await wrapper.vm.recaptureSelection();
-}
-
-it("悬挂的选区摘要完成时不得写回已被收起的选区", async () => {
-  const { wrapper } = await setup({ annotatable: true });
-  const pending = [];
-  vi.stubGlobal("crypto", { subtle: { digest: () => new Promise((resolve) => pending.push(resolve)) } });
-  try {
-    await suspendDigestAndCollapse(wrapper, pending);
-    const domLength = globalThis.getSelection().rangeCount;
-    pending.forEach((resolve) => resolve(new Uint8Array(32).buffer));
-    await nextTick();
-    await nextTick();
-    expect(globalThis.getSelection().rangeCount).toBe(domLength);
-    expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
-
-async function startDelayedSelection(wrapper, digestResolvers) {
-  await framesSettled();
-  const editor = wrapper.vm.editor;
-  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
-  selectDomRange(wrapper.get(".canvas-editor p").element.firstChild, 3, 0, false);
-  void wrapper.vm.recaptureSelection();
-  await vi.waitUntil(() => digestResolvers.length > 0, { interval: 10 });
-}
-
-function finishDelayedSelection(digestResolvers) {
-  digestResolvers.splice(0).forEach((resolve) => resolve(new Uint8Array(32).buffer));
-}
-
-function stubQuoteDigests(pending) {
-  vi.stubGlobal("crypto", {
-    subtle: {
-      digest: (_algorithm, bytes) => new Promise((resolve) => pending.push({
-        quote: new TextDecoder().decode(bytes), resolve,
-      })),
-    },
-  });
-}
-
-function startOldSelection(wrapper, paragraph, pending) {
-  selectDomRange(paragraph.firstChild, 4, 0, false);
-  void wrapper.vm.recaptureSelection();
-  const digest = pending.find(({ quote }) => quote === "案例原文");
-  expect(digest).toBeDefined();
-  return digest;
-}
-
-async function invalidateOldSelection(wrapper, editor, paragraph, digest) {
-  selectDomRange(paragraph.firstChild, 3, 0, false);
-  expect(globalThis.getSelection().toString()).toBe("案例原");
-  expect(editor.state.selection.from).toBe(9);
-  expect(editor.state.selection.to).toBe(13);
-  globalThis.document.dispatchEvent(new Event("selectionchange"));
-  expect(globalThis.getSelection().toString()).toBe("案例原");
-  digest.resolve(new Uint8Array(32).buffer);
-  await nextTick();
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
-}
-
-async function publishNewSelection(wrapper, editor, pending) {
-  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 12)));
-  const digests = pending.filter(({ quote }) => quote === "案例原");
-  expect(digests.length).toBeGreaterThan(0);
-  digests.forEach(({ resolve }) => resolve(new Uint8Array(32).buffer));
-  await Promise.resolve(); await nextTick(); await nextTick();
-  expect(wrapper.emitted("selection").at(-1)[0]).toMatchObject({ quote: "案例原" });
-  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
-}
-
-it("新选区摘要未完成时隐藏旧批注触发器，完成后才发布新锚点", async () => {
-  const { wrapper } = await setup({ annotatable: true, revision: 3 });
-  await selectParagraph(wrapper);
-  const digestResolvers = [];
-  vi.stubGlobal("crypto", { subtle: { digest: () => new Promise((resolve) => digestResolvers.push(resolve)) } });
-  try {
-    await startDelayedSelection(wrapper, digestResolvers);
-    await nextTick();
-    expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
-    finishDelayedSelection(digestResolvers);
-    await vi.waitUntil(() => (wrapper.emitted("selection") ?? [])
-      .some(([event]) => event?.quote === "案例原"), { interval: 10 });
-    expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
-
-it("原生新选区在编辑器同步前立即作废旧摘要，之后只发布新锚点", async () => {
-  const { wrapper } = await setup({ annotatable: true, revision: 3 });
-  globalThis.document.body.appendChild(wrapper.element);
-  await selectParagraph(wrapper);
-  await framesSettled();
-  const pending = [];
-  stubQuoteDigests(pending);
-  try {
-    const editor = wrapper.vm.editor;
-    const paragraph = wrapper.get(".canvas-editor p").element;
-    const oldDigest = startOldSelection(wrapper, paragraph, pending);
-    await invalidateOldSelection(wrapper, editor, paragraph, oldDigest);
-    await publishNewSelection(wrapper, editor, pending);
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
-
 it("正文插入由编辑器映射批注标记并上报原生 steps", async () => {
   const annotation = {
     id: "annotation-1", from: 9, to: 13, quote: "案例原文", revision: 3,

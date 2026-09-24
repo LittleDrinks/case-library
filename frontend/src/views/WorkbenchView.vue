@@ -564,7 +564,6 @@ function askAnnotationAi(annotation) {
     to: annotation.to,
     quote: annotation.quote,
     section: annotation.section,
-    quoteHash: annotation.quoteHash,
     revision: revision.value,
     sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
   };

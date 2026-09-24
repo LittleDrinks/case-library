@@ -81,10 +81,15 @@ def _document(marker: str) -> dict:
     return {"type": "doc", "content": [heading, paragraph]}
 
 
-def _annotation_body(submitted: dict) -> dict:
+def _annotation_body(case: dict) -> dict:
+    quote = case["title"]
+    start = len("一、教学说明") + 3
     return {
-        "quote": submitted["case"]["title"],
+        "quote": quote,
         "section": "一、教学说明",
+        "from": start,
+        "to": start + len(quote),
+        "revision": case["revision"],
         "content": "请补充可观察的评价标准。",
         "source": "admin",
     }
@@ -92,15 +97,15 @@ def _annotation_body(submitted: dict) -> dict:
 
 def annotate_and_reject(admin, csrf: str, submitted: dict) -> dict:
     case = transition(admin, csrf, submitted["case"], "start")["case"]
-    annotation = _create_annotation(admin, csrf, case, submitted)
+    annotation = _create_annotation(admin, csrf, case)
     returned = _reject_case(admin, csrf, case)
     assert returned["event"]["annotationIds"] == [annotation["id"]]
     return annotation
 
 
-def _create_annotation(admin, csrf: str, case: dict, submitted: dict) -> dict:
+def _create_annotation(admin, csrf: str, case: dict) -> dict:
     path = f"/api/cases/{case['id']}/annotations"
-    status, annotation = request(admin, "POST", path, _annotation_body(submitted), csrf)
+    status, annotation = request(admin, "POST", path, _annotation_body(case), csrf)
     assert status == 201
     return annotation
 

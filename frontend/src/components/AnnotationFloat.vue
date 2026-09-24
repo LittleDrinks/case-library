@@ -77,7 +77,6 @@ function payload() {
     from: props.draft.from,
     to: props.draft.to,
     quote: props.draft.quote,
-    quoteHash: props.draft.quoteHash,
     section: props.draft.section,
     revision: props.draft.revision,
     content: content.value.trim(),

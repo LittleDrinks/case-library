@@ -46,6 +46,9 @@ def create_annotation(client: TestClient, admin: dict, case: dict) -> dict:
         json={
             "quote": "供应中断周期不明",
             "section": "情境设定与前提假设",
+            "from": 111,
+            "to": 119,
+            "revision": case["revision"],
             "content": "请明确对应的课程目标。",
             "source": "admin",
         },
@@ -61,6 +64,9 @@ def assert_annotation_shape(annotation: dict, case: dict, admin: dict) -> None:
         "versionId": case["submittedVersionId"],
         "quote": "供应中断周期不明",
         "section": "情境设定与前提假设",
+        "from": 111,
+        "to": 119,
+        "revision": case["revision"],
         "content": "请明确对应的课程目标。",
         "source": "admin",
         "status": "pending",
@@ -138,7 +144,7 @@ def test_author_resolves_thread_and_admin_reopens_it(client: TestClient) -> None
     ]
 
 
-def test_annotation_anchor_must_exist_in_the_submitted_section(
+def test_annotation_anchor_must_match_the_submitted_selection(
     client: TestClient,
 ) -> None:
     _author, admin, started = reviewing_case(client)
@@ -149,13 +155,32 @@ def test_annotation_anchor_must_exist_in_the_submitted_section(
         json={
             "quote": "这段文字不在冻结版本里",
             "section": "情境设定与前提假设",
+            "from": 111,
+            "to": 119,
+            "revision": case["revision"],
             "content": "无效锚点不能成为审核意见。",
             "source": "admin",
         },
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "批注选区不属于待审版本小节"
+    assert response.json()["detail"] == "批注选区已变化，请重新选择正文"
+
+
+def test_annotation_creation_rejects_missing_anchor(client: TestClient) -> None:
+    _author, admin, started = reviewing_case(client)
+    response = client.post(
+        f"/api/cases/{started['case']['id']}/annotations",
+        headers={"X-CSRF-Token": admin["csrfToken"]},
+        json={
+            "quote": "供应中断周期不明",
+            "section": "情境设定与前提假设",
+            "content": "无锚点批注不能写入。",
+            "source": "admin",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def reject_command(case: dict) -> dict:

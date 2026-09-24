@@ -595,7 +595,7 @@ test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
 
 async function openDraftFloat(wrapper, canvas) {
   canvas.vm.$emit("selection", {
-    from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+    from: 1, to: 3, quote: "正文", section: "正文", revision: 3,
   });
   canvas.vm.$emit("annotate");
   await flushPromises();
@@ -605,7 +605,7 @@ async function openDraftFloat(wrapper, canvas) {
 function emitAnnotationEntry(canvas, event) {
   if (event === "annotate") {
     canvas.vm.$emit("selection", {
-      from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文", revision: 3,
+      from: 1, to: 3, quote: "正文", section: "正文", revision: 3,
     });
   }
   canvas.vm.$emit(event, event === "annotation-click" ? "annotation-1" : undefined);
@@ -624,7 +624,7 @@ async function editOpenDraft(canvas, wrapper) {
 test("编辑后立即保存批注：dirty flush 后仍按映射锚点提交最新修订", async () => {
   api.createAnnotation.mockResolvedValue({
     id: "annotation-new", caseId: "case-1", from: 1, to: 3, quote: "正文",
-    quoteHash: "h", section: "正文", revision: 4, anchorState: "active",
+    section: "正文", revision: 4, anchorState: "active",
     status: "pending", content: "编辑后保存", source: "manual", createdBy: "user-1",
     createdAt: "2026-09-13T00:00:00Z", replies: [],
   });
@@ -641,7 +641,7 @@ test("编辑后立即保存批注：dirty flush 后仍按映射锚点提交最�
 
 function annotationThread(overrides = {}) {
   return {
-    id: "annotation-1", from: 1, to: 3, quote: "正文", quoteHash: "h", section: "正文",
+    id: "annotation-1", from: 1, to: 3, quote: "正文", section: "正文",
     revision: 3, anchorState: "active", status: "pending", content: "旧意见",
     createdBy: "user-1", replies: [], revisions: [], ...overrides,
   };

@@ -350,7 +350,7 @@ def _seed_real_annotation(database, marker: str) -> None:
     database.annotations.insert_one({
         "id": f"an-{marker}", "caseId": marker, "versionId": None,
         "quote": "目标正文段落", "section": "p", "content": "意见", "source": "manual",
-        "from": 1, "to": 7, "quoteHash": "h", "revision": 1,
+        "from": 1, "to": 7, "revision": 1,
         "status": "pending", "anchorState": "active", "replies": [],
         "createdBy": "u1",
     })

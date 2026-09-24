@@ -17,12 +17,12 @@ const caseRecord = {
 };
 const user = { id: "user-1", role: "user", csrfToken: "csrf" };
 const selection = {
-  from: 9, to: 13, quote: "案例原文", quoteHash: "h-1",
+  from: 9, to: 13, quote: "案例原文",
   section: "正文", revision: 4, sameBlock: true,
 };
 const annotation = {
   id: "annotation-1", caseId: "case-1", from: 9, to: 13, quote: "案例原文",
-  quoteHash: "h-1", section: "正文", revision: 4, anchorState: "active",
+  section: "正文", revision: 4, anchorState: "active",
   status: "pending", content: "请润色这句", source: "manual", createdBy: "user-1",
   createdAt: "2026-09-12T08:00:00Z", replies: [],
   revisions: [{
@@ -60,7 +60,7 @@ it("保存意见携带完整正式锚点且不触发任何AI请求", async () =>
   await save.trigger("click");
   await flushPromises();
   expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
-    from: 9, to: 13, quote: "案例原文", quoteHash: "h-1",
+    from: 9, to: 13, quote: "案例原文",
     section: "正文", revision: 4, content: "请润色这句", source: "manual",
   }), "csrf");
   expect(api.mergeAnnotation).not.toHaveBeenCalled();

@@ -5,7 +5,6 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
-import { hashQuote } from "../lib/annotationAnchor.js";
 import { CitationMark, createCitationNumbers, refreshCitationNumbers } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
 
@@ -25,7 +24,6 @@ const selection = ref(null);
 const cursorPlaced = ref(false);
 const triggerPosition = ref({ top: "0", left: "0" });
 let selectionBlocked = false;
-let selectionRequest = 0;
 let selectionFrame = 0;
 let annotationRefreshPending = false;
 let selectedAnnotation = null;
@@ -76,7 +74,6 @@ function positionTrigger(context) {
 function clearSelection() {
   cancelSelectionFrame();
   selectionBlocked = true;
-  selectionRequest += 1;
   selectedAnnotation = null;
   selection.value = null;
   triggerPosition.value = { top: "0", left: "0" };
@@ -97,12 +94,10 @@ function collapseEditorSelection() {
   ));
 }
 
-// 状态观察：原生选区变化先丢弃内部候选并使悬挂的异步捕获失效，不触碰 DOM 选区。
+// 状态观察：原生选区变化先丢弃内部候选，等待编辑器同步后再捕获，不触碰 DOM 选区。
 // selectionchange 可能早于编辑器 DOM→state 同步，此刻 state 仍是旧光标；
 // 若在此清 DOM 会抹掉用户正在建立的新选区（removeAllRanges 还会再触发 selectionchange）。
-// 但必须自增 request：否则悬挂的旧 hashQuote 完成后会把过期选区写回（绕过 null 观察）。
 function discardSelection(preserveWritingContext = false) {
-  selectionRequest += 1;
   if (!preserveWritingContext) selectedAnnotation = null;
   clearCapturedSelection(preserveWritingContext);
 }
@@ -139,15 +134,15 @@ function validDomSelection(activeEditor, range) {
     && quoteText(activeEditor.state.doc, range.from, range.to).trim();
 }
 
-function publishSelection(context, quoteHash) {
-  const captured = { ...context, revision: props.revision, quoteHash };
+function publishSelection(context) {
+  const captured = { ...context, revision: props.revision };
   selection.value = captured;
   emit("selection", captured);
   emit("writing-context", captured);
   positionTrigger(context);
 }
 
-async function captureSelection({ editor: activeEditor }) {
+function captureSelection({ editor: activeEditor }) {
   const context = currentContext(activeEditor);
   flushAnnotationRefresh(activeEditor);
   const preserveWritingContext = shouldPreserveAnnotation(activeEditor, context);
@@ -157,12 +152,9 @@ async function captureSelection({ editor: activeEditor }) {
   }
   cancelSelectionFrame();
   selectionBlocked = false;
-  const request = ++selectionRequest;
   if (!preserveWritingContext) selectedAnnotation = null;
   clearCapturedSelection(preserveWritingContext);
-  const quoteHash = await hashQuote(context.quote);
-  if (request !== selectionRequest || selectionBlocked) return;
-  publishSelection(context, quoteHash);
+  publishSelection(context);
 }
 
 function domSelectionRange(activeEditor = editor.value) {
@@ -198,10 +190,10 @@ function flushAnnotationRefresh(activeEditor = editor.value) {
   refreshAnnotationAnchors(activeEditor);
 }
 
-async function recaptureSelection() {
+function recaptureSelection() {
   if (!editor.value) return;
   selectionBlocked = false;
-  await captureSelection({ editor: editor.value });
+  captureSelection({ editor: editor.value });
 }
 
 function selectedAnnotationIsValid(activeEditor = editor.value) {
@@ -217,9 +209,8 @@ function invalidateSelectedAnnotation() {
   const activeEditor = editor.value;
   if (!selectedAnnotation || selectedAnnotationIsValid(activeEditor)) return;
   selectedAnnotation = null;
-  selectionRequest += 1;
   if (activeEditor && selectionIsCapturable(activeEditor, currentContext(activeEditor))) {
-    void recaptureSelection();
+    recaptureSelection();
     return;
   }
   discardSelection();
@@ -229,7 +220,7 @@ function scheduleSelectionCapture() {
   cancelSelectionFrame();
   selectionFrame = requestAnimationFrame(() => {
     selectionFrame = 0;
-    if (editorHasDomSelection()) void recaptureSelection();
+    if (editorHasDomSelection()) recaptureSelection();
   });
 }
 
@@ -271,12 +262,11 @@ function refreshRevisionSelection() {
   if (!domSelectionRange(activeEditor) || !selectionIsCapturable(activeEditor, context)) return false;
   const captured = selection.value;
   if (!captured || captured.from !== context.from || captured.to !== context.to
-    || captured.quote !== context.quote || !captured.quoteHash) {
-    void captureSelection({ editor: activeEditor });
+    || captured.quote !== context.quote) {
+    captureSelection({ editor: activeEditor });
     return true;
   }
-  selectionRequest += 1;
-  publishSelection(context, captured.quoteHash);
+  publishSelection(context);
   return true;
 }
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 
@@ -52,7 +50,6 @@ def create_annotation(client: TestClient, user: dict, case: dict, text: str) -> 
             "to": start + len(text),
             "quote": text,
             "section": HEADING,
-            "quoteHash": hashlib.sha256(text.encode()).hexdigest(),
             "revision": case["revision"],
             "content": "请补充评价依据。",
             "source": "manual",

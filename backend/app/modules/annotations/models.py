@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AnnotationSource = Literal["manual", "selfcheck", "ai", "admin"]
 AnnotationStatus = Literal["pending", "resolved"]
@@ -17,26 +17,15 @@ class AnnotationCreate(BaseModel):
     section: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=4000)
     source: AnnotationSource = "manual"
-    from_: int | None = Field(default=None, alias="from", ge=0)
-    to: int | None = Field(default=None, ge=0)
-    quoteHash: str | None = Field(
-        default=None,
-        alias="quoteHash",
-        validation_alias=AliasChoices("quoteHash", "hash"),
-        max_length=128,
-    )
-    revision: int | None = Field(default=None, ge=1)
+    from_: int = Field(alias="from", ge=0)
+    to: int = Field(ge=0)
+    revision: int = Field(ge=1)
 
     @model_validator(mode="after")
-    def validate_manual_anchor(self) -> "AnnotationCreate":
+    def validate_anchor(self) -> "AnnotationCreate":
         if not self.quote.strip():
             raise ValueError("批注引用不能为空")
-        anchor = (self.from_, self.to, self.quoteHash, self.revision)
-        if self.source == "manual" and any(value is None for value in anchor):
-            raise ValueError("手动批注必须提供当前正文锚点")
-        if any(value is not None for value in anchor) and any(value is None for value in anchor):
-            raise ValueError("批注锚点字段不完整")
-        if self.from_ is not None and self.to is not None and self.from_ >= self.to:
+        if self.from_ >= self.to:
             raise ValueError("批注锚点范围无效")
         return self
 
@@ -92,8 +81,7 @@ class AnnotationView(BaseModel):
     source: AnnotationSource
     from_: int | None = Field(default=None, alias="from", ge=0)
     to: int | None = Field(default=None, ge=0)
-    quoteHash: str | None = Field(default=None, alias="quoteHash")
-    revision: int | None = Field(default=None, ge=1)
+    revision: int = Field(ge=1)
     status: AnnotationStatus
     anchorState: AnchorState | None = None
     replies: list[AnnotationReplyView]

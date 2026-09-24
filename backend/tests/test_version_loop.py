@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 from app.modules.agent import prosemirror
@@ -84,7 +82,6 @@ def _draft_annotation(client, auth: dict, case: dict, quote: str, note: str) -> 
             "quote": quote, "section": HEADING, "content": note, "source": "manual",
             "revision": case["revision"],
             "from": 10, "to": 10 + len(quote.encode("utf-16-le")) // 2,
-            "quoteHash": hashlib.sha256(quote.encode()).hexdigest(),
         },
     )
     assert response.status_code == 201, response.json()
@@ -100,7 +97,8 @@ def _version_annotation(client, auth: dict, case: dict) -> dict:
         f"/api/cases/{case['id']}/annotations",
         headers={"X-CSRF-Token": admin["csrfToken"]},
         json={
-            "quote": HEADING, "section": HEADING,
+            "quote": HEADING, "section": HEADING, "from": 1,
+            "to": 1 + len(HEADING), "revision": started["case"]["revision"],
             "content": "历史版本批注", "source": "admin",
         },
     )

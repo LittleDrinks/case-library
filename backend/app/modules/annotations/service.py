@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,7 +10,6 @@ from pymongo.database import Database
 from app.modules.agent import prosemirror
 from app.modules.cases.service import CaseError, RevisionConflict, case_view
 
-ANCHOR_FIELDS = ("from", "to", "quoteHash", "revision")
 ACTIVE_ANCHOR = "active"
 CHANGED_ANCHOR = "changed"
 DELETED_ANCHOR = "deleted"
@@ -43,10 +41,7 @@ def _revision_view(annotation: dict, revision: dict, case_revision: int) -> dict
 def _view(annotation: dict, case_revision: int) -> dict:
     view = {key: value for key, value in annotation.items() if key != "_id"}
     view.pop("updatedAt", None)
-    if view.pop("_legacy", False):
-        for field in ANCHOR_FIELDS:
-            view.pop(field, None)
-    elif view.get("versionId") is None:
+    if view.get("versionId") is None:
         view.setdefault("anchorState", ACTIVE_ANCHOR)
     if "revisions" in view:
         view["revisions"] = [
@@ -144,14 +139,8 @@ def _validated_range_text(node: dict, start: int, lower: int, upper: int) -> str
         raise CaseError(409, "批注选区必须使用有效的正文位置") from error
 
 
-def _anchor_values(body: dict) -> tuple[int | None, int | None, str | None, int | None]:
-    return tuple(body.get(field) for field in ANCHOR_FIELDS)
-
-
 def _require_anchor(document: dict, body: dict) -> None:
-    start, end, quote_hash, revision = _anchor_values(body)
-    if None in (start, end, quote_hash, revision):
-        raise CaseError(409, "批注锚点字段不完整")
+    start, end = body["from"], body["to"]
     block = next((row for row in _text_blocks(document) if row["start"] < start <= row["end"] and row["start"] < end <= row["end"]), None)
     quote = body["quote"]
     if not block or end <= start:
@@ -159,8 +148,6 @@ def _require_anchor(document: dict, body: dict) -> None:
     actual = _validated_range_text(block["node"], block["start"], start, end)
     if block["section"] != body["section"].strip() or actual != quote:
         raise CaseError(409, "批注选区已变化，请重新选择正文")
-    if hashlib.sha256(quote.encode("utf-8")).hexdigest() != quote_hash:
-        raise CaseError(409, "批注引用校验失败，请重新选择正文")
 
 
 def _mapping_for_change(document: dict, updated: dict, steps: list[dict] | None):
@@ -312,23 +299,6 @@ def reconcile_document_annotations(
     )
 
 
-def _section_texts(document: dict) -> dict[str, str]:
-    sections, current = {}, ""
-    for node in document.get("content", []):
-        if node.get("type") == "heading" and node.get("attrs", {}).get("level") in {1, 2}:
-            current = _node_text(node).strip()
-            sections[current] = current
-        elif current:
-            sections[current] += _node_text(node)
-    return sections
-
-
-def _require_legacy_anchor(version: dict, body: dict) -> None:
-    section_text = _section_texts(version["document"]).get(body["section"], "")
-    if body["quote"].strip() not in section_text:
-        raise CaseError(409, "批注选区不属于待审版本小节")
-
-
 def _target_document(database, case: dict, body: dict, user: dict, session):
     if body["source"] == "admin":
         if user["role"] != "admin":
@@ -371,17 +341,11 @@ def _annotation(case: dict, body: dict, user: dict, version_id: str | None) -> d
 def _create_in_transaction(database, case_id: str, body: dict, user: dict, session) -> dict:
     case = _case(database, case_id, user, session)
     document, version_id = _target_document(database, case, body, user, session)
-    legacy = body.get("revision") is None
-    if not legacy and body["revision"] != case["revision"]:
+    if body["revision"] != case["revision"]:
         raise RevisionConflict(case["revision"])
-    if legacy:
-        _require_legacy_anchor({"document": document}, body)
-    else:
-        _require_anchor(document, body)
+    _require_anchor(document, body)
     _touch_case(database, case, session)
     annotation = _annotation(case, body, user, version_id)
-    if legacy:
-        annotation["_legacy"] = True
     database.annotations.insert_one(annotation, session=session)
     return _view(annotation, case["revision"])
 

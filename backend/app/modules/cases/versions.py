@@ -23,7 +23,7 @@ FORMAL_VERSION_KINDS = (
     "submission", AI_VERSION_KIND, MANUAL_VERSION_KIND, RESTORE_VERSION_KIND,
 )
 RESTORED_ANNOTATION_FIELDS = (
-    "quote", "section", "content", "source", "from", "to", "quoteHash",
+    "quote", "section", "content", "source", "from", "to",
     "revision", "status", "replies", "revisions", "anchorState",
 )
 

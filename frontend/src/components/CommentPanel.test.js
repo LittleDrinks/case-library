@@ -18,7 +18,7 @@ const user = { id: "user-1", role: "user", csrfToken: "csrf" };
 const annotation = {
   id: "annotation-1", caseId: "case-1", quote: "选中的正文",
   section: "一、教学说明", content: "原始批注", source: "manual",
-  from: 9, to: 16, quoteHash: "hash", revision: 4, status: "pending", replies: [], createdBy: user.id,
+  from: 9, to: 16, revision: 4, status: "pending", replies: [], createdBy: user.id,
   createdAt: "2026-08-26T00:00:00Z",
 };
 const revisedAnnotation = {

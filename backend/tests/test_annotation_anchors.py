@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 from app.modules.agent import writes
@@ -58,7 +56,6 @@ def annotation_payload(case: dict, text: str, prior: tuple[str, ...] = ()) -> di
         "to": start + utf16_size(text),
         "quote": text,
         "section": HEADING,
-        "quoteHash": hashlib.sha256(text.encode()).hexdigest(),
         "revision": case["revision"],
         "content": "请补充教学依据。",
         "source": "manual",

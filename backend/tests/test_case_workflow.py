@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 from app.modules.agent import prosemirror
@@ -349,7 +347,6 @@ def _draft_annotation(client, owner: dict, case: dict) -> dict:
             "quote": quote, "section": OVERWRITE_HEADING, "content": "工作稿旧批注",
             "source": "manual", "revision": case["revision"],
             "from": start, "to": start + len(quote),
-            "quoteHash": hashlib.sha256(quote.encode()).hexdigest(),
         },
     )
     assert note.status_code == 201
@@ -362,6 +359,9 @@ def _version_annotation(client, admin: dict, started: dict) -> dict:
         headers={"X-CSRF-Token": admin["csrfToken"]},
         json={
             "quote": "工作稿正文", "section": OVERWRITE_HEADING,
+            "from": len(OVERWRITE_HEADING) + 3,
+            "to": len(OVERWRITE_HEADING) + 3 + len("工作稿正文"),
+            "revision": started["case"]["revision"],
             "content": "待审版本批注", "source": "admin",
         },
     )
@@ -539,6 +539,7 @@ def _review_annotation(client, admin, case):
         json={
             "quote": "供应中断周期不明",
             "section": "情境设定与前提假设",
+            "from": 111, "to": 119, "revision": case["revision"],
             "content": "请明确对应的课程目标。",
             "source": "admin",
         },

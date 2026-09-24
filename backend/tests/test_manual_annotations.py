@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 
@@ -41,7 +39,6 @@ def selection(text: str, prior_paragraphs: tuple[str, ...] = (), revision: int =
         "to": offset + len(text),
         "quote": text,
         "section": HEADING,
-        "quoteHash": hashlib.sha256(text.encode()).hexdigest(),
         "revision": revision,
     }
 
@@ -76,11 +73,10 @@ def create_manual(client: TestClient, user: dict, case: dict, text: str) -> dict
     return response.json()
 
 
-def assert_anchor(annotation: dict, user: dict, case: dict, text: str) -> None:
+def assert_anchor(annotation: dict, user: dict, case: dict) -> None:
     assert annotation["createdBy"] == user["user"]["id"]
     assert annotation["revision"] == case["revision"]
     assert annotation["from"] < annotation["to"]
-    assert annotation["quoteHash"] == hashlib.sha256(text.encode()).hexdigest()
     assert annotation["status"] == "pending"
 
 
@@ -112,7 +108,7 @@ def test_author_can_crud_manual_annotation_with_anchor_fields(client: TestClient
     user = login(client, "user", "user123")
     case = create_case(client, user, "供应中断周期不明")
     annotation = create_manual(client, user, case, "供应中断周期不明")
-    assert_anchor(annotation, user, case, "供应中断周期不明")
+    assert_anchor(annotation, user, case)
     edited = edit_annotation(client, user, case, annotation)
     assert edited.status_code == 200
     assert edited.json()["content"] == "请补充课程目标对应关系。"

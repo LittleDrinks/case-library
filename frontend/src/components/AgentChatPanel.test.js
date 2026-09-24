@@ -1103,7 +1103,7 @@ it("keeps retry on a newly failed turn with a server-assigned message id", async
 });
 
 function selectionContext() {
-  return { from: 9, to: 13, sameBlock: true, quote: "第二段原文", quoteHash: "quote-hash", revision: 3 };
+  return { from: 9, to: 13, sameBlock: true, quote: "第二段原文", revision: 3 };
 }
 
 it("hands annotation runs with their thread to the workbench so refresh survives panel switches", async () => {

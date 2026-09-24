@@ -326,7 +326,10 @@ def _submit_case(client: TestClient, author: dict, case: dict) -> dict:
         json={"command": "start", "revision": response.json()["case"]["revision"]},
     )
     assert started.status_code == 200, started.text
-    return {"versionId": response.json()["version"]["id"]}
+    return {
+        "versionId": response.json()["version"]["id"],
+        "revision": started.json()["case"]["revision"],
+    }
 
 
 def _admin_review_annotation(client: TestClient, case: dict, submission: dict) -> dict:
@@ -335,6 +338,8 @@ def _admin_review_annotation(client: TestClient, case: dict, submission: dict) -
         f"/api/cases/{case['id']}/annotations",
         headers=_csrf(admin),
         json={"quote": "目标正文", "section": HEADING,
+              "from": paragraph_start(), "to": paragraph_start() + len("目标正文"),
+              "revision": submission["revision"],
               "content": "审核意见", "source": "admin"},
     )
     assert response.status_code == 201, response.text
