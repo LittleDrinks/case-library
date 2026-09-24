@@ -118,6 +118,17 @@ async function renderCase(overrides) {
   return wrapper;
 }
 
+function renderActionNoticeWorkbench(overrides = {}) {
+  api.getCase.mockResolvedValue(caseFixture(overrides));
+  return mount(WorkbenchView, {
+    global: { stubs: {
+      SiteHeader: true, CanvasEditor: ActionNoticeEditorProbe, OutlinePanel: true,
+      teleport: true, AssistantRail: ActionNoticeRailProbe,
+      RouterLink: { template: "<a><slot /></a>" },
+    } },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   state.route.name = "workbench";
@@ -242,6 +253,40 @@ test("动作冲突后自动刷新服务端状态", async () => {
   expect(wrapper.get('.action-notice[role="alert"]').text()).toContain("案例状态已变化");
 });
 
+test("422错误在复制成功提示消退后仍可见", async () => {
+  vi.useFakeTimers();
+  let wrapper;
+  try {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    api.lifecycleCase.mockRejectedValueOnce(
+      Object.assign(new Error("正文不能为空；必填标签组未选择标签：学科"), { status: 422 }),
+    );
+    wrapper = renderActionNoticeWorkbench();
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="提交审核"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('.action-notice-error[role="alert"]').text())
+      .toContain("正文不能为空；必填标签组未选择标签：学科");
+
+    await wrapper.get('[data-testid="notice-open-version"]').trigger("click");
+    await wrapper.get(".version-copy").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("冻结版本正文");
+    expect(wrapper.get('.action-notice-success[role="status"]').text()).toContain("已复制");
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.action-notice-success[role="status"]').exists()).toBe(false);
+    expect(wrapper.get('.action-notice-error[role="alert"]').text())
+      .toContain("正文不能为空；必填标签组未选择标签：学科");
+  } finally {
+    wrapper?.unmount();
+    vi.useRealTimers();
+  }
+});
+
 test("复制与插入引用共用可关闭的成功提示，旧计时器不清除新提示", async () => {
   vi.useFakeTimers();
   let wrapper;
@@ -249,17 +294,10 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     clearLocalDraft("user-1", "case-1");
-    api.getCase.mockResolvedValue(caseFixture({ lastReview: {
-      action: "reject", reasonType: "事实待核实", summary: "补充来源", versionNumber: 2,
-    } }));
     api.saveCase.mockRejectedValue(Object.assign(new Error("revision conflict"), { status: 409 }));
-    wrapper = mount(WorkbenchView, {
-      global: { stubs: {
-        SiteHeader: true, CanvasEditor: ActionNoticeEditorProbe, OutlinePanel: true,
-        teleport: true, AssistantRail: ActionNoticeRailProbe,
-        RouterLink: { template: "<a><slot /></a>" },
-      } },
-    });
+    wrapper = renderActionNoticeWorkbench({ lastReview: {
+      action: "reject", reasonType: "事实待核实", summary: "补充来源", versionNumber: 2,
+    } });
     await flushPromises();
     await wrapper.get('[data-testid="notice-edit"]').trigger("click");
     await vi.advanceTimersByTimeAsync(1000);

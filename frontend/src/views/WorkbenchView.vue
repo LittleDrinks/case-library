@@ -45,6 +45,7 @@ const conflict = ref(null);
 const activeTool = ref("ai");
 const drawerOpen = ref(false);
 const actionNotice = shallowRef(null);
+const actionSuccessNotice = shallowRef(null);
 const busyAction = ref("");
 const contentMutationBusy = ref(false);
 const annotationSelection = ref(null);
@@ -424,25 +425,32 @@ const CITATION_NOTICES = {
   unpositioned: "请先在正文点击插入位置，或选中一段文字",
 };
 
-function clearActionNotice() {
+function clearActionSuccessNotice() {
   if (actionNoticeTimeout !== null) {
     clearTimeout(actionNoticeTimeout);
     actionNoticeTimeout = null;
   }
+  actionSuccessNotice.value = null;
+}
+
+function clearActionNotice() {
+  clearActionSuccessNotice();
   actionNotice.value = null;
 }
 
 function showActionNotice(message, type = "error") {
-  clearActionNotice();
+  clearActionSuccessNotice();
   const notice = { message, type };
-  actionNotice.value = notice;
   if (type === "success") {
+    actionSuccessNotice.value = notice;
     actionNoticeTimeout = setTimeout(() => {
-      if (actionNotice.value !== notice) return;
-      actionNotice.value = null;
+      if (actionSuccessNotice.value !== notice) return;
+      actionSuccessNotice.value = null;
       actionNoticeTimeout = null;
     }, ACTION_NOTICE_DURATION);
+    return;
   }
+  actionNotice.value = notice;
 }
 
 function insertSourceCitation(row) {
@@ -830,20 +838,25 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="actionNotice && !decisionCommand && !(overwriteTarget && busyAction === 'overwrite')"
-        class="action-notice"
-        :class="`action-notice-${actionNotice.type}`"
-        :role="actionNotice.type === 'success' ? 'status' : 'alert'"
+        class="action-notice action-notice-error"
+        role="alert"
       >
-        <Check v-if="actionNotice.type === 'success'" :size="17" aria-hidden="true" />
-        <AlertTriangle v-else :size="17" aria-hidden="true" />
+        <AlertTriangle :size="17" aria-hidden="true" />
         <span>{{ actionNotice.message }}</span>
+      </div>
+      <div
+        v-if="actionSuccessNotice"
+        class="action-notice action-notice-success"
+        role="status"
+      >
+        <Check :size="17" aria-hidden="true" />
+        <span>{{ actionSuccessNotice.message }}</span>
         <button
-          v-if="actionNotice.type === 'success'"
           class="action-notice-close"
           type="button"
           aria-label="关闭成功提示"
           title="关闭成功提示"
-          @click="clearActionNotice"
+          @click="clearActionSuccessNotice"
         ><X :size="16" aria-hidden="true" /></button>
       </div>
       <div v-if="autosave.state.value === 'error'" class="conflict-banner" role="alert">
