@@ -96,9 +96,3 @@ services:
         - type=gha,scope=search-worker
       cache_to:
         - type=gha,mode=max,scope=search-worker
-  searxng:
-    build:
-      cache_from:
-        - type=gha,scope=searxng
-      cache_to:
-        - type=gha,mode=max,scope=searxng
