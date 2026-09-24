@@ -509,7 +509,10 @@ def _snapshot_id(client: TestClient, auth: dict) -> str:
 
     database = client.app.state.database
     case = database.cases.find_one({"id": "c-draft-1"})
-    snapshot = record_snapshot(database, case, auth["user"], "pre_agent_write", None)
+    record_snapshot(database, case, auth["user"], "pre_agent_write", None)
+    snapshot = database.case_snapshots.find_one(
+        {"caseId": case["id"], "kind": "pre_agent_write"}, sort=[("_id", -1)]
+    )
     return snapshot["id"]
 
 

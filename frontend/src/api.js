@@ -180,9 +180,6 @@ export const api = {
   listSources: (id, versionId) => request(
     `${sourcesRoot(id)}${versionQuery(versionId)}`,
   ),
-  listCaseSources: (id, versionId) => request(
-    `${caseSourceRoot(id)}${versionQuery(versionId)}`,
-  ),
   addCaseSource: (id, payload, csrfToken) => request(
     caseSourceRoot(id), jsonOptions("POST", payload, csrfToken),
   ),

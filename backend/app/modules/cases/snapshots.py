@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pymongo import ReturnDocument
 from pymongo.database import Database
 
-from app.modules.attachments.service import attachment_view, snapshot_attachments
+from app.modules.attachments.service import snapshot_attachments
 from app.modules.case_materials.service import restore_materials, snapshot_materials
 from app.modules.case_sources.service import (
     restore_case_sources,
@@ -65,14 +65,6 @@ def _record(
     }
 
 
-def _clean(snapshot: dict) -> dict:
-    result = {key: value for key, value in snapshot.items() if key != "_id"}
-    result["attachments"] = [attachment_view(row) for row in snapshot["attachments"]]
-    result["materials"] = snapshot.get("materials", [])
-    result["caseSources"] = snapshot.get("caseSources", [])
-    return result
-
-
 def _lock_case(database, case: dict, user: dict, session) -> dict:
     query = {
         "id": case["id"],
@@ -99,7 +91,7 @@ def _raise_lock_conflict(database, case: dict, user: dict, session) -> None:
     raise RevisionConflict(current["revision"])
 
 
-def record_snapshot(database: Database, case: dict, user: dict, kind: str, session) -> dict:
+def record_snapshot(database: Database, case: dict, user: dict, kind: str, session) -> None:
     """在既有事务会话内留存一份批前快照，供写回类操作（如 Agent 接受）回滚。"""
     attachments = snapshot_attachments(database, case["id"], session)
     materials = snapshot_materials(database, case["id"], session)
@@ -107,7 +99,6 @@ def record_snapshot(database: Database, case: dict, user: dict, kind: str, sessi
     snapshot = _record(case, user, attachments, materials, case_sources, kind)
     snapshot["annotations"] = snapshot_annotations(database, case["id"], session)
     database.case_snapshots.insert_one(snapshot, session=session)
-    return _clean(snapshot)
 
 
 def _overwrite_target(database, case_id: str, target_id: str, session) -> dict:
