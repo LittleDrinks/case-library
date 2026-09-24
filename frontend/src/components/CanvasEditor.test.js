@@ -62,6 +62,25 @@ function pressEditorKey(editor, key) {
   return event;
 }
 
+function adjacentCitationDocument(firstSource, secondSource) {
+  const citation = (source) => ({
+    type: "citation",
+    attrs: { sourceType: source.sourceType, sourceId: source.id },
+  });
+  return {
+    type: "doc",
+    content: [{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Before " },
+        { type: "text", text: "first", marks: [{ type: "bold" }, citation(firstSource)] },
+        { type: "text", text: "second", marks: [{ type: "bold" }, citation(secondSource)] },
+        { type: "text", text: " after" },
+      ],
+    }],
+  };
+}
+
 async function selectParagraph(wrapper, length = 4) {
   const editor = wrapper.vm.editor;
   editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(
@@ -267,6 +286,56 @@ it.each([
     { type: "citation", attrs: { sourceType: source.sourceType, sourceId: source.id } },
   );
   expect(wrapper.props("sources")).toEqual([source]);
+});
+
+it.each([
+  ["甲", 13, "source-b"],
+  ["乙", 19, "source-a"],
+])("相邻粗体不同来源引用%s末尾 Backspace 只取消目标", async (_, position, remainingSourceId) => {
+  const sourceA = { sourceType: "case", id: "source-a", number: 1, title: "来源甲" };
+  const sourceB = { sourceType: "case", id: "source-b", number: 2, title: "来源乙" };
+  const sources = [sourceA, sourceB];
+  const { wrapper } = await setup({
+    annotatable: true,
+    document: adjacentCitationDocument(sourceA, sourceB),
+    sources,
+  });
+  const editor = wrapper.vm.editor;
+
+  editor.commands.setTextSelection(position);
+  const event = pressEditorKey(editor, "Backspace");
+  await nextTick();
+
+  expect(event.defaultPrevented).toBe(true);
+  expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
+  expect(editor.getJSON().content[0].content
+    .flatMap((node) => node.marks ?? [])
+    .filter((mark) => mark.type === "citation")
+    .map((mark) => mark.attrs.sourceId)).toEqual([remainingSourceId]);
+  expect(wrapper.props("sources")).toEqual(sources);
+});
+
+it("相邻粗体不同来源引用内部取消只移除当前来源标记", async () => {
+  const sourceA = { sourceType: "case", id: "source-a", number: 1, title: "来源甲" };
+  const sourceB = { sourceType: "case", id: "source-b", number: 2, title: "来源乙" };
+  const sources = [sourceA, sourceB];
+  const { wrapper } = await setup({
+    annotatable: true,
+    document: adjacentCitationDocument(sourceA, sourceB),
+    sources,
+  });
+  const editor = wrapper.vm.editor;
+
+  editor.commands.setTextSelection(15);
+  await framesSettled();
+  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+
+  expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
+  expect(editor.getJSON().content[0].content
+    .flatMap((node) => node.marks ?? [])
+    .filter((mark) => mark.type === "citation")
+    .map((mark) => mark.attrs.sourceId)).toEqual([sourceA.id]);
+  expect(wrapper.props("sources")).toEqual(sources);
 });
 
 it.each(["Backspace", "Delete"])("引用正文内部按 %s 不触发整段引用移除", async (key) => {

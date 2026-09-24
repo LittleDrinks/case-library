@@ -73,7 +73,7 @@ export function citationRangeAt(state) {
     });
     return range;
   }
-  return getMarkRange(selection.$from, type) || null;
+  return citationRangeAtPosition(state, selection.from);
 }
 
 function anchorOnly(document, range) {
@@ -87,7 +87,7 @@ export function removeCitation(editor) {
   if (!citationRangeAt(state)) return false;
   const { selection } = state;
   const range = selection.empty
-    ? getMarkRange(selection.$from, state.schema.marks.citation)
+    ? citationRangeAt(state)
     : { from: selection.from, to: selection.to };
   return removeCitationRange(editor, range, selection.from);
 }
@@ -130,15 +130,22 @@ function movePastCitationNumber(editor) {
 }
 
 function citationRangeBefore(state, position) {
-  const type = state.schema.marks.citation;
-  return position > 0 && type
-    ? getMarkRange(state.doc.resolve(position - 1), type)
+  return position > 0
+    ? citationRangeAtPosition(state, position - 1)
     : null;
 }
 
 function citationRangeAfter(state, position) {
+  return citationRangeAtPosition(state, position);
+}
+
+function citationRangeAtPosition(state, position) {
   const type = state.schema.marks.citation;
-  return type ? getMarkRange(state.doc.resolve(position), type) : null;
+  if (!type) return null;
+  const $position = state.doc.resolve(position);
+  const mark = $position.nodeAfter?.marks.find((item) => item.type === type)
+    || $position.nodeBefore?.marks.find((item) => item.type === type);
+  return mark ? getMarkRange($position, type, mark.attrs) || null : null;
 }
 
 function removeCitationRange(editor, range, restorePosition) {
