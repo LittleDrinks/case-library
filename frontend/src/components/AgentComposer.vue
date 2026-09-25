@@ -14,13 +14,17 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   threadId: { type: String, default: "" },
   writingContext: { type: Object, default: null },
+  revisionContext: { type: Object, default: null },
   promptRequest: { type: Object, default: null },
   skills: { type: Array, default: () => [] },
   catalog: { type: String, default: "loading" },
 });
-const emit = defineEmits(["send", "clear-selection", "reload-catalog", "prompt-inserted"]);
+const emit = defineEmits([
+  "send", "clear-selection", "clear-revision", "reload-catalog", "prompt-inserted",
+]);
 const { sources, remove } = useConversationSources();
 const sourcePicker = ref(null);
+const draftInput = ref(null);
 const draft = ref("");
 const chosenSkillId = ref("");
 const skillOpen = ref(false);
@@ -83,6 +87,12 @@ function submit() {
   skillOpen.value = false;
   skillQuery.value = "";
 }
+
+function focusDraft() {
+  draftInput.value?.focus();
+}
+
+defineExpose({ focusDraft });
 </script>
 
 <template>
@@ -95,7 +105,7 @@ function submit() {
         :read-only="readOnly"
         :disabled="busy"
       />
-      <span v-if="sources.length || selectionText" class="context-divider" />
+      <span v-if="sources.length || selectionText || revisionContext" class="context-divider" />
       <span v-for="source in sources.slice(0, 1)" :key="`${source.sourceType}:${source.id}`" class="context-chip" :title="source.title || source.id">
         <span>{{ source.title || source.id }}</span>
         <button type="button" :aria-label="`取消参考${source.title || source.id}`" @click="remove(source)"><X :size="11" /></button>
@@ -105,6 +115,10 @@ function submit() {
         <TextSelect :size="12" aria-hidden="true" /><span>正文选区 {{ selectionText.length }} 字</span>
         <button type="button" aria-label="移除正文选区" @click="emit('clear-selection')"><X :size="11" /></button>
       </span>
+      <span v-if="revisionContext" class="context-chip revision-context-chip" data-testid="composer-revision">
+        <TextSelect :size="12" aria-hidden="true" /><span>微调修订建议</span>
+        <button type="button" aria-label="移除微调上下文" @click="emit('clear-revision')"><X :size="11" /></button>
+      </span>
     </div>
     <div class="compose-box">
       <div v-if="chosenSkill" class="message-skill-block" data-testid="composer-skill-block">
@@ -113,6 +127,7 @@ function submit() {
         <button type="button" aria-label="移除 Skill 调用" @click="chosenSkillId = ''"><X :size="13" /></button>
       </div>
       <textarea
+        ref="draftInput"
         v-model="draft"
         aria-label="向 AI 提问"
         :placeholder="placeholder"

@@ -394,19 +394,22 @@ def _assert_ai_acceptance(database, case_id, first, duplicate) -> None:
     first_view = first.json()
     duplicate_view = duplicate.json()
     assert duplicate_view["artifact"]["status"] == "accepted"
+    assert first_view["applied"] is True and duplicate_view["applied"] is False
     version_id = first_view["artifact"]["versionId"]
     assert version_id and duplicate_view["artifact"]["versionId"] == version_id
     current = database.cases.find_one({"id": case_id}, {"_id": 0})
-    assert current["revision"] == 1
-    assert current["document"] == _document(*PARAGRAPHS)
+    assert current["revision"] == 2
+    assert current["document"]["content"][0] == _document(PARAGRAPHS[0])["content"][0]
+    assert REPLACEMENT in current["document"]["content"][1]["content"][0]["text"]
     version = database.case_versions.find_one({"id": version_id}, {"_id": 0})
     assert version["kind"] == "ai"
     assert REPLACEMENT in version["document"]["content"][1]["content"][0]["text"]
     assert database.case_versions.count_documents({"caseId": case_id, "kind": "ai"}) == 1
-    assert database.case_snapshots.count_documents({"caseId": case_id}) == 0
+    assert database.case_snapshots.count_documents({"caseId": case_id}) == 1
+    assert database.agent_writes.count_documents({"caseId": case_id}) == 1
 
 
-def test_accept_creates_ai_version_without_changing_draft(client: TestClient, tracer_case) -> None:
+def test_accept_applies_to_draft_and_creates_ai_version(client: TestClient, tracer_case) -> None:
     artifact = _assert_pending_artifact(client, tracer_case)
     first = _decide(client, tracer_case["id"], artifact["id"], "accepted")
     assert first.status_code == 200, first.text

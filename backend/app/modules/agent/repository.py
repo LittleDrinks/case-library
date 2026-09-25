@@ -434,7 +434,7 @@ class AgentRepository:
         resources: list[dict[str, str]] | None = None,
         reader_case_id: str | None = None, reader_version_id: str | None = None,
         review_case_id: str | None = None,
-        artifact: AgentArtifact | None = None,
+        artifacts: list[AgentArtifact] | None = None,
         write_record: dict | None = None,
     ) -> bool:
         return self._complete_tx(run_id, owner_id, lambda: _transaction(
@@ -442,7 +442,7 @@ class AgentRepository:
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
                 reader_case_id, reader_version_id, review_case_id,
-                artifact,
+                artifacts,
                 write_record,
             ),
         ))
@@ -457,8 +457,8 @@ class AgentRepository:
 
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
-                      review_case_id=None,
-                      artifact: AgentArtifact | None = None, write_record=None) -> bool:
+                      review_case_id=None, artifacts=None,
+                      write_record=None) -> bool:
         run = _run_view(
             self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session)
         )
@@ -471,7 +471,7 @@ class AgentRepository:
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
             )
         return self._complete_records(
-            run, assistant, session, owner_id, resources, artifact, write_record
+            run, assistant, session, owner_id, resources, artifacts, write_record
         )
 
     def _delivery_fences_pass(self, run, reader_case_id, reader_version_id,
@@ -495,19 +495,27 @@ class AgentRepository:
         )
 
     def _complete_records(
-        self, run, assistant, session, owner_id, resources, artifact=None, write_record=None
+        self, run, assistant, session, owner_id, resources, artifacts=None,
+        write_record=None,
     ) -> bool:
-        version = self._persist_version(run, artifact, write_record, session)
-        if artifact and artifact.kind == "document":
-            assistant = _link_version(assistant, artifact.id, version, self._version_detail(run))
+        proposals = artifacts or []
+        document_artifact = next(
+            (proposal for proposal in proposals if proposal.kind == "document"), None
+        )
+        version = self._persist_version(run, document_artifact, write_record, session)
+        if document_artifact:
+            assistant = _link_version(
+                assistant, document_artifact.id, version, self._version_detail(run)
+            )
         if write_record and write_record.get("scope") == "document":
             assistant = _link_write_version(
                 assistant, write_record["id"], version, self._version_detail(run)
             )
         assistant = self._completed_assistant(run, assistant, session)
         self._persist_assistant(run, assistant, session, owner_id)
-        if artifact is not None and artifact.kind != "document":
-            self._persist_artifact(run, artifact, session)
+        for proposal in proposals:
+            if proposal.kind != "document":
+                self._persist_artifact(run, proposal, session)
         self._finish_completed(run, assistant, session, owner_id, resources)
         return True
 

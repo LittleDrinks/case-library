@@ -520,7 +520,8 @@ def _publish(database, repository, run, artifact=None, write_record=None, parts=
         created_at=datetime.now(UTC),
     )
     return repository.complete_run(
-        run.id, message, resources=[], artifact=artifact, write_record=write_record
+        run.id, message, resources=[], artifacts=[artifact] if artifact else [],
+        write_record=write_record,
     )
 
 
@@ -615,7 +616,7 @@ def test_document_generation_has_no_candidate_card(client: TestClient) -> None:
 def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         database=database, case_id=case["id"], thread_id=run.thread_id,
-        run_id=run.id, user=user, proposed=None, wrote=wrote, evidence=[],
+        run_id=run.id, user=user, proposed_artifacts=[], wrote=wrote, evidence=[],
         annotation_id=None,
     )
 
@@ -669,7 +670,7 @@ def test_propose_document_tool_stages_pending_candidate(client: TestClient) -> N
     deps = _deps(database, case, run, auth["user"])
     output = asyncio.run(propose_document(_ctx(deps), DRAFT_BLOCKS, "依据资料初稿"))
     assert output["kind"] == "document"
-    assert deps.proposed is not None
+    assert deps.proposed_artifacts
     with pytest.raises(ModelRetry):
         asyncio.run(propose_document(_ctx(deps), DRAFT_BLOCKS, "再次提议"))
     assert database.agent_artifacts.count_documents({}) == 0

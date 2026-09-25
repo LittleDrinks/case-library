@@ -4,6 +4,7 @@ import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -152,12 +153,14 @@ async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
 }
 
-function mountPanel(overrides = {}) {
+function mountPanel(overrides = {}, revisionWorkbench = null) {
+  const provide = { [CONVERSATION_SOURCES_KEY]: conversationStore };
+  if (revisionWorkbench) provide[REVISION_WORKBENCH_KEY] = revisionWorkbench;
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
     global: {
       stubs: { RouterLink: true },
-      provide: { [CONVERSATION_SOURCES_KEY]: conversationStore },
+      provide,
     },
   });
 }
@@ -843,6 +846,16 @@ function tracerSnapshot() {
   };
 }
 
+function revisionSnapshot(status) {
+  const result = tracerSnapshot();
+  result.artifacts = tracerArtifacts(status).map((item) => ({ ...item, kind: "range" }));
+  if (status === "accepted") {
+    result.artifacts[0].writeId = "write-9";
+    result.writes = [{ id: "write-9", status: "written", scope: "selection" }];
+  }
+  return result;
+}
+
 it("renders the tracer skill load, sources and pending artifact card", async () => {
   api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
   const wrapper = mountPanel();
@@ -858,6 +871,107 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(artifact.text()).toContain("替换为：替换后的第二段");
   expect(artifact.text()).toContain("依据：科学家精神案例");
   expect(wrapper.text()).toContain("已生成单段修订候选");
+});
+
+it("previews and applies a located suggestion without opening its AI version", async () => {
+  let snapshots = 0;
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
+    snapshots++ < 3 ? revisionSnapshot("pending") : revisionSnapshot("accepted"),
+  )));
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+    apply: vi.fn().mockResolvedValue(true),
+  };
+  const result = {
+    artifact: { ...revisionSnapshot("accepted").artifacts[0], writeId: "write-9" },
+    case: { id: "case-1", revision: 2, document: { type: "doc", content: [] } },
+    applied: true,
+    steps: [{ stepType: "replace" }],
+    write: { id: "write-9", status: "written", revision: 2 },
+  };
+  api.agentDecide.mockResolvedValue(result);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({ id: "artifact-9" }));
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
+  expect(workbench.apply).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "artifact-9" }), result.steps,
+  );
+  expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ revision: 2 });
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+  expect(wrapper.get('[data-testid="agent-undo-revision"]').exists()).toBe(true);
+});
+
+it("clears a revision preview after keeping the original text", async () => {
+  const pending = revisionSnapshot("pending");
+  const rejected = revisionSnapshot("rejected");
+  api.agentThread.mockResolvedValueOnce(structuredClone(pending))
+    .mockResolvedValueOnce(structuredClone(pending))
+    .mockResolvedValue(structuredClone(rejected));
+  api.agentDecide.mockResolvedValue({ artifact: { status: "rejected" }, case: null });
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-reject"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "rejected", "csrf");
+  expect(workbench.clearPreview).toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("rejected");
+});
+
+it("keeps a superseded suggestion as message-local context for the next request", async () => {
+  let snapshots = 0;
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
+    snapshots++ < 3 ? revisionSnapshot("pending") : revisionSnapshot("superseded"),
+  )));
+  api.agentDecide.mockResolvedValue({
+    artifact: { ...revisionSnapshot("superseded").artifacts[0] },
+    case: { id: "case-1", revision: 1 }, applied: false,
+  });
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await flushPromises();
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "superseded", "csrf");
+  expect(wrapper.get('[data-testid="composer-revision"]').exists()).toBe(true);
+
+  await sendComposerMessage(wrapper, "请写得更简洁");
+  expect(postedParts(fetch)).toContainEqual({
+    type: "data-revision", data: { artifactId: "artifact-9" },
+  });
+  expect(postedParts(fetch)).toContainEqual({
+    type: "data-selection", data: { from: 9, to: 14, quote: "第二段原文" },
+  });
 });
 
 function tracerPartsSnapshot() {

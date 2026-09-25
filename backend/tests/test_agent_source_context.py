@@ -213,5 +213,6 @@ def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
     database.cases.update_one({"id": "c-source-22"}, {"$set": {"publicationStatus": "public"}})
     result = decide_artifact(database, "c-draft-1", thread.id, artifact.id, user, "accepted")
     assert result["artifact"].version_id
-    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 1
+    assert result["applied"] is True
+    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 2
     assert database.case_versions.find_one({"id": result["artifact"].version_id})["kind"] == "ai"

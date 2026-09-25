@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Step } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { CitationMark, createCitationNumbers, refreshCitationNumbers } from "../lib/citation.js";
@@ -27,6 +28,8 @@ let selectionBlocked = false;
 let selectionFrame = 0;
 let annotationRefreshPending = false;
 let selectedAnnotation = null;
+let applyingServerRevision = false;
+let revisionEnterTimer = null;
 
 function sectionName(activeEditor, position) {
   let section = "正文";
@@ -271,6 +274,7 @@ function refreshRevisionSelection() {
 }
 
 function updateEditor({ editor: activeEditor, transaction }) {
+  if (applyingServerRevision) return;
   selectionBlocked = true;
   discardSelection();
   emit("change", {
@@ -281,6 +285,7 @@ function updateEditor({ editor: activeEditor, transaction }) {
 }
 
 const annotationKey = new PluginKey("annotationAnchors");
+const revisionKey = new PluginKey("revisionSuggestions");
 
 function quoteText(doc, from, to) {
   return doc.textBetween(from, to, "\n", "\n");
@@ -334,6 +339,170 @@ function annotationDecorations(doc, annotations, pending = props.pendingAnchor, 
   return DecorationSet.create(doc, [
     ...annotationMarks(doc, annotations), ...pendingMarks(doc, pending, previous),
   ]);
+}
+
+function revisionDecorations(doc, state) {
+  const decorations = [];
+  const preview = state.preview;
+  if (preview && pendingAnchorRange(doc, preview)) {
+    decorations.push(Decoration.inline(preview.from, preview.to, {
+      class: preview.phase === "leaving"
+        ? "revision-preview-old leaving" : "revision-preview-old",
+    }, { revisionPreview: true }));
+    decorations.push(Decoration.widget(preview.to, () => {
+      const node = window.document.createElement("span");
+      node.className = "revision-preview-new";
+      node.textContent = preview.replacement;
+      return node;
+    }, { side: 1, key: `revision-preview-${preview.id}` }));
+  }
+  const entered = state.entered;
+  if (entered && entered.from < entered.to && entered.to <= doc.content.size) {
+    decorations.push(Decoration.inline(entered.from, entered.to, {
+      class: "revision-applied-new",
+    }, { revisionApplied: true }));
+  }
+  return DecorationSet.create(doc, decorations);
+}
+
+function applyRevisionDecorations(transaction, previous) {
+  const meta = transaction.getMeta(revisionKey);
+  if (meta) {
+    const next = {
+      preview: Object.hasOwn(meta, "preview") ? meta.preview : previous.preview,
+      entered: Object.hasOwn(meta, "entered") ? meta.entered : previous.entered,
+    };
+    return { ...next, decorations: revisionDecorations(transaction.doc, next) };
+  }
+  let preview = previous.preview;
+  let entered = previous.entered;
+  if (transaction.docChanged) {
+    if (preview) {
+      const from = transaction.mapping.map(preview.from, 1);
+      const to = transaction.mapping.map(preview.to, -1);
+      preview = from < to && quoteText(transaction.doc, from, to) === preview.quote
+        ? { ...preview, from, to } : null;
+    }
+    if (entered) {
+      const from = transaction.mapping.map(entered.from, -1);
+      const to = transaction.mapping.map(entered.to, 1);
+      entered = from < to ? { ...entered, from, to } : null;
+    }
+  }
+  const next = { preview, entered };
+  return { ...next, decorations: revisionDecorations(transaction.doc, next) };
+}
+
+const revisionExtension = Extension.create({
+  name: "revisionSuggestions",
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: revisionKey,
+      state: {
+        init: (_, state) => {
+          const value = { preview: null, entered: null };
+          return { ...value, decorations: revisionDecorations(state.doc, value) };
+        },
+        apply: applyRevisionDecorations,
+      },
+      props: { decorations: (state) => revisionKey.getState(state)?.decorations },
+    })];
+  },
+});
+
+function waitForScrollToSettle(container) {
+  if (!container) return Promise.resolve();
+  return new Promise((resolve) => {
+    let idleTimer;
+    const finish = () => {
+      window.clearTimeout(idleTimer);
+      window.clearTimeout(maxTimer);
+      container.removeEventListener("scroll", onScroll);
+      resolve();
+    };
+    const onScroll = () => {
+      window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(finish, 120);
+    };
+    const maxTimer = window.setTimeout(finish, 1800);
+    container.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  });
+}
+
+async function previewRevision(target) {
+  const activeEditor = editor.value;
+  if (!activeEditor || !props.editable || !pendingAnchorRange(activeEditor.state.doc, target)) return false;
+  activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview: null, entered: null }));
+  try {
+    let element = activeEditor.view.domAtPos(target.from).node;
+    if (element.nodeType !== Node.ELEMENT_NODE) element = element.parentElement;
+    const block = element?.closest("p, h1, h2, h3, li");
+    if (block?.scrollIntoView) {
+      const scrollComplete = waitForScrollToSettle(activeEditor.view.dom.closest(".canvas-column"));
+      block.scrollIntoView({ behavior: "smooth", block: "center" });
+      await scrollComplete;
+    }
+  } catch { /* Decoration still provides the preview if scrolling is unavailable. */ }
+  if (!isRevisionCurrent(target)) return false;
+  activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
+    preview: { ...target, phase: "preview" }, entered: null,
+  }));
+  return true;
+}
+
+function clearRevisionPreview() {
+  const activeEditor = editor.value;
+  if (!activeEditor) return;
+  activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
+    preview: null, entered: null,
+  }));
+}
+
+function isRevisionCurrent(target) {
+  const activeEditor = editor.value;
+  return Boolean(activeEditor && pendingAnchorRange(activeEditor.state.doc, target));
+}
+
+async function applyRevisionSteps(steps, target) {
+  const activeEditor = editor.value;
+  if (!activeEditor || !isRevisionCurrent(target) || !Array.isArray(steps) || !steps.length) {
+    return false;
+  }
+  const preview = { ...target, phase: "leaving" };
+  activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview }));
+  await new Promise((resolve) => window.setTimeout(resolve, 180));
+  if (!isRevisionCurrent(target)) {
+    clearRevisionPreview();
+    return false;
+  }
+  let transaction = activeEditor.state.tr;
+  try {
+    for (const step of steps) transaction = transaction.step(Step.fromJSON(activeEditor.state.schema, step));
+  } catch {
+    clearRevisionPreview();
+    return false;
+  }
+  const from = transaction.mapping.map(target.from, -1);
+  const to = transaction.mapping.map(target.to, 1);
+  if (quoteText(transaction.doc, from, to) !== target.replacement) {
+    clearRevisionPreview();
+    return false;
+  }
+  transaction.setMeta(revisionKey, { preview: null, entered: { from, to } });
+  clearSelection();
+  applyingServerRevision = true;
+  try {
+    activeEditor.view.dispatch(transaction);
+  } finally {
+    applyingServerRevision = false;
+  }
+  if (revisionEnterTimer) window.clearTimeout(revisionEnterTimer);
+  revisionEnterTimer = window.setTimeout(() => {
+    if (editor.value) editor.value.view.dispatch(editor.value.state.tr.setMeta(revisionKey, { entered: null }));
+    revisionEnterTimer = null;
+  }, 900);
+  return true;
 }
 
 function applyAnnotationAnchors(transaction, previous) {
@@ -423,7 +592,8 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
+  }), CitationMark, annotationExtension, revisionExtension,
+  createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: (context) => {
@@ -470,6 +640,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   cancelSelectionFrame();
+  if (revisionEnterTimer) window.clearTimeout(revisionEnterTimer);
   window.document.removeEventListener("selectionchange", handleSelectionChange);
 });
 
@@ -498,7 +669,10 @@ function selectAnnotation(annotation) {
   return true;
 }
 
-defineExpose({ selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
+defineExpose({
+  selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor,
+  previewRevision, clearRevisionPreview, isRevisionCurrent, applyRevisionSteps,
+});
 </script>
 
 <template>

@@ -673,3 +673,64 @@ it("挂起锚点失效或清空后移除临时高亮", async () => {
   await wrapper.setProps({ pendingAnchor: { ...pending, quote: "案例原文" } });
   expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
 });
+
+it("显示正文内修订差异并用原生 steps 应用，保留撤销历史", async () => {
+  const { wrapper } = await setup();
+  const editor = wrapper.vm.editor;
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
+  expect(wrapper.get(".revision-preview-new").text()).toBe("新正文");
+  const steps = editor.state.tr.insertText("新正文", 9, 13).steps.map((step) => step.toJSON());
+  expect(await wrapper.vm.applyRevisionSteps(steps, target)).toBe(true);
+  await nextTick();
+
+  expect(editor.state.doc.textBetween(9, 12)).toBe("新正文");
+  expect(wrapper.get(".revision-applied-new").text()).toBe("新正文");
+  expect(wrapper.emitted("change")).toBeUndefined();
+  expect(editor.commands.undo()).toBe(true);
+  expect(editor.state.doc.textBetween(9, 13)).toBe("案例原文");
+  expect(wrapper.emitted("change")).toHaveLength(1);
+});
+
+it("等正文平滑滚动结束后再展示修订预览", async () => {
+  const { wrapper } = await setup();
+  const scrollColumn = wrapper.element;
+  scrollColumn.classList.add("canvas-column");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn(() => {
+    window.setTimeout(() => {
+      scrollColumn.scrollTop = 24;
+      scrollColumn.dispatchEvent(new Event("scroll"));
+    }, 40);
+  });
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+
+  const preview = wrapper.vm.previewRevision(target);
+  await new Promise((resolve) => window.setTimeout(resolve, 70));
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  await preview;
+
+  expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
+});
+
+it("目标原文变化后清除差异并拒绝应用", async () => {
+  const { wrapper } = await setup();
+  const editor = wrapper.vm.editor;
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+  wrapper.vm.previewRevision(target);
+  editor.view.dispatch(editor.state.tr.insertText("已改", 9, 13));
+  await nextTick();
+
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  expect(wrapper.vm.isRevisionCurrent(target)).toBe(false);
+  expect(await wrapper.vm.applyRevisionSteps([], target)).toBe(false);
+});

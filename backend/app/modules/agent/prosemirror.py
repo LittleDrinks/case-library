@@ -118,6 +118,32 @@ def text_blocks(document: dict[str, Any]) -> list[dict[str, int]]:
     return blocks
 
 
+def positioned_text_blocks(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return each text block with its native range, text, and heading path."""
+    result: list[dict[str, Any]] = []
+    sections: dict[int, str] = {}
+
+    def visit(node, position, _parent, _index):
+        if node.type.name == "heading":
+            level = node.attrs.get("level", 1)
+            sections[level] = node.text_between(0, node.content.size)
+            for current in tuple(sections):
+                if current > level:
+                    del sections[current]
+        if node.is_textblock:
+            start, end = position + 1, position + 1 + node.content.size
+            result.append({
+                "from": start,
+                "to": end,
+                "type": node.type.name,
+                "section": " / ".join(sections.values()) or "正文",
+                "text": text_between(document, start, end),
+            })
+
+    _document(document).descendants(visit)
+    return result
+
+
 def text_between(document: dict[str, Any], from_pos: int, to_pos: int) -> str:
     """Read a native ProseMirror range, including hard breaks as newlines."""
     return _document(document).text_between(from_pos, to_pos, leaf_text="\n")

@@ -17,6 +17,7 @@ from app.modules.agent import artifacts, writes
 from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef, write_view
+from app.modules.agent.repository import claim_run_write_path
 from app.modules.agent.search import CorpusSearchParams
 from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.source_reader import read_source as read_domain_source
@@ -72,15 +73,22 @@ def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
 async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
-    """为教师选定的正文范围构建修订候选；随运行完成事务统一提交。"""
+    """按当前正文位置构建一条修订候选；运行成功后与助手消息一同提交。"""
     require_revision_reason(reason)
-    if ctx.deps.proposed is not None:
-        raise ModelRetry("本次运行已提议过修订候选")
+    if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
+        raise ModelRetry("批注讨论本轮只能提议一条选区修订")
+    if any(start < item.target.to_pos and item.target.from_pos < end
+           for item in ctx.deps.proposed_artifacts):
+        raise ModelRetry("同一轮的多个修订目标不能重叠")
+    if not ctx.deps.revision_path_claimed:
+        if not claim_run_write_path(ctx.deps.database, ctx.deps.run_id, "revision"):
+            raise ModelRetry("本次运行已选择另一条正文处理方式，不能再生成修订建议")
+        ctx.deps.revision_path_claimed = True
     try:
         artifact = _propose(ctx, start, end, replacement, reason)
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.proposed = artifact
+    ctx.deps.proposed_artifacts.append(artifact)
     return _artifact_view(artifact)
 
 
@@ -118,7 +126,7 @@ async def propose_document(
     """提议整篇独立只读 AI 版本；暂存运行结果，运行成功即落版本，不改当前教师稿。"""
     if ctx.deps.annotation_id:
         raise ModelRetry("批注讨论只能提议选区修订")
-    if ctx.deps.proposed is not None:
+    if ctx.deps.proposed_artifacts:
         raise ModelRetry("本次运行已提议过修订候选")
     return _propose_document(ctx, blocks, reason)
 
@@ -131,7 +139,7 @@ def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: st
         )
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.proposed = artifact
+    ctx.deps.proposed_artifacts.append(artifact)
     return {
         "kind": artifact.kind, "status": "pending",
         "blocks": len(artifact.blocks), "baseRevision": artifact.base_revision,

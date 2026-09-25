@@ -88,6 +88,7 @@ class RunPlan:
     selections: list[dict] = field(default_factory=list)
     annotation_id: str | None = None
     annotation: dict | None = None
+    revision_context: dict | None = None
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -350,12 +351,51 @@ def _run_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
 
 def _validate_plan(
     database, case: dict, plan: RunPlan, version_id: str | None = None,
-    user: dict | None = None,
+    user: dict | None = None, thread_id: str | None = None,
 ) -> RunPlan:
     plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
     plan.annotation_id = _annotation_from_parts(database, case, plan, version_id, user)
+    plan.revision_context = _revision_from_parts(
+        database, case, plan, thread_id, user,
+    )
     return plan
+
+
+def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
+    parts = [part for part in plan.parts if part.get("type") == "data-revision"]
+    if not parts:
+        return None
+    if (
+        len(parts) != 1 or plan.annotation_id or not user
+        or case["ownerId"] != user["id"] or not thread_id
+    ):
+        raise HTTPException(status_code=403, detail="修订上下文不可用")
+    data = parts[0].get("data")
+    artifact_id = data.get("artifactId") if isinstance(data, dict) else None
+    if not isinstance(artifact_id, str) or not artifact_id:
+        raise HTTPException(status_code=422, detail="修订上下文格式无效")
+    artifact = database.agent_artifacts.find_one({
+        "id": artifact_id, "caseId": case["id"], "threadId": thread_id,
+        "status": "superseded", "kind": "range", "annotationId": None,
+        "decidedBy": user["id"],
+    })
+    if not artifact:
+        raise HTTPException(status_code=409, detail="原修订建议已不可微调")
+    from app.modules.agent.source_reader import revalidate_sources
+
+    if not revalidate_sources(database, user, case["id"], artifact.get("sources") or []):
+        raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
+    if len(plan.selections) != 1 or any(
+        plan.selections[0].get(key) != artifact["target"].get(key)
+        for key in ("from", "to", "quote")
+    ):
+        raise HTTPException(status_code=409, detail="修订上下文与正文目标不一致")
+    return {
+        "quote": artifact["target"]["quote"],
+        "replacement": artifact["replacement"],
+        "reason": artifact.get("reason") or "",
+    }
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
@@ -581,7 +621,7 @@ def _plan_for(repository, thread, adapter, database, user, conversation):
     project = parts_projector(database, user, conversation.case["id"])
     return _validate_plan(
         database, conversation.case, _run_plan(repository, thread, adapter, project),
-        conversation.version_id, user,
+        conversation.version_id, user, thread.id,
     )
 
 
@@ -656,7 +696,20 @@ def _base_instructions(conversation: Conversation, refs, plan) -> str:
         conversation.case.get("title") or "未命名案例", refs,
         plan.selected, plan.selections, conversation.reader,
     )
-    return instructions + annotation_instructions(plan.annotation)
+    return instructions + annotation_instructions(plan.annotation) + revision_instructions(
+        plan.revision_context,
+    )
+
+
+def revision_instructions(context: dict | None) -> str:
+    if not context:
+        return ""
+    return (
+        "\n\n教师正在微调一条已停用的修订建议。原文范围仍由服务端锁定；"
+        "结合教师本条要求、上一版建议及其理由，重新给出一条可确认的修订建议。"
+        f"\n原文：{context['quote']}\n上一版建议：{context['replacement']}"
+        f"\n上一版理由：{context['reason']}"
+    )
 
 
 def _run_deps(request, database, settings, user, conversation, thread, run, refs, plan):

@@ -331,7 +331,7 @@ def _complete(context: RunContext) -> None:
     if context.result is None:
         _terminal(context, context.repository.fail_run)
         return
-    artifact = context.deps.proposed if context.deps else None
+    artifacts = context.deps.proposed_artifacts if context.deps else []
     reader = context.reader and not context.review
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
@@ -340,7 +340,7 @@ def _complete(context: RunContext) -> None:
         reader_case_id=context.case["id"] if reader else None,
         reader_version_id=context.case.get("versionId") if reader else None,
         review_case_id=context.case["id"] if context.review else None,
-        artifact=artifact,
+        artifacts=artifacts,
         write_record=context.deps.write_record if context.deps else None,
     ):
         context.lost = True

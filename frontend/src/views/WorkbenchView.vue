@@ -17,6 +17,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 import { documentOutline, documentText, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
@@ -61,6 +62,17 @@ let pendingSteps = [];
 let annotationRunPoll = null;
 const sources = ref([]);
 const canvasEditor = ref(null);
+provide(REVISION_WORKBENCH_KEY, {
+  flush: () => flushAutosave(),
+  preview: (artifact) => canvasEditor.value?.previewRevision?.({
+    ...artifact.target, id: artifact.id, replacement: artifact.replacement,
+  }) || false,
+  clearPreview: () => canvasEditor.value?.clearRevisionPreview?.(),
+  isCurrent: (artifact) => canvasEditor.value?.isRevisionCurrent?.(artifact.target) || false,
+  apply: (artifact, steps) => canvasEditor.value?.applyRevisionSteps?.(steps, {
+    ...artifact.target, replacement: artifact.replacement,
+  }) || false,
+});
 const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");

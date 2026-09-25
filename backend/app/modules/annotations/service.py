@@ -250,33 +250,37 @@ def _map_revision_targets(row: dict, anchor: dict, case_revision: int) -> list[d
     ]
 
 
-def _reconcile_pending_artifact(
+def _reconcile_unresolved_artifact(
     database, row: dict, document: dict, mapping, revision: int, session
 ) -> None:
+    status = row["status"]
     state, anchor = _mapped_anchor(document, row["target"], mapping)
     if state == ACTIVE_ANCHOR and anchor:
         target = {"from": anchor["from"], "to": anchor["to"], "quote": row["target"]["quote"]}
         database.agent_artifacts.update_one(
-            {"id": row["id"], "status": "pending"},
+            {"id": row["id"], "status": status},
             {"$set": {"baseRevision": revision, "target": target}},
             session=session,
         )
         return
     database.agent_artifacts.update_one(
-        {"id": row["id"], "status": "pending"},
+        {"id": row["id"], "status": status},
         {"$set": {"status": "expired"}},
         session=session,
     )
 
 
-def _reconcile_pending_artifacts(
+def _reconcile_unresolved_artifacts(
     database, case_id: str, document: dict, mapping, revision: int, session,
     exclude_artifact_id: str | None,
 ) -> None:
-    rows = database.agent_artifacts.find({"caseId": case_id, "status": "pending"}, session=session)
+    rows = database.agent_artifacts.find(
+        {"caseId": case_id, "status": {"$in": ["pending", "superseded"]}},
+        session=session,
+    )
     for row in rows:
         if row["id"] != exclude_artifact_id:
-            _reconcile_pending_artifact(database, row, document, mapping, revision, session)
+            _reconcile_unresolved_artifact(database, row, document, mapping, revision, session)
 
 
 def reconcile_document_annotations(
@@ -294,7 +298,7 @@ def reconcile_document_annotations(
             continue
         state, anchor = _mapped_anchor(updated, row, mapping)
         _set_anchor_state(database, row, state, anchor, revision, session)
-    _reconcile_pending_artifacts(
+    _reconcile_unresolved_artifacts(
         database, case_id, updated, mapping, revision, session, exclude_artifact_id,
     )
 

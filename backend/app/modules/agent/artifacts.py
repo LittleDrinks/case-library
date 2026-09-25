@@ -1,8 +1,7 @@
-"""Artifact 领域服务：Run 锁定选区与基线，校验后暂存提议，随运行完成统一提交。
+"""工作台修订建议：Run 锁定正文基线，校验后暂存提议并随完成统一提交。
 
-提议目标只能来自 Run 创建时锁定的教师非空选区；工具调用期只构建不落库，
-Artifact 与助手消息、tool.result、事件尾部在 Run 完成事务内同时对外可见，
-失败或取消不留下可决定卡片；接受前复验来源可读性，基线越过时展示 expired。
+工具可在完整正文位置索引中定位一个段落；教师选区存在时仍锁定该范围。
+工具调用期只构建不落库，Artifact 与助手消息在 Run 完成事务中一起发布。
 """
 
 from __future__ import annotations
@@ -16,9 +15,11 @@ from app.core.ids import new_id
 from app.modules.agent import blocks, prosemirror
 from app.modules.agent.models import (
     AgentArtifact,
+    AgentWrite,
     ArtifactDecision,
     ArtifactTarget,
     SourceRef,
+    write_view,
 )
 from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFoundError
 from app.modules.agent.repository import (
@@ -40,13 +41,10 @@ def propose_artifact(
     start: int, end: int, replacement: str, reason: str,
     sources: list[SourceRef], user: dict, annotation_id: str | None = None,
 ) -> AgentArtifact:
-    """校验 Run 锁定选区并构建 pending Artifact；不落库，随运行完成提交。
-
-    模型不得推断目标：提议必须与教师选定范围一致且基线未过期。
-    """
+    """校验当前正文范围并构建 pending Artifact；随运行完成事务统一提交。"""
     case = _current_case(database, case_id)
     _verify_writer(case, user)
-    target = _locked_target(database, run_id, case, start, end)
+    target = _revision_target(database, run_id, case, start, end)
     _ensure_no_artifact(database, run_id)
     return _artifact_document(
         case, thread_id, run_id, target, replacement, reason, sources, annotation_id
@@ -94,7 +92,7 @@ def _verify_run_baseline(database, run_id: str, case: dict) -> dict:
     if run.get("readOnly"):
         raise CaseError(403, "只读对话不能写入正文")
     if run.get("baseRevision") is None:
-        raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
+        raise CaseError(422, "本条消息没有正文基线，不能提议修订")
     if run["baseRevision"] != case["revision"]:
         raise CaseError(409, "正文已更新，修订目标已过期，请重新选择段落")
     return run
@@ -105,15 +103,21 @@ def _ensure_no_artifact(database, run_id: str) -> None:
         raise CaseError(409, "本次运行已提议过修订候选")
 
 
-def _locked_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
-    """模型提议必须命中 Run 锁定的教师选区。"""
+def _revision_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
     run = _verify_run_baseline(database, run_id, case)
     lock = run.get("target")
-    if not lock:
-        raise CaseError(422, "本条消息没有教师选定的正文段落，不能提议修订")
-    if (lock["from"], lock["to"]) != (start, end):
-        raise CaseError(422, "修订目标必须与教师选定的范围一致")
-    return ArtifactTarget(from_pos=lock["from"], to_pos=lock["to"], quote=lock["quote"])
+    if lock:
+        if (lock["from"], lock["to"]) != (start, end):
+            raise CaseError(422, "修订目标必须与教师选定的范围一致")
+        return ArtifactTarget(from_pos=lock["from"], to_pos=lock["to"], quote=lock["quote"])
+    try:
+        prosemirror.selection_block(case["document"], start, end)
+        quote = prosemirror.text_between(case["document"], start, end)
+    except (ParagraphChangedError, ParagraphNotFoundError) as error:
+        raise CaseError(422, "修订目标必须位于当前正文的同一段落") from error
+    if not quote.strip():
+        raise CaseError(422, "修订目标不能为空")
+    return ArtifactTarget(from_pos=start, to_pos=end, quote=quote)
 
 
 def _current_case(database: Database, case_id: str, session=None) -> dict:
@@ -150,13 +154,29 @@ def decide_artifact(
     事务内先校验 Thread 归属（案例+用户），再校验 Artifact 绑定该 Thread；
     幂等与冲突路径同样执行校验，伪造 threadId 时不产生任何变更或事件。
     """
-    artifact, case = transaction(
+    artifact, case, write, steps, applied = transaction(
         database,
         lambda session: _decide(
             database, case_id, thread_id, artifact_id, user, decision, session
         ),
     )
-    return {"artifact": expired_artifact_view(artifact, case.get("revision")), "case": case_view(case)}
+    result = {
+        "artifact": _visible_decision_artifact(database, artifact, case, user),
+        "case": case_view(case),
+        "applied": applied,
+    }
+    if write:
+        result["write"] = write_view(write)
+    if steps:
+        result["steps"] = steps
+    return result
+
+
+def _visible_decision_artifact(database, artifact, case, user):
+    from app.modules.agent.visibility import visible_artifact
+
+    current = expired_artifact_view(artifact, case.get("revision"))
+    return visible_artifact(database, current, user)
 
 
 def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
@@ -166,15 +186,26 @@ def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
     if artifact.status != "pending":
         if artifact.status != decision:
             raise CaseError(409, "修订候选已决定，不能改变决定")
-        return artifact, case
+        write = database.agent_writes.find_one(
+            {"artifactId": artifact.id}, session=session,
+        ) if artifact.status == "accepted" else None
+        return artifact, case, write, [], False
     _decidable_run(database, artifact, decision, session)
     _verify_writer(case, user)
     _decide_annotation_revision(database, artifact, user, decision, session)
-    if decision == "accepted":
+    write, steps = None, []
+    if decision in ("accepted", "superseded"):
         if not revalidate_sources(database, user, case_id, artifact.sources):
-            raise CaseError(409, "修订依据当前不可读，候选已过期")
-        case = _accept_candidate(database, case, artifact, user, session)
-    return _save_decision(database, artifact, user, decision, session), case
+            raise CaseError(409, "修订依据当前不可读，候选不能应用或微调")
+        if decision == "superseded":
+            _recheck_target(case, artifact)
+    if decision == "accepted":
+        case, write, steps = _accept_candidate(database, case, artifact, user, session)
+    artifact = _save_decision(
+        database, artifact, user, decision, session,
+        write["id"] if write else None,
+    )
+    return artifact, case, write, steps, bool(write)
 
 
 def _decide_annotation_revision(database, artifact, user, decision, session) -> None:
@@ -182,6 +213,8 @@ def _decide_annotation_revision(database, artifact, user, decision, session) -> 
         return
     if decision == "accepted":
         raise CaseError(409, "批注修订请从批注面板合并")
+    if decision == "superseded":
+        raise CaseError(409, "批注修订不支持从工作台微调")
     from app.modules.annotations.service import mark_ai_revision_decision
 
     mark_ai_revision_decision(database, artifact, user, decision, session)
@@ -222,9 +255,34 @@ def _verify_writer(case: dict, user: dict) -> None:
         raise CaseError(409, "案例当前不可编辑")
 
 
-def _accept_candidate(database, case, artifact, user, session) -> dict:
-    """普通候选独立成只读 AI 版本，不改当前教师稿或 revision。"""
-    return _candidate_ai_version(database, case, artifact, user, session)
+def _accept_candidate(database, case, artifact, user, session) -> tuple[dict, dict | None, list]:
+    """把当前段落候选写入教师稿，并为编辑器保留可撤销的 ProseMirror steps。"""
+    if artifact.kind == "document":
+        return _candidate_ai_version(database, case, artifact, user, session), None, []
+    if case["revision"] != artifact.base_revision:
+        raise CaseError(409, "正文已更新，修订候选已过期")
+    document, steps = _resolved_document(case, artifact)
+    from app.modules.cases.snapshots import record_snapshot
+
+    record_snapshot(database, case, user, "pre_agent_decision", session)
+    write = AgentWrite(
+        id=new_id("write"), case_id=case["id"], thread_id=artifact.thread_id,
+        run_id=artifact.run_id, artifact_id=artifact.id, scope="selection",
+        summary=artifact.reason, before_document=case["document"], document=document,
+        document_steps=steps, base_revision=case["revision"],
+        result_revision=case["revision"] + 1, created_by=user["id"], created_at=_now(),
+    ).model_dump(by_alias=True, mode="python")
+    updated = _commit_revision(database, case, user, artifact, write, steps, session)
+    database.agent_writes.insert_one(write, session=session)
+    _append_event(database, artifact.thread_id, "document.written", artifact.run_id,
+                  {"writeId": write["id"], "scope": "selection"}, session)
+    from app.modules.cases.versions import AI_VERSION_KIND, create_version
+
+    version = create_version(
+        database, updated, user, AI_VERSION_KIND, updated["title"], document, session,
+    )
+    _link_candidate_version(database, updated, artifact, version, session)
+    return updated, write, steps
 
 
 def _candidate_ai_version(database, case, artifact, user, session) -> dict:
@@ -241,9 +299,35 @@ def _candidate_ai_version(database, case, artifact, user, session) -> dict:
     return case
 
 
+def _commit_revision(database, case, user, artifact, write, steps, session):
+    from app.modules.annotations.service import (
+        document_mapping, reconcile_document_annotations,
+    )
+
+    document = write["document"]
+    mapping = document_mapping(case["document"], document, steps)
+    updated = database.cases.find_one_and_update(
+        {"id": case["id"], "ownerId": user["id"], "workflowStatus": "draft",
+         "revision": case["revision"]},
+        {"$set": {"document": document, "updatedAt": _now().isoformat()},
+         "$inc": {"revision": 1}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not updated:
+        raise CaseError(409, "正文已更新，修订候选已过期")
+    reconcile_document_annotations(
+        database, case["id"], case["document"], document,
+        updated["revision"], steps, session, mapping,
+        exclude_artifact_id=artifact.id,
+    )
+    return updated
+
+
 def _link_candidate_version(database, case, artifact, record, session) -> None:
     database.case_versions.update_one(
-        {"id": record["id"]}, {"$set": {"sourceRunId": artifact.run_id}}, session=session,
+        {"id": record["id"]}, {"$set": {
+            "sourceRunId": artifact.run_id, "sourceArtifactId": artifact.id,
+        }}, session=session,
     )
     database.agent_artifacts.update_one(
         {"id": artifact.id}, {"$set": {"versionId": record["id"]}}, session=session,
@@ -274,11 +358,15 @@ def _recheck_target(case: dict, artifact: AgentArtifact) -> None:
 
 
 def _save_decision(database, artifact: AgentArtifact, user: dict,
-                   decision: ArtifactDecision, session) -> AgentArtifact:
+                   decision: ArtifactDecision, session,
+                   write_id: str | None = None) -> AgentArtifact:
     now = _now()
+    changes = {"status": decision, "decidedBy": user["id"], "decidedAt": now}
+    if write_id:
+        changes["writeId"] = write_id
     row = database.agent_artifacts.find_one_and_update(
         {"id": artifact.id, "status": "pending"},
-        {"$set": {"status": decision, "decidedBy": user["id"], "decidedAt": now}},
+        {"$set": changes},
         return_document=ReturnDocument.AFTER, session=session,
     )
     if not row:

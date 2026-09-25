@@ -77,7 +77,7 @@ def _new_write_record(case, run, scope, normalized, user, summary, document, ste
         base_revision=case["revision"], result_revision=case["revision"] + 1,
         created_by=user["id"], created_at=_now(),
     )
-    return record.model_dump(by_alias=True, mode="python")
+    return record.model_dump(by_alias=True, mode="python", exclude_none=True)
 
 
 def _commit_write(database, case_id, user, run, write, steps, scope, session) -> dict:

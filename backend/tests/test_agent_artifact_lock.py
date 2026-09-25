@@ -10,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.exceptions import ModelRetry
 
+import app.core.database as database_module
+from app.core.database import initialize
 from app.modules.agent import artifacts, prosemirror
 from app.modules.agent.models import AgentMessage, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
@@ -193,7 +195,7 @@ def _owner(database, case: dict) -> dict:
     return {"id": row["ownerId"], "role": "user"}
 
 
-def _publish(database, repository, run, artifact=None) -> None:
+def _publish(database, repository, run, artifact=None, revisions=None) -> None:
     """运行完成事务：助手消息、tool.result 与修订候选同时对外可见。"""
     message = AgentMessage(
         id=f"assistant-{run.id}", thread_id=run.thread_id, run_id=run.id,
@@ -201,7 +203,7 @@ def _publish(database, repository, run, artifact=None) -> None:
         created_at=datetime.now(UTC),
     )
     assert repository.complete_run(
-        run.id, message, resources=[], artifact=artifact,
+        run.id, message, resources=[], artifacts=([artifact] if artifact else revisions or []),
     ) is True
 
 
@@ -216,14 +218,13 @@ def _save_prefix(client: TestClient, auth: dict, case: dict) -> dict:
     )
 
 
-def test_propose_without_locked_target_is_refused(client: TestClient) -> None:
+def test_propose_locates_a_paragraph_without_a_preselected_target(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
     database.agent_runs.update_one({"id": run.id}, {"$set": {"target": None}})
-    with pytest.raises(CaseError) as excinfo:
-        _propose(database, case, run)
-    assert excinfo.value.status_code == 422
+    artifact = _propose(database, case, run)
+    assert artifact.target == SECOND
     assert database.agent_artifacts.count_documents({}) == 0
 
 
@@ -249,10 +250,125 @@ def test_propose_after_baseline_revision_change_is_refused(client: TestClient) -
     assert database.agent_artifacts.count_documents({}) == 0
 
 
-def test_second_proposal_in_same_run_is_refused() -> None:
-    ctx = SimpleNamespace(deps=SimpleNamespace(proposed=object()))
-    with pytest.raises(ModelRetry):
-        asyncio.run(propose_revision(ctx, SECOND.from_pos, SECOND.to_pos, "文本"))
+def test_multiple_suggestions_can_be_proposed_in_one_run(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, _repository, thread, run = _locked_run(client, auth, case, None)
+    deps = SimpleNamespace(
+        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
+        user=auth["user"], evidence=[], annotation_id=None, proposed_artifacts=[],
+        revision_path_claimed=False,
+    )
+    ctx = SimpleNamespace(deps=deps)
+    asyncio.run(propose_revision(ctx, FIRST.from_pos, FIRST.to_pos, "第一段修订。", "完善表达"))
+    asyncio.run(propose_revision(ctx, SECOND.from_pos, SECOND.to_pos, "第二段修订。", "补充说明"))
+    assert [item.target.quote for item in deps.proposed_artifacts] == list(PARAGRAPHS)
+
+
+def test_overlapping_suggestions_are_rejected_in_one_run(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, _repository, thread, run = _locked_run(client, auth, case, None)
+    deps = SimpleNamespace(
+        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
+        user=auth["user"], evidence=[], annotation_id=None, proposed_artifacts=[],
+        revision_path_claimed=False,
+    )
+    ctx = SimpleNamespace(deps=deps)
+    asyncio.run(propose_revision(ctx, FIRST.from_pos, FIRST.to_pos, "第一段修改。", "重写表达"))
+
+    with pytest.raises(ModelRetry, match="目标不能重叠"):
+        asyncio.run(propose_revision(ctx, FIRST.from_pos + 2, FIRST.to_pos,
+                                     "重复范围。", "避免重复修改"))
+
+
+def test_applying_one_suggestion_keeps_the_next_target_mapped(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, None)
+    first = _propose(database, case, run, target=FIRST, replacement="第一段更新。")
+    second = _propose(database, case, run, target=SECOND, replacement="第二段修改完成。")
+    _publish(database, repository, run, revisions=[first, second])
+
+    first_result = artifacts.decide_artifact(
+        database, case["id"], thread.id, first.id, auth["user"], "accepted",
+    )
+    mapped_second = database.agent_artifacts.find_one({"id": second.id})
+    assert mapped_second["status"] == "pending"
+    assert mapped_second["baseRevision"] == first_result["case"]["revision"]
+    assert mapped_second["target"] == {
+        "from": SECOND.from_pos - 2,
+        "to": SECOND.to_pos - 2,
+        "quote": SECOND.quote,
+    }
+
+    second_result = artifacts.decide_artifact(
+        database, case["id"], thread.id, second.id, auth["user"], "accepted",
+    )
+    current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
+    assert second_result["case"]["revision"] == case["revision"] + 2
+    assert [node["content"][0]["text"] for node in current["document"]["content"]] == [
+        "第一段更新。", "第二段修改完成。",
+    ]
+    assert database.agent_writes.count_documents({"runId": run.id}) == 2
+    versions = list(database.case_versions.find(
+        {"caseId": case["id"], "sourceRunId": run.id}, {"_id": 0},
+    ))
+    assert {item["sourceArtifactId"] for item in versions} == {first.id, second.id}
+
+
+def test_artifact_indexes_migrate_once_and_survive_another_bootstrap(client: TestClient) -> None:
+    database = client.app.state.database
+    database.agent_writes.drop_index("runId_1")
+    database.agent_writes.create_index([("runId", 1)], unique=True, name="runId_1")
+    database.case_versions.drop_index("one_ai_version_per_run")
+    database.case_versions.create_index(
+        [("caseId", 1), ("sourceRunId", 1)], unique=True,
+        partialFilterExpression={"sourceRunId": {"$type": "string"}},
+        name="one_ai_version_per_run",
+    )
+    database.schema_migrations.delete_one({"_id": "agent-artifact-index-v1"})
+
+    initialize(database)
+    initialize(database)
+
+    write_run_index = database.agent_writes.index_information()["runId_1"]
+    version_run_index = database.case_versions.index_information()["one_ai_version_per_run"]
+    assert write_run_index["unique"] is True
+    assert write_run_index["partialFilterExpression"] == {
+        "artifactId": {"$exists": False},
+    }
+    assert version_run_index["partialFilterExpression"] == {
+        "sourceRunId": {"$type": "string"},
+        "sourceArtifactId": {"$exists": False},
+    }
+
+
+def test_artifact_index_migration_requires_owned_completion(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = client.app.state.database
+    migration_id = "agent-artifact-index-v1"
+    database.schema_migrations.delete_one({"_id": migration_id})
+    original_replace = database_module._replace_index
+    replacements = 0
+
+    def replace_and_transfer_lease(*args, **kwargs) -> None:
+        nonlocal replacements
+        original_replace(*args, **kwargs)
+        replacements += 1
+        if replacements == 4:
+            database.schema_migrations.update_one(
+                {"_id": migration_id}, {"$set": {"owner": "another-worker"}},
+            )
+
+    monkeypatch.setattr(database_module, "_replace_index", replace_and_transfer_lease)
+    with pytest.raises(RuntimeError, match="migration lease lost"):
+        initialize(database)
+
+    migration = database.schema_migrations.find_one({"_id": migration_id})
+    assert migration["owner"] == "another-worker"
+    assert "completedAt" not in migration
 
 
 def test_proposal_publishes_only_with_completed_run(client: TestClient) -> None:
@@ -293,17 +409,15 @@ def test_cancelled_run_leaves_no_artifact(client: TestClient) -> None:
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
 
 
-def test_only_one_proposal_per_run(client: TestClient) -> None:
+def test_multiple_suggestions_are_published_with_the_completed_run(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
-    database, repository, _thread, run = _locked_run(client, auth, case, SECOND)
-    artifact = _propose(database, case, run)
-    assert artifact.status == "pending"
-    _publish(database, repository, run, artifact)
-    with pytest.raises(CaseError) as excinfo:
-        _propose(database, case, run)
-    assert excinfo.value.status_code == 409
-    assert database.agent_artifacts.count_documents({"runId": run.id}) == 1
+    database, repository, _thread, run = _locked_run(client, auth, case, None)
+    first = _propose(database, case, run)
+    second = _propose(database, case, run, target=FIRST)
+    assert first.status == second.status == "pending"
+    _publish(database, repository, run, revisions=[first, second])
+    assert database.agent_artifacts.count_documents({"runId": run.id}) == 2
 
 
 # ---- 决定门禁、幂等、相反决定 ----
@@ -317,6 +431,9 @@ def _assert_repeated_accept_conflicts(database, case, thread, artifact, user) ->
         database, case["id"], thread.id, artifact.id, user, "accepted",
     )
     assert first["artifact"].status == replay["artifact"].status == "accepted"
+    assert first["applied"] is True and first["steps"]
+    assert replay["applied"] is False and "steps" not in replay
+    assert replay["write"]["id"] == first["write"]["id"]
     with pytest.raises(CaseError) as excinfo:
         artifacts.decide_artifact(database, case["id"], thread.id, artifact.id, user, "rejected")
     assert excinfo.value.status_code == 409
@@ -329,14 +446,55 @@ def test_repeat_same_decision_replays_opposite_conflicts(client: TestClient) -> 
     artifact = _propose(database, case, run)
     _publish(database, repository, run, artifact)
     _assert_repeated_accept_conflicts(database, case, thread, artifact, auth["user"])
-    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
     assert database.case_versions.count_documents({"caseId": case["id"], "kind": "ai"}) == 1
 
 
-# ---- 普通候选：结果进入独立 AI 版本，当前稿保持不变 ----
+def test_refining_a_suggestion_retires_it_without_changing_the_draft(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "superseded",
+    )
+
+    assert result["artifact"].status == "superseded"
+    assert result["applied"] is False
+    assert result["case"]["revision"] == case["revision"]
+    assert database.agent_writes.count_documents({"caseId": case["id"]}) == 0
+    assert database.cases.find_one({"id": case["id"]})["document"] == case["document"]
+    with pytest.raises(CaseError) as excinfo:
+        artifacts.decide_artifact(
+            database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+        )
+    assert excinfo.value.status_code == 409
 
 
-def test_accept_replaces_only_selected_range(client: TestClient) -> None:
+def test_unrelated_edits_keep_a_superseded_suggestion_mapped(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+    artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "superseded",
+    )
+
+    saved = _save_prefix(client, auth, case)
+    assert saved.status_code == 200, saved.text
+    row = database.agent_artifacts.find_one({"id": artifact.id})
+    assert row["status"] == "superseded"
+    assert row["baseRevision"] == 2
+    assert row["target"] == {"from": 13, "to": 21, "quote": PARAGRAPHS[1]}
+
+
+# ---- 工作台建议应用到当前稿，并保留 AI 版本和撤销记录 ----
+
+
+def test_accept_applies_only_selected_range_to_the_current_document(client: TestClient) -> None:
     document = {"type": "doc", "content": [{
         "type": "paragraph",
         "content": [
@@ -363,9 +521,13 @@ def _assert_mapped_acceptance(database, case, thread, artifact, auth) -> None:
     assert result["artifact"].status == "accepted"
     assert result["artifact"].version_id
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
-    assert current["revision"] == 2
+    assert current["revision"] == 3
+    assert current["document"]["content"][0]["content"][0]["text"] == f"前置{PARAGRAPHS[0]}"
+    assert current["document"]["content"][1]["content"][0]["text"] == REPLACEMENT
+    assert result["steps"]
+    assert result["write"]["revision"] == 3
     version = database.case_versions.find_one({"id": result["artifact"].version_id}, {"_id": 0})
-    assert version["kind"] == "ai" and version["document"] != current["document"]
+    assert version["kind"] == "ai" and version["document"] == current["document"]
 
 
 def test_accept_maps_pending_artifact_after_unrelated_save(client: TestClient) -> None:
@@ -389,15 +551,18 @@ def _assert_range_accepted(database, case, thread, artifact, auth) -> None:
     assert result["artifact"].status == "accepted"
     assert result["artifact"].version_id
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
-    assert current["revision"] == case["revision"]
-    assert current["document"] == case["document"]
+    assert current["revision"] == case["revision"] + 1
+    assert current["document"] != case["document"]
+    assert result["write"]["revision"] == current["revision"]
+    assert result["steps"]
     version = database.case_versions.find_one(
         {"id": result["artifact"].version_id}, {"_id": 0}
     )
     assert version["kind"] == "ai" and version["sourceRunId"] == artifact.run_id
-    content = version["document"]["content"][0]["content"]
+    content = current["document"]["content"][0]["content"]
     assert "".join(node["text"] for node in content) == "保留前缀。已按来源修订。保留后缀。"
     assert "marks" not in content[0] and content[-1]["marks"] == [{"type": "bold"}]
+    assert version["document"] == current["document"]
 
 
 def test_utf16_selection_preserves_following_text() -> None:
@@ -499,11 +664,12 @@ def _assert_accepted(database, case, thread, artifact, auth) -> None:
     assert result["artifact"].status == "accepted"
     assert result["artifact"].version_id
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
-    assert current["revision"] == case["revision"]
+    assert current["revision"] == case["revision"] + 1
+    assert current["document"] != case["document"]
     version = database.case_versions.find_one(
         {"id": result["artifact"].version_id}, {"_id": 0}
     )
-    assert version["kind"] == "ai" and version["document"] != current["document"]
+    assert version["kind"] == "ai" and version["document"] == current["document"]
 
 
 def test_accept_rechecks_case_source_permission_and_publication(client: TestClient) -> None:

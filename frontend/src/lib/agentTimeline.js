@@ -9,7 +9,8 @@ export const TOOL_STATUS_LABELS = {
   no_access: "当前身份无权限读取", empty: "内容为空", error: "读取失败",
 };
 export const ARTIFACT_STATUS_LABELS = {
-  accepted: "已接受", rejected: "已拒绝", expired: "已过期", pending: "待确认",
+  accepted: "已接受", rejected: "已拒绝", expired: "已过期",
+  superseded: "已微调", pending: "待确认",
 };
 export const RUN_STATUS_LABELS = {
   active: "运行中", completed: "已完成", failed: "运行失败", cancelled: "已取消",
