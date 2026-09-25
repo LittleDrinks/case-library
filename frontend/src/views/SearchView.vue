@@ -5,7 +5,6 @@ import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
 import CatalogPagination from "../components/CatalogPagination.vue";
 import SearchAIAnswer from "../components/SearchAIAnswer.vue";
-import SearchGraph from "../components/SearchGraph.vue";
 import SearchFilters from "../components/SearchFilters.vue";
 import SiteHeader from "../components/SiteHeader.vue";
 import { emptyFilters, filterQuery, filtersFromQuery } from "../lib/searchFilters.js";
@@ -21,7 +20,6 @@ const payload = ref({
 const activeKind = ref(searchKind(route.query.kind));
 const page = ref(1);
 const cursor = ref("");
-const view = ref(route.query.view === "graph" ? "graph" : "list");
 const loading = ref(false);
 const error = ref("");
 const filters = ref(filtersFromQuery(route.query, activeKind.value));
@@ -101,20 +99,14 @@ function metaLine(item) {
 
 function routeQuery(overrides = {}) {
   const state = {
-    term: query.value.trim(), kind: activeKind.value, mode: view.value,
+    term: query.value.trim(), kind: activeKind.value,
     filters: filters.value, ...overrides,
   };
   return {
     ...(state.term ? { q: state.term } : {}),
     ...(state.kind === "all" ? {} : { kind: state.kind }),
-    ...(state.mode === "list" ? {} : { view: state.mode }),
     ...filterQuery(state.filters, state.kind),
   };
-}
-
-function selectView(mode) {
-  view.value = mode;
-  router.replace({ name: "search", query: routeQuery({ mode }) });
 }
 
 function applyResult(term, result) {
@@ -205,9 +197,6 @@ function searchRouteState() {
 }
 
 watch(searchRouteState, syncSearchRoute, { immediate: true });
-watch(() => route.query.view, (value) => {
-  view.value = value === "graph" ? "graph" : "list";
-});
 
 onBeforeUnmount(invalidateSearch);
 </script>
@@ -220,16 +209,11 @@ onBeforeUnmount(invalidateSearch);
         <Search :size="18" aria-hidden="true" />
         <input v-model="query" aria-label="搜索公开案例" placeholder="用自然语言或关键词检索案例、知识、素材；留空回车即浏览全部" />
         <button type="submit">检索</button>
-        <div class="search-views" aria-label="检索视图">
-          <button v-for="mode in ['list', 'graph']" :key="mode" type="button" :aria-pressed="view === mode" @click="selectView(mode)">
-            {{ { list: "列表", graph: "图谱" }[mode] }}
-          </button>
-        </div>
       </form>
 
       <div v-if="loading && !payload.pageSize" class="search-state"><LoaderCircle class="spin" :size="20" />检索中</div>
       <div v-else-if="error" class="search-state error-state" role="alert">{{ error }}</div>
-      <template v-else-if="view === 'list'">
+      <template v-else>
         <p v-if="loading" class="search-refresh" role="status"><LoaderCircle class="spin" :size="14" />更新结果中</p>
         <SearchAIAnswer v-if="summarySnapshot" :snapshot="summarySnapshot" :href-for="targetHref" />
         <div class="result-toolbar">
@@ -255,7 +239,6 @@ onBeforeUnmount(invalidateSearch);
         </section>
         <CatalogPagination v-if="payload.total" :page="page" :total="payload.total" :next-cursor="payload.nextCursor" :previous-cursor="payload.previousCursor" @change="selectPage" />
       </template>
-      <SearchGraph v-else :query="submitted" :items="items" />
     </main>
   </div>
 </template>
