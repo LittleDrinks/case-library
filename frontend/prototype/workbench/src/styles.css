@@ -298,3 +298,7 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 .paper-scroll::-webkit-scrollbar { display: none; }
 .request-revision { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); background: white; border-radius: 5px; color: var(--brand); }
 @media (max-width: 800px) { .workspace { --outline-width: 120px; } .workspace.outline-collapsed { --outline-width: 40px; } }
+
+.edit-demo-guide { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 20px; background: #f7eeeb; font-size: 13px; }
+.edit-demo-guide button { background: white; border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; color: var(--brand); }
+.edit-demo-guide small { color: var(--ink-3); }

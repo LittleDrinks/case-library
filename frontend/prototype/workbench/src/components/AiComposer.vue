@@ -176,7 +176,7 @@ function removeSkill(id) {
           <Lightbulb :size="14" />
         </button>
       </div>
-      <span class="ai-disclaimer">AI 使用真实模型 · 文档仅内存</span>
+      <span class="ai-disclaimer">{{ store.editDemo ? "固定模拟结果 · 不调用模型" : "AI 使用真实模型 · 文档仅内存" }}</span>
     </div>
   </div>
 </template>

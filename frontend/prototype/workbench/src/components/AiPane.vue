@@ -69,7 +69,7 @@ function revisionStatus(msg) {
   return { accepted: "已采用", rejected: "已拒绝", stale: "原文已变化", pending: "待你确认" }[revision(msg).status] || "待你确认";
 }
 function revisionError(msg) {
-  return msg.aborted ? "已停止生成，未应用任何修改。" : `请求失败：${msg.error}。请从 AI 命令菜单重新生成修改建议。`;
+  return msg.aborted ? "已停止生成，未应用任何修改。" : `请求失败：${msg.error}。请重新输入修改要求生成建议。`;
 }
 onBeforeUnmount(() => { clearTimeout(titleTimer); cancelAnimationFrame(titleFrame); });
 defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
@@ -102,7 +102,7 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
         </div>
         <div v-else-if="msg.role === 'revision-card'" class="ai-msg assistant">
           <div class="ai-rev-card">
-            <header><Sparkles :size="12" /> 修改建议（真实模型生成）</header>
+            <header><Sparkles :size="12" /> 修改建议（{{ msg.simulated ? "模拟结果" : "真实模型生成" }}）</header>
             <p class="rev-original"><s>{{ revision(msg).original }}</s></p>
             <p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p>
             <small v-if="revision(msg).reason">{{ revision(msg).reason }}</small>
@@ -110,8 +110,8 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
             <footer>
               <span class="tag" :class="revision(msg).status">{{ revisionStatus(msg) }}</span>
               <div v-if="msg.revisionId && revision(msg).status === 'pending'" class="rev-actions">
-                <button type="button" @click="emit('preview', revision(msg))"><Eye :size="12" /> 查看原文</button>
-                <button type="button" @click="emit('accept', revision(msg))"><Check :size="12" /> 采用</button>
+                <button type="button" @click="emit('preview', revision(msg))"><Eye :size="12" /> {{ store.ui.previewId === msg.revisionId ? "关闭预览" : "预览差异" }}</button>
+                <button type="button" @click="emit('accept', revision(msg))"><Check :size="12" /> 应用修改</button>
                 <button type="button" @click="emit('reject', revision(msg))"><X :size="12" /> 保留原文</button>
               </div>
               <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s</small>

@@ -89,6 +89,11 @@ function showToast(text) {
 
 // —— AI 配置加载（真实模型清单） ——
 onMounted(async () => {
+  if (store.editDemo) {
+    store.aiConfig = { models: ["模拟结果"], defaultModel: "模拟结果", ready: true, error: "" };
+    store.modelId = "模拟结果";
+    return;
+  }
   try {
     const res = await fetch("/prototype-ai/config");
     if (!res.ok) throw new Error((await res.json()).message || `HTTP ${res.status}`);
@@ -126,8 +131,32 @@ function removeChip() {
 
 const sourceRevision = (item) => store.revisions.find((revision) => revision.id === item.id) || item;
 
+function reloadDemo() { location.reload(); }
+
+function generateDemoRevision() {
+  const ed = editor();
+  if (!ed) return;
+  let range = null;
+  ed.state.doc.descendants((node, pos) => {
+    if (!range && node.type.name === "paragraph" && node.textContent.trim()) {
+      range = { from: pos + 1, to: pos + 1 + node.content.size };
+    }
+  });
+  if (!range) return;
+  const original = ed.state.doc.textBetween(range.from, range.to);
+  const id = crypto.randomUUID();
+  const replacement = "1931 年，钱伟长考入清华大学历史系。九一八事变后，他决定转学物理，希望以自己的专业选择回应国家需要。这一经历可以成为课堂讨论的起点：个人志向与时代需要发生冲突时，我们如何作出选择？";
+  store.revisions.push({ id, kind: "revision", original, anchorQuote: original, range, replacement, status: "pending", reason: "固定样例，仅演示修改流程", anchorMissing: false });
+  activeThread().messages.push({ role: "user", text: "把开头改得紧凑一点，并引出课堂讨论。", quote: original }, { role: "revision-card", revisionId: id, simulated: true });
+  store.ui.aiCollapsed = false;
+  store.railTab = "ai";
+  paperRef.value?.focusQuote(original, range);
+  showToast("模拟建议已生成，正文尚未修改");
+}
+
 function previewRevision(item) {
   store.ui.previewId = store.ui.previewId === item.id ? "" : item.id;
+  if (store.ui.previewId) paperRef.value?.focusQuote(item.original, item.range);
   paperRef.value?.refresh();
 }
 
@@ -268,6 +297,7 @@ async function runChat(args) {
 }
 
 async function onSend(payload) {
+  if (store.editDemo) { generateDemoRevision(); return; }
   if (payload.retry) {
     const idx = activeThread().messages.indexOf(payload.retry);
     if (idx >= 0) activeThread().messages.splice(Math.max(0, idx - 1), 2);
@@ -342,7 +372,7 @@ const toolbarRow2 = [
     <header class="brand-row">
       <img src="/logo.png" alt="上海大学" class="brand-logo" />
       <span class="brand-title">思政教学案例库 · 工作台</span>
-      <span class="proto-badge">交互原型 · 数据仅存内存</span>
+      <span class="proto-badge">{{ store.editDemo ? "修改流程原型 · 模拟 AI · 仅内存" : "交互原型 · 数据仅存内存" }}</span>
       <span class="brand-right">
         <span class="doc-status">{{ store.doc.status }}</span>
         <span class="doc-save">{{ store.doc.savedAt }}</span>
@@ -354,6 +384,12 @@ const toolbarRow2 = [
       <span class="toolbar-divider" />
       <button v-for="t in toolbarRow2" :key="t.title" type="button" :title="t.title" :class="{ active: editor()?.isActive && safeActive(t) }" @mousedown.prevent @click="runFormat(t.run)"><component :is="t.icon" :size="15" /></button>
       <span class="toolbar-divider" />
+    </div>
+    <div v-if="store.editDemo" class="edit-demo-guide">
+      <span>试一遍：生成建议 → 预览差异 → 应用修改 → 工具栏撤销</span>
+      <button type="button" @click="generateDemoRevision">生成开头修改建议</button>
+      <button type="button" @click="reloadDemo">重新开始</button>
+      <small>可先手动改开头，再尝试应用旧建议。</small>
     </div>
     <div class="workspace" :class="{ 'outline-collapsed': outlineCollapsed, 'ai-collapsed': store.ui.aiCollapsed }">
       <OutlinePanel :items="outlines" :collapsed="outlineCollapsed" @collapse="outlineCollapsed = !outlineCollapsed" @locate="locateOutline" />

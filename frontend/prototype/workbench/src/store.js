@@ -3,6 +3,7 @@ import { reactive } from "vue";
 // 原型状态：文档/会话为内存模拟；AI 对话、修订建议、会话标题走真实模型（/prototype-ai 代理）。
 
 export const store = reactive({
+  editDemo: new URLSearchParams(location.search).get("demo") === "edit",
   doc: {
     title: "从钱伟长教育思想看“强国何以有我”",
     byline: "思政教学案例 · 工作稿",
