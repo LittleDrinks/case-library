@@ -136,22 +136,29 @@ function reloadDemo() { location.reload(); }
 function generateDemoRevision() {
   const ed = editor();
   if (!ed) return;
-  let range = null;
+  const examples = [
+    { prefix: "1931 年", label: "开头 · 压缩叙述", replacement: "1931 年，钱伟长考入清华大学历史系。九一八事变后，他决定转学物理，希望以自己的专业选择回应国家需要。课堂可以由此追问：个人志向与时代需要之间，应当怎样作出选择？" },
+    { prefix: "本案例选取", label: "教学目标 · 明确学习任务", replacement: "本案例以转系决定与办学实践为两条主线。学生阅读材料后，分别找出人物面临的选择、支持判断的证据和可能的其他解释，再用一段话说明个人发展与国家需要的关系。" },
+    { prefix: "1983 年", label: "办学实践 · 增加分析角度", replacement: "1983 年，钱伟长出任上海工业大学校长，提出拆除学校与社会、教学与科研、专业之间以及教与学之间的“四堵墙”。阅读这段材料时，可让学生任选一堵“墙”，解释它为什么妨碍学习，并提出一种可以在今天的校园中尝试的改进办法。" },
+    { prefix: "讨论二：", label: "讨论问题 · 加入具体情境", replacement: "讨论二：如果你喜欢的专业暂时不属于热门领域，你会如何判断它与社会需要的关系？请结合案例，提出自己的选择及理由，并回应一种不同意见。" },
+    { prefix: "课后作业", label: "课后作业 · 明确交付成果", replacement: "课后两人一组访谈一位本校教师，记录一个研究问题、它回应的现实需求，以及访谈中的一句原话。形成八百字短文，区分访谈事实与自己的判断，下节课用三分钟交流。" },
+  ];
+  const candidates = [];
   ed.state.doc.descendants((node, pos) => {
-    if (!range && node.type.name === "paragraph" && node.textContent.trim()) {
-      range = { from: pos + 1, to: pos + 1 + node.content.size };
-    }
+    if (node.type.name !== "paragraph") return;
+    const example = examples.find((item) => node.textContent.startsWith(item.prefix));
+    if (!example || store.revisions.some((item) => item.original === node.textContent && item.status === "pending")) return;
+    candidates.push({ id: crypto.randomUUID(), kind: "revision", original: node.textContent, anchorQuote: node.textContent,
+      range: { from: pos + 1, to: pos + 1 + node.content.size }, replacement: example.replacement,
+      status: "pending", reason: example.label, anchorMissing: false });
   });
-  if (!range) return;
-  const original = ed.state.doc.textBetween(range.from, range.to);
-  const id = crypto.randomUUID();
-  const replacement = "1931 年，钱伟长考入清华大学历史系。九一八事变后，他决定转学物理，希望以自己的专业选择回应国家需要。这一经历可以成为课堂讨论的起点：个人志向与时代需要发生冲突时，我们如何作出选择？";
-  store.revisions.push({ id, kind: "revision", original, anchorQuote: original, range, replacement, status: "pending", reason: "固定样例，仅演示修改流程", anchorMissing: false });
-  activeThread().messages.push({ role: "user", text: "把开头改得紧凑一点，并引出课堂讨论。", quote: original }, { role: "revision-card", revisionId: id, simulated: true });
+  if (!candidates.length) { showToast("建议已生成；可重新开始再体验"); return; }
+  store.revisions.push(...candidates);
+  activeThread().messages.push({ role: "user", text: "请把叙述、教学任务和讨论题改得更具体，逐处给出修改建议。" },
+    ...candidates.map((item) => ({ role: "revision-card", revisionId: item.id, simulated: true })));
   store.ui.aiCollapsed = false;
   store.railTab = "ai";
-  paperRef.value?.focusQuote(original, range);
-  showToast("模拟建议已生成，正文尚未修改");
+  showToast(`已生成 ${candidates.length} 处模拟建议，点击卡片查看正文预览`);
 }
 
 function activateRevision(item) {
@@ -403,7 +410,7 @@ const toolbarRow2 = [
     </div>
     <div v-if="store.editDemo" class="edit-demo-guide">
       <span>试一遍：生成建议 → 预览差异 → 应用修改 → 工具栏撤销</span>
-      <button type="button" @click="generateDemoRevision">生成开头修改建议</button>
+      <button type="button" @click="generateDemoRevision">生成 5 处修改建议</button>
       <button type="button" @click="reloadDemo">重新开始</button>
       <small>可先手动改开头，再尝试应用旧建议。</small>
     </div>
