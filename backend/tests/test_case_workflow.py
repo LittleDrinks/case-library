@@ -592,7 +592,7 @@ def test_public_views_never_expose_review_feedback(client: TestClient) -> None:
 def test_return_requires_at_least_one_fixed_reason(client: TestClient) -> None:
     _admin, case, submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")
-    for reasons in (None, [], ["其他原因"]):
+    for reasons in (None, [], ["其他原因"], ["其他", "其他"]):
         extra = {} if reasons is None else {"reasonTypes": reasons}
         response = _transition(
             client,

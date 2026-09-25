@@ -430,7 +430,7 @@ test("引用变化保存成功后才重取资料区编号，普通正文改动�
   }
 });
 
-function rejectBody(reasonTypes = ["结构不完整"], message) {
+function rejectBody(reasonTypes, message) {
   return {
     command: "reject", revision: 3, reasonTypes, message, submittedVersionId: "cv-1",
   };

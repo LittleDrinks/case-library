@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { X } from "@lucide/vue";
 
 const props = defineProps({
@@ -8,6 +8,7 @@ const props = defineProps({
   error: { type: String, default: "" },
 });
 const emit = defineEmits(["cancel", "confirm"]);
+const firstReasonInput = ref(null);
 const reasons = [
   "内容需要补充或修改",
   "事实、数据或来源需要核实",
@@ -32,9 +33,15 @@ function submit() {
   });
 }
 
-function resetForm() {
+function setFirstReasonInput(element) {
+  firstReasonInput.value = element;
+}
+
+async function resetForm() {
   reasonTypes.value = [];
   message.value = "";
+  await nextTick();
+  firstReasonInput.value?.focus();
 }
 
 watch(() => props.command, resetForm);
@@ -64,7 +71,13 @@ watch(() => props.command, resetForm);
           <fieldset>
             <legend>退回原因（至少选择一项）</legend>
             <label v-for="reason in reasons" :key="reason" class="review-decision-reason">
-              <input v-model="reasonTypes" type="checkbox" :value="reason" :disabled="busy" />
+              <input
+                :ref="reason === reasons[0] ? setFirstReasonInput : undefined"
+                v-model="reasonTypes"
+                type="checkbox"
+                :value="reason"
+                :disabled="busy"
+              />
               <span>{{ reason }}</span>
             </label>
           </fieldset>

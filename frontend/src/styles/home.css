@@ -55,7 +55,7 @@
 .case-card h2 { margin: 14px 0 10px; overflow-wrap: anywhere; font-size: 18px; line-height: 1.55; }
 .case-card h2 a { color: var(--ink); text-decoration: none; }
 .case-card h2 a:hover { color: var(--brand); }
-.case-card > p { display: -webkit-box; min-height: 66px; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.case-card > p:not(.case-card-notice) { display: -webkit-box; min-height: 66px; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .case-card-theory { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
 .case-card-theory li { max-width: 100%; padding: 3px 7px; overflow-wrap: anywhere; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--ink-2); font-size: 11px; }
 .case-card footer { display: flex; flex-wrap: wrap; gap: 13px; margin-top: auto; padding-top: 17px; color: var(--ink-3); font-size: 11px; }

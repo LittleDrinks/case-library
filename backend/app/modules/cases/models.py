@@ -92,4 +92,6 @@ class LifecycleCommand(BaseModel):
     def require_review_reason(self) -> LifecycleCommand:
         if self.command == "reject" and not self.reasonTypes:
             raise ValueError("退回修改至少选择一个原因")
+        if self.command == "reject" and len(self.reasonTypes) != len(set(self.reasonTypes)):
+            raise ValueError("退回原因不能重复")
         return self

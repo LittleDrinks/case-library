@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { expect, test } from "vitest";
 import ReviewDecisionDialog from "./ReviewDecisionDialog.vue";
 
@@ -9,12 +9,22 @@ const REASONS = [
   "其他",
 ];
 
-function mountDialog(props = {}) {
+function mountDialog(props = {}, attachTo = undefined) {
   return mount(ReviewDecisionDialog, {
     props: { command: "reject", ...props },
+    attachTo,
     global: { stubs: { teleport: true } },
   });
 }
+
+test("打开时将键盘焦点放到第一项退回原因", async () => {
+  const wrapper = mountDialog({ command: "" }, document.body);
+  await wrapper.setProps({ command: "reject" });
+  await flushPromises();
+
+  expect(wrapper.find('input[type="checkbox"]').element).toBe(document.activeElement);
+  wrapper.unmount();
+});
 
 test("退回原因固定为四项，未选择原因时不能提交", async () => {
   const wrapper = mountDialog();
