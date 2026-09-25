@@ -1,12 +1,21 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, Plus, Sparkles, X } from "@lucide/vue";
+import { Check, ChevronDown, Plus, Sparkles, X } from "@lucide/vue";
 
 import { activeThread, store } from "../store.js";
 import AiComposer from "./AiComposer.vue";
 
 const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "rename-thread", "accept", "reject", "preview", "activate"]);
 const scrollEl = ref(null);
+const expandedRevision = ref("");
+function toggleRevision(msg) {
+  expandedRevision.value = expandedRevision.value === msg.revisionId ? "" : msg.revisionId;
+  if (expandedRevision.value) emit("activate", revision(msg));
+}
+function revisionTitle(msg) {
+  const item = revision(msg);
+  return item.reason && msg.simulated ? item.reason : (item.original || "修改建议").slice(0, 24);
+}
 const titleFlash = ref(false);
 const composerRef = ref(null);
 const followBottom = ref(true);
@@ -100,11 +109,18 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
           <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ msg.aborted ? "已停止生成，已收到的内容保留在这里。" : `请求失败：${msg.error}` }} <button v-if="!msg.aborted" type="button" @click="send({ retry: msg })">重试</button></p>
           <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s{{ msg.aborted ? " · 已停止" : "" }}</small>
         </div>
-        <div v-else-if="msg.role === 'revision-card'" class="ai-msg assistant">
+        <div v-else-if="msg.role === 'revision-card'" class="ai-msg assistant revision-message">
           <div class="ai-rev-card" :class="{ 'is-previewing': store.ui.previewId === msg.revisionId }"
-            tabindex="0" role="group" aria-label="修改建议，聚焦以预览正文变化"
-            @click="emit('activate', revision(msg))" @focusin="emit('activate', revision(msg))">
-            <header><span class="revision-heading"><Sparkles :size="15" /> 修改建议</span><span class="revision-source">{{ msg.simulated ? "模拟结果" : "AI" }}</span></header>
+            role="group" aria-label="修改建议"
+            @focusin="emit('activate', revision(msg))">
+            <button class="revision-toggle" type="button" :aria-expanded="expandedRevision === msg.revisionId"
+              @click="toggleRevision(msg)">
+              <span class="revision-title">{{ revisionTitle(msg) }}</span>
+              <span v-if="['accepted', 'rejected'].includes(revision(msg).status)" class="revision-result">{{ revision(msg).status === 'accepted' ? '已应用' : '已保留原文' }}</span>
+              <ChevronDown :size="14" :class="{ rotated: expandedRevision === msg.revisionId }" />
+            </button>
+            <p v-if="expandedRevision !== msg.revisionId" class="revision-excerpt" @click="toggleRevision(msg)">{{ revision(msg).replacement || msg.text }}</p>
+            <div v-if="expandedRevision === msg.revisionId" class="revision-expanded" @click="emit('activate', revision(msg))">
             <div class="revision-copy"><p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p></div>
             <details class="revision-original"><summary>查看原文</summary><p>{{ revision(msg).original }}</p></details>
             <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ revisionError(msg) }}</p>
@@ -115,6 +131,7 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
               </div>
               <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s</small>
             </footer>
+            </div>
           </div>
         </div>
       </template>
