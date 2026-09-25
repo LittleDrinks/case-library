@@ -14,7 +14,7 @@ function toggleRevision(msg) {
 }
 function revisionTitle(msg) {
   const item = revision(msg);
-  return item.reason && msg.simulated ? item.reason : (item.original || "修改建议").slice(0, 24);
+  return item.title || (item.original || "修改建议").slice(0, 24);
 }
 const titleFlash = ref(false);
 const composerRef = ref(null);
@@ -119,10 +119,9 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
               <span v-if="['accepted', 'rejected'].includes(revision(msg).status)" class="revision-result">{{ revision(msg).status === 'accepted' ? '已应用' : '已保留原文' }}</span>
               <ChevronDown :size="14" :class="{ rotated: expandedRevision === msg.revisionId }" />
             </button>
-            <p v-if="expandedRevision !== msg.revisionId" class="revision-excerpt" @click="toggleRevision(msg)">{{ revision(msg).replacement || msg.text }}</p>
+            <p v-if="expandedRevision !== msg.revisionId" class="revision-excerpt" @click="toggleRevision(msg)">{{ revision(msg).reason }}</p>
             <div v-if="expandedRevision === msg.revisionId" class="revision-expanded" @click="emit('activate', revision(msg))">
-            <div class="revision-copy"><p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p></div>
-            <details class="revision-original"><summary>查看原文</summary><p>{{ revision(msg).original }}</p></details>
+            <div class="revision-copy"><p class="revision-explanation">{{ revision(msg).reason }}</p></div>
             <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ revisionError(msg) }}</p>
             <footer>
               <div v-if="msg.revisionId && revision(msg).status === 'pending'" class="rev-actions">

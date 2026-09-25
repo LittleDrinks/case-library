@@ -334,3 +334,5 @@ button { transition: color 150ms, background-color 150ms, border-color 150ms; }
 .ai-rev-card .rev-actions button { padding: 6px 10px; font-weight: 500; }
 .ai-rev-card .rev-actions button:last-child { background: transparent; border-color: transparent; color: #827b72; }
 .ai-rev-card .rev-actions button:hover { background: #e9ede9; color: #303b35; }
+
+.ai-rev-card .revision-explanation { margin: 2px 0 14px; color: #514d47; font-size: 13px; line-height: 1.85; }
