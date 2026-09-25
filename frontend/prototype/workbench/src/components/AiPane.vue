@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, Eye, Plus, Sparkles, X } from "@lucide/vue";
+import { Check, Plus, Sparkles, X } from "@lucide/vue";
 
 import { activeThread, store } from "../store.js";
 import AiComposer from "./AiComposer.vue";
 
-const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "rename-thread", "accept", "reject", "preview"]);
+const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "rename-thread", "accept", "reject", "preview", "activate"]);
 const scrollEl = ref(null);
 const titleFlash = ref(false);
 const composerRef = ref(null);
@@ -101,18 +101,19 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
           <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s{{ msg.aborted ? " · 已停止" : "" }}</small>
         </div>
         <div v-else-if="msg.role === 'revision-card'" class="ai-msg assistant">
-          <div class="ai-rev-card">
-            <header><Sparkles :size="12" /> 修改建议（{{ msg.simulated ? "模拟结果" : "真实模型生成" }}）</header>
-            <p class="rev-original"><s>{{ revision(msg).original }}</s></p>
-            <p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p>
-            <small v-if="revision(msg).reason">{{ revision(msg).reason }}</small>
+          <div class="ai-rev-card" :class="{ 'is-previewing': store.ui.previewId === msg.revisionId }"
+            tabindex="0" role="group" aria-label="修改建议，聚焦以预览正文变化"
+            @click="emit('activate', revision(msg))" @focusin="emit('activate', revision(msg))">
+            <header><span class="revision-heading"><Sparkles :size="15" /> 修改建议</span><span class="revision-source">{{ msg.simulated ? "模拟结果" : "AI" }}</span></header>
+            <div class="revision-copy"><span class="revision-label">建议改为</span><p class="rev-replacement">{{ revision(msg).replacement || msg.text }}</p></div>
+            <details class="revision-original"><summary>查看原文</summary><p>{{ revision(msg).original }}</p></details>
+            <p v-if="revision(msg).reason && !msg.simulated" class="revision-reason">{{ revision(msg).reason }}</p>
             <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ revisionError(msg) }}</p>
             <footer>
-              <span class="tag" :class="revision(msg).status">{{ revisionStatus(msg) }}</span>
+              <span class="revision-state">{{ store.ui.previewId === msg.revisionId && revision(msg).status === "pending" ? "正在正文中预览 · 尚未应用" : revisionStatus(msg) }}</span>
               <div v-if="msg.revisionId && revision(msg).status === 'pending'" class="rev-actions">
-                <button type="button" @click="emit('preview', revision(msg))"><Eye :size="12" /> {{ store.ui.previewId === msg.revisionId ? "关闭预览" : "预览差异" }}</button>
-                <button type="button" @click="emit('accept', revision(msg))"><Check :size="12" /> 应用修改</button>
-                <button type="button" @click="emit('reject', revision(msg))"><X :size="12" /> 保留原文</button>
+                <button type="button" @click.stop="emit('accept', revision(msg))"><Check :size="12" /> 应用修改</button>
+                <button type="button" @click.stop="emit('reject', revision(msg))"><X :size="12" /> 保留原文</button>
               </div>
               <small v-if="msg.ms != null" class="ai-msg-meta">{{ msg.model }} · {{ (msg.ms / 1000).toFixed(1) }}s</small>
             </footer>

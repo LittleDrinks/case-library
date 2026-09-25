@@ -154,6 +154,22 @@ function generateDemoRevision() {
   showToast("模拟建议已生成，正文尚未修改");
 }
 
+function activateRevision(item) {
+  if (item.status !== "pending") return;
+  const ed = editor();
+  const range = item.anchorMissing ? null : findTextRange(ed.state.doc, item.original, item.range);
+  if (!range) { showToast("原文已变化，请重新生成修改建议"); return; }
+  const newlySelected = store.ui.previewId !== item.id;
+  store.ui.previewId = item.id;
+  paperRef.value?.refresh();
+  if (!newlySelected) return;
+  nextTick(() => {
+    const scroller = ed.view.dom.closest(".paper-scroll");
+    const top = ed.view.coordsAtPos(range.from).top;
+    if (scroller) scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + top - scroller.getBoundingClientRect().top - 96), behavior: "auto" });
+  });
+}
+
 function previewRevision(item) {
   store.ui.previewId = store.ui.previewId === item.id ? "" : item.id;
   if (store.ui.previewId) paperRef.value?.focusQuote(item.original, item.range);
@@ -408,7 +424,7 @@ const toolbarRow2 = [
       <section id="assistant-panel" class="assist-area" :inert="store.ui.aiCollapsed" :aria-hidden="store.ui.aiCollapsed">
         <AiPane ref="aiPaneRef" v-show="store.railTab === 'ai'"
           @send="onSend"
-          @preview="previewRevision" @accept="acceptRevision" @reject="rejectRevision"
+          @activate="activateRevision" @preview="previewRevision" @accept="acceptRevision" @reject="rejectRevision"
           @stop="stopJob"
           @locate-chip="locateChip"
           @remove-chip="removeChip"
