@@ -49,7 +49,7 @@
 .case-card-meta span, .case-card-meta strong { padding: 3px 7px; border-radius: 4px; background: var(--paper); font-weight: 600; }
 .case-card-meta span:first-child { background: var(--brand-soft); color: var(--brand); }
 .case-card-meta strong { margin-left: auto; color: var(--ink-2); }
-.case-card-notice { margin: 0; padding: 7px 10px; border: 1px solid #edc5cb; border-radius: 6px; background: #fdf6f7; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+.case-card-notice { margin: 0; padding: 7px 10px; overflow-wrap: anywhere; border: 1px solid #edc5cb; border-radius: 6px; background: #fdf6f7; color: var(--ink-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .case-card-meta strong[data-status="pending"], .case-card-meta strong[data-status="reviewing"] { background: var(--amber-soft); color: var(--amber); }
 .case-card-meta strong[data-status="published"] { background: var(--green-soft); color: var(--green); }
 .case-card h2 { margin: 14px 0 10px; overflow-wrap: anywhere; font-size: 18px; line-height: 1.55; }

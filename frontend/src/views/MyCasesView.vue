@@ -33,7 +33,7 @@ function isReturned(item) {
 function returnReason(item) {
   const review = item.lastReview;
   if (!review) return "";
-  return `${review.reasonType}${review.summary ? `：${review.summary}` : ""}`;
+  return `${review.reasonTypes.join("、")}${review.message ? `：${review.message}` : ""}`;
 }
 
 function inGroup(group, item) {
@@ -126,7 +126,6 @@ onMounted(loadCases);
           <ul class="return-todo-list">
             <li v-for="item in returnedCases" :key="item.id">
               <RouterLink :to="caseDestination(item)"><b>{{ item.title }}</b></RouterLink>
-              <span>{{ returnReason(item) }}</span>
               <em v-if="item.pendingAnnotationCount">待处理批注 {{ item.pendingAnnotationCount }} 条</em>
             </li>
           </ul>

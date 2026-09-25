@@ -12,8 +12,8 @@ vi.mock("../session.js", () => ({
 vi.mock("../api.js", () => ({ api: { listCases: vi.fn(), createCase: vi.fn() } }));
 
 const lastReview = {
-  action: "reject", reasonType: "证据不足", summary: "请补充数据来源",
-  annotationIds: ["ca-1"], versionNumber: 2, actorId: "admin-1",
+  action: "reject", reasonTypes: ["事实、数据或来源需要核实", "其他"],
+  message: "请补充数据来源".repeat(80), versionNumber: 2, actorId: "admin-1",
   createdAt: "2026-09-01T00:00:00Z",
 };
 
@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-test("退回稿进入退回修改分组并标注退回意见", async () => {
+test("退回原因和完整留言只在案例卡片展示一次", async () => {
   const wrapper = await renderCases([card({ lastReview, pendingAnnotationCount: 2 })]);
   const groups = wrapper.findAll(".my-case-group").filter(
     (node) => node.get("h2").text() === "退回修改",
@@ -48,14 +48,18 @@ test("退回稿进入退回修改分组并标注退回意见", async () => {
   expect(groups.length).toBe(1);
   expect(groups[0].findAll(".case-card").length).toBe(1);
   const notice = wrapper.get(".case-card-notice");
-  expect(notice.text()).toBe("证据不足：请补充数据来源");
+  expect(notice.text()).toBe(`事实、数据或来源需要核实、其他：${lastReview.message}`);
+  expect(wrapper.text().split(lastReview.message)).toHaveLength(2);
+  expect(wrapper.get(".return-todo-list").text()).not.toContain(lastReview.message);
   expect(wrapper.text()).toContain("待处理批注 2 条");
   expect(wrapper.text()).toContain("处理退回意见");
 });
 
 test("退回待办列出原因与待处理批注，重投后回到进行中", async () => {
   const wrapper = await renderCases([card({ lastReview, pendingAnnotationCount: 1 })]);
-  expect(wrapper.get(".return-todo-list").text()).toContain("请补充数据来源");
+  expect(wrapper.get(".return-todo-list").text()).toContain("退回稿");
+  expect(wrapper.get(".return-todo-list").text()).toContain("待处理批注 1 条");
+  expect(wrapper.get(".case-card-notice").text()).toContain(lastReview.message);
   api.listCases.mockResolvedValue([card()]);
   await wrapper.vm.loadCases();
   await flushPromises();

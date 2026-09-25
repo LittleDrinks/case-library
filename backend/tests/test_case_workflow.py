@@ -502,13 +502,16 @@ def _assert_return_feedback(returned):
     assert returned["case"]["workflowStatus"] == "draft"
     assert "lastReview" not in returned["case"]
     assert returned["event"]["action"] == "reject"
-    assert returned["event"]["reasonType"] == "证据不足"
+    assert returned["event"]["reasonTypes"] == ["事实、数据或来源需要核实"]
+    assert returned["event"]["message"] == ""
     assert returned["event"]["annotationIds"] == []
 
 
 def _reject_and_view(client, started):
     admin = _relogin(client, "admin", "admin123")
-    returned = _decide(client, admin, started, "reject", reasonType="证据不足")
+    returned = _decide(
+        client, admin, started, "reject", reasonTypes=["事实、数据或来源需要核实"]
+    )
     _assert_return_feedback(returned)
     admin_view = client.get("/api/cases/c-draft-1").json()
     client.cookies.clear()
@@ -525,10 +528,11 @@ def test_reviewer_returns_without_annotations_and_owner_sees_reason(
     assert "lastReview" not in admin_view
     history = client.get("/api/cases/c-draft-1/history").json()
     rejects = [event for event in history["events"] if event["action"] == "reject"]
-    assert len(rejects) == 1 and rejects[0]["reasonType"] == "证据不足"
+    assert len(rejects) == 1
+    assert rejects[0]["reasonTypes"] == ["事实、数据或来源需要核实"]
     assert view["lastReview"]["action"] == "reject"
-    assert view["lastReview"]["reasonType"] == "证据不足"
-    assert view["lastReview"]["summary"] == ""
+    assert view["lastReview"]["reasonTypes"] == ["事实、数据或来源需要核实"]
+    assert view["lastReview"]["message"] == ""
     assert view["availableActions"] == ["submit", "overwrite"]
 
 
@@ -557,11 +561,17 @@ def test_mine_list_surfaces_return_feedback_until_resubmit(client: TestClient) -
     _admin, case, _submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")
     _review_annotation(client, admin, started["case"])
-    _decide(client, admin, started, "reject", reasonType="证据不足")
+    _decide(
+        client,
+        admin,
+        started,
+        "reject",
+        reasonTypes=["事实、数据或来源需要核实"],
+    )
     owner = _relogin(client)
     card = _mine_card(client, case["id"])
     assert card["lastReview"]["action"] == "reject"
-    assert card["lastReview"]["reasonType"] == "证据不足"
+    assert card["lastReview"]["reasonTypes"] == ["事实、数据或来源需要核实"]
     assert card["pendingAnnotationCount"] == 1
     owner = _relogin(client)
     current = client.get(f"/api/cases/{case['id']}").json()
@@ -579,10 +589,11 @@ def test_public_views_never_expose_review_feedback(client: TestClient) -> None:
     assert approved["case"]["workflowStatus"] == "published"
 
 
-def test_whitespace_only_return_reason_is_rejected(client: TestClient) -> None:
+def test_return_requires_at_least_one_fixed_reason(client: TestClient) -> None:
     _admin, case, submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")
-    for reason in ("   ", "\t\n", "\u3000"):
+    for reasons in (None, [], ["其他原因"]):
+        extra = {} if reasons is None else {"reasonTypes": reasons}
         response = _transition(
             client,
             case["id"],
@@ -590,28 +601,64 @@ def test_whitespace_only_return_reason_is_rejected(client: TestClient) -> None:
             "reject",
             started["case"],
             submittedVersionId=submitted["version"]["id"],
-            reasonType=reason,
+            **extra,
         )
         assert response.status_code == 422
+    assert client.get(f"/api/cases/{case['id']}").json()["workflowStatus"] == "reviewing"
 
 
-def test_return_reason_is_trimmed_before_persisted(client: TestClient) -> None:
+def test_only_admin_can_return_a_review(client: TestClient) -> None:
+    _admin, case, submitted, started = _review_round(client)
+    owner = _relogin(client)
+
+    response = _transition(
+        client,
+        case["id"],
+        owner["csrfToken"],
+        "reject",
+        started["case"],
+        submittedVersionId=submitted["version"]["id"],
+        reasonTypes=["内容需要补充或修改"],
+    )
+
+    assert response.status_code == 403
+    assert client.get(f"/api/cases/{case['id']}").json()["workflowStatus"] == "reviewing"
+
+
+def test_supplement_is_not_a_review_action(client: TestClient) -> None:
+    _admin, case, submitted, started = _review_round(client)
+    admin = _relogin(client, "admin", "admin123")
+
+    response = _transition(
+        client,
+        case["id"],
+        admin["csrfToken"],
+        "supplement",
+        started["case"],
+        submittedVersionId=submitted["version"]["id"],
+        reasonTypes=["内容需要补充或修改"],
+    )
+
+    assert response.status_code == 422
+
+
+def test_return_message_is_trimmed_before_persisted(client: TestClient) -> None:
     _admin, _case, _submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")
     returned = _decide(
         client,
         admin,
         started,
-        "supplement",
-        reasonType="  证据不足\u3000",
-        summary="\n 请补充数据来源。 ",
+        "reject",
+        reasonTypes=["事实、数据或来源需要核实"],
+        message="\n 请补充数据来源。 ",
     )
-    assert returned["event"]["reasonType"] == "证据不足"
-    assert returned["event"]["summary"] == "请补充数据来源。"
+    assert returned["event"]["reasonTypes"] == ["事实、数据或来源需要核实"]
+    assert returned["event"]["message"] == "请补充数据来源。"
     _relogin(client)
     view = client.get("/api/cases/c-draft-1").json()
-    assert view["lastReview"]["reasonType"] == "证据不足"
-    assert view["lastReview"]["summary"] == "请补充数据来源。"
+    assert view["lastReview"]["reasonTypes"] == ["事实、数据或来源需要核实"]
+    assert view["lastReview"]["message"] == "请补充数据来源。"
 
 
 def test_return_without_reason_is_rejected(client: TestClient) -> None:
@@ -629,6 +676,7 @@ def test_return_without_reason_is_rejected(client: TestClient) -> None:
         "reject",
         started["case"],
         submittedVersionId=submitted["version"]["id"],
+        reasonTypes=[],
     )
     assert response.status_code == 422
 
@@ -636,13 +684,72 @@ def test_return_without_reason_is_rejected(client: TestClient) -> None:
 def test_resubmit_clears_the_last_review_feedback(client: TestClient) -> None:
     _admin, case, _submitted, started = _review_round(client)
     admin = _relogin(client, "admin", "admin123")
-    returned = _decide(client, admin, started, "supplement", reasonType="证据不足")
+    returned = _decide(
+        client,
+        admin,
+        started,
+        "reject",
+        reasonTypes=["事实、数据或来源需要核实"],
+    )
     owner = _relogin(client)
     resubmitted = _transition_json(
         client, case["id"], owner["csrfToken"], "submit", returned["case"]
     )
     assert resubmitted["case"]["workflowStatus"] == "pending"
     assert resubmitted["case"]["lastReview"] is None
+
+
+def test_return_records_multiple_reasons_and_full_optional_message(client: TestClient) -> None:
+    _admin, case, _submitted, started = _review_round(client)
+    assert started["case"]["availableActions"] == ["approve", "reject"]
+    reasons = ["内容需要补充或修改", "事实、数据或来源需要核实"]
+    message = "请补充本案例采用的数据来源及核验过程。" * 120
+
+    returned = _decide(
+        client,
+        _relogin(client, "admin", "admin123"),
+        started,
+        "reject",
+        reasonTypes=reasons,
+        message=message,
+    )
+
+    assert returned["case"]["workflowStatus"] == "draft"
+    assert returned["event"]["action"] == "reject"
+    assert returned["event"]["reasonTypes"] == reasons
+    assert returned["event"]["message"] == message
+    assert returned["event"]["annotationIds"] == []
+    assert "lastReview" not in returned["case"]
+
+    owner = _relogin(client)
+    refreshed = client.get(f"/api/cases/{case['id']}").json()
+    assert refreshed["lastReview"]["reasonTypes"] == reasons
+    assert refreshed["lastReview"]["message"] == message
+    card = _mine_card(client, case["id"])
+    assert card["lastReview"] == refreshed["lastReview"]
+
+    resubmitted = _transition_json(
+        client, case["id"], owner["csrfToken"], "submit", refreshed
+    )
+    assert resubmitted["case"]["workflowStatus"] == "pending"
+    assert resubmitted["version"]["id"] != returned["event"]["versionId"]
+    assert resubmitted["case"]["lastReview"] is None
+
+
+def test_other_reason_can_be_returned_without_a_message(client: TestClient) -> None:
+    _admin, _case, _submitted, started = _review_round(client)
+
+    returned = _decide(
+        client,
+        _relogin(client, "admin", "admin123"),
+        started,
+        "reject",
+        reasonTypes=["其他"],
+    )
+
+    assert returned["case"]["workflowStatus"] == "draft"
+    assert returned["event"]["reasonTypes"] == ["其他"]
+    assert returned["event"]["message"] == ""
 
 
 def _create_empty_case(client, owner, title):

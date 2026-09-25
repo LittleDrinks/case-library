@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { X } from "@lucide/vue";
 
 const props = defineProps({
@@ -8,29 +8,33 @@ const props = defineProps({
   error: { type: String, default: "" },
 });
 const emit = defineEmits(["cancel", "confirm"]);
-const reasonInput = ref(null);
-const reasonType = ref("");
-const summary = ref("");
-const copy = computed(() => ({
-  reject: { title: "退回修改", confirm: "确认退回" },
-  supplement: { title: "要求补充", confirm: "确认要求补充" },
-}[props.command]));
+const reasons = [
+  "内容需要补充或修改",
+  "事实、数据或来源需要核实",
+  "格式或案例信息需要调整",
+  "其他",
+];
+const reasonTypes = ref([]);
+const message = ref("");
+const copy = computed(() => (
+  props.command === "reject" ? { title: "退回修改", confirm: "确认退回" } : null
+));
 
 function cancel() {
   if (!props.busy) emit("cancel");
 }
 
 function submit() {
-  const reason = reasonType.value.trim();
-  if (!reason || props.busy) return;
-  emit("confirm", { reasonType: reason, summary: summary.value.trim() || undefined });
+  if (!reasonTypes.value.length || props.busy) return;
+  emit("confirm", {
+    reasonTypes: [...reasonTypes.value],
+    message: message.value.trim() || undefined,
+  });
 }
 
-async function resetForm() {
-  reasonType.value = "";
-  summary.value = "";
-  await nextTick();
-  reasonInput.value?.focus();
+function resetForm() {
+  reasonTypes.value = [];
+  message.value = "";
 }
 
 watch(() => props.command, resetForm);
@@ -57,18 +61,21 @@ watch(() => props.command, resetForm);
           </button>
         </header>
         <form @submit.prevent="submit">
+          <fieldset>
+            <legend>退回原因（至少选择一项）</legend>
+            <label v-for="reason in reasons" :key="reason" class="review-decision-reason">
+              <input v-model="reasonTypes" type="checkbox" :value="reason" :disabled="busy" />
+              <span>{{ reason }}</span>
+            </label>
+          </fieldset>
           <label>
-            <span>原因类型</span>
-            <input ref="reasonInput" v-model="reasonType" required maxlength="80" />
-          </label>
-          <label>
-            <span>总评</span>
-            <textarea v-model="summary" maxlength="4000" rows="5" />
+            <span>留言（可选）</span>
+            <textarea v-model="message" maxlength="4000" rows="5" :disabled="busy" />
           </label>
           <p v-if="error" class="review-decision-error" role="alert">{{ error }}</p>
           <footer>
             <button type="button" :disabled="busy" @click="cancel">取消</button>
-            <button class="primary" type="submit" :disabled="!reasonType.trim() || busy">
+            <button class="primary" type="submit" :disabled="!reasonTypes.length || busy">
               {{ busy ? "处理中" : copy.confirm }}
             </button>
           </footer>

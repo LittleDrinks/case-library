@@ -43,14 +43,13 @@ async function lifecycle(request, caseId, command, extra = {}) {
 async function completeReviewDecision(page) {
   let dialog = page.getByRole("dialog", { name: "退回修改" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel("原因类型")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await page.getByRole("button", { name: "退回修改" }).click();
   dialog = page.getByRole("dialog", { name: "退回修改" });
   await expect(dialog.getByRole("button", { name: "确认退回" })).toBeDisabled();
-  await dialog.getByLabel("原因类型").fill("教学目标不清晰");
-  await dialog.getByLabel("总评").fill("请依据批注补充后重新提交。");
+  await dialog.getByLabel("内容需要补充或修改").check();
+  await dialog.getByLabel("留言（可选）").fill("请依据批注补充后重新提交。");
   await dialog.getByRole("button", { name: "确认退回" }).click();
 }
 
