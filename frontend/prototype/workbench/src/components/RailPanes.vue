@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { Sparkles } from "@lucide/vue";
-import { mockResources, store } from "../store.js";
+import { store } from "../store.js";
 
 // 右轨面板：会话历史 / 修改审阅 / 资料。AI 主面板在 AiPane。
 defineProps({ tab: { type: String, required: true } });
@@ -14,8 +14,8 @@ function rename(t) {
   t.title = name.value.trim(); t.manualRenamed = true; t.auto = false;
   renaming.value = "";
 }
-const pendingRevisions = computed(() => store.annotations.filter((a) => a.kind === "revision" && a.status === "pending"));
-const handledRevisions = computed(() => store.annotations.filter((a) => a.kind === "revision" && a.status !== "pending"));
+const pendingRevisions = computed(() => store.revisions.filter((a) => a.kind === "revision" && a.status === "pending"));
+const handledRevisions = computed(() => store.revisions.filter((a) => a.kind === "revision" && a.status !== "pending"));
 </script>
 
 <template>
@@ -54,14 +54,6 @@ const handledRevisions = computed(() => store.annotations.filter((a) => a.kind =
         </li>
       </ul>
     </template>
-    <template v-else-if="tab === 'resources'">
-      <header class="rail-pane-head"><b>资料</b><span>已挂载 3</span></header>
-      <ul class="resource-list">
-        <li v-for="r in mockResources" :key="r.id">
-          <b>{{ r.name }}</b>
-          <small>{{ r.meta }}</small>
-        </li>
-      </ul>
-    </template>
+
   </div>
 </template>

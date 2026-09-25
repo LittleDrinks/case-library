@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ChevronDown, CornerDownLeft, Globe, Lightbulb, Paperclip, Sparkles, X } from "@lucide/vue";
+import { ChevronDown, CornerDownLeft, Lightbulb, Sparkles, X } from "@lucide/vue";
 import { store, activeThread } from "../store.js";
 
 // AI 输入区：选区 chip（可展开/移除/定位）+ 输入框 + 底部 model/web/thinking 控件。
@@ -9,7 +9,7 @@ const props = defineProps({
   elapsed: { type: Number, default: 0 },
   modelSupportedThinking: { type: Boolean, default: false },
 });
-const emit = defineEmits(["send", "stop", "locate-chip", "open-ai-menu", "remove-chip"]);
+const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip"]);
 const inputEl = ref(null);
 const composerEl = ref(null);
 const modelButton = ref(null);
@@ -18,7 +18,6 @@ let flashTimer = 0;
 const chipExpanded = ref(false);
 const chipFlash = ref(false);
 const modelMenuOpen = ref(false);
-const webLater = ref(false);
 
 const draft = computed({
   get: () => store.composerDraft,
@@ -103,9 +102,9 @@ defineExpose({ focusInput });
 function canSend() {
   return Boolean(draft.value.trim()) && !props.busy && store.aiConfig.ready;
 }
-function submit() {
+function submit(revise = false) {
   if (!canSend()) return;
-  emit("send", { text: draft.value.trim(), skills: [...chosenSkills.value] });
+  emit("send", { text: draft.value.trim(), skills: [...chosenSkills.value], revise });
   draft.value = "";
   const thread = activeThread();
   if (thread) thread.pendingSkills = [];
@@ -150,11 +149,10 @@ function removeSkill(id) {
         @keydown.enter="enter"
       />
       <div class="compose-side">
-        <button type="button" title="附件接入尚未开放" aria-label="附件接入尚未开放" disabled><Paperclip :size="15" /></button>
-        <button type="button" class="ai-menu-trigger" title="AI 命令" @click="emit('open-ai-menu')"><Sparkles :size="15" /></button>
-        <button type="button" class="send" :disabled="!canSend()" title="发送" @click="submit"><CornerDownLeft :size="15" /></button>
+        <button type="button" class="send" :disabled="!canSend()" title="发送" @click="submit()"><CornerDownLeft :size="15" /></button>
       </div>
     </div>
+    <button v-if="store.selectionChip" type="button" class="request-revision" :disabled="!canSend() || store.selectionChip.anchorMissing" @click="submit(true)">按输入生成修改建议</button>
     <div class="capability-bar">
       <div class="capability-left">
         <button ref="modelButton" type="button" class="capability model" aria-haspopup="menu" :aria-expanded="modelMenuOpen" @click="toggleModels">
@@ -166,9 +164,7 @@ function removeSkill(id) {
             <small v-if="m === store.aiConfig.defaultModel">默认</small>
           </button>
         </div>
-        <button type="button" class="capability" title="联网：Later，未接入" @click="webLater = true">
-          <Globe :size="14" /> <span v-if="webLater" class="later-hint">联网 Later · 未接入</span>
-        </button>
+
         <button
           type="button"
           class="capability"

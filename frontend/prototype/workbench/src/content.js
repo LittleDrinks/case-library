@@ -1,5 +1,5 @@
 // 初始文档内容（ProseMirror JSON）。中文真实教学内容：钱伟长课程思政案例。
-// 批注锚点/修订预览全部由 decoration 层渲染，不写入正文结构。
+// 修订预览全部由 decoration 层渲染，不写入正文结构。
 export const initialDoc = {
   type: "doc",
   content: [

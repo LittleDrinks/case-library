@@ -11,7 +11,7 @@ import { initialDoc } from "./content.js";
 const props = defineProps({
   snapshot: { type: Object, required: true },
 });
-const emit = defineEmits(["selection-change", "annotate", "ask-ai", "doc-change", "anchor", "open-ai-menu"]);
+const emit = defineEmits(["selection-change", "ask-ai", "doc-change"]);
 const editorEl = ref(null);
 let decorationsTick = 0;
 
@@ -46,12 +46,6 @@ defineExpose({
   },
 });
 
-function onAnchorClick(event) {
-  const id = event.target.closest("[data-ann]")?.dataset.ann;
-  const item = props.snapshot.annotations.find((a) => a.id === id);
-  if (item) emit("anchor", item);
-}
-
 // TextSelection 引入放底部避免与 SFC 编译器冲突
 import { TextSelection } from "@tiptap/pm/state";
 function TextSelectionNear(state, range) {
@@ -61,13 +55,11 @@ function TextSelectionNear(state, range) {
 
 <template>
   <div ref="editorEl" class="paper-wrap">
-    <EditorContent v-if="editor" :editor="editor" class="paper-editor" @click="onAnchorClick" />
+    <EditorContent v-if="editor" :editor="editor" class="paper-editor" />
     <SelectionBalloon
       v-if="editor"
       :editor="editor"
-      @annotate="(sel) => emit('annotate', sel)"
       @ask-ai="(sel) => emit('ask-ai', sel)"
-      @open-ai-menu="(event) => emit('open-ai-menu', event)"
       @selection-change="(e) => emit('selection-change', e)"
     />
   </div>

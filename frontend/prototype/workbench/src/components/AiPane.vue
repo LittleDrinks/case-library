@@ -5,7 +5,7 @@ import { Check, Eye, Plus, Sparkles, X } from "@lucide/vue";
 import { activeThread, store } from "../store.js";
 import AiComposer from "./AiComposer.vue";
 
-const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "open-ai-menu", "rename-thread", "accept", "reject", "preview"]);
+const emit = defineEmits(["send", "stop", "locate-chip", "remove-chip", "new-thread", "rename-thread", "accept", "reject", "preview"]);
 const scrollEl = ref(null);
 const titleFlash = ref(false);
 const composerRef = ref(null);
@@ -20,11 +20,7 @@ const elapsed = computed(() => {
   const job = store.runningJob;
   return job ? globalThis.performance.now() - job.startedAt : 0;
 });
-const suggestions = [
-  { id: "summarize", label: "总结文档" },
-  { id: "improve", label: "改进写作" },
-  { id: "review", label: "审查文档" },
-];
+
 
 function finishTitleFlash() {
   titleFlash.value = false;
@@ -64,12 +60,12 @@ function send(payload) {
   emit("send", payload);
 }
 function revision(msg) {
-  return store.annotations.find((item) => item.id === msg.annotationId) || msg;
+  return store.revisions.find((item) => item.id === msg.revisionId) || msg;
 }
 function revisionStatus(msg) {
   if (msg.aborted) return "已停止";
   if (msg.error) return "请求失败";
-  if (!msg.annotationId) return msg.ms == null ? "正在生成修改建议…" : "没有可用的修改";
+  if (!msg.revisionId) return msg.ms == null ? "正在生成修改建议…" : "没有可用的修改";
   return { accepted: "已采用", rejected: "已拒绝", stale: "原文已变化", pending: "待你确认" }[revision(msg).status] || "待你确认";
 }
 function revisionError(msg) {
@@ -88,13 +84,7 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
       <button type="button" class="new-chat" @click="emit('new-thread')"><Plus :size="13" /> 新会话</button>
     </header>
     <div ref="scrollEl" class="ai-messages" @scroll="rememberScroll">
-      <div v-if="!thread || !thread.messages.length" class="ai-welcome">
-        <div class="ai-welcome-actions">
-          <button v-for="s in suggestions" :key="s.id" type="button" class="ai-suggestion" @click="send({ text: s.label, via: 'suggestion' })">
-            <Sparkles :size="13" /> {{ s.label }}
-          </button>
-        </div>
-      </div>
+      <p v-if="!thread?.messages.length" class="ai-welcome">输入问题，或选择正文后与 AI 讨论。</p>
       <template v-for="(msg, i) in thread?.messages || []" :key="i">
         <div v-if="msg.role === 'user'" class="ai-msg user">
           <blockquote v-if="msg.quote">“{{ msg.quote }}”</blockquote>
@@ -119,7 +109,7 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
             <p v-if="msg.error" class="ai-msg-error" :class="{ stopped: msg.aborted }" role="status">{{ revisionError(msg) }}</p>
             <footer>
               <span class="tag" :class="revision(msg).status">{{ revisionStatus(msg) }}</span>
-              <div v-if="msg.annotationId && revision(msg).status === 'pending'" class="rev-actions">
+              <div v-if="msg.revisionId && revision(msg).status === 'pending'" class="rev-actions">
                 <button type="button" @click="emit('preview', revision(msg))"><Eye :size="12" /> 查看原文</button>
                 <button type="button" @click="emit('accept', revision(msg))"><Check :size="12" /> 采用</button>
                 <button type="button" @click="emit('reject', revision(msg))"><X :size="12" /> 保留原文</button>
@@ -139,7 +129,6 @@ defineExpose({ focusComposer: () => composerRef.value?.focusInput() });
       @stop="emit('stop')"
       @locate-chip="emit('locate-chip')"
       @remove-chip="emit('remove-chip')"
-      @open-ai-menu="emit('open-ai-menu')"
     />
   </section>
 </template>

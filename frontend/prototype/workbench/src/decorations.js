@@ -1,4 +1,4 @@
-// decoration 层：批注锚点高亮、待定修订预览（删除线+插入预览）、选区 chip 高亮。
+// decoration 层：待定修订预览（删除线+插入预览）、选区 chip 高亮。
 // 预览是临时展示层，不写入正文；采用/拒绝走真实事务。
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -7,20 +7,6 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 export const overlayKey = new PluginKey("prototypeOverlay");
 
 import { findTextRange } from "./text-range.js";
-
-function annotationDecorations(doc, annotations) {
-  const items = [];
-  for (const ann of annotations) {
-    if (ann.resolved && ann.kind === "comment") continue;
-    const range = ann.anchorMissing ? null : findTextRange(doc, ann.anchorQuote, ann.range);
-    if (!range) continue;
-    items.push(Decoration.inline(range.from, range.to, {
-      class: `ann-anchor kind-${ann.kind}`,
-      "data-ann": ann.id,
-    }));
-  }
-  return items;
-}
 
 function revisionDecorations(doc, revisions) {
   const items = [];
@@ -50,7 +36,6 @@ function chipDecoration(doc, chip) {
 export function buildOverlay(state, snapshot) {
   const doc = state.doc;
   const items = [
-    ...annotationDecorations(doc, snapshot.annotations),
     ...revisionDecorations(doc, snapshot.revisions || []),
     ...chipDecoration(doc, snapshot.chip),
   ];

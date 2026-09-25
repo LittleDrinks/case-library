@@ -1,10 +1,10 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { BubbleMenu } from "@tiptap/vue-3";
-import { Bold, ChevronDown, Italic, Link2, MessageSquarePlus, Sparkles, X } from "@lucide/vue";
+import { Bold, Italic, Link2, Sparkles, X } from "@lucide/vue";
 
 const props = defineProps({ editor: { type: Object, required: true } });
-const emit = defineEmits(["annotate", "ask-ai", "selection-change", "open-ai-menu"]);
+const emit = defineEmits(["ask-ai", "selection-change"]);
 const linking = ref(false);
 const linkUrl = ref("");
 const toolbarEl = ref(null);
@@ -18,9 +18,6 @@ const shouldShow = ({ editor, from, to }) => !editor.view.composing && from !== 
 function currentSelection() {
   const { from, to } = props.editor.state.selection;
   return { from, to, quote: props.editor.state.doc.textBetween(from, to, " ") };
-}
-function openMenu(event) {
-  emit("open-ai-menu", { ...currentSelection(), rect: event.currentTarget.getBoundingClientRect() });
 }
 function format(name) {
   props.editor.chain().focus()[name]().run();
@@ -78,9 +75,7 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); docum
       <button type="button" title="斜体" aria-label="斜体" :aria-pressed="editor.isActive('italic')" :class="{ active: editor.isActive('italic') }" @mousedown.prevent @click="format('toggleItalic')"><Italic :size="15" /></button>
       <button type="button" title="链接" aria-label="链接" :aria-expanded="linking" :class="{ active: editor.isActive('link') }" @mousedown.prevent @click="openLink"><Link2 :size="15" /></button>
       <span class="balloon-divider" />
-      <button type="button" title="批注" aria-label="批注" @mousedown.prevent @click="emit('annotate', currentSelection())"><MessageSquarePlus :size="15" /></button>
       <button type="button" title="问 AI" aria-label="问 AI" class="ai" @mousedown.prevent @click="emit('ask-ai', currentSelection())"><Sparkles :size="15" /></button>
-      <button type="button" title="AI 命令" aria-label="AI 命令" class="ai balloon-menu-trigger" @mousedown.prevent @click="openMenu"><ChevronDown :size="12" /></button>
       <form v-if="linking" class="balloon-link-form" @submit.prevent="applyLink">
         <input ref="linkEl" v-model="linkUrl" type="text" placeholder="https://…" aria-label="链接地址" />
         <button type="submit">应用</button>

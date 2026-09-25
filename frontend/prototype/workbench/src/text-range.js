@@ -47,6 +47,3 @@ export function mapRevision(transaction, revision) {
   }
   revision.range = outer; revision.anchorMissing = true; revision.status = "stale";
 }
-export function annotationQuote(annotation) {
-  return annotation.status === "accepted" ? annotation.replacement : annotation.anchorQuote;
-}
