@@ -94,7 +94,7 @@ test("管理员从管理后台发现待审案例并进入审核工作台", async
   const row = page.getByRole("article", { name: `待审核：${PENDING_CASE}` });
   await row.getByRole("link", { name: "审核", exact: true }).click();
   await expect(page).toHaveURL(/#\/admin\/review\/c-pending-1$/);
-  await expect(page.locator(".workspace-crumb")).toContainText("审核管理");
+  await expect(page.locator(".workbench-brand-link")).toContainText("思政教学案例库 · 审核");
 });
 
 test("教师从我的案例新建默认案例并进入作者工作台", async ({ page }) => {

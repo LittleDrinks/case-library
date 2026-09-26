@@ -603,8 +603,9 @@ class AgentRepository:
         )
 
     def fail_run(self, run_id: str, owner_id: str | None = None, *,
-                 assistant: AgentMessage | None = None, error: str = "AI 服务暂不可用") -> bool:
-        return self._finish(run_id, "failed", {"error": error}, owner_id, assistant)
+                 assistant: AgentMessage | None = None, error: str = "AI 服务暂不可用",
+                 artifacts: list[AgentArtifact] | None = None) -> bool:
+        return self._finish(run_id, "failed", {"error": error}, owner_id, assistant, artifacts)
 
     def cancel_run(self, run_id: str, owner_id: str | None = None, *,
                    assistant: AgentMessage | None = None) -> bool:
@@ -612,18 +613,19 @@ class AgentRepository:
 
     def _finish(
         self, run_id: str, status: TerminalRunStatus, fields: dict, owner_id=None,
-        assistant: AgentMessage | None = None,
+        assistant: AgentMessage | None = None, artifacts: list[AgentArtifact] | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._finish_transaction(
-                run_id, status, fields, session, owner_id, assistant
+                run_id, status, fields, session, owner_id, assistant, artifacts
             ),
         )
 
     def _finish_transaction(
         self, run_id: str, status: TerminalRunStatus, fields: dict, session,
         owner_id=None, assistant: AgentMessage | None = None,
+        artifacts: list[AgentArtifact] | None = None,
     ) -> bool:
         run = self._finish_record(
             run_id, status, fields, session, owner_id
@@ -635,6 +637,11 @@ class AgentRepository:
                 run, self._completed_assistant(run, assistant, session), session,
                 require_active=False,
             )
+        for artifact in artifacts or []:
+            case = self.database.cases.find_one({"id": artifact.case_id}, session=session)
+            if not case or case["revision"] != artifact.base_revision:
+                artifact = artifact.model_copy(update={"status": "expired"})
+            self._persist_artifact(run, artifact, session)
         self._clear_active(run.thread_id, run_id, session)
         self._append_event(run.thread_id, _terminal_event(status), run_id, fields, session)
         return True

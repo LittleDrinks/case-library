@@ -35,6 +35,25 @@ async function expectBrand(page) {
   await expect(brand).toHaveText(BRAND);
 }
 
+async function expectWorkbenchBrand(page) {
+  await expect(page).toHaveTitle(BRAND);
+  const brand = page.locator('.workbench-brand-link');
+  await expect(brand).toBeVisible();
+  await expect(brand).toHaveAttribute('href', '#/');
+  await expect(brand.getByRole('img', { name: '上海大学' })).toBeVisible();
+  await expect(brand).toContainText('思政教学案例库');
+}
+
+async function expectWorkspaceHeader(page) {
+  const header = page.locator('.workspace-header');
+  await expect(header).toBeVisible();
+  await expectStyles(header, {
+    backgroundColor: 'rgba(255, 255, 255, 0.97)', borderBottomColor: DEMO.line,
+  });
+  expect((await boxOf(header)).height).toBeLessThanOrEqual(64);
+  await expect(page.locator('.site-header')).toHaveCount(0);
+}
+
 async function expectLoginBrand(page) {
   await page.goto("/#/login");
   await expect(page).toHaveTitle(BRAND);
@@ -51,14 +70,14 @@ async function expectCaseDetailBrand(page) {
   await page.goto("/#/cases/c-02");
   await expect(page.locator(".workspace-header")).toBeVisible();
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  await expectBrand(page);
+  await expectWorkbenchBrand(page);
 }
 
 async function expectPrivateRouteBrand(page) {
   await loginAsAdmin(page);
   await page.goto("/#/workbench/c-02");
   await expect(page.locator(".workbench-page")).toBeVisible();
-  await expectBrand(page);
+  await expectWorkbenchBrand(page);
   await page.goto("/#/admin");
   await expect(page.getByRole("heading", { name: "管理后台" })).toBeVisible();
   await expectBrand(page);
@@ -89,12 +108,12 @@ async function openCaseDetail(page) {
   await page.goto("/#/cases/c-02");
   await expect(page.locator(".document-paper")).toBeVisible();
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  await expectBrand(page);
+  await expectWorkbenchBrand(page);
 }
 
 async function expectDesktopCaseDetail(page) {
   await openCaseDetail(page);
-  await expectDesktopHeader(page);
+  await expectWorkspaceHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".document-paper"), DESKTOP_PAPER);
@@ -102,7 +121,7 @@ async function expectDesktopCaseDetail(page) {
 
 async function expectMobileCaseDetail(page) {
   await openCaseDetail(page);
-  await expectMobileHeader(page);
+  await expectWorkspaceHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".assistant-rail"), { position: "absolute" });
@@ -113,12 +132,12 @@ async function expectMobileCaseDetail(page) {
 async function openWorkbench(page) {
   await page.goto("/#/workbench/c-02");
   await expect(page.locator(".document-paper")).toBeVisible();
-  await expectBrand(page);
+  await expectWorkbenchBrand(page);
 }
 
 async function expectDesktopWorkbench(page) {
   await openWorkbench(page);
-  await expectDesktopHeader(page);
+  await expectWorkspaceHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".document-paper"), DESKTOP_PAPER);
@@ -126,7 +145,7 @@ async function expectDesktopWorkbench(page) {
 
 async function expectMobileWorkbench(page) {
   await openWorkbench(page);
-  await expectMobileHeader(page);
+  await expectWorkspaceHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
   await expectStyles(page.locator(".assistant-rail"), { position: "absolute" });
@@ -395,9 +414,7 @@ test("工作台和管理导入页共享暖纸红全局主题", async ({ page }) 
   await loginAsAdmin(page);
   await page.goto("/#/workbench/c-02");
   await expectStyles(page.locator(".workbench-page"), { backgroundColor: DEMO.background });
-  await expectStyles(page.locator(".site-header"), {
-    backgroundColor: DEMO.header, borderBottomColor: DEMO.line,
-  });
+  await expectWorkspaceHeader(page);
   await page.goto("/#/admin/material-imports");
   await expectStyles(page.locator(".admin-page"), { backgroundColor: DEMO.background });
   await expect(page.locator(".material-import-form")).toHaveCSS("border-top-color", DEMO.line);

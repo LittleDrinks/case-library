@@ -437,9 +437,12 @@ function applyRevisionDecorations(transaction, previous) {
   let entered = previous.entered;
   if (transaction.docChanged) {
     if (preview) {
-      const from = transaction.mapping.map(preview.from, 1);
-      const to = transaction.mapping.map(preview.to, -1);
-      preview = pendingAnchorRange(transaction.doc, { ...preview, from, to })
+      const left = transaction.mapping.mapResult(preview.from, 1);
+      const right = transaction.mapping.mapResult(preview.to, -1);
+      const from = left.pos;
+      const to = right.pos;
+      const deletedInsertion = preview.from === preview.to && (left.deleted || right.deleted);
+      preview = !deletedInsertion && pendingAnchorRange(transaction.doc, { ...preview, from, to })
         ? { ...preview, from, to } : null;
     }
     if (entered) {

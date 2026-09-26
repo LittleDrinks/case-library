@@ -78,6 +78,7 @@ async function loginTeacher(page) {
 }
 
 async function logoutAndWait(page) {
+  await page.goto("/#/");
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/#\/login$/);
 }

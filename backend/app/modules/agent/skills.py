@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pydantic_ai.capabilities import Capability
-from pydantic_ai.exceptions import ModelRetry
+from pydantic_ai.exceptions import ModelRetry, ToolFailed
 from pydantic_ai.tools import RunContext, Tool
 
 from app.modules.agent import artifacts, writes
@@ -89,6 +89,8 @@ async def propose_revision(
     try:
         artifact = _propose(ctx, start, end, replacement, reason)
     except CaseError as error:
+        if error.status_code in (403, 404, 409):
+            raise ToolFailed(str(error.detail)) from error
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.proposed_artifacts.append(artifact)
     return _artifact_view(artifact)

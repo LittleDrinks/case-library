@@ -216,21 +216,22 @@ def _assistant_parts_of(context: RunContext) -> list[dict]:
     return _assistant_parts(_assistant_ui(context, context.result))
 
 
-def _partial_assistant(context: RunContext) -> AgentMessage | None:
+def _partial_assistant(context: RunContext, saved_artifact_ids: frozenset[str] = frozenset()) -> AgentMessage | None:
     messages = context.captured_messages[len(context.history):]
     if not _reader_accessible(context) or not any(
         isinstance(message, ModelResponse) and message.parts for message in messages
     ):
         return None
     assistant = _assistant_message(context, None)
-    return assistant.model_copy(update={"parts": [_interrupted_part(part) for part in assistant.parts]})
+    return assistant.model_copy(update={"parts": [_interrupted_part(part, saved_artifact_ids) for part in assistant.parts]})
 
 
-def _interrupted_part(part: dict) -> dict:
+def _interrupted_part(part: dict, saved_artifact_ids: frozenset[str]) -> dict:
     if part.get("state") == "approval-requested":
         reason = "运行已结束，工具未完成"
     elif (part.get("type") in {"tool-propose_revision", "tool-propose_document"}
-          and part.get("state") == "output-available"):
+          and part.get("state") == "output-available"
+          and part.get("output", {}).get("artifactId") not in saved_artifact_ids):
         reason = "运行未完成，修改建议未保存"
     else:
         return part
@@ -363,8 +364,11 @@ def _finalize(context: RunContext) -> None:
         elif status == "cancelled":
             _terminal(context, context.repository.cancel_run, assistant=_partial_assistant(context))
         else:
+            artifacts = [item for item in context.deps.proposed_artifacts
+                         if item.kind == "range" and not item.annotation_id] if context.deps else []
             _terminal(context, context.repository.fail_run, cancel_on_conflict=True,
-                      assistant=_partial_assistant(context), error=_failure_message(context))
+                      assistant=_partial_assistant(context, frozenset(item.id for item in artifacts)),
+                      error=_failure_message(context), artifacts=artifacts)
     except Exception:
         _monitor_failed(context)
     finally:
@@ -414,12 +418,17 @@ def _revoke_reader(context: RunContext) -> None:
         context.token.cancel()
 
 
-def _terminal(context: RunContext, finish, cancel_on_conflict=False, assistant=None, error=None) -> None:
+def _terminal(context: RunContext, finish, cancel_on_conflict=False, assistant=None, error=None,
+              artifacts=None) -> None:
     kwargs = {"assistant": assistant} if assistant is not None else {}
     if error is not None:
         kwargs["error"] = error
+    if artifacts:
+        kwargs["artifacts"] = artifacts
     if not finish(context.run.id, context.worker_id, **kwargs):
         kwargs.pop("error", None)
+        if kwargs.pop("artifacts", None):
+            kwargs["assistant"] = _partial_assistant(context)
         if cancel_on_conflict and context.repository.cancel_run(
                 context.run.id, context.worker_id, **kwargs):
             context.cancelled = True

@@ -156,10 +156,10 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   const captured = wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0];
   expect(captured).toMatchObject({ quote: "案例原文", revision: 3, from: 9, to: 13 });
   for (const label of ["选区加粗", "选区斜体", "编辑选区链接", "带选区问 AI"]) {
-    expect(wrapper.find(`[aria-label="${label}"]`).exists()).toBe(true);
+    expect(wrapper.findComponent({ name: "BubbleMenu" }).find(`[aria-label="${label}"]`).exists()).toBe(true);
   }
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
-  await wrapper.get('[aria-label="带选区问 AI"]').trigger("click");
+  await wrapper.findComponent({ name: "BubbleMenu" }).get('[aria-label="带选区问 AI"]').trigger("click");
   expect(wrapper.emitted("ask-ai")).toHaveLength(1);
 });
 
@@ -965,4 +965,25 @@ it("空段落建议预览新增文字，应用原生插入步骤后显示正文"
   expect(wrapper.vm.editor.getJSON().content[0].content[0].text).toBe("教学目标");
   expect(wrapper.vm.isRevisionCurrent(target)).toBe(false);
   expect(await wrapper.vm.previewRevision(target)).toBe(false);
+});
+
+it.each([1, 3])("合并空段落后清除被删除目标 %i 的插入预览", async (position) => {
+  const { wrapper } = await setup({ document: {
+    type: "doc", content: [{ type: "paragraph" }, { type: "paragraph" }],
+  } });
+  const target = { id: "removed-empty", from: position, to: position, quote: "", replacement: "旧建议" };
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  wrapper.vm.editor.view.dispatch(wrapper.vm.editor.state.tr.delete(1, 3));
+  await nextTick();
+  expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
+});
+
+it("提交后切换只读并恢复编辑不会破坏编辑器挂载", async () => {
+  const { wrapper } = await setup();
+  await wrapper.setProps({ editable: false });
+  expect(wrapper.get('.ProseMirror').attributes('contenteditable')).toBe('false');
+  await wrapper.setProps({ editable: true });
+  expect(wrapper.get('.ProseMirror').attributes('contenteditable')).toBe('true');
+  await wrapper.setProps({ document: replacedDocument });
+  expect(wrapper.get('.ProseMirror').text()).toContain('替换后的正文');
 });

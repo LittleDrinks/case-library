@@ -354,7 +354,8 @@ def test_invalid_revision_retries_report_tool_failure_and_keep_followup_usable(c
     assert client.get(THREAD_PATH).json()["latestRun"]["status"] == "completed"
 
 
-def test_failed_run_does_not_restore_an_uncommitted_revision_as_actionable(client: TestClient) -> None:
+@pytest.mark.parametrize("changed", [False, True])
+def test_failed_run_preserves_completed_revision_for_apply_and_undo(client: TestClient, changed: bool) -> None:
     auth = _login(client)
     document = {"type": "doc", "content": [
         {"type": "paragraph", "content": [{"type": "text", "text": "原文"}]},
@@ -373,6 +374,14 @@ def test_failed_run_does_not_restore_an_uncommitted_revision_as_actionable(clien
             yield {0: DeltaToolCall(name="propose_revision", tool_call_id="unsaved-revision",
                 json_args=json.dumps({"start": 1, "end": 3, "replacement": "新文", "reason": "清晰表达"}))}
         else:
+            if changed:
+                updated = await asyncio.to_thread(client.patch, f"/api/cases/{created.json()['id']}",
+                    headers=_csrf(auth), json={"revision": created.json()["revision"], "document": {
+                        "type": "doc", "content": [{"type": "paragraph", "content": [
+                            {"type": "text", "text": "人工新文"}]}]}, "steps": [
+                        {"stepType": "replace", "from": 1, "to": 3, "slice": {
+                            "content": [{"type": "text", "text": "人工新文"}]}}]})
+                assert updated.status_code == 200, updated.text
             raise RuntimeError("provider unavailable")
 
     with _agent().override(model=FunctionModel(stream_function=propose_then_fail)):
@@ -380,12 +389,29 @@ def test_failed_run_does_not_restore_an_uncommitted_revision_as_actionable(clien
     assert response.status_code == 200
     snapshot = client.get(path).json()
     assert snapshot["latestRun"]["status"] == "failed"
-    assert snapshot["artifacts"] == []
+    assert len(snapshot["artifacts"]) == 1
+    artifact = snapshot["artifacts"][0]
     proposal = next(part for message in snapshot["messages"] for part in message["parts"]
                     if part["type"] == "tool-propose_revision")
-    assert proposal["state"] == "output-error"
-    assert proposal["errorText"] == "运行未完成，修改建议未保存"
-    assert "output" not in proposal
+    assert proposal["state"] == "output-available"
+    assert proposal["output"]["artifactId"] == artifact["id"]
+    case_path = f"/api/cases/{created.json()['id']}"
+    if changed:
+        assert artifact["status"] == "expired"
+        rejected = client.post(f"{path}/{thread['id']}/artifacts/{artifact['id']}/decision",
+                               headers=_csrf(auth), json={"decision": "accepted"})
+        assert rejected.status_code == 409
+        assert client.get(case_path).json()["document"]["content"][0]["content"][0]["text"] == "人工新文"
+        return
+    assert client.get(case_path).json()["document"] == document
+    applied = client.post(f"{path}/{thread['id']}/artifacts/{artifact['id']}/decision",
+                          headers=_csrf(auth), json={"decision": "accepted"})
+    assert applied.status_code == 200, applied.text
+    assert client.get(case_path).json()["document"]["content"][0]["content"][0]["text"] == "新文"
+    write = client.get(path).json()["writes"][0]
+    undone = client.post(f"{path}/{thread['id']}/writes/{write['id']}/undo", headers=_csrf(auth))
+    assert undone.status_code == 200, undone.text
+    assert client.get(case_path).json()["document"] == document
 
 
 def test_terminal_failure_persists_terminal_event_without_late_runtime_event(client: TestClient) -> None:
@@ -568,3 +594,41 @@ def test_empty_template_blocks_support_suggestions_apply_and_undo(client: TestCl
     current = client.get(f"/api/cases/{case_id}").json()["document"]
     assert current["content"][0]["content"][0]["text"] == "教学目标"
     assert current["content"][1] == {"type": "paragraph"}
+
+
+def test_stale_revision_tool_failure_does_not_abort_the_conversation(client: TestClient) -> None:
+    auth = _login(client)
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "原文"}]},
+    ]}
+    case = client.post("/api/cases", headers=_csrf(auth), json={
+        "title": "正文已更新", "document": document,
+    }).json()
+    path = f"/api/cases/{case['id']}/agent/thread"
+    thread = client.get(path).json()
+    calls = 0
+
+    async def stale_proposal(_messages, _info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            updated = await asyncio.to_thread(client.patch, f"/api/cases/{case['id']}",
+                headers=_csrf(auth), json={"revision": case["revision"], "title": "人工新标题"})
+            assert updated.status_code == 200, updated.text
+        if calls <= 2:
+            yield {0: DeltaToolCall(name="propose_revision", tool_call_id=f"stale-{calls}",
+                json_args=json.dumps({"start": 1, "end": 3, "replacement": "新文", "reason": "清晰表达"}))}
+        else:
+            yield "正文已更新，请基于新正文重新提出修改要求。"
+
+    with _agent().override(model=FunctionModel(stream_function=stale_proposal)):
+        result = client.post(f"{path}/{thread['id']}/stream", headers=_csrf(auth), json=_body())
+    assert result.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    assert snapshot["artifacts"] == []
+    parts = snapshot["messages"][-1]["parts"]
+    assert any(part.get("text") == "正文已更新，请基于新正文重新提出修改要求。" for part in parts)
+    errors = [part for part in parts if part["type"] == "tool-propose_revision"]
+    assert len(errors) == 2 and all(part["state"] == "output-error" for part in errors)
+    assert client.get(f"/api/cases/{case['id']}").json()["document"] == document

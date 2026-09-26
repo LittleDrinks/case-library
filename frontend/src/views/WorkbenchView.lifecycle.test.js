@@ -868,7 +868,7 @@ test("工作台移除批注入口，选区可直接交给 AI 讨论", async () =
   expect(canvas.props("annotations")).toEqual([]);
   canvas.vm.editor.commands.setTextSelection({ from: 1, to: 3 });
   await flushPromises();
-  await canvas.get('[aria-label="带选区问 AI"]').trigger("click");
+  await canvas.findComponent({ name: "BubbleMenu" }).get('[aria-label="带选区问 AI"]').trigger("click");
   await flushPromises();
   expect(rail.classes()).not.toContain("collapsed");
   const chat = rail.findComponent({ name: "AgentChatPanel" });
