@@ -158,6 +158,95 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
 });
 
+it("编号列表序列化只包含后端接受的起点属性", async () => {
+  const document = {
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+      }],
+    }],
+  };
+  const { wrapper } = await setup({ document });
+
+  expect(wrapper.vm.editor.getJSON()).toEqual(document);
+});
+
+it("工具栏创建的编号列表序列化为默认起点", async () => {
+  const document = {
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+  };
+  const { wrapper } = await setup({ document });
+
+  triggerToolbarButton("编号列表");
+
+  expect(wrapper.vm.editor.getJSON()).toEqual({
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 1 },
+      content: [{
+        type: "listItem",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+      }],
+    }],
+  });
+});
+
+it("后续编辑保留嵌套编号列表起点且不序列化额外属性", async () => {
+  const document = {
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "第一层" }] },
+          {
+            type: "orderedList",
+            attrs: { start: 6 },
+            content: [{
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "嵌套项" }] }],
+            }],
+          },
+        ],
+      }],
+    }],
+  };
+  const { wrapper } = await setup({ document });
+  const editor = wrapper.vm.editor;
+  editor.commands.focus("end");
+  editor.commands.insertContent("后续编辑");
+
+  expect(editor.getJSON()).toEqual({
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "第一层" }] },
+          {
+            type: "orderedList",
+            attrs: { start: 6 },
+            content: [{
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "嵌套项后续编辑" }] }],
+            }],
+          },
+        ],
+      }],
+    }],
+  });
+});
+
 it("批注选区重捕获保留关联，改选和显式清除会解除", async () => {
   const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
   const { wrapper } = await setup({ annotatable: true, revision: 3, annotations: [annotation] });
@@ -731,6 +820,115 @@ it("等正文平滑滚动结束后再展示修订预览", async () => {
 
   expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
   expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
+});
+
+it("locates an applied record by its replacement without showing a stale preview", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const target = {
+    id: "artifact-accepted", from: 9, to: 13, quote: "案例原文",
+    replacement: "替换后的正文", status: "accepted", locateOnly: true,
+  };
+
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
+});
+
+it("does not guess a historical location when the replacement text repeats", async () => {
+  const replacement = "替换后的正文";
+  const documentWithRepeatedReplacement = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
+      { type: "paragraph", content: [{ type: "text", text: "后来插入的间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithRepeatedReplacement, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraphs = wrapper.findAll(".canvas-editor p");
+  paragraphs.forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-repeated", from: 9, to: 9 + replacement.length,
+    quote: "旧原文", replacement, status: "accepted", locateOnly: true,
+  })).toBe(false);
+
+  expect(domAtPos).not.toHaveBeenCalled();
+  paragraphs.forEach(({ element }) => expect(element.scrollIntoView).not.toHaveBeenCalled());
+});
+
+it("does not use a replacement when the original historical quote is ambiguous", async () => {
+  const documentWithAmbiguousQuote = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "唯一替换" }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithAmbiguousQuote, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  wrapper.findAll(".canvas-editor p")
+    .forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-ambiguous-quote", from: 1, to: 4, quote: "旧原文",
+    replacement: "唯一替换", status: "superseded", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+});
+
+it("does not locate an unapplied historical suggestion by its replacement", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-rejected", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "替换后的正文", status: "rejected", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("does not report a historical record located when its text is absent", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-missing", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "也已不存在", status: "accepted", locateOnly: true,
+  })).toBe(false);
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("discards a preview whose smooth scroll finishes after a newer request", async () => {
+  const { wrapper } = await setup();
+  const scrollColumn = wrapper.element;
+  scrollColumn.classList.add("canvas-column");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const first = {
+    id: "artifact-first", from: 9, to: 13, quote: "案例原文", replacement: "第一条修改",
+  };
+  const second = { ...first, id: "artifact-second", replacement: "第二条修改" };
+
+  const firstPreview = wrapper.vm.previewRevision(first);
+  const secondPreview = wrapper.vm.previewRevision(second);
+  scrollColumn.dispatchEvent(new Event("scroll"));
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+
+  expect(await firstPreview).toBe(false);
+  expect(await secondPreview).toBe(true);
+  expect(wrapper.get(".revision-preview-new").text()).toBe("第二条修改");
 });
 
 it("目标原文变化后清除差异并拒绝应用", async () => {

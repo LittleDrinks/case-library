@@ -70,39 +70,55 @@ def _current_user_text(payload: dict) -> str:
     return ""
 
 
-def _full_generation_call(payload: dict) -> bool:
-    return "请完整生成全文" in _current_user_text(payload) and _pending_tool_round(payload)
+def _available_tools(payload: dict) -> set[str]:
+    return {
+        item.get("function", {}).get("name", "")
+        for item in payload.get("tools", [])
+    }
 
 
-def _direct_write_call(payload: dict) -> bool:
+def _blank_draft_call(payload: dict) -> bool:
+    return (
+        "请完整生成全文" in _current_user_text(payload)
+        and "write_document" in _available_tools(payload)
+        and _pending_tool_round(payload)
+    )
+
+
+def _revision_call(payload: dict) -> bool:
     text = _current_user_text(payload)
-    return ("直接写入" in text or "写入正文" in text) and _pending_tool_round(payload)
+    return (
+        any(phrase in text for phrase in ("写入正文", "直接写入", "直接修改"))
+        and "propose_revision" in _available_tools(payload)
+        and _pending_tool_round(payload)
+    )
 
 
-def _write_event(scope: str) -> bytes:
+def _revision_event(long_reason: bool = False) -> bytes:
     arguments = json.dumps({
-        "scope": scope,
-        "blocks": [{"type": "paragraph", "text": "直接写入替换的新正文"}],
-        "summary": "教师指令直接写入",
+        "start": 1,
+        "end": 1 + len("当前案例测试正文"),
+        "replacement": "通过建议应用的新正文",
+        "reason": "补充可核对的背景事实并说明其与本段论点的关系。 " * (100 if long_reason else 1),
     }, ensure_ascii=False)
     payload = {"choices": [{"delta": {"tool_calls": [{
-        "index": 0, "id": "direct-write-call", "type": "function",
-        "function": {"name": "write_document", "arguments": arguments},
+        "index": 0, "id": "revision-call", "type": "function",
+        "function": {"name": "propose_revision", "arguments": arguments},
     }]}}]}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
-def _tool_event() -> bytes:
+def _blank_draft_event() -> bytes:
     arguments = json.dumps({
         "blocks": [
             {"type": "heading", "level": 1, "text": "AI完整稿"},
             {"type": "paragraph", "text": "AI生成正文"},
         ],
-        "reason": "完整生成",
+        "summary": "为新建空稿生成初稿",
     }, ensure_ascii=False)
     payload = {"choices": [{"delta": {"tool_calls": [{
-        "index": 0, "id": "full-generation-call", "type": "function",
-        "function": {"name": "propose_document", "arguments": arguments},
+        "index": 0, "id": "blank-draft-call", "type": "function",
+        "function": {"name": "write_document", "arguments": arguments},
     }]}}]}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
@@ -129,15 +145,12 @@ def _stream(handler, payload: dict) -> None:
     handler.send_header("Connection", "close")
     handler.end_headers()
     try:
-        if _full_generation_call(payload):
-            for event in (_tool_event(), _tool_finish_event()):
+        if _blank_draft_call(payload):
+            for event in (_blank_draft_event(), _tool_finish_event()):
                 handler.wfile.write(event)
                 handler.wfile.flush()
-        elif _direct_write_call(payload):
-            prompt = json.dumps(payload, ensure_ascii=False)
-            has_selection = "本条消息正文选区" in prompt and "没有正文选区" not in prompt
-            scope = "selection" if has_selection else "document"
-            for event in (_write_event(scope), _tool_finish_event()):
+        elif _revision_call(payload):
+            for event in (_revision_event("长理由" in _current_user_text(payload)), _tool_finish_event()):
                 handler.wfile.write(event)
                 handler.wfile.flush()
         elif not _send_pieces(handler, payload):

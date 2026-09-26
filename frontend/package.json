@@ -19,6 +19,7 @@
     "@ai-sdk/vue": "3.0.272",
     "@lucide/vue": "^1.31.0",
     "@tiptap/core": "^2.11.5",
+    "@tiptap/extension-ordered-list": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
     "@tiptap/vue-3": "^2.11.5",

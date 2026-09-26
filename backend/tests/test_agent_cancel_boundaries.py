@@ -273,7 +273,7 @@ def test_cancel_request_freezes_document_write_path(client: TestClient) -> None:
     case = _create_case(client, auth, _document("原稿保持。"))
     database, _thread, run = _cancelled_run_with_base(client, auth, case)
     with pytest.raises(CaseError):
-        writes.apply_write(database, case["id"], run.id, "document",
+        writes.apply_write(database, case["id"], run.id,
                            DRAFT_BLOCKS, auth["user"], "取消后写入")
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
 

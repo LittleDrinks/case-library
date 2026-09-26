@@ -153,9 +153,21 @@ async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
 }
 
-function mountPanel(overrides = {}, revisionWorkbench = null) {
-  const provide = { [CONVERSATION_SOURCES_KEY]: conversationStore };
-  if (revisionWorkbench) provide[REVISION_WORKBENCH_KEY] = revisionWorkbench;
+function createRevisionWorkbench() {
+  return {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockResolvedValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+    apply: vi.fn().mockResolvedValue(true),
+  };
+}
+
+function mountPanel(overrides = {}, revisionWorkbench = createRevisionWorkbench()) {
+  const provide = {
+    [CONVERSATION_SOURCES_KEY]: conversationStore,
+    [REVISION_WORKBENCH_KEY]: revisionWorkbench,
+  };
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
     global: {
@@ -846,9 +858,21 @@ function tracerSnapshot() {
   };
 }
 
-function revisionSnapshot(status) {
+function revisionSnapshot(status, includeSecond = false) {
   const result = tracerSnapshot();
   result.artifacts = tracerArtifacts(status).map((item) => ({ ...item, kind: "range" }));
+  if (includeSecond) {
+    result.artifacts.push({
+      ...result.artifacts[0], id: "artifact-10",
+      target: { from: 30, to: 35, quote: "第三段原文" },
+      replacement: "第三段新文",
+    });
+    const proposalIndex = result.messages[1].parts.findIndex((part) => part.type === "tool-propose_revision");
+    result.messages[1].parts.splice(proposalIndex + 1, 0, {
+      type: "tool-propose_revision", toolCallId: "t4", state: "output-available",
+      input: {}, output: { artifactId: "artifact-10" },
+    });
+  }
   if (status === "accepted") {
     result.artifacts[0].writeId = "write-9";
     result.writes = [{ id: "write-9", status: "written", scope: "selection" }];
@@ -903,6 +927,7 @@ it("previews and applies a located suggestion without opening its AI version", a
   await flushPromises();
 
   expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
+  expect(workbench.flush).toHaveBeenCalled();
   expect(workbench.apply).toHaveBeenCalledWith(
     expect.objectContaining({ id: "artifact-9" }), result.steps,
   );
@@ -910,6 +935,100 @@ it("previews and applies a located suggestion without opening its AI version", a
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
   expect(wrapper.emitted("open-version")).toBeUndefined();
   expect(wrapper.get('[data-testid="agent-undo-revision"]').exists()).toBe(true);
+});
+
+it("does not apply a revision when the workbench cannot flush the current document", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending"));
+  const workbench = createRevisionWorkbench();
+  workbench.flush.mockResolvedValue(false);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(workbench.flush).toHaveBeenCalledTimes(2);
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[role="alert"]').text()).toContain("正文尚未保存");
+  wrapper.unmount();
+});
+
+it("keeps the newest card selected when overlapping preview requests finish out of order", async () => {
+  const firstPreview = deferred();
+  const secondPreview = deferred();
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending", true));
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn((artifact) => artifact.id === "artifact-9"
+      ? firstPreview.promise : secondPreview.promise),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  const firstCard = wrapper.get('[data-artifact-id="artifact-9"] .revision-suggestion-head');
+  const secondCard = wrapper.get('[data-artifact-id="artifact-10"] .revision-suggestion-head');
+  await firstCard.trigger("click");
+  await vi.waitFor(() => expect(workbench.preview).toHaveBeenCalledTimes(1));
+  await secondCard.trigger("click");
+  await vi.waitFor(() => expect(workbench.preview).toHaveBeenCalledTimes(2));
+
+  secondPreview.resolve(true);
+  await flushPromises();
+  firstPreview.resolve(true);
+  await flushPromises();
+
+  expect(firstCard.attributes("aria-expanded")).toBe("false");
+  expect(secondCard.attributes("aria-expanded")).toBe("true");
+  wrapper.unmount();
+});
+
+it.each(["accepted", "expired", "superseded"])(
+  "lets a %s suggestion open its read-only record and locate the body",
+  async (status) => {
+    api.agentThread.mockResolvedValue(revisionSnapshot(status));
+    const workbench = {
+      clearPreview: vi.fn(),
+      preview: vi.fn().mockResolvedValue(true),
+    };
+    const wrapper = mountPanel({ readOnly: true }, workbench);
+    await flushPromises();
+
+    await wrapper.get(".revision-suggestion-head").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".revision-suggestion-details").text()).toContain("第二段原文");
+    expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
+    expect(workbench.clearPreview).toHaveBeenCalled();
+    expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({
+      id: "artifact-9", status, locateOnly: true,
+    }));
+    wrapper.unmount();
+  },
+);
+
+it("reports when a historical suggestion has no unique body location", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("accepted"));
+  const workbench = {
+    clearPreview: vi.fn(),
+    preview: vi.fn().mockResolvedValue(false),
+  };
+  const wrapper = mountPanel({ readOnly: true }, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+
+  expect(wrapper.get('[role="alert"]').text()).toContain(
+    "正文中没有唯一匹配位置，无法定位这条历史建议",
+  );
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({
+    id: "artifact-9", locateOnly: true,
+  }));
+  wrapper.unmount();
 });
 
 it("clears a revision preview after keeping the original text", async () => {

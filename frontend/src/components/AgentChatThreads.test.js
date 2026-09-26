@@ -4,6 +4,7 @@ import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -53,7 +54,16 @@ function mountPanel() {
     props: { caseRecord: { id: "case-1" } },
     global: {
       stubs: { RouterLink: true },
-      provide: { [CONVERSATION_SOURCES_KEY]: createConversationSources() },
+      provide: {
+        [CONVERSATION_SOURCES_KEY]: createConversationSources(),
+        [REVISION_WORKBENCH_KEY]: {
+          flush: vi.fn().mockResolvedValue(true),
+          preview: vi.fn().mockResolvedValue(true),
+          clearPreview: vi.fn(),
+          isCurrent: vi.fn().mockReturnValue(true),
+          apply: vi.fn().mockResolvedValue(true),
+        },
+      },
     },
   });
 }

@@ -48,7 +48,9 @@ const tabs = [
 const panelCollapsed = ref(false);
 
 function select(tab) {
-  panelCollapsed.value = false;
+  const closedMobileDrawer = !props.open
+    && window.matchMedia?.("(max-width: 800px)").matches;
+  panelCollapsed.value = !closedMobileDrawer && props.active === tab && !panelCollapsed.value;
   emit("select", tab);
 }
 
@@ -56,11 +58,27 @@ function toggleDrawer() {
   if (!props.open) panelCollapsed.value = false;
   emit("toggle");
 }
+
+function expandPanel() {
+  panelCollapsed.value = false;
+}
+
+defineExpose({ expandPanel });
 </script>
 
 <template>
   <aside class="assistant-rail" :class="{ open, collapsed: panelCollapsed }">
     <nav class="assistant-tabs" aria-label="辅助面板">
+      <button
+        class="panel-collapse-toggle"
+        type="button"
+        :title="panelCollapsed ? '展开侧栏' : '收起侧栏'"
+        :aria-label="panelCollapsed ? '展开侧栏' : '收起侧栏'"
+        @click="panelCollapsed = !panelCollapsed"
+      >
+        <PanelRightOpen v-if="panelCollapsed" :size="17" aria-hidden="true" />
+        <PanelRightClose v-else :size="17" aria-hidden="true" />
+      </button>
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -74,16 +92,6 @@ function toggleDrawer() {
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
         <b>{{ tab.label }}</b>
-      </button>
-      <button
-        class="panel-collapse-toggle"
-        type="button"
-        :title="panelCollapsed ? '展开侧栏' : '收起侧栏'"
-        :aria-label="panelCollapsed ? '展开侧栏' : '收起侧栏'"
-        @click="panelCollapsed = !panelCollapsed"
-      >
-        <PanelRightOpen v-if="panelCollapsed" :size="17" aria-hidden="true" />
-        <PanelRightClose v-else :size="17" aria-hidden="true" />
       </button>
       <button class="drawer-toggle" type="button" :title="open ? '收起面板' : '展开面板'" :aria-label="open ? '收起面板' : '展开面板'" @click="toggleDrawer">
         <ChevronDown v-if="open" :size="18" aria-hidden="true" />

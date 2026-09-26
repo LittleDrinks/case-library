@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { unzipSync } from "fflate";
 
 async function login(page, username, password) {
   await expect.poll(async () => (
@@ -178,16 +179,20 @@ async function mountApprovedMaterial(page, caseId, title) {
   await openApprovedMaterialSearch(page, caseId, title);
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
-  await expect(page.getByRole("status")).toHaveText("已加入 1 条素材");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/workbench/${caseId}`);
+}
+
+async function expectDownloadedFile(page, linkName, filename, content) {
+  const pending = page.waitForEvent("download");
+  await page.getByRole("link", { name: linkName }).click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe(filename);
+  expect(await readFile(await download.path(), "utf8")).toBe(content);
 }
 
 async function downloadApprovedMaterial(page, caseId, title, filename, content) {
   await openApprovedMaterialSearch(page, caseId, title);
-  const pending = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${title}` }).click();
-  const download = await pending;
-  expect(download.suggestedFilename()).toBe(filename);
-  expect(await readFile(await download.path(), "utf8")).toBe(content);
+  await expectDownloadedFile(page, `下载${title}`, filename, content);
 }
 
 async function expectMaterialAbsent(page, caseId, title) {
@@ -204,7 +209,6 @@ async function expectMaterialAbsent(page, caseId, title) {
 }
 
 async function expectWorkbenchMaterial(page, title) {
-  await page.getByRole("link", { name: "返回当前案例" }).click();
   await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   await page.getByRole("button", { name: /素材 1/ }).click();
   await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
@@ -257,6 +261,36 @@ async function expectRestrictedSource(page, title) {
   await expect(restricted).toBeVisible();
   await expect(restricted.getByRole("link")).toHaveCount(0);
   await expect(restricted).toContainText("内容按权限开放");
+}
+
+async function externalLinks(page, data) {
+  const packageFiles = unzipSync(new Uint8Array(data));
+  const relationships = new TextDecoder().decode(packageFiles["word/_rels/document.xml.rels"]);
+  return page.evaluate((xml) => {
+    const document = new DOMParser().parseFromString(xml, "application/xml");
+    return [...document.getElementsByTagName("Relationship")]
+      .filter((item) => item.getAttribute("TargetMode") === "External")
+      .map((item) => item.getAttribute("Target"));
+  }, relationships);
+}
+
+async function approvedMaterialId(request, filename) {
+  const page = await readOkJson(
+    await request.get("/api/admin/material-candidates?status=approved"),
+  );
+  const item = page.items.find((candidate) => candidate.filename === filename);
+  expect(item).toBeTruthy();
+  return item.materialId;
+}
+
+async function mountAsCurrentUser(request, caseId, materialId) {
+  const auth = await readOkJson(await request.get("/api/auth/session"));
+  const current = await readOkJson(await request.get(`/api/cases/${caseId}`));
+  const response = await request.post(`/api/cases/${caseId}/materials`, {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { materialId, revision: current.revision },
+  });
+  expect(response.status()).toBe(201);
 }
 
 test("管理员批量导入资料并识别重复内容", async ({ page }) => {
@@ -333,4 +367,78 @@ test("发布案例公开文件可匿名下载且校内文件保持受限", async
   await page.goto(`/#/cases/${draft.id}`);
   await expectPublicDownload(page, publicTitle, `public-bytes-${marker}`);
   await expectRestrictedSource(page, campusTitle);
+});
+
+test("DOCX 来源链接落到素材页并按公开、登录、权限和缺失状态处理", async ({ page }) => {
+  test.setTimeout(90_000);
+  const marker = `${Date.now()}-${test.info().parallelIndex}`;
+  const publicTitle = `导出公开来源-${marker}`;
+  const campusTitle = `导出校内来源-${marker}`;
+  const privateTitle = `导出私密来源-${marker}`;
+  const publicFile = `导出公开来源-${marker}.txt`;
+  const campusFile = `导出校内来源-${marker}.txt`;
+  const privateFile = `导出私密来源-${marker}.txt`;
+
+  await openAdminImport(page);
+  await importApprovedFile(page, "public", publicFile, publicTitle, `public-${marker}`);
+  await importApprovedFile(page, "campus", campusFile, campusTitle, `campus-${marker}`);
+  await importApprovedFile(page, "private", privateFile, privateTitle, `private-${marker}`);
+
+  const request = page.context().request;
+  const materialIds = await Promise.all([
+    approvedMaterialId(request, publicFile),
+    approvedMaterialId(request, campusFile),
+    approvedMaterialId(request, privateFile),
+  ]);
+  const created = await createDraft(request, `DOCX 来源链接-${marker}`);
+  for (const materialId of materialIds) {
+    await mountAsCurrentUser(request, created.id, materialId);
+  }
+  const exportResponse = await request.get(`/api/cases/${created.id}/export.docx`);
+  expect(exportResponse.ok()).toBe(true);
+  const targets = await externalLinks(page, await exportResponse.body());
+  const materialLinks = targets.filter((target) => new URL(target).hash.startsWith("#/materials/"));
+  expect(materialLinks).toHaveLength(3);
+  const linkFor = (materialId) => materialLinks.find(
+    (target) => new URL(target).hash === `#/materials/${materialId}`,
+  );
+  const [publicLink, campusLink, privateLink] = materialIds.map(linkFor);
+  expect(publicLink).toBeTruthy();
+  expect(campusLink).toBeTruthy();
+  expect(privateLink).toBeTruthy();
+
+  await logoutAndWait(page);
+  await page.goto(publicLink);
+  await expect(page.getByRole("heading", { name: publicTitle })).toBeVisible();
+  await expectDownloadedFile(page, `下载${publicTitle}`, publicFile, `public-${marker}`);
+
+  await page.goto(campusLink);
+  await expect(page.getByRole("alert")).toContainText("登录后可以重试");
+  await page.getByRole("link", { name: "登录后继续访问" }).click();
+  await page.getByLabel("用户名").fill("user");
+  await page.getByLabel("密码").fill("user123");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(campusLink);
+  await expect(page.getByRole("heading", { name: campusTitle })).toBeVisible();
+  await expectDownloadedFile(page, `下载${campusTitle}`, campusFile, `campus-${marker}`);
+
+  await page.goto(privateLink);
+  await expect(page.getByRole("alert")).toContainText("当前账号无权查看");
+  await expect(page.getByRole("heading", { name: privateTitle })).toHaveCount(0);
+  await page.goto("/#/materials/m-319-source-does-not-exist");
+  await expect(page.getByRole("alert")).toContainText("当前账号无权查看");
+  await expect(page.getByRole("heading")).toHaveCount(0);
+
+  await logoutAndWait(page);
+  await page.getByLabel("用户名").fill("admin");
+  await page.getByLabel("密码").fill("admin123");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  const adminSession = await readOkJson(await request.get("/api/auth/session"));
+  expect(adminSession.user.role).toBe("admin");
+  expect((await request.get(`/api/materials/${materialIds[2]}`)).status()).toBe(200);
+  await page.goto(privateLink);
+  await expect(page).toHaveURL(privateLink);
+  await expect(page.getByRole("heading", { name: privateTitle })).toBeVisible();
+  await expectDownloadedFile(page, `下载${privateTitle}`, privateFile, `private-${marker}`);
 });

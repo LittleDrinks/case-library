@@ -18,7 +18,7 @@ import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
 import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
-import { documentOutline, documentText, normalizeDocument } from "../lib/document.js";
+import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
@@ -45,6 +45,7 @@ const loadError = ref("");
 const conflict = ref(null);
 const activeTool = ref("ai");
 const drawerOpen = ref(false);
+const assistantRail = ref(null);
 const actionNotice = shallowRef(null);
 const actionSuccessNotice = shallowRef(null);
 const busyAction = ref("");
@@ -65,7 +66,11 @@ const canvasEditor = ref(null);
 provide(REVISION_WORKBENCH_KEY, {
   flush: () => flushAutosave(),
   preview: (artifact) => canvasEditor.value?.previewRevision?.({
-    ...artifact.target, id: artifact.id, replacement: artifact.replacement,
+    ...artifact.target,
+    id: artifact.id,
+    replacement: artifact.replacement,
+    status: artifact.status,
+    locateOnly: artifact.locateOnly,
   }) || false,
   clearPreview: () => canvasEditor.value?.clearRevisionPreview?.(),
   isCurrent: (artifact) => canvasEditor.value?.isRevisionCurrent?.(artifact.target) || false,
@@ -73,6 +78,7 @@ provide(REVISION_WORKBENCH_KEY, {
     ...artifact.target, replacement: artifact.replacement,
   }) || false,
 });
+const versionEditor = ref(null);
 const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
@@ -502,6 +508,12 @@ function selectRailTool(tool) {
   selectTool(tool);
 }
 
+function selectHeaderTool(tool) {
+  if (contentMutationBusy.value) return;
+  selectRailTool(tool);
+  assistantRail.value?.expandPanel();
+}
+
 function selectTool(tool) {
   activeTool.value = readerMode.value && tool === "comments" ? "ai" : tool;
   drawerOpen.value = true;
@@ -610,6 +622,7 @@ function askAnnotationAi(annotation) {
     sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
   };
   selectTool("ai");
+  assistantRail.value?.expandPanel();
 }
 
 function requestLifecycle(command) {
@@ -736,12 +749,21 @@ function overwriteFailed(error) {
 }
 
 async function copyVersion() {
-  if (!activeVersion.value || !navigator.clipboard?.writeText) {
+  if (!activeVersion.value || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
     showActionNotice("当前环境不支持复制，请使用浏览器复制功能");
     return;
   }
   try {
-    await navigator.clipboard.writeText(documentText(activeVersion.value.document));
+    const content = versionEditor.value?.clipboardContent?.();
+    if (!content) {
+      showActionNotice("复制失败，请使用浏览器复制功能");
+      return;
+    }
+    const clipboardItem = new ClipboardItem({
+      "text/html": new Blob([content.html], { type: "text/html" }),
+      "text/plain": new Blob([content.text], { type: "text/plain" }),
+    });
+    await navigator.clipboard.write([clipboardItem]);
     showActionNotice(`已复制${versionLabel(activeVersion.value)}正文`, "success");
   } catch {
     showActionNotice("复制失败，请使用浏览器复制功能");
@@ -819,11 +841,11 @@ onBeforeUnmount(() => {
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
-        @tool="selectRailTool"
+        @tool="selectHeaderTool"
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
-      <div v-if="editable" class="workbench-format-row">
+      <div v-show="editable" class="workbench-format-row">
         <button
           type="button"
           class="outline-format-toggle"
@@ -950,6 +972,7 @@ onBeforeUnmount(() => {
               </div>
             </header>
             <CanvasEditor
+              ref="versionEditor"
               :key="activeVersion.id"
               :document="activeVersion.document"
               :editable="false"
@@ -960,6 +983,7 @@ onBeforeUnmount(() => {
           </article>
         </main>
         <AssistantRail
+          ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
           :version-id="readerVersion"

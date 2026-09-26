@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
-from app.modules.agent import writes
-from app.modules.agent.models import ArtifactTarget
+from app.modules.agent import artifacts
+from app.modules.agent.models import AgentMessage, ArtifactTarget
 from app.modules.agent.repository import AgentRepository
 
 HEADING = "一、教学说明"
@@ -258,12 +260,27 @@ def test_agent_write_and_undo_reconcile_active_anchor(client: TestClient) -> Non
     target_start = paragraph_start()
     target = ArtifactTarget(from_pos=target_start, to_pos=target_start + len("第一段"), quote="第一段")
     database, thread, run = agent_run(client, auth, case, target)
-    record = writes.apply_write(
-        database, case["id"], run.id, "selection",
-        [{"type": "paragraph", "text": "更长的第一段"}], auth["user"],
+    proposal = artifacts.propose_artifact(
+        database, case["id"], thread.id, run.id,
+        target.from_pos, target.to_pos, "更长的第一段", "明确目标段落", [], auth["user"],
     )
+    assistant = AgentMessage(
+        id=run.assistant_message_id, thread_id=thread.id, run_id=run.id,
+        role="assistant", parts=[], created_at=datetime.now(UTC),
+    )
+    assert AgentRepository(database).complete_run(
+        run.id, assistant, artifacts=[proposal], resources=[],
+    )
+    applied = artifacts.decide_artifact(
+        database, case["id"], thread.id, proposal.id, auth["user"], "accepted",
+    )
+    record = database.agent_writes.find_one({"id": applied["write"]["id"]})
+    assert record["artifactId"] == proposal.id
+    assert record["scope"] == "selection"
     moved = annotation(client, case)
     assert moved["anchorState"] == "active"
     assert moved["from"] == paragraph_start("更长的第一段")
-    writes.undo_write(database, case["id"], thread.id, record["id"], auth["user"])
+    from app.modules.agent.writes import undo_write
+
+    undo_write(database, case["id"], thread.id, record["id"], auth["user"])
     assert annotation(client, case)["from"] == paragraph_start("第一段")

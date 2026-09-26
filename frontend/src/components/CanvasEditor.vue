@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { OrderedList as TiptapOrderedList } from "@tiptap/extension-ordered-list";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -8,6 +9,14 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { CitationMark, createCitationNumbers, refreshCitationNumbers } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
+
+const OrderedList = TiptapOrderedList.extend({
+  addAttributes() {
+    const attributes = { ...this.parent() };
+    delete attributes.type;
+    return attributes;
+  },
+});
 
 const props = defineProps({
   document: { type: Object, required: true },
@@ -30,6 +39,7 @@ let annotationRefreshPending = false;
 let selectedAnnotation = null;
 let applyingServerRevision = false;
 let revisionEnterTimer = null;
+let revisionPreviewGeneration = 0;
 
 function sectionName(activeEditor, position) {
   let section = "正文";
@@ -311,6 +321,49 @@ function pendingAnchorRange(doc, pending) {
   }
 }
 
+function findUniqueTextRange(doc, text) {
+  if (!text) return null;
+  let match = null;
+  let ambiguous = false;
+  doc.descendants((node, position) => {
+    if (!node.isTextblock || ambiguous) return;
+    const segments = [];
+    let cursor = position + 1;
+    node.forEach((child) => {
+      const value = child.isText ? child.text : child.type.name === "hardBreak" ? "\n" : "";
+      if (value) segments.push({ from: cursor, text: value });
+      cursor += child.nodeSize;
+    });
+    const blockText = segments.map((segment) => segment.text).join("");
+    let offset = blockText.indexOf(text);
+    while (offset >= 0) {
+      let consumed = 0;
+      let from = null;
+      for (const segment of segments) {
+        if (offset < consumed + segment.text.length) {
+          from = segment.from + offset - consumed;
+          break;
+        }
+        consumed += segment.text.length;
+      }
+      if (from !== null) {
+        if (match) {
+          ambiguous = true;
+          return;
+        }
+        match = { from, to: from + text.length };
+      }
+      offset = blockText.indexOf(text, offset + 1);
+    }
+  });
+  return ambiguous ? null : match;
+}
+
+function historicalTargetRange(doc, target) {
+  const text = target.status === "accepted" ? target.replacement : target.quote;
+  return findUniqueTextRange(doc, text);
+}
+
 function annotationMarks(doc, annotations) {
   return annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
@@ -431,11 +484,18 @@ function waitForScrollToSettle(container) {
 }
 
 async function previewRevision(target) {
+  const generation = ++revisionPreviewGeneration;
   const activeEditor = editor.value;
-  if (!activeEditor || !props.editable || !pendingAnchorRange(activeEditor.state.doc, target)) return false;
+  if (!activeEditor || (!props.editable && !target.locateOnly)) return false;
+  const doc = activeEditor.state.doc;
+  const currentRange = target.locateOnly
+    ? historicalTargetRange(doc, target)
+    : pendingAnchorRange(doc, target);
+  if (!currentRange) return false;
+  const position = currentRange.from;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview: null, entered: null }));
   try {
-    let element = activeEditor.view.domAtPos(target.from).node;
+    let element = activeEditor.view.domAtPos(position).node;
     if (element.nodeType !== Node.ELEMENT_NODE) element = element.parentElement;
     const block = element?.closest("p, h1, h2, h3, li");
     if (block?.scrollIntoView) {
@@ -444,6 +504,8 @@ async function previewRevision(target) {
       await scrollComplete;
     }
   } catch { /* Decoration still provides the preview if scrolling is unavailable. */ }
+  if (generation !== revisionPreviewGeneration) return false;
+  if (target.locateOnly) return true;
   if (!isRevisionCurrent(target)) return false;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
     preview: { ...target, phase: "preview" }, entered: null,
@@ -452,6 +514,7 @@ async function previewRevision(target) {
 }
 
 function clearRevisionPreview() {
+  revisionPreviewGeneration += 1;
   const activeEditor = editor.value;
   if (!activeEditor) return;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
@@ -465,6 +528,7 @@ function isRevisionCurrent(target) {
 }
 
 async function applyRevisionSteps(steps, target) {
+  revisionPreviewGeneration += 1;
   const activeEditor = editor.value;
   if (!activeEditor || !isRevisionCurrent(target) || !Array.isArray(steps) || !steps.length) {
     return false;
@@ -589,10 +653,11 @@ const editor = useEditor({
   editable: props.editable,
   extensions: [StarterKit.configure({
     heading: { levels: [1, 2, 3] },
+    orderedList: false,
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), CitationMark, annotationExtension, revisionExtension,
+  }), OrderedList, CitationMark, annotationExtension, revisionExtension,
   createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
@@ -659,6 +724,16 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
+function clipboardContent() {
+  if (!editor.value) return null;
+  const document = editor.value.state.doc;
+  const slice = document.slice(0, document.content.size);
+  return {
+    html: editor.value.view.serializeForClipboard(slice).dom.innerHTML,
+    text: editor.value.getText({ blockSeparator: "\n" }),
+  };
+}
+
 function selectAnnotation(annotation) {
   const activeEditor = editor.value;
   if (!activeEditor || annotation.anchorState === "deleted" || annotation.anchorState === "changed") return false;
@@ -671,7 +746,7 @@ function selectAnnotation(annotation) {
 
 defineExpose({
   selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor,
-  previewRevision, clearRevisionPreview, isRevisionCurrent, applyRevisionSteps,
+  previewRevision, clearRevisionPreview, isRevisionCurrent, applyRevisionSteps, clipboardContent,
 });
 </script>
 

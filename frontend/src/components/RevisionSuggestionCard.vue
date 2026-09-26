@@ -20,7 +20,7 @@ const pendingCollapse = ref(null);
 let pointerDown = false;
 const completed = computed(() => ["accepted", "superseded"].includes(props.artifact.status));
 const title = computed(() => {
-  const value = props.artifact.target?.section || props.artifact.target?.quote || "正文修订";
+  const value = props.artifact.target?.quote || "正文修订";
   return value.length > 54 ? `${value.slice(0, 54)}…` : value;
 });
 const reasonPreview = computed(() => {
@@ -118,12 +118,9 @@ function clickAction(event, name) {
       <p v-if="artifact.status === 'expired'" class="revision-suggestion-expired">
         目标原文已变化，这条建议不能应用
       </p>
-      <p v-if="artifact.annotationId" class="revision-suggestion-note">
-        已关联批注，请在批注面板中处理
-      </p>
       <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       <div
-        v-if="artifact.status === 'pending' && !readOnly && !artifact.annotationId"
+        v-if="artifact.status === 'pending' && !readOnly"
         class="revision-suggestion-actions"
       >
         <button type="button" data-testid="agent-accept" :disabled="sending || deciding" @click="clickAction($event, 'accept')">

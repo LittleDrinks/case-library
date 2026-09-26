@@ -57,7 +57,7 @@ const expandedRevisionId = ref("");
 const revisionContext = ref(null);
 const composer = ref(null);
 const decidingArtifacts = reactive(new Set());
-const revisionWorkbench = inject(REVISION_WORKBENCH_KEY, null);
+const revisionWorkbench = inject(REVISION_WORKBENCH_KEY);
 const conversationSources = useConversationSources();
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
@@ -72,6 +72,7 @@ let pendingWriteSync = false;
 let hydratedWriteThread = "";
 let hydratedVersionThread = "";
 let versionOpenGeneration = 0;
+let revisionPreviewGeneration = 0;
 let threadSwitchDepth = 0;
 
 function sourceRefs() {
@@ -330,6 +331,7 @@ function closeThreads() {
 
 onBeforeUnmount(() => {
   versionOpenGeneration += 1;
+  revisionPreviewGeneration += 1;
   pendingVersionOpenIds.clear();
   versionOpenInFlightIds.clear();
   stopThreadsPolling();
@@ -416,22 +418,23 @@ function statusText() {
 
 async function acceptArtifact(artifactId) {
   decideError.value = "";
+  revisionPreviewGeneration += 1;
   let artifact = artifacts.value.find((item) => item.id === artifactId);
   try {
     if (isRevisionSuggestion(artifact)) {
       if (!await prepareRevisionDecision()) return;
       artifact = artifacts.value.find((item) => item.id === artifactId);
       if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
-      if (revisionWorkbench && !revisionWorkbench.isCurrent?.(artifact)) {
+      if (!revisionWorkbench.isCurrent(artifact)) {
         throw new Error("目标原文已变化，这条建议不能应用");
       }
       decidingArtifacts.add(artifactId);
       const result = await decide(artifactId, "accepted");
-      if (revisionWorkbench && result.applied && result.steps?.length) {
+      if (result.applied && result.steps?.length) {
         const applied = await revisionWorkbench.apply(artifact, result.steps);
         if (!applied) decideError.value = "正文已保存，但编辑器未能载入撤销步骤，请刷新工作台";
       }
-      if (!result.applied || !result.steps?.length) revisionWorkbench?.clearPreview?.();
+      if (!result.applied || !result.steps?.length) revisionWorkbench.clearPreview();
       expandedRevisionId.value = "";
       emit("case-revised", result.case);
       emit("versions-updated");
@@ -448,7 +451,6 @@ async function acceptArtifact(artifactId) {
 }
 
 async function prepareRevisionDecision() {
-  if (!revisionWorkbench) return true;
   if (!await revisionWorkbench.flush()) {
     throw new Error("正文尚未保存，请保存后重试");
   }
@@ -456,29 +458,50 @@ async function prepareRevisionDecision() {
   return true;
 }
 
+async function locateHistoricalRevision(artifact) {
+  revisionWorkbench.clearPreview();
+  return revisionWorkbench.preview({ ...artifact, locateOnly: true });
+}
+
+async function previewCurrentRevision(artifact, isCurrentRequest) {
+  if (!await prepareRevisionDecision() || !isCurrentRequest()) return;
+  const current = artifacts.value.find((item) => item.id === artifact.id);
+  if (!current) throw new Error("这条建议已不存在，请刷新后重试");
+  if (current.status !== "pending") {
+    const located = await locateHistoricalRevision(current);
+    if (!isCurrentRequest()) return;
+    if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
+    return;
+  }
+  const previewed = await revisionWorkbench.preview(current);
+  if (!isCurrentRequest()) return;
+  if (!previewed) throw new Error("目标原文已变化，无法预览这条建议");
+}
+
 async function previewRevision(artifact) {
+  const generation = ++revisionPreviewGeneration;
+  const isCurrentRequest = () => generation === revisionPreviewGeneration
+    && expandedRevisionId.value === artifact.id;
   decideError.value = "";
   expandedRevisionId.value = artifact.id;
-  if (props.readOnly || ["accepted", "expired"].includes(artifact.status)) return;
   try {
-    if (!await prepareRevisionDecision()) return;
-    const current = artifacts.value.find((item) => item.id === artifact.id);
-    if (!current) throw new Error("这条建议已不存在，请刷新后重试");
-    if (["accepted", "expired"].includes(current.status)) return;
-    if (!await revisionWorkbench?.preview?.(current)) {
-      if (current.status === "pending") throw new Error("目标原文已变化，无法预览这条建议");
+    if (props.readOnly || artifact.status !== "pending") {
+      const located = await locateHistoricalRevision(artifact);
+      if (!isCurrentRequest()) return;
+      if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
       return;
     }
-    expandedRevisionId.value = current.id;
+    await previewCurrentRevision(artifact, isCurrentRequest);
   } catch (requestError) {
-    decideError.value = requestError.message || "预览失败";
+    if (isCurrentRequest()) decideError.value = requestError.message || "预览失败";
   }
 }
 
 function collapseRevision(artifactId) {
   if (expandedRevisionId.value !== artifactId) return;
+  revisionPreviewGeneration += 1;
   expandedRevisionId.value = "";
-  revisionWorkbench?.clearPreview?.();
+  revisionWorkbench.clearPreview();
 }
 
 function historyVersion(history, versionId, runId) {
@@ -627,8 +650,9 @@ function refineRevision(artifactId) {
 }
 
 function clearRevisionContext() {
+  revisionPreviewGeneration += 1;
   revisionContext.value = null;
-  revisionWorkbench?.clearPreview?.();
+  revisionWorkbench.clearPreview();
 }
 
 function revisionCardProps(artifact) {
@@ -691,7 +715,7 @@ async function sendMessage({ text, skillId }) {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
       }
-      if (revisionWorkbench && !revisionWorkbench.isCurrent?.(current)) {
+      if (!revisionWorkbench.isCurrent(current)) {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
       }
@@ -733,7 +757,7 @@ async function rejectArtifact(artifactId) {
   try {
     await decide(artifactId, "rejected");
     const artifact = artifacts.value.find((item) => item.id === artifactId);
-    if (isRevisionSuggestion(artifact)) revisionWorkbench?.clearPreview?.();
+    if (isRevisionSuggestion(artifact)) revisionWorkbench.clearPreview();
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
   }
