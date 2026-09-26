@@ -1,4 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import WorkbenchView from "./WorkbenchView.vue";
 import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
@@ -41,6 +42,53 @@ const VersionRailProbe = {
   </div>`,
 };
 
+const ClipboardVersionProbe = {
+  name: "ClipboardVersionProbe",
+  emits: ["open-version"],
+  setup() {
+    return {
+      version: versionFixture({
+        id: "cv-rich-history",
+        document: {
+          type: "doc",
+          content: [
+            { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "历史标题" }] },
+            { type: "paragraph", content: [
+              { type: "text", text: "第一行" },
+              { type: "hardBreak" },
+              { type: "text", text: "第二行" },
+              { type: "text", text: "加粗", marks: [{ type: "bold" }] },
+            ] },
+            { type: "bulletList", content: [
+              { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "项目一" }] }] },
+              { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "项目二" }] }] },
+            ] },
+          ],
+        },
+      }),
+    };
+  },
+  template: `<button data-testid="open-rich-history" type="button" @click="$emit('open-version', version)">打开历史稿</button>`,
+};
+
+class ClipboardItemProbe {
+  constructor(items) {
+    this.items = items;
+    this.types = Object.keys(items);
+  }
+
+  getType(type) {
+    return Promise.resolve(this.items[type]);
+  }
+}
+
+function stubClipboard() {
+  const write = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { platform: "Linux", userAgent: "jsdom", clipboard: { write } });
+  vi.stubGlobal("ClipboardItem", ClipboardItemProbe);
+  return write;
+}
+
 const ActionNoticeRailProbe = {
   name: "ActionNoticeRailProbe",
   emits: ["open-version", "insert-citation"],
@@ -57,7 +105,10 @@ const ActionNoticeEditorProbe = {
   name: "CanvasEditor",
   emits: ["change"],
   setup(_props, { expose }) {
-    expose({ insertCitation: () => "inserted" });
+    expose({
+      insertCitation: () => "inserted",
+      clipboardContent: () => ({ html: "<p>冻结版本正文</p>", text: "冻结版本正文" }),
+    });
   },
   template: `<div class="canvas-editor">
     <button data-testid="notice-edit" type="button" @click="$emit('change', { document: { type: 'doc', content: [] }, steps: [] })">编辑</button>
@@ -258,8 +309,7 @@ test("422错误在复制成功提示消退后仍可见", async () => {
   vi.useFakeTimers();
   let wrapper;
   try {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const write = stubClipboard();
     api.lifecycleCase.mockRejectedValueOnce(
       Object.assign(new Error("正文不能为空；必填标签组未选择标签：学科"), { status: 422 }),
     );
@@ -274,7 +324,7 @@ test("422错误在复制成功提示消退后仍可见", async () => {
     await wrapper.get('[data-testid="notice-open-version"]').trigger("click");
     await wrapper.get(".version-copy").trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith("冻结版本正文");
+    expect(write).toHaveBeenCalledTimes(1);
     expect(wrapper.get('.action-notice-success[role="status"]').text()).toContain("已复制");
 
     await vi.advanceTimersByTimeAsync(3000);
@@ -292,8 +342,7 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
   vi.useFakeTimers();
   let wrapper;
   try {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const write = stubClipboard();
     clearLocalDraft("user-1", "case-1");
     api.saveCase.mockRejectedValue(Object.assign(new Error("revision conflict"), { status: 409 }));
     wrapper = renderActionNoticeWorkbench({ lastReview: {
@@ -310,7 +359,7 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
     await wrapper.get('[data-testid="notice-open-version"]').trigger("click");
     await wrapper.get(".version-copy").trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith("冻结版本正文");
+    expect(write).toHaveBeenCalledTimes(1);
     expect(wrapper.get('.action-notice[role="status"]').classes()).toContain("action-notice-success");
     await vi.advanceTimersByTimeAsync(2000);
 
@@ -480,6 +529,56 @@ async function renderVersionWorkbench(overrides = {}) {
   await flushPromises();
   return wrapper;
 }
+
+test("复制选中的历史稿写入富文本和可读纯文本，不取当前稿也不改版本", async () => {
+  const currentDocument = {
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text: "当前教师稿不可复制" }] }],
+  };
+  api.getCase.mockResolvedValue(caseFixture({ document: currentDocument }));
+  const write = stubClipboard();
+  const wrapper = mount(WorkbenchView, {
+    global: { stubs: {
+      SiteHeader: true, OutlinePanel: true, teleport: true,
+      AssistantRail: ClipboardVersionProbe,
+      RouterLink: { template: "<a><slot /></a>" },
+    } },
+  });
+  await flushPromises();
+
+  await wrapper.get('[data-testid="open-rich-history"]').trigger("click");
+  await nextTick();
+  await wrapper.get(".version-copy").trigger("click");
+  await flushPromises();
+
+  expect(write).toHaveBeenCalledTimes(1);
+  const [clipboardItem] = write.mock.calls[0][0];
+  expect(clipboardItem.types).toEqual(expect.arrayContaining(["text/html", "text/plain"]));
+  const html = await clipboardItem.getType("text/html").then((blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  }));
+  const plainText = await clipboardItem.getType("text/plain").then((blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  }));
+  const richDocument = document.createElement("div");
+  richDocument.innerHTML = html;
+  expect(richDocument.querySelector("h1")?.textContent).toBe("历史标题");
+  expect(richDocument.querySelector("p br")).not.toBeNull();
+  expect(richDocument.querySelectorAll("ul > li")).toHaveLength(2);
+  expect(richDocument.querySelector("strong")?.textContent).toBe("加粗");
+  expect(plainText).toContain("历史标题\n第一行\n第二行加粗");
+  expect(plainText).toMatch(/项目一\n+项目二/);
+  expect(plainText).not.toContain("当前教师稿不可复制");
+  expect(api.saveCase).not.toHaveBeenCalled();
+  expect(api.lifecycleCase).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
 
 test("首 Tab 固定当前教师稿，历史版本以只读 Tab 打开且可关闭", async () => {
   const wrapper = await renderVersionWorkbench();

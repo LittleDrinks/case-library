@@ -41,8 +41,19 @@ def valid_document() -> dict:
             {
                 "type": "orderedList",
                 "attrs": {"start": 2},
-                "content": [_list_item("编号")],
+                "content": [{
+                    "type": "listItem",
+                    "content": [
+                        _paragraph(_text("编号")),
+                        {
+                            "type": "orderedList",
+                            "attrs": {"start": 6},
+                            "content": [_list_item("嵌套编号")],
+                        },
+                    ],
+                }],
             },
+            {"type": "orderedList", "attrs": {"start": 1}, "content": [_list_item("默认起点")]},
         ],
     }
 
@@ -78,6 +89,17 @@ INVALID_DOCUMENTS = (
     (
         "wrong-list-child",
         {"type": "doc", "content": [{"type": "bulletList", "content": [_paragraph()]}]},
+    ),
+    (
+        "ordered-list-type-attribute",
+        {
+            "type": "doc",
+            "content": [{
+                "type": "orderedList",
+                "attrs": {"start": 3, "type": None},
+                "content": [_list_item("编号")],
+            }],
+        },
     ),
     (
         "block-in-paragraph",
