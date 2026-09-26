@@ -160,15 +160,21 @@ def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str,
 def _assert_atomic_decision(database, case_id: str, artifact: dict, version_id: str) -> None:
     current = database.cases.find_one({"id": case_id}, {"_id": 0})
     assert current["revision"] == artifact["baseRevision"] + 1
-    assert current["document"] == _document(*PARAGRAPHS)
     version = database.case_versions.find_one(
         {"id": version_id, "caseId": case_id}, {"_id": 0}
     )
     assert version and version["kind"] == "ai"
+    assert current["document"] == version["document"]
+    assert current["document"]["content"][0] == _document(*PARAGRAPHS)["content"][0]
     assert REPLACEMENT_MARK in version["document"]["content"][1]["content"][0]["text"]
+    snapshot = database.case_snapshots.find_one(
+        {"caseId": case_id, "kind": "pre_agent_decision"}, {"_id": 0}
+    )
+    assert snapshot and snapshot["document"] == _document(*PARAGRAPHS)
+    assert snapshot["sourceRevision"] == artifact["baseRevision"]
     assert database.case_snapshots.count_documents(
         {"caseId": case_id, "kind": "pre_agent_decision"}
-    ) == 0
+    ) == 1
     events = list(database.agent_thread_events.find(
         {"threadId": artifact["threadId"]}, {"_id": 0}
     ).sort("eventSeq", 1))
@@ -226,7 +232,7 @@ def test_tracer_run_builds_pending_artifact_with_server_sources():
         _close_e2e(client, mongo)
 
 
-def test_accept_creates_independent_version_and_replays_decision():
+def test_accept_applies_revision_and_replays_decision():
     client, csrf = _login()
     mongo = MongoClient(MONGO_URI)
     try:
