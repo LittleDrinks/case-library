@@ -176,14 +176,17 @@ def _add_list(
                 paragraph = _add_paragraph(
                     document, child, numbers, style if index == 0 else None
                 )
+                indent = Pt(18 * (depth + 1))
                 if index == 0:
                     if num_id is not None:
                         _bind_numbering(paragraph, num_id)
                     if depth >= 3:
-                        indent = Pt(18 * (depth + 1))
                         paragraph.paragraph_format.left_indent = indent
                         paragraph.paragraph_format.first_line_indent = -Pt(18)
                         paragraph.paragraph_format.tab_stops.add_tab_stop(indent)
+                else:
+                    paragraph.paragraph_format.left_indent = indent
+                    paragraph.paragraph_format.first_line_indent = None
             else:
                 _add_node(document, child, numbers, depth + 1)
 

@@ -44,6 +44,23 @@ def _item(text: str) -> dict:
     }
 
 
+def _continued_item(text: str) -> dict:
+    return {
+        "type": "listItem",
+        "content": [
+            _paragraph_node(text),
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": f"{text}续段一"},
+                    {"type": "hardBreak"},
+                    {"type": "text", "text": f"{text}续段二"},
+                ],
+            },
+        ],
+    }
+
+
 def _paragraph_node(text: str) -> dict:
     return {
         "type": "paragraph",
@@ -446,7 +463,9 @@ def test_docx_export_indents_nested_ordered_and_bullet_lists(
                                                             {
                                                                 "type": "orderedList",
                                                                 "content": [
-                                                                    _item("四级编号")
+                                                                    _continued_item(
+                                                                        "四级编号"
+                                                                    )
                                                                 ],
                                                             },
                                                         ],
@@ -487,7 +506,9 @@ def test_docx_export_indents_nested_ordered_and_bullet_lists(
                                                             {
                                                                 "type": "bulletList",
                                                                 "content": [
-                                                                    _item("四级项目")
+                                                                    _continued_item(
+                                                                        "四级项目"
+                                                                    )
                                                                 ],
                                                             },
                                                         ],
@@ -542,6 +563,14 @@ def test_docx_export_indents_nested_ordered_and_bullet_lists(
     assert third_bullet[1:] == (1080, 360)
     assert direct_list_format(data, "三级项目") == (None, None, None)
     assert direct_list_format(data, "四级项目") == ("1440", "360", "1440")
+    for item_text in ("四级编号", "四级项目"):
+        continuation = paragraph(root, f"{item_text}续段一{item_text}续段二")
+        indent = continuation.find("w:pPr/w:ind", NS)
+        assert indent is not None
+        assert indent.get(w("left")) == "1440"
+        assert indent.get(w("firstLine")) is None
+        assert indent.get(w("hanging")) is None
+        assert len(continuation.findall(".//w:br", NS)) == 1
     assert paragraph(root, "顶层编号一").find("w:pPr/w:ind", NS) is None
     assert paragraph(root, "嵌套编号一").find("w:pPr/w:ind", NS) is None
 
