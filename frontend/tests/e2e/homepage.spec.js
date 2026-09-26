@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { openCatalogFirstScreen } from "./catalog-ready.js";
 
@@ -163,9 +164,7 @@ test("匿名用户从公开案例卡进入独立只读详情", async ({ page }) 
   await expect(page.locator(".workspace-header")).toBeVisible();
   await expect(page.locator(".case-status")).toContainText("只读");
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  if (!await page.getByLabel("向 AI 提问").isVisible()) {
-    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  }
+  await openAiTab(page);
   await expect(page.getByRole("link", { name: "登录后讨论本案例" })).toBeVisible();
   await expect(page.getByRole("button", { name: "导出 DOCX" })).toBeVisible();
   await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);

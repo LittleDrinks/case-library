@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { getSchema } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -101,9 +102,7 @@ async function sendGenerationAndWaitForPersistence(page, caseId, text) {
 }
 
 async function openChatPanel(page) {
-  if (!await page.getByLabel("向 AI 提问").isVisible()) {
-    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  }
+  await openAiTab(page);
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }

@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { SKILL_ID, teachingPackage } from "./skill-package.js";
 import { waitForCatalogSynced } from "./catalog-ready.js";
@@ -20,9 +21,7 @@ async function login(page, caseId = CASE_ID) {
 }
 
 async function openChat(page) {
-  if (!await page.getByLabel("向 AI 提问").isVisible()) {
-    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  }
+  await openAiTab(page);
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
   await expect.poll(() => page.locator(".assistant-rail").evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(300);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();

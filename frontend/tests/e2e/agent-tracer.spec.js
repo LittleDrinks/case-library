@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { SKILL_ID, teachingPackage } from "./skill-package.js";
 
@@ -80,9 +81,7 @@ async function publishTeachingSkill(playwright) {
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
-  if (!await page.getByLabel("向 AI 提问").isVisible()) {
-    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
-  }
+  await openAiTab(page);
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
