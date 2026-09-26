@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 
 from app.modules.agent import agent, prosemirror
 from app.modules.agent.artifacts import decide_artifact, propose_artifact
-from app.modules.agent.models import ArtifactTarget, SourceRef
+from app.modules.agent.models import AgentRun, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.source_reader import read_source
 from app.modules.cases.service import CaseError
@@ -31,7 +32,7 @@ def _csrf(auth: dict) -> dict:
     return {"X-CSRF-Token": auth["csrfToken"]}
 
 
-def _seed_source(database, public: str = "public") -> None:
+def _seed_source(database, public: str = "public", case_id: str = "c-draft-1") -> None:
     database.cases.insert_one({
         "id": "c-source-22", "ownerId": "other", "publicationStatus": public,
         "workflowStatus": "published", "publishedVersionId": "v-source-22",
@@ -41,7 +42,7 @@ def _seed_source(database, public: str = "public") -> None:
         "title": "固定来源", "document": _document("固定版本正文"),
     })
     database.case_sources.insert_one({
-        "id": "src-22", "caseId": "c-draft-1", "sourceCaseId": "c-source-22",
+        "id": "src-22", "caseId": case_id, "sourceCaseId": "c-source-22",
         "versionId": "v-source-22", "versionNumber": 4, "title": "固定来源",
     })
 
@@ -69,6 +70,45 @@ def test_read_source_rechecks_source_publication(client: TestClient) -> None:
     result = read_source(client.app.state.database, None, {"id": "u-user-demo", "role": "user"},
                          "c-draft-1", "case", "src-22")
     assert result == {"status": "no_access", "detail": "来源案例内容当前不可读"}
+
+
+def test_refinement_revalidates_source_refs_loaded_from_storage(client: TestClient) -> None:
+    auth = _auth(client)
+    case = _selection_case(client, auth)
+    database = client.app.state.database
+    _seed_source(database, case_id=case["id"])
+    repository = AgentRepository(database)
+    thread = repository.default_thread(case["id"], auth["user"]["id"])
+    run = AgentRun(
+        id="run-refine-source", thread_id=thread.id, user_id=auth["user"]["id"],
+        user_message_id="user-refine-source", assistant_message_id="assistant-refine-source",
+        status="completed", started_at=datetime.now(UTC), finished_at=datetime.now(UTC),
+    )
+    database.agent_runs.insert_one(run.model_dump(by_alias=True, mode="python"))
+    target = prosemirror.text_blocks(case["document"])[1]
+    database.agent_artifacts.insert_one({
+        "id": "artifact-refine-source", "caseId": case["id"], "threadId": thread.id,
+        "runId": run.id, "baseRevision": case["revision"], "kind": "range",
+        "target": {"from": target["start"], "to": target["end"], "quote": "第二段需要修订。"},
+        "replacement": "已有修订建议。", "reason": "来源支持的修改理由。",
+        "sources": [{
+            "kind": "case", "id": "src-22", "title": "固定来源", "version": "v4",
+            "versionId": "v-source-22", "sourceCaseId": "c-source-22",
+            "location": "case:c-source-22@v-source-22",
+        }],
+        "status": "pending", "decidedBy": None, "createdAt": datetime.now(UTC),
+    })
+
+    response = _post_parts(client, auth, case["id"], [
+        {"type": "text", "text": "请微调这条建议"},
+        {"type": "data-revision", "data": {"artifactId": "artifact-refine-source"}},
+        {"type": "data-selection", "data": {
+            "from": target["start"], "to": target["end"], "quote": "第二段需要修订。",
+        }},
+    ])
+
+    assert response.status_code == 200, response.text
+    assert database.agent_artifacts.find_one({"id": "artifact-refine-source"})["status"] == "superseded"
 
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:

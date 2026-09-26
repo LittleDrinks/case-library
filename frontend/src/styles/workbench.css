@@ -321,7 +321,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .revision-suggestion-status[data-status="expired"] { color: var(--red); }
 .revision-suggestion-status[data-status="accepted"] { color: var(--green); }
 .revision-suggestion-reason-preview { display: -webkit-box; margin: 0; padding: 0 12px 8px 30px; overflow: hidden; color: var(--ink-3); font-size: 11px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.revision-suggestion-details { max-height: 500px; padding: 0 12px 10px 30px; overflow: hidden; opacity: 1; transition: max-height .26s ease, opacity .2s ease, padding .26s ease; }
+.revision-suggestion-details { max-height: 500px; padding: 0 12px 10px 30px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; opacity: 1; transition: max-height .26s ease, opacity .2s ease, padding .26s ease; }
 .revision-suggestion.collapsing .revision-suggestion-details { max-height: 0; padding-bottom: 0; opacity: 0; }
 .revision-suggestion-reason { margin: 1px 0 7px; color: var(--ink-2); white-space: pre-wrap; }
 .revision-suggestion-location { margin: 0; color: var(--ink-3); }

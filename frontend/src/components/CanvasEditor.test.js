@@ -182,7 +182,7 @@ it("工具栏创建的编号列表序列化为默认起点", async () => {
   };
   const { wrapper } = await setup({ document });
 
-  await wrapper.get('[aria-label="编号列表"]').trigger("mousedown");
+  triggerToolbarButton("编号列表");
 
   expect(wrapper.vm.editor.getJSON()).toEqual({
     type: "doc",

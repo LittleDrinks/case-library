@@ -25,6 +25,7 @@ from app.modules.agent.models import (
     AgentThreadSummary,
     ArtifactDecision,
     ArtifactTarget,
+    SourceRef,
     write_view,
 )
 from app.modules.agent.writes import undo_write
@@ -387,7 +388,8 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
         raise HTTPException(status_code=409, detail="原修订建议已不可微调")
     from app.modules.agent.source_reader import revalidate_sources
 
-    if not revalidate_sources(database, user, case["id"], artifact.get("sources") or []):
+    sources = [SourceRef.model_validate(source) for source in artifact.get("sources") or []]
+    if not revalidate_sources(database, user, case["id"], sources):
         raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
     return {
         "artifactId": artifact_id,
