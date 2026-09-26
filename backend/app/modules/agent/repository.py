@@ -638,7 +638,11 @@ class AgentRepository:
                 require_active=False,
             )
         for artifact in artifacts or []:
-            case = self.database.cases.find_one({"id": artifact.case_id}, session=session)
+            # 与正文编辑写同一记录，避免候选在旧快照中落库而错过位置映射。
+            case = self.database.cases.find_one_and_update(
+                {"id": artifact.case_id}, {"$set": {"_revisionDeliveryRun": run.id}},
+                return_document=ReturnDocument.AFTER, session=session,
+            )
             if not case or case["revision"] != artifact.base_revision:
                 artifact = artifact.model_copy(update={"status": "expired"})
             self._persist_artifact(run, artifact, session)
