@@ -55,13 +55,17 @@ class RunStream:
         )
 
 
-async def run_stream(repository, run_id, case_id, user, access_check, project):
+async def run_stream(repository, run_id, case_id, user, access_check, project,
+                     expected_owner=None):
     index = 0
     while True:
         if access_check and not access_check():
             return
         run = repository.database.agent_runs.find_one({"id": run_id}, {"stream": 0})
         if not run:
+            return
+        if expected_owner and run.get("ownerId") != expected_owner and run["status"] == "active":
+            yield sse_data("[DONE]")
             return
         row = repository.database.agent_run_streams.find_one(
             {"_id": run_id}, {"chunks": {"$slice": [index, 200]}, "sources": 1},
@@ -97,9 +101,9 @@ def _run_terminal_chunks(repository, run, project):
         yield TERMINAL_CHUNKS[f"run.{run['status']}"]
 
 
-def live_response(repository, run_id, case_id, user, access_check, project):
+def live_response(repository, run_id, case_id, user, access_check, project, expected_owner=None):
     return StreamingResponse(
-        run_stream(repository, run_id, case_id, user, access_check, project),
+        run_stream(repository, run_id, case_id, user, access_check, project, expected_owner),
         media_type="text/event-stream", headers=sse_headers(),
     )
 

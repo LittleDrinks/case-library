@@ -639,6 +639,7 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
         repository, context.run.id, case_id, user,
         _event_access_check(database, conversation, thread),
         parts_projector(database, user, case_id),
+        context.worker_id,
     )
 
 
