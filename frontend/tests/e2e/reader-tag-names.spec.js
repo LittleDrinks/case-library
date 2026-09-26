@@ -124,10 +124,31 @@ async function reopenAndSaveTags(page, caseId, marker) {
   const saveDone = page.waitForResponse(
     (response) => response.url().endsWith(`/api/cases/${caseId}`) && response.request().method() === "PATCH",
   );
-  await page.getByRole("button", { name: "设置标签" }).click();
+  const tagTrigger = page.getByRole("button", { name: "设置标签" });
+  await tagTrigger.focus();
+  await tagTrigger.press("Enter");
   const popover = page.locator(".case-tag-popover");
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole("searchbox", { name: "查找标签" })).toBeFocused();
+  const popoverBox = await popover.boundingBox();
+  const columnBox = await page.locator(".canvas-column").boundingBox();
+  expect(popoverBox).not.toBeNull();
+  expect(columnBox).not.toBeNull();
+  expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+  expect(popoverBox.y).toBeGreaterThanOrEqual(0);
+  expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(645);
+  expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(844);
+  expect(popoverBox.x + popoverBox.width).toBeGreaterThan(columnBox.x + columnBox.width);
+  expect(await page.evaluate(({ x, y }) => Boolean(
+    document.elementFromPoint(x, y)?.closest(".case-tag-popover")
+  ), { x: popoverBox.x + popoverBox.width - 4, y: popoverBox.y + popoverBox.height / 2 })).toBe(true);
   // 作者真实修改：勾上劳动教育并取消文化自信，产生工作记录净变化。
-  await popover.locator("label", { hasText: ADDED_TAG }).locator("input").check();
+  const addedTag = popover.locator("label", { hasText: ADDED_TAG });
+  const addedTagBox = await addedTag.boundingBox();
+  expect(addedTagBox).not.toBeNull();
+  expect(addedTagBox.x + addedTagBox.width).toBeGreaterThan(columnBox.x + columnBox.width);
+  await addedTag.click({ position: { x: addedTagBox.width - 8, y: addedTagBox.height / 2 } });
+  await expect(addedTag.locator("input")).toBeChecked();
   await popover.locator("label", { hasText: REMOVED_TAG }).locator("input").uncheck();
   await expectThisSaveApplied(await saveDone);
   await page.getByRole("button", { name: "设置标签" }).click();
