@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   artifactStatus, durationText, elapsedBetween, sourceHref, sourceRefId,
   toolParamSummary, toolResultSummary, toolRunning, toolState,
+  toolDiagnosticText,
 } from "./agentTimeline.js";
 
 describe("tool running states", () => {
@@ -78,6 +79,19 @@ describe("tool result summaries", () => {
       type: "tool-search_corpus", state: "output-available",
       output: { status: "future_status" },
     })).toBe("工具返回了无法识别的结果状态");
+  });
+
+  it("explains the explicit missing-reason validation without exposing wrapped diagnostics", () => {
+    const errorText = "工具校验失败：修订必须给出具体修改理由，且不能为空白；internal provider detail";
+    const failedRevision = {
+      type: "tool-propose_revision", state: "output-error", errorText,
+    };
+    const summary = toolResultSummary(failedRevision, { status: "completed" });
+
+    expect(summary)
+      .toBe("缺少具体修改理由，修订建议未能生成。本轮已结束；请补充具体修改理由后重新发送。");
+    expect(summary).not.toContain("internal provider detail");
+    expect(toolDiagnosticText(failedRevision)).toBe(errorText);
   });
 
   it("explains denied tool calls as unexecuted actions", () => {

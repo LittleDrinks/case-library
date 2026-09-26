@@ -181,9 +181,13 @@ async function refreshSnapshot(
   caseId, state, generation, threadId = state.threadId.value, mayApply = () => true,
 ) {
   const snapshot = await api.agentThread(caseId, threadId);
-  if (isCurrent(state, generation) && state.threadId.value === threadId && mayApply()) {
-    state.snapshot.value = snapshot;
+  if (!isCurrent(state, generation) || state.threadId.value !== threadId || !mayApply()) {
+    return snapshot;
   }
+  const current = state.snapshot.value;
+  if (Number.isInteger(current?.eventSeq)
+    && (!Number.isInteger(snapshot?.eventSeq) || snapshot.eventSeq < current.eventSeq)) return current;
+  state.snapshot.value = snapshot;
   return snapshot;
 }
 

@@ -98,13 +98,23 @@ export function toolFailureSummary(part, runStatus = "") {
     return `这项操作未获授权，因此没有执行。${next}`;
   }
   const name = toolName(part);
-  const cause = toolFailureCause(part, name);
+  const missingRevisionReason = name === "propose_revision"
+    && part.errorText?.includes("修订必须给出具体修改理由，且不能为空白");
+  const cause = missingRevisionReason
+    ? "缺少具体修改理由，修订建议未能生成" : toolFailureCause(part, name);
+  const retryStep = missingRevisionReason
+    ? "请补充具体修改理由后重新发送" : toolFailureNextStep(name);
   let next;
   if (runStatus === "active") next = "本轮仍在处理，请等待后续结果";
-  else if (runStatus === "failed") next = "本轮已失败；如仍需此操作，可重试这条消息";
-  else if (runStatus === "cancelled") next = "本轮已取消；需要此操作时请重新发送请求";
-  else if (runStatus === "completed") next = `本轮已结束；${toolFailureNextStep(name)}`;
-  else next = toolFailureNextStep(name);
+  else if (runStatus === "failed") {
+    next = `本轮已失败；${missingRevisionReason ? retryStep : "如仍需此操作，可重试这条消息"}`;
+  } else if (runStatus === "cancelled") {
+    next = `本轮已取消；${missingRevisionReason ? retryStep : "需要此操作时请重新发送请求"}`;
+  } else if (runStatus === "completed") {
+    next = `本轮已结束；${retryStep}`;
+  } else {
+    next = retryStep;
+  }
   return `${cause}。${next}。`;
 }
 
