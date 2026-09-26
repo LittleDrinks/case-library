@@ -75,7 +75,8 @@ async def propose_revision(
     require_revision_reason(reason)
     if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
         raise ModelRetry("批注讨论本轮只能提议一条选区修订")
-    if any(start < item.target.to_pos and item.target.from_pos < end
+    if any((start < item.target.to_pos and item.target.from_pos < end)
+           or start == end == item.target.from_pos == item.target.to_pos
            for item in ctx.deps.proposed_artifacts):
         raise ModelRetry(
             "本轮已有与该位置重叠的修订建议。不要再次为该目标调用 propose_revision，"

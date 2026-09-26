@@ -950,3 +950,19 @@ it("目标原文变化后清除差异并拒绝应用", async () => {
   expect(wrapper.vm.isRevisionCurrent(target)).toBe(false);
   expect(await wrapper.vm.applyRevisionSteps([], target)).toBe(false);
 });
+
+it("空段落建议预览新增文字，应用原生插入步骤后显示正文", async () => {
+  const { wrapper } = await setup({ document: {
+    type: "doc", content: [{ type: "paragraph" }],
+  } });
+  const target = { id: "fill-empty", from: 1, to: 1, quote: "", replacement: "教学目标" };
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(wrapper.get(".revision-preview-new").text()).toBe("教学目标");
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  const steps = [{ stepType: "replace", from: 1, to: 1,
+    slice: { content: [{ type: "text", text: "教学目标" }] } }];
+  expect(await wrapper.vm.applyRevisionSteps(steps, target)).toBe(true);
+  expect(wrapper.vm.editor.getJSON().content[0].content[0].text).toBe("教学目标");
+  expect(wrapper.vm.isRevisionCurrent(target)).toBe(false);
+  expect(await wrapper.vm.previewRevision(target)).toBe(false);
+});

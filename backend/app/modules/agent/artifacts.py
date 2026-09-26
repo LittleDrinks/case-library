@@ -111,7 +111,7 @@ def _revision_target(database, run_id, case: dict, start: int, end: int) -> Arti
         quote = prosemirror.text_between(case["document"], start, end)
     except (ParagraphChangedError, ParagraphNotFoundError) as error:
         raise CaseError(422, "修订目标必须位于当前正文的同一段落") from error
-    if not quote.strip():
+    if start != end and not quote.strip():
         raise CaseError(422, "修订目标不能为空")
     return ArtifactTarget(from_pos=start, to_pos=end, quote=quote)
 

@@ -504,3 +504,67 @@ def test_active_run_uniqueness_is_database_enforced(client: TestClient) -> None:
     except DuplicateKeyError:
         return
     raise AssertionError("active Run index did not reject a second run")
+
+
+@pytest.mark.parametrize("edit_first", [False, True])
+def test_empty_template_blocks_support_suggestions_apply_and_undo(client: TestClient, edit_first: bool) -> None:
+    auth = _login(client)
+    original = {"type": "doc", "content": [{"type": "paragraph"}, {"type": "paragraph"}]}
+    created = client.post("/api/cases", headers=_csrf(auth), json={
+        "title": "填写空白模板", "document": original,
+    })
+    assert created.status_code == 200
+    case_id = created.json()["id"]
+    path = f"/api/cases/{case_id}/agent/thread"
+    thread_id = client.get(path).json()["id"]
+    requests = 0
+
+    async def fill_template(_messages, _info):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            yield {i: DeltaToolCall(name="propose_revision", tool_call_id=f"empty-{i}",
+                   json_args=json.dumps({"start": pos, "end": pos, "replacement": text,
+                                         "reason": "填写模板中的空白段落"}))
+                   for i, (pos, text) in enumerate([(1, "教学目标"), (3, "课堂活动"), (1, "重复填写")])}
+        else:
+            yield "请逐条确认两处填写建议。"
+
+    with _agent().override(model=FunctionModel(stream_function=fill_template)):
+        result = client.post(f"{path}/{thread_id}/stream", headers=_csrf(auth), json=_body("填好模板"))
+    assert result.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    assert len(snapshot["artifacts"]) == 2
+    assert client.get(f"/api/cases/{case_id}").json()["document"] == original
+    proposals = sorted(snapshot["artifacts"], key=lambda item: item["target"]["from"])
+    if edit_first:
+        saved = client.patch(f"/api/cases/{case_id}", headers=_csrf(auth), json={
+            "revision": 1, "document": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "人工填写"}]},
+                {"type": "paragraph"},
+            ]}, "steps": [{"stepType": "replace", "from": 1, "to": 1,
+                           "slice": {"content": [{"type": "text", "text": "人工填写"}]}}],
+        })
+        assert saved.status_code == 200, saved.text
+        refreshed = client.get(path).json()["artifacts"]
+        assert next(item for item in refreshed if item["id"] == proposals[0]["id"])["status"] == "expired"
+        assert next(item for item in refreshed if item["id"] == proposals[1]["id"])["status"] == "pending"
+        stale = client.post(f"{path}/{thread_id}/artifacts/{proposals[0]['id']}/decision",
+                            headers=_csrf(auth), json={"decision": "accepted"})
+        assert stale.status_code == 409
+        assert client.get(f"/api/cases/{case_id}").json()["document"]["content"][0]["content"][0]["text"] == "人工填写"
+        return
+    writes = []
+    for proposal in proposals:
+        accepted = client.post(f"{path}/{thread_id}/artifacts/{proposal['id']}/decision",
+                               headers=_csrf(auth), json={"decision": "accepted"})
+        assert accepted.status_code == 200, accepted.text
+        writes.append(accepted.json()["artifact"]["writeId"])
+    current = client.get(f"/api/cases/{case_id}").json()["document"]
+    assert [node["content"][0]["text"] for node in current["content"]] == ["教学目标", "课堂活动"]
+    undone = client.post(f"{path}/{thread_id}/writes/{writes[-1]}/undo", headers=_csrf(auth))
+    assert undone.status_code == 200, undone.text
+    current = client.get(f"/api/cases/{case_id}").json()["document"]
+    assert current["content"][0]["content"][0]["text"] == "教学目标"
+    assert current["content"][1] == {"type": "paragraph"}

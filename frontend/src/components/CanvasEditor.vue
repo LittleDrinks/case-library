@@ -314,9 +314,13 @@ function annotationAnchor(annotation, doc) {
 function pendingAnchorRange(doc, pending) {
   if (!pending) return null;
   const { from, to } = pending;
-  if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) return null;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from > to) return null;
   if (to > doc.content.size) return null;
   try {
+    if (from === to) {
+      const { parent } = doc.resolve(from);
+      if (!parent.isTextblock || parent.content.size !== 0) return null;
+    }
     return quoteText(doc, from, to) === pending.quote ? { from, to } : null;
   } catch {
     return null;
@@ -400,7 +404,7 @@ function revisionDecorations(doc, state) {
   const decorations = [];
   const preview = state.preview;
   if (preview && pendingAnchorRange(doc, preview)) {
-    decorations.push(Decoration.inline(preview.from, preview.to, {
+    if (preview.from < preview.to) decorations.push(Decoration.inline(preview.from, preview.to, {
       class: preview.phase === "leaving"
         ? "revision-preview-old leaving" : "revision-preview-old",
     }, { revisionPreview: true }));
@@ -435,7 +439,7 @@ function applyRevisionDecorations(transaction, previous) {
     if (preview) {
       const from = transaction.mapping.map(preview.from, 1);
       const to = transaction.mapping.map(preview.to, -1);
-      preview = from < to && quoteText(transaction.doc, from, to) === preview.quote
+      preview = pendingAnchorRange(transaction.doc, { ...preview, from, to })
         ? { ...preview, from, to } : null;
     }
     if (entered) {
