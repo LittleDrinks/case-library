@@ -380,3 +380,58 @@ def test_parts_projector_reverifies_permissions_per_call(client: TestClient) -> 
     _revoke_source(database)
     assert project(parts)[1]["text"] == HIDDEN_ANSWER
     assert project(parts)[0]["output"]["status"] == "no_access"
+
+
+def test_active_recovery_does_not_replay_revoked_source_chunks(client: TestClient) -> None:
+    import asyncio
+    from threading import Event
+    from test_agent_runs_lifecycle import (
+        _asgi_scope, _login_cookie, _post_async, _spawn_disconnected_app, _stop_loop,
+    )
+
+    database = client.app.state.database
+    _seed_source(database)
+    auth = _login_cookie(client)
+    thread_id = _thread(client, "c-draft-1")
+    reached, release, disconnect = Event(), Event(), Event()
+
+    async def answer(messages, _info):
+        if "read_source" not in _tool_names(messages):
+            yield _tool_delta("read_source", {"source_type": "case", "source_id": "src-22"}, "active-read")
+            return
+        yield LEAK_MARK
+        reached.set()
+        await asyncio.to_thread(release.wait, 10)
+        yield "，结束"
+
+    model = FunctionModel(stream_function=answer)
+    pending, _, pool = _post_async(client.app, "读取后刷新", model)
+    chunks = []
+    try:
+        assert reached.wait(5)
+        _revoke_source(database)
+        assert _snapshot(client, thread_id)["activeRun"]
+        scope = _asgi_scope({"Cookie": auth["cookie"]}, thread_id)
+        scope.update(method="GET", path=f"/api/cases/c-draft-1/agent/thread/{thread_id}/events")
+
+        async def receive_chunk(message):
+            if message["type"] == "http.response.start":
+                release.set()
+            chunks.append(message.get("body", b"").decode())
+
+        _, reading, loop = _spawn_disconnected_app(
+            client.app, scope, b"", model, disconnect, receive_chunk, {},
+        )
+        try:
+            reading.result(timeout=10)
+            result = "".join(chunks)
+            assert LEAK_MARK not in result
+            assert SOURCE_TEXT not in result
+            assert HIDDEN_ANSWER in result
+        finally:
+            disconnect.set()
+            _stop_loop(loop, reading)
+    finally:
+        release.set()
+        pending.result(timeout=10)
+        pool.shutdown()

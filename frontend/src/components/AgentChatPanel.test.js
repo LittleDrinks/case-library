@@ -1965,3 +1965,36 @@ it("does not pull the reader to the bottom after opening thinking during streami
   feed.send({ type: "finish", finishReason: "stop" }); feed.close();
   await flushPromises(); wrapper.unmount();
 });
+
+it("continues the same reply during recovery and keeps one message at completion", async () => {
+  const feed = resourceFeed();
+  const running = structuredClone(snapshot);
+  running.messages = [];
+  running.activeRun = { id: "run-resume", status: "active" };
+  running.latestRun = running.activeRun;
+  api.agentThread.mockResolvedValue(running);
+  const fetch = vi.fn().mockResolvedValue(feed.response);
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  feed.send({ type: "start", messageId: "reply-resume" });
+  feed.send({ type: "text-start", id: "text-resume" });
+  feed.send({ type: "text-delta", id: "text-resume", delta: "前半" });
+  await vi.waitFor(() => expect(wrapper.text()).toContain("前半"));
+  expect(fetch.mock.calls[0][0]).toContain("/events?");
+  feed.send({ type: "text-delta", id: "text-resume", delta: "后半" });
+  await vi.waitFor(() => expect(wrapper.text()).toContain("前半后半"));
+  feed.send({ type: "text-end", id: "text-resume" });
+  const complete = { id: "reply-resume", role: "assistant", runId: "run-resume", parts: [
+    { type: "text", text: "前半后半", state: "done" },
+  ] };
+  feed.send({ type: "data-agent-message", transient: true, data: complete });
+  feed.send({ type: "finish", finishReason: "stop" });
+  api.agentThread.mockResolvedValue({ ...running, activeRun: null,
+    latestRun: { id: "run-resume", status: "completed" }, messages: [complete] });
+  feed.close();
+  await vi.waitFor(() => expect(wrapper.text()).not.toContain("正在恢复连接"));
+  expect(wrapper.text().match(/前半后半/g)).toHaveLength(1);
+  expect(fetch.mock.calls).toHaveLength(1);
+  wrapper.unmount();
+});

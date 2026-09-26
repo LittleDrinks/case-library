@@ -111,7 +111,7 @@ async def _native_events(context: RunContext):
             async with _model_context(context) as model:
                 async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
                     async for event in events:
-                        _record_tool_event(context, event)
+                        await asyncio.to_thread(_record_tool_event, context, event)
                         yield event
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
@@ -288,10 +288,9 @@ async def execute_run(context: RunContext, supervisor) -> None:
         await _drain(context)
     finally:
         monitor.cancel()
-        _finalize(context)
+        await asyncio.to_thread(_finalize, context)
         if context.supervisor is not None:
             context.supervisor.unregister(context.run.id)
-        await context.buffer.close()
 
 
 def _stream_status(context: RunContext) -> TerminalRunStatus:
@@ -306,13 +305,13 @@ async def _monitor(context: RunContext, owner_task) -> None:
     try:
         while True:
             await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
-            if not _renew(context):
+            if not await asyncio.to_thread(_renew, context):
                 owner_task.cancel()
                 return
     except asyncio.CancelledError:
         raise
     except Exception:
-        _monitor_failed(context)
+        await asyncio.to_thread(_monitor_failed, context)
         owner_task.cancel()
 
 

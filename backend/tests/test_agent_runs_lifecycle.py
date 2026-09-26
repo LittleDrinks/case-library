@@ -438,41 +438,6 @@ def _assert_exhausted(client: TestClient, path: str, event_seq: int) -> None:
     assert header_cursor.status_code == 204
 
 
-def test_events_endpoint_tails_active_run_and_stops_at_done(client: TestClient) -> None:
-    _login(client)
-    release = Event()
-    model = _gated_model(release)
-    with client.app.state.agent.override(model=model):
-        future, _client, pool = _post_async(client.app, "事件尾测试", model)
-        try:
-            thread_id = _await_thread_with_active(client)
-            _assert_events_tail(client, thread_id, release)
-        finally:
-            release.set()
-            future.result(timeout=30)
-            pool.shutdown()
-
-
-def _assert_events_tail(client: TestClient, thread_id: str, release: Event) -> None:
-    database = client.app.state.database
-    before = database.agent_threads.find_one({"id": thread_id}, {"_id": 0})
-    with client.stream(
-        "GET", f"{THREAD_PATH}/{thread_id}/events",
-        params={"afterSeq": before["eventSeq"]}, timeout=30,
-    ) as response:
-        assert response.status_code == 200
-        release.set()
-        lines = [line for line in response.iter_lines() if line]
-    chunks = [json.loads(line[6:]) for line in lines if line != "data: [DONE]"]
-    assert lines[-1] == "data: [DONE]"
-    assert chunks[0]["type"] == "data-agent-message"
-    assert chunks[0]["data"]["parts"][0]["text"] == "前半后半"
-    assert [chunk["type"] for chunk in chunks].count("data-agent-message") == 1
-    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
-    run = database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
-    assert run["status"] == "completed"
-
-
 def test_terminal_event_seals_the_thread_event_tail(client: TestClient) -> None:
     auth = _login(client)
     with client.app.state.agent.override(model=TestModel(custom_output_text="终态回答", call_tools=[])):
@@ -558,3 +523,65 @@ def test_snapshot_hydrates_legacy_run_with_retired_fields(client: TestClient) ->
     assert all(row["id"] != run["id"] or "writeAuthorized" not in row
                for row in snapshot["runs"])
     assert repository.latest_run(thread_id).id == run["id"]
+
+
+def test_reconnect_on_another_worker_receives_tokens_before_run_finishes(client: TestClient) -> None:
+    from app.main import create_app
+
+    auth = _login_cookie(client)
+    thread_id = _thread_id(client)
+    release, reached, disconnect = Event(), Event(), Event()
+    model = _gated_model(release, reached)
+    body = json.dumps(_post_body("运行中刷新")).encode()
+    first, sending, producer_loop = _drive_disconnect(
+        client.app, thread_id, auth, body, model, disconnect,
+    )
+    resumed = Event()
+    resumed_chunks = []
+    reader_disconnect = Event()
+    worker = create_app(
+        database=client.app.state.database, settings=client.app.state.settings,
+        blob_store=client.app.state.blob_store,
+        search_catalog=client.app.state.search_catalog,
+        catalog_state=client.app.state.catalog_state,
+    )
+    try:
+        assert first["first"].wait(5)
+        assert reached.wait(5)
+        disconnect.set()
+        sending.result(timeout=5)
+        snapshot = client.get(THREAD_PATH).json()
+        assert snapshot["activeRun"]
+        scope = _asgi_scope({"Cookie": auth["cookie"]}, thread_id)
+        scope.update(method="GET", path=f"{THREAD_PATH}/{thread_id}/events",
+                     query_string=f"afterSeq={snapshot['eventSeq']}".encode())
+
+        async def receive_chunk(message):
+            raw = message.get("body", b"").decode()
+            resumed_chunks.append(raw)
+            if '"text-delta"' in raw and "前半" in raw:
+                resumed.set()
+
+        with TestClient(worker):
+            _, reading, reader_loop = _spawn_disconnected_app(
+                worker, scope, b"", model, reader_disconnect, receive_chunk, {},
+            )
+            try:
+                assert resumed.wait(5), "运行尚未结束，刷新后应收到已经生成的前半段"
+                assert client.get(THREAD_PATH).json()["activeRun"]
+                release.set()
+                reading.result(timeout=10)
+                assert "后半" in "".join(resumed_chunks)
+                assert "".join(resumed_chunks).endswith("data: [DONE]\n\n")
+            finally:
+                release.set()
+                reader_disconnect.set()
+                _stop_loop(reader_loop, reading)
+        snapshot = client.get(THREAD_PATH).json()
+        assert snapshot["latestRun"]["status"] == "completed"
+        assert len(snapshot["runs"]) == 1
+    finally:
+        release.set()
+        disconnect.set()
+        _await_run(client.app.state.database, thread_id)
+        _stop_loop(producer_loop, sending)
