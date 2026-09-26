@@ -48,7 +48,7 @@ const tabs = [
 const panelCollapsed = ref(false);
 
 function select(tab) {
-  panelCollapsed.value = props.active === tab && !panelCollapsed.value;
+  panelCollapsed.value = props.open && props.active === tab && !panelCollapsed.value;
   emit("select", tab);
 }
 

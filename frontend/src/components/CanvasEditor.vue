@@ -325,21 +325,24 @@ function findTextRange(doc, text, preferredFrom) {
       cursor += child.nodeSize;
     });
     const blockText = segments.map((segment) => segment.text).join("");
-    const offset = blockText.indexOf(text);
-    if (offset < 0) return;
-    let consumed = 0;
-    let from = null;
-    for (const segment of segments) {
-      if (offset < consumed + segment.text.length) {
-        from = segment.from + offset - consumed;
-        break;
+    let offset = blockText.indexOf(text);
+    while (offset >= 0) {
+      let consumed = 0;
+      let from = null;
+      for (const segment of segments) {
+        if (offset < consumed + segment.text.length) {
+          from = segment.from + offset - consumed;
+          break;
+        }
+        consumed += segment.text.length;
       }
-      consumed += segment.text.length;
+      if (from !== null) {
+        const candidate = { from, to: from + text.length };
+        const distance = Math.abs(from - preferredFrom);
+        if (!nearest || distance < nearest.distance) nearest = { ...candidate, distance };
+      }
+      offset = blockText.indexOf(text, offset + 1);
     }
-    if (from === null) return;
-    const candidate = { from, to: from + text.length };
-    const distance = Math.abs(from - preferredFrom);
-    if (!nearest || distance < nearest.distance) nearest = { ...candidate, distance };
   });
   return nearest && { from: nearest.from, to: nearest.to };
 }
@@ -472,8 +475,8 @@ async function previewRevision(target) {
     ? findTextRange(doc, target.status === "accepted" ? target.replacement : target.quote, target.from)
       || findTextRange(doc, target.replacement, target.from)
     : pendingAnchorRange(doc, target);
-  if (!currentRange && !target.locateOnly) return false;
-  const position = currentRange?.from ?? Math.max(0, Math.min(target.from, doc.content.size));
+  if (!currentRange) return false;
+  const position = currentRange.from;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview: null, entered: null }));
   try {
     let element = activeEditor.view.domAtPos(position).node;

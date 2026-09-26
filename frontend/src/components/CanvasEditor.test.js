@@ -748,6 +748,43 @@ it("locates an applied record by its replacement without showing a stale preview
   expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
 });
 
+it("locates the matching replacement nearest the historical target when text repeats", async () => {
+  const replacement = "替换后的正文";
+  const paragraphText = `${replacement}；第二处：${replacement}`;
+  const documentWithRepeatedReplacement = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [{ type: "text", text: paragraphText }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithRepeatedReplacement, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const secondOccurrence = 9 + `${replacement}；第二处：`.length;
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-repeated", from: secondOccurrence, to: secondOccurrence + replacement.length,
+    quote: "旧原文", replacement, status: "accepted", locateOnly: true,
+  })).toBe(true);
+
+  expect(domAtPos).toHaveBeenCalledWith(secondOccurrence);
+  expect(paragraph.scrollIntoView).toHaveBeenCalled();
+});
+
+it("does not report a historical record located when its text is absent", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-missing", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "也已不存在", status: "accepted", locateOnly: true,
+  })).toBe(false);
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+});
+
 it("discards a preview whose smooth scroll finishes after a newer request", async () => {
   const { wrapper } = await setup();
   const scrollColumn = wrapper.element;

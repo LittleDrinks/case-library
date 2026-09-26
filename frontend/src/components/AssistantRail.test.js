@@ -129,6 +129,15 @@ it("places collapse first and toggles the active panel like the confirmed workbe
   expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
 });
 
+it("opens the selected panel on the first click while the drawer is closed", async () => {
+  const wrapper = render({ open: false, active: "ai" });
+
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+
+  expect(wrapper.emitted("select")).toEqual([["ai"]]);
+  expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
+});
+
 it("keeps the AI draft while switching through integrated rail panels", async () => {
   vi.stubGlobal("fetch", vi.fn());
   const wrapper = renderWithRealChat();
