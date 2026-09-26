@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 
@@ -150,8 +151,26 @@ def _bind_numbering(paragraph: Paragraph, num_id: int) -> None:
 def _new_numbering(document: DocxDocument, style: str, start: int) -> int:
     style_num = document.styles[style].element.pPr.numPr.numId.val
     numbering = document.part.numbering_part.element
-    abstract_num = numbering.num_having_numId(style_num).abstractNumId.val
-    instance = numbering.add_num(abstract_num)
+    style_abstract_id = numbering.num_having_numId(style_num).abstractNumId.val
+    style_abstract = next(
+        item
+        for item in numbering.findall(qn("w:abstractNum"))
+        if int(item.get(qn("w:abstractNumId"))) == style_abstract_id
+    )
+    abstract_id = (
+        max(
+            int(item.get(qn("w:abstractNumId")))
+            for item in numbering.findall(qn("w:abstractNum"))
+        )
+        + 1
+    )
+    abstract = deepcopy(style_abstract)
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    # Word otherwise merges the cloned counter with the style's shared numbering.
+    abstract.remove(abstract.find(qn("w:nsid")))
+    first_num = numbering.find(qn("w:num"))
+    numbering.insert(numbering.index(first_num), abstract)
+    instance = numbering.add_num(abstract_id)
     instance.add_lvlOverride(ilvl=0).add_startOverride(val=start)
     return instance.numId
 

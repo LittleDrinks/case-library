@@ -100,6 +100,33 @@ def _ordered_list_at_depth(label: str, depth: int, start: int) -> dict:
     return result
 
 
+def _nested_ordered_list(level: int = 1) -> dict:
+    label = f"ORDER-L{level}"
+    children = [_paragraph_node(label)]
+    if level < 5:
+        children.append(_nested_ordered_list(level + 1))
+    else:
+        children.append(
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": f"{label}-CONT-A"},
+                    {"type": "hardBreak"},
+                    {"type": "text", "text": f"{label}-CONT-B"},
+                ],
+            }
+        )
+    start = 3 if level == 1 else 6 if level == 2 else 1
+    return {
+        "type": "orderedList",
+        "attrs": {"start": start},
+        "content": [
+            {"type": "listItem", "content": children},
+            _item(f"{label}-SECOND"),
+        ],
+    }
+
+
 RICH_DOCUMENT = {
     "type": "doc",
     "content": [
@@ -161,6 +188,34 @@ def numbering_start_override(data: bytes, item_text: str) -> int | None:
 def numbering_start(data: bytes, item_text: str) -> int:
     start = numbering_start_override(data, item_text)
     return 1 if start is None else start
+
+
+def numbering_binding(data: bytes, item_text: str) -> tuple[str, str, int, str | None]:
+    with ZipFile(BytesIO(data)) as package:
+        document = parse_xml(package.read("word/document.xml"))
+        numbering = parse_xml(package.read("word/numbering.xml"))
+    num_pr = paragraph(document, item_text).find("w:pPr/w:numPr", NS)
+    assert num_pr is not None
+    num_id = num_pr.find("w:numId", NS).get(w("val"))
+    ilvl = num_pr.find("w:ilvl", NS).get(w("val"))
+    instance = next(
+        item
+        for item in numbering.findall("w:num", NS)
+        if item.get(w("numId")) == num_id
+    )
+    abstract_id = instance.find("w:abstractNumId", NS).get(w("val"))
+    abstract = next(
+        item
+        for item in numbering.findall("w:abstractNum", NS)
+        if item.get(w("abstractNumId")) == abstract_id
+    )
+    nsid = abstract.find("w:nsid", NS)
+    return (
+        num_id,
+        abstract_id,
+        int(ilvl),
+        nsid.get(w("val")) if nsid is not None else None,
+    )
 
 
 def numbering_layout(data: bytes, item_text: str) -> tuple[str, int, int]:
@@ -421,11 +476,7 @@ def test_public_docx_export_restarts_deep_ordered_lists(client: TestClient) -> N
             "document": {
                 "type": "doc",
                 "content": [
-                    _ordered_list_at_depth("ORDER-L1", 0, 3),
-                    _ordered_list_at_depth("ORDER-L2", 1, 6),
-                    _ordered_list_at_depth("ORDER-L3", 2, 1),
-                    _ordered_list_at_depth("ORDER-L4", 3, 1),
-                    _ordered_list_at_depth("ORDER-L5", 4, 1),
+                    _nested_ordered_list(),
                     _ordered_list_at_depth("ORDER-L5-START5", 4, 5),
                 ],
             },
@@ -451,7 +502,6 @@ def test_public_docx_export_restarts_deep_ordered_lists(client: TestClient) -> N
     public_export = client.get(path + "/public/export.docx")
     assert current_export.status_code == public_export.status_code == 200
 
-    roots = ["ORDER-L3", "ORDER-L4", "ORDER-L5"]
     lists = [
         ("ORDER-L1", 3),
         ("ORDER-L2", 6),
@@ -462,16 +512,19 @@ def test_public_docx_export_restarts_deep_ordered_lists(client: TestClient) -> N
     ]
     for response in (current_export, public_export):
         data = response.content
-        assert [numbering_start_override(data, label) for label in roots] == [1, 1, 1]
         assert [numbering_start_override(data, label) for label, _ in lists] == [
             start for _, start in lists
         ]
         assert all(
-            numbering_layout(data, label)[0]
-            == numbering_layout(data, f"{label}-SECOND")[0]
+            numbering_binding(data, label)[0]
+            == numbering_binding(data, f"{label}-SECOND")[0]
             for label, _ in lists
         )
-        assert len({numbering_layout(data, label)[0] for label in roots}) == 3
+        deep_bindings = [
+            numbering_binding(data, f"ORDER-L{level}") for level in range(3, 6)
+        ]
+        assert len({binding[1:3] for binding in deep_bindings}) == 3
+        assert all(binding[3] is None for binding in deep_bindings)
 
 
 def test_docx_export_aligns_manual_lines_split_by_hard_break(
