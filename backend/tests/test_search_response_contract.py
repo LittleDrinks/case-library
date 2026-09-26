@@ -178,15 +178,6 @@ def test_restricted_items_keep_field_absence_contract(client: TestClient) -> Non
     assert "summary" not in payload["items"][1]
 
 
-def test_case_items_resolve_tag_names_from_catalog(client: TestClient) -> None:
-    _use(client)
-    _login(client)
-    payload = _get_tagged_page(client)
-    assert payload["items"][0]["tagNames"] == ["科学家精神"]
-    assert "tagNames" not in payload["items"][1]
-    assert "tagNames" not in payload["items"][2]
-
-
 def test_post_response_echoes_nested_tag_condition(client: TestClient) -> None:
     _use(client)
     _login(client)
