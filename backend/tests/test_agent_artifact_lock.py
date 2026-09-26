@@ -319,7 +319,7 @@ def test_overlapping_suggestions_are_rejected_in_one_run(client: TestClient) -> 
     ctx = SimpleNamespace(deps=deps)
     asyncio.run(propose_revision(ctx, FIRST.from_pos, FIRST.to_pos, "第一段修改。", "重写表达"))
 
-    with pytest.raises(ModelRetry, match="目标不能重叠"):
+    with pytest.raises(ModelRetry, match="不要再次为该目标调用 propose_revision"):
         asyncio.run(propose_revision(ctx, FIRST.from_pos + 2, FIRST.to_pos,
                                      "重复范围。", "避免重复修改"))
 

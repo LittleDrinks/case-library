@@ -71,13 +71,16 @@ def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
 async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
-    """按当前正文位置构建一条修订候选；运行成功后与助手消息一同提交。"""
+    """按正文位置提出建议；同轮目标不能重叠，其他不重叠位置仍可继续。"""
     require_revision_reason(reason)
     if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
         raise ModelRetry("批注讨论本轮只能提议一条选区修订")
     if any(start < item.target.to_pos and item.target.from_pos < end
            for item in ctx.deps.proposed_artifacts):
-        raise ModelRetry("同一轮的多个修订目标不能重叠")
+        raise ModelRetry(
+            "本轮已有与该位置重叠的修订建议。不要再次为该目标调用 propose_revision，"
+            "请保留已有候选并完成当前回复；其他建议只能使用不重叠的位置。"
+        )
     if not ctx.deps.revision_path_claimed:
         if not claim_run_write_path(ctx.deps.database, ctx.deps.run_id, "revision"):
             raise ModelRetry("本次运行已选择另一条正文处理方式，不能再生成修订建议")

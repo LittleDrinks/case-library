@@ -727,6 +727,7 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
 
 async function openHistoryTimeline(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await page.getByRole("button", { name: /^查看历史版本 v1 · .+$/ }).click();
 }
 

@@ -45,6 +45,7 @@ const loadError = ref("");
 const conflict = ref(null);
 const activeTool = ref("ai");
 const drawerOpen = ref(false);
+const assistantRail = ref(null);
 const actionNotice = shallowRef(null);
 const actionSuccessNotice = shallowRef(null);
 const busyAction = ref("");
@@ -507,6 +508,12 @@ function selectRailTool(tool) {
   selectTool(tool);
 }
 
+function selectHeaderTool(tool) {
+  if (contentMutationBusy.value) return;
+  selectRailTool(tool);
+  assistantRail.value?.expandPanel();
+}
+
 function selectTool(tool) {
   activeTool.value = readerMode.value && tool === "comments" ? "ai" : tool;
   drawerOpen.value = true;
@@ -833,7 +840,7 @@ onBeforeUnmount(() => {
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
-        @tool="selectRailTool"
+        @tool="selectHeaderTool"
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
@@ -975,6 +982,7 @@ onBeforeUnmount(() => {
           </article>
         </main>
         <AssistantRail
+          ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
           :version-id="readerVersion"

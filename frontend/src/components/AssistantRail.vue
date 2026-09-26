@@ -58,6 +58,12 @@ function toggleDrawer() {
   if (!props.open) panelCollapsed.value = false;
   emit("toggle");
 }
+
+function expandPanel() {
+  panelCollapsed.value = false;
+}
+
+defineExpose({ expandPanel });
 </script>
 
 <template>
