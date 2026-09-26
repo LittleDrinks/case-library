@@ -510,7 +510,13 @@ test("手机工作台使用正文单栏和可收起辅助面板", async ({ page 
 
 test("390px 审核头完整展示全部审核动作", async ({ page }) => {
   await openMobileReview(page);
-  await expect(page.locator(".workspace-actions .lifecycle-action")).toHaveCount(3);
+  await expect(page.locator(".workspace-actions .lifecycle-action")).toHaveCount(2);
+  const approve = page.getByRole("button", { name: "通过发布", exact: true });
+  const reject = page.getByRole("button", { name: "退回修改", exact: true });
+  await expect(approve).toBeVisible();
+  await expect(approve).toBeEnabled();
+  await expect(reject).toBeVisible();
+  await expect(reject).toBeEnabled();
   const buttons = page.locator(".workspace-actions button:visible");
   const layout = await buttonLayout(buttons);
   expect(layout.every(({ left, right, clipped }) => left >= 0 && right <= 390 && !clipped)).toBe(true);

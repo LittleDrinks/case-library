@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { X } from "@lucide/vue";
 
 const props = defineProps({
@@ -17,9 +17,6 @@ const reasons = [
 ];
 const reasonTypes = ref([]);
 const message = ref("");
-const copy = computed(() => (
-  props.command === "reject" ? { title: "退回修改", confirm: "确认退回" } : null
-));
 
 function cancel() {
   if (!props.busy) emit("cancel");
@@ -50,7 +47,7 @@ watch(() => props.command, resetForm);
 <template>
   <Teleport to="body">
     <div
-      v-if="copy"
+      v-if="command === 'reject'"
       class="review-decision-backdrop"
       @mousedown.self="cancel"
       @keydown.esc="cancel"
@@ -62,7 +59,7 @@ watch(() => props.command, resetForm);
         aria-labelledby="review-decision-title"
       >
         <header>
-          <h2 id="review-decision-title">{{ copy.title }}</h2>
+          <h2 id="review-decision-title">退回修改</h2>
           <button type="button" title="关闭" aria-label="关闭" :disabled="busy" @click="cancel">
             <X :size="18" />
           </button>
@@ -89,7 +86,7 @@ watch(() => props.command, resetForm);
           <footer>
             <button type="button" :disabled="busy" @click="cancel">取消</button>
             <button class="primary" type="submit" :disabled="!reasonTypes.length || busy">
-              {{ busy ? "处理中" : copy.confirm }}
+              {{ busy ? "处理中" : "确认退回" }}
             </button>
           </footer>
         </form>
