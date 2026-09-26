@@ -158,6 +158,95 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
 });
 
+it("编号列表序列化只包含后端接受的起点属性", async () => {
+  const document = {
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+      }],
+    }],
+  };
+  const { wrapper } = await setup({ document });
+
+  expect(wrapper.vm.editor.getJSON()).toEqual(document);
+});
+
+it("工具栏创建的编号列表序列化为默认起点", async () => {
+  const document = {
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+  };
+  const { wrapper } = await setup({ document });
+
+  await wrapper.get('[aria-label="编号列表"]').trigger("mousedown");
+
+  expect(wrapper.vm.editor.getJSON()).toEqual({
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 1 },
+      content: [{
+        type: "listItem",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "第一项" }] }],
+      }],
+    }],
+  });
+});
+
+it("后续编辑保留嵌套编号列表起点且不序列化额外属性", async () => {
+  const document = {
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "第一层" }] },
+          {
+            type: "orderedList",
+            attrs: { start: 6 },
+            content: [{
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "嵌套项" }] }],
+            }],
+          },
+        ],
+      }],
+    }],
+  };
+  const { wrapper } = await setup({ document });
+  const editor = wrapper.vm.editor;
+  editor.commands.focus("end");
+  editor.commands.insertContent("后续编辑");
+
+  expect(editor.getJSON()).toEqual({
+    type: "doc",
+    content: [{
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [{
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "第一层" }] },
+          {
+            type: "orderedList",
+            attrs: { start: 6 },
+            content: [{
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "嵌套项后续编辑" }] }],
+            }],
+          },
+        ],
+      }],
+    }],
+  });
+});
+
 it("批注选区重捕获保留关联，改选和显式清除会解除", async () => {
   const annotation = { id: "annotation-1", from: 9, to: 13, quote: "案例原文", anchorState: "active" };
   const { wrapper } = await setup({ annotatable: true, revision: 3, annotations: [annotation] });
