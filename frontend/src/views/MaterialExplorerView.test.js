@@ -5,12 +5,13 @@ import MaterialExplorerView from "./MaterialExplorerView.vue";
 import { api, ApiError } from "../api.js";
 
 const replace = vi.fn();
+const push = vi.fn();
 const route = reactive({ query: { caseId: "case-1" }, fullPath: "/materials?caseId=case-1" });
 const wrappers = [];
 
 vi.mock("vue-router", () => ({
   useRoute: () => route,
-  useRouter: () => ({ replace }),
+  useRouter: () => ({ replace, push }),
 }));
 vi.mock("../api.js", () => ({
   api: {
@@ -45,6 +46,7 @@ function render() {
 beforeEach(() => {
   vi.clearAllMocks();
   replace.mockReset();
+  push.mockReset();
   route.query = { caseId: "case-1" };
   route.fullPath = "/materials?caseId=case-1";
   sessionStorage.clear();
@@ -87,6 +89,30 @@ test("受限素材不可选择且批量挂载只提交可访问项", async () =>
   expect(api.mountCaseMaterial).toHaveBeenCalledWith(
     "case-1", available.id, 1, "csrf",
   );
+});
+
+test("选材成功后返回原案例工作台", async () => {
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("[aria-label='选择可用素材']").setValue(true);
+  await wrapper.get("[aria-label='加入当前案例']").trigger("click");
+  await flushPromises();
+
+  expect(push).toHaveBeenCalledWith({ name: "workbench", params: { id: "case-1" } });
+  expect(api.listCaseMaterials).toHaveBeenCalledTimes(2);
+});
+
+test("选材失败后留在原页并保留选择和错误", async () => {
+  api.mountCaseMaterial.mockRejectedValueOnce(new Error("版本已变化"));
+  const wrapper = render();
+  await flushPromises();
+  await wrapper.get("[aria-label='选择可用素材']").setValue(true);
+  await wrapper.get("[aria-label='加入当前案例']").trigger("click");
+  await flushPromises();
+
+  expect(push).not.toHaveBeenCalled();
+  expect(wrapper.get("[aria-label='选择可用素材']").element.checked).toBe(true);
+  expect(wrapper.get("[role='alert']").text()).toContain("版本已变化");
 });
 
 test("素材表格为移动布局保留字段标签", async () => {

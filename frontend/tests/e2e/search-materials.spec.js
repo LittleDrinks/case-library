@@ -205,8 +205,33 @@ test("公共检索列表在手机端无横向溢出", async ({ page }) => {
 async function selectMaterial(page, title) {
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
-  await expect(page.getByText("已加入 1 条素材")).toBeVisible();
-  await page.getByRole("link", { name: "返回当前案例" }).click();
+  await expect(page).toHaveURL(/#\/workbench\/c-draft-1$/);
+}
+
+async function searchKnownMaterial(page, title) {
+  await page.route("**/api/search**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("kind") !== "material" || url.searchParams.get("q") !== title) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [{
+          id: "m-kcsz", title, summary: "课程思政建设指导纲要",
+          source: "教育部", materialType: "政策文件", authority: "original",
+          accessLevel: "public", contentAvailable: true, hasFile: false,
+        }],
+        facets: {}, total: 1, page: 1, metadataIncluded: true,
+        nextCursor: null, previousCursor: null,
+      }),
+    });
+  });
+  await page.getByLabel("搜索素材").fill(title);
+  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(page.getByText(title, { exact: true })).toBeVisible();
 }
 
 async function assertMaterialAttached(page, title) {
@@ -234,12 +259,33 @@ test("作者从工作台进入带案例上下文的素材掌控台", async ({ pa
   await expect(page.getByRole("group", { name: "使用条件" })).toBeVisible();
   await expect(page.getByLabel("仅可对外使用")).toBeVisible();
   const title = "高等学校课程思政建设指导纲要（教高〔2020〕3号）";
-  await waitForSearchReady(page, title);
-  await page.getByLabel("搜索素材").fill(title);
-  await page.getByRole("button", { name: "搜索", exact: true }).click();
-  await expect(page.getByText(title, { exact: true })).toBeVisible();
+  await searchKnownMaterial(page, title);
   await selectMaterial(page, title);
   await assertMaterialAttached(page, title);
+});
+
+test("素材加入失败后留在掌控台并保留勾选和错误", async ({ page }) => {
+  await enterCatalogFromWorkbench(page);
+  const title = "高等学校课程思政建设指导纲要（教高〔2020〕3号）";
+  await searchKnownMaterial(page, title);
+  await page.getByLabel(`选择${title}`).check();
+  await page.route("**/api/cases/c-draft-1/materials", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "案例版本已变化" }),
+    });
+  });
+  await page.getByRole("button", { name: "加入当前案例" }).click();
+
+  await expect(page).toHaveURL(/#\/materials\?caseId=c-draft-1(?:&|$)/);
+  await expect(page.getByRole("alert")).toContainText("案例版本已变化");
+  await expect(page.getByLabel(`选择${title}`)).toBeChecked();
+  await expect(page.getByText("已加入 1 条素材")).toHaveCount(0);
 });
 
 test("素材掌控台筛选全库并可切回当前案例素材", async ({ page }) => {

@@ -7,11 +7,13 @@ import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { publicUrl } from "../lib/publicUrl.js";
+import { session } from "../session.js";
 
 const route = useRoute();
 const material = ref(null);
 const loading = ref(true);
 const error = ref("");
+const errorStatus = ref(null);
 const materialId = computed(() => String(route.params.id || ""));
 const fromMaterials = computed(() => route.query.from === "materials");
 const returnName = computed(() => (fromMaterials.value ? "materials" : "search"));
@@ -19,6 +21,11 @@ const caseId = computed(() => String(route.query.caseId || ""));
 const sourceUrl = computed(() => publicUrl(material.value?.sourceUrl));
 const returnQuery = computed(() => queryForReturn(route.query, fromMaterials.value));
 const returnLocation = computed(() => ({ name: returnName.value, query: returnQuery.value }));
+const loginLocation = computed(() => ({
+  name: "login", query: { redirect: route.fullPath },
+}));
+const returnLabel = computed(() => (fromMaterials.value ? "返回素材掌控台" : "返回资源检索"));
+const unavailable = computed(() => !loading.value && errorStatus.value === 404);
 
 const accessLabels = { public: "公开访问", campus: "校内访问", private: "私密访问" };
 const authorityLabels = {
@@ -35,8 +42,12 @@ function queryForReturn(query, materials) {
 async function loadMaterial() {
   loading.value = true;
   error.value = "";
+  errorStatus.value = null;
   try { material.value = await api.getMaterial(materialId.value); }
-  catch (caught) { error.value = caught.message || "素材加载失败"; }
+  catch (caught) {
+    error.value = caught.message || "素材加载失败";
+    errorStatus.value = caught.status || null;
+  }
   finally { loading.value = false; }
 }
 
@@ -63,6 +74,13 @@ watch(materialId, loadMaterial, { immediate: true });
         <ArrowLeft :size="16" aria-hidden="true" />{{ fromMaterials ? "返回素材掌控台" : "返回资源检索" }}
       </RouterLink>
       <div v-if="loading" class="material-detail-state"><LoaderCircle class="spin" :size="22" />正在加载素材</div>
+      <div v-else-if="unavailable" class="material-detail-state error-state" role="alert">
+        <AlertTriangle :size="22" />
+        <span v-if="session.user">无法查看该素材。当前账号无权查看，或素材已不存在。</span>
+        <span v-else>无法查看该素材。登录后可以重试，或返回资源检索。</span>
+        <RouterLink v-if="!session.user" :to="loginLocation">登录后继续访问</RouterLink>
+        <RouterLink :to="returnLocation">{{ returnLabel }}</RouterLink>
+      </div>
       <div v-else-if="error" class="material-detail-state error-state" role="alert">
         <AlertTriangle :size="22" /><span>{{ error }}</span>
         <button type="button" @click="loadMaterial"><RefreshCw :size="15" />重试</button>
