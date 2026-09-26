@@ -283,9 +283,34 @@ test("工作台标签弹层在窄桌面视口内完整可点并可滚到末项",
     expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
     const lastTag = popover.locator("fieldset label").last();
     await lastTag.scrollIntoViewIfNeeded();
-    const lastTagBox = await lastTag.boundingBox();
-    expect(lastTagBox.y).toBeGreaterThanOrEqual(box.y);
-    expect(lastTagBox.y + lastTagBox.height).toBeLessThanOrEqual(box.y + box.height);
+    const scrolledGeometry = await lastTag.evaluate((label) => {
+      const element = label.closest(".case-tag-popover");
+      const popoverRect = element.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const cornerHits = [
+        [popoverRect.left + 4, popoverRect.top + 4],
+        [popoverRect.right - 4, popoverRect.top + 4],
+        [popoverRect.left + 4, popoverRect.bottom - 4],
+        [popoverRect.right - 4, popoverRect.bottom - 4],
+      ].map(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest(".case-tag-popover")));
+      return {
+        popover: {
+          left: popoverRect.left,
+          top: popoverRect.top,
+          right: popoverRect.right,
+          bottom: popoverRect.bottom,
+        },
+        label: { top: labelRect.top, bottom: labelRect.bottom },
+        cornerHits,
+      };
+    });
+    expect(scrolledGeometry.popover.left).toBeGreaterThanOrEqual(0);
+    expect(scrolledGeometry.popover.top).toBeGreaterThanOrEqual(0);
+    expect(scrolledGeometry.popover.right).toBeLessThanOrEqual(width);
+    expect(scrolledGeometry.popover.bottom).toBeLessThanOrEqual(844);
+    expect(scrolledGeometry.label.top).toBeGreaterThanOrEqual(scrolledGeometry.popover.top);
+    expect(scrolledGeometry.label.bottom).toBeLessThanOrEqual(scrolledGeometry.popover.bottom);
+    expect(scrolledGeometry.cornerHits).toEqual([true, true, true, true]);
     const lastInput = lastTag.locator("input");
     await expect(lastInput).toBeVisible();
     const wasChecked = await lastInput.isChecked();
