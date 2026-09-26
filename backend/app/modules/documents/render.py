@@ -120,14 +120,23 @@ def _add_heading(document: DocxDocument, node: dict, numbers: dict) -> None:
     level = min(3, max(1, int(node.get("attrs", {}).get("level", 1))))
     paragraph = document.add_paragraph(style=f"Heading {level}")
     format_heading(paragraph)
-    _add_inlines(paragraph, node.get("content", []), HEADING_FONT, HEADING_SIZE, numbers)
+    _add_inlines(
+        paragraph, node.get("content", []), HEADING_FONT, HEADING_SIZE, numbers
+    )
 
 
 def _add_paragraph(
     document: DocxDocument, node: dict, numbers: dict, style: str | None = None
 ) -> Paragraph:
     paragraph = document.add_paragraph(style=style)
-    format_body(paragraph, indented=style is None)
+    has_hard_break = any(
+        child.get("type") == "hardBreak"
+        or (child.get("type") == "text" and "\n" in child.get("text", ""))
+        for child in node.get("content", [])
+    )
+    format_body(paragraph, indented=style is None and not has_hard_break)
+    if style is None and has_hard_break:
+        paragraph.paragraph_format.left_indent = Pt(21)
     _add_inlines(paragraph, node.get("content", []), BODY_FONT, BODY_SIZE, numbers)
     return paragraph
 
@@ -148,12 +157,17 @@ def _new_numbering(document: DocxDocument, style: str, start: int) -> int:
     return instance.numId
 
 
+def _list_style(style: str, depth: int) -> str:
+    return style if depth == 0 else f"{style} {min(depth + 1, 3)}"
+
+
 def _add_list(
     document: DocxDocument,
     node: dict,
     style: str,
     numbers: dict,
     num_id: int | None = None,
+    depth: int = 0,
 ) -> None:
     for item in node.get("content", []):
         children = item.get("content", [])
@@ -162,38 +176,56 @@ def _add_list(
                 paragraph = _add_paragraph(
                     document, child, numbers, style if index == 0 else None
                 )
-                if index == 0 and num_id is not None:
-                    _bind_numbering(paragraph, num_id)
+                if index == 0:
+                    if num_id is not None:
+                        _bind_numbering(paragraph, num_id)
+                    if depth >= 3:
+                        indent = Pt(18 * (depth + 1))
+                        paragraph.paragraph_format.left_indent = indent
+                        paragraph.paragraph_format.first_line_indent = -Pt(18)
+                        paragraph.paragraph_format.tab_stops.add_tab_stop(indent)
             else:
-                _add_node(document, child, numbers)
+                _add_node(document, child, numbers, depth + 1)
 
 
-def _add_blockquote(document: DocxDocument, node: dict, numbers: dict) -> None:
+def _add_blockquote(
+    document: DocxDocument, node: dict, numbers: dict, list_depth: int
+) -> None:
     for child in node.get("content", []):
         if child.get("type") == "paragraph":
             _add_paragraph(document, child, numbers, "Quote")
         else:
-            _add_node(document, child, numbers)
+            _add_node(document, child, numbers, list_depth)
 
 
-def _add_node(document: DocxDocument, node: dict, numbers: dict) -> None:
+def _add_node(
+    document: DocxDocument, node: dict, numbers: dict, list_depth: int = 0
+) -> None:
     kind = node.get("type")
     if kind == "heading":
         _add_heading(document, node, numbers)
     elif kind == "paragraph":
         _add_paragraph(document, node, numbers)
     elif kind == "blockquote":
-        _add_blockquote(document, node, numbers)
+        _add_blockquote(document, node, numbers, list_depth)
     elif kind == "bulletList":
-        _add_list(document, node, "List Bullet", numbers)
-    elif kind == "orderedList":
-        start = int(node.get("attrs", {}).get("start", 1))
         _add_list(
             document,
             node,
-            "List Number",
+            _list_style("List Bullet", list_depth),
             numbers,
-            _new_numbering(document, "List Number", start),
+            depth=list_depth,
+        )
+    elif kind == "orderedList":
+        start = int(node.get("attrs", {}).get("start", 1))
+        style = _list_style("List Number", list_depth)
+        _add_list(
+            document,
+            node,
+            style,
+            numbers,
+            _new_numbering(document, style, start),
+            list_depth,
         )
 
 

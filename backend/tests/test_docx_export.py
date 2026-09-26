@@ -109,6 +109,48 @@ def numbering_start(data: bytes, item_text: str) -> int:
     return int(start.get(w("val"))) if start is not None else 1
 
 
+def numbering_layout(data: bytes, item_text: str) -> tuple[str, int, int]:
+    with ZipFile(BytesIO(data)) as package:
+        document = parse_xml(package.read("word/document.xml"))
+        numbering = parse_xml(package.read("word/numbering.xml"))
+        styles = parse_xml(package.read("word/styles.xml"))
+    item = paragraph(document, item_text)
+    number_id = item.find("w:pPr/w:numPr/w:numId", NS)
+    if number_id is None:
+        style_id = item.find("w:pPr/w:pStyle", NS).get(w("val"))
+        number_id = styles.find(
+            f".//w:style[@w:styleId='{style_id}']/w:pPr/w:numPr/w:numId", NS
+        )
+    instance = next(
+        entry
+        for entry in numbering.findall("w:num", NS)
+        if entry.get(w("numId")) == number_id.get(w("val"))
+    )
+    abstract_id = instance.find("w:abstractNumId", NS).get(w("val"))
+    abstract = next(
+        entry
+        for entry in numbering.findall("w:abstractNum", NS)
+        if entry.get(w("abstractNumId")) == abstract_id
+    )
+    indent = abstract.find("w:lvl/w:pPr/w:ind", NS)
+    return (
+        number_id.get(w("val")),
+        int(indent.get(w("left"))),
+        int(indent.get(w("hanging"))),
+    )
+
+
+def direct_list_format(data: bytes, item_text: str) -> tuple[str | None, ...]:
+    item = paragraph(document_xml(data), item_text)
+    indent = item.find("w:pPr/w:ind", NS)
+    tab = item.find("w:pPr/w:tabs/w:tab", NS)
+    return (
+        indent.get(w("left")) if indent is not None else None,
+        indent.get(w("hanging")) if indent is not None else None,
+        tab.get(w("pos")) if tab is not None else None,
+    )
+
+
 def paragraph_text(paragraph: Element) -> str:
     return "".join(node.text or "" for node in paragraph.iter(w("t")))
 
@@ -315,6 +357,195 @@ def test_docx_export_preserves_ordered_list_start(client: TestClient) -> None:
     assert numbering_start(data, "第五题") == 5
 
 
+def test_docx_export_aligns_manual_lines_split_by_hard_break(
+    client: TestClient,
+) -> None:
+    first = "（1）如何理解习近平文化思想中'两个结合'的实践路径？"
+    second = "（2）校园文化活动中如何体现以人民为中心的发展思想？"
+    ai_first, ai_second = "（1）AI 写入第一项", "（2）AI 写入第二项"
+    document = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": first},
+                    {"type": "hardBreak"},
+                    {"type": "text", "text": second},
+                ],
+            },
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": ai_first + "\n" + ai_second}],
+            },
+        ],
+    }
+    auth = login(client)
+    created = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "软换行版式测试", "document": document},
+    )
+    case = created.json()
+    material = client.post(
+        f"/api/cases/{case['id']}/materials",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"materialId": "m-kcsz", "revision": case["revision"]},
+    ).json()
+    response = client.get(f"/api/cases/{case['id']}/export.docx")
+    root = document_xml(response.content)
+
+    assert created.status_code == 200
+    assert response.status_code == 200
+    exported = paragraph(root, first + second)
+    assert len(exported.findall(".//w:br", NS)) == 1
+    indent = exported.find("w:pPr/w:ind", NS)
+    assert indent is not None
+    assert indent.get(w("left")) == "420"
+    assert indent.get(w("firstLine")) is None
+    ai_exported = paragraph(root, ai_first + ai_second)
+    assert len(ai_exported.findall(".//w:br", NS)) == 1
+    ai_indent = ai_exported.find("w:pPr/w:ind", NS)
+    assert ai_indent is not None
+    assert ai_indent.get(w("left")) == "420"
+    assert ai_indent.get(w("firstLine")) is None
+    assert any(
+        paragraph_text(item).startswith(f"〔1〕 {material['title']}．")
+        for item in root.iter(w("p"))
+    )
+
+
+def test_docx_export_indents_nested_ordered_and_bullet_lists(
+    client: TestClient,
+) -> None:
+    document = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "orderedList",
+                "content": [
+                    {
+                        "type": "listItem",
+                        "content": [
+                            _paragraph_node("顶层编号一"),
+                            {
+                                "type": "orderedList",
+                                "content": [
+                                    _item("嵌套编号一"),
+                                    {
+                                        "type": "listItem",
+                                        "content": [
+                                            _paragraph_node("嵌套编号二"),
+                                            {
+                                                "type": "orderedList",
+                                                "content": [
+                                                    {
+                                                        "type": "listItem",
+                                                        "content": [
+                                                            _paragraph_node("三级编号"),
+                                                            {
+                                                                "type": "orderedList",
+                                                                "content": [
+                                                                    _item("四级编号")
+                                                                ],
+                                                            },
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    _item("顶层编号二"),
+                ],
+            },
+            {
+                "type": "bulletList",
+                "content": [
+                    {
+                        "type": "listItem",
+                        "content": [
+                            _paragraph_node("顶层项目一"),
+                            {
+                                "type": "bulletList",
+                                "content": [
+                                    _item("嵌套项目一"),
+                                    {
+                                        "type": "listItem",
+                                        "content": [
+                                            _paragraph_node("嵌套项目二"),
+                                            {
+                                                "type": "bulletList",
+                                                "content": [
+                                                    {
+                                                        "type": "listItem",
+                                                        "content": [
+                                                            _paragraph_node("三级项目"),
+                                                            {
+                                                                "type": "bulletList",
+                                                                "content": [
+                                                                    _item("四级项目")
+                                                                ],
+                                                            },
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    _item("顶层项目二"),
+                ],
+            },
+        ],
+    }
+    data = export_document(client, "嵌套列表测试", document)
+    root = document_xml(data)
+
+    assert paragraph_style(paragraph(root, "顶层编号一")) == "ListNumber"
+    assert paragraph_style(paragraph(root, "顶层编号二")) == "ListNumber"
+    assert paragraph_style(paragraph(root, "嵌套编号一")) == "ListNumber2"
+    assert paragraph_style(paragraph(root, "嵌套编号二")) == "ListNumber2"
+    assert paragraph_style(paragraph(root, "三级编号")) == "ListNumber3"
+    assert paragraph_style(paragraph(root, "四级编号")) == "ListNumber3"
+    assert paragraph_style(paragraph(root, "顶层项目一")) == "ListBullet"
+    assert paragraph_style(paragraph(root, "顶层项目二")) == "ListBullet"
+    assert paragraph_style(paragraph(root, "嵌套项目一")) == "ListBullet2"
+    assert paragraph_style(paragraph(root, "嵌套项目二")) == "ListBullet2"
+    assert paragraph_style(paragraph(root, "三级项目")) == "ListBullet3"
+    assert paragraph_style(paragraph(root, "四级项目")) == "ListBullet3"
+
+    ordered_one = numbering_layout(data, "顶层编号一")
+    ordered_two = numbering_layout(data, "顶层编号二")
+    nested_ordered = numbering_layout(data, "嵌套编号一")
+    nested_ordered_two = numbering_layout(data, "嵌套编号二")
+    third_ordered = numbering_layout(data, "三级编号")
+    bullet = numbering_layout(data, "顶层项目一")
+    nested_bullet = numbering_layout(data, "嵌套项目一")
+    third_bullet = numbering_layout(data, "三级项目")
+    assert ordered_one[0] == ordered_two[0]
+    assert ordered_one[0] != nested_ordered[0]
+    assert nested_ordered[0] == nested_ordered_two[0]
+    assert ordered_one[1:] == (360, 360)
+    assert nested_ordered[1:] == (720, 360)
+    assert third_ordered[1:] == (1080, 360)
+    assert direct_list_format(data, "三级编号") == (None, None, None)
+    assert direct_list_format(data, "四级编号") == ("1440", "360", "1440")
+    assert bullet[1:] == (360, 360)
+    assert nested_bullet[1:] == (720, 360)
+    assert third_bullet[1:] == (1080, 360)
+    assert direct_list_format(data, "三级项目") == (None, None, None)
+    assert direct_list_format(data, "四级项目") == ("1440", "360", "1440")
+    assert paragraph(root, "顶层编号一").find("w:pPr/w:ind", NS) is None
+    assert paragraph(root, "嵌套编号一").find("w:pPr/w:ind", NS) is None
+
+
 def test_docx_export_preserves_blockquote_paragraphs(client: TestClient) -> None:
     document = {
         "type": "doc",
@@ -335,7 +566,10 @@ def test_docx_export_preserves_blockquote_paragraphs(client: TestClient) -> None
 
 
 def citation(source_type: str, source_id: str) -> dict:
-    return {"type": "citation", "attrs": {"sourceType": source_type, "sourceId": source_id}}
+    return {
+        "type": "citation",
+        "attrs": {"sourceType": source_type, "sourceId": source_id},
+    }
 
 
 def cited_document() -> dict:
@@ -351,9 +585,30 @@ def cited_document() -> dict:
 
 def cited_entries() -> list[dict]:
     return [
-        {"sourceType": "material", "id": "image-1", "number": 1, "title": "图片资料", "source": "图像库", "url": "https://case.test/api/materials/image-1/content"},
-        {"sourceType": "case", "id": "source-1", "number": 2, "title": "引用案例", "source": "上海大学", "version": "v2", "url": CASE_VERSION_URL},
-        {"sourceType": "attachment", "id": "unused-1", "number": 3, "title": "未用附件", "url": "https://case.test/api/cases/c-1/attachments/unused-1/content?versionId=version-2"},
+        {
+            "sourceType": "material",
+            "id": "image-1",
+            "number": 1,
+            "title": "图片资料",
+            "source": "图像库",
+            "url": "https://case.test/api/materials/image-1/content",
+        },
+        {
+            "sourceType": "case",
+            "id": "source-1",
+            "number": 2,
+            "title": "引用案例",
+            "source": "上海大学",
+            "version": "v2",
+            "url": CASE_VERSION_URL,
+        },
+        {
+            "sourceType": "attachment",
+            "id": "unused-1",
+            "number": 3,
+            "title": "未用附件",
+            "url": "https://case.test/api/cases/c-1/attachments/unused-1/content?versionId=version-2",
+        },
     ]
 
 
@@ -362,7 +617,9 @@ def docx_xml_and_links(data: bytes) -> tuple[Element, set[str]]:
         root = parse_xml(package.read("word/document.xml"))
         relationships = parse_xml(package.read("word/_rels/document.xml.rels"))
         return root, {
-            item.get("Target") for item in relationships if item.get("TargetMode") == "External"
+            item.get("Target")
+            for item in relationships
+            if item.get("TargetMode") == "External"
         }
 
 
