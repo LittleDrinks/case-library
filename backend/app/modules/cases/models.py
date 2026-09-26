@@ -58,6 +58,14 @@ class ManualVersionCreate(BaseModel):
     revision: int = Field(ge=1)
 
 
+ReviewReason = Literal[
+    "内容需要补充或修改",
+    "事实、数据或来源需要核实",
+    "格式或案例信息需要调整",
+    "其他",
+]
+
+
 class LifecycleCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,7 +75,6 @@ class LifecycleCommand(BaseModel):
         "start",
         "approve",
         "reject",
-        "supplement",
         "hide",
         "restore",
         "reopen",
@@ -76,16 +83,15 @@ class LifecycleCommand(BaseModel):
     revision: int = Field(ge=1)
     submittedVersionId: str | None = None
     targetId: str | None = None
-    # strip_whitespace 先于 min_length 执行：纯空白退回原因直接 422，合法原因去空格后持久化。
-    reasonType: Annotated[str | None, StringConstraints(strip_whitespace=True)] = Field(
-        default=None, min_length=1, max_length=80
-    )
-    summary: Annotated[str | None, StringConstraints(strip_whitespace=True)] = Field(
+    reasonTypes: list[ReviewReason] | None = Field(default=None, min_length=1, max_length=4)
+    message: Annotated[str | None, StringConstraints(strip_whitespace=True)] = Field(
         default=None, max_length=4000
     )
 
     @model_validator(mode="after")
     def require_review_reason(self) -> LifecycleCommand:
-        if self.command in {"reject", "supplement"} and not self.reasonType:
-            raise ValueError("退回或要求补充必须提供 reasonType")
+        if self.command == "reject" and not self.reasonTypes:
+            raise ValueError("退回修改至少选择一个原因")
+        if self.command == "reject" and len(self.reasonTypes) != len(set(self.reasonTypes)):
+            raise ValueError("退回原因不能重复")
         return self

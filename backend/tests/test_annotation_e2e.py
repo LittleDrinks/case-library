@@ -99,6 +99,7 @@ def annotate_and_reject(admin, csrf: str, submitted: dict) -> dict:
     case = transition(admin, csrf, submitted["case"], "start")["case"]
     annotation = _create_annotation(admin, csrf, case)
     returned = _reject_case(admin, csrf, case)
+    assert returned["event"]["reasonTypes"] == ["内容需要补充或修改"]
     assert returned["event"]["annotationIds"] == [annotation["id"]]
     return annotation
 
@@ -117,7 +118,7 @@ def _reject_case(admin, csrf: str, case: dict) -> dict:
         case,
         "reject",
         submittedVersionId=case["submittedVersionId"],
-        reasonType="教学目标不清晰",
+        reasonTypes=["内容需要补充或修改"],
     )
 
 
