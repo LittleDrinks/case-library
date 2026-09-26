@@ -152,8 +152,7 @@ def _new_numbering(document: DocxDocument, style: str, start: int) -> int:
     numbering = document.part.numbering_part.element
     abstract_num = numbering.num_having_numId(style_num).abstractNumId.val
     instance = numbering.add_num(abstract_num)
-    if start != 1:
-        instance.add_lvlOverride(ilvl=0).add_startOverride(val=start)
+    instance.add_lvlOverride(ilvl=0).add_startOverride(val=start)
     return instance.numId
 
 

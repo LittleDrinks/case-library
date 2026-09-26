@@ -37,6 +37,18 @@ def login(client: TestClient) -> dict:
     return response.json()
 
 
+def transition_case(
+    client: TestClient, case: dict, auth: dict, command: str, **extra
+) -> dict:
+    response = client.post(
+        f"/api/cases/{case['id']}/lifecycle",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"command": command, "revision": case["revision"], **extra},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def _item(text: str) -> dict:
     return {
         "type": "listItem",
@@ -66,6 +78,26 @@ def _paragraph_node(text: str) -> dict:
         "type": "paragraph",
         "content": [{"type": "text", "text": text}],
     }
+
+
+def _ordered_list_at_depth(label: str, depth: int, start: int) -> dict:
+    result = {
+        "type": "orderedList",
+        "attrs": {"start": start},
+        "content": [_item(label), _item(f"{label}-SECOND")],
+    }
+    for level in range(depth):
+        result = {
+            "type": "orderedList",
+            "attrs": {"start": 1},
+            "content": [
+                {
+                    "type": "listItem",
+                    "content": [_paragraph_node(f"{label}-PARENT-{level + 1}"), result],
+                }
+            ],
+        }
+    return result
 
 
 RICH_DOCUMENT = {
@@ -111,7 +143,7 @@ def document_xml(data: bytes) -> Element:
         return parse_xml(package.read("word/document.xml"))
 
 
-def numbering_start(data: bytes, item_text: str) -> int:
+def numbering_start_override(data: bytes, item_text: str) -> int | None:
     with ZipFile(BytesIO(data)) as package:
         document = parse_xml(package.read("word/document.xml"))
         numbering = parse_xml(package.read("word/numbering.xml"))
@@ -123,7 +155,12 @@ def numbering_start(data: bytes, item_text: str) -> int:
         if item.get(w("numId")) == num_id.get(w("val"))
     )
     start = instance.find("w:lvlOverride/w:startOverride", NS)
-    return int(start.get(w("val"))) if start is not None else 1
+    return int(start.get(w("val"))) if start is not None else None
+
+
+def numbering_start(data: bytes, item_text: str) -> int:
+    start = numbering_start_override(data, item_text)
+    return 1 if start is None else start
 
 
 def numbering_layout(data: bytes, item_text: str) -> tuple[str, int, int]:
@@ -372,6 +409,69 @@ def test_docx_export_preserves_ordered_list_start(client: TestClient) -> None:
     data = export_document(client, "编号起始值测试", document)
 
     assert numbering_start(data, "第五题") == 5
+
+
+def test_public_docx_export_restarts_deep_ordered_lists(client: TestClient) -> None:
+    user = login(client)
+    created = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": user["csrfToken"]},
+        json={
+            "title": "深层列表重启测试",
+            "document": {
+                "type": "doc",
+                "content": [
+                    _ordered_list_at_depth("ORDER-L1", 0, 3),
+                    _ordered_list_at_depth("ORDER-L2", 1, 6),
+                    _ordered_list_at_depth("ORDER-L3", 2, 1),
+                    _ordered_list_at_depth("ORDER-L4", 3, 1),
+                    _ordered_list_at_depth("ORDER-L5", 4, 1),
+                    _ordered_list_at_depth("ORDER-L5-START5", 4, 5),
+                ],
+            },
+        },
+    )
+    assert created.status_code == 200
+    case = created.json()
+    path = f"/api/cases/{case['id']}"
+    current_export = client.get(path + "/export.docx")
+    submitted = transition_case(client, case, user, "submit")
+    admin = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin123"}
+    ).json()
+    started = transition_case(client, submitted["case"], admin, "start")
+    transition_case(
+        client,
+        started["case"],
+        admin,
+        "approve",
+        submittedVersionId=submitted["version"]["id"],
+    )
+    client.cookies.clear()
+    public_export = client.get(path + "/public/export.docx")
+    assert current_export.status_code == public_export.status_code == 200
+
+    roots = ["ORDER-L3", "ORDER-L4", "ORDER-L5"]
+    lists = [
+        ("ORDER-L1", 3),
+        ("ORDER-L2", 6),
+        ("ORDER-L3", 1),
+        ("ORDER-L4", 1),
+        ("ORDER-L5", 1),
+        ("ORDER-L5-START5", 5),
+    ]
+    for response in (current_export, public_export):
+        data = response.content
+        assert [numbering_start_override(data, label) for label in roots] == [1, 1, 1]
+        assert [numbering_start_override(data, label) for label, _ in lists] == [
+            start for _, start in lists
+        ]
+        assert all(
+            numbering_layout(data, label)[0]
+            == numbering_layout(data, f"{label}-SECOND")[0]
+            for label, _ in lists
+        )
+        assert len({numbering_layout(data, label)[0] for label in roots}) == 3
 
 
 def test_docx_export_aligns_manual_lines_split_by_hard_break(
