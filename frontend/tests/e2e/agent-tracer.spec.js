@@ -245,8 +245,19 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
 });
 
 async function sendAnnotationRound(page, text, annotationId) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  const card = page.locator(".comment-card");
+  const rail = page.locator(".assistant-rail");
+  const commentsTab = page.getByRole("button", { name: "批注", exact: true });
+  const commentsPanel = rail.locator(".comment-panel");
+  if (!await commentsPanel.isVisible()) {
+    if ((await rail.getAttribute("class")).split(/\s+/).includes("collapsed")) {
+      await rail.getByRole("button", { name: "展开侧栏", exact: true }).click();
+    }
+    if (await commentsTab.getAttribute("aria-pressed") !== "true") {
+      await commentsTab.click();
+    }
+  }
+  await expect(commentsPanel).toBeVisible();
+  const card = commentsPanel.locator(".comment-card");
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "让 AI 修订" }).click();
   await selectPublishedSkill(page);
