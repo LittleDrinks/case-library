@@ -130,12 +130,22 @@ it("places collapse first and toggles the active panel like the confirmed workbe
 });
 
 it("opens the selected panel on the first click while the drawer is closed", async () => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
   const wrapper = render({ open: false, active: "ai" });
 
   await wrapper.get('[aria-label="AI"]').trigger("click");
 
   expect(wrapper.emitted("select")).toEqual([["ai"]]);
   expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
+});
+
+it("collapses the current desktop panel on its first click", async () => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
+  const wrapper = render({ open: false, active: "ai" });
+
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+
+  expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
 });
 
 it("keeps the AI draft while switching through integrated rail panels", async () => {
