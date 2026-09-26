@@ -21,7 +21,6 @@ const authority = ref("");
 const materialType = ref("");
 const externalOnly = ref(false);
 const error = ref("");
-const notice = ref("");
 const busy = ref(false);
 const selected = ref([]);
 const mounted = ref([]);
@@ -170,11 +169,10 @@ async function mountSelected() {
   if (!editable.value || busy.value || !ids.length) return;
   busy.value = true;
   error.value = "";
-  notice.value = "";
   try {
     for (const id of ids) await mountOne(id);
     mounted.value = await api.listCaseMaterials(caseId.value);
-    notice.value = `已加入 ${ids.length} 条素材`;
+    await router.push({ name: "workbench", params: { id: caseId.value } });
     selected.value = [];
   } catch (caught) {
     error.value = caught.message || "素材加入失败";
@@ -251,8 +249,7 @@ onBeforeUnmount(invalidateSearch);
             </button>
           </div>
           <p v-if="error" class="error-state" role="alert">{{ error }}</p>
-          <p v-else-if="notice" class="material-notice" role="status">{{ notice }}</p>
-          <div v-else class="material-table-wrap">
+          <div class="material-table-wrap">
             <CatalogPagination v-if="total" :page="page" :total="total" :next-cursor="nextCursor" :previous-cursor="previousCursor" @change="selectPage" />
             <table><thead><tr><th v-if="caseId" class="selection-column">选择</th><th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th class="download-column">下载</th></tr></thead><tbody><tr v-for="item in materials" :key="item.id"><td v-if="caseId" class="selection-column" data-label="选择"><span v-if="mountedIds.has(item.id)" class="mounted-label">已加入</span><input v-else v-model="selected" type="checkbox" :value="item.id" :aria-label="`选择${item.title}`" :disabled="!item.contentAvailable || !editable || busy" /></td><td data-label="素材"><b><RouterLink :to="materialDetailLocation(item)" @click="rememberReturn">{{ item.title }}</RouterLink></b><small>{{ item.summary }}</small></td><td data-label="来源">{{ item.source }}</td><td data-label="类型">{{ item.materialType }}</td><td data-label="权威性">{{ { original: '原始权威来源', secondary: '可靠二手来源', pending: '待核验线索' }[item.authority] }}</td><td class="download-column" data-label="下载"><MaterialDownloadAction :material="item" /></td></tr></tbody></table>
             <p v-if="!materials.length" class="search-empty">当前筛选下没有结果</p>
