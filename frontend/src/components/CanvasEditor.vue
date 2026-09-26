@@ -1,6 +1,8 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { OrderedList as TiptapOrderedList } from "@tiptap/extension-ordered-list";
+import Link from "@tiptap/extension-link";
+import SelectionToolbar from "./SelectionToolbar.vue";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -28,7 +30,7 @@ const props = defineProps({
   sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
-  "change", "selection", "writing-context", "annotate", "annotation-click",
+  "change", "selection", "writing-context", "annotate", "annotation-click", "ask-ai",
 ]);
 const selection = ref(null);
 const cursorPlaced = ref(false);
@@ -135,15 +137,15 @@ function validSelection(activeEditor) {
 }
 
 function selectionIsCapturable(activeEditor, context) {
-  return props.annotatable && validSelection(activeEditor) && context.quote.trim()
+  return (props.editable || props.annotatable) && !activeEditor.state.selection.empty && context.quote.trim()
     && !selectionNeedsSync(activeEditor);
 }
 
 function validDomSelection(activeEditor, range) {
-  if (!range || !props.annotatable || range.from >= range.to) return false;
+  if (!range || !(props.editable || props.annotatable) || range.from >= range.to) return false;
   const $from = activeEditor.state.doc.resolve(range.from);
   const $to = activeEditor.state.doc.resolve(range.to);
-  return $from.sameParent($to) && $from.parent.isTextblock
+  return $from.parent.isTextblock && $to.parent.isTextblock
     && quoteText(activeEditor.state.doc, range.from, range.to).trim();
 }
 
@@ -657,7 +659,7 @@ const editor = useEditor({
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), OrderedList, CitationMark, annotationExtension, revisionExtension,
+  }), Link.extend({ addAttributes() { return { href: { default: null } }; } }).configure({ openOnClick: false, autolink: false, linkOnPaste: false }), OrderedList, CitationMark, annotationExtension, revisionExtension,
   createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
@@ -754,14 +756,6 @@ defineExpose({
   <Teleport to="#workbench-format-toolbar">
     <EditorToolbar v-if="editable" :editor="editor" />
   </Teleport>
-  <button
-    v-if="selection"
-    class="annotation-trigger"
-    type="button"
-    :style="triggerPosition"
-    aria-label="添加选区批注"
-    @mousedown.prevent
-    @click="emit('annotate')"
-  >+ 批注</button>
+  <SelectionToolbar v-if="editable && editor" :editor="editor" @ask-ai="emit('ask-ai')" />
   <EditorContent :editor="editor" />
 </template>

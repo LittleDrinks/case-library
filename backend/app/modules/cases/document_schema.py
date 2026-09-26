@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 from typing import Any
 
 MAX_DOCUMENT_BYTES = 1024 * 1024
@@ -10,7 +11,7 @@ BLOCK_NODES = {"paragraph", "heading", "bulletList", "orderedList", "blockquote"
 INLINE_NODES = {"text", "hardBreak"}
 LIST_NODES = {"bulletList", "orderedList"}
 ALLOWED_NODES = BLOCK_NODES | INLINE_NODES | {"doc", "listItem"}
-ALLOWED_MARKS = {"bold", "italic", "strike", "citation"}
+ALLOWED_MARKS = {"bold", "italic", "strike", "citation", "link"}
 CITATION_SOURCE_TYPES = {"case", "material", "attachment"}
 MAX_SOURCE_ID = 120
 REQUIRED_CONTENT = LIST_NODES | {"blockquote", "listItem"}
@@ -92,9 +93,20 @@ def _validate_mark(mark: Any) -> str:
         raise ValueError(f"未知 mark：{mark_type}")
     if mark_type == "citation":
         _validate_citation_attrs(mark)
+    elif mark_type == "link":
+        _validate_link_attrs(mark)
     elif set(mark) != {"type"}:
         raise ValueError("mark 只能包含 type")
     return mark_type
+
+
+def _validate_link_attrs(mark: dict) -> None:
+    attrs = mark.get("attrs")
+    if set(mark) != {"type", "attrs"} or not isinstance(attrs, dict) or set(attrs) != {"href"}:
+        raise ValueError("link attrs 只能包含 href")
+    href = attrs["href"]
+    if not isinstance(href, str) or urlsplit(href).scheme not in {"http", "https"} or not urlsplit(href).netloc:
+        raise ValueError("链接必须是有效的 HTTP 或 HTTPS 地址")
 
 
 def _validate_citation_attrs(mark: dict) -> None:

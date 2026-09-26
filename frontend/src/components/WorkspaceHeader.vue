@@ -1,7 +1,7 @@
 <script setup>
-import { ClipboardCheck, Download, Eye, History, Paperclip, Sparkles } from "@lucide/vue";
+import { ArrowLeft, Download, Eye } from "@lucide/vue";
 
-const props = defineProps({
+defineProps({
   title: { type: String, required: true },
   status: { type: String, required: true },
   saveState: { type: String, required: true },
@@ -27,18 +27,18 @@ const saveLabels = {
 
 <template>
   <header class="workspace-header" :class="{ 'review-header': reviewMode }">
-    <div class="workspace-crumb" :data-mobile-label="readOnly ? '案例阅读' : reviewMode ? '案例审核' : '案例编辑'">
-      <span>{{ readOnly ? "案例库" : reviewMode ? "审核管理" : "我的案例" }}</span><i>/</i><b>{{ title }}</b>
+    <div class="workbench-brand">
+      <RouterLink to="/my-cases" class="workbench-back" title="返回我的案例" aria-label="返回我的案例"><ArrowLeft :size="16" /></RouterLink>
+      <RouterLink to="/" class="workbench-brand-link">
+        <img src="/shanghai-university-horizontal-logo.png" alt="上海大学" />
+        <span>思政教学案例库 · {{ readOnly ? "阅读" : reviewMode ? "审核" : "工作台" }}</span>
+      </RouterLink>
     </div>
     <div class="workspace-state">
       <span class="case-status">{{ status }}</span>
       <span v-if="!readOnly" class="save-state" :data-state="saveState">{{ saveLabels[saveState] }}</span>
     </div>
     <div class="workspace-actions">
-      <button type="button" title="AI" aria-label="AI" @click="emit('tool', 'ai')"><Sparkles :size="17" /></button>
-      <button type="button" title="版本历史" aria-label="版本历史" :disabled="!historyAvailable" @click="emit('tool', 'history')"><History :size="17" /></button>
-      <button type="button" title="附件" aria-label="附件" @click="emit('tool', 'files')"><Paperclip :size="17" /></button>
-      <button type="button" title="提交前自检" aria-label="提交前自检" disabled><ClipboardCheck :size="17" /></button>
       <button type="button" title="导出 DOCX" aria-label="导出 DOCX" @click="emit('export')"><Download :size="17" /></button>
       <RouterLink
         v-if="publicCaseId"

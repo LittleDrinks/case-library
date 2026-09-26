@@ -4,13 +4,11 @@ import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, PanelLeft, Refresh
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
-import AnnotationFloat from "../components/AnnotationFloat.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
 import OverwriteConfirmDialog from "../components/OverwriteConfirmDialog.vue";
 import ReviewDecisionDialog from "../components/ReviewDecisionDialog.vue";
-import SiteHeader from "../components/SiteHeader.vue";
 import VersionTabs from "../components/VersionTabs.vue";
 import WorkspaceHeader from "../components/WorkspaceHeader.vue";
 import { api } from "../api.js";
@@ -826,7 +824,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="workbench-page">
-    <SiteHeader />
     <div v-if="loading" class="page-state"><LoaderCircle class="spin" :size="22" /><span>正在加载案例</span></div>
     <div v-else-if="loadError" class="page-state error-state"><AlertTriangle :size="22" /><span>{{ loadError }}</span><button type="button" @click="loadCase"><RefreshCw :size="15" />重试</button></div>
     <template v-else>
@@ -913,7 +910,7 @@ onBeforeUnmount(() => {
             :source-title="title"
           />
           <VersionTabs
-            v-else-if="versionTabsAvailable"
+            v-else-if="versionTabsAvailable && versionTabItems.length"
             :tabs="versionTabItems"
             :active="activeTabId"
             :disabled="Boolean(headerBusyAction)"
@@ -949,15 +946,13 @@ onBeforeUnmount(() => {
                 :document="document"
                 :revision="revision"
                 :editable="editable"
-                :annotatable="annotatable"
-                :annotations="annotations"
-                :pending-anchor="floatDraft"
+                :annotatable="false"
+                :annotations="[]"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="updateWritingContext"
-                @annotate="openDraftFloat"
-                @annotation-click="openThreadFloat"
+                @ask-ai="selectHeaderTool('ai')"
               />
             </article>
           </template>
@@ -1021,21 +1016,6 @@ onBeforeUnmount(() => {
           @versions-updated="refreshVersionHistory"
           @version-created="handleVersionCreated"
           @version-deleted="closeVersionTab"
-        />
-        <AnnotationFloat
-          v-if="(floatDraft || floatThread) && !readerMode && !historicalVersion"
-          :case-record="caseRecord"
-          :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
-          :draft="floatDraft"
-          :thread="floatThread"
-          :before-save="prepareFloatSave"
-          @close="closeAnnotationFloat"
-          @saved="floatSaved"
-          @resolved="floatResolved"
-          @case-revised="floatRevised"
-          @ask-ai="askFloatAi"
-          @replied="floatReplied"
-          @mutation-state="contentMutationBusy = $event"
         />
       </div>
     </template>

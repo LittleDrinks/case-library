@@ -41,6 +41,7 @@ _SCHEMA = Schema({
         },
     },
     "marks": {"bold": {}, "italic": {}, "strike": {},
+              "link": {"attrs": {"href": {"default": None}}},
               "citation": {
                   "attrs": {
                       "sourceType": {"validate": "string"},
