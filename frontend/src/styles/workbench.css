@@ -638,9 +638,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 }
 
 @media (max-width: 1440px) {
-  .canvas-workspace, .canvas-workspace.outline-collapsed { grid-template-columns: 180px minmax(0, 1fr) 44px; }
-  .canvas-workspace.outline-collapsed { grid-template-columns: 52px minmax(0, 1fr) 44px; }
-  .assistant-rail { position: absolute; top: 28px; right: 0; bottom: 20px; z-index: 30; width: 444px; pointer-events: none; }
+  .assistant-rail { position: absolute; top: 28px; right: 0; bottom: 20px; z-index: 30; width: 444px; height: auto; pointer-events: none; }
   .assistant-rail > * { pointer-events: auto; }
   .assistant-rail.collapsed { width: 44px; }
   .document-paper { padding: 60px 35px 80px; }
@@ -700,6 +698,14 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 @media (max-width: 800px) {
   .canvas-workspace, .canvas-workspace.outline-collapsed { grid-template-columns: 120px minmax(0, 1fr) 44px; }
   .canvas-workspace.outline-collapsed { grid-template-columns: 40px minmax(0, 1fr) 44px; }
+}
+
+@media (min-width: 641px) and (max-width: 800px) {
+  .canvas-workspace:has(.assistant-rail.open) { grid-template-columns: 120px minmax(140px, 1fr) min(444px, calc(100vw - 260px)); }
+  .canvas-workspace.outline-collapsed:has(.assistant-rail.open) { grid-template-columns: 40px minmax(140px, 1fr) min(444px, calc(100vw - 180px)); }
+  .assistant-rail.open { width: min(444px, calc(100vw - 260px)); }
+  .canvas-workspace.outline-collapsed .assistant-rail.open { width: min(444px, calc(100vw - 180px)); }
+  .case-tag-popover { z-index: 31; }
 }
 
 /* 批注浮窗：右侧轻量卡片，不覆盖正文 */

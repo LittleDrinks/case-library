@@ -159,7 +159,7 @@ def _accept(client: httpx.Client, csrf: str, case_id: str, artifact_id: str,
 
 def _assert_atomic_decision(database, case_id: str, artifact: dict, version_id: str) -> None:
     current = database.cases.find_one({"id": case_id}, {"_id": 0})
-    assert current["revision"] == 1
+    assert current["revision"] == artifact["baseRevision"] + 1
     assert current["document"] == _document(*PARAGRAPHS)
     version = database.case_versions.find_one(
         {"id": version_id, "caseId": case_id}, {"_id": 0}

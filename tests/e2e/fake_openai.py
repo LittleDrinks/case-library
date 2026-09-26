@@ -88,7 +88,10 @@ def _blank_draft_call(payload: dict) -> bool:
 def _revision_call(payload: dict) -> bool:
     text = _current_user_text(payload)
     return (
-        any(phrase in text for phrase in ("写入正文", "直接写入", "直接修改"))
+        any(
+            phrase in text
+            for phrase in ("写入正文", "直接写入", "直接修改", "提出修改建议")
+        )
         and "propose_revision" in _available_tools(payload)
         and _pending_tool_round(payload)
     )

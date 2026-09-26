@@ -10,6 +10,8 @@ const DEMO = {
   ink: "rgb(38, 34, 31)",
   line: "rgb(233, 227, 218)",
 };
+const DESKTOP_PAPER = { borderRadius: "2px", padding: "56px 48px 72px" };
+const MOBILE_PAPER = { borderRadius: "2px", padding: "30px 24px 72px" };
 
 async function openHome(page, width, height) {
   await page.setViewportSize({ width, height });
@@ -95,17 +97,16 @@ async function expectDesktopCaseDetail(page) {
   await expectDesktopHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
-  await expectStyles(page.locator(".document-paper"), {
-    borderRadius: "6px", padding: "65px 55px 80px",
-  });
+  await expectStyles(page.locator(".document-paper"), DESKTOP_PAPER);
 }
 
 async function expectMobileCaseDetail(page) {
   await openCaseDetail(page);
   await expectMobileHeader(page);
-  await expect(page.locator(".outline-wrap")).toBeHidden();
-  await expectStyles(page.locator(".canvas-workspace"), { display: "block" });
-  await expectStyles(page.locator(".assistant-rail"), { position: "fixed" });
+  await expect(page.locator(".outline-wrap")).toBeVisible();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
+  await expectStyles(page.locator(".assistant-rail"), { position: "absolute" });
+  await expectStyles(page.locator(".document-paper"), MOBILE_PAPER);
   await expectNoOverflow(page, 390);
 }
 
@@ -120,17 +121,16 @@ async function expectDesktopWorkbench(page) {
   await expectDesktopHeader(page);
   await expect(page.locator(".outline-wrap")).toBeVisible();
   await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
-  await expectStyles(page.locator(".document-paper"), {
-    borderRadius: "6px", padding: "65px 55px 80px",
-  });
+  await expectStyles(page.locator(".document-paper"), DESKTOP_PAPER);
 }
 
 async function expectMobileWorkbench(page) {
   await openWorkbench(page);
   await expectMobileHeader(page);
-  await expect(page.locator(".outline-wrap")).toBeHidden();
-  await expectStyles(page.locator(".canvas-workspace"), { display: "block" });
-  await expectStyles(page.locator(".assistant-rail"), { position: "fixed" });
+  await expect(page.locator(".outline-wrap")).toBeVisible();
+  await expectStyles(page.locator(".canvas-workspace"), { display: "grid" });
+  await expectStyles(page.locator(".assistant-rail"), { position: "absolute" });
+  await expectStyles(page.locator(".document-paper"), MOBILE_PAPER);
   await expectNoOverflow(page, 390);
 }
 

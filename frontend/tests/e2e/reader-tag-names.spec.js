@@ -118,6 +118,9 @@ async function reopenAndSaveTags(page, caseId, marker) {
   await page.goto(`/#/workbench/${caseId}`);
   await page.getByRole("button", { name: "另开新稿" }).click();
   await expect(page.locator("textarea.document-title")).not.toHaveAttribute("readonly");
+  await page.getByRole("button", { name: "AI", exact: true }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(645);
   const saveDone = page.waitForResponse(
     (response) => response.url().endsWith(`/api/cases/${caseId}`) && response.request().method() === "PATCH",
   );
@@ -195,6 +198,7 @@ test("作者另开新稿修改标签保存后，公开页保持已批准版本�
   await signIn(page, AUTHOR);
   const marker = `作者编辑标签-${Date.now()}`;
   const created = await publishWithAdmin(browser, request, marker);
+  await page.setViewportSize({ width: 645, height: 844 });
 
   await openPublicCase(page, created.id, marker);
   await assertRealTagNames(page);

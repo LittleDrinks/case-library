@@ -898,10 +898,14 @@ function annotationThread(overrides = {}) {
   };
 }
 
+const expandAnnotationAiPanel = vi.fn();
 const annotationAiRailStub = {
   name: "AnnotationAiRailStub",
   props: ["writingContext", "promptRequest"],
   emits: ["ask-ai", "clear-writing-context"],
+  setup(_props, { expose }) {
+    expose({ expandPanel: expandAnnotationAiPanel });
+  },
   template: "<div />",
 };
 
@@ -991,6 +995,7 @@ async function openAnnotationThread(wrapper) {
 }
 
 test("真实编辑器重捕获保留批注 AI 关联，切线程清除关联", async () => {
+  expandAnnotationAiPanel.mockClear();
   const annotation = annotationThread();
   api.getCase.mockResolvedValue(caseFixture());
   api.listAnnotations.mockResolvedValue([annotation]);
@@ -998,6 +1003,7 @@ test("真实编辑器重捕获保留批注 AI 关联，切线程清除关联", a
   await flushPromises();
   wrapper.getComponent(annotationAiRailStub).vm.$emit("ask-ai", annotation);
   await flushPromises();
+  expect(expandAnnotationAiPanel).toHaveBeenCalledOnce();
   expect(wrapper.getComponent(annotationAiRailStub).props("writingContext"))
     .toMatchObject({ annotationId: annotation.id, from: annotation.from, to: annotation.to });
   expect(wrapper.getComponent(annotationAiRailStub).props("promptRequest").text).toContain(annotation.content);
