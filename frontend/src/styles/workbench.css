@@ -329,7 +329,7 @@ a.agent-artifact-source:hover { text-decoration: underline; }
 .revision-suggestion-location { margin: 0; color: var(--ink-3); }
 .revision-suggestion-sources { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; color: var(--ink-3); font-size: 11px; }
 .revision-suggestion-sources a { color: var(--brand); text-decoration: none; }
-.revision-suggestion-expired, .revision-suggestion-note { margin: 7px 0 0; color: var(--red); }
+.revision-suggestion-expired { margin: 7px 0 0; color: var(--red); }
 .revision-suggestion-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .revision-suggestion-actions button { display: inline-flex; min-height: 29px; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--line); background: #fff; color: var(--ink-2); font-size: 11px; }
 .revision-suggestion-actions button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }

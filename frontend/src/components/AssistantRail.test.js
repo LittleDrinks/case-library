@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AssistantRail from "./AssistantRail.vue";
 import { api } from "../api.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -33,7 +34,16 @@ function render(overrides = {}) {
 function renderWithRealChat(overrides = {}) {
   return mount(AssistantRail, {
     props: { ...props, ...overrides },
-    global: { provide: { [CONVERSATION_SOURCES_KEY]: createConversationSources() }, stubs: {
+    global: { provide: {
+      [CONVERSATION_SOURCES_KEY]: createConversationSources(),
+      [REVISION_WORKBENCH_KEY]: {
+        flush: () => Promise.resolve(true),
+        preview: () => Promise.resolve(true),
+        clearPreview() {},
+        isCurrent: () => true,
+        apply: () => Promise.resolve(true),
+      },
+    }, stubs: {
       AgentArtifactCard: true, AgentResourceTrace: true, AgentSourcePicker: true, AgentThreadList: true,
       CommentPanel: true, AttachmentPanel: true, PublicSourceList: true, VersionPanel: true, RouterLink: true,
     } },

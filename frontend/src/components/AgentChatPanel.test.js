@@ -153,9 +153,21 @@ async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
 }
 
-function mountPanel(overrides = {}, revisionWorkbench = null) {
-  const provide = { [CONVERSATION_SOURCES_KEY]: conversationStore };
-  if (revisionWorkbench) provide[REVISION_WORKBENCH_KEY] = revisionWorkbench;
+function createRevisionWorkbench() {
+  return {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockResolvedValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+    apply: vi.fn().mockResolvedValue(true),
+  };
+}
+
+function mountPanel(overrides = {}, revisionWorkbench = createRevisionWorkbench()) {
+  const provide = {
+    [CONVERSATION_SOURCES_KEY]: conversationStore,
+    [REVISION_WORKBENCH_KEY]: revisionWorkbench,
+  };
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
     global: {
@@ -915,6 +927,7 @@ it("previews and applies a located suggestion without opening its AI version", a
   await flushPromises();
 
   expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
+  expect(workbench.flush).toHaveBeenCalled();
   expect(workbench.apply).toHaveBeenCalledWith(
     expect.objectContaining({ id: "artifact-9" }), result.steps,
   );
@@ -922,6 +935,24 @@ it("previews and applies a located suggestion without opening its AI version", a
   expect(wrapper.emitted("versions-updated")).toEqual([[]]);
   expect(wrapper.emitted("open-version")).toBeUndefined();
   expect(wrapper.get('[data-testid="agent-undo-revision"]').exists()).toBe(true);
+});
+
+it("does not apply a revision when the workbench cannot flush the current document", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending"));
+  const workbench = createRevisionWorkbench();
+  workbench.flush.mockResolvedValue(false);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(workbench.flush).toHaveBeenCalledTimes(2);
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[role="alert"]').text()).toContain("正文尚未保存");
+  wrapper.unmount();
 });
 
 it("keeps the newest card selected when overlapping preview requests finish out of order", async () => {
