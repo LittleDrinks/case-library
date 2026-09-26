@@ -28,7 +28,9 @@ async function configureProviderChat(page) {
 }
 
 async function openChat(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI", exact: true }).click();
+  if (!await page.getByLabel("向 AI 提问").isVisible()) {
+    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
+  }
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }

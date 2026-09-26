@@ -31,7 +31,7 @@ export default defineConfig({
         "**/agent-source-proof.spec.js", "**/agent-317.spec.js",
       ],
     },
-    { name: "agent-tracer", testMatch: ["**/agent-tracer.spec.js", "**/agent-annotation-rounds.spec.js"] },
+    { name: "agent-tracer", testMatch: ["**/agent-tracer.spec.js"] },
     { name: "sidebar", testMatch: "**/agent-sidebar.spec.js", grepInvert: /真实运行：Thinking/ },
     { name: "sidebar-tracer", testMatch: "**/agent-sidebar.spec.js", grep: /真实运行：Thinking/ },
   ],

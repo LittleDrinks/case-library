@@ -5,8 +5,6 @@ const PROVIDER_BASE_URL = process.env.E2E_PROVIDER_BASE_URL || "http://ai-provid
 const REQUEST_TEXT = "请结合平台资料修订第2段：补充评价依据";
 const TARGET_TEXT = "第二段：教学目标需要更明确的评价依据。";
 const REPLACEMENT_MARK = "修订后的段落：教学目标、课堂任务与评价依据逐项对应";
-const SECOND_REPLACEMENT_MARK = "第二轮修订：教学目标、课堂任务与评价依据逐项对应";
-const M1_ANNOTATION_QUOTE = "的评价依据。";
 
 async function login(page) {
   await page.goto("/#/login");
@@ -82,8 +80,10 @@ async function publishTeachingSkill(playwright) {
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  if (!await page.getByLabel("向 AI 提问").isVisible()) {
+    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
+  }
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 
@@ -120,33 +120,6 @@ async function dragSelectText(page, value) {
   await page.mouse.down();
   await page.mouse.move(points.end.x, points.end.y, { steps: 2 });
   await page.mouse.up();
-}
-
-async function selectAnnotationText(page, value) {
-  await dragSelectText(page, value);
-  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || "")).toBe(value);
-}
-
-async function addAnnotation(page, quote = TARGET_TEXT) {
-  await selectAnnotationText(page, quote);
-  await page.getByRole("button", { name: "添加选区批注" }).click();
-  const float = page.locator(".annotation-float");
-  await float.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
-  await float.getByRole("button", { name: "保存意见", exact: true }).click();
-  await expect(float).toContainText("请依据资料收紧这一段表述。");
-  await page.getByRole("dialog", { name: "批注浮窗" })
-    .getByRole("button", { name: "关闭批注浮窗" }).click();
-  const commentsTab = page.getByRole("button", { name: "批注", exact: true });
-  await expect(commentsTab).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".comment-card")).toHaveCount(1);
-  const response = await page.context().request.get(
-    `/api/cases/${await currentCaseId(page)}/annotations`,
-  );
-  return response.json();
-}
-
-async function currentCaseId(page) {
-  return page.url().split("/").pop();
 }
 
 async function expandSearchTool(page) {
@@ -242,223 +215,6 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
   expect(await sources.count()).toBeGreaterThan(0);
   await acceptAndVerify(page, created.id);
   await reloadRestoresTracer(page, created.id);
-});
-
-async function sendAnnotationRound(page, text, annotationId) {
-  const rail = page.locator(".assistant-rail");
-  const commentsTab = page.getByRole("button", { name: "批注", exact: true });
-  const commentsPanel = rail.locator(".comment-panel");
-  if (!await commentsPanel.isVisible()) {
-    if ((await rail.getAttribute("class")).split(/\s+/).includes("collapsed")) {
-      await rail.getByRole("button", { name: "展开侧栏", exact: true }).click();
-    }
-    if (await commentsTab.getAttribute("aria-pressed") !== "true") {
-      await commentsTab.click();
-    }
-  }
-  await expect(commentsPanel).toBeVisible();
-  const card = commentsPanel.locator(".comment-card");
-  await expect(card).toBeVisible();
-  await card.getByRole("button", { name: "让 AI 修订" }).click();
-  await selectPublishedSkill(page);
-  const request = page.waitForRequest((item) => (
-    item.method() === "POST" && new URL(item.url()).pathname.endsWith("/stream")
-  ));
-  await page.getByLabel("向 AI 提问").fill(text);
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  const payload = (await request).postDataJSON();
-  expect(payload.messages[0].parts).toContainEqual({ type: "data-annotation", data: { id: annotationId } });
-  await expect(page.getByTestId("agent-artifact")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("agent-artifact")).toHaveAttribute("data-artifact-status", "pending");
-  await expect(page.locator(".agent-chat-panel"))
-    .toHaveAttribute("data-run-status", "completed", { timeout: 30_000 });
-}
-
-async function prepareAnnotationDiscussion(page, playwright, quote = TARGET_TEXT) {
-  await publishTeachingSkill(playwright);
-  await login(page);
-  await configureChat(page);
-  await waitSearchableCatalog(page);
-  const created = await createCase(page);
-  await openChat(page, created.id);
-  await selectPublishedSkill(page);
-  const annotations = await addAnnotation(page, quote);
-  return { created, annotation: annotations[0] };
-}
-
-async function expandCommentsPanel(page) {
-  const expandSidebar = page.getByRole("button", { name: "展开侧栏", exact: true });
-  if (await expandSidebar.isVisible()) await expandSidebar.click();
-  await expect(page.getByRole("button", { name: "批注", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".comment-card")).toBeVisible();
-}
-
-async function expectAnnotationHistory(page) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(page.locator(".comment-revisions li")).toHaveCount(2);
-  await expect(page.locator(".comment-revisions")).toContainText(REPLACEMENT_MARK);
-  await expect(page.locator(".comment-revisions")).toContainText(SECOND_REPLACEMENT_MARK);
-}
-
-async function closeAnnotation(page) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  const card = page.locator(".comment-card");
-  await card.getByRole("button", { name: "标记解决" }).click();
-  await expect(card).toHaveCount(0);
-  await expect(page.locator(".comment-panel .panel-empty")).toContainText("暂无批注");
-}
-
-function annotationCard(page, annotationId) {
-  return page.locator(".comment-card[data-annotation-id=\"" + annotationId + "\"]");
-}
-
-async function annotationThread(page, caseId, annotationId) {
-  const rows = await (await page.context().request.get(`/api/cases/${caseId}/annotations`)).json();
-  const thread = rows.find((row) => row.id === annotationId);
-  expect(thread.status).toBe("resolved");
-  return thread;
-}
-
-async function expectResolvedAnnotation(page, caseId, annotationId) {
-  const history = (await annotationThread(page, caseId, annotationId)).revisions || [];
-  await expect(history).toHaveLength(1);
-  expect(history[0].status).toBe("rejected");
-}
-
-async function changeAnnotationTarget(page) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await selectAnnotationText(page, M1_ANNOTATION_QUOTE); await page.keyboard.type("改写目标");
-  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
-  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-}
-
-test("批注讨论：真实 Agent 两轮候选在公共面板中保留历史并合并最新轮", async ({ page, playwright }) => {
-  test.setTimeout(120_000);
-  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright);
-  await sendAnnotationRound(page, "第一轮：请结合当前选区生成修订候选。", annotation.id);
-  await sendAnnotationRound(page, "第二轮：请继续收紧当前批注对应的候选。", annotation.id);
-  await expectAnnotationHistory(page);
-  await page.getByRole("button", { name: "合并并关闭" }).click();
-  await expect(page.locator(".comment-card")).toHaveCount(0);
-  await assertResolvedHistoryWithoutStaleWarning(page, created, annotation);
-});
-
-async function assertResolvedHistoryWithoutStaleWarning(page, created, annotation) {
-  const revisions = (await annotationThread(page, created.id, annotation.id)).revisions || [];
-  expect(revisions).toHaveLength(2);
-  expect(revisions[0].status).toBe("expired");
-  expect(revisions[1].status).toBe("accepted");
-  expect(revisions[1].replacement).toContain(SECOND_REPLACEMENT_MARK);
-  await page.reload();
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(page.locator(".comment-card")).toHaveCount(0);
-  const merged = await annotationThread(page, created.id, annotation.id);
-  expect((merged.revisions || [])[1]?.replacement).toContain(SECOND_REPLACEMENT_MARK);
-  await expect(page.locator(".canvas-editor")).toContainText(SECOND_REPLACEMENT_MARK);
-  const current = await page.context().request.get(`/api/cases/${created.id}`);
-  expect((await current.json()).document.content[1].content[0].text).toContain(SECOND_REPLACEMENT_MARK);
-}
-
-test("批注候选可直接关闭且正文与修订历史刷新一致", async ({ page, playwright }) => {
-  test.setTimeout(120_000);
-  const { created, annotation } = await prepareAnnotationDiscussion(
-    page, playwright, M1_ANNOTATION_QUOTE,
-  );
-  await sendAnnotationRound(page, "请修订选区：第一轮候选仅供直接关闭，不改正文。", annotation.id);
-  const before = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
-  await closeAnnotation(page);
-  const after = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
-  expect(after.document).toEqual(before.document); expect(after.revision).toBe(before.revision);
-  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expectResolvedAnnotation(page, created.id, annotation.id);
-});
-
-test("目标变化后浏览器拒绝过期采用并保留无关正文编辑", async ({ page, playwright }) => {
-  test.setTimeout(120_000);
-  const { created, annotation } = await prepareAnnotationDiscussion(
-    page, playwright, M1_ANNOTATION_QUOTE,
-  );
-  await sendAnnotationRound(page, "请修订选区：第一轮候选用于目标变化验证。", annotation.id);
-  await changeAnnotationTarget(page);
-  const card = page.locator(".comment-card");
-  await expect(card).toContainText("原文已变动，旧修订不可合并");
-  await expect(card.getByRole("button", { name: "合并并关闭" })).toHaveCount(0);
-  await expect(card).toContainText("已失效");
-  const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
-  const text = current.document.content[1].content[0].text;
-  expect(text).toBe("第二段：教学目标需要更明确改写目标");
-});
-
-async function deleteAnnotationTarget(page, caseId) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await selectAnnotationText(page, M1_ANNOTATION_QUOTE);
-  const saveResponse = page.waitForResponse((response) => (
-    response.request().method() === "PATCH"
-    && new URL(response.url()).pathname === `/api/cases/${caseId}`
-  ));
-  await page.keyboard.press("Backspace");
-  const response = await saveResponse;
-  expect(response.ok()).toBe(true);
-  const payload = response.request().postDataJSON();
-  expect(payload.steps).toContainEqual({ stepType: "replace", from: 24, to: 30 });
-  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
-  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-}
-
-async function editUnrelatedText(page) {
-  await page.locator(".canvas-editor p").first().click();
-  await page.keyboard.press("End"); await page.keyboard.type(" 无关正文编辑");
-  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 5_000 });
-  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
-}
-
-test("目标删除后浏览器拒绝采用并保留已删除状态", async ({ page, playwright }) => {
-  test.setTimeout(120_000);
-  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright, M1_ANNOTATION_QUOTE);
-  await sendAnnotationRound(page, "请修订选区：删除目标后不得采用。", annotation.id);
-  await deleteAnnotationTarget(page, created.id);
-  const card = annotationCard(page, annotation.id);
-  await expect(card).toContainText("原文已删除");
-  await expect(card).toContainText("已失效");
-  await expect(card.getByRole("button", { name: "合并并关闭" })).toHaveCount(0);
-  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
-  expect(rows).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: annotation.id, anchorState: "deleted" }),
-  ]));
-});
-
-test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, playwright }) => {
-  test.setTimeout(120_000);
-  const { created, annotation } = await prepareAnnotationDiscussion(page, playwright, M1_ANNOTATION_QUOTE);
-  await sendAnnotationRound(page, "请修订选区：无关编辑后仍可采用。", annotation.id);
-  await editUnrelatedText(page);
-  const card = annotationCard(page, annotation.id);
-  await expect(card.getByRole("button", { name: "合并并关闭" })).toBeVisible();
-  await card.getByRole("button", { name: "合并并关闭" }).click();
-  await expect(card).toHaveCount(0);
-  const rows = await (await page.context().request.get(`/api/cases/${created.id}/annotations`)).json();
-  const accepted = rows[0].revisions.find((revision) => revision.status === "accepted");
-  const current = await (await page.context().request.get(`/api/cases/${created.id}`)).json();
-  expect(accepted).toBeDefined();
-  expect(current.document.content[0].content[0].text).toContain("无关正文编辑");
-  expect(current.document.content[1].content[0].text).toContain(accepted.replacement);
-});
-
-test("批注讨论生成中切到批注面板：后台完成后当前历史自动出现新修订", async ({ page, playwright }) => {
-  test.setTimeout(150_000);
-  await prepareAnnotationDiscussion(page, playwright);
-  await expandCommentsPanel(page);
-  const comment = page.locator(".comment-card");
-  await comment.getByRole("button", { name: "让 AI 修订" }).click();
-  await selectPublishedSkill(page);
-  await page.getByLabel("向 AI 提问").fill("第一轮：请结合当前选区生成修订候选。");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  // 生成中切到批注面板：AI 面板被卸载，服务端运行继续
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  // 后台完成终态后无需手动刷新，当前批注历史自动出现新修订
-  await expect(page.locator(".comment-revisions li")).toHaveCount(1, { timeout: 90_000 });
-  await expect(page.locator(".comment-revisions")).toContainText(REPLACEMENT_MARK);
 });
 
 async function acceptAndVerify(page, caseId) {

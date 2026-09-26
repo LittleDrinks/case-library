@@ -99,7 +99,7 @@ test("selected history pastes with formatting into rich text and readable text t
   });
   await expect(page.getByLabel("案例标题")).toHaveValue("当前教师稿标题");
 
-  await page.getByRole("button", { name: "版本历史" }).click();
+  await page.getByRole("button", { name: "历史版本" }).click();
   await page.getByRole("button", { name: "查看历史版本 v1 · 复制测试历史稿" }).click();
   await expect(page.locator(".version-paper .canvas-editor h1")).toHaveText("历史稿标题");
   await page.getByRole("button", { name: "复制正文" }).click();

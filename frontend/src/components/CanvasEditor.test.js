@@ -155,7 +155,12 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   await selectParagraph(wrapper);
   const captured = wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0];
   expect(captured).toMatchObject({ quote: "案例原文", revision: 3, from: 9, to: 13 });
-  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  for (const label of ["选区加粗", "选区斜体", "编辑选区链接", "带选区问 AI"]) {
+    expect(wrapper.find(`[aria-label="${label}"]`).exists()).toBe(true);
+  }
+  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  await wrapper.get('[aria-label="带选区问 AI"]').trigger("click");
+  expect(wrapper.emitted("ask-ai")).toHaveLength(1);
 });
 
 it("编号列表序列化只包含后端接受的起点属性", async () => {
@@ -549,17 +554,17 @@ it("相同正文保存修订保留有效选区，正文替换或手动编辑会�
   await nextTick();
   await selectParagraph(wrapper);
   await wrapper.setProps({ revision: 4 });
-  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  expect(wrapper.emitted("selection").at(-1)[0]).not.toBeNull();
   expect(globalThis.getSelection().toString()).toBe("案例原文");
   expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
     .toMatchObject({ quote: "案例原文", revision: 4 });
   await wrapper.setProps({ document: replacedDocument, revision: 5 });
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
   await wrapper.setProps({ document: caseDocument, revision: 6 });
   await selectParagraph(wrapper);
   wrapper.vm.editor.commands.insertContent("新增");
   await nextTick();
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
 });
 
 it("原生选区消失时修订变化不会复活 PM 旧选区", async () => {
@@ -568,7 +573,7 @@ it("原生选区消失时修订变化不会复活 PM 旧选区", async () => {
   await selectParagraph(wrapper);
   clearDomSelection();
   await wrapper.setProps({ revision: 4 });
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
 });
 
 it("清理选区同时折叠编辑器状态，后续批注刷新不会复活旧选区", async () => {
@@ -582,7 +587,7 @@ it("清理选区同时折叠编辑器状态，后续批注刷新不会复活旧�
   expect(wrapper.vm.editor.state.selection.empty).toBe(true);
   await wrapper.setProps({ annotations: [annotation] });
   expect(globalThis.getSelection().toString()).toBe("");
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
 });
 
 
@@ -620,14 +625,14 @@ it("autosave 修订早于 PM 同步时保留新原生选区并阻塞旧触发器
   await selectWhileStateStale(wrapper, wrapper.get(".canvas-editor p").element);
   await wrapper.setProps({ revision: 4 });
   expect(globalThis.getSelection().toString()).toBe("案例原文");
-  expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
+  expect(wrapper.emitted("selection").at(-1)[0]).toBeNull();
   expect((wrapper.emitted("selection") ?? []).some(([event]) => event?.revision === 4)).toBe(false);
   editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 9, 13)));
   await wrapper.vm.recaptureSelection();
   await vi.waitUntil(() => (wrapper.emitted("selection") ?? [])
     .some(([event]) => event?.quote === "案例原文" && event.revision === 4), { interval: 10 });
   await nextTick();
-  expect(wrapper.get('[aria-label="添加选区批注"]').exists()).toBe(true);
+  expect(wrapper.emitted("selection").at(-1)[0]).not.toBeNull();
   expect(wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0])
     .toMatchObject({ quote: "案例原文", revision: 4 });
 });

@@ -46,9 +46,15 @@ const tabs = [
 const panelCollapsed = ref(false);
 
 function select(tab) {
-  const closedMobileDrawer = !props.open
-    && window.matchMedia?.("(max-width: 800px)").matches;
-  panelCollapsed.value = !closedMobileDrawer && props.active === tab && !panelCollapsed.value;
+  if (window.matchMedia?.("(max-width: 800px)").matches) {
+    panelCollapsed.value = false;
+    if (props.open && props.active === tab) {
+      emit("toggle");
+      return;
+    }
+  } else {
+    panelCollapsed.value = props.active === tab && !panelCollapsed.value;
+  }
   emit("select", tab);
 }
 
@@ -85,7 +91,7 @@ defineExpose({ expandPanel });
         :title="tab.label"
         :aria-label="tab.label"
         :aria-pressed="active === tab.id"
-        v-show="(tab.id !== 'history' || historyAvailable) && (!readOnly || tab.id !== 'comments')"
+        v-show="tab.id !== 'history' || historyAvailable"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />

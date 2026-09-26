@@ -13,6 +13,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.js"],
-    server: { deps: { inline: ["element-plus", "@popperjs/core"] } },
+    alias: { "tippy.js": "tippy.js/dist/tippy.esm.js" },
+    server: { deps: { inline: ["element-plus", "@popperjs/core", /@tiptap\/(vue-3|extension-bubble-menu|extension-floating-menu)/, "tippy.js"] } },
   },
 });

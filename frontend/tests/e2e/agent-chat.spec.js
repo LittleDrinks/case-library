@@ -101,8 +101,10 @@ async function sendGenerationAndWaitForPersistence(page, caseId, text) {
 }
 
 async function openChatPanel(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  if (!await page.getByLabel("向 AI 提问").isVisible()) {
+    await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
+  }
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 

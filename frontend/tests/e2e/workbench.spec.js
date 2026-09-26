@@ -31,6 +31,7 @@ async function login(page, username = "user", password = "user123") {
 }
 
 async function logoutAndWait(page) {
+  await page.goto("/#/");
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/#\/login$/);
 }
@@ -138,7 +139,7 @@ async function crashDraftValue(page, caseId) {
 }
 
 async function openAttachments(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "附件" }).click();
+  await page.locator(".assistant-tabs").getByRole("button", { name: "附件" }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
 }
 
@@ -595,7 +596,10 @@ test("窄屏目录宽度不受桌面辅助栏收起状态覆盖", async ({ page 
     getComputedStyle(element).gridTemplateColumns.split(" ")[0]
   ));
   await expect.poll(firstTrack).toBe("120px");
-  expect((await page.locator(".document-paper").boundingBox()).width).toBeGreaterThanOrEqual(210);
+  const paper = await page.locator(".document-paper").boundingBox();
+  const side = await page.locator(".assistant-rail").boundingBox();
+  expect(paper.x).toBeGreaterThanOrEqual(120);
+  expect(paper.x + paper.width).toBeLessThanOrEqual(side.x);
 
   await outline.getByRole("button", { name: "收起目录" }).click();
   await expect.poll(firstTrack).toBe("40px");
@@ -747,7 +751,7 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
 });
 
 async function openHistoryTimeline(page) {
-  await page.getByRole("button", { name: "版本历史" }).click();
+  await page.getByRole("button", { name: "历史版本" }).click();
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await page.getByRole("button", { name: /^查看历史版本 v1 · .+$/ }).click();
 }
@@ -764,18 +768,6 @@ async function stageFrozenVersion(page, request, marker) {
 async function overwriteDialogStep(page, action) {
   await page.locator(".version-paper-actions .version-restore").click();
   await page.getByRole("button", { name: action, exact: true }).click();
-}
-
-async function addDraftAnnotation(page, marker) {
-  await page.getByRole("tab", { name: "当前教师稿" }).click();
-  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
-  await page.getByRole("button", { name: "添加选区批注" }).click();
-  const float = page.locator(".annotation-float");
-  await float.getByLabel("批注内容").fill("恢复前的草稿批注");
-  await float.getByRole("button", { name: "保存意见", exact: true }).click();
-  await expect(float).toContainText("恢复前的草稿批注");
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expect(page.locator(".comment-card")).toHaveCount(1);
 }
 
 async function expectReadOnlyVersionTab(page, marker) {
@@ -816,23 +808,22 @@ test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正�
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
 });
 
-test("批注浮窗询问 AI 会展开已收起的辅助栏", async ({ page }) => {
+test("选区工具栏询问 AI 会展开辅助栏并保留正文选区", async ({ page }) => {
   await login(page);
-  const request = page.context().request;
-  const marker = `浮窗提问 ${Date.now()}`;
-  const created = await createCase(request, marker);
+  const marker = `选区提问 ${Date.now()}`;
+  const created = await createCase(page.context().request, marker);
   await page.goto(`/#/workbench/${created.id}`);
-  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
-  await page.getByRole("button", { name: "添加选区批注" }).click();
-  const float = page.locator(".annotation-float");
-  await float.getByLabel("批注内容").fill("补全教学背景");
   await page.getByRole("button", { name: "收起侧栏" }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
-  await float.getByRole("button", { name: "询问AI" }).click();
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  for (const name of ["选区加粗", "选区斜体", "编辑选区链接"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: "添加选区批注" })).toHaveCount(0);
+  await page.getByRole("button", { name: "带选区问 AI" }).click();
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
-  await expect(page.getByLabel("向 AI 提问")).toHaveValue(/补全教学背景/);
-  await expect(float).toBeVisible();
+  await expect(page.getByTestId("composer-selection")).toHaveAttribute("title", marker);
 });
 
 test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async ({ page }) => {
@@ -855,7 +846,7 @@ test("作者可在历史面板手动创建命名版本", async ({ page }) => {
   const request = page.context().request;
   const created = await createCase(request, `手动版本 ${Date.now()}`);
   await page.goto(`/#/workbench/${created.id}`);
-  await page.getByRole("button", { name: "版本历史" }).click();
+  await page.getByRole("button", { name: "历史版本" }).click();
   await page.getByRole("button", { name: "新建版本", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "新建版本" })).toBeInViewport({ ratio: 1 });
   await page.getByLabel("版本名称").fill("补充教学目标");
@@ -902,39 +893,6 @@ async function expectHoverExpandAndClose(page, tabs, label, marker) {
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
 }
 
-async function expectPreservedDraftAnnotation(page, request, caseId) {
-  await expect(page.locator(".comment-panel .panel-empty")).toHaveText("暂无批注");
-  const history = await (await request.get(`/api/cases/${caseId}/history`)).json();
-  const baseline = history.versions.find((row) => row.title === "恢复前的当前稿");
-  expect(baseline.annotations).toEqual(expect.arrayContaining([
-    expect.objectContaining({ content: "恢复前的草稿批注" }),
-  ]));
-  const rows = await (await request.get(`/api/cases/${caseId}/annotations`)).json();
-  expect(rows.some((row) => row.content === "恢复前的草稿批注")).toBe(false);
-}
-
-test("恢复历史版本后保留恢复前草稿批注且当前面板刷新一致", async ({ page }) => {
-  await login(page);
-  const request = page.context().request;
-  const marker = `恢复批注保留 ${Date.now()}`;
-  const created = await stageFrozenVersion(page, request, marker);
-  await addDraftAnnotation(page, marker);
-  const vueErrors = [];
-  page.on("pageerror", (error) => vueErrors.push(error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error" && /nextSibling|emitsOptions/.test(message.text())) {
-      vueErrors.push(message.text());
-    }
-  });
-  await openHistoryTimeline(page); await overwriteDialogStep(page, "确认恢复");
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  expect(vueErrors).toEqual([]);
-  await expectPreservedDraftAnnotation(page, request, created.id);
-  await page.reload();
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  await expectPreservedDraftAnnotation(page, request, created.id);
-});
-
 test("恢复请求在途时确认按钮进入处理中且不可重复提交", async ({ page }) => {
   await login(page);
   const request = page.context().request;
@@ -950,4 +908,68 @@ test("恢复请求在途时确认按钮进入处理中且不可重复提交", as
   } finally { held.release(); }
   await expect(page.getByLabel("案例标题")).toHaveValue(created.title);
   await expect.poll(() => crashDraftValue(page, created.id)).toBeNull();
+});
+
+async function sampleRail(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const frames = [];
+    const started = performance.now();
+    function sample(now) {
+      const rail = document.querySelector(".assistant-rail").getBoundingClientRect();
+      const tabs = document.querySelector(".assistant-tabs").getBoundingClientRect();
+      frames.push({ width: rail.width, right: tabs.right });
+      if (now - started < 400) requestAnimationFrame(sample);
+      else resolve(frames);
+    }
+    requestAnimationFrame(sample);
+  }));
+}
+
+test("侧栏跨桌面断点不放大，开合宽度连续且工具轨固定", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await login(page);
+  await expect(page.locator(".assistant-rail")).toBeVisible();
+  for (const width of [1280, 1600, 1024, 801, 900, 1024]) {
+    const [frames] = await Promise.all([
+      sampleRail(page), page.setViewportSize({ width, height: 1000 }),
+    ]);
+    expect(Math.max(...frames.map((frame) => frame.width))).toBeLessThanOrEqual(445);
+    const contentWidth = await page.locator(".document-paper").evaluate((paper) => {
+      const style = getComputedStyle(paper);
+      return paper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    });
+    expect(contentWidth).toBeGreaterThanOrEqual(300);
+  }
+  for (const opening of [false, true]) {
+    const outlineWidth = (await page.locator(".outline-wrap").boundingBox()).width;
+    const [frames] = await Promise.all([
+      sampleRail(page),
+      page.getByRole("button", { name: opening ? "展开侧栏" : "收起侧栏" }).click(),
+    ]);
+    expect(frames.at(-1).width).toBeCloseTo(opening ? 444 : 44, 0);
+    expect(frames.some((frame) => frame.width > 46 && frame.width < 440)).toBe(true);
+    for (let index = 1; index < frames.length; index += 1) {
+      const delta = frames[index].width - frames[index - 1].width;
+      expect(opening ? delta : -delta).toBeGreaterThanOrEqual(-1);
+    }
+    const positions = frames.map((frame) => frame.right);
+    expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1.1);
+    expect((await page.locator(".outline-wrap").boundingBox()).width).toBeCloseTo(outlineWidth, 0);
+  }
+});
+
+test("手机重复点击当前 AI 标签可收起并再次展开", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const tab = page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true });
+  const rail = page.locator(".assistant-rail");
+  await tab.click();
+  await expect(page.getByLabel("向 AI 提问")).toBeVisible();
+  await expect.poll(async () => (await rail.boundingBox()).width).toBeGreaterThan(389);
+  await tab.click();
+  await expect.poll(async () => (await rail.boundingBox()).width).toBeLessThan(45);
+  await expect(page.getByLabel("向 AI 提问")).toBeHidden();
+  await tab.click();
+  await expect(page.getByLabel("向 AI 提问")).toBeVisible();
+  await expect.poll(async () => (await rail.boundingBox()).width).toBeGreaterThan(389);
 });

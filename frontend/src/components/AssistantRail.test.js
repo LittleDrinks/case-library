@@ -154,6 +154,19 @@ it("collapses the current desktop panel on its first click", async () => {
   expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
 });
 
+it("closes the mobile drawer when its active tab is clicked and reopens on the next click", async () => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+  const wrapper = render({ open: true, active: "ai" });
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.emitted("toggle")).toHaveLength(1);
+  expect(wrapper.emitted("select")).toBeUndefined();
+  await wrapper.setProps({ open: false });
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.emitted("select")).toEqual([["ai"]]);
+  expect(wrapper.classes()).not.toContain("collapsed");
+  wrapper.unmount();
+});
+
 it("keeps the AI draft while switching through integrated rail panels", async () => {
   vi.stubGlobal("fetch", vi.fn());
   const wrapper = renderWithRealChat();
