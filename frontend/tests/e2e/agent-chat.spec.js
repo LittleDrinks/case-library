@@ -261,6 +261,7 @@ async function proposeRevisionApplyAndUndo(page, created, message, selected) {
   const snapshot = await chatSnapshot(page, created.id);
   const revision = snapshot.messages.flatMap((item) => item.parts)
     .find((part) => part.type === "tool-propose_revision");
+  expect(revision, "已有正文修改必须先生成修订建议").toBeDefined();
   expect(revision.input).toMatchObject({
     start: 1,
     end: ORIGINAL_TEXT.length + 1,
@@ -307,7 +308,7 @@ async function proposeRevisionApplyAndUndo(page, created, message, selected) {
 
 for (const scenario of [
   { message: "帮我把这段话写入正文试试", selected: false },
-  { message: "请直接写入替换选中文字", selected: true },
+  { message: "请为选中文字提出修改建议", selected: true },
 ]) {
   test(`已有正文请求「${scenario.message}」先预览修订，应用后可撤销`, async ({ page }) => {
     await login(page);

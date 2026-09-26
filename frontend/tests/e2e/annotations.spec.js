@@ -149,6 +149,17 @@ async function selectSubstring(page, paragraph, value) {
   await expect(page.getByRole("button", { name: "添加选区批注" })).toBeEnabled();
 }
 
+async function openComments(page) {
+  const tab = page.getByRole("button", { name: "批注", exact: true });
+  const rail = page.locator(".assistant-rail");
+  if (await tab.getAttribute("aria-pressed") !== "true") await tab.click();
+  await expect(tab).toHaveAttribute("aria-pressed", "true");
+  if (await rail.evaluate((node) => node.classList.contains("collapsed"))) {
+    await page.getByRole("button", { name: "展开侧栏" }).click();
+  }
+  await expect(rail).not.toHaveClass(/collapsed/);
+}
+
 async function addSelectedAnnotation(page, paragraph, quote, content) {
   await selectSubstring(page, paragraph, quote);
   await page.getByRole("button", { name: "添加选区批注" }).click();
@@ -156,7 +167,7 @@ async function addSelectedAnnotation(page, paragraph, quote, content) {
   await float.getByLabel("批注内容").fill(content);
   await float.getByRole("button", { name: "保存意见", exact: true }).click();
   await expect(float).toContainText(content);
-  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await openComments(page);
   await expect(page.locator(".comment-card", { hasText: content })).toBeVisible();
   const caseId = page.url().split("/").pop();
   const response = await page.context().request.get("/api/cases/" + caseId + "/annotations");
@@ -363,13 +374,13 @@ test("同段多个批注可分别打开与关闭并刷新保留", async ({ page 
   const marker = `同段甲：教学依据；同段乙：课堂活动 ${Date.now()}`;
   await openDraft(page, marker);
   const paragraph = page.locator(".canvas-editor p", { hasText: marker });
-  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await openComments(page);
   const first = await addSelectedAnnotation(page, paragraph, "同段甲：教学依据", "第一条批注");
   const second = await addSelectedAnnotation(page, paragraph, "同段乙：课堂活动", "第二条批注");
   expect(first.id).not.toBe(second.id);
   await expectAnnotationIdentity(page, first, second);
   await resolveFirstAnnotation(page, first, second);
-  await page.reload(); await page.getByRole("button", { name: "批注", exact: true }).click();
+  await page.reload(); await openComments(page);
   await expectReloadedAnnotations(page, first, second);
 });
 

@@ -2,6 +2,8 @@ import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import CaseTagPicker from "./CaseTagPicker.vue";
 
+let view;
+
 const groups = [
   { id: "g1", name: "课程", requiredForSubmission: true, enabled: true, sortKey: 0, tags: [
     { id: "t1", groupId: "g1", name: "自然辩证法概论", sortKey: 0, enabled: true },
@@ -12,29 +14,33 @@ const groups = [
   ] },
 ];
 
-const mounted = [];
-
-afterEach(() => {
-  while (mounted.length) mounted.pop().unmount();
-});
-
-function wrapper(extra = {}, options = {}) {
-  const view = mount(CaseTagPicker, {
+function wrapper(extra = {}) {
+  view = mount(CaseTagPicker, {
     props: { tagIds: [], groups, editable: true, ...extra },
-    ...options,
+    attachTo: document.body,
   });
-  mounted.push(view);
   return view;
 }
 
+async function openPopover(currentView) {
+  await currentView.get(".case-tag-trigger").trigger("click");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const popover = document.querySelector(".case-tag-popover");
+  expect(popover).not.toBeNull();
+  expect(currentView.element.contains(popover)).toBe(false);
+  return popover;
+}
+
 async function groupedMultiselectContract() {
-  const view = wrapper({ tagIds: ["t2"] });
-  await view.get(".case-tag-editor > button").trigger("click");
-  expect(view.text()).toContain("投稿必填");
-  await view.get(".case-tag-popover fieldset input[type='checkbox']").setValue(true);
-  expect(view.emitted("update:tagIds")[0][0]).toEqual(["t2", "t1"]);
-  await view.get(".case-tag-popover").trigger("click");
-  expect(view.find(".case-tag-popover").exists()).toBe(true);
+  const currentView = wrapper({ tagIds: ["t2"] });
+  const popover = await openPopover(currentView);
+  expect(popover.textContent).toContain("投稿必填");
+  const checkbox = popover.querySelector("fieldset input[type='checkbox']");
+  checkbox.click();
+  await currentView.vm.$nextTick();
+  expect(currentView.emitted("update:tagIds")[0][0]).toEqual(["t2", "t1"]);
+  expect(popover.getAttribute("aria-hidden")).toBe("false");
+  expect(currentView.get(".case-tag-trigger").attributes("aria-expanded")).toBe("true");
 }
 
 async function chipRemovalContract() {
@@ -56,11 +62,11 @@ async function errorRetryContract() {
 }
 
 async function disabledTagContract() {
-  const view = wrapper({ tagIds: ["t3"] });
-  await view.get(".case-tag-editor > button").trigger("click");
-  const options = view.findAll(".case-tag-popover label").map((label) => label.text());
+  const currentView = wrapper({ tagIds: ["t3"] });
+  const popover = await openPopover(currentView);
+  const options = [...popover.querySelectorAll("label")].map((label) => label.textContent);
   expect(options).toEqual(["自然辩证法概论", "科学家精神"]);
-  expect(view.get("[aria-label='案例标签']").text()).toContain("劳动教育");
+  expect(currentView.get("[aria-label='案例标签']").text()).toContain("劳动教育");
 }
 
 function unknownTagContract() {
@@ -78,16 +84,18 @@ async function readonlyErrorRetryContract() {
 
 async function outsideClickClosesWithoutTakingFocus() {
   const view = wrapper();
-  const trigger = view.get(".case-tag-editor > button");
+  const trigger = view.get(".case-tag-trigger");
   const outside = document.createElement("button");
-  outside.addEventListener("click", (event) => event.stopPropagation());
+  let outsideClickCount = 0;
+  outside.addEventListener("click", () => outsideClickCount += 1);
   document.body.appendChild(outside);
   try {
-    await trigger.trigger("click");
+    await openPopover(view);
     outside.focus();
     outside.click();
     await view.vm.$nextTick();
     expect(trigger.attributes("aria-expanded")).toBe("false");
+    expect(outsideClickCount).toBe(1);
     expect(document.activeElement).toBe(outside);
   } finally {
     outside.remove();
@@ -95,13 +103,13 @@ async function outsideClickClosesWithoutTakingFocus() {
 }
 
 async function escapeClosesAndReturnsFocus() {
-  const view = wrapper({}, { attachTo: document.body });
-  const trigger = view.get(".case-tag-editor > button");
-  await trigger.trigger("click");
-  const search = view.get(".case-tag-popover input[type='search']");
-  search.element.focus();
+  const view = wrapper();
+  const trigger = view.get(".case-tag-trigger");
+  const popover = await openPopover(view);
+  const search = popover.querySelector("input[type='search']");
+  search.focus();
   const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-  search.element.dispatchEvent(event);
+  search.dispatchEvent(event);
   await view.vm.$nextTick();
   expect(trigger.attributes("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(trigger.element);
@@ -109,12 +117,12 @@ async function escapeClosesAndReturnsFocus() {
 }
 
 async function escapeClosesAfterFocusLeavesPicker() {
-  const view = wrapper({}, { attachTo: document.body });
-  const trigger = view.get(".case-tag-editor > button");
+  const view = wrapper();
+  const trigger = view.get(".case-tag-trigger");
   const outside = document.createElement("button");
   document.body.appendChild(outside);
   try {
-    await trigger.trigger("click");
+    await openPopover(view);
     outside.focus();
     const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     outside.dispatchEvent(event);
@@ -138,4 +146,10 @@ describe("案例标签设置", () => {
   it("点击外部关闭面板且不夺回外部焦点", outsideClickClosesWithoutTakingFocus);
   it("Escape 关闭面板并将焦点交还触发按钮", escapeClosesAndReturnsFocus);
   it("焦点移出面板后按 Escape 仍关闭并返回触发按钮", escapeClosesAfterFocusLeavesPicker);
+});
+
+afterEach(() => {
+  view?.unmount();
+  view = undefined;
+  document.body.innerHTML = "";
 });

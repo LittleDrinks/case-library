@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronDown, LoaderCircle, Tags, X } from "@lucide/vue";
+import { ElPopover } from "element-plus";
+import "element-plus/theme-chalk/el-popper.css";
+import "element-plus/theme-chalk/el-popover.css";
 import { tagIndex } from "../lib/tagCatalog.js";
 
 const props = defineProps({
@@ -15,6 +18,7 @@ const open = ref(false);
 const query = ref("");
 const picker = ref(null);
 const triggerButton = ref(null);
+const queryInput = ref(null);
 const selectableGroups = computed(() => props.groups
   .filter((group) => group.enabled !== false)
   .map((group) => ({ ...group, tags: group.tags.filter((tag) => tag.enabled !== false) }))
@@ -44,7 +48,10 @@ function remove(id) {
 }
 
 function closeOnOutsideClick(event) {
-  if (open.value && !picker.value?.contains(event.target)) open.value = false;
+  if (!open.value) return;
+  const path = event.composedPath();
+  if (path.includes(picker.value) || path.some((node) => node?.classList?.contains("case-tag-popover"))) return;
+  open.value = false;
 }
 
 function closeOnEscape(event) {
@@ -56,12 +63,17 @@ function closeOnEscape(event) {
 
 onMounted(() => {
   document.addEventListener("click", closeOnOutsideClick, true);
-  document.addEventListener("keydown", closeOnEscape);
+  // Restore focus before ElPopover's focus trap handles Escape.
+  document.addEventListener("keydown", closeOnEscape, true);
 });
 onBeforeUnmount(() => {
   document.removeEventListener("click", closeOnOutsideClick, true);
-  document.removeEventListener("keydown", closeOnEscape);
+  document.removeEventListener("keydown", closeOnEscape, true);
 });
+
+function focusSearch() {
+  queryInput.value?.focus({ preventScroll: true });
+}
 </script>
 
 <template>
@@ -80,9 +92,22 @@ onBeforeUnmount(() => {
       </ul>
       <span v-else-if="editable" class="case-tags-state">未设置标签</span>
       <div v-if="editable" class="case-tag-editor">
-        <button ref="triggerButton" type="button" :aria-expanded="open" @click="open = !open">设置标签<ChevronDown :size="12" /></button>
-        <div v-if="open" class="case-tag-popover">
-          <input v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
+        <ElPopover
+          v-model:visible="open"
+          trigger="click"
+          role="dialog"
+          placement="bottom-start"
+          :width="300"
+          popper-class="case-tag-popover"
+          :show-arrow="false"
+          @after-enter="focusSearch"
+        >
+          <template #reference>
+            <button ref="triggerButton" type="button" class="case-tag-trigger" :aria-expanded="open">
+              设置标签<ChevronDown :size="12" />
+            </button>
+          </template>
+          <input ref="queryInput" v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
           <p v-if="!selectableGroups.length" class="case-tags-state">暂无可选标签</p>
           <fieldset v-for="group in filteredGroups" :key="group.id">
             <legend>{{ group.name }}<b v-if="group.requiredForSubmission">投稿必填</b></legend>
@@ -91,7 +116,7 @@ onBeforeUnmount(() => {
               <span>{{ tag.name }}</span>
             </label>
           </fieldset>
-        </div>
+        </ElPopover>
       </div>
     </template>
   </div>
