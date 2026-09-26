@@ -68,8 +68,10 @@ export function toolParamSummary(part) {
   return "";
 }
 
-export function toolResultSummary(part) {
-  if (["output-error", "output-denied"].includes(part.state)) return toolFailureSummary(part);
+export function toolResultSummary(part, run = null) {
+  if (["output-error", "output-denied"].includes(part.state)) {
+    return toolFailureSummary(part, run?.status || "");
+  }
   if (part.state !== "output-available") return "";
   const output = part.output || {};
   if (part.type === "tool-propose_document") {
@@ -81,21 +83,80 @@ export function toolResultSummary(part) {
   }
   if (output.artifactId) return "已创建修订候选，等待决定";
   if (typeof output.status === "string" && output.status !== "ok") {
-    return TOOL_STATUS_LABELS[output.status] || "工具返回了无法识别的结果状态";
+    return toolStatusSummary(part, output);
   }
   if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
   if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
   return "";
 }
 
-export function toolFailureSummary(part) {
+export function toolFailureSummary(part, runStatus = "") {
   if (part.state === "output-denied") {
-    return "这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。";
+    const next = runStatus === "active"
+      ? "本轮仍在处理，请等待后续结果，或改用可访问的资料继续。"
+      : "请改用可访问的资料或调整请求后继续。";
+    return `这项操作未获授权，因此没有执行。${next}`;
   }
-  const validationFailure = typeof part.errorText === "string"
-    && part.errorText.includes("Fix the errors and try again.");
-  const cause = validationFailure ? "工具参数未通过校验" : "工具没有完成这一步";
-  return `${cause}。请调整请求后重新发送；原始错误保存在技术日志中。`;
+  const name = toolName(part);
+  const cause = toolFailureCause(part, name);
+  let next;
+  if (runStatus === "active") next = "本轮仍在处理，请等待后续结果";
+  else if (runStatus === "failed") next = "本轮已失败；如仍需此操作，可重试这条消息";
+  else if (runStatus === "cancelled") next = "本轮已取消；需要此操作时请重新发送请求";
+  else if (runStatus === "completed") next = `本轮已结束；${toolFailureNextStep(name)}`;
+  else next = toolFailureNextStep(name);
+  return `${cause}。${next}。`;
+}
+
+function toolFailureCause(part, name) {
+  if (name.startsWith("read_skill_resource_")) {
+    const path = part.input?.path || part.output?.path;
+    return path ? `无法读取 Skill 资源 ${path}` : "Skill 资源未能读取";
+  }
+  return ({
+    load_capability: "请求的 Skill 未能加载",
+    search_corpus: "案例检索未能完成",
+    list_tag_catalog: "标签目录查询未能完成",
+    read_source: "来源内容未能读取",
+    propose_revision: "修订建议未能生成",
+    propose_document: "AI 版本未能生成",
+    write_document: "正文写入未能完成",
+  })[name] || "工具操作未能完成";
+}
+
+function toolFailureNextStep(name) {
+  if (name.startsWith("read_skill_resource_")) {
+    return "请核对资源路径，或从 Skill 资源目录改选可用文本文件后重新发起请求";
+  }
+  return ({
+    load_capability: "请确认 Skill 已发布，或从已发布的 Skill 列表选择可用项",
+    search_corpus: "请调整检索范围或查询词后重新发起请求",
+    list_tag_catalog: "请稍后重试，或直接使用已知标签",
+    read_source: "请检查来源权限，或改用其他可访问来源后继续",
+    propose_revision: "请重新选择目标原文或调整修订要求后重试",
+    propose_document: "请调整生成要求后重新发起请求",
+    write_document: "请核对正文和撤销记录，确认当前状态后再决定是否重试",
+  })[name] || "请检查请求内容后重新发起请求";
+}
+
+function toolStatusSummary(part, output) {
+  const sourceRead = toolName(part) === "read_source";
+  const detail = typeof output.detail === "string" && output.detail.trim()
+    ? `（${output.detail}）` : "";
+  if (sourceRead && output.status === "no_access") {
+    return `当前身份无权读取此来源${detail}。请改用其他可访问来源后继续。`;
+  }
+  if (sourceRead && output.status === "unavailable") {
+    return `此来源当前不可读取${detail}。请检查来源状态，或选择其他来源后继续。`;
+  }
+  if (sourceRead && output.status === "not_found") {
+    return `未找到请求的来源${detail}。请检查来源信息，或改选其他来源后继续。`;
+  }
+  if (sourceRead && output.status === "empty") return `来源内容为空${detail}。请改选其他来源后继续。`;
+  if (["denied", "rejected", "failed", "error"].includes(output.status)) {
+    return `${TOOL_STATUS_LABELS[output.status]}。${toolFailureNextStep(toolName(part))}。`;
+  }
+  return TOOL_STATUS_LABELS[output.status] || "工具返回了无法识别的结果状态";
 }
 
 export function toolDiagnosticText(part) {

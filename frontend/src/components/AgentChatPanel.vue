@@ -868,6 +868,7 @@ function retryMessageHasAnnotation(messageId) {
                 v-else-if="part.type.startsWith('tool-read_skill_resource_')"
                 :part="{ ...part }"
                 :duration="toolDurationText(part, messageRun(message))"
+                :run-status="messageRun(message)?.status || ''"
               />
               <details
                 v-else-if="part.type.startsWith('tool-')"
@@ -885,10 +886,10 @@ function retryMessageHasAnnotation(messageId) {
                 </summary>
                 <p v-if="toolParamSummary(part)" class="agent-tool-line">{{ toolParamSummary(part) }}</p>
                 <p
-                  v-if="toolResultSummary(part)"
+                  v-if="toolResultSummary(part, messageRun(message))"
                   class="agent-tool-line"
                   :role="['output-error', 'output-denied'].includes(part.state) ? 'alert' : undefined"
-                >{{ toolResultSummary(part) }}</p>
+                >{{ toolResultSummary(part, messageRun(message)) }}</p>
                 <details
                   v-if="toolDiagnosticText(part)"
                   class="agent-tool-log"

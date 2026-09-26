@@ -1095,7 +1095,7 @@ it("separates a completed run from a failed tool and preserves its raw log", asy
   const failed = wrapper.get('[data-testid="agent-tool-trace"]');
   expect(failed.find("summary").text()).toContain("检索案例 · 未完成");
   expect(failed.get('[role="alert"]').text())
-    .toBe("工具参数未通过校验。请调整请求后重新发送；原始错误保存在技术日志中。");
+    .toBe("案例检索未能完成。本轮已结束；请调整检索范围或查询词后重新发起请求。");
   expect(failed.find("summary").text()).not.toContain("Fix the errors");
   expect(failed.get('[data-testid="agent-tool-log"] pre').text()).toBe(rawError);
 });
@@ -1329,6 +1329,80 @@ it("tracks the current streamed run and freezes its server duration when it ends
   }
 });
 
+it("does not let an in-flight poll overwrite the run's terminal snapshot", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-26T01:00:00.000Z"));
+  const startedAt = "2026-09-26T01:00:00.000Z";
+  const activeRun = {
+    id: "run-current", status: "active", userMessageId: "user-current",
+    assistantMessageId: "assistant-current", startedAt,
+  };
+  const completedRun = {
+    ...activeRun, status: "completed", finishedAt: "2026-09-26T01:00:01.200Z",
+  };
+  let reads = 0;
+  let clientRequestId;
+  let releasePoll;
+  let finishPost;
+  let wrapper;
+  const fetch = vi.fn(() => new Promise((resolve) => { finishPost = resolve; }));
+  api.agentThread.mockImplementation(() => {
+    reads += 1;
+    if (reads === 1) return Promise.resolve(structuredClone(snapshot));
+    if (reads === 2) {
+      clientRequestId = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).id;
+      const staleRun = { ...activeRun, clientRequestId };
+      return new Promise((resolve) => {
+        releasePoll = () => resolve({
+          ...structuredClone(snapshot),
+          messages: [{
+            id: "user-current", runId: staleRun.id, role: "user", metadata: {},
+            parts: [{ type: "text", text: "本轮问题" }],
+          }],
+          activeRun: staleRun, latestRun: null, runs: [staleRun],
+        });
+      });
+    }
+    const run = { ...completedRun, clientRequestId };
+    return Promise.resolve({
+      ...structuredClone(snapshot),
+      messages: [{
+        id: "user-current", runId: run.id, role: "user", metadata: {},
+        parts: [{ type: "text", text: "本轮问题" }],
+      }],
+      latestRun: run, runs: [run],
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  try {
+    wrapper = mountPanel();
+    await flushPromises();
+    await wrapper.get('[aria-label="向 AI 提问"]').setValue("本轮问题");
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(releasePoll).toBeTypeOf("function");
+
+    finishPost(answerResponse());
+    await flushPromises();
+    expect(reads).toBe(3);
+    expect(wrapper.get('[data-run-status]').attributes("data-run-status")).toBe("completed");
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+
+    releasePoll();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.get('[data-run-status]').attributes("data-run-status")).toBe("completed");
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+    expect(wrapper.find('[data-testid="agent-stop"]').exists()).toBe(false);
+  } finally {
+    finishPost?.(answerResponse());
+    wrapper?.unmount();
+  }
+});
+
 it("discards an in-flight run snapshot after switching threads", async () => {
   vi.useFakeTimers();
   const otherThread = emptyThread("thread-2");
@@ -1497,7 +1571,7 @@ it("renders failed resource reads from the UI tool protocol", async () => {
   await flushPromises();
   const trace = wrapper.get('[data-testid="agent-skill-resource-error"]');
   expect(trace.get('[role="alert"]').text())
-    .toBe("工具没有完成这一步。请调整请求后重新发送；原始错误保存在技术日志中。");
+    .toBe("无法读取 Skill 资源 references/missing.md。本轮已结束；请核对资源路径，或从 Skill 资源目录改选可用文本文件后重新发起请求。");
   expect(trace.get('[data-testid="agent-tool-log"] pre').text())
     .toBe("资源不存在：references/missing.md");
 });

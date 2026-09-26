@@ -64,11 +64,16 @@ describe("tool result summaries", () => {
       .toBe("已创建修订候选，等待决定");
   });
 
-  it("explains tool failures without exposing SDK errors or unknown status codes", () => {
-    expect(toolResultSummary({
+  it("gives operation-specific next steps without exposing internal errors", () => {
+    const failedSearch = {
       type: "tool-search_corpus", state: "output-error",
-      errorText: "Error: Fix the errors and try again.",
-    })).toBe("工具参数未通过校验。请调整请求后重新发送；原始错误保存在技术日志中。");
+      errorText: "Error: internal provider failure",
+    };
+    expect(toolResultSummary(failedSearch, { status: "active" }))
+      .toBe("案例检索未能完成。本轮仍在处理，请等待后续结果。");
+    expect(toolResultSummary(failedSearch, { status: "completed" }))
+      .toBe("案例检索未能完成。本轮已结束；请调整检索范围或查询词后重新发起请求。");
+    expect(toolResultSummary(failedSearch, { status: "completed" })).not.toContain("internal provider");
     expect(toolResultSummary({
       type: "tool-search_corpus", state: "output-available",
       output: { status: "future_status" },
@@ -78,6 +83,13 @@ describe("tool result summaries", () => {
   it("explains denied tool calls as unexecuted actions", () => {
     expect(toolResultSummary({ type: "tool-search_corpus", state: "output-denied" }))
       .toBe("这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。");
+  });
+
+  it("explains structured source access failures with an alternative", () => {
+    expect(toolResultSummary({
+      type: "tool-read_source", state: "output-available",
+      output: { status: "no_access", detail: "来源当前不可读" },
+    })).toBe("当前身份无权读取此来源（来源当前不可读）。请改用其他可访问来源后继续。");
   });
 });
 

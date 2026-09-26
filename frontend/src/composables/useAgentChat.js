@@ -169,16 +169,19 @@ function startRunSnapshotPolling(caseId, state, generation, threadId) {
     }
     if (poll.pending) return;
     poll.pending = true;
-    void refreshSnapshot(caseId, state, generation, threadId)
+    void refreshSnapshot(caseId, state, generation, threadId,
+      () => state.runSnapshotPoll === poll)
       .catch(() => {})
       .finally(() => { poll.pending = false; });
   }, RUN_SNAPSHOT_POLL_MS);
   return poll;
 }
 
-async function refreshSnapshot(caseId, state, generation, threadId = state.threadId.value) {
+async function refreshSnapshot(
+  caseId, state, generation, threadId = state.threadId.value, mayApply = () => true,
+) {
   const snapshot = await api.agentThread(caseId, threadId);
-  if (isCurrent(state, generation) && state.threadId.value === threadId) {
+  if (isCurrent(state, generation) && state.threadId.value === threadId && mayApply()) {
     state.snapshot.value = snapshot;
   }
   return snapshot;

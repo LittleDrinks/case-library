@@ -4,6 +4,7 @@ import { toolDiagnosticText, toolFailureSummary } from "../lib/agentTimeline.js"
 const props = defineProps({
   part: { type: Object, required: true },
   duration: { type: String, default: "" },
+  runStatus: { type: String, default: "" },
 });
 
 function isResource(part) {
@@ -23,7 +24,7 @@ function pathOf(part) {
 }
 
 function errorOf(part) {
-  return toolFailureSummary(part);
+  return toolFailureSummary(part, props.runStatus);
 }
 
 function labelOf(part) {
