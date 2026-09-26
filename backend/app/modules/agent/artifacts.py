@@ -69,8 +69,10 @@ def propose_document_artifact(
 
 
 def _document_candidate(database, run_id: str, case: dict, blocks_input: object) -> list:
-    """整篇生成前提：运行基线未越且本次运行尚未生成过整篇稿。"""
+    """初稿候选仅接受空正文，并要求运行基线未越。"""
     _verify_run_baseline(database, run_id, case)
+    if not blocks.document_blank(case["document"]):
+        raise CaseError(422, "正文已有内容，不能提议整篇初稿")
     _ensure_no_artifact(database, run_id)
     normalized = blocks.validate_blocks(blocks_input)
     if not claim_run_write_path(database, run_id, "document"):
@@ -288,7 +290,8 @@ def _candidate_ai_version(database, case, artifact, user, session) -> dict:
 
 def _commit_revision(database, case, user, artifact, write, steps, session):
     from app.modules.annotations.service import (
-        document_mapping, reconcile_document_annotations,
+        document_mapping,
+        reconcile_document_annotations,
     )
 
     document = write["document"]

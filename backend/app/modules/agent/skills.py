@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext, Tool
@@ -147,34 +145,32 @@ def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: st
 
 
 async def write_document(
-    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
-    blocks: DraftBlocks, summary: str = "",
+    ctx: RunContext[ToolDeps], blocks: DraftBlocks, summary: str = "",
 ) -> dict:
-    """按教师明确的直接写入指令执行正文写入；服务端全部校验通过才返回 written。
+    """为新建空稿生成初稿；已有正文必须通过修订建议确认。
 
     写入即落库并保留可撤销记录；失败或冲突向模型返回原因，不虚报成功。
     """
     if ctx.deps.annotation_id:
-        raise ModelRetry("批注讨论只能提议选区修订，不能直接写入正文")
-    return await _write_document(ctx, scope, blocks, summary)
+        raise ModelRetry("批注讨论只能提议正文修订，不能直接写入正文")
+    return await _write_document(ctx, blocks, summary)
 
 
 async def _write_document(
-    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
-    blocks: DraftBlocks, summary: str,
+    ctx: RunContext[ToolDeps], blocks: DraftBlocks, summary: str,
 ) -> dict:
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
-    record = _apply_document_write(ctx, scope, blocks, summary)
+    record = _apply_document_write(ctx, blocks, summary)
     ctx.deps.wrote = True
     ctx.deps.write_record = record
     return {**write_view(record), "undoable": True}
 
 
-def _apply_document_write(ctx, scope, blocks, summary):
+def _apply_document_write(ctx, blocks, summary):
     try:
         record = writes.apply_write(
-            ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id, scope,
+            ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id,
             blocks, ctx.deps.user, summary,
         )
     except CaseError as error:

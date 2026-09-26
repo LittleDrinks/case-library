@@ -3,18 +3,24 @@
 模型不得把 Markdown 标记当正文：标题、段落、列表和引用必须用块类型表达。
 服务端校验后以规范化「输入形状」（text/items/paragraphs）存储与投影，
 写入时才转换为 ProseMirror 节点；块类型按 type 字面值分发，避免子类
-继承导致有序列表被折叠为无序列表。整篇写入仅允许真空文档或未编辑模板。
+继承导致有序列表被折叠为无序列表。初稿写入仅允许真空文档。
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
 from app.modules.cases.document_schema import validate_prosemirror_document
 from app.modules.cases.service import CaseError
-from app.modules.cases.template import new_case_document
 
 MAX_BLOCKS = 300
 MAX_BLOCK_TEXT = 10_000
@@ -163,8 +169,3 @@ def document_blank(document: dict[str, Any]) -> bool:
             if str(child.get("text", "")).strip():
                 return False
     return True
-
-
-def document_rewritable(document: dict[str, Any]) -> bool:
-    """整篇写入仅接受真空文档或未经改动的模板正文。"""
-    return document_blank(document) or document == new_case_document()

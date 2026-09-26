@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 MessageRole = Literal["user", "assistant"]
 RunStatus = Literal["active", "completed", "failed", "cancelled"]
 TerminalRunStatus = Literal["completed", "failed", "cancelled"]
@@ -159,7 +158,7 @@ class AgentArtifact(BaseModel):
 
 
 class AgentWrite(BaseModel):
-    """显式直接写入的落地记录：恰好一次写正文，保留撤销所需的前后文档。"""
+    """正文写入记录：保存应用前后文档，供版本、审计与撤销使用。"""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
