@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const CASE_ID = "case-317-browser";
 const THREAD_ID = "thread-317-browser";
 const RUN_ID = "run-317-browser";
 const USER_MESSAGE_ID = "message-317-user";
@@ -111,58 +110,39 @@ function directWriteSnapshot() {
 }
 
 async function mountPanel(page, snapshotForThread, onStreamRequest = () => {}) {
+  await page.goto("/#/login");
+  await page.getByLabel("用户名").fill("user");
+  await page.getByLabel("密码").fill("user123");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  const request = page.context().request;
+  const auth = await (await request.get("/api/auth/session")).json();
+  const created = await request.post("/api/cases", {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { title: "浏览器状态夹具", document: {
+      type: "doc", content: [{ type: "paragraph", content: [] }],
+    } },
+  });
+  expect(created.ok()).toBe(true);
+  const caseRecord = await created.json();
   const readSnapshot = typeof snapshotForThread === "function"
     ? snapshotForThread : () => structuredClone(snapshotForThread);
-  await page.route("**/agent-317-component", (route) => route.fulfill({
-    contentType: "text/html",
-    body: "<!doctype html><html><body><div id=\"test-root\"></div></body></html>",
-  }));
-  await page.route("**/api/**", async (route) => {
+  const agentPath = `/api/cases/${caseRecord.id}/agent`;
+  await page.route(`**${agentPath}/**`, async (route) => {
     const { pathname } = new URL(route.request().url());
-    if (pathname === `/api/cases/${CASE_ID}/agent/thread`) {
+    if (pathname === `${agentPath}/thread` || pathname === `${agentPath}/threads/${THREAD_ID}`) {
       await route.fulfill({ json: await readSnapshot() });
-    } else if (pathname === `/api/cases/${CASE_ID}/agent/threads/${THREAD_ID}`) {
-      await route.fulfill({ json: await readSnapshot() });
-    } else if (pathname === "/api/ai/settings") {
-      await route.fulfill({ json: { configured: true, model: "fixture" } });
-    } else if (pathname === "/api/skills") {
-      await route.fulfill({ json: [] });
-    } else if (pathname === `/api/cases/${CASE_ID}/agent/thread/${THREAD_ID}/stream`) {
+    } else if (pathname === `${agentPath}/thread/${THREAD_ID}/stream`) {
       onStreamRequest(route.request().postDataJSON());
       await route.fulfill({ status: 503, json: { detail: "deterministic browser fixture" } });
     } else {
       await route.fulfill({ status: 404, json: { detail: "not found" } });
     }
   });
-
-  await page.goto("/agent-317-component");
-  await page.evaluate(async () => {
-    const [
-      { createApp, h, provide, reactive },
-      { default: AgentChatPanel },
-      { CONVERSATION_SOURCES_KEY, createConversationSources },
-    ] = await Promise.all([
-      import("/node_modules/.vite/deps/vue.js"),
-      import("/src/components/AgentChatPanel.vue"),
-      import("/src/composables/useConversationSources.js"),
-    ]);
-    const caseRecord = reactive({
-      id: "case-317-browser",
-      revision: 1,
-      title: "浏览器状态夹具",
-      ownerId: "user-317",
-      workflowStatus: "draft",
-      document: { type: "doc", content: [{ type: "paragraph", content: [] }] },
-    });
-    const app = createApp({
-      setup() {
-        provide(CONVERSATION_SOURCES_KEY, createConversationSources());
-        return () => h(AgentChatPanel, { caseRecord, open: true });
-      },
-    });
-    app.mount("#test-root");
-    window.bumpCaseRevision = () => { caseRecord.revision += 1; };
-  });
+  await page.route("**/api/ai/settings", (route) => route.fulfill({
+    json: { configured: true, model: "fixture" },
+  }));
+  await page.goto(`/#/workbench/${caseRecord.id}`);
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
 }
 
@@ -179,7 +159,8 @@ test("late refresh snapshots cannot unfreeze a completed run timer", async ({ pa
   await expect(panel).toHaveAttribute("data-run-status", "completed");
   await expect(status).toContainText("耗时 2.0s");
 
-  await page.evaluate(() => window.bumpCaseRevision());
+  await page.getByLabel("案例标题").fill("触发真实自动保存后的刷新");
+  await expect(page.locator(".save-state")).toHaveText("已保存");
   await expect.poll(() => threadReads).toBe(2);
   await expect(panel).toHaveAttribute("data-event-seq", "4");
   await expect(panel).toHaveAttribute("data-run-status", "completed");
