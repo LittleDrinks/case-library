@@ -568,14 +568,15 @@ class AgentRepository:
         ) is None:
             raise RuntimeError("Thread 事件写入失败")
 
-    def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None) -> None:
+    def _persist_assistant(self, run: AgentRun, assistant: AgentMessage, session, owner_id=None,
+                           *, require_active=True) -> None:
         self.database.agent_messages.insert_one(
             assistant.model_dump(by_alias=True, mode="python", exclude_none=True),
             session=session,
         )
         if self._append_event(
             run.thread_id, "message.created", run.id, {"messageId": assistant.id},
-            session, require_active=True, owner_id=owner_id
+            session, require_active=require_active, owner_id=owner_id
         ) is None:
             raise RuntimeError("AI 运行已结束")
 
@@ -601,31 +602,39 @@ class AgentRepository:
             }
         )
 
-    def fail_run(self, run_id: str, owner_id: str | None = None) -> bool:
-        return self._finish(run_id, "failed", {"error": "AI 服务暂不可用"}, owner_id)
+    def fail_run(self, run_id: str, owner_id: str | None = None, *,
+                 assistant: AgentMessage | None = None, error: str = "AI 服务暂不可用") -> bool:
+        return self._finish(run_id, "failed", {"error": error}, owner_id, assistant)
 
-    def cancel_run(self, run_id: str, owner_id: str | None = None) -> bool:
-        return self._finish(run_id, "cancelled", {"error": "运行已取消"}, owner_id)
+    def cancel_run(self, run_id: str, owner_id: str | None = None, *,
+                   assistant: AgentMessage | None = None) -> bool:
+        return self._finish(run_id, "cancelled", {"error": "运行已取消"}, owner_id, assistant)
 
     def _finish(
         self, run_id: str, status: TerminalRunStatus, fields: dict, owner_id=None,
+        assistant: AgentMessage | None = None,
     ) -> bool:
         return _transaction(
             self.database,
             lambda session: self._finish_transaction(
-                run_id, status, fields, session, owner_id
+                run_id, status, fields, session, owner_id, assistant
             ),
         )
 
     def _finish_transaction(
         self, run_id: str, status: TerminalRunStatus, fields: dict, session,
-        owner_id=None,
+        owner_id=None, assistant: AgentMessage | None = None,
     ) -> bool:
         run = self._finish_record(
             run_id, status, fields, session, owner_id
         )
         if not run:
             return False
+        if assistant is not None:
+            self._persist_assistant(
+                run, self._completed_assistant(run, assistant, session), session,
+                require_active=False,
+            )
         self._clear_active(run.thread_id, run_id, session)
         self._append_event(run.thread_id, _terminal_event(status), run_id, fields, session)
         return True

@@ -1877,3 +1877,91 @@ it("keeps user messages as plain preformatted text", async () => {
   expect(user.get("p").text()).toBe("# 生成案例\n带 换行");
   expect(wrapper.get('[data-testid="agent-answer"]').text()).toContain("确定回答");
 });
+
+it("renders thinking Markdown with a directly reachable collapse control", async () => {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{ type: "reasoning", text: "**关键判断**\n\n- 第一项\n- 第二项", state: "done" }];
+  api.agentThread.mockResolvedValue(result);
+  const wrapper = mountPanel();
+  await flushPromises();
+  const thinking = wrapper.get('.agent-reasoning');
+  thinking.element.open = true;
+  await thinking.trigger('toggle');
+  expect(thinking.find('strong').text()).toBe('关键判断');
+  expect(thinking.findAll('li')).toHaveLength(2);
+  await thinking.get('button[aria-label="收起思考过程"]').trigger('click');
+  expect(thinking.element.open).toBe(false);
+  wrapper.unmount();
+});
+
+it("restores complete messages including reasoning and tool errors from the recovery stream", async () => {
+  const running = structuredClone(snapshot);
+  running.activeRun = { id: "run-recover", status: "active" };
+  running.latestRun = running.activeRun;
+  api.agentThread.mockResolvedValue(running);
+  const message = { id: "recovered-answer", role: "assistant", runId: "run-recover", parts: [
+    { type: "reasoning", text: "**恢复的判断**", state: "done" },
+    { type: "tool-read_source", toolCallId: "failed-read", state: "output-error",
+      input: { source_id: "missing" }, errorText: "来源已不可读" },
+    { type: "text", text: "保留的部分回答", state: "done" },
+  ] };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([
+    `data: ${JSON.stringify({ type: "data-agent-message", data: message, transient: true })}\n\n`,
+    'data: {"type":"finish","finishReason":"stop"}\n\n',
+    'data: [DONE]\n\n',
+  ])));
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(wrapper.text()).toContain("保留的部分回答"));
+  expect(wrapper.get(".agent-reasoning strong").text()).toBe("恢复的判断");
+  expect(wrapper.text()).toContain("来源已不可读");
+  expect(wrapper.text()).not.toContain("正在恢复连接");
+});
+
+it("keeps an expanded source readable while later answer tokens arrive", async () => {
+  const feed = resourceFeed();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(feed.response));
+  api.getCase.mockResolvedValueOnce({ id: "c-42", title: "来源标题", summary: "来源摘要", contentAvailable: true });
+  const wrapper = mountPanel();
+  await flushPromises();
+  await sendComposerMessage(wrapper, "检索并回答");
+  feed.send({ type: "start", messageId: "live-sources" });
+  feed.send({ type: "tool-input-available", toolCallId: "search-1", toolName: "search_corpus", input: { query: "科学家" } });
+  feed.send({ type: "tool-output-available", toolCallId: "search-1", output: { sources: [{ kind: "case", id: "c-42", title: "来源标题" }] } });
+  await vi.waitFor(() => expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("来源摘要"));
+  const trace = wrapper.get('.agent-tool-trace');
+  trace.element.open = true;
+  await trace.trigger('toggle');
+  api.getCase.mockImplementation(() => new Promise(() => {}));
+  feed.send({ type: "text-start", id: "answer" });
+  feed.send({ type: "text-delta", id: "answer", delta: "根据资料" });
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("来源摘要");
+  expect(trace.element.open).toBe(true);
+  feed.send({ type: "text-end", id: "answer" });
+  feed.send({ type: "finish", finishReason: "stop" });
+  feed.close();
+  await flushPromises();
+  wrapper.unmount();
+});
+
+it("does not pull the reader to the bottom after opening thinking during streaming", async () => {
+  const feed = resourceFeed();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(feed.response));
+  const wrapper = mountPanel(); await flushPromises();
+  await sendComposerMessage(wrapper, "解释一下");
+  feed.send({ type: "start", messageId: "thinking-live" });
+  feed.send({ type: "reasoning-start", id: "reason" });
+  feed.send({ type: "reasoning-delta", id: "reason", delta: "正在分析" });
+  await flushPromises();
+  const area = wrapper.get('.ai-conversation');
+  Object.defineProperties(area.element, { scrollHeight: { configurable: true, value: 2000 }, clientHeight: { configurable: true, value: 500 } });
+  area.element.scrollTop = 1500;
+  await area.trigger('scroll');
+  await wrapper.get('.agent-reasoning summary').trigger('click');
+  feed.send({ type: "reasoning-delta", id: "reason", delta: "，继续分析" });
+  await flushPromises();
+  expect(area.element.scrollTop).toBe(1500);
+  feed.send({ type: "reasoning-end", id: "reason" });
+  feed.send({ type: "finish", finishReason: "stop" }); feed.close();
+  await flushPromises(); wrapper.unmount();
+});

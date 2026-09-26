@@ -151,7 +151,7 @@ async function refreshSource(source, generation, area) {
 }
 
 async function refreshSources(generation = sourceGeneration) {
-  const refs = sourceRefs();
+  const refs = sourceRefs().filter((source) => !sourceStates.has(sourceRefId(source)));
   if (!refs.length) return;
   const area = await currentSourceArea();
   if (generation !== sourceGeneration) return;
@@ -247,22 +247,30 @@ const threadRuns = computed(() => {
   return runs.length ? runs : [threadState.value?.latestRun].filter(Boolean);
 });
 
+function pauseFollowing(event) {
+  if (event.target.closest("summary")) nearBottom.value = false;
+}
+
 function trackScroll() {
   const node = conversation.value;
   if (node) nearBottom.value = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
 }
 
-async function scrollToLatest() {
+async function scrollToLatest(force = true) {
   await nextTick();
+  if (!force && !nearBottom.value) return;
   if (conversation.value) conversation.value.scrollTop = conversation.value.scrollHeight;
   nearBottom.value = true;
 }
 
-watch(messages, () => {
+watch(() => JSON.stringify(sourceRefs().map(sourceRefId)), () => {
   void refreshSources();
+});
+
+watch(messages, () => {
   void syncWrittenDocuments();
   syncGeneratedVersions();
-  if (nearBottom.value) void scrollToLatest();
+  if (nearBottom.value) void scrollToLatest(false);
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
 // 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
@@ -277,8 +285,7 @@ watch(() => threadState.value?.latestRun?.status, (current, previous) => {
   drainPendingVersionOpens();
 });
 watch(artifacts, () => {
-  void refreshSources();
-  if (nearBottom.value) void scrollToLatest();
+  if (nearBottom.value) void scrollToLatest(false);
 }, { deep: true });
 watch(threadId, (current, previous) => {
   if (current === previous) return;
@@ -844,7 +851,7 @@ function retryMessageHasAnnotation(messageId) {
         >停止</button>
         <RouterLink v-if="!loading && !configured" :to="{ name: 'ai-settings' }">配置 AI 模型</RouterLink>
       </div>
-      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite" @scroll="trackScroll">
+      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite" @scroll="trackScroll" @click.capture="pauseFollowing">
         <div v-if="!messages.length && !loading" class="panel-empty">
           <MessageSquareText :size="24" /><span>{{ configured ? "向 AI 提问" : "配置模型后开始对话" }}</span>
         </div>
@@ -858,7 +865,8 @@ function retryMessageHasAnnotation(messageId) {
                 :class="{ streaming: part.state === 'streaming' }"
               >
                 <summary><LoaderCircle v-if="part.state === 'streaming'" class="spin" :size="13" /><span>{{ part.state === "streaming" ? "思考中" : "思考过程" }}</span></summary>
-                <p>{{ part.text }}</p>
+                <div class="markdown-body agent-reasoning-content" v-html="renderMarkdown(part.text)" />
+                <button type="button" class="reasoning-collapse" aria-label="收起思考过程" @click="$event.currentTarget.closest('details').open = false">收起思考过程</button>
               </details>
               <p v-else-if="part.type === 'text' && part.text && message.role === 'user'">{{ part.text }}</p>
               <div
@@ -1038,7 +1046,7 @@ function retryMessageHasAnnotation(messageId) {
         />
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
-      <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
+      <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest()"><ChevronDown :size="14" />最新消息</button>
       <AgentComposer
         ref="composer"
         :case-id="caseRecord.id"

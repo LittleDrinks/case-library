@@ -83,49 +83,18 @@ def _fail_chunk(event: AgentThreadEvent) -> dict:
     }
 
 
-def _text_chunks(part: dict) -> list[dict]:
-    part_id = str(part.get("id") or "text")
-    return [
-        {"type": "text-start", "id": part_id},
-        {"type": "text-delta", "id": part_id, "delta": str(part.get("text") or "")},
-        {"type": "text-end", "id": part_id},
-    ]
-
-
-def _tool_chunks(part: dict, index: int) -> list[dict]:
-    part_id = str(part.get("toolCallId") or f"tool-{index}")
-    name = str(part["type"])[len("tool-"):]
-    return [
-        {"type": "tool-input-start", "toolCallId": part_id, "toolName": name},
-        {
-            "type": "tool-input-available",
-            "toolCallId": part_id,
-            "toolName": name,
-            "input": part.get("input") or {},
-        },
-        {
-            "type": "tool-output-available",
-            "toolCallId": part_id,
-            "output": part.get("output"),
-        },
-    ]
-
-
 def _message_chunks(
     repository: AgentRepository, event: AgentThreadEvent, project,
 ) -> list[dict]:
     message = repository.message(event.thread_id, str(event.payload.get("messageId")))
     if message is None or message.role != "assistant":
         return []
-    parts = project(message.parts)
-    chunks = [{"type": "start", "messageId": message.id}]
-    for index, part in enumerate(parts):
-        kind = str(part.get("type") or "")
-        if kind == "text":
-            chunks.extend(_text_chunks(part))
-        elif kind.startswith("tool-"):
-            chunks.extend(_tool_chunks(part, index))
-    return chunks
+    visible = message.model_copy(update={"parts": project(message.parts)})
+    return [{
+        "type": "data-agent-message",
+        "data": visible.model_dump(by_alias=True, mode="json"),
+        "transient": True,
+    }]
 
 
 def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project) -> list[dict]:

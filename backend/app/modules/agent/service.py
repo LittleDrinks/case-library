@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from pydantic_ai import CancellationToken
-from pydantic_ai.exceptions import RunCancelled
-from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent
+from pydantic_ai import CancellationToken, capture_run_messages
+from pydantic_ai.exceptions import ModelRetry, RunCancelled, ToolRetryError, UnexpectedModelBehavior
+from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent, ModelResponse
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
+from pydantic_ai.ui.vercel_ai.response_types import ErrorChunk
 
 from app.modules.agent.models import AgentMessage, AgentRun, AgentThread, TerminalRunStatus
 from app.modules.agent.deps import ToolDeps
@@ -27,6 +29,7 @@ from app.modules.cases.published import version_readable_by_id
 
 
 RUN_HEARTBEAT_SECONDS = float(os.getenv("AGENT_RUN_HEARTBEAT_SECONDS", "5"))
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -57,6 +60,8 @@ class RunContext:
     lost: bool = False
     lease_released: bool = False
     tool_timings: dict[str, dict[str, str]] = field(default_factory=dict)
+    captured_messages: list = field(default_factory=list)
+    failure: Exception | None = None
 
 
 def _run_kwargs(context: RunContext, model=None) -> dict:
@@ -101,16 +106,21 @@ def _record_tool_event(context: RunContext, event) -> None:
 
 async def _native_events(context: RunContext):
     try:
-        async with _model_context(context) as model:
-            async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
-                async for event in events:
-                    _record_tool_event(context, event)
-                    yield event
+        with capture_run_messages() as messages:
+            context.captured_messages = messages
+            async with _model_context(context) as model:
+                async with context.agent.run_stream_events(**_run_kwargs(context, model)) as events:
+                    async for event in events:
+                        _record_tool_event(context, event)
+                        yield event
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
         raise
-    except Exception:
+    except Exception as error:
         context.failed = True
+        context.failure = error
+        logger.warning("Agent run %s failed: %s; cause=%s", context.run.id,
+                       type(error).__name__, type(error.__cause__).__name__)
         raise
 
 
@@ -138,7 +148,7 @@ def _message_id(assistant_id: str, user_id: str):
 
 def _dump_messages(context: RunContext, result):
     return VercelAIAdapter.dump_messages(
-        result.new_messages(),
+        result.new_messages() if result is not None else context.captured_messages[len(context.history):],
         generate_message_id=_message_id(
             context.run.assistant_message_id, context.run.user_message_id
         ),
@@ -206,6 +216,37 @@ def _assistant_parts_of(context: RunContext) -> list[dict]:
     return _assistant_parts(_assistant_ui(context, context.result))
 
 
+def _partial_assistant(context: RunContext) -> AgentMessage | None:
+    messages = context.captured_messages[len(context.history):]
+    if not _reader_accessible(context) or not any(
+        isinstance(message, ModelResponse) and message.parts for message in messages
+    ):
+        return None
+    assistant = _assistant_message(context, None)
+    return assistant.model_copy(update={"parts": [_interrupted_part(part) for part in assistant.parts]})
+
+
+def _interrupted_part(part: dict) -> dict:
+    if part.get("state") == "approval-requested":
+        reason = "运行已结束，工具未完成"
+    elif (part.get("type") in {"tool-propose_revision", "tool-propose_document"}
+          and part.get("state") == "output-available"):
+        reason = "运行未完成，修改建议未保存"
+    else:
+        return part
+    result = {key: value for key, value in part.items() if key not in {"approval", "output"}}
+    return {**result, "state": "output-error", "errorText": reason}
+
+
+def _failure_message(context: RunContext) -> str:
+    error = context.failure
+    if isinstance(error, UnexpectedModelBehavior):
+        if context.tool_timings and isinstance(error.__cause__, (ModelRetry, ToolRetryError)):
+            return "AI 未能完成工具调用，请调整要求后重试"
+        return "AI 返回内容不符合要求，请重试"
+    return "AI 服务暂不可用"
+
+
 async def _drain(context: RunContext) -> None:
     try:
         async with aclosing(_adapter_stream(context)) as stream:
@@ -213,6 +254,8 @@ async def _drain(context: RunContext) -> None:
                 if not _reader_accessible(context):
                     _revoke_reader(context)
                     return
+                if isinstance(chunk, ErrorChunk):
+                    chunk = chunk.model_copy(update={"error_text": _failure_message(context)})
                 await context.buffer.publish(chunk)
     except (RunCancelled, asyncio.CancelledError):
         context.cancelled = True
@@ -318,9 +361,10 @@ def _finalize(context: RunContext) -> None:
         if status == "completed":
             _complete(context)
         elif status == "cancelled":
-            _terminal(context, context.repository.cancel_run)
+            _terminal(context, context.repository.cancel_run, assistant=_partial_assistant(context))
         else:
-            _terminal(context, context.repository.fail_run, cancel_on_conflict=True)
+            _terminal(context, context.repository.fail_run, cancel_on_conflict=True,
+                      assistant=_partial_assistant(context), error=_failure_message(context))
     except Exception:
         _monitor_failed(context)
     finally:
@@ -370,10 +414,14 @@ def _revoke_reader(context: RunContext) -> None:
         context.token.cancel()
 
 
-def _terminal(context: RunContext, finish, cancel_on_conflict=False) -> None:
-    if not finish(context.run.id, context.worker_id):
+def _terminal(context: RunContext, finish, cancel_on_conflict=False, assistant=None, error=None) -> None:
+    kwargs = {"assistant": assistant} if assistant is not None else {}
+    if error is not None:
+        kwargs["error"] = error
+    if not finish(context.run.id, context.worker_id, **kwargs):
+        kwargs.pop("error", None)
         if cancel_on_conflict and context.repository.cancel_run(
-                context.run.id, context.worker_id):
+                context.run.id, context.worker_id, **kwargs):
             context.cancelled = True
         else:
             context.lost = True

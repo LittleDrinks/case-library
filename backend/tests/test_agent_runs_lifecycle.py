@@ -307,6 +307,30 @@ def test_cancel_after_terminal_completion_is_idle_noop(client: TestClient) -> No
                 if event["type"] == "run.cancelled"]
 
 
+def test_stop_after_partial_answer_keeps_it_on_refresh(client: TestClient) -> None:
+    auth = _login(client)
+    thread_id = _thread_id(client)
+    release, reached = Event(), Event()
+    future, worker_client, pool = _post_async(client.app, "停止后保留回答", _gated_model(release, reached))
+    try:
+        assert reached.wait(10)
+        response = client.post(f"{THREAD_PATH}/{thread_id}/cancel", headers=_csrf(auth))
+        assert response.status_code == 200
+        release.set()
+        assert future.result(timeout=15).status_code == 200
+        snapshot = client.get(THREAD_PATH).json()
+        assert snapshot["latestRun"]["status"] == "cancelled"
+        assert snapshot["activeRun"] is None
+        assistants = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+        assert assistants
+        assert "前半" in str(assistants[-1]["parts"])
+        assert snapshot["artifacts"] == []
+    finally:
+        release.set()
+        pool.shutdown()
+        worker_client.close()
+
+
 def _retry_request(client: TestClient, auth: dict, message_id: str):
     return client.post(
         f"{THREAD_PATH}/{_thread_id(client)}/stream",
@@ -385,8 +409,10 @@ def _sse_chunks(response) -> list:
 
 def _assert_replayed_assistant(chunks: list, snapshot: dict) -> None:
     assistant_id = snapshot["latestRun"]["assistantMessageId"]
-    assert chunks[0] == {"type": "start", "messageId": assistant_id}
-    assert {"type": "text-delta", "id": chunks[1]["id"], "delta": "恢复回答"} in chunks
+    assert chunks[0]["type"] == "data-agent-message"
+    assert chunks[0]["data"]["id"] == assistant_id
+    assert chunks[0]["data"] == snapshot["messages"][-1]
+    assert chunks[0]["data"]["parts"][0]["text"] == "恢复回答"
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
 
 
@@ -439,8 +465,9 @@ def _assert_events_tail(client: TestClient, thread_id: str, release: Event) -> N
         lines = [line for line in response.iter_lines() if line]
     chunks = [json.loads(line[6:]) for line in lines if line != "data: [DONE]"]
     assert lines[-1] == "data: [DONE]"
-    assert chunks[0]["type"] == "start"
-    assert [chunk["type"] for chunk in chunks].count("text-delta") == 1
+    assert chunks[0]["type"] == "data-agent-message"
+    assert chunks[0]["data"]["parts"][0]["text"] == "前半后半"
+    assert [chunk["type"] for chunk in chunks].count("data-agent-message") == 1
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
     run = database.agent_runs.find_one({"threadId": thread_id}, {"_id": 0})
     assert run["status"] == "completed"

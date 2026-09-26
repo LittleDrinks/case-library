@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pymongo.errors import DuplicateKeyError
 
@@ -281,6 +281,111 @@ def test_provider_failure_marks_run_failed_and_clears_active_thread(client: Test
         {"id": run["threadId"]}
     )["activeRunId"] is None
     assert client.get(THREAD_PATH).json()["latestRun"]["error"] == "AI 服务暂不可用"
+
+
+def test_partial_provider_failure_keeps_answer_in_thread_snapshot(client: TestClient) -> None:
+    auth = _login(client)
+
+    async def failing_after_partial(_messages, _info):
+        yield "已经生成的部分回答"
+        raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=failing_after_partial)):
+        response = _post(client, auth, "保留失败前的回答", message_id="partial-failure-message")
+
+    assert response.status_code == 200
+    snapshot = client.get(THREAD_PATH).json()
+    assistants = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+    assert assistants
+    assert "已经生成的部分回答" in str(assistants[-1]["parts"])
+    assert snapshot["latestRun"]["status"] == "failed"
+
+
+def test_recovery_delivers_the_same_complete_message_as_snapshot(client: TestClient) -> None:
+    auth = _login(client)
+
+    async def interrupted_thinking(_messages, _info):
+        yield {0: DeltaThinkingPart(content="**已完成的判断**")}
+        yield "已经形成的结论"
+        raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=interrupted_thinking)):
+        assert _post(client, auth, "恢复全部消息部分").status_code == 200
+    snapshot = client.get(THREAD_PATH).json()
+    assistant = next(message for message in snapshot["messages"] if message["role"] == "assistant")
+    assert any(part["type"] == "reasoning" for part in assistant["parts"])
+    replay = client.get(f"{THREAD_PATH}/{snapshot['id']}/events", params={"afterSeq": 0})
+    chunks = [json.loads(line[6:]) for line in replay.text.splitlines()
+              if line.startswith("data: {")]
+    messages = [chunk["data"] for chunk in chunks if chunk["type"] == "data-agent-message"]
+    assert messages == [assistant]
+    assert chunks[-1]["type"] == "error"
+    assert client.get(f"{THREAD_PATH}/{snapshot['id']}/events",
+                      params={"afterSeq": snapshot["eventSeq"]}).status_code == 204
+
+
+def test_invalid_revision_retries_report_tool_failure_and_keep_followup_usable(client: TestClient) -> None:
+    auth = _login(client)
+    calls = 0
+
+    async def invalid_revision(_messages, _info):
+        nonlocal calls
+        assert "propose_revision" in {tool.name for tool in _info.function_tools}
+        calls += 1
+        yield {0: DeltaToolCall(
+            name="propose_revision", tool_call_id=f"bad-revision-{calls}",
+            json_args=json.dumps({"start": 0, "end": 999999,
+                                  "replacement": "修改后", "reason": "补充示例"}),
+        )}
+
+    with _agent().override(model=FunctionModel(stream_function=invalid_revision)):
+        response = _post(client, auth, "修改正文", message_id="bad-revision")
+    snapshot = client.get(THREAD_PATH).json()
+    assert snapshot["latestRun"]["status"] == "failed"
+    assert snapshot["latestRun"]["error"] == "AI 未能完成工具调用，请调整要求后重试"
+    assert "AI 未能完成工具调用" in response.text
+    assert snapshot["artifacts"] == []
+    tools = [part for message in snapshot["messages"] for part in message["parts"]
+             if part["type"].startswith("tool-")]
+    assert tools and all(part["state"] == "output-error" for part in tools)
+    assert any("同一段落" in part["errorText"] for part in tools)
+    with _agent().override(model=TestModel(custom_output_text="可以继续", call_tools=[])):
+        assert _post(client, auth, "继续讨论", message_id="after-bad-revision").status_code == 200
+    assert client.get(THREAD_PATH).json()["latestRun"]["status"] == "completed"
+
+
+def test_failed_run_does_not_restore_an_uncommitted_revision_as_actionable(client: TestClient) -> None:
+    auth = _login(client)
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "原文"}]},
+    ]}
+    created = client.post("/api/cases", headers=_csrf(auth),
+                          json={"title": "保留失败记录", "document": document})
+    assert created.status_code == 200
+    path = f"/api/cases/{created.json()['id']}/agent/thread"
+    thread = client.get(path).json()
+    first = True
+
+    async def propose_then_fail(_messages, _info):
+        nonlocal first
+        if first:
+            first = False
+            yield {0: DeltaToolCall(name="propose_revision", tool_call_id="unsaved-revision",
+                json_args=json.dumps({"start": 1, "end": 3, "replacement": "新文", "reason": "清晰表达"}))}
+        else:
+            raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=propose_then_fail)):
+        response = client.post(f"{path}/{thread['id']}/stream", headers=_csrf(auth), json=_body())
+    assert response.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "failed"
+    assert snapshot["artifacts"] == []
+    proposal = next(part for message in snapshot["messages"] for part in message["parts"]
+                    if part["type"] == "tool-propose_revision")
+    assert proposal["state"] == "output-error"
+    assert proposal["errorText"] == "运行未完成，修改建议未保存"
+    assert "output" not in proposal
 
 
 def test_terminal_failure_persists_terminal_event_without_late_runtime_event(client: TestClient) -> None:

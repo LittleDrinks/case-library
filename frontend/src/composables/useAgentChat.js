@@ -57,11 +57,20 @@ function transport(caseId, threadId, state) {
 }
 
 function buildChat(caseId, snapshot, state) {
-  return new Chat({
+  const chat = new Chat({
     id: snapshot.id,
     messages: projectMessages(snapshot.messages),
     transport: transport(caseId, snapshot.id, state),
+    onData: (chunk) => {
+      if (chunk.type !== "data-agent-message") return;
+      const [message] = projectMessages([chunk.data]);
+      const exists = chat.messages.some((item) => item.id === message.id);
+      chat.messages = exists
+        ? chat.messages.map((item) => item.id === message.id ? message : item)
+        : [...chat.messages, message];
+    },
   });
+  return chat;
 }
 
 function snapshotStatus(snapshot) {
