@@ -118,7 +118,7 @@ async function reopenAndSaveTags(page, caseId, marker) {
   await page.goto(`/#/workbench/${caseId}`);
   await page.getByRole("button", { name: "另开新稿" }).click();
   await expect(page.locator("textarea.document-title")).not.toHaveAttribute("readonly");
-  await page.getByRole("button", { name: "AI", exact: true }).click();
+  await page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(645);
   const saveDone = page.waitForResponse(
