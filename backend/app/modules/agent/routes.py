@@ -399,6 +399,7 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
         "quote": artifact["target"]["quote"],
         "replacement": artifact["replacement"],
         "reason": artifact.get("reason") or "",
+        "sources": sources,
     }
 
 
@@ -737,6 +738,7 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         store=request.app.state.blob_store, version_id=conversation.version_id,
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
+        evidence=list((plan.revision_context or {}).get("sources") or []),
     )
 
 

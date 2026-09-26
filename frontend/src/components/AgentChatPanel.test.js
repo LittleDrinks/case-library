@@ -979,6 +979,27 @@ it.each(["accepted", "expired", "superseded"])(
   },
 );
 
+it("reports when a historical suggestion has no unique body location", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("accepted"));
+  const workbench = {
+    clearPreview: vi.fn(),
+    preview: vi.fn().mockResolvedValue(false),
+  };
+  const wrapper = mountPanel({ readOnly: true }, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+
+  expect(wrapper.get('[role="alert"]').text()).toContain(
+    "正文中没有唯一匹配位置，无法定位这条历史建议",
+  );
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({
+    id: "artifact-9", locateOnly: true,
+  }));
+  wrapper.unmount();
+});
+
 it("clears a revision preview after keeping the original text", async () => {
   const pending = revisionSnapshot("pending");
   const rejected = revisionSnapshot("rejected");

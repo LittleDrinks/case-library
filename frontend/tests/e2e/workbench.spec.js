@@ -581,6 +581,27 @@ test("手机工作台使用正文单栏和可收起辅助面板", async ({ page 
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/open/);
 });
 
+test("窄屏目录宽度不受桌面辅助栏收起状态覆盖", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await login(page);
+  const outline = page.locator(".outline-wrap");
+  await outline.getByRole("button", { name: "展开目录" }).click();
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const workspace = page.locator(".canvas-workspace");
+  const firstTrack = () => workspace.evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns.split(" ")[0]
+  ));
+  await expect.poll(firstTrack).toBe("120px");
+  expect((await page.locator(".document-paper").boundingBox()).width).toBeGreaterThanOrEqual(210);
+
+  await outline.getByRole("button", { name: "收起目录" }).click();
+  await expect.poll(firstTrack).toBe("40px");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
 test("390px 审核头完整展示全部审核动作", async ({ page }) => {
   await openMobileReview(page);
   await expect(page.locator(".workspace-actions .lifecycle-action")).toHaveCount(2);

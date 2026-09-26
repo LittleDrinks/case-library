@@ -837,29 +837,65 @@ it("locates an applied record by its replacement without showing a stale preview
   expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
 });
 
-it("locates the matching replacement nearest the historical target when text repeats", async () => {
+it("does not guess a historical location when the replacement text repeats", async () => {
   const replacement = "替换后的正文";
-  const paragraphText = `${replacement}；第二处：${replacement}`;
   const documentWithRepeatedReplacement = {
     type: "doc",
     content: [
       { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
-      { type: "paragraph", content: [{ type: "text", text: paragraphText }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
+      { type: "paragraph", content: [{ type: "text", text: "后来插入的间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
     ],
   };
   const { wrapper } = await setup({ document: documentWithRepeatedReplacement, editable: false });
   const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
-  const paragraph = wrapper.get(".canvas-editor p").element;
-  paragraph.scrollIntoView = vi.fn();
-  const secondOccurrence = 9 + `${replacement}；第二处：`.length;
+  const paragraphs = wrapper.findAll(".canvas-editor p");
+  paragraphs.forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
 
   expect(await wrapper.vm.previewRevision({
-    id: "artifact-repeated", from: secondOccurrence, to: secondOccurrence + replacement.length,
+    id: "artifact-repeated", from: 9, to: 9 + replacement.length,
     quote: "旧原文", replacement, status: "accepted", locateOnly: true,
-  })).toBe(true);
+  })).toBe(false);
 
-  expect(domAtPos).toHaveBeenCalledWith(secondOccurrence);
-  expect(paragraph.scrollIntoView).toHaveBeenCalled();
+  expect(domAtPos).not.toHaveBeenCalled();
+  paragraphs.forEach(({ element }) => expect(element.scrollIntoView).not.toHaveBeenCalled());
+});
+
+it("does not use a replacement when the original historical quote is ambiguous", async () => {
+  const documentWithAmbiguousQuote = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "唯一替换" }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithAmbiguousQuote, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  wrapper.findAll(".canvas-editor p")
+    .forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-ambiguous-quote", from: 1, to: 4, quote: "旧原文",
+    replacement: "唯一替换", status: "superseded", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+});
+
+it("does not locate an unapplied historical suggestion by its replacement", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-rejected", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "替换后的正文", status: "rejected", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
 });
 
 it("does not report a historical record located when its text is absent", async () => {

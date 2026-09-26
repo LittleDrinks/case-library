@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { getSchema } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { Transform } from "@tiptap/pm/transform";
 
 const ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
 const ORIGINAL_TEXT = "当前案例测试正文";
@@ -23,6 +26,10 @@ function caseDocument(text) {
     type: "doc",
     content: [{ type: "paragraph", content: [{ type: "text", text }] }],
   };
+}
+
+function paragraphBlock(text) {
+  return { type: "paragraph", content: [{ type: "text", text }] };
 }
 
 async function createCase(page, text = ORIGINAL_TEXT) {
@@ -310,6 +317,58 @@ for (const scenario of [
     await proposeRevisionApplyAndUndo(page, created, scenario.message, scenario.selected);
   });
 }
+
+test("历史建议遇到重复替换正文时明确提示无法定位", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendChat(page, "请直接修改并给出长理由");
+  const snapshot = await chatSnapshot(page, created.id);
+  const revision = snapshot.messages.flatMap((item) => item.parts)
+    .find((part) => part.type === "tool-propose_revision");
+  const card = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await card.locator(".revision-suggestion-head").click();
+  await card.getByTestId("agent-accept").click();
+  await expect(card).toHaveAttribute("data-artifact-status", "accepted");
+
+  const current = await caseRecord(page, created.id);
+  const schema = getSchema([StarterKit]);
+  const transform = new Transform(schema.nodeFromJSON(current.document));
+  transform.insert(0, [
+    schema.nodeFromJSON(paragraphBlock(PROPOSED_TEXT)),
+    schema.nodeFromJSON(paragraphBlock("插入的间隔段落")),
+  ]);
+  const response = await page.context().request.patch(`/api/cases/${created.id}`, {
+    headers: { "X-CSRF-Token": await csrf(page) },
+    data: {
+      revision: current.revision,
+      document: transform.doc.toJSON(),
+      steps: transform.steps.map((step) => step.toJSON()),
+    },
+  });
+  expect(response.ok()).toBe(true);
+  await page.reload();
+  await openChatPanel(page);
+  const historicalCard = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await page.evaluate(() => {
+    window.historicalParagraphScrolls = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(options) {
+      if (this.matches(".canvas-editor p")) window.historicalParagraphScrolls.push(this.textContent);
+      return original.call(this, options);
+    };
+  });
+
+  await historicalCard.locator(".revision-suggestion-head").click();
+  await expect(historicalCard.getByRole("alert"))
+    .toContainText("正文中没有唯一匹配位置，无法定位这条历史建议");
+  expect(await page.evaluate(() => window.historicalParagraphScrolls)).toEqual([]);
+});
 
 test("长建议理由可在卡片内滚动到底部使用修改操作", async ({ page }) => {
   await login(page);

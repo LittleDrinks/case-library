@@ -471,7 +471,7 @@ async function previewCurrentRevision(artifact, isCurrentRequest) {
   if (current.status !== "pending") {
     const located = await locateHistoricalRevision(current);
     if (!isCurrentRequest()) return;
-    if (located === false) throw new Error("暂时无法定位这条建议对应的正文");
+    if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
     return;
   }
   const previewed = await revisionWorkbench?.preview?.(current);
@@ -489,7 +489,7 @@ async function previewRevision(artifact) {
     if (props.readOnly || artifact.status !== "pending") {
       const located = await locateHistoricalRevision(artifact);
       if (!isCurrentRequest()) return;
-      if (located === false) throw new Error("暂时无法定位这条建议对应的正文");
+      if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
       return;
     }
     await previewCurrentRevision(artifact, isCurrentRequest);

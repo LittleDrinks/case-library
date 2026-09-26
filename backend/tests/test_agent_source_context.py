@@ -47,11 +47,11 @@ def _seed_source(database, public: str = "public", case_id: str = "c-draft-1") -
     })
 
 
-def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict]):
+def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict], model=None):
     thread = client.get(f"/api/cases/{case_id}/agent/thread").json()["id"]
     body = {"id": "source-context", "trigger": "submit-message",
             "messages": [{"id": "source-message", "role": "user", "parts": parts}]}
-    with agent.override(model=TestModel(custom_output_text="完成", call_tools=[])):
+    with agent.override(model=model or TestModel(custom_output_text="完成", call_tools=[])):
         return client.post(f"/api/cases/{case_id}/agent/thread/{thread}/stream",
                            headers=_csrf(auth), json=body)
 
@@ -99,16 +99,30 @@ def test_refinement_revalidates_source_refs_loaded_from_storage(client: TestClie
         "status": "pending", "decidedBy": None, "createdAt": datetime.now(UTC),
     })
 
+    async def propose_refinement(messages, _info):
+        called = any(
+            getattr(part, "part_kind", "") == "tool-call"
+            and part.tool_name == "propose_revision"
+            for message in messages for part in getattr(message, "parts", [])
+        )
+        if not called:
+            yield _revision_delta(target["start"], target["end"])
+            return
+        yield "已生成微调建议，等待作者确认。"
+
     response = _post_parts(client, auth, case["id"], [
         {"type": "text", "text": "请微调这条建议"},
         {"type": "data-revision", "data": {"artifactId": "artifact-refine-source"}},
         {"type": "data-selection", "data": {
             "from": target["start"], "to": target["end"], "quote": "第二段需要修订。",
         }},
-    ])
+    ], FunctionModel(stream_function=propose_refinement))
 
     assert response.status_code == 200, response.text
     assert database.agent_artifacts.find_one({"id": "artifact-refine-source"})["status"] == "superseded"
+    snapshot = AgentRepository(database).snapshot(thread)
+    refinement = next(item for item in snapshot.artifacts if item.id != "artifact-refine-source")
+    assert [source.version_id for source in refinement.sources] == ["v-source-22"]
 
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:

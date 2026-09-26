@@ -321,11 +321,12 @@ function pendingAnchorRange(doc, pending) {
   }
 }
 
-function findTextRange(doc, text, preferredFrom) {
+function findUniqueTextRange(doc, text) {
   if (!text) return null;
-  let nearest = null;
+  let match = null;
+  let ambiguous = false;
   doc.descendants((node, position) => {
-    if (!node.isTextblock) return;
+    if (!node.isTextblock || ambiguous) return;
     const segments = [];
     let cursor = position + 1;
     node.forEach((child) => {
@@ -346,14 +347,21 @@ function findTextRange(doc, text, preferredFrom) {
         consumed += segment.text.length;
       }
       if (from !== null) {
-        const candidate = { from, to: from + text.length };
-        const distance = Math.abs(from - preferredFrom);
-        if (!nearest || distance < nearest.distance) nearest = { ...candidate, distance };
+        if (match) {
+          ambiguous = true;
+          return;
+        }
+        match = { from, to: from + text.length };
       }
       offset = blockText.indexOf(text, offset + 1);
     }
   });
-  return nearest && { from: nearest.from, to: nearest.to };
+  return ambiguous ? null : match;
+}
+
+function historicalTargetRange(doc, target) {
+  const text = target.status === "accepted" ? target.replacement : target.quote;
+  return findUniqueTextRange(doc, text);
 }
 
 function annotationMarks(doc, annotations) {
@@ -481,8 +489,7 @@ async function previewRevision(target) {
   if (!activeEditor || (!props.editable && !target.locateOnly)) return false;
   const doc = activeEditor.state.doc;
   const currentRange = target.locateOnly
-    ? findTextRange(doc, target.status === "accepted" ? target.replacement : target.quote, target.from)
-      || findTextRange(doc, target.replacement, target.from)
+    ? historicalTargetRange(doc, target)
     : pendingAnchorRange(doc, target);
   if (!currentRange) return false;
   const position = currentRange.from;
