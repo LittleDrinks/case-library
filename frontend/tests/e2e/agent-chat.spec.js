@@ -316,7 +316,7 @@ test("长建议理由可在卡片内滚动到底部使用修改操作", async ({
   await configureChat(page);
   const created = await createCase(page);
   await openChat(page, created.id);
-  await sendChat(page, "请修改并给出长理由");
+  await sendChat(page, "请直接修改并给出长理由");
   await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
     .toBe("completed");
 
