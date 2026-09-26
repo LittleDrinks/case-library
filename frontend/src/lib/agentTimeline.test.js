@@ -68,32 +68,37 @@ describe("tool result summaries", () => {
       .toBe("已创建修订候选，等待决定");
   });
 
-  it("gives operation-specific next steps without exposing internal errors", () => {
-    const failedSearch = {
-      type: "tool-search_corpus", state: "output-error",
-      errorText: "Error: internal provider failure",
+  it("presents tool error text and follows the run status", () => {
+    const failedRevision = {
+      type: "tool-propose_revision", state: "output-error",
+      errorText: "同一轮的多个修订目标不能重叠\n\nFix the errors and try again.",
     };
-    expect(toolResultSummary(failedSearch, { status: "active" }))
-      .toBe("案例检索未能完成。本轮仍在处理，请等待后续结果。");
-    expect(toolResultSummary(failedSearch, { status: "completed" }))
-      .toBe("案例检索未能完成。本轮已结束；请调整检索范围或查询词后重新发起请求。");
-    expect(toolResultSummary(failedSearch, { status: "completed" })).not.toContain("internal provider");
+    const errorText = failedRevision.errorText;
+
+    expect(toolResultSummary(failedRevision, { status: "active" }))
+      .toBe(`${errorText}\n本轮仍在处理中，请等待后续结果。`);
+    expect(toolResultSummary(failedRevision, { status: "failed" }))
+      .toBe(`${errorText}\n本轮已失败，可重试这条消息。`);
+    expect(toolResultSummary(failedRevision, { status: "cancelled" }))
+      .toBe(`${errorText}\n本轮已取消，需要时可重新发送请求。`);
+    expect(toolResultSummary(failedRevision, { status: "completed" }))
+      .toBe(`${errorText}\n本轮已结束，可重试这条消息。`);
+    expect(toolDiagnosticText(failedRevision)).toBe(errorText);
     expect(toolResultSummary({
       type: "tool-search_corpus", state: "output-available",
       output: { status: "future_status" },
     })).toBe("工具返回了无法识别的结果状态");
   });
 
-  it("explains the explicit missing-reason validation without exposing wrapped diagnostics", () => {
-    const errorText = "工具校验失败：修订必须给出具体修改理由，且不能为空白；internal provider detail";
+  it("shows the missing-reason tool error without asking the user to repair tool arguments", () => {
+    const errorText = "修订必须给出具体修改理由，且不能为空白\n\nFix the errors and try again.";
     const failedRevision = {
       type: "tool-propose_revision", state: "output-error", errorText,
     };
     const summary = toolResultSummary(failedRevision, { status: "completed" });
 
-    expect(summary)
-      .toBe("缺少具体修改理由，修订建议未能生成。本轮已结束；请补充具体修改理由后重新发送。");
-    expect(summary).not.toContain("internal provider detail");
+    expect(summary).toBe(`${errorText}\n本轮已结束，可重试这条消息。`);
+    expect(summary).not.toContain("请补充具体修改理由");
     expect(toolDiagnosticText(failedRevision)).toBe(errorText);
   });
 

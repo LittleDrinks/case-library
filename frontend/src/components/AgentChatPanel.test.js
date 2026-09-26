@@ -1081,7 +1081,7 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
 });
 
 it("separates a completed run from a failed tool and preserves its raw log", async () => {
-  const rawError = "Error: Fix the errors and try again.";
+  const rawError = "标签不存在\n\nFix the errors and try again.";
   const tracer = tracerSnapshot();
   tracer.messages[1].parts = [{
     type: "tool-search_corpus", toolCallId: "t-failed", state: "output-error",
@@ -1095,8 +1095,7 @@ it("separates a completed run from a failed tool and preserves its raw log", asy
   const failed = wrapper.get('[data-testid="agent-tool-trace"]');
   expect(failed.find("summary").text()).toContain("检索案例 · 未完成");
   expect(failed.get('[role="alert"]').text())
-    .toBe("案例检索未能完成。本轮已结束；请调整检索范围或查询词后重新发起请求。");
-  expect(failed.find("summary").text()).not.toContain("Fix the errors");
+    .toBe(`${rawError}\n本轮已结束，可重试这条消息。`);
   expect(failed.get('[data-testid="agent-tool-log"] pre').text()).toBe(rawError);
 });
 
@@ -1571,7 +1570,7 @@ it("renders failed resource reads from the UI tool protocol", async () => {
   await flushPromises();
   const trace = wrapper.get('[data-testid="agent-skill-resource-error"]');
   expect(trace.get('[role="alert"]').text())
-    .toBe("无法读取 Skill 资源 references/missing.md。本轮已结束；请核对资源路径，或从 Skill 资源目录改选可用文本文件后重新发起请求。");
+    .toBe("资源不存在：references/missing.md\n本轮已结束，可重试这条消息。");
   expect(trace.get('[data-testid="agent-tool-log"] pre').text())
     .toBe("资源不存在：references/missing.md");
 });

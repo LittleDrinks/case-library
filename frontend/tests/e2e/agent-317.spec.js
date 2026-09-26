@@ -6,6 +6,8 @@ const RUN_ID = "run-317-browser";
 const USER_MESSAGE_ID = "message-317-user";
 const ASSISTANT_MESSAGE_ID = "message-317-assistant";
 const REASON_ERROR = "修订必须给出具体修改理由，且不能为空白";
+const OVERLAP_ERROR = "同一轮的多个修订目标不能重叠";
+const RETRY_SUFFIX = "\n\nFix the errors and try again.";
 
 function completedSnapshot() {
   const startedAt = "2026-09-26T00:00:00.000Z";
@@ -84,14 +86,14 @@ function staleRetrySnapshot() {
   return snapshot;
 }
 
-function revisionFailureSnapshot() {
+function revisionFailureSnapshot(errorText = `${REASON_ERROR}${RETRY_SUFFIX}`) {
   const snapshot = completedSnapshot();
   snapshot.messages[1].parts = [{
     type: "tool-propose_revision",
     toolCallId: "tool-call-317",
     state: "output-error",
     input: { start: 1, end: 8, replacement: "修订后的文字" },
-    errorText: REASON_ERROR,
+    errorText,
   }];
   return snapshot;
 }
@@ -211,13 +213,30 @@ test("revision tool validation gives its domain reason and keeps the diagnostic"
   await expect(trace).toBeVisible();
   await trace.locator("summary").first().click();
   const alert = trace.getByRole("alert");
-  await expect(alert).toContainText("缺少具体修改理由");
-  await expect(alert).toContainText("请补充具体修改理由后重新发送");
+  await expect(alert).toContainText(REASON_ERROR);
+  await expect(alert).toContainText("本轮已结束，可重试这条消息");
+  await expect(alert).not.toContainText("请补充具体修改理由");
 
   const log = trace.getByTestId("agent-tool-log");
   await expect(log).toBeVisible();
   await log.locator("summary").click();
-  await expect(log.locator("pre")).toHaveText(REASON_ERROR);
+  await expect(log.locator("pre")).toHaveText(`${REASON_ERROR}${RETRY_SUFFIX}`);
+});
+
+test("overlapping revision targets show their tool error reason and keep the diagnostic", async ({ page }) => {
+  await mountPanel(page, revisionFailureSnapshot(`${OVERLAP_ERROR}${RETRY_SUFFIX}`));
+
+  const trace = page.locator('[data-testid="agent-tool-trace"]');
+  await expect(trace).toBeVisible();
+  await trace.locator("summary").first().click();
+  const alert = trace.getByRole("alert");
+  await expect(alert).toContainText(OVERLAP_ERROR);
+  await expect(alert).toContainText("本轮已结束，可重试这条消息");
+
+  const log = trace.getByTestId("agent-tool-log");
+  await expect(log).toBeVisible();
+  await log.locator("summary").click();
+  await expect(log.locator("pre")).toHaveText(`${OVERLAP_ERROR}${RETRY_SUFFIX}`);
 });
 
 test("successful document writes show a concrete state consistent with the result", async ({ page }) => {

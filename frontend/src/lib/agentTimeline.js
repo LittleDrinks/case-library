@@ -98,44 +98,20 @@ export function toolFailureSummary(part, runStatus = "") {
       : "请改用可访问的资料或调整请求后继续。";
     return `这项操作未获授权，因此没有执行。${next}`;
   }
-  const name = toolName(part);
-  const missingRevisionReason = name === "propose_revision"
-    && part.errorText?.includes("修订必须给出具体修改理由，且不能为空白");
-  const cause = missingRevisionReason
-    ? "缺少具体修改理由，修订建议未能生成" : toolFailureCause(part, name);
-  const retryStep = missingRevisionReason
-    ? "请补充具体修改理由后重新发送" : toolFailureNextStep(name);
-  let next;
-  if (runStatus === "active") next = "本轮仍在处理，请等待后续结果";
-  else if (runStatus === "failed") {
-    next = `本轮已失败；${missingRevisionReason ? retryStep : "如仍需此操作，可重试这条消息"}`;
-  } else if (runStatus === "cancelled") {
-    next = `本轮已取消；${missingRevisionReason ? retryStep : "需要此操作时请重新发送请求"}`;
-  } else if (runStatus === "completed") {
-    next = `本轮已结束；${retryStep}`;
-  } else {
-    next = retryStep;
-  }
-  return `${cause}。${next}。`;
+  const cause = typeof part.errorText === "string" && part.errorText.trim()
+    ? part.errorText.trim() : "工具操作未能完成";
+  return `${cause}\n${runFailureNextStep(runStatus)}`;
 }
 
-function toolFailureCause(part, name) {
-  if (name.startsWith("read_skill_resource_")) {
-    const path = part.input?.path || part.output?.path;
-    return path ? `无法读取 Skill 资源 ${path}` : "Skill 资源未能读取";
-  }
-  return ({
-    load_capability: "请求的 Skill 未能加载",
-    search_corpus: "案例检索未能完成",
-    list_tag_catalog: "标签目录查询未能完成",
-    read_source: "来源内容未能读取",
-    propose_revision: "修订建议未能生成",
-    propose_document: "AI 版本未能生成",
-    write_document: "正文写入未能完成",
-  })[name] || "工具操作未能完成";
+function runFailureNextStep(status) {
+  if (status === "active") return "本轮仍在处理中，请等待后续结果。";
+  if (status === "failed") return "本轮已失败，可重试这条消息。";
+  if (status === "cancelled") return "本轮已取消，需要时可重新发送请求。";
+  if (status === "completed") return "本轮已结束，可重试这条消息。";
+  return "需要时可重新发送请求。";
 }
 
-function toolFailureNextStep(name) {
+function toolStatusNextStep(name) {
   if (name.startsWith("read_skill_resource_")) {
     return "请核对资源路径，或从 Skill 资源目录改选可用文本文件后重新发起请求";
   }
@@ -165,7 +141,7 @@ function toolStatusSummary(part, output) {
   }
   if (sourceRead && output.status === "empty") return `来源内容为空${detail}。请改选其他来源后继续。`;
   if (["denied", "rejected", "failed", "error"].includes(output.status)) {
-    return `${TOOL_STATUS_LABELS[output.status]}。${toolFailureNextStep(toolName(part))}。`;
+    return `${TOOL_STATUS_LABELS[output.status]}。${toolStatusNextStep(toolName(part))}。`;
   }
   return TOOL_STATUS_LABELS[output.status] || "工具返回了无法识别的结果状态";
 }
