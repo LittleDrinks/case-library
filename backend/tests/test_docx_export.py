@@ -693,7 +693,9 @@ def test_docx_material_source_link_opens_platform_page_and_keeps_download_access
             "size": len(original),
         }
     )
-    client.app.state.blob_store.put(blob_id, BytesIO(original), len(original), "text/plain")
+    client.app.state.blob_store.put(
+        blob_id, BytesIO(original), len(original), "text/plain"
+    )
 
     denied_detail = client.get(f"/api/materials/{material_id}")
     denied_download = client.get(f"/api/materials/{material_id}/content")
