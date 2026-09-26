@@ -1,4 +1,4 @@
-"""Run 流的两个输出面：活动请求的进程内 tee 缓冲与恢复请求的事件尾 SSE。"""
+"""活动 Run 的共享 UI chunk 流与终态消息恢复。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 
 from app.modules.agent.models import AgentThread, AgentThreadEvent
 from app.modules.agent.repository import AgentRepository
+from app.modules.agent.visibility import SourceGate
 
 STREAM_POLL_SECONDS = float(os.getenv("AGENT_STREAM_POLL_SECONDS", "0.1"))
 
@@ -34,45 +35,76 @@ def sse_data(payload) -> str:
     return f"data: {body}\n\n"
 
 
-class LiveBuffer:
-    """活动 Run 的 UI chunk 缓冲；订阅者断开不影响执行任务。"""
+class RunStream:
+    """保存官方 Adapter 输出；首次连接和跨 worker 重连读取同一份流。"""
 
-    def __init__(self) -> None:
-        self._chunks: list[str] = []
-        self._done = False
-        self._changed = asyncio.Condition()
+    def __init__(self, repository, run, deps) -> None:
+        self.repository, self.run, self.deps = repository, run, deps
 
     async def publish(self, chunk) -> None:
         encoded = chunk.encode(6)
         if encoded == "[DONE]":
             return
-        async with self._changed:
-            self._chunks.append(encoded)
-            self._changed.notify_all()
+        refs = [ref.model_dump(by_alias=True, mode="json")
+                for ref in [*self.deps.hits, *self.deps.evidence]] if self.deps else []
+        await asyncio.to_thread(
+            self.repository.database.agent_run_streams.update_one,
+            {"_id": self.run.id},
+            {"$push": {"chunks": json.loads(encoded)}, "$set": {"sources": refs}},
+            upsert=True,
+        )
 
-    async def close(self) -> None:
-        async with self._changed:
-            self._done = True
-            self._changed.notify_all()
 
-    async def stream(self):
-        index = 0
-        while True:
-            async with self._changed:
-                while index >= len(self._chunks) and not self._done:
-                    await self._changed.wait()
-                batch, done = self._chunks[index:], self._done
-            for chunk in batch:
+async def run_stream(repository, run_id, case_id, user, access_check, project,
+                     expected_owner=None):
+    index = 0
+    while True:
+        if access_check and not access_check():
+            return
+        run = repository.database.agent_runs.find_one({"id": run_id}, {"stream": 0})
+        if not run:
+            return
+        if expected_owner and run.get("ownerId") != expected_owner and run["status"] == "active":
+            yield sse_data("[DONE]")
+            return
+        row = repository.database.agent_run_streams.find_one(
+            {"_id": run_id}, {"chunks": {"$slice": [index, 200]}, "sources": 1},
+        ) or {}
+        gate = SourceGate(repository.database, user, case_id)
+        readable = all(gate.readable(ref) for ref in row.get("sources", []))
+        chunks = row.get("chunks", [])
+        if readable:
+            body = "".join(
+                sse_data(chunk) for chunk in chunks
+                if chunk["type"] not in {"finish", "error", "abort"}
+            )
+            if body:
+                yield body
+        index += len(chunks)
+        if run["status"] != "active" and len(chunks) < 200:
+            for chunk in _run_terminal_chunks(repository, run, project):
                 yield sse_data(chunk)
-            index += len(batch)
-            if done:
-                yield sse_data("[DONE]")
-                return
+            yield sse_data("[DONE]")
+            return
+        await asyncio.sleep(STREAM_POLL_SECONDS)
 
 
-def live_response(buffer: LiveBuffer) -> StreamingResponse:
+def _run_terminal_chunks(repository, run, project):
+    message = repository.message(run["threadId"], run["assistantMessageId"])
+    if message:
+        yield {"type": "data-agent-message", "transient": True, "data":
+               message.model_copy(update={"parts": project(message.parts)}).model_dump(
+                   by_alias=True, mode="json")}
+    if run["status"] == "failed":
+        yield {"type": "error", "errorText": run.get("error") or "AI 服务暂不可用"}
+    else:
+        yield TERMINAL_CHUNKS[f"run.{run['status']}"]
+
+
+def live_response(repository, run_id, case_id, user, access_check, project, expected_owner=None):
     return StreamingResponse(
-        buffer.stream(), media_type="text/event-stream", headers=sse_headers()
+        run_stream(repository, run_id, case_id, user, access_check, project, expected_owner),
+        media_type="text/event-stream", headers=sse_headers(),
     )
 
 
@@ -83,49 +115,18 @@ def _fail_chunk(event: AgentThreadEvent) -> dict:
     }
 
 
-def _text_chunks(part: dict) -> list[dict]:
-    part_id = str(part.get("id") or "text")
-    return [
-        {"type": "text-start", "id": part_id},
-        {"type": "text-delta", "id": part_id, "delta": str(part.get("text") or "")},
-        {"type": "text-end", "id": part_id},
-    ]
-
-
-def _tool_chunks(part: dict, index: int) -> list[dict]:
-    part_id = str(part.get("toolCallId") or f"tool-{index}")
-    name = str(part["type"])[len("tool-"):]
-    return [
-        {"type": "tool-input-start", "toolCallId": part_id, "toolName": name},
-        {
-            "type": "tool-input-available",
-            "toolCallId": part_id,
-            "toolName": name,
-            "input": part.get("input") or {},
-        },
-        {
-            "type": "tool-output-available",
-            "toolCallId": part_id,
-            "output": part.get("output"),
-        },
-    ]
-
-
 def _message_chunks(
     repository: AgentRepository, event: AgentThreadEvent, project,
 ) -> list[dict]:
     message = repository.message(event.thread_id, str(event.payload.get("messageId")))
     if message is None or message.role != "assistant":
         return []
-    parts = project(message.parts)
-    chunks = [{"type": "start", "messageId": message.id}]
-    for index, part in enumerate(parts):
-        kind = str(part.get("type") or "")
-        if kind == "text":
-            chunks.extend(_text_chunks(part))
-        elif kind.startswith("tool-"):
-            chunks.extend(_tool_chunks(part, index))
-    return chunks
+    visible = message.model_copy(update={"parts": project(message.parts)})
+    return [{
+        "type": "data-agent-message",
+        "data": visible.model_dump(by_alias=True, mode="json"),
+        "transient": True,
+    }]
 
 
 def _event_chunks(repository: AgentRepository, event: AgentThreadEvent, project) -> list[dict]:

@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { SKILL_ID, teachingPackage } from "./skill-package.js";
 import { waitForCatalogSynced } from "./catalog-ready.js";
@@ -20,7 +21,7 @@ async function login(page, caseId = CASE_ID) {
 }
 
 async function openChat(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI", exact: true }).click();
+  await openAiTab(page);
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
   await expect.poll(() => page.locator(".assistant-rail").evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(300);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
@@ -451,6 +452,7 @@ test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async (
   test.setTimeout(60_000);
   await prepareSelectedSources(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await openChat(page);
   await expectMobileContext(page);
   const box = await composerGeometry(page);
   expect(box.scrollWidth).toBeLessThanOrEqual(box.width + 1);

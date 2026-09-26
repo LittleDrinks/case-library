@@ -11,13 +11,6 @@ const emit = defineEmits(["collapse", "locate"]);
 <template>
   <aside class="outline-wrap">
     <nav class="outline-panel" aria-label="正文目录">
-      <template v-if="!collapsed">
-        <p class="outline-label">本文目录</p>
-        <button v-for="(item, order) in items" :key="item.index" type="button" :class="`level-${item.level}`" @click="emit('locate', order)">
-          {{ item.text }}
-        </button>
-        <p v-if="!items.length" class="outline-empty">正文还没有小标题</p>
-      </template>
       <button
         class="outline-collapse"
         type="button"
@@ -27,6 +20,13 @@ const emit = defineEmits(["collapse", "locate"]);
       >
         <ChevronsLeft :size="16" aria-hidden="true" />
       </button>
+      <template v-if="!collapsed">
+        <p class="outline-label">本文目录</p>
+        <button v-for="(item, order) in items" :key="item.index" type="button" :class="`level-${item.level}`" :title="item.text" @click="emit('locate', order)">
+          {{ item.text }}
+        </button>
+        <p v-if="!items.length" class="outline-empty">正文还没有小标题</p>
+      </template>
     </nav>
   </aside>
 </template>

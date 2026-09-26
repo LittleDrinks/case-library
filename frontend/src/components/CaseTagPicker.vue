@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronDown, LoaderCircle, Tags, X } from "@lucide/vue";
 import { ElPopover } from "element-plus";
 import "element-plus/theme-chalk/el-popper.css";
@@ -16,6 +16,8 @@ const props = defineProps({
 const emit = defineEmits(["update:tagIds", "retry"]);
 const open = ref(false);
 const query = ref("");
+const picker = ref(null);
+const triggerButton = ref(null);
 const queryInput = ref(null);
 const fallbackPlacements = ["top-start", "bottom-start"];
 const popperOptions = {
@@ -52,13 +54,37 @@ function remove(id) {
   emit("update:tagIds", props.tagIds.filter(item => item !== id));
 }
 
+function closeOnOutsideClick(event) {
+  if (!open.value) return;
+  const path = event.composedPath();
+  if (path.includes(picker.value) || path.some((node) => node?.classList?.contains("case-tag-popover"))) return;
+  open.value = false;
+}
+
+function closeOnEscape(event) {
+  if (!open.value || event.key !== "Escape") return;
+  event.preventDefault();
+  open.value = false;
+  triggerButton.value?.focus();
+}
+
+onMounted(() => {
+  document.addEventListener("click", closeOnOutsideClick, true);
+  // Restore focus before ElPopover's focus trap handles Escape.
+  document.addEventListener("keydown", closeOnEscape, true);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", closeOnOutsideClick, true);
+  document.removeEventListener("keydown", closeOnEscape, true);
+});
+
 function focusSearch() {
   queryInput.value?.focus({ preventScroll: true });
 }
 </script>
 
 <template>
-  <div v-if="!quiet" class="case-tags">
+  <div v-if="!quiet" ref="picker" class="case-tags">
     <Tags :size="13" aria-hidden="true" />
     <span v-if="loading" class="case-tags-state"><LoaderCircle class="spin" :size="12" />标签目录加载中</span>
     <span v-else-if="error" class="case-tags-state" role="alert">
@@ -76,6 +102,7 @@ function focusSearch() {
         <ElPopover
           v-model:visible="open"
           trigger="click"
+          role="dialog"
           placement="bottom-start"
           :fallback-placements="fallbackPlacements"
           :popper-options="popperOptions"
@@ -85,7 +112,7 @@ function focusSearch() {
           @after-enter="focusSearch"
         >
           <template #reference>
-            <button type="button" class="case-tag-trigger" :aria-expanded="open">
+            <button ref="triggerButton" type="button" class="case-tag-trigger" :aria-expanded="open">
               设置标签<ChevronDown :size="12" />
             </button>
           </template>

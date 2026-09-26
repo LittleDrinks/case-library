@@ -6,7 +6,7 @@ import { renderMarkdown } from "../lib/markdown.js";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import {
   sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
-  toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
+  toolResultSummary, toolRunning, toolState, toolDiagnosticText, sourcesOf, elapsedBetween,
   runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
@@ -44,14 +44,22 @@ const {
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
+const statusRun = computed(() => {
+  if (threadState.value?.activeRun) return threadState.value.activeRun;
+  if (sending.value || recovering.value) return null;
+  const currentUserMessage = [...messages.value].reverse()
+    .find((message) => message.role === "user");
+  if (currentUserMessage && !messageRun(currentUserMessage)) return null;
+  return threadState.value?.latestRun;
+});
 const globalError = computed(() => {
   const runStatus = threadState.value?.latestRun?.status;
   return error.value || (["failed", "cancelled"].includes(runStatus) ? "" : chatError.value);
 });
-const runStatusAttr = computed(() => (
-  sending.value || threadState.value?.activeRun
-    ? "active" : threadState.value?.latestRun?.status || "none"
-));
+const runStatusAttr = computed(() => statusRun.value?.status
+  || (sending.value || recovering.value ? "active" : "none"));
+const runClock = ref(Date.now());
+let runClockTimer = null;
 const decideError = ref("");
 const expandedRevisionId = ref("");
 const revisionContext = ref(null);
@@ -143,7 +151,7 @@ async function refreshSource(source, generation, area) {
 }
 
 async function refreshSources(generation = sourceGeneration) {
-  const refs = sourceRefs();
+  const refs = sourceRefs().filter((source) => !sourceStates.has(sourceRefId(source)));
   if (!refs.length) return;
   const area = await currentSourceArea();
   if (generation !== sourceGeneration) return;
@@ -183,12 +191,12 @@ function skillName(skillId) {
 
 function toolDurationText(part, run) {
   const timing = run?.toolTimings?.[part.toolCallId];
-  return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, Date.now()) : "";
+  return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, runClock.value) : "";
 }
 
-function runDurationText(run = threadState.value?.latestRun) {
+function runDurationText(run = statusRun.value) {
   if (!run) return "";
-  return elapsedBetween(run.startedAt, run.finishedAt, Date.now());
+  return elapsedBetween(run.startedAt, run.finishedAt, runClock.value);
 }
 
 function messageRun(message) {
@@ -239,22 +247,30 @@ const threadRuns = computed(() => {
   return runs.length ? runs : [threadState.value?.latestRun].filter(Boolean);
 });
 
+function pauseFollowing(event) {
+  if (event.target.closest("summary")) nearBottom.value = false;
+}
+
 function trackScroll() {
   const node = conversation.value;
   if (node) nearBottom.value = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
 }
 
-async function scrollToLatest() {
+async function scrollToLatest(force = true) {
   await nextTick();
+  if (!force && !nearBottom.value) return;
   if (conversation.value) conversation.value.scrollTop = conversation.value.scrollHeight;
   nearBottom.value = true;
 }
 
-watch(messages, () => {
+watch(() => JSON.stringify(sourceRefs().map(sourceRefId)), () => {
   void refreshSources();
+});
+
+watch(messages, () => {
   void syncWrittenDocuments();
   syncGeneratedVersions();
-  if (nearBottom.value) void scrollToLatest();
+  if (nearBottom.value) void scrollToLatest(false);
 }, { deep: true });
 // 运行在本次会话内由 active 变为 completed 时，本轮若还有未同步的直接
 // 写入（流式期间被跳过、或快照先于 watcher 就绪），补一次画布刷新。
@@ -269,8 +285,7 @@ watch(() => threadState.value?.latestRun?.status, (current, previous) => {
   drainPendingVersionOpens();
 });
 watch(artifacts, () => {
-  void refreshSources();
-  if (nearBottom.value) void scrollToLatest();
+  if (nearBottom.value) void scrollToLatest(false);
 }, { deep: true });
 watch(threadId, (current, previous) => {
   if (current === previous) return;
@@ -294,6 +309,17 @@ onMounted(() => {
   window.addEventListener("focus", refreshSourcePermissions);
   document.addEventListener("visibilitychange", refreshOnVisible);
 });
+watch(() => [
+  sending.value, recovering.value,
+  threadState.value?.activeRun?.id, threadState.value?.activeRun?.status,
+], ([isSending, isRecovering, _runId, runStatus]) => {
+  clearInterval(runClockTimer);
+  runClockTimer = null;
+  const active = isSending || isRecovering || runStatus === "active";
+  if (!active) return;
+  runClock.value = Date.now();
+  runClockTimer = setInterval(() => { runClock.value = Date.now(); }, 200);
+}, { immediate: true });
 
 const THREADS_POLL_MS = 2000;
 let threadsTimer = null;
@@ -335,6 +361,8 @@ onBeforeUnmount(() => {
   pendingVersionOpenIds.clear();
   versionOpenInFlightIds.clear();
   stopThreadsPolling();
+  clearInterval(runClockTimer);
+  runClockTimer = null;
   window.removeEventListener("focus", refreshSourcePermissions);
   document.removeEventListener("visibilitychange", refreshOnVisible);
 });
@@ -793,7 +821,7 @@ function retryMessageHasAnnotation(messageId) {
   <section
     class="assistant-panel ai-panel agent-chat-panel"
     :data-event-seq="threadState?.eventSeq ?? 0"
-    :data-run-id="threadState?.latestRun?.id || ''"
+    :data-run-id="statusRun?.id || ''"
     :data-run-status="runStatusAttr"
   >
     <template v-if="mode === 'chat'">
@@ -823,7 +851,7 @@ function retryMessageHasAnnotation(messageId) {
         >停止</button>
         <RouterLink v-if="!loading && !configured" :to="{ name: 'ai-settings' }">配置 AI 模型</RouterLink>
       </div>
-      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite" @scroll="trackScroll">
+      <div ref="conversation" class="panel-scroll ai-conversation" aria-live="polite" @scroll="trackScroll" @click.capture="pauseFollowing">
         <div v-if="!messages.length && !loading" class="panel-empty">
           <MessageSquareText :size="24" /><span>{{ configured ? "向 AI 提问" : "配置模型后开始对话" }}</span>
         </div>
@@ -837,7 +865,8 @@ function retryMessageHasAnnotation(messageId) {
                 :class="{ streaming: part.state === 'streaming' }"
               >
                 <summary><LoaderCircle v-if="part.state === 'streaming'" class="spin" :size="13" /><span>{{ part.state === "streaming" ? "思考中" : "思考过程" }}</span></summary>
-                <p>{{ part.text }}</p>
+                <div class="markdown-body agent-reasoning-content" v-html="renderMarkdown(part.text)" />
+                <button type="button" class="reasoning-collapse" aria-label="收起思考过程" @click="$event.currentTarget.closest('details').open = false">收起思考过程</button>
               </details>
               <p v-else-if="part.type === 'text' && part.text && message.role === 'user'">{{ part.text }}</p>
               <div
@@ -871,6 +900,7 @@ function retryMessageHasAnnotation(messageId) {
                 v-else-if="part.type.startsWith('tool-read_skill_resource_')"
                 :part="{ ...part }"
                 :duration="toolDurationText(part, messageRun(message))"
+                :run-status="messageRun(message)?.status || ''"
               />
               <details
                 v-else-if="part.type.startsWith('tool-')"
@@ -888,10 +918,18 @@ function retryMessageHasAnnotation(messageId) {
                 </summary>
                 <p v-if="toolParamSummary(part)" class="agent-tool-line">{{ toolParamSummary(part) }}</p>
                 <p
-                  v-if="toolResultSummary(part)"
+                  v-if="toolResultSummary(part, messageRun(message))"
                   class="agent-tool-line"
-                  :role="part.state === 'output-error' ? 'alert' : undefined"
-                >{{ toolResultSummary(part) }}</p>
+                  :role="['output-error', 'output-denied'].includes(part.state) ? 'alert' : undefined"
+                >{{ toolResultSummary(part, messageRun(message)) }}</p>
+                <details
+                  v-if="toolDiagnosticText(part)"
+                  class="agent-tool-log"
+                  data-testid="agent-tool-log"
+                >
+                  <summary>技术日志</summary>
+                  <pre>{{ toolDiagnosticText(part) }}</pre>
+                </details>
                 <div v-if="sourcesOf(part).length" class="agent-sources" data-testid="agent-sources">
                   <div v-for="source in sourcesOf(part)" :key="sourceRefId(source)" class="agent-source-item" data-testid="agent-source" :data-source-ref="sourceRefId(source)" :data-source-state="sourceState(source).state">
                     <a
@@ -1008,7 +1046,7 @@ function retryMessageHasAnnotation(messageId) {
         />
         <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
-      <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
+      <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest()"><ChevronDown :size="14" />最新消息</button>
       <AgentComposer
         ref="composer"
         :case-id="caseRecord.id"

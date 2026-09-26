@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pydantic_ai.capabilities import Capability
-from pydantic_ai.exceptions import ModelRetry
+from pydantic_ai.exceptions import ModelRetry, ToolFailed
 from pydantic_ai.tools import RunContext, Tool
 
 from app.modules.agent import artifacts, writes
@@ -75,7 +75,8 @@ async def propose_revision(
     require_revision_reason(reason)
     if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
         raise ModelRetry("批注讨论本轮只能提议一条选区修订")
-    if any(start < item.target.to_pos and item.target.from_pos < end
+    if any((start < item.target.to_pos and item.target.from_pos < end)
+           or start == end == item.target.from_pos == item.target.to_pos
            for item in ctx.deps.proposed_artifacts):
         raise ModelRetry(
             "本轮已有与该位置重叠的修订建议。不要再次为该目标调用 propose_revision，"
@@ -88,6 +89,8 @@ async def propose_revision(
     try:
         artifact = _propose(ctx, start, end, replacement, reason)
     except CaseError as error:
+        if error.status_code in (403, 404, 409):
+            raise ToolFailed(str(error.detail)) from error
         raise ModelRetry(str(error.detail)) from error
     ctx.deps.proposed_artifacts.append(artifact)
     return _artifact_view(artifact)

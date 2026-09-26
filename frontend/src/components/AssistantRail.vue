@@ -1,12 +1,11 @@
 <script setup>
 import {
-  ChevronDown, ChevronUp, History, MessageCircle, Paperclip,
+  ChevronDown, ChevronUp, History, Paperclip,
   PanelRightClose, PanelRightOpen, Sparkles,
 } from "@lucide/vue";
 import { ref } from "vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
-import CommentPanel from "./CommentPanel.vue";
 import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
 
@@ -42,15 +41,20 @@ const emit = defineEmits(["prompt-inserted", "select-annotation",
 const tabs = [
   { id: "ai", label: "AI", icon: Sparkles },
   { id: "history", label: "历史版本", icon: History },
-  { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
 const panelCollapsed = ref(false);
 
 function select(tab) {
-  const closedMobileDrawer = !props.open
-    && window.matchMedia?.("(max-width: 800px)").matches;
-  panelCollapsed.value = !closedMobileDrawer && props.active === tab && !panelCollapsed.value;
+  if (window.matchMedia?.("(max-width: 800px)").matches) {
+    panelCollapsed.value = false;
+    if (props.open && props.active === tab) {
+      emit("toggle");
+      return;
+    }
+  } else {
+    panelCollapsed.value = props.active === tab && !panelCollapsed.value;
+  }
   emit("select", tab);
 }
 
@@ -87,7 +91,7 @@ defineExpose({ expandPanel });
         :title="tab.label"
         :aria-label="tab.label"
         :aria-pressed="active === tab.id"
-        v-show="(tab.id !== 'history' || historyAvailable) && (!readOnly || tab.id !== 'comments')"
+        v-show="tab.id !== 'history' || historyAvailable"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
@@ -124,18 +128,6 @@ defineExpose({ expandPanel });
     <div v-if="!historical && readOnly && !user && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
     </div>
-    <CommentPanel
-      v-if="!readOnly && active === 'comments'"
-      :case-record="caseRecord"
-      :user="user"
-      :annotation-refresh-token="annotationRefreshToken"
-      @annotations="emit('annotations', $event)"
-      @ask-ai="emit('ask-ai', $event)"
-      @select-annotation="emit('select-annotation', $event)"
-      @case-revised="emit('case-revised', $event)"
-      @clear-writing-context="emit('clear-writing-context')"
-    />
-
     <div v-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
       <PublicSourceList
         :sources="sources"

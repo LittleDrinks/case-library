@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 
 const PUBLISHED_TAGS = ["科学家精神", "爱国主义教育", "文化自信", "大思政课建设"];
@@ -118,7 +119,7 @@ async function reopenAndSaveTags(page, caseId, marker) {
   await page.goto(`/#/workbench/${caseId}`);
   await page.getByRole("button", { name: "另开新稿" }).click();
   await expect(page.locator("textarea.document-title")).not.toHaveAttribute("readonly");
-  await page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true }).click();
+  await openAiTab(page);
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(645);
   const saveDone = page.waitForResponse(
@@ -248,7 +249,7 @@ test("工作台标签弹层在窄桌面视口内完整可点并可滚到末项",
     await page.setViewportSize({ width, height: 844 });
     await page.reload();
     await expect(page.locator("textarea.document-title")).toBeVisible();
-    await page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true }).click();
+    await openAiTab(page);
     await expect(page.locator(".canvas-workspace")).toHaveClass(/outline-collapsed/);
 
     const trigger = page.getByRole("button", { name: "设置标签", exact: true });
@@ -327,7 +328,7 @@ test("工作台标签弹层在窄桌面视口内完整可点并可滚到末项",
     await expect(trigger).toBeFocused();
     await trigger.click();
     await expect(popover).toBeVisible();
-    const aiTrigger = page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true });
+    const aiTrigger = page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true });
     await aiTrigger.click();
     await expect(popover).toBeHidden();
     await expect(aiTrigger).toBeFocused();

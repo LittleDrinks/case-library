@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   artifactStatus, durationText, elapsedBetween, sourceHref, sourceRefId,
   toolParamSummary, toolResultSummary, toolRunning, toolState,
+  toolDiagnosticText,
 } from "./agentTimeline.js";
 
 describe("tool running states", () => {
@@ -15,9 +16,16 @@ describe("tool running states", () => {
   it("maps terminal states to readable labels including failures", () => {
     expect(toolState({ state: "input-available" })).toBe("进行中");
     expect(toolState({ state: "output-available", output: { status: "ok" } })).toBe("已完成");
+    expect(toolState({
+      type: "tool-write_document", state: "output-available", output: { status: "written" },
+    })).toBe("已写入");
     expect(toolState({ state: "output-available", output: { status: "no_access" } })).toBe("当前身份无权限读取");
-    expect(toolState({ state: "output-error", errorText: "连接中断" })).toBe("连接中断");
-    expect(toolState({ state: "output-error" })).toBe("执行失败");
+    expect(toolState({ state: "output-available", output: { status: "future_status" } }))
+      .toBe("结果状态未知");
+    expect(toolState({ state: "output-error", errorText: "连接中断" })).toBe("未完成");
+    expect(toolState({ state: "output-error" })).toBe("未完成");
+    expect(toolRunning({ state: "output-denied" })).toBe(false);
+    expect(toolState({ state: "output-denied" })).toBe("已拒绝");
   });
 });
 
@@ -58,6 +66,52 @@ describe("tool result summaries", () => {
   it("points at the pending decision without leaking payloads", () => {
     expect(toolResultSummary({ type: "tool-propose_revision", state: "output-available", output: { artifactId: "a-1" } }))
       .toBe("已创建修订候选，等待决定");
+  });
+
+  it("presents tool error text and follows the run status", () => {
+    const failedRevision = {
+      type: "tool-propose_revision", state: "output-error",
+      errorText: "同一轮的多个修订目标不能重叠\n\nFix the errors and try again.",
+    };
+    const errorText = failedRevision.errorText;
+
+    expect(toolResultSummary(failedRevision, { status: "active" }))
+      .toBe(`${errorText}\n本轮仍在处理中，请等待后续结果。`);
+    expect(toolResultSummary(failedRevision, { status: "failed" }))
+      .toBe(`${errorText}\n本轮已失败，可重试这条消息。`);
+    expect(toolResultSummary(failedRevision, { status: "cancelled" }))
+      .toBe(`${errorText}\n本轮已取消，需要时可重新发送请求。`);
+    expect(toolResultSummary(failedRevision, { status: "completed" }))
+      .toBe(`${errorText}\n本轮已结束，可重试这条消息。`);
+    expect(toolDiagnosticText(failedRevision)).toBe(errorText);
+    expect(toolResultSummary({
+      type: "tool-search_corpus", state: "output-available",
+      output: { status: "future_status" },
+    })).toBe("工具返回了无法识别的结果状态");
+  });
+
+  it("shows the missing-reason tool error without asking the user to repair tool arguments", () => {
+    const errorText = "修订必须给出具体修改理由，且不能为空白\n\nFix the errors and try again.";
+    const failedRevision = {
+      type: "tool-propose_revision", state: "output-error", errorText,
+    };
+    const summary = toolResultSummary(failedRevision, { status: "completed" });
+
+    expect(summary).toBe(`${errorText}\n本轮已结束，可重试这条消息。`);
+    expect(summary).not.toContain("请补充具体修改理由");
+    expect(toolDiagnosticText(failedRevision)).toBe(errorText);
+  });
+
+  it("explains denied tool calls as unexecuted actions", () => {
+    expect(toolResultSummary({ type: "tool-search_corpus", state: "output-denied" }))
+      .toBe("这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。");
+  });
+
+  it("explains structured source access failures with an alternative", () => {
+    expect(toolResultSummary({
+      type: "tool-read_source", state: "output-available",
+      output: { status: "no_access", detail: "来源当前不可读" },
+    })).toBe("当前身份无权读取此来源（来源当前不可读）。请改用其他可访问来源后继续。");
   });
 });
 

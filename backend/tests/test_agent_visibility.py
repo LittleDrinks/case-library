@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 from pydantic_ai.models.function import (
     DeltaThinkingPart,
@@ -380,3 +382,67 @@ def test_parts_projector_reverifies_permissions_per_call(client: TestClient) -> 
     _revoke_source(database)
     assert project(parts)[1]["text"] == HIDDEN_ANSWER
     assert project(parts)[0]["output"]["status"] == "no_access"
+
+
+@pytest.mark.parametrize("revoke_after_first_batch", [False, True])
+def test_active_recovery_does_not_replay_revoked_source_chunks(client: TestClient, revoke_after_first_batch: bool) -> None:
+    import asyncio
+    from threading import Event
+    from test_agent_runs_lifecycle import (
+        _asgi_scope, _login_cookie, _post_async, _spawn_disconnected_app, _stop_loop,
+    )
+
+    database = client.app.state.database
+    _seed_source(database)
+    auth = _login_cookie(client)
+    thread_id = _thread(client, "c-draft-1")
+    reached, release, disconnect = Event(), Event(), Event()
+
+    async def answer(messages, _info):
+        if "read_source" not in _tool_names(messages):
+            yield _tool_delta("read_source", {"source_type": "case", "source_id": "src-22"}, "active-read")
+            return
+        for _ in range(225):
+            yield LEAK_MARK
+        reached.set()
+        await asyncio.to_thread(release.wait, 10)
+        yield LEAK_MARK + "，结束"
+
+    model = FunctionModel(stream_function=answer)
+    pending, _, pool = _post_async(client.app, "读取后刷新", model)
+    chunks = []
+    try:
+        assert reached.wait(5)
+        assert _snapshot(client, thread_id)["activeRun"]
+        scope = _asgi_scope({"Cookie": auth["cookie"]}, thread_id)
+        scope.update(method="GET", path=f"/api/cases/c-draft-1/agent/thread/{thread_id}/events")
+
+        async def receive_chunk(message):
+            raw = message.get("body", b"").decode()
+            if raw:
+                chunks.append(raw)
+                if revoke_after_first_batch and len(chunks) == 1:
+                    _revoke_source(database)
+                release.set()
+
+        _, reading, loop = _spawn_disconnected_app(
+            client.app, scope, b"", model, disconnect, receive_chunk, {},
+        )
+        try:
+            reading.result(timeout=10)
+            if revoke_after_first_batch:
+                assert any(LEAK_MARK in chunk for chunk in chunks[:1])
+                result = "".join(chunks[1:])
+                assert LEAK_MARK not in result
+                assert HIDDEN_ANSWER in result
+            else:
+                result = "".join(chunks)
+                assert LEAK_MARK in result
+                assert HIDDEN_ANSWER not in result
+        finally:
+            disconnect.set()
+            _stop_loop(loop, reading)
+    finally:
+        release.set()
+        pending.result(timeout=10)
+        pool.shutdown()

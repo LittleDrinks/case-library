@@ -250,11 +250,25 @@ def _map_revision_targets(row: dict, anchor: dict, case_revision: int) -> list[d
     ]
 
 
+def _mapped_revision_target(document, target, mapping):
+    start, end = target["from"], target["to"]
+    if start != end:
+        return _mapped_anchor(document, target, mapping)
+    left, right = mapping.map_result(start, 1), mapping.map_result(end, -1)
+    if left.deleted or right.deleted or left.pos != right.pos:
+        return CHANGED_ANCHOR, None
+    try:
+        prosemirror.check_target(document, left.pos, right.pos, target["quote"])
+    except (prosemirror.ParagraphNotFoundError, prosemirror.ParagraphChangedError):
+        return CHANGED_ANCHOR, None
+    return ACTIVE_ANCHOR, {"from": left.pos, "to": right.pos}
+
+
 def _reconcile_unresolved_artifact(
     database, row: dict, document: dict, mapping, revision: int, session
 ) -> None:
     status = row["status"]
-    state, anchor = _mapped_anchor(document, row["target"], mapping)
+    state, anchor = _mapped_revision_target(document, row["target"], mapping)
     if state == ACTIVE_ANCHOR and anchor:
         target = {"from": anchor["from"], "to": anchor["to"], "quote": row["target"]["quote"]}
         database.agent_artifacts.update_one(

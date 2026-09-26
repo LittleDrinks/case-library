@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { openCatalogFirstScreen } from "./catalog-ready.js";
 
@@ -93,7 +94,7 @@ test("管理员从管理后台发现待审案例并进入审核工作台", async
   const row = page.getByRole("article", { name: `待审核：${PENDING_CASE}` });
   await row.getByRole("link", { name: "审核", exact: true }).click();
   await expect(page).toHaveURL(/#\/admin\/review\/c-pending-1$/);
-  await expect(page.locator(".workspace-crumb")).toContainText("审核管理");
+  await expect(page.locator(".workbench-brand-link")).toContainText("思政教学案例库 · 审核");
 });
 
 test("教师从我的案例新建默认案例并进入作者工作台", async ({ page }) => {
@@ -163,12 +164,12 @@ test("匿名用户从公开案例卡进入独立只读详情", async ({ page }) 
   await expect(page.locator(".workspace-header")).toBeVisible();
   await expect(page.locator(".case-status")).toContainText("只读");
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
+  await openAiTab(page);
   await expect(page.getByRole("link", { name: "登录后讨论本案例" })).toBeVisible();
   await expect(page.getByRole("button", { name: "导出 DOCX" })).toBeVisible();
   await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "辅助面板" })).toBeVisible();
-  await page.locator(".workspace-actions").getByRole("button", { name: "附件" }).click();
+  await page.locator(".assistant-tabs").getByRole("button", { name: "附件" }).click();
   await expect(page.getByRole("heading", { name: "来源", exact: true })).toBeVisible();
 });
 

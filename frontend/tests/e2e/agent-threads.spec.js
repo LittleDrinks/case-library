@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 
 const ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
@@ -45,8 +46,8 @@ async function configureChat(page) {
 async function openChat(page, caseId) {
   await page.goto(`/#/workbench/${caseId}`);
   await expect(page.getByLabel("案例标题")).toBeVisible();
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  await openAiTab(page);
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 

@@ -194,6 +194,7 @@ async function pickSourceInPopover(wrapper) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = "";
 });
 
@@ -1194,7 +1195,45 @@ it("shows tool failures and keeps source cards on stable in-site ids", async () 
 
   await vi.waitFor(() => expectSourceCards(wrapper));
   const failed = wrapper.get('[data-testid="agent-source-read"]');
-  expect(failed.text()).toContain("阅读来源 · 读取失败");
+  expect(failed.text()).toContain("阅读来源 · 未完成");
+  expect(failed.find('[data-testid="agent-tool-log"] pre').text()).toBe("读取失败");
+});
+
+it("separates a completed run from a failed tool and preserves its raw log", async () => {
+  const rawError = "标签不存在\n\nFix the errors and try again.";
+  const tracer = tracerSnapshot();
+  tracer.messages[1].parts = [{
+    type: "tool-search_corpus", toolCallId: "t-failed", state: "output-error",
+    input: { query: "科学家精神" }, errorText: rawError,
+  }];
+  api.agentThread.mockResolvedValue(structuredClone(tracer));
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="agent-run-status"]').text()).toContain("已完成");
+  const failed = wrapper.get('[data-testid="agent-tool-trace"]');
+  expect(failed.find("summary").text()).toContain("检索案例 · 未完成");
+  expect(failed.get('[role="alert"]').text())
+    .toBe(`${rawError}\n本轮已结束，可重试这条消息。`);
+  expect(failed.get('[data-testid="agent-tool-log"] pre').text()).toBe(rawError);
+});
+
+it("renders the validated selection snapshot from a reloaded message", async () => {
+  const restored = structuredClone(snapshot);
+  restored.messages = [{
+    id: "user-selected", role: "user", metadata: {}, parts: [
+      { type: "text", text: "请处理选区" },
+      { type: "data-selection", data: {
+        from: 7, to: 15, quote: "第二段需要修订。",
+      } },
+    ],
+  }];
+  api.agentThread.mockResolvedValue(restored);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  expect(wrapper.get('[data-testid="message-selection"]').text())
+    .toBe("正文选区：第二段需要修订。");
 });
 
 it("blocks an old source link when the current unified entry is restricted", async () => {
@@ -1311,12 +1350,227 @@ it("renders persisted tool duration by tool call id", async () => {
 
 it("shows real finished-run duration from backend timestamps", async () => {
   const tracer = tracerSnapshot();
-  tracer.latestRun = { id: "run-1", status: "completed", startedAt: "2026-09-07T10:00:00Z", finishedAt: "2026-09-07T10:00:03.5Z" };
+  tracer.latestRun = {
+    id: "run-1", status: "completed", userMessageId: "message-user",
+    assistantMessageId: "message-assistant", startedAt: "2026-09-07T10:00:00Z",
+    finishedAt: "2026-09-07T10:00:03.5Z",
+  };
   api.agentThread.mockResolvedValue(structuredClone(tracer));
   const wrapper = mountPanel();
   await flushPromises();
 
   expect(wrapper.get(".ai-status").text()).toContain("耗时 3.5s");
+});
+
+it("tracks the current streamed run and freezes its server duration when it ends", async () => {
+  vi.useFakeTimers();
+  const startedAt = "2026-09-26T01:00:00.000Z";
+  vi.setSystemTime(new Date(startedAt));
+  const previousRun = {
+    id: "run-previous", status: "completed", userMessageId: "user-previous",
+    assistantMessageId: "assistant-previous", startedAt: "2026-09-26T00:59:00.000Z",
+    finishedAt: "2026-09-26T00:59:10.000Z",
+  };
+  const activeRun = {
+    id: "run-current", status: "active", userMessageId: "user-current",
+    assistantMessageId: "assistant-current", startedAt,
+  };
+  const finishedRun = {
+    ...activeRun, status: "completed", finishedAt: "2026-09-26T01:00:01.200Z",
+  };
+  let snapshotReads = 0;
+  let clientRequestId;
+  let streamFinished = false;
+  let finishPost;
+  let wrapper;
+  api.agentThread.mockImplementation(() => {
+    snapshotReads += 1;
+    if (snapshotReads === 1) {
+      return Promise.resolve({
+        ...structuredClone(snapshot), latestRun: previousRun, runs: [previousRun],
+      });
+    }
+    if (!streamFinished) {
+      clientRequestId = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).id;
+      const run = { ...activeRun, clientRequestId };
+      return Promise.resolve({
+        ...structuredClone(snapshot),
+        messages: [{
+          id: "user-current", runId: run.id, role: "user", metadata: {},
+          parts: [{ type: "text", text: "本轮问题" }],
+        }],
+        activeRun: run,
+        latestRun: previousRun,
+        runs: [previousRun, run],
+      });
+    }
+    const run = { ...finishedRun, clientRequestId };
+    return Promise.resolve({
+      ...structuredClone(snapshot),
+      messages: [{
+        id: "user-current", runId: run.id, role: "user", metadata: {},
+        parts: [{ type: "text", text: "本轮问题" }],
+      }],
+      latestRun: run,
+      runs: [previousRun, run],
+    });
+  });
+  vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { finishPost = resolve; })));
+
+  try {
+    wrapper = mountPanel();
+    await flushPromises();
+    await wrapper.get('[aria-label="向 AI 提问"]').setValue("本轮问题");
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(wrapper.get(".ai-status").text()).not.toContain("耗时 10.0s");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="agent-run-status"]').attributes("data-run-id"))
+      .toBe("run-current");
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 0.5s");
+
+    await vi.advanceTimersByTimeAsync(700);
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+
+    streamFinished = true;
+    finishPost(answerResponse());
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+    expect(wrapper.get(".ai-status").text()).not.toContain("正在生成");
+  } finally {
+    wrapper?.unmount();
+  }
+});
+
+it("does not let an in-flight poll overwrite the run's terminal snapshot", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-26T01:00:00.000Z"));
+  const startedAt = "2026-09-26T01:00:00.000Z";
+  const activeRun = {
+    id: "run-current", status: "active", userMessageId: "user-current",
+    assistantMessageId: "assistant-current", startedAt,
+  };
+  const completedRun = {
+    ...activeRun, status: "completed", finishedAt: "2026-09-26T01:00:01.200Z",
+  };
+  let reads = 0;
+  let clientRequestId;
+  let releasePoll;
+  let finishPost;
+  let wrapper;
+  const fetch = vi.fn(() => new Promise((resolve) => { finishPost = resolve; }));
+  api.agentThread.mockImplementation(() => {
+    reads += 1;
+    if (reads === 1) return Promise.resolve(structuredClone(snapshot));
+    if (reads === 2) {
+      clientRequestId = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).id;
+      const staleRun = { ...activeRun, clientRequestId };
+      return new Promise((resolve) => {
+        releasePoll = () => resolve({
+          ...structuredClone(snapshot),
+          messages: [{
+            id: "user-current", runId: staleRun.id, role: "user", metadata: {},
+            parts: [{ type: "text", text: "本轮问题" }],
+          }],
+          activeRun: staleRun, latestRun: null, runs: [staleRun],
+        });
+      });
+    }
+    const run = { ...completedRun, clientRequestId };
+    return Promise.resolve({
+      ...structuredClone(snapshot),
+      messages: [{
+        id: "user-current", runId: run.id, role: "user", metadata: {},
+        parts: [{ type: "text", text: "本轮问题" }],
+      }],
+      latestRun: run, runs: [run],
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  try {
+    wrapper = mountPanel();
+    await flushPromises();
+    await wrapper.get('[aria-label="向 AI 提问"]').setValue("本轮问题");
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(releasePoll).toBeTypeOf("function");
+
+    finishPost(answerResponse());
+    await flushPromises();
+    expect(reads).toBe(3);
+    expect(wrapper.get('[data-run-status]').attributes("data-run-status")).toBe("completed");
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+
+    releasePoll();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.get('[data-run-status]').attributes("data-run-status")).toBe("completed");
+    expect(wrapper.get(".ai-status").text()).toContain("耗时 1.2s");
+    expect(wrapper.find('[data-testid="agent-stop"]').exists()).toBe(false);
+  } finally {
+    finishPost?.(answerResponse());
+    wrapper?.unmount();
+  }
+});
+
+it("discards an in-flight run snapshot after switching threads", async () => {
+  vi.useFakeTimers();
+  const otherThread = emptyThread("thread-2");
+  otherThread.messages = [{
+    id: "other-message", role: "user", metadata: {},
+    parts: [{ type: "text", text: "第二对话消息" }],
+  }];
+  let snapshotReads = 0;
+  let releaseSnapshot;
+  let finishPost;
+  let wrapper;
+  api.agentThreads.mockResolvedValue([{ id: "thread-2", title: "第二对话" }]);
+  api.agentThread.mockImplementation((_, threadId) => {
+    if (threadId === "thread-2") return Promise.resolve(otherThread);
+    snapshotReads += 1;
+    if (snapshotReads === 1) return Promise.resolve(structuredClone(snapshot));
+    return new Promise((resolve) => { releaseSnapshot = resolve; });
+  });
+  vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { finishPost = resolve; })));
+
+  try {
+    wrapper = mountPanel();
+    await flushPromises();
+    await wrapper.get('[aria-label="向 AI 提问"]').setValue("旧线程本轮问题");
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(snapshotReads).toBe(2);
+    expect(releaseSnapshot).toBeTypeOf("function");
+
+    await openOtherThread(wrapper);
+    releaseSnapshot({
+      ...structuredClone(snapshot),
+      messages: [{
+        id: "stale-user", role: "user", metadata: {},
+        parts: [{ type: "text", text: "旧线程本轮问题" }],
+      }],
+      activeRun: { id: "stale-run", status: "active" },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("第二对话消息");
+    expect(wrapper.text()).not.toContain("旧线程本轮问题");
+    finishPost(answerResponse());
+    await flushPromises();
+  } finally {
+    finishPost?.(answerResponse());
+    wrapper?.unmount();
+  }
 });
 
 it("shows a cancelled run as an actionable error without fake completion", async () => {
@@ -1433,7 +1687,50 @@ it("renders failed resource reads from the UI tool protocol", async () => {
   api.agentThread.mockResolvedValue(failed);
   const wrapper = mountPanel();
   await flushPromises();
-  expect(wrapper.get('[data-testid="agent-skill-resource-error"]').text()).toContain("资源不存在");
+  const trace = wrapper.get('[data-testid="agent-skill-resource-error"]');
+  expect(trace.get('[role="alert"]').text())
+    .toBe("资源不存在：references/missing.md\n本轮已结束，可重试这条消息。");
+  expect(trace.get('[data-testid="agent-tool-log"] pre').text())
+    .toBe("资源不存在：references/missing.md");
+});
+
+it("renders denied tool calls as unexecuted and preserves the denial reason", async () => {
+  const denied = tracerSnapshot();
+  denied.messages[1].parts = [{
+    type: "tool-search_corpus", toolCallId: "t-denied", state: "output-denied",
+    input: { query: "科学家精神" },
+    approval: { id: "approval-1", approved: false, reason: "Tool call execution denied." },
+  }];
+  api.agentThread.mockResolvedValue(denied);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const trace = wrapper.get('[data-testid="agent-tool-trace"]');
+  expect(trace.get("summary").text()).toContain("检索案例 · 已拒绝");
+  expect(trace.get("summary").find("svg").exists()).toBe(false);
+  expect(trace.get('[role="alert"]').text())
+    .toBe("这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。");
+  expect(trace.get('[data-testid="agent-tool-log"] pre').text())
+    .toBe("Tool call execution denied.");
+});
+
+it("renders denied resource reads with a readable status and preserved reason", async () => {
+  const denied = tracerSnapshot();
+  denied.messages[1].parts = [{
+    type: "tool-read_skill_resource_skill_pub", toolCallId: "t-denied-resource",
+    state: "output-denied", input: { path: "references/hidden.md" },
+    approval: { id: "approval-2", approved: false, reason: "Tool call execution denied." },
+  }];
+  api.agentThread.mockResolvedValue(denied);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  const trace = wrapper.get('[data-testid="agent-skill-resource-error"]');
+  expect(trace.get("summary").text()).toContain("读取资源已拒绝");
+  expect(trace.get('[role="alert"]').text())
+    .toBe("这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。");
+  expect(trace.get('[data-testid="agent-tool-log"] pre').text())
+    .toBe("Tool call execution denied.");
 });
 function resourceFeed() {
   let controller;
@@ -1579,4 +1876,125 @@ it("keeps user messages as plain preformatted text", async () => {
   expect(user.find("h1").exists()).toBe(false);
   expect(user.get("p").text()).toBe("# 生成案例\n带 换行");
   expect(wrapper.get('[data-testid="agent-answer"]').text()).toContain("确定回答");
+});
+
+it("renders thinking Markdown with a directly reachable collapse control", async () => {
+  const result = structuredClone(snapshot);
+  result.messages[0].parts = [{ type: "reasoning", text: "**关键判断**\n\n- 第一项\n- 第二项", state: "done" }];
+  api.agentThread.mockResolvedValue(result);
+  const wrapper = mountPanel();
+  await flushPromises();
+  const thinking = wrapper.get('.agent-reasoning');
+  thinking.element.open = true;
+  await thinking.trigger('toggle');
+  expect(thinking.find('strong').text()).toBe('关键判断');
+  expect(thinking.findAll('li')).toHaveLength(2);
+  await thinking.get('button[aria-label="收起思考过程"]').trigger('click');
+  expect(thinking.element.open).toBe(false);
+  wrapper.unmount();
+});
+
+it("restores complete messages including reasoning and tool errors from the recovery stream", async () => {
+  const running = structuredClone(snapshot);
+  running.activeRun = { id: "run-recover", status: "active" };
+  running.latestRun = running.activeRun;
+  api.agentThread.mockResolvedValue(running);
+  const message = { id: "recovered-answer", role: "assistant", runId: "run-recover", parts: [
+    { type: "reasoning", text: "**恢复的判断**", state: "done" },
+    { type: "tool-read_source", toolCallId: "failed-read", state: "output-error",
+      input: { source_id: "missing" }, errorText: "来源已不可读" },
+    { type: "text", text: "保留的部分回答", state: "done" },
+  ] };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([
+    `data: ${JSON.stringify({ type: "data-agent-message", data: message, transient: true })}\n\n`,
+    'data: {"type":"finish","finishReason":"stop"}\n\n',
+    'data: [DONE]\n\n',
+  ])));
+  const wrapper = mountPanel();
+  await vi.waitFor(() => expect(wrapper.text()).toContain("保留的部分回答"));
+  expect(wrapper.get(".agent-reasoning strong").text()).toBe("恢复的判断");
+  expect(wrapper.text()).toContain("来源已不可读");
+  expect(wrapper.text()).not.toContain("正在恢复连接");
+});
+
+it("keeps an expanded source readable while later answer tokens arrive", async () => {
+  const feed = resourceFeed();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(feed.response));
+  api.getCase.mockResolvedValueOnce({ id: "c-42", title: "来源标题", summary: "来源摘要", contentAvailable: true });
+  const wrapper = mountPanel();
+  await flushPromises();
+  await sendComposerMessage(wrapper, "检索并回答");
+  feed.send({ type: "start", messageId: "live-sources" });
+  feed.send({ type: "tool-input-available", toolCallId: "search-1", toolName: "search_corpus", input: { query: "科学家" } });
+  feed.send({ type: "tool-output-available", toolCallId: "search-1", output: { sources: [{ kind: "case", id: "c-42", title: "来源标题" }] } });
+  await vi.waitFor(() => expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("来源摘要"));
+  const trace = wrapper.get('.agent-tool-trace');
+  trace.element.open = true;
+  await trace.trigger('toggle');
+  api.getCase.mockImplementation(() => new Promise(() => {}));
+  feed.send({ type: "text-start", id: "answer" });
+  feed.send({ type: "text-delta", id: "answer", delta: "根据资料" });
+  await flushPromises();
+  expect(wrapper.get('[data-testid="agent-source"]').text()).toContain("来源摘要");
+  expect(trace.element.open).toBe(true);
+  feed.send({ type: "text-end", id: "answer" });
+  feed.send({ type: "finish", finishReason: "stop" });
+  feed.close();
+  await flushPromises();
+  wrapper.unmount();
+});
+
+it("does not pull the reader to the bottom after opening thinking during streaming", async () => {
+  const feed = resourceFeed();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(feed.response));
+  const wrapper = mountPanel(); await flushPromises();
+  await sendComposerMessage(wrapper, "解释一下");
+  feed.send({ type: "start", messageId: "thinking-live" });
+  feed.send({ type: "reasoning-start", id: "reason" });
+  feed.send({ type: "reasoning-delta", id: "reason", delta: "正在分析" });
+  await flushPromises();
+  const area = wrapper.get('.ai-conversation');
+  Object.defineProperties(area.element, { scrollHeight: { configurable: true, value: 2000 }, clientHeight: { configurable: true, value: 500 } });
+  area.element.scrollTop = 1500;
+  await area.trigger('scroll');
+  await wrapper.get('.agent-reasoning summary').trigger('click');
+  feed.send({ type: "reasoning-delta", id: "reason", delta: "，继续分析" });
+  await flushPromises();
+  expect(area.element.scrollTop).toBe(1500);
+  feed.send({ type: "reasoning-end", id: "reason" });
+  feed.send({ type: "finish", finishReason: "stop" }); feed.close();
+  await flushPromises(); wrapper.unmount();
+});
+
+it("continues the same reply during recovery and keeps one message at completion", async () => {
+  const feed = resourceFeed();
+  const running = structuredClone(snapshot);
+  running.messages = [];
+  running.activeRun = { id: "run-resume", status: "active" };
+  running.latestRun = running.activeRun;
+  api.agentThread.mockResolvedValue(running);
+  const fetch = vi.fn().mockResolvedValue(feed.response);
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+  feed.send({ type: "start", messageId: "reply-resume" });
+  feed.send({ type: "text-start", id: "text-resume" });
+  feed.send({ type: "text-delta", id: "text-resume", delta: "前半" });
+  await vi.waitFor(() => expect(wrapper.text()).toContain("前半"));
+  expect(fetch.mock.calls[0][0]).toContain("/events?");
+  feed.send({ type: "text-delta", id: "text-resume", delta: "后半" });
+  await vi.waitFor(() => expect(wrapper.text()).toContain("前半后半"));
+  feed.send({ type: "text-end", id: "text-resume" });
+  const complete = { id: "reply-resume", role: "assistant", runId: "run-resume", parts: [
+    { type: "text", text: "前半后半", state: "done" },
+  ] };
+  feed.send({ type: "data-agent-message", transient: true, data: complete });
+  feed.send({ type: "finish", finishReason: "stop" });
+  api.agentThread.mockResolvedValue({ ...running, activeRun: null,
+    latestRun: { id: "run-resume", status: "completed" }, messages: [complete] });
+  feed.close();
+  await vi.waitFor(() => expect(wrapper.text()).not.toContain("正在恢复连接"));
+  expect(wrapper.text().match(/前半后半/g)).toHaveLength(1);
+  expect(fetch.mock.calls).toHaveLength(1);
+  wrapper.unmount();
 });

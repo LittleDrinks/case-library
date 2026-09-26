@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 
 const QUESTION = "资料区验收：请依据已选资料回答。";
@@ -28,7 +29,7 @@ async function configureProviderChat(page) {
 }
 
 async function openChat(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI", exact: true }).click();
+  await openAiTab(page);
   await expect(page.locator(".agent-chat-panel")).toBeVisible();
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }

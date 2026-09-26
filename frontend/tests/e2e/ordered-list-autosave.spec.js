@@ -164,7 +164,7 @@ test("历史编号列表可复制粘贴、自动保存并刷新保留起点和�
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseOrigin });
   await expect(page.getByLabel("案例标题")).toHaveValue("当前教师稿标题");
 
-  await page.getByRole("button", { name: "版本历史" }).click();
+  await page.getByRole("button", { name: "历史版本" }).click();
   await page.getByRole("button", { name: "查看历史版本 v1 · 编号列表历史稿" }).click();
   await expect(page.locator(".version-paper .canvas-editor ol[start='3'] ol[start='6']"))
     .toHaveCount(1);

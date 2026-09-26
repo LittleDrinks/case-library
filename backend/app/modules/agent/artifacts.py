@@ -111,7 +111,7 @@ def _revision_target(database, run_id, case: dict, start: int, end: int) -> Arti
         quote = prosemirror.text_between(case["document"], start, end)
     except (ParagraphChangedError, ParagraphNotFoundError) as error:
         raise CaseError(422, "修订目标必须位于当前正文的同一段落") from error
-    if not quote.strip():
+    if start != end and not quote.strip():
         raise CaseError(422, "修订目标不能为空")
     return ArtifactTarget(from_pos=start, to_pos=end, quote=quote)
 
@@ -213,12 +213,13 @@ def _decide_annotation_revision(database, artifact, user, decision, session) -> 
 
 def _decidable_run(database, artifact: AgentArtifact, decision: ArtifactDecision,
                    session) -> None:
-    """运行终态前不接受决定；已取消/失败的提议不能被接受。"""
+    """终态后可决定已保存的独立修订；取消或未完成的正文路径不能被接受。"""
     run = database.agent_runs.find_one({"id": artifact.run_id}, session=session)
     status = (run or {}).get("status")
     if run is None or status == "active":
         raise CaseError(409, "修订候选所在运行尚未结束，暂不能决定")
-    if decision == "accepted" and status in ("cancelled", "failed"):
+    if decision == "accepted" and (status == "cancelled" or
+            status == "failed" and (artifact.kind != "range" or artifact.annotation_id)):
         raise CaseError(409, "运行已取消或失败，修订候选不能接受")
 
 

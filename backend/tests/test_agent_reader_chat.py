@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -169,7 +170,12 @@ def test_reader_chat_run_completes_and_resumes(client: TestClient) -> None:
     assert [item["role"] for item in snapshot["messages"]] == ["user", "assistant"]
     events = client.get(f"{THREAD_PATH}/{thread['id']}/events", params={"afterSeq": 0})
     assert events.status_code == 200
-    assert '"delta":"读者讨论回答"' in events.text
+    chunks = [json.loads(line[6:]) for line in events.text.splitlines()
+              if line.startswith("data: ") and line != "data: [DONE]"]
+    restored = [chunk["data"] for chunk in chunks if chunk["type"] == "data-agent-message"]
+    assert restored == [snapshot["messages"][1]]
+    assert any(part.get("text") == "读者讨论回答" for part in restored[0]["parts"])
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
 
 
 def test_reader_annotation_part_is_forbidden_on_published_view(client: TestClient) -> None:

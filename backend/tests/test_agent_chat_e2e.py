@@ -624,21 +624,27 @@ def test_agent_http_stop_race_cancellation_wins_before_stream_end():
             run = _await_active(database, thread_id)
             _assert_cancel_accepted(client, csrf, cancel_path)
             assert future.result(timeout=15).status_code == 200
-        _assert_stop_race_cancelled(database, thread_id, run["id"])
+        _assert_stop_race_cancelled(database, thread_id, run["id"], _thread(client, case["id"]))
     finally:
         _close(client, mongo=mongo)
 
 
-def _assert_stop_race_cancelled(database, thread_id: str, run_id: str) -> None:
+def _assert_stop_race_cancelled(database, thread_id: str, run_id: str, snapshot: dict) -> None:
     """取消竞态：token 先于流结束触发后，Run 终态封尾且不产生完成输出。"""
     terminal = _await_status(database, run_id, "cancelled")
     assert terminal["error"] == "运行已取消"
     events = _events(database, thread_id)
     assert events[-1]["type"] == "run.cancelled"
     assert not [event for event in events if event["type"] in {"run.completed", "run.failed"}]
-    assert database.agent_messages.count_documents(
-        {"threadId": thread_id, "role": "assistant"}
-    ) == 0
+    assert snapshot["latestRun"]["status"] == "cancelled"
+    partial = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+    assert len(partial) <= 1
+    assert len([event for event in events if event["type"] == "message.created"]) == 1 + len(partial)
+    for message in partial:
+        assert message["runId"] == run_id
+        assert not any(part.get("state") == "approval-requested" for part in message["parts"])
+    assert snapshot["artifacts"] == []
+    assert snapshot["writes"] == []
     _await_released(database, run_id)
 
 
@@ -665,7 +671,8 @@ def _assert_events_replay(client, path: str, snapshot: dict) -> None:
         if line.startswith("data: ") and line != "data: [DONE]"
     ]
     assistant_id = snapshot["latestRun"]["assistantMessageId"]
-    assert chunks[0] == {"type": "start", "messageId": assistant_id}
+    assistant = next(message for message in snapshot["messages"] if message["id"] == assistant_id)
+    assert chunks[0] == {"type": "data-agent-message", "data": assistant, "transient": True}
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
     assert replay.text.endswith("data: [DONE]\n\n")
     current = client.get(path, params={"afterSeq": snapshot["eventSeq"]})

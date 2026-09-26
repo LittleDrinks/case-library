@@ -41,6 +41,7 @@ _SCHEMA = Schema({
         },
     },
     "marks": {"bold": {}, "italic": {}, "strike": {},
+              "link": {"attrs": {"href": {"default": None}}},
               "citation": {
                   "attrs": {
                       "sourceType": {"validate": "string"},
@@ -150,12 +151,13 @@ def text_between(document: dict[str, Any], from_pos: int, to_pos: int) -> str:
 
 
 def selection_block(document: dict[str, Any], from_pos: int, to_pos: int) -> dict:
-    """Return the text block containing a non-empty range."""
-    if from_pos >= to_pos:
+    """Return the containing text block, including an empty block's insertion point."""
+    if from_pos > to_pos:
         raise ParagraphNotFoundError
     block = next(
         (row for row in text_blocks(document)
-         if row["start"] <= from_pos and to_pos <= row["end"]),
+         if row["start"] <= from_pos and to_pos <= row["end"]
+         and (from_pos < to_pos or row["start"] == row["end"])),
         None,
     )
     if block is None:

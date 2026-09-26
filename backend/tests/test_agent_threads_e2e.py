@@ -110,3 +110,60 @@ def test_two_threads_have_independent_monotonic_event_sequences() -> None:
         _assert_thread_event_order(database, second.id, second_run)
     finally:
         mongo.close()
+
+
+def test_failed_proposal_cannot_miss_a_concurrent_document_edit(monkeypatch) -> None:
+    from app.modules.agent.artifacts import decide_artifact
+    from app.modules.agent.models import AgentArtifact, ArtifactTarget
+    from app.modules.cases.service import CaseError, create_case, update_case
+
+    mongo, repository = _repository()
+    database = mongo.get_default_database()
+    _, owner_id = _scope()
+    user = {"id": owner_id, "role": "teacher"}
+    document = {"type": "doc", "content": [{"type": "paragraph"}, {"type": "paragraph"}]}
+    case = create_case(database, {"title": "候选并发保存", "document": document}, user)
+    thread = repository.default_thread(case["id"], owner_id)
+    assistant_id = new_id("message")
+    run = repository.start_run(thread, owner_id, [{"type": "text", "text": "补写首段"}], {}, assistant_id)
+    artifact = AgentArtifact(
+        id=new_id("artifact"), case_id=case["id"], thread_id=thread.id, run_id=run.id,
+        base_revision=case["revision"], target=ArtifactTarget(from_pos=1, to_pos=1, quote=""),
+        replacement="只能补在原来的首段", created_at=datetime.now(UTC),
+    )
+    assistant = AgentMessage(
+        id=assistant_id, thread_id=thread.id, run_id=run.id, role="assistant",
+        parts=[{"type": "text", "text": "已生成建议"}], created_at=datetime.now(UTC),
+    )
+    original = repository._persist_assistant
+    changed = False
+
+    def edit_after_snapshot(*args, **kwargs):
+        nonlocal changed
+        original(*args, **kwargs)
+        if changed:
+            return
+        changed = True
+        # 失败事务已经读取快照，另一个事务删除首段；第二个空段移到同一坐标。
+        update_case(database, case["id"], {
+            "revision": case["revision"],
+            "document": {"type": "doc", "content": [{"type": "paragraph"}]},
+            "steps": [{"stepType": "replace", "from": 0, "to": 2}],
+        }, user)
+
+    monkeypatch.setattr(repository, "_persist_assistant", edit_after_snapshot)
+    try:
+        assert repository.fail_run(run.id, assistant=assistant, artifacts=[artifact])
+        with pytest.raises(CaseError):
+            decide_artifact(database, case["id"], thread.id, artifact.id, user, "accepted")
+        saved = database.agent_artifacts.find_one({"id": artifact.id})
+        assert saved["status"] == "expired"
+        assert database.cases.find_one({"id": case["id"]})["document"] == {
+            "type": "doc", "content": [{"type": "paragraph"}],
+        }
+    finally:
+        for collection in ("agent_messages", "agent_thread_events", "agent_runs", "agent_artifacts"):
+            database[collection].delete_many({"threadId": thread.id})
+        database.agent_threads.delete_one({"id": thread.id})
+        database.cases.delete_one({"id": case["id"]})
+        mongo.close()

@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pymongo.errors import DuplicateKeyError
 
@@ -283,6 +283,137 @@ def test_provider_failure_marks_run_failed_and_clears_active_thread(client: Test
     assert client.get(THREAD_PATH).json()["latestRun"]["error"] == "AI 服务暂不可用"
 
 
+def test_partial_provider_failure_keeps_answer_in_thread_snapshot(client: TestClient) -> None:
+    auth = _login(client)
+
+    async def failing_after_partial(_messages, _info):
+        yield "已经生成的部分回答"
+        raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=failing_after_partial)):
+        response = _post(client, auth, "保留失败前的回答", message_id="partial-failure-message")
+
+    assert response.status_code == 200
+    snapshot = client.get(THREAD_PATH).json()
+    assistants = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+    assert assistants
+    assert "已经生成的部分回答" in str(assistants[-1]["parts"])
+    assert snapshot["latestRun"]["status"] == "failed"
+
+
+def test_recovery_delivers_the_same_complete_message_as_snapshot(client: TestClient) -> None:
+    auth = _login(client)
+
+    async def interrupted_thinking(_messages, _info):
+        yield {0: DeltaThinkingPart(content="**已完成的判断**")}
+        yield "已经形成的结论"
+        raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=interrupted_thinking)):
+        assert _post(client, auth, "恢复全部消息部分").status_code == 200
+    snapshot = client.get(THREAD_PATH).json()
+    assistant = next(message for message in snapshot["messages"] if message["role"] == "assistant")
+    assert any(part["type"] == "reasoning" for part in assistant["parts"])
+    replay = client.get(f"{THREAD_PATH}/{snapshot['id']}/events", params={"afterSeq": 0})
+    chunks = [json.loads(line[6:]) for line in replay.text.splitlines()
+              if line.startswith("data: {")]
+    messages = [chunk["data"] for chunk in chunks if chunk["type"] == "data-agent-message"]
+    assert messages == [assistant]
+    assert chunks[-1]["type"] == "error"
+    assert client.get(f"{THREAD_PATH}/{snapshot['id']}/events",
+                      params={"afterSeq": snapshot["eventSeq"]}).status_code == 204
+
+
+def test_invalid_revision_retries_report_tool_failure_and_keep_followup_usable(client: TestClient) -> None:
+    auth = _login(client)
+    calls = 0
+
+    async def invalid_revision(_messages, _info):
+        nonlocal calls
+        assert "propose_revision" in {tool.name for tool in _info.function_tools}
+        calls += 1
+        yield {0: DeltaToolCall(
+            name="propose_revision", tool_call_id=f"bad-revision-{calls}",
+            json_args=json.dumps({"start": 0, "end": 999999,
+                                  "replacement": "修改后", "reason": "补充示例"}),
+        )}
+
+    with _agent().override(model=FunctionModel(stream_function=invalid_revision)):
+        response = _post(client, auth, "修改正文", message_id="bad-revision")
+    snapshot = client.get(THREAD_PATH).json()
+    assert snapshot["latestRun"]["status"] == "failed"
+    assert snapshot["latestRun"]["error"] == "AI 未能完成工具调用，请调整要求后重试"
+    assert "AI 未能完成工具调用" in response.text
+    assert snapshot["artifacts"] == []
+    tools = [part for message in snapshot["messages"] for part in message["parts"]
+             if part["type"].startswith("tool-")]
+    assert tools and all(part["state"] == "output-error" for part in tools)
+    assert any("同一段落" in part["errorText"] for part in tools)
+    with _agent().override(model=TestModel(custom_output_text="可以继续", call_tools=[])):
+        assert _post(client, auth, "继续讨论", message_id="after-bad-revision").status_code == 200
+    assert client.get(THREAD_PATH).json()["latestRun"]["status"] == "completed"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_failed_run_preserves_completed_revision_for_apply_and_undo(client: TestClient, changed: bool) -> None:
+    auth = _login(client)
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "原文"}]},
+    ]}
+    created = client.post("/api/cases", headers=_csrf(auth),
+                          json={"title": "保留失败记录", "document": document})
+    assert created.status_code == 200
+    path = f"/api/cases/{created.json()['id']}/agent/thread"
+    thread = client.get(path).json()
+    first = True
+
+    async def propose_then_fail(_messages, _info):
+        nonlocal first
+        if first:
+            first = False
+            yield {0: DeltaToolCall(name="propose_revision", tool_call_id="unsaved-revision",
+                json_args=json.dumps({"start": 1, "end": 3, "replacement": "新文", "reason": "清晰表达"}))}
+        else:
+            if changed:
+                updated = await asyncio.to_thread(client.patch, f"/api/cases/{created.json()['id']}",
+                    headers=_csrf(auth), json={"revision": created.json()["revision"], "document": {
+                        "type": "doc", "content": [{"type": "paragraph", "content": [
+                            {"type": "text", "text": "人工新文"}]}]}, "steps": [
+                        {"stepType": "replace", "from": 1, "to": 3, "slice": {
+                            "content": [{"type": "text", "text": "人工新文"}]}}]})
+                assert updated.status_code == 200, updated.text
+            raise RuntimeError("provider unavailable")
+
+    with _agent().override(model=FunctionModel(stream_function=propose_then_fail)):
+        response = client.post(f"{path}/{thread['id']}/stream", headers=_csrf(auth), json=_body())
+    assert response.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "failed"
+    assert len(snapshot["artifacts"]) == 1
+    artifact = snapshot["artifacts"][0]
+    proposal = next(part for message in snapshot["messages"] for part in message["parts"]
+                    if part["type"] == "tool-propose_revision")
+    assert proposal["state"] == "output-available"
+    assert proposal["output"]["artifactId"] == artifact["id"]
+    case_path = f"/api/cases/{created.json()['id']}"
+    if changed:
+        assert artifact["status"] == "expired"
+        rejected = client.post(f"{path}/{thread['id']}/artifacts/{artifact['id']}/decision",
+                               headers=_csrf(auth), json={"decision": "accepted"})
+        assert rejected.status_code == 409
+        assert client.get(case_path).json()["document"]["content"][0]["content"][0]["text"] == "人工新文"
+        return
+    assert client.get(case_path).json()["document"] == document
+    applied = client.post(f"{path}/{thread['id']}/artifacts/{artifact['id']}/decision",
+                          headers=_csrf(auth), json={"decision": "accepted"})
+    assert applied.status_code == 200, applied.text
+    assert client.get(case_path).json()["document"]["content"][0]["content"][0]["text"] == "新文"
+    write = client.get(path).json()["writes"][0]
+    undone = client.post(f"{path}/{thread['id']}/writes/{write['id']}/undo", headers=_csrf(auth))
+    assert undone.status_code == 200, undone.text
+    assert client.get(case_path).json()["document"] == document
+
+
 def test_terminal_failure_persists_terminal_event_without_late_runtime_event(client: TestClient) -> None:
     auth = _login(client)
 
@@ -399,3 +530,105 @@ def test_active_run_uniqueness_is_database_enforced(client: TestClient) -> None:
     except DuplicateKeyError:
         return
     raise AssertionError("active Run index did not reject a second run")
+
+
+@pytest.mark.parametrize("edit_first", [False, True])
+def test_empty_template_blocks_support_suggestions_apply_and_undo(client: TestClient, edit_first: bool) -> None:
+    auth = _login(client)
+    original = {"type": "doc", "content": [{"type": "paragraph"}, {"type": "paragraph"}]}
+    created = client.post("/api/cases", headers=_csrf(auth), json={
+        "title": "填写空白模板", "document": original,
+    })
+    assert created.status_code == 200
+    case_id = created.json()["id"]
+    path = f"/api/cases/{case_id}/agent/thread"
+    thread_id = client.get(path).json()["id"]
+    requests = 0
+
+    async def fill_template(_messages, _info):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            yield {i: DeltaToolCall(name="propose_revision", tool_call_id=f"empty-{i}",
+                   json_args=json.dumps({"start": pos, "end": pos, "replacement": text,
+                                         "reason": "填写模板中的空白段落"}))
+                   for i, (pos, text) in enumerate([(1, "教学目标"), (3, "课堂活动"), (1, "重复填写")])}
+        else:
+            yield "请逐条确认两处填写建议。"
+
+    with _agent().override(model=FunctionModel(stream_function=fill_template)):
+        result = client.post(f"{path}/{thread_id}/stream", headers=_csrf(auth), json=_body("填好模板"))
+    assert result.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    assert len(snapshot["artifacts"]) == 2
+    assert client.get(f"/api/cases/{case_id}").json()["document"] == original
+    proposals = sorted(snapshot["artifacts"], key=lambda item: item["target"]["from"])
+    if edit_first:
+        saved = client.patch(f"/api/cases/{case_id}", headers=_csrf(auth), json={
+            "revision": 1, "document": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "人工填写"}]},
+                {"type": "paragraph"},
+            ]}, "steps": [{"stepType": "replace", "from": 1, "to": 1,
+                           "slice": {"content": [{"type": "text", "text": "人工填写"}]}}],
+        })
+        assert saved.status_code == 200, saved.text
+        refreshed = client.get(path).json()["artifacts"]
+        assert next(item for item in refreshed if item["id"] == proposals[0]["id"])["status"] == "expired"
+        assert next(item for item in refreshed if item["id"] == proposals[1]["id"])["status"] == "pending"
+        stale = client.post(f"{path}/{thread_id}/artifacts/{proposals[0]['id']}/decision",
+                            headers=_csrf(auth), json={"decision": "accepted"})
+        assert stale.status_code == 409
+        assert client.get(f"/api/cases/{case_id}").json()["document"]["content"][0]["content"][0]["text"] == "人工填写"
+        return
+    writes = []
+    for proposal in proposals:
+        accepted = client.post(f"{path}/{thread_id}/artifacts/{proposal['id']}/decision",
+                               headers=_csrf(auth), json={"decision": "accepted"})
+        assert accepted.status_code == 200, accepted.text
+        writes.append(accepted.json()["artifact"]["writeId"])
+    current = client.get(f"/api/cases/{case_id}").json()["document"]
+    assert [node["content"][0]["text"] for node in current["content"]] == ["教学目标", "课堂活动"]
+    undone = client.post(f"{path}/{thread_id}/writes/{writes[-1]}/undo", headers=_csrf(auth))
+    assert undone.status_code == 200, undone.text
+    current = client.get(f"/api/cases/{case_id}").json()["document"]
+    assert current["content"][0]["content"][0]["text"] == "教学目标"
+    assert current["content"][1] == {"type": "paragraph"}
+
+
+def test_stale_revision_tool_failure_does_not_abort_the_conversation(client: TestClient) -> None:
+    auth = _login(client)
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "原文"}]},
+    ]}
+    case = client.post("/api/cases", headers=_csrf(auth), json={
+        "title": "正文已更新", "document": document,
+    }).json()
+    path = f"/api/cases/{case['id']}/agent/thread"
+    thread = client.get(path).json()
+    calls = 0
+
+    async def stale_proposal(_messages, _info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            updated = await asyncio.to_thread(client.patch, f"/api/cases/{case['id']}",
+                headers=_csrf(auth), json={"revision": case["revision"], "title": "人工新标题"})
+            assert updated.status_code == 200, updated.text
+        if calls <= 2:
+            yield {0: DeltaToolCall(name="propose_revision", tool_call_id=f"stale-{calls}",
+                json_args=json.dumps({"start": 1, "end": 3, "replacement": "新文", "reason": "清晰表达"}))}
+        else:
+            yield "正文已更新，请基于新正文重新提出修改要求。"
+
+    with _agent().override(model=FunctionModel(stream_function=stale_proposal)):
+        result = client.post(f"{path}/{thread['id']}/stream", headers=_csrf(auth), json=_body())
+    assert result.status_code == 200
+    snapshot = client.get(path).json()
+    assert snapshot["latestRun"]["status"] == "completed"
+    assert snapshot["artifacts"] == []
+    parts = snapshot["messages"][-1]["parts"]
+    assert any(part.get("text") == "正文已更新，请基于新正文重新提出修改要求。" for part in parts)
+    errors = [part for part in parts if part["type"] == "tool-propose_revision"]
+    assert len(errors) == 2 and all(part["state"] == "output-error" for part in errors)
+    assert client.get(f"/api/cases/{case['id']}").json()["document"] == document

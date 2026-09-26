@@ -30,7 +30,7 @@ from app.modules.agent.models import (
 )
 from app.modules.agent.writes import undo_write
 from app.modules.agent.recovery import (
-    LiveBuffer,
+    RunStream,
     events_stream,
     live_response,
     sse_headers,
@@ -357,11 +357,27 @@ def _validate_plan(
 ) -> RunPlan:
     plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    if not plan.retry_message_id:
+        plan.parts = _persist_selection_snapshots(plan.parts, plan.selections)
     plan.annotation_id = _annotation_from_parts(database, case, plan, version_id, user)
     plan.revision_context = _revision_from_parts(
         database, case, plan, thread_id, user,
     )
     return plan
+
+
+def _persist_selection_snapshots(parts: list[dict], selections: list[dict]) -> list[dict]:
+    validated = iter(selections)
+    persisted = []
+    for part in parts:
+        if part.get("type") != "data-selection":
+            persisted.append(part)
+            continue
+        selection = next(validated)
+        persisted.append({
+            **part, "data": {**part["data"], "quote": selection["quote"]},
+        })
+    return persisted
 
 
 def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
@@ -619,7 +635,12 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
         adapter, plan, assistant_id,
     )
     request.app.state.run_supervisor.start(context)
-    return live_response(context.buffer)
+    return live_response(
+        repository, context.run.id, case_id, user,
+        _event_access_check(database, conversation, thread),
+        parts_projector(database, user, case_id),
+        context.worker_id,
+    )
 
 
 def _plan_for(repository, thread, adapter, database, user, conversation):
@@ -697,7 +718,7 @@ def _run_context(request, database, settings, user, conversation: Conversation,
     )
     return RunContext(
         repository, run, adapter, plan.history, plan.prompt, conversation.case,
-        request.app.state.agent, buffer=LiveBuffer(),
+        request.app.state.agent, buffer=RunStream(repository, run, deps),
         supervisor=request.app.state.run_supervisor,
         selection=selection, settings=settings, lease=lease, worker_id=worker_id,
         deps=deps, bounds=bounds, capabilities=_capabilities(conversation, bounds),
@@ -738,7 +759,8 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         store=request.app.state.blob_store, version_id=conversation.version_id,
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
-        evidence=list((plan.revision_context or {}).get("sources") or []),
+        evidence=[SourceRef.model_validate(ref)
+                  for ref in (plan.revision_context or {}).get("sources") or []],
     )
 
 
@@ -913,6 +935,9 @@ def thread_events(
 def _event_response(database, user, repository, conversation, thread, cursor):
     access_check = _event_access_check(database, conversation, thread)
     project = parts_projector(database, user, thread.case_id)
+    if thread.active_run_id:
+        return live_response(repository, thread.active_run_id, thread.case_id, user,
+                             access_check, project)
     return live_event_response(repository, thread, max(cursor, 0), access_check, project=project)
 
 

@@ -1,3 +1,4 @@
+import { openAiTab } from "./agent-panel.js";
 import { expect, test } from "@playwright/test";
 import { getSchema } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -101,8 +102,8 @@ async function sendGenerationAndWaitForPersistence(page, caseId, text) {
 }
 
 async function openChatPanel(page) {
-  await page.locator(".workspace-actions").getByRole("button", { name: "AI" }).click();
-  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  await openAiTab(page);
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await expect(page.getByLabel("向 AI 提问")).toBeEnabled();
 }
 

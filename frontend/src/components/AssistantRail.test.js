@@ -67,14 +67,9 @@ afterEach(() => {
 });
 
 async function switchThroughPanels(wrapper, panel, request) {
-  await wrapper.setProps({ active: "comments" });
-  const comments = wrapper.findComponent({ name: "CommentPanel" });
-  expect(comments.exists()).toBe(true);
-  expect(wrapper.findComponent({ name: "AgentChatPanel" }).element).toBe(panel.element);
-  comments.vm.$emit("ask-ai", request);
-  expect(wrapper.emitted("ask-ai")).toEqual([[request]]);
   await wrapper.setProps({ active: "files" });
   expect(wrapper.findComponent({ name: "AttachmentPanel" }).exists()).toBe(true);
+  expect(wrapper.findComponent({ name: "AgentChatPanel" }).element).toBe(panel.element);
   await wrapper.setProps({ active: "history" });
   expect(wrapper.findComponent({ name: "VersionPanel" }).exists()).toBe(true);
   await wrapper.setProps({ active: "ai", promptRequest: request });
@@ -113,8 +108,9 @@ it("uses the persistent Agent chat as the only AI entry", () => {
   expect(wrapper.text()).not.toContain("对话");
 });
 
-it("keeps comments and attachments on the same assistant rail", async () => {
-  const wrapper = render({ active: "comments" });
+it("keeps AI and attachments on the rail without an annotation entry", async () => {
+  const wrapper = render({ active: "files" });
+  expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);
   await wrapper.get('[aria-label="AI"]').trigger("click");
   expect(wrapper.emitted("select")).toEqual([["ai"]]);
   await wrapper.setProps({ active: "files" });
@@ -158,6 +154,19 @@ it("collapses the current desktop panel on its first click", async () => {
   expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
 });
 
+it("closes the mobile drawer when its active tab is clicked and reopens on the next click", async () => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+  const wrapper = render({ open: true, active: "ai" });
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.emitted("toggle")).toHaveLength(1);
+  expect(wrapper.emitted("select")).toBeUndefined();
+  await wrapper.setProps({ open: false });
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.emitted("select")).toEqual([["ai"]]);
+  expect(wrapper.classes()).not.toContain("collapsed");
+  wrapper.unmount();
+});
+
 it("keeps the AI draft while switching through integrated rail panels", async () => {
   vi.stubGlobal("fetch", vi.fn());
   const wrapper = renderWithRealChat();
@@ -193,7 +202,7 @@ it("uses the read-only rail for public discussion and资料", () => {
   const wrapper = render({ readOnly: true, user: { id: "user-1" }, active: "ai" });
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).props("readOnly")).toBe(true);
   expect(wrapper.get('[aria-label="历史版本"]').isVisible()).toBe(true);
-  expect(wrapper.get('[aria-label="批注"]').isVisible()).toBe(false);
+  expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);
 });
 
 it("requires login before opening a private reader discussion", () => {
@@ -210,11 +219,11 @@ it("does not expose a writable AI thread on a historical version", () => {
   expect(wrapper.text()).toContain("恢复此版本");
 });
 
-it("keeps review chat private to review mode while annotations stay available", () => {
+it("keeps review chat private to review mode without an annotation entry", () => {
   const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
   const panel = wrapper.findComponent({ name: "AgentChatPanel" });
   expect(panel.props("review")).toBe(true);
-  expect(wrapper.get('[aria-label="批注"]').isVisible()).toBe(true);
+  expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);
 });
 
 it("exposes the fourth history entry and forwards manual version creation", () => {

@@ -193,7 +193,12 @@ def test_cancel_before_generation_delivers_nothing(client: TestClient) -> None:
     auth = _login(client)
     thread_id = _thread_id(client)
     reached, release = Event(), Event()
-    model = _gated_model(reached, release)
+    async def before_output(_messages, _info):
+        reached.set()
+        await asyncio.to_thread(release.wait, 30)
+        yield "取消后不能交付"
+
+    model = FunctionModel(stream_function=before_output)
     future, pool = _post_async(client.app, AUTHOR, thread_id, model)
     try:
         assert reached.wait(10)
