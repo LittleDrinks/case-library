@@ -48,18 +48,24 @@ function closeOnOutsideClick(event) {
 }
 
 function closeOnEscape(event) {
-  if (!open.value) return;
+  if (!open.value || event.key !== "Escape") return;
   event.preventDefault();
   open.value = false;
   triggerButton.value?.focus();
 }
 
-onMounted(() => document.addEventListener("click", closeOnOutsideClick));
-onBeforeUnmount(() => document.removeEventListener("click", closeOnOutsideClick));
+onMounted(() => {
+  document.addEventListener("click", closeOnOutsideClick, true);
+  document.addEventListener("keydown", closeOnEscape);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", closeOnOutsideClick, true);
+  document.removeEventListener("keydown", closeOnEscape);
+});
 </script>
 
 <template>
-  <div v-if="!quiet" ref="picker" class="case-tags" @keydown.esc="closeOnEscape">
+  <div v-if="!quiet" ref="picker" class="case-tags">
     <Tags :size="13" aria-hidden="true" />
     <span v-if="loading" class="case-tags-state"><LoaderCircle class="spin" :size="12" />标签目录加载中</span>
     <span v-else-if="error" class="case-tags-state" role="alert">

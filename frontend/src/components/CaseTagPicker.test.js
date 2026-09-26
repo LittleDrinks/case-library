@@ -80,6 +80,7 @@ async function outsideClickClosesWithoutTakingFocus() {
   const view = wrapper();
   const trigger = view.get(".case-tag-editor > button");
   const outside = document.createElement("button");
+  outside.addEventListener("click", (event) => event.stopPropagation());
   document.body.appendChild(outside);
   try {
     await trigger.trigger("click");
@@ -107,6 +108,25 @@ async function escapeClosesAndReturnsFocus() {
   expect(event.defaultPrevented).toBe(true);
 }
 
+async function escapeClosesAfterFocusLeavesPicker() {
+  const view = wrapper({}, { attachTo: document.body });
+  const trigger = view.get(".case-tag-editor > button");
+  const outside = document.createElement("button");
+  document.body.appendChild(outside);
+  try {
+    await trigger.trigger("click");
+    outside.focus();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    outside.dispatchEvent(event);
+    await view.vm.$nextTick();
+    expect(trigger.attributes("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger.element);
+    expect(event.defaultPrevented).toBe(true);
+  } finally {
+    outside.remove();
+  }
+}
+
 describe("案例标签设置", () => {
   it("按目录分组多选并回传完整标签集合", groupedMultiselectContract);
   it("已选标签可通过 chip 移除", chipRemovalContract);
@@ -117,4 +137,5 @@ describe("案例标签设置", () => {
   it("只读目录加载失败仍提供重试", readonlyErrorRetryContract);
   it("点击外部关闭面板且不夺回外部焦点", outsideClickClosesWithoutTakingFocus);
   it("Escape 关闭面板并将焦点交还触发按钮", escapeClosesAndReturnsFocus);
+  it("焦点移出面板后按 Escape 仍关闭并返回触发按钮", escapeClosesAfterFocusLeavesPicker);
 });
