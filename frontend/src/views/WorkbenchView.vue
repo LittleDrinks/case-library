@@ -622,6 +622,7 @@ function askAnnotationAi(annotation) {
     sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
   };
   selectTool("ai");
+  assistantRail.value?.expandPanel();
 }
 
 function requestLifecycle(command) {

@@ -795,6 +795,25 @@ test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正�
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
 });
 
+test("批注浮窗询问 AI 会展开已收起的辅助栏", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const marker = `浮窗提问 ${Date.now()}`;
+  const created = await createCase(request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("补全教学背景");
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
+  await float.getByRole("button", { name: "询问AI" }).click();
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
+  await expect(page.locator(".agent-chat-panel")).toBeVisible();
+  await expect(page.getByLabel("向 AI 提问")).toHaveValue(/补全教学背景/);
+  await expect(float).toBeVisible();
+});
+
 test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async ({ page }) => {
   await login(page);
   const request = page.context().request;
