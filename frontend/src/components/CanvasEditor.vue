@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { OrderedList as TiptapOrderedList } from "@tiptap/extension-ordered-list";
 import StarterKit from "@tiptap/starter-kit";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -7,6 +8,14 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { CitationMark, createCitationNumbers, refreshCitationNumbers } from "../lib/citation.js";
 import EditorToolbar from "./EditorToolbar.vue";
+
+const OrderedList = TiptapOrderedList.extend({
+  addAttributes() {
+    const attributes = { ...this.parent() };
+    delete attributes.type;
+    return attributes;
+  },
+});
 
 const props = defineProps({
   document: { type: Object, required: true },
@@ -420,10 +429,11 @@ const editor = useEditor({
   editable: props.editable,
   extensions: [StarterKit.configure({
     heading: { levels: [1, 2, 3] },
+    orderedList: false,
     code: false,
     codeBlock: false,
     horizontalRule: false,
-  }), CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
+  }), OrderedList, CitationMark, annotationExtension, createCitationNumbers(() => props.sources)],
   editorProps: { attributes: { class: "canvas-editor", spellcheck: "false" } },
   onUpdate: updateEditor,
   onCreate: (context) => {
@@ -490,8 +500,10 @@ function insertCitation(source) {
 
 function clipboardContent() {
   if (!editor.value) return null;
+  const document = editor.value.state.doc;
+  const slice = document.slice(0, document.content.size);
   return {
-    html: editor.value.getHTML(),
+    html: editor.value.view.serializeForClipboard(slice).dom.innerHTML,
     text: editor.value.getText({ blockSeparator: "\n" }),
   };
 }
