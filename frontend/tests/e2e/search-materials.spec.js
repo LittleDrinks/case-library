@@ -335,7 +335,15 @@ test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", a
 test("受限素材详情与下载统一返回 404", async ({ page }) => {
   await login(page);
   await page.goto("/#/materials/m-kc4");
-  await expect(page.getByRole("alert")).toContainText("素材不存在");
+  await expect(page.getByRole("alert")).toContainText(
+    "无法查看该素材。当前账号无权查看，或素材已不存在。",
+  );
+  await expect(page.locator(".material-detail-content")).toHaveCount(0);
+  const returnLink = page.getByRole("alert").getByRole("link", { name: "返回资源检索" });
+  await expect(returnLink).toBeVisible();
+  await returnLink.click();
+  await expect(page).toHaveURL(/#\/search(?:\?|$)/);
+  await expect(page.getByRole("search")).toBeVisible();
 
   const response = await page.context().request.get("/api/materials/m-kc4/content");
   expect(response.status()).toBe(404);
