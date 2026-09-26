@@ -70,8 +70,15 @@ test("长文标签面板外部关闭保留正文光标，工具栏格式与标�
   await page.goto(`/#/workbench/${created.id}`);
   await expect(page.getByLabel("案例标题")).toHaveValue(`Issue 318 ${key}`);
 
-  await page.getByRole("button", { name: "设置标签" }).click();
+  const tagTrigger = page.getByRole("button", { name: "设置标签" });
+  await tagTrigger.click();
   const popover = page.locator(".case-tag-popover");
+  await page.getByLabel("案例标题").focus();
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect(tagTrigger).toBeFocused();
+
+  await tagTrigger.click();
   const firstTag = popover.locator('input[type="checkbox"]').first();
   await expect(firstTag).toBeVisible();
   const tagLabel = await firstTag.evaluate((input) => input.closest("label").innerText.trim());
