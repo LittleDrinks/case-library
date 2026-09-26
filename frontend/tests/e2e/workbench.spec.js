@@ -879,8 +879,16 @@ test("恢复历史版本后保留恢复前草稿批注且当前面板刷新一�
   const marker = `恢复批注保留 ${Date.now()}`;
   const created = await stageFrozenVersion(page, request, marker);
   await addDraftAnnotation(page, marker);
+  const vueErrors = [];
+  page.on("pageerror", (error) => vueErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" && /nextSibling|emitsOptions/.test(message.text())) {
+      vueErrors.push(message.text());
+    }
+  });
   await openHistoryTimeline(page); await overwriteDialogStep(page, "确认恢复");
   await page.getByRole("button", { name: "批注", exact: true }).click();
+  expect(vueErrors).toEqual([]);
   await expectPreservedDraftAnnotation(page, request, created.id);
   await page.reload();
   await page.getByRole("button", { name: "批注", exact: true }).click();

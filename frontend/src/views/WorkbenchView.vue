@@ -844,7 +844,7 @@ onBeforeUnmount(() => {
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
-      <div v-if="editable" class="workbench-format-row">
+      <div v-show="editable" class="workbench-format-row">
         <button
           type="button"
           class="outline-format-toggle"
