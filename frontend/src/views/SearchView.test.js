@@ -49,7 +49,8 @@ function render(options = {}) {
   return mount(SearchView, {
     ...options,
     global: { stubs: {
-      SiteHeader: true, SearchGraph: true, SearchAIAnswer: SearchAIAnswerStub,
+      SiteHeader: true,
+      SearchAIAnswer: SearchAIAnswerStub,
       SearchFilters: true, RouterLink: { template: "<a><slot /></a>" },
     } },
   });
@@ -92,6 +93,18 @@ test("URL 携带标签条件时刷新后按原条件检索", async () => {
   await flushPromises();
 
   expect(api.search).toHaveBeenLastCalledWith("", "case", null, 20, { tagIds: ["tag-1"], tagMode: "any" });
+});
+
+test("URL 携带旧图谱视图时仍显示列表结果且无图谱入口", async () => {
+  api.search.mockReset().mockResolvedValue(first);
+  route.query = { q: "游标目录", kind: "material", view: "graph" };
+  const wrapper = render();
+  await flushPromises();
+
+  expect(wrapper.find(".mixed-results").exists()).toBe(true);
+  expect(wrapper.find(".mixed-result").text()).toContain("第一页");
+  expect(wrapper.find(".search-views").exists()).toBe(false);
+  expect(wrapper.find('[aria-label="当前检索结果图谱"]').exists()).toBe(false);
 });
 
 beforeEach(() => {

@@ -188,8 +188,8 @@ def reject_command(case: dict) -> dict:
         "command": "reject",
         "revision": case["revision"],
         "submittedVersionId": case["submittedVersionId"],
-        "reasonType": "教学目标不清晰",
-        "summary": "请依据批注修改后重新提交。",
+        "reasonTypes": ["内容需要补充或修改"],
+        "message": "请依据批注修改后重新提交。",
     }
 
 
@@ -199,8 +199,8 @@ def assert_rejected(returned: dict, case: dict, annotation: dict | None) -> None
     assert returned["case"]["submittedVersionId"] is None
     assert returned["event"]["action"] == "reject"
     assert returned["event"]["versionId"] == case["submittedVersionId"]
-    assert returned["event"]["reasonType"] == "教学目标不清晰"
-    assert returned["event"]["summary"] == "请依据批注修改后重新提交。"
+    assert returned["event"]["reasonTypes"] == ["内容需要补充或修改"]
+    assert returned["event"]["message"] == "请依据批注修改后重新提交。"
     expected_ids = [annotation["id"]] if annotation else []
     assert returned["event"]["annotationIds"] == expected_ids
 
@@ -270,21 +270,21 @@ def start_second_review(client: TestClient, case: dict) -> tuple[dict, dict]:
     return admin, started
 
 
-def supplement_command(case: dict) -> dict:
+def return_command(case: dict) -> dict:
     return {
-        "command": "supplement",
+        "command": "reject",
         "revision": case["revision"],
         "submittedVersionId": case["submittedVersionId"],
-        "reasonType": "证据不足",
+        "reasonTypes": ["事实、数据或来源需要核实"],
     }
 
 
-def test_supplement_keeps_previous_publication_hidden(client: TestClient) -> None:
+def test_return_keeps_previous_publication_hidden(client: TestClient) -> None:
     _author, _admin, approved, reopened = publish_then_reopen(client)
     admin, started = start_second_review(client, reopened["case"])
     case = started["case"]
     annotation = create_annotation(client, admin, started["case"])
-    command = supplement_command(case)
+    command = return_command(case)
     wrong = client.post(
         f"/api/cases/{case['id']}/lifecycle",
         headers={"X-CSRF-Token": admin["csrfToken"]},
@@ -296,5 +296,5 @@ def test_supplement_keeps_previous_publication_hidden(client: TestClient) -> Non
     assert returned["case"]["workflowStatus"] == "draft"
     assert returned["case"]["publicationStatus"] == "hidden"
     assert returned["case"]["publishedVersionId"] == approved["version"]["id"]
-    assert returned["event"]["action"] == "supplement"
+    assert returned["event"]["action"] == "reject"
     assert returned["event"]["annotationIds"] == [annotation["id"]]

@@ -382,11 +382,11 @@ def _review_annotation_ids(database, case: dict, version: dict, session) -> list
 
 
 def _review_event(case, user: dict, version: dict, body: dict, ids: list[str]) -> dict:
-    event = _event(case, user, version, _now(), body["command"])
+    event = _event(case, user, version, _now(), "reject")
     event.update(
         {
-            "reasonType": body["reasonType"],
-            "summary": body.get("summary") or "",
+            "reasonTypes": body["reasonTypes"],
+            "message": body.get("message") or "",
             "annotationIds": ids,
         }
     )
@@ -396,8 +396,8 @@ def _review_event(case, user: dict, version: dict, body: dict, ids: list[str]) -
 def _last_review(event: dict, version: dict) -> dict:
     return {
         "action": event["action"],
-        "reasonType": event["reasonType"],
-        "summary": event["summary"],
+        "reasonTypes": event["reasonTypes"],
+        "message": event["message"],
         "annotationIds": event["annotationIds"],
         "versionNumber": version["number"],
         "actorId": event["actorId"],
@@ -503,7 +503,7 @@ def _mark_reopened(database, case: dict, version: dict, now: str, session) -> di
 
 
 def _admin_action(database, case: dict, body: dict, user: dict, session) -> dict:
-    if body["command"] in {"reject", "supplement"}:
+    if body["command"] == "reject":
         return _return_for_revision(database, case, body, user, session)
     if body["command"] in {"hide", "restore"}:
         return _publication_change(database, case, user, body["command"], session)

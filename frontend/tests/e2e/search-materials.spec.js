@@ -68,24 +68,19 @@ async function assertOneSearchRequest(page, requests) {
   expect(queryRequests(requests, "思政")).toHaveLength(1);
 }
 
-async function assertGraph(page) {
-  await page.getByRole("button", { name: "图谱", exact: true }).click();
-  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: /案例.*钱伟长图书馆/ })).toBeVisible();
-  await expect(page.getByRole("list", { name: "图谱关系列表" })).toContainText(
-    /钱伟长图书馆——科学家精神的大思政课堂.*共同主题.*科学家精神/,
-  );
-}
-
-test("公共检索保留高级筛选和两种视图", async ({ page }) => {
+test("公共检索忽略旧图谱视图并保留高级筛选", async ({ page }) => {
   test.setTimeout(60_000);
   const searchRequests = watchOkRequests(page, "/api/search");
   await waitForSearchReady(page, "");
   await page.goto("/#/search");
   await assertOneSearchRequest(page, searchRequests);
+  await page.goto("/#/search?q=思政&view=graph");
+  const results = page.getByRole("region", { name: "检索结果" });
+  await expect(results.getByRole("article").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "图谱", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "当前检索结果图谱" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /知识/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "高级筛选" })).toBeVisible();
-  await assertGraph(page);
 });
 
 test("问题式检索仍只请求检索与筛选目录接口", async ({ page }) => {
@@ -195,14 +190,12 @@ test("公共检索按页签请求对应类型并翻页", async ({ page }) => {
   expect(changedPayload).toMatchObject({ page: 1, metadataIncluded: true });
 });
 
-test("公共检索两种视图在手机端无横向溢出", async ({ page }) => {
+test("公共检索列表在手机端无横向溢出", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/#/search?q=思政");
-  for (const mode of ["列表", "图谱"]) {
-    await page.getByRole("button", { name: mode, exact: true }).click();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-  }
-  await page.getByRole("button", { name: "列表", exact: true }).click();
+  await expect(page.getByRole("region", { name: "检索结果" }).getByRole("article").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "图谱", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.getByRole("tab", { name: /案例/ }).click();
   await page.getByRole("button", { name: "高级筛选" }).click();
   await page.getByRole("group", { name: "案例类型" }).getByLabel(/校本实践类/).check();

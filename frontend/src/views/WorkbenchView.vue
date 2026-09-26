@@ -147,16 +147,12 @@ const lifecycleActions = computed(() => {
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
 ));
-const lastReviewLabel = computed(() => (
-  lastReview.value?.action === "supplement" ? "要求补充" : "退回修改"
-));
 const LIFECYCLE_META = {
   submit: { label: "提交审核", primary: true, area: "author" },
   withdraw: { label: "撤回提交", primary: false, area: "author" },
   start: { label: "开始审核", primary: true, area: "review" },
   approve: { label: "通过发布", primary: true, area: "review" },
   reject: { label: "退回修改", primary: false, area: "review" },
-  supplement: { label: "要求补充", primary: false, area: "review" },
   hide: { label: "暂时隐藏", primary: false, area: "review" },
   restore: { label: "恢复公开", primary: false, area: "review" },
   reopen: { label: "另开新稿", primary: true, area: "author" },
@@ -618,7 +614,7 @@ function askAnnotationAi(annotation) {
 
 function requestLifecycle(command) {
   if (headerBusyAction.value) return;
-  if (!["reject", "supplement"].includes(command)) {
+  if (command !== "reject") {
     void performLifecycle(command);
     return;
   }
@@ -911,7 +907,7 @@ onBeforeUnmount(() => {
             <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
               <AlertTriangle :size="17" aria-hidden="true" />
               <span>
-                {{ lastReviewLabel }}（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonType }}<template v-if="lastReview.summary"> — {{ lastReview.summary }}</template>
+                退回修改（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonTypes.join("、") }}<template v-if="lastReview.message"> — {{ lastReview.message }}</template>
               </span>
             </div>
             <article class="document-paper">

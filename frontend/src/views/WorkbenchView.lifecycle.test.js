@@ -212,12 +212,13 @@ test("历史阅读导出携带固定版本并使用公开接口", async () => {
 
 test("退回草稿展示最近审核意见", async () => {
   const lastReview = {
-    action: "reject", reasonType: "事实待核实", summary: "第三节数据来源需标注",
-    annotationIds: [], versionNumber: 2, actorId: "admin-1", createdAt: "2026-09-01T00:00:00Z",
+    action: "reject", reasonTypes: ["事实、数据或来源需要核实", "内容需要补充或修改"],
+    message: "第三节数据来源需标注",
+    versionNumber: 2, actorId: "admin-1", createdAt: "2026-09-01T00:00:00Z",
   };
   const wrapper = await renderCase({ lastReview });
   const banner = wrapper.get(".review-return-banner");
-  expect(banner.text()).toContain("退回修改（v2）：事实待核实");
+  expect(banner.text()).toContain("退回修改（v2）：事实、数据或来源需要核实、内容需要补充或修改");
   expect(banner.text()).toContain("第三节数据来源需标注");
 });
 
@@ -296,7 +297,8 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
     clearLocalDraft("user-1", "case-1");
     api.saveCase.mockRejectedValue(Object.assign(new Error("revision conflict"), { status: 409 }));
     wrapper = renderActionNoticeWorkbench({ lastReview: {
-      action: "reject", reasonType: "事实待核实", summary: "补充来源", versionNumber: 2,
+      action: "reject", reasonTypes: ["事实、数据或来源需要核实"],
+      message: "补充来源", versionNumber: 2,
     } });
     await flushPromises();
     await wrapper.get('[data-testid="notice-edit"]').trigger("click");
@@ -330,7 +332,7 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
     expect(wrapper.find(".action-notice").exists()).toBe(false);
     expect(wrapper.get('.conflict-banner[role="alert"]').text())
       .toContain("案例已在其他页面更新");
-    expect(wrapper.get(".review-return-banner").text()).toContain("事实待核实");
+    expect(wrapper.get(".review-return-banner").text()).toContain("事实、数据或来源需要核实");
   } finally {
     wrapper?.unmount();
     clearLocalDraft("user-1", "case-1");
@@ -338,21 +340,41 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
   }
 });
 
-test("审核模式下退回只需原因类型，不强制批注", async () => {
+test("管理员退回可多选固定原因，失败后保留输入并可重试", async () => {
   state.route.name = "case-review";
   state.user = { id: "admin-1", role: "admin" };
   const wrapper = await renderCase({
     ownerId: "user-9", workflowStatus: "reviewing", submittedVersionId: "cv-1",
-    availableActions: ["approve", "reject", "supplement"],
+    availableActions: ["approve", "reject"],
   });
+  const reasonTypes = ["内容需要补充或修改", "格式或案例信息需要调整"];
+  const message = "请明确补充案例背景及来源。";
+  api.lifecycleCase.mockRejectedValueOnce(new Error("网络暂时不可用"));
   api.lifecycleCase.mockResolvedValue({ case: caseFixture(), version: {}, event: {} });
+
+  expect(wrapper.find('button[aria-label="要求补充"]').exists()).toBe(false);
   await wrapper.get('button[aria-label="退回修改"]').trigger("click");
   await flushPromises();
   const dialog = wrapper.getComponent(ReviewDecisionDialog);
-  await dialog.get("input").setValue("结构不完整");
+  await dialog.findAll('input[type="checkbox"]')[0].setChecked(true);
+  await dialog.findAll('input[type="checkbox"]')[2].setChecked(true);
+  await dialog.get("textarea").setValue(message);
   await dialog.get("form").trigger("submit");
   await flushPromises();
-  expect(api.lifecycleCase).toHaveBeenCalledWith("case-1", rejectBody(), "csrf-token");
+
+  const expectedBody = rejectBody(reasonTypes, message);
+  expect(api.lifecycleCase).toHaveBeenLastCalledWith("case-1", expectedBody, "csrf-token");
+  expect(dialog.props("command")).toBe("reject");
+  expect(dialog.get('[role="alert"]').text()).toBe("网络暂时不可用");
+  expect(dialog.findAll('input[type="checkbox"]')[0].element.checked).toBe(true);
+  expect(dialog.findAll('input[type="checkbox"]')[2].element.checked).toBe(true);
+  expect(dialog.get("textarea").element.value).toBe(message);
+
+  await dialog.get("form").trigger("submit");
+  await flushPromises();
+  expect(api.lifecycleCase).toHaveBeenCalledTimes(2);
+  expect(api.lifecycleCase).toHaveBeenLastCalledWith("case-1", expectedBody, "csrf-token");
+  expect(dialog.props("command")).toBe("");
 });
 
 test("审核模式按钮来自服务端动作而非本地状态推断", async () => {
@@ -408,9 +430,9 @@ test("引用变化保存成功后才重取资料区编号，普通正文改动�
   }
 });
 
-function rejectBody() {
+function rejectBody(reasonTypes, message) {
   return {
-    command: "reject", revision: 3, reasonType: "结构不完整", submittedVersionId: "cv-1",
+    command: "reject", revision: 3, reasonTypes, message, submittedVersionId: "cv-1",
   };
 }
 

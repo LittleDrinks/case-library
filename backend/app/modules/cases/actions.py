@@ -9,7 +9,7 @@ OWNER_COMMANDS = {
 }
 ADMIN_COMMANDS = {
     "pending": ("start",),
-    "reviewing": ("approve", "reject", "supplement"),
+    "reviewing": ("approve", "reject"),
 }
 
 
