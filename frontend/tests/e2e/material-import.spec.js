@@ -179,16 +179,20 @@ async function mountApprovedMaterial(page, caseId, title) {
   await openApprovedMaterialSearch(page, caseId, title);
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
-  await expect(page.getByRole("status")).toHaveText("已加入 1 条素材");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/workbench/${caseId}`);
+}
+
+async function expectDownloadedFile(page, linkName, filename, content) {
+  const pending = page.waitForEvent("download");
+  await page.getByRole("link", { name: linkName }).click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe(filename);
+  expect(await readFile(await download.path(), "utf8")).toBe(content);
 }
 
 async function downloadApprovedMaterial(page, caseId, title, filename, content) {
   await openApprovedMaterialSearch(page, caseId, title);
-  const pending = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${title}` }).click();
-  const download = await pending;
-  expect(download.suggestedFilename()).toBe(filename);
-  expect(await readFile(await download.path(), "utf8")).toBe(content);
+  await expectDownloadedFile(page, `下载${title}`, filename, content);
 }
 
 async function expectMaterialAbsent(page, caseId, title) {
@@ -205,7 +209,6 @@ async function expectMaterialAbsent(page, caseId, title) {
 }
 
 async function expectWorkbenchMaterial(page, title) {
-  await page.getByRole("link", { name: "返回当前案例" }).click();
   await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   await page.getByRole("button", { name: /素材 1/ }).click();
   await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
@@ -407,10 +410,7 @@ test("DOCX 来源链接落到素材页并按公开、登录、权限和缺失状
   await logoutAndWait(page);
   await page.goto(publicLink);
   await expect(page.getByRole("heading", { name: publicTitle })).toBeVisible();
-  const publicDownload = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${publicTitle}` }).click();
-  expect(await readFile(await (await publicDownload).path(), "utf8"))
-    .toBe(`public-${marker}`);
+  await expectDownloadedFile(page, `下载${publicTitle}`, publicFile, `public-${marker}`);
 
   await page.goto(campusLink);
   await expect(page.getByRole("alert")).toContainText("登录后可以重试");
@@ -420,10 +420,7 @@ test("DOCX 来源链接落到素材页并按公开、登录、权限和缺失状
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page).toHaveURL(campusLink);
   await expect(page.getByRole("heading", { name: campusTitle })).toBeVisible();
-  const campusDownload = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${campusTitle}` }).click();
-  expect(await readFile(await (await campusDownload).path(), "utf8"))
-    .toBe(`campus-${marker}`);
+  await expectDownloadedFile(page, `下载${campusTitle}`, campusFile, `campus-${marker}`);
 
   await page.goto(privateLink);
   await expect(page.getByRole("alert")).toContainText("当前账号无权查看");
@@ -443,8 +440,5 @@ test("DOCX 来源链接落到素材页并按公开、登录、权限和缺失状
   await page.goto(privateLink);
   await expect(page).toHaveURL(privateLink);
   await expect(page.getByRole("heading", { name: privateTitle })).toBeVisible();
-  const privateDownload = page.waitForEvent("download");
-  await page.getByRole("link", { name: `下载${privateTitle}` }).click();
-  expect(await readFile(await (await privateDownload).path(), "utf8"))
-    .toBe(`private-${marker}`);
+  await expectDownloadedFile(page, `下载${privateTitle}`, privateFile, `private-${marker}`);
 });

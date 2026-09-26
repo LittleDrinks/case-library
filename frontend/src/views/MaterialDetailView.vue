@@ -71,7 +71,7 @@ watch(materialId, loadMaterial, { immediate: true });
     <SiteHeader />
     <main id="main-content" class="material-detail-shell">
       <RouterLink class="material-detail-back" :to="returnLocation">
-        <ArrowLeft :size="16" aria-hidden="true" />{{ fromMaterials ? "返回素材掌控台" : "返回资源检索" }}
+        <ArrowLeft :size="16" aria-hidden="true" />{{ returnLabel }}
       </RouterLink>
       <div v-if="loading" class="material-detail-state"><LoaderCircle class="spin" :size="22" />正在加载素材</div>
       <div v-else-if="unavailable" class="material-detail-state error-state" role="alert">
