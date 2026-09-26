@@ -19,6 +19,13 @@ const query = ref("");
 const picker = ref(null);
 const triggerButton = ref(null);
 const queryInput = ref(null);
+const fallbackPlacements = ["top-start", "bottom-start"];
+const popperOptions = {
+  modifiers: [{
+    name: "preventOverflow",
+    options: { boundary: "viewport", rootBoundary: "viewport", padding: 12, altAxis: true, tether: false },
+  }],
+};
 const selectableGroups = computed(() => props.groups
   .filter((group) => group.enabled !== false)
   .map((group) => ({ ...group, tags: group.tags.filter((tag) => tag.enabled !== false) }))
@@ -97,6 +104,8 @@ function focusSearch() {
           trigger="click"
           role="dialog"
           placement="bottom-start"
+          :fallback-placements="fallbackPlacements"
+          :popper-options="popperOptions"
           :width="300"
           popper-class="case-tag-popover"
           :show-arrow="false"
