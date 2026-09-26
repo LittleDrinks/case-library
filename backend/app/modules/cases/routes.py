@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
@@ -107,7 +108,7 @@ def export_public_docx(
 ):
     _, record = _published_record(database, case_id, version_id)
     entries = ordered_entries(database, record, None, _origin(request, settings))
-    return _docx_response(record, entries, case_id)
+    return _docx_response(record, entries, case_id, _origin(request, settings))
 
 
 @router.get("/{case_id}/export.docx")
@@ -123,13 +124,24 @@ def export_docx(
         database, case_id
     )[1]
     entries = ordered_entries(database, record, user, _origin(request, settings))
-    return _docx_response(record, entries, case_id)
+    return _docx_response(record, entries, case_id, _origin(request, settings))
 
 
-def _docx_response(case: dict, entries: list[dict], case_id: str) -> Response:
+def _docx_response(
+    case: dict, entries: list[dict], case_id: str, origin: str
+) -> Response:
     headers = {"Content-Disposition": f'attachment; filename="case-{case_id}.docx"'}
+    document_entries = [
+        {
+            **entry,
+            "url": f"{origin}/#/materials/{quote(str(entry['id']), safe='')}",
+        }
+        if entry["sourceType"] == "material"
+        else entry
+        for entry in entries
+    ]
     return Response(
-        build_case_docx(case, entries),
+        build_case_docx(case, document_entries),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
     )
