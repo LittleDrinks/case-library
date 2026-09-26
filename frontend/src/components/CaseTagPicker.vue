@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronDown, LoaderCircle, Tags, X } from "@lucide/vue";
 import { tagIndex } from "../lib/tagCatalog.js";
 
@@ -13,6 +13,8 @@ const props = defineProps({
 const emit = defineEmits(["update:tagIds", "retry"]);
 const open = ref(false);
 const query = ref("");
+const picker = ref(null);
+const triggerButton = ref(null);
 const selectableGroups = computed(() => props.groups
   .filter((group) => group.enabled !== false)
   .map((group) => ({ ...group, tags: group.tags.filter((tag) => tag.enabled !== false) }))
@@ -40,10 +42,24 @@ function toggle(id, event) {
 function remove(id) {
   emit("update:tagIds", props.tagIds.filter(item => item !== id));
 }
+
+function closeOnOutsideClick(event) {
+  if (open.value && !picker.value?.contains(event.target)) open.value = false;
+}
+
+function closeOnEscape(event) {
+  if (!open.value) return;
+  event.preventDefault();
+  open.value = false;
+  triggerButton.value?.focus();
+}
+
+onMounted(() => document.addEventListener("click", closeOnOutsideClick));
+onBeforeUnmount(() => document.removeEventListener("click", closeOnOutsideClick));
 </script>
 
 <template>
-  <div v-if="!quiet" class="case-tags">
+  <div v-if="!quiet" ref="picker" class="case-tags" @keydown.esc="closeOnEscape">
     <Tags :size="13" aria-hidden="true" />
     <span v-if="loading" class="case-tags-state"><LoaderCircle class="spin" :size="12" />标签目录加载中</span>
     <span v-else-if="error" class="case-tags-state" role="alert">
@@ -58,7 +74,7 @@ function remove(id) {
       </ul>
       <span v-else-if="editable" class="case-tags-state">未设置标签</span>
       <div v-if="editable" class="case-tag-editor">
-        <button type="button" :aria-expanded="open" @click="open = !open">设置标签<ChevronDown :size="12" /></button>
+        <button ref="triggerButton" type="button" :aria-expanded="open" @click="open = !open">设置标签<ChevronDown :size="12" /></button>
         <div v-if="open" class="case-tag-popover">
           <input v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
           <p v-if="!selectableGroups.length" class="case-tags-state">暂无可选标签</p>

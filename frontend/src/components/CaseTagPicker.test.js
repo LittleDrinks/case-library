@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import CaseTagPicker from "./CaseTagPicker.vue";
 
 const groups = [
@@ -12,10 +12,19 @@ const groups = [
   ] },
 ];
 
-function wrapper(extra = {}) {
-  return mount(CaseTagPicker, {
+const mounted = [];
+
+afterEach(() => {
+  while (mounted.length) mounted.pop().unmount();
+});
+
+function wrapper(extra = {}, options = {}) {
+  const view = mount(CaseTagPicker, {
     props: { tagIds: [], groups, editable: true, ...extra },
+    ...options,
   });
+  mounted.push(view);
+  return view;
 }
 
 async function groupedMultiselectContract() {
@@ -24,6 +33,8 @@ async function groupedMultiselectContract() {
   expect(view.text()).toContain("投稿必填");
   await view.get(".case-tag-popover fieldset input[type='checkbox']").setValue(true);
   expect(view.emitted("update:tagIds")[0][0]).toEqual(["t2", "t1"]);
+  await view.get(".case-tag-popover").trigger("click");
+  expect(view.find(".case-tag-popover").exists()).toBe(true);
 }
 
 async function chipRemovalContract() {
@@ -65,6 +76,37 @@ async function readonlyErrorRetryContract() {
   expect(view.emitted("retry")).toHaveLength(1);
 }
 
+async function outsideClickClosesWithoutTakingFocus() {
+  const view = wrapper();
+  const trigger = view.get(".case-tag-editor > button");
+  const outside = document.createElement("button");
+  document.body.appendChild(outside);
+  try {
+    await trigger.trigger("click");
+    outside.focus();
+    outside.click();
+    await view.vm.$nextTick();
+    expect(trigger.attributes("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(outside);
+  } finally {
+    outside.remove();
+  }
+}
+
+async function escapeClosesAndReturnsFocus() {
+  const view = wrapper({}, { attachTo: document.body });
+  const trigger = view.get(".case-tag-editor > button");
+  await trigger.trigger("click");
+  const search = view.get(".case-tag-popover input[type='search']");
+  search.element.focus();
+  const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  search.element.dispatchEvent(event);
+  await view.vm.$nextTick();
+  expect(trigger.attributes("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(trigger.element);
+  expect(event.defaultPrevented).toBe(true);
+}
+
 describe("案例标签设置", () => {
   it("按目录分组多选并回传完整标签集合", groupedMultiselectContract);
   it("已选标签可通过 chip 移除", chipRemovalContract);
@@ -73,4 +115,6 @@ describe("案例标签设置", () => {
   it("停用标签不进入候选，已选停用标签仍回显", disabledTagContract);
   it("无法解析的条目不把内部 ID 当作标签名称", unknownTagContract);
   it("只读目录加载失败仍提供重试", readonlyErrorRetryContract);
+  it("点击外部关闭面板且不夺回外部焦点", outsideClickClosesWithoutTakingFocus);
+  it("Escape 关闭面板并将焦点交还触发按钮", escapeClosesAndReturnsFocus);
 });
