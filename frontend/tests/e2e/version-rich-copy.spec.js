@@ -4,6 +4,7 @@ const baseOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL).origin;
 
 test.use({
   launchOptions: {
+    channel: "chromium",
     args: [`--unsafely-treat-insecure-origin-as-secure=${baseOrigin}`],
   },
 });
