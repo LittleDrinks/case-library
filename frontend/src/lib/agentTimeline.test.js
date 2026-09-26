@@ -16,8 +16,12 @@ describe("tool running states", () => {
     expect(toolState({ state: "input-available" })).toBe("进行中");
     expect(toolState({ state: "output-available", output: { status: "ok" } })).toBe("已完成");
     expect(toolState({ state: "output-available", output: { status: "no_access" } })).toBe("当前身份无权限读取");
-    expect(toolState({ state: "output-error", errorText: "连接中断" })).toBe("连接中断");
-    expect(toolState({ state: "output-error" })).toBe("执行失败");
+    expect(toolState({ state: "output-available", output: { status: "future_status" } }))
+      .toBe("结果状态未知");
+    expect(toolState({ state: "output-error", errorText: "连接中断" })).toBe("未完成");
+    expect(toolState({ state: "output-error" })).toBe("未完成");
+    expect(toolRunning({ state: "output-denied" })).toBe(false);
+    expect(toolState({ state: "output-denied" })).toBe("已拒绝");
   });
 });
 
@@ -58,6 +62,22 @@ describe("tool result summaries", () => {
   it("points at the pending decision without leaking payloads", () => {
     expect(toolResultSummary({ type: "tool-propose_revision", state: "output-available", output: { artifactId: "a-1" } }))
       .toBe("已创建修订候选，等待决定");
+  });
+
+  it("explains tool failures without exposing SDK errors or unknown status codes", () => {
+    expect(toolResultSummary({
+      type: "tool-search_corpus", state: "output-error",
+      errorText: "Error: Fix the errors and try again.",
+    })).toBe("工具参数未通过校验。请调整请求后重新发送；原始错误保存在技术日志中。");
+    expect(toolResultSummary({
+      type: "tool-search_corpus", state: "output-available",
+      output: { status: "future_status" },
+    })).toBe("工具返回了无法识别的结果状态");
+  });
+
+  it("explains denied tool calls as unexecuted actions", () => {
+    expect(toolResultSummary({ type: "tool-search_corpus", state: "output-denied" }))
+      .toBe("这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。");
   });
 });
 

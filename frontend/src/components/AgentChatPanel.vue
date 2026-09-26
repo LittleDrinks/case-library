@@ -6,7 +6,7 @@ import { renderMarkdown } from "../lib/markdown.js";
 import { useAgentChat } from "../composables/useAgentChat.js";
 import {
   sourceHref, sourceRefId, toolLabel, toolName, toolParamSummary,
-  toolResultSummary, toolRunning, toolState, sourcesOf, elapsedBetween,
+  toolResultSummary, toolRunning, toolState, toolDiagnosticText, sourcesOf, elapsedBetween,
   runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
@@ -44,14 +44,22 @@ const {
 const configured = computed(() => Boolean(settings.value?.configured));
 const sending = computed(() => ["submitted", "streaming"].includes(status.value));
 const displayError = computed(() => chatError.value || error.value || "AI 服务暂不可用");
+const statusRun = computed(() => {
+  if (threadState.value?.activeRun) return threadState.value.activeRun;
+  if (sending.value || recovering.value) return null;
+  const currentUserMessage = [...messages.value].reverse()
+    .find((message) => message.role === "user");
+  if (currentUserMessage && !messageRun(currentUserMessage)) return null;
+  return threadState.value?.latestRun;
+});
 const globalError = computed(() => {
   const runStatus = threadState.value?.latestRun?.status;
   return error.value || (["failed", "cancelled"].includes(runStatus) ? "" : chatError.value);
 });
-const runStatusAttr = computed(() => (
-  sending.value || threadState.value?.activeRun
-    ? "active" : threadState.value?.latestRun?.status || "none"
-));
+const runStatusAttr = computed(() => statusRun.value?.status
+  || (sending.value || recovering.value ? "active" : "none"));
+const runClock = ref(Date.now());
+let runClockTimer = null;
 const decideError = ref("");
 const expandedRevisionId = ref("");
 const revisionContext = ref(null);
@@ -182,12 +190,12 @@ function skillName(skillId) {
 
 function toolDurationText(part, run) {
   const timing = run?.toolTimings?.[part.toolCallId];
-  return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, Date.now()) : "";
+  return timing ? elapsedBetween(timing.startedAt, timing.finishedAt, runClock.value) : "";
 }
 
-function runDurationText(run = threadState.value?.latestRun) {
+function runDurationText(run = statusRun.value) {
   if (!run) return "";
-  return elapsedBetween(run.startedAt, run.finishedAt, Date.now());
+  return elapsedBetween(run.startedAt, run.finishedAt, runClock.value);
 }
 
 function messageRun(message) {
@@ -293,6 +301,17 @@ onMounted(() => {
   window.addEventListener("focus", refreshSourcePermissions);
   document.addEventListener("visibilitychange", refreshOnVisible);
 });
+watch(() => [
+  sending.value, recovering.value,
+  threadState.value?.activeRun?.id, threadState.value?.activeRun?.status,
+], ([isSending, isRecovering, _runId, runStatus]) => {
+  clearInterval(runClockTimer);
+  runClockTimer = null;
+  const active = isSending || isRecovering || runStatus === "active";
+  if (!active) return;
+  runClock.value = Date.now();
+  runClockTimer = setInterval(() => { runClock.value = Date.now(); }, 200);
+}, { immediate: true });
 
 const THREADS_POLL_MS = 2000;
 let threadsTimer = null;
@@ -333,6 +352,8 @@ onBeforeUnmount(() => {
   pendingVersionOpenIds.clear();
   versionOpenInFlightIds.clear();
   stopThreadsPolling();
+  clearInterval(runClockTimer);
+  runClockTimer = null;
   window.removeEventListener("focus", refreshSourcePermissions);
   document.removeEventListener("visibilitychange", refreshOnVisible);
 });
@@ -769,7 +790,7 @@ function retryMessageHasAnnotation(messageId) {
   <section
     class="assistant-panel ai-panel agent-chat-panel"
     :data-event-seq="threadState?.eventSeq ?? 0"
-    :data-run-id="threadState?.latestRun?.id || ''"
+    :data-run-id="statusRun?.id || ''"
     :data-run-status="runStatusAttr"
   >
     <template v-if="mode === 'chat'">
@@ -866,8 +887,16 @@ function retryMessageHasAnnotation(messageId) {
                 <p
                   v-if="toolResultSummary(part)"
                   class="agent-tool-line"
-                  :role="part.state === 'output-error' ? 'alert' : undefined"
+                  :role="['output-error', 'output-denied'].includes(part.state) ? 'alert' : undefined"
                 >{{ toolResultSummary(part) }}</p>
+                <details
+                  v-if="toolDiagnosticText(part)"
+                  class="agent-tool-log"
+                  data-testid="agent-tool-log"
+                >
+                  <summary>技术日志</summary>
+                  <pre>{{ toolDiagnosticText(part) }}</pre>
+                </details>
                 <div v-if="sourcesOf(part).length" class="agent-sources" data-testid="agent-sources">
                   <div v-for="source in sourcesOf(part)" :key="sourceRefId(source)" class="agent-source-item" data-testid="agent-source" :data-source-ref="sourceRefId(source)" :data-source-state="sourceState(source).state">
                     <a

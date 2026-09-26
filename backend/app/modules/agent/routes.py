@@ -356,11 +356,27 @@ def _validate_plan(
 ) -> RunPlan:
     plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
+    if not plan.retry_message_id:
+        plan.parts = _persist_selection_snapshots(plan.parts, plan.selections)
     plan.annotation_id = _annotation_from_parts(database, case, plan, version_id, user)
     plan.revision_context = _revision_from_parts(
         database, case, plan, thread_id, user,
     )
     return plan
+
+
+def _persist_selection_snapshots(parts: list[dict], selections: list[dict]) -> list[dict]:
+    validated = iter(selections)
+    persisted = []
+    for part in parts:
+        if part.get("type") != "data-selection":
+            persisted.append(part)
+            continue
+        selection = next(validated)
+        persisted.append({
+            **part, "data": {**part["data"], "quote": selection["quote"]},
+        })
+    return persisted
 
 
 def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:

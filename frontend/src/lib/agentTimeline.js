@@ -7,6 +7,7 @@ export const TOOL_STATUS_LABELS = {
   ok: "已完成", pending: "处理中", created: "已创建", not_saved: "未保存",
   unavailable: "无法读取", not_found: "未找到",
   no_access: "当前身份无权限读取", empty: "内容为空", error: "读取失败",
+  denied: "操作被拒绝", rejected: "已拒绝", failed: "执行失败",
 };
 export const ARTIFACT_STATUS_LABELS = {
   accepted: "已接受", rejected: "已拒绝", expired: "已过期",
@@ -29,13 +30,16 @@ export function toolLabel(part) {
 }
 
 export function toolRunning(part) {
-  return part.state !== "output-available" && part.state !== "output-error";
+  return !["output-available", "output-error", "output-denied"].includes(part.state);
 }
 
 export function toolState(part) {
-  if (part.state === "output-error") return part.errorText || "执行失败";
+  if (part.state === "output-error") return "未完成";
+  if (part.state === "output-denied") return "已拒绝";
+  if (part.state === "approval-requested") return "等待授权";
   if (part.state !== "output-available") return "进行中";
-  return TOOL_STATUS_LABELS[part.output?.status] || "已完成";
+  if (typeof part.output?.status !== "string") return "已完成";
+  return TOOL_STATUS_LABELS[part.output.status] || "结果状态未知";
 }
 
 export function sourcesOf(part) {
@@ -65,7 +69,7 @@ export function toolParamSummary(part) {
 }
 
 export function toolResultSummary(part) {
-  if (part.state === "output-error") return part.errorText || "执行失败";
+  if (["output-error", "output-denied"].includes(part.state)) return toolFailureSummary(part);
   if (part.state !== "output-available") return "";
   const output = part.output || {};
   if (part.type === "tool-propose_document") {
@@ -76,12 +80,26 @@ export function toolResultSummary(part) {
     if (summary !== null) return summary;
   }
   if (output.artifactId) return "已创建修订候选，等待决定";
+  if (typeof output.status === "string" && output.status !== "ok") {
+    return TOOL_STATUS_LABELS[output.status] || "工具返回了无法识别的结果状态";
+  }
   if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
   if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
-  if (typeof output.status === "string" && output.status !== "ok") {
-    return TOOL_STATUS_LABELS[output.status] || output.status;
-  }
   return "";
+}
+
+export function toolFailureSummary(part) {
+  if (part.state === "output-denied") {
+    return "这项操作未获授权，因此没有执行。请改用可访问的资料或调整请求后继续。";
+  }
+  const validationFailure = typeof part.errorText === "string"
+    && part.errorText.includes("Fix the errors and try again.");
+  const cause = validationFailure ? "工具参数未通过校验" : "工具没有完成这一步";
+  return `${cause}。请调整请求后重新发送；原始错误保存在技术日志中。`;
+}
+
+export function toolDiagnosticText(part) {
+  return part.state === "output-denied" ? part.approval?.reason || "" : part.errorText || "";
 }
 
 function directWriteResultSummary(output) {
