@@ -84,7 +84,6 @@
 .material-selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--ink-2); }
 .material-selection-bar button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 0; border-radius: 6px; background: var(--brand); color: #fff; font-weight: 650; }
 .material-selection-bar button:disabled { opacity: .45; }
-.material-notice { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--green); }
 .material-table-wrap { overflow-x: auto; }
 .material-results table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
 .material-results th, .material-results td { padding: 11px 12px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }

@@ -670,6 +670,67 @@ def test_docx_export_numbers_citations_and_links_all_retained_sources() -> None:
     }
 
 
+def test_docx_material_source_link_opens_platform_page_and_keeps_download_access(
+    client: TestClient,
+) -> None:
+    material_id = "m-docx-source"
+    blob_id = "docx-source-blob"
+    original = b"authorized source bytes"
+    client.app.state.database.materials.insert_one(
+        {
+            "id": material_id,
+            "title": "导出来源素材",
+            "summary": "受限摘要标记",
+            "excerpt": "受限正文标记",
+            "source": "受限来源信息",
+            "sourceUrl": "https://source.example/material",
+            "status": "active",
+            "accessLevel": "private",
+            "createdBy": "u-user-demo",
+            "blobId": blob_id,
+            "filename": "source.txt",
+            "mediaType": "text/plain",
+            "size": len(original),
+        }
+    )
+    client.app.state.blob_store.put(blob_id, BytesIO(original), len(original), "text/plain")
+
+    denied_detail = client.get(f"/api/materials/{material_id}")
+    denied_download = client.get(f"/api/materials/{material_id}/content")
+    assert denied_detail.status_code == denied_download.status_code == 404
+    assert not any(
+        value in denied_detail.text
+        for value in ("导出来源素材", "受限摘要标记", "受限正文标记", "受限来源信息")
+    )
+
+    auth = login(client)
+    created = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": "来源链接验收"},
+    )
+    assert created.status_code == 200
+    case = created.json()
+    mounted = client.post(
+        f"/api/cases/{case['id']}/materials",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"materialId": material_id, "revision": case["revision"]},
+    )
+    assert mounted.status_code == 201
+
+    export = client.get(f"/api/cases/{case['id']}/export.docx")
+    assert export.status_code == 200
+    _, targets = docx_xml_and_links(export.content)
+    assert f"http://testserver/#/materials/{material_id}" in targets
+    assert f"http://testserver/api/materials/{material_id}/content" not in targets
+
+    detail = client.get(f"/api/materials/{material_id}")
+    download = client.get(f"/api/materials/{material_id}/content")
+    assert detail.status_code == 200
+    assert download.status_code == 200
+    assert download.content == original
+
+
 def test_docx_export_preserves_the_required_case_structure(client: TestClient) -> None:
     root = document_xml(create_default_case(client))
     texts = [paragraph_text(item) for item in root.iter(w("p"))]
