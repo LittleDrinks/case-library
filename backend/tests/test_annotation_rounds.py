@@ -694,7 +694,7 @@ def test_late_completion_rolls_back_on_real_replica_set():
         _close_annotation(database, marker)
         with pytest.raises(CaseError):
             AgentRepository(database).complete_run(
-                f"r-{marker}", _late_message(marker), artifact=_late_artifact(marker),
+                f"r-{marker}", _late_message(marker), artifacts=[_late_artifact(marker)],
             )
         _assert_rolled_back(database, marker)
     finally:
@@ -730,7 +730,7 @@ def _run_real_completion_in_thread(database, marker: str, committed):
             role="assistant", parts=[], createdAt=datetime.now(UTC))
         artifact = _late_artifact(marker, base_revision=2)
         outcome = AgentRepository(database).complete_run(
-            f"r-{marker}", assistant, artifact=artifact)
+            f"r-{marker}", assistant, artifacts=[artifact])
         assert outcome is True
         committed.set()
 

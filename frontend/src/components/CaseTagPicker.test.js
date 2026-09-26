@@ -1,6 +1,8 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import CaseTagPicker from "./CaseTagPicker.vue";
+
+let view;
 
 const groups = [
   { id: "g1", name: "课程", requiredForSubmission: true, enabled: true, sortKey: 0, tags: [
@@ -13,17 +15,27 @@ const groups = [
 ];
 
 function wrapper(extra = {}) {
-  return mount(CaseTagPicker, {
+  view = mount(CaseTagPicker, {
     props: { tagIds: [], groups, editable: true, ...extra },
+    attachTo: document.body,
   });
+  return view;
+}
+
+async function openPopover(currentView) {
+  await currentView.get(".case-tag-editor button").trigger("click");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  return document.querySelector(".case-tag-popover");
 }
 
 async function groupedMultiselectContract() {
-  const view = wrapper({ tagIds: ["t2"] });
-  await view.get(".case-tag-editor > button").trigger("click");
-  expect(view.text()).toContain("投稿必填");
-  await view.get(".case-tag-popover fieldset input[type='checkbox']").setValue(true);
-  expect(view.emitted("update:tagIds")[0][0]).toEqual(["t2", "t1"]);
+  const currentView = wrapper({ tagIds: ["t2"] });
+  const popover = await openPopover(currentView);
+  expect(popover.textContent).toContain("投稿必填");
+  const checkbox = popover.querySelector("fieldset input[type='checkbox']");
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+  expect(currentView.emitted("update:tagIds")[0][0]).toEqual(["t2", "t1"]);
 }
 
 async function chipRemovalContract() {
@@ -45,11 +57,11 @@ async function errorRetryContract() {
 }
 
 async function disabledTagContract() {
-  const view = wrapper({ tagIds: ["t3"] });
-  await view.get(".case-tag-editor > button").trigger("click");
-  const options = view.findAll(".case-tag-popover label").map((label) => label.text());
+  const currentView = wrapper({ tagIds: ["t3"] });
+  const popover = await openPopover(currentView);
+  const options = [...popover.querySelectorAll("label")].map((label) => label.textContent);
   expect(options).toEqual(["自然辩证法概论", "科学家精神"]);
-  expect(view.get("[aria-label='案例标签']").text()).toContain("劳动教育");
+  expect(currentView.get("[aria-label='案例标签']").text()).toContain("劳动教育");
 }
 
 function unknownTagContract() {
@@ -73,4 +85,10 @@ describe("案例标签设置", () => {
   it("停用标签不进入候选，已选停用标签仍回显", disabledTagContract);
   it("无法解析的条目不把内部 ID 当作标签名称", unknownTagContract);
   it("只读目录加载失败仍提供重试", readonlyErrorRetryContract);
+});
+
+afterEach(() => {
+  view?.unmount();
+  view = undefined;
+  document.body.innerHTML = "";
 });

@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext, Tool
@@ -17,6 +15,7 @@ from app.modules.agent import artifacts, writes
 from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef, write_view
+from app.modules.agent.repository import claim_run_write_path
 from app.modules.agent.search import CorpusSearchParams
 from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.source_reader import read_source as read_domain_source
@@ -72,15 +71,25 @@ def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
 async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
-    """为教师选定的正文范围构建修订候选；随运行完成事务统一提交。"""
+    """按正文位置提出建议；同轮目标不能重叠，其他不重叠位置仍可继续。"""
     require_revision_reason(reason)
-    if ctx.deps.proposed is not None:
-        raise ModelRetry("本次运行已提议过修订候选")
+    if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
+        raise ModelRetry("批注讨论本轮只能提议一条选区修订")
+    if any(start < item.target.to_pos and item.target.from_pos < end
+           for item in ctx.deps.proposed_artifacts):
+        raise ModelRetry(
+            "本轮已有与该位置重叠的修订建议。不要再次为该目标调用 propose_revision，"
+            "请保留已有候选并完成当前回复；其他建议只能使用不重叠的位置。"
+        )
+    if not ctx.deps.revision_path_claimed:
+        if not claim_run_write_path(ctx.deps.database, ctx.deps.run_id, "revision"):
+            raise ModelRetry("本次运行已选择另一条正文处理方式，不能再生成修订建议")
+        ctx.deps.revision_path_claimed = True
     try:
         artifact = _propose(ctx, start, end, replacement, reason)
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.proposed = artifact
+    ctx.deps.proposed_artifacts.append(artifact)
     return _artifact_view(artifact)
 
 
@@ -118,7 +127,7 @@ async def propose_document(
     """提议整篇独立只读 AI 版本；暂存运行结果，运行成功即落版本，不改当前教师稿。"""
     if ctx.deps.annotation_id:
         raise ModelRetry("批注讨论只能提议选区修订")
-    if ctx.deps.proposed is not None:
+    if ctx.deps.proposed_artifacts:
         raise ModelRetry("本次运行已提议过修订候选")
     return _propose_document(ctx, blocks, reason)
 
@@ -131,7 +140,7 @@ def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: st
         )
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error
-    ctx.deps.proposed = artifact
+    ctx.deps.proposed_artifacts.append(artifact)
     return {
         "kind": artifact.kind, "status": "pending",
         "blocks": len(artifact.blocks), "baseRevision": artifact.base_revision,
@@ -139,34 +148,32 @@ def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: st
 
 
 async def write_document(
-    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
-    blocks: DraftBlocks, summary: str = "",
+    ctx: RunContext[ToolDeps], blocks: DraftBlocks, summary: str = "",
 ) -> dict:
-    """按教师明确的直接写入指令执行正文写入；服务端全部校验通过才返回 written。
+    """为新建空稿生成初稿；已有正文必须通过修订建议确认。
 
     写入即落库并保留可撤销记录；失败或冲突向模型返回原因，不虚报成功。
     """
     if ctx.deps.annotation_id:
-        raise ModelRetry("批注讨论只能提议选区修订，不能直接写入正文")
-    return await _write_document(ctx, scope, blocks, summary)
+        raise ModelRetry("批注讨论只能提议正文修订，不能直接写入正文")
+    return await _write_document(ctx, blocks, summary)
 
 
 async def _write_document(
-    ctx: RunContext[ToolDeps], scope: Literal["document", "selection"],
-    blocks: DraftBlocks, summary: str,
+    ctx: RunContext[ToolDeps], blocks: DraftBlocks, summary: str,
 ) -> dict:
     if ctx.deps.wrote:
         raise ModelRetry("本次运行已直接写入过正文")
-    record = _apply_document_write(ctx, scope, blocks, summary)
+    record = _apply_document_write(ctx, blocks, summary)
     ctx.deps.wrote = True
     ctx.deps.write_record = record
     return {**write_view(record), "undoable": True}
 
 
-def _apply_document_write(ctx, scope, blocks, summary):
+def _apply_document_write(ctx, blocks, summary):
     try:
         record = writes.apply_write(
-            ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id, scope,
+            ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id,
             blocks, ctx.deps.user, summary,
         )
     except CaseError as error:
@@ -174,11 +181,13 @@ def _apply_document_write(ctx, scope, blocks, summary):
     return record
 
 
-def domain_capability() -> Capability:
-    """平台基础能力立即常驻，不依赖是否选择 Skill；写工具仅作者运行可用。"""
+def domain_capability(*, generate_document: bool) -> Capability:
+    """空稿保留初稿生成；已有正文只提供修订建议。"""
+    tools = [search_corpus, read_source, propose_revision]
+    if generate_document:
+        tools.extend([propose_document, write_document])
     return Capability(
-        tools=[search_corpus, read_source, propose_revision, propose_document,
-               write_document]
+        tools=tools,
     )
 
 

@@ -47,8 +47,17 @@ def _initialize_case_versions(database: Database) -> None:
     database.case_versions.create_index(
         [("caseId", ASCENDING), ("sourceRunId", ASCENDING)],
         unique=True,
-        partialFilterExpression={"sourceRunId": {"$type": "string"}},
+        partialFilterExpression={
+            "sourceRunId": {"$type": "string"},
+            "sourceArtifactId": None,
+        },
         name="one_ai_version_per_run",
+    )
+    database.case_versions.create_index(
+        [("sourceArtifactId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"sourceArtifactId": {"$type": "string"}},
+        name="one_ai_version_per_artifact",
     )
     database.case_versions.create_index([("attachments.blobId", ASCENDING)])
     database.case_versions.create_index([("materials.id", ASCENDING)])
@@ -149,10 +158,6 @@ def _initialize_search_delivery(database: Database) -> None:
 
 
 def _initialize_agent_threads(database: Database) -> None:
-    information = database.agent_threads.index_information()
-    for legacy in ("ownerId_1_caseId_1_isDefault_1", "agent_one_default_thread"):
-        if legacy in information:
-            database.agent_threads.drop_index(legacy)
     database.agent_threads.create_index([("id", ASCENDING)], unique=True)
     # mode 参与唯一性：同一管理员的作者线程（mode 缺省）与审核线程（mode=review）互不冲突。
     database.agent_threads.create_index(
@@ -227,7 +232,17 @@ def _initialize_agent_artifacts(database: Database) -> None:
 
 def _initialize_agent_writes(database: Database) -> None:
     database.agent_writes.create_index([("id", ASCENDING)], unique=True)
-    database.agent_writes.create_index([("runId", ASCENDING)], unique=True)
+    database.agent_writes.create_index(
+        [("runId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"artifactId": None},
+    )
+    database.agent_writes.create_index(
+        [("artifactId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"artifactId": {"$type": "string"}},
+        name="one_write_per_artifact",
+    )
     database.agent_writes.create_index(
         [("threadId", ASCENDING), ("createdAt", ASCENDING)]
     )

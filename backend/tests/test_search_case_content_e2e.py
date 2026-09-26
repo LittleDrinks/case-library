@@ -71,14 +71,10 @@ def _published_version() -> dict:
     }
 
 
-def _seed_database():
-    database = mongomock.MongoClient()["case_content_search_e2e"]
-    database.client.admin.command = lambda _name: {"ok": 1, "isWritablePrimary": True}
-    database.client.start_session = lambda: PassthroughSession()
+def _seed_database(database) -> None:
     database.cases.insert_many([_public_case(), _hidden_case()])
     database.case_versions.insert_many([_published_version(), _hidden_version()])
     database.users.insert_many(_users())
-    return database
 
 
 def _public_case() -> dict:
@@ -143,7 +139,10 @@ def _meili():
 
 
 def _search_setup():
-    return _seed_database(), _meili(), f"case_content_{uuid.uuid4().hex}"
+    database = mongomock.MongoClient()["case_content_search_e2e"]
+    database.client.admin.command = lambda _name: {"ok": 1, "isWritablePrimary": True}
+    database.client.start_session = lambda: PassthroughSession()
+    return database, _meili(), f"case_content_{uuid.uuid4().hex}"
 
 
 @pytest.fixture(scope="module")
@@ -156,6 +155,8 @@ def case_search(tmp_path_factory):
     state = ReadyCatalogState(database)
     app = create_app(database, settings, MemoryBlobStore(), catalog, state)
     with TestClient(app) as http:
+        # Mongomock misreads missing artifact IDs as duplicate null keys.
+        _seed_database(database)
         CatalogRebuilder(database, client, uid).rebuild()
         WorkerHeartbeat(database, "case-content-fixture").pulse()
         yield SearchContext(http, database)

@@ -404,6 +404,7 @@ function exposedApi(caseId, state, at) {
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
     undoWrite: (writeId) => undoWrite(caseId, state, at(), state.threadId.value, writeId),
+    refresh: () => refreshSnapshot(caseId, state, at()),
     reload: () => reload(caseId, state),
   };
 }

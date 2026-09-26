@@ -7,6 +7,7 @@ import uuid
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+from app.modules.agent import prosemirror
 
 
 def _login(client: TestClient) -> dict:
@@ -21,10 +22,14 @@ def _document(text: str) -> dict:
     }]}
 
 
-def _create_case(client: TestClient, auth: dict) -> dict:
+def _empty_document() -> dict:
+    return {"type": "doc", "content": [{"type": "paragraph", "content": []}]}
+
+
+def _create_case(client: TestClient, auth: dict, document: dict | None = None) -> dict:
     return client.post(
         "/api/cases", headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"title": "AI版本案例", "document": _document("教师原稿")},
+        json={"title": "AI版本案例", "document": document or _document("教师原稿")},
     ).json()
 
 
@@ -45,6 +50,28 @@ def _full_generation_model() -> FunctionModel:
             )}
             return
         yield "已生成完整 AI 稿。"
+
+    return FunctionModel(stream_function=stream)
+
+
+def _full_revision_model(targets: list[dict]) -> FunctionModel:
+    next_target = 0
+
+    async def stream(_messages, _info):
+        nonlocal next_target
+        if next_target < len(targets):
+            target = targets[next_target]
+            next_target += 1
+            args = {
+                "start": target["start"], "end": target["end"],
+                "replacement": target["replacement"], "reason": target["reason"],
+            }
+            yield {0: DeltaToolCall(
+                name="propose_revision", json_args=json.dumps(args),
+                tool_call_id=f"full-revision-{next_target}",
+            )}
+            return
+        yield "已为全文中需要修改的位置分别提供建议。"
 
     return FunctionModel(stream_function=stream)
 
@@ -102,11 +129,14 @@ def _assert_saved_version(client: TestClient, case: dict, thread_id: str) -> Non
 
 
 def _overwrite_version(client: TestClient, auth: dict, case: dict, version: dict):
-    step = {"stepType": "replace", "from": 1, "to": 5,
+    current = client.get(f"/api/cases/{case['id']}").json()
+    block = prosemirror.text_blocks(current["document"])[0]
+    step = {"stepType": "replace", "from": block["start"], "to": block["end"],
             "slice": {"content": [{"type": "text", "text": "覆盖前教师稿"}]}}
     changed = client.patch(
         f"/api/cases/{case['id']}", headers={"X-CSRF-Token": auth["csrfToken"]},
-        json={"revision": 1, "document": _document("覆盖前教师稿"), "steps": [step]},
+        json={"revision": current["revision"], "document": _document("覆盖前教师稿"),
+              "steps": [step]},
     ).json()
     return client.post(
         f"/api/cases/{case['id']}/lifecycle",
@@ -120,7 +150,7 @@ def test_full_generation_is_a_readonly_version_without_changing_the_draft(
     client: TestClient,
 ) -> None:
     auth = _login(client)
-    case = _create_case(client, auth)
+    case = _create_case(client, auth, _empty_document())
     response, thread_id = _run_message(
         client, auth, case, "请完整生成全文", "full-generation-message"
     )
@@ -130,23 +160,55 @@ def test_full_generation_is_a_readonly_version_without_changing_the_draft(
     _assert_saved_version(client, case, thread_id)
 
 
-def test_full_generation_works_with_existing_body(client: TestClient) -> None:
+def test_full_document_revision_proposes_each_changed_paragraph(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth)
-    response, thread_id = _run_message(
-        client, auth, case, "请根据资料重写整个案例", "natural-full-generation-message"
-    )
+    document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "第一段现有正文。"}]},
+        {"type": "paragraph", "content": [{"type": "text", "text": "第二段现有正文。"}]},
+    ]}
+    case = _create_case(client, auth, document)
+    blocks = prosemirror.text_blocks(case["document"])
+    targets = [
+        {"start": block["start"], "end": block["end"],
+         "replacement": replacement, "reason": reason}
+        for block, replacement, reason in zip(
+            blocks,
+            ("第一段修改建议。", "第二段修改建议。"),
+            ("补足第一段重点。", "澄清第二段表达。"),
+            strict=True,
+        )
+    ]
+    thread_id = client.get(f"/api/cases/{case['id']}/agent/thread").json()["id"]
+    from app.modules.agent.runtime import agent
+
+    with agent.override(model=_full_revision_model(targets)):
+        response = client.post(
+            f"/api/cases/{case['id']}/agent/thread/{thread_id}/stream",
+            headers={"X-CSRF-Token": auth["csrfToken"]},
+            json=_message_body("请按全文需要修改的位置分别提出建议",
+                               "natural-full-revision-message"),
+        )
 
     assert response.status_code == 200
     _await_completed(client.app.state.database, thread_id)
-    _assert_saved_version(client, case, thread_id)
+    assert client.get(f"/api/cases/{case['id']}").json()["document"] == case["document"]
+    assert client.get(f"/api/cases/{case['id']}/history").json()["versions"] == []
+    artifacts = list(client.app.state.database.agent_artifacts.find(
+        {"caseId": case["id"]}, {"_id": 0}, sort=[("target.from", 1)],
+    ))
+    assert [item["target"]["quote"] for item in artifacts] == [
+        "第一段现有正文。", "第二段现有正文。",
+    ]
+    assert [item["replacement"] for item in artifacts] == [
+        "第一段修改建议。", "第二段修改建议。",
+    ]
 
 
 def test_replaying_full_generation_request_does_not_duplicate_version(
     client: TestClient,
 ) -> None:
     auth = _login(client)
-    case = _create_case(client, auth)
+    case = _create_case(client, auth, _empty_document())
     first, thread_id = _run_message(
         client, auth, case, "请完整生成全文", "same-user-message"
     )
@@ -165,7 +227,7 @@ def test_replaying_full_generation_request_does_not_duplicate_version(
 
 def test_ai_version_uses_the_existing_overwrite_flow(client: TestClient) -> None:
     auth = _login(client)
-    case = _create_case(client, auth)
+    case = _create_case(client, auth, _empty_document())
     response, thread_id = _run_message(
         client, auth, case, "请完整生成全文", "overwrite-version-message"
     )

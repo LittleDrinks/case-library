@@ -118,16 +118,42 @@ async function reopenAndSaveTags(page, caseId, marker) {
   await page.goto(`/#/workbench/${caseId}`);
   await page.getByRole("button", { name: "另开新稿" }).click();
   await expect(page.locator("textarea.document-title")).not.toHaveAttribute("readonly");
+  await page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(645);
   const saveDone = page.waitForResponse(
     (response) => response.url().endsWith(`/api/cases/${caseId}`) && response.request().method() === "PATCH",
   );
-  await page.getByRole("button", { name: "设置标签" }).click();
+  const tagTrigger = page.getByRole("button", { name: "设置标签" });
+  await tagTrigger.focus();
+  await tagTrigger.press("Enter");
   const popover = page.locator(".case-tag-popover");
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole("searchbox", { name: "查找标签" })).toBeFocused();
+  const popoverBox = await popover.boundingBox();
+  const columnBox = await page.locator(".canvas-column").boundingBox();
+  expect(popoverBox).not.toBeNull();
+  expect(columnBox).not.toBeNull();
+  expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+  expect(popoverBox.y).toBeGreaterThanOrEqual(0);
+  expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(645);
+  expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(844);
+  expect(popoverBox.x + popoverBox.width).toBeGreaterThan(columnBox.x + columnBox.width);
+  expect(await page.evaluate(({ x, y }) => Boolean(
+    document.elementFromPoint(x, y)?.closest(".case-tag-popover")
+  ), { x: popoverBox.x + popoverBox.width - 4, y: popoverBox.y + popoverBox.height / 2 })).toBe(true);
   // 作者真实修改：勾上劳动教育并取消文化自信，产生工作记录净变化。
-  await popover.locator("label", { hasText: ADDED_TAG }).locator("input").check();
+  const addedTag = popover.locator("label", { hasText: ADDED_TAG });
+  const addedTagBox = await addedTag.boundingBox();
+  expect(addedTagBox).not.toBeNull();
+  expect(addedTagBox.x + addedTagBox.width).toBeGreaterThan(columnBox.x + columnBox.width);
+  await addedTag.click({ position: { x: addedTagBox.width - 8, y: addedTagBox.height / 2 } });
+  await expect(addedTag.locator("input")).toBeChecked();
   await popover.locator("label", { hasText: REMOVED_TAG }).locator("input").uncheck();
   await expectThisSaveApplied(await saveDone);
-  await page.getByRole("button", { name: "设置标签" }).click();
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect(tagTrigger).toBeFocused();
 
   await page.reload();
   await expect(page.locator("textarea.document-title")).toHaveValue(marker);
@@ -195,6 +221,7 @@ test("作者另开新稿修改标签保存后，公开页保持已批准版本�
   await signIn(page, AUTHOR);
   const marker = `作者编辑标签-${Date.now()}`;
   const created = await publishWithAdmin(browser, request, marker);
+  await page.setViewportSize({ width: 645, height: 844 });
 
   await openPublicCase(page, created.id, marker);
   await assertRealTagNames(page);
@@ -208,4 +235,101 @@ test("作者另开新稿修改标签保存后，公开页保持已批准版本�
   await assertPublicKeepsApprovedTags(page, created.id, marker);
   await capture(page, testInfo, "author-public-after-edit.png");
   await context.close();
+});
+
+test("工作台标签弹层在窄桌面视口内完整可点并可滚到末项", async ({ page }) => {
+  await signIn(page, AUTHOR);
+  const marker = `标签弹层视口-${Date.now()}`;
+  const created = await createTaggedCase(page.context().request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.locator("textarea.document-title")).toBeVisible();
+
+  for (const width of [645, 700, 800]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.reload();
+    await expect(page.locator("textarea.document-title")).toBeVisible();
+    await page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true }).click();
+    await expect(page.locator(".canvas-workspace")).toHaveClass(/outline-collapsed/);
+
+    const trigger = page.getByRole("button", { name: "设置标签", exact: true });
+    await trigger.focus();
+    await trigger.press("Enter");
+    const popover = page.locator(".case-tag-popover:visible");
+    await expect(popover).toBeVisible();
+    await expect(popover.locator("fieldset")).toHaveCount(4);
+    await expect(popover.locator("fieldset label")).toHaveCount(16);
+
+    const box = await popover.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(box.y + box.height).toBeLessThanOrEqual(844);
+    const cornerHits = await popover.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return [
+        [rect.left + 4, rect.top + 4],
+        [rect.right - 4, rect.top + 4],
+        [rect.left + 4, rect.bottom - 4],
+        [rect.right - 4, rect.bottom - 4],
+      ].map(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest(".case-tag-popover")));
+    });
+    expect(cornerHits).toEqual([true, true, true, true]);
+
+    const scroll = await popover.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+    const lastTag = popover.locator("fieldset label").last();
+    await lastTag.scrollIntoViewIfNeeded();
+    const scrolledGeometry = await lastTag.evaluate((label) => {
+      const element = label.closest(".case-tag-popover");
+      const popoverRect = element.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const cornerHits = [
+        [popoverRect.left + 4, popoverRect.top + 4],
+        [popoverRect.right - 4, popoverRect.top + 4],
+        [popoverRect.left + 4, popoverRect.bottom - 4],
+        [popoverRect.right - 4, popoverRect.bottom - 4],
+      ].map(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest(".case-tag-popover")));
+      return {
+        popover: {
+          left: popoverRect.left,
+          top: popoverRect.top,
+          right: popoverRect.right,
+          bottom: popoverRect.bottom,
+        },
+        label: { top: labelRect.top, bottom: labelRect.bottom },
+        cornerHits,
+      };
+    });
+    expect(scrolledGeometry.popover.left).toBeGreaterThanOrEqual(0);
+    expect(scrolledGeometry.popover.top).toBeGreaterThanOrEqual(0);
+    expect(scrolledGeometry.popover.right).toBeLessThanOrEqual(width);
+    expect(scrolledGeometry.popover.bottom).toBeLessThanOrEqual(844);
+    expect(scrolledGeometry.label.top).toBeGreaterThanOrEqual(scrolledGeometry.popover.top);
+    expect(scrolledGeometry.label.bottom).toBeLessThanOrEqual(scrolledGeometry.popover.bottom);
+    expect(scrolledGeometry.cornerHits).toEqual([true, true, true, true]);
+    const lastInput = lastTag.locator("input");
+    await expect(lastInput).toBeVisible();
+    const wasChecked = await lastInput.isChecked();
+    const saved = page.waitForResponse((response) => (
+      response.url().endsWith(`/api/cases/${created.id}`)
+      && response.request().method() === "PATCH"
+    ));
+    await lastInput.click();
+    await expect(lastInput).toHaveJSProperty("checked", !wasChecked);
+    expect((await saved).ok()).toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(popover).toBeVisible();
+    const aiTrigger = page.locator(".workspace-header").getByRole("button", { name: "AI", exact: true });
+    await aiTrigger.click();
+    await expect(popover).toBeHidden();
+    await expect(aiTrigger).toBeFocused();
+  }
 });

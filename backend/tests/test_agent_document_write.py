@@ -1,8 +1,7 @@
-"""正文写入：整篇 AI 版本、明确指令直接写入可撤销、候选修订确认。
+"""空稿初稿写入与候选修订确认。
 
-覆盖：直接写入的服务端守卫（作者、工作版本、基线修订号、选区仅锁定范围、
-一次运行一次写入）、撤销的修订号守卫与幂等、整篇 AI 版本的提议流程、工具
-只真实成功才宣称写入，以及只读运行不暴露写工具。
+覆盖：空稿初稿写入守卫、撤销的修订号守卫与幂等、整篇 AI 版本的提议流程、
+工具只真实成功才宣称写入，以及只读运行不暴露写工具。
 """
 
 from __future__ import annotations
@@ -16,20 +15,20 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError
-from pydantic_ai import ModelResponse, ToolCallPart, Tool
+from pydantic_ai import ModelResponse, Tool, ToolCallPart
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
-from app.modules.agent import artifacts, blocks, prosemirror, writes
-from app.modules.agent.models import ArtifactTarget
+from app.modules.agent import artifacts, blocks, writes
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.visibility import HIDDEN_REVISION
+from app.modules.agent.routes import _capabilities
 from app.modules.agent.skills import (
     domain_capability,
     propose_document,
     reader_capability,
     write_document,
 )
+from app.modules.agent.visibility import HIDDEN_REVISION
 from app.modules.cases.service import CaseError
 
 PARAGRAPHS = ("第一段保持不变。", "第二段需要修订。")
@@ -38,7 +37,6 @@ DRAFT_BLOCKS = [
     {"type": "paragraph", "text": "**标记**保留为字面文本"},
     {"type": "bullet_list", "items": ["要点一", "要点二"]},
 ]
-SECOND = ArtifactTarget(from_pos=11, to_pos=19, quote=PARAGRAPHS[1])
 
 
 def _login(client: TestClient) -> dict:
@@ -77,14 +75,12 @@ def _create_case(client: TestClient, auth: dict, document: dict | None = None) -
     return response.json()
 
 
-def _locked_run(database, auth: dict, case: dict,
-                target: ArtifactTarget | None = None):
+def _locked_run(database, auth: dict, case: dict):
     repository = AgentRepository(database)
     thread = repository.default_thread(case["id"], auth["user"]["id"])
     run = repository.start_run(
         thread, auth["user"]["id"], [{"type": "text", "text": "写入"}], {},
         f"assistant-{uuid.uuid4().hex}", base_revision=case["revision"],
-        target=target,
     )
     return thread, run
 
@@ -109,21 +105,6 @@ _CANONICAL_BLOCKS = [
     {"type": "bullet_list", "items": ["要点"]},
     {"type": "blockquote", "paragraphs": ["引用"]},
 ]
-_PARTIAL_SELECTION_DOCUMENT = {"type": "doc", "content": [
-    {"type": "paragraph", "content": [
-        {"type": "text", "text": "前置"},
-        {"type": "text", "text": "原句保留依据", "marks": [
-            {"type": "citation", "attrs": {"sourceType": "case", "sourceId": "c-src"}},
-        ]},
-    ]},
-    {"type": "paragraph", "content": [
-        {"type": "text", "text": "改写前缀"},
-        {"type": "text", "text": PARAGRAPHS[1]},
-        {"type": "text", "text": "改写后缀"},
-    ]},
-]}
-
-
 def _canonical_artifact(client: TestClient, auth: dict):
     case = _create_case(client, auth, _document())
     database = client.app.state.database
@@ -148,7 +129,7 @@ def test_normalized_blocks_keep_real_storage_shape() -> None:
 def test_document_candidate_and_write_store_canonical_blocks(
         client: TestClient) -> None:
     auth = _login(client)
-    database, thread, case, run, artifact = _canonical_artifact(client, auth)
+    database, _thread, case, run, artifact = _canonical_artifact(client, auth)
     assert artifact.blocks == [
         {"type": "ordered_list", "items": ["第一步"]},
         {"type": "paragraph", "text": "段落"},
@@ -190,20 +171,12 @@ def _assert_nonblank_documents() -> None:
     ]})
 
 
-def _assert_template_rewritable() -> None:
-    from app.modules.cases.template import new_case_document
-
-    assert blocks.document_rewritable(new_case_document())
-    edited = new_case_document()
-    edited["content"][0]["content"][0]["text"] += "（已改）"
-    assert not blocks.document_rewritable(edited)
-
-
-def test_blank_detection_only_allows_truly_empty_or_template(
-        client: TestClient) -> None:
+def test_blank_detection_requires_empty_document() -> None:
     _assert_blank_documents()
     _assert_nonblank_documents()
-    _assert_template_rewritable()
+    from app.modules.cases.template import new_case_document
+
+    assert not blocks.document_blank(new_case_document())
 
 
 def test_completed_run_cannot_direct_write(client: TestClient) -> None:
@@ -214,7 +187,7 @@ def test_completed_run_cannot_direct_write(client: TestClient) -> None:
     AgentRepository(database).cancel_run(run.id)
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
-            database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+            database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
         )
     assert excinfo.value.status_code == 409
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
@@ -229,19 +202,19 @@ def test_write_refused_when_run_belongs_to_other_case(client: TestClient) -> Non
     _thread, run = _locked_run(database, auth, case_a)
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
-            database, case_b["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+            database, case_b["id"], run.id, DRAFT_BLOCKS, auth["user"],
         )
     assert excinfo.value.status_code == 404
     assert database.cases.find_one({"id": case_b["id"]})["revision"] == 1
     assert database.agent_writes.count_documents({}) == 0
     # 跨案例拒绝后，原运行对自己案例仍可正常写入。
     record = writes.apply_write(
-        database, case_a["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+        database, case_a["id"], run.id, DRAFT_BLOCKS, auth["user"],
     )
     assert record["resultRevision"] == 2
 
 
-# ---- 直接写入：整篇仅空草稿或模板 ----
+# ---- 初稿写入：只接受空正文 ----
 
 
 def test_direct_write_replaces_blank_document(client: TestClient) -> None:
@@ -250,7 +223,7 @@ def test_direct_write_replaces_blank_document(client: TestClient) -> None:
     database = client.app.state.database
     thread, run = _locked_run(database, auth, case)
     writes.apply_write(
-        database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+        database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
     )
     _assert_blank_write_persisted(database, case, run, thread)
 
@@ -272,16 +245,20 @@ def _assert_blank_write_persisted(database, case, run, thread) -> None:
                for snapshot in database.case_snapshots.find({"caseId": case["id"]}))
 
 
-def test_direct_write_accepts_untouched_template(client: TestClient) -> None:
+def test_direct_write_refuses_default_template(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database = client.app.state.database
     _thread, run = _locked_run(database, auth, case)
-    record = writes.apply_write(
-        database, case["id"], run.id, "document",
-        [{"type": "paragraph", "text": "整体生成的初稿。"}], auth["user"],
-    )
-    assert record["resultRevision"] == 2
+    with pytest.raises(CaseError) as excinfo:
+        writes.apply_write(
+            database, case["id"], run.id,
+            [{"type": "paragraph", "text": "整体生成的初稿。"}], auth["user"],
+        )
+    assert excinfo.value.status_code == 422
+    assert "正文已有内容" in excinfo.value.detail
+    assert database.cases.find_one({"id": case["id"]})["revision"] == 1
+    assert database.agent_writes.count_documents({}) == 0
 
 
 def test_direct_write_refuses_full_overwrite_of_existing_body(client: TestClient) -> None:
@@ -291,88 +268,22 @@ def test_direct_write_refuses_full_overwrite_of_existing_body(client: TestClient
     _thread, run = _locked_run(database, auth, case)
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
-            database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+            database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
         )
     assert excinfo.value.status_code == 422
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
     assert database.agent_writes.count_documents({}) == 0
 
 
-# ---- 直接写入：选区仅锁定范围 ----
-
-
-def test_direct_selection_write_replaces_locked_range(client: TestClient) -> None:
-    auth = _login(client)
-    case = _create_case(client, auth, _document(*PARAGRAPHS))
-    database = client.app.state.database
-    _thread, run = _locked_run(database, auth, case, SECOND)
-    writes.apply_write(
-        database, case["id"], run.id, "selection",
-        [{"type": "heading", "level": 2, "text": "小结"},
-         {"type": "bullet_list", "items": ["要点一", "要点二"]}],
-        auth["user"],
-    )
-    updated = database.cases.find_one({"id": case["id"]})
-    assert updated["revision"] == 2
-    assert [node["type"] for node in updated["document"]["content"]] == [
-        "paragraph", "heading", "bulletList",
-    ]
-    assert prosemirror.paragraphs(updated["document"])[0]["quote"] == PARAGRAPHS[0]
-
-
-def test_direct_selection_write_preserves_partial_range_and_citation(
-        client: TestClient) -> None:
-    auth = _login(client)
-    case = _create_case(client, auth, _document(*PARAGRAPHS))
-    database = client.app.state.database
-    document = _PARTIAL_SELECTION_DOCUMENT
-    database.cases.update_one({"id": case["id"]}, {"$set": {"document": document}})
-    block = prosemirror.text_blocks(document)[1]
-    target = ArtifactTarget(from_pos=block["start"] + 4,
-                            to_pos=block["start"] + 4 + len(PARAGRAPHS[1]),
-                            quote=PARAGRAPHS[1])
-    _thread, run = _locked_run(database, auth, case, target)
-    writes.apply_write(
-        database, case["id"], run.id, "selection",
-        [{"type": "paragraph", "text": "已重写的结构化段落"}], auth["user"],
-    )
-    _assert_partial_selection_result(database, case)
-
-
-def _assert_partial_selection_result(database, case) -> None:
-    content = database.cases.find_one({"id": case["id"]})["document"]["content"]
-    assert [node["type"] for node in content] == [
-        "paragraph", "paragraph", "paragraph", "paragraph",
-    ]
-    first = content[0]["content"]
-    assert first[1]["marks"][0]["type"] == "citation"
-    assert first[1]["text"] == "原句保留依据"
-    assert prosemirror.paragraphs(
-        database.cases.find_one({"id": case["id"]})["document"]
-    )[2]["quote"] == "已重写的结构化段落"
-
-
-def test_selection_without_locked_target_refused(client: TestClient) -> None:
-    auth = _login(client)
-    case = _create_case(client, auth, _document(*PARAGRAPHS))
-    database = client.app.state.database
-    _thread, run = _locked_run(database, auth, case, target=None)
-    with pytest.raises(CaseError) as excinfo:
-        writes.apply_write(
-            database, case["id"], run.id, "selection", DRAFT_BLOCKS, auth["user"],
-        )
-    assert excinfo.value.status_code == 422
-
-
 def test_read_only_run_write_paths_explicitly_refused(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth, _document(*PARAGRAPHS))
     database = client.app.state.database
-    thread, run = _locked_run(database, auth, case, SECOND)
+    thread, run = _locked_run(database, auth, case)
     database.agent_runs.update_one({"id": run.id}, {"$set": {"readOnly": True}})
     with pytest.raises(CaseError) as denied:
         writes.apply_write(
-            database, case["id"], run.id, "selection", DRAFT_BLOCKS, auth["user"],
+            database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
         )
     assert denied.value.status_code == 403
     with pytest.raises(CaseError) as candidate:
@@ -393,7 +304,7 @@ def test_direct_write_refuses_stale_baseline(client: TestClient) -> None:
     database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
-            database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+            database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
         )
     assert excinfo.value.status_code == 409
 
@@ -404,11 +315,11 @@ def test_only_one_direct_write_per_run(client: TestClient) -> None:
     database = client.app.state.database
     _thread, run = _locked_run(database, auth, case)
     writes.apply_write(
-        database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+        database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
     )
     with pytest.raises(CaseError) as excinfo:
         writes.apply_write(
-            database, case["id"], run.id, "document",
+            database, case["id"], run.id,
             [{"type": "paragraph", "text": "再次写入"}], auth["user"],
         )
     assert excinfo.value.status_code == 409
@@ -424,7 +335,7 @@ def test_invalid_blocks_are_refused(client: TestClient) -> None:
                 [{"type": "markdown", "text": "# 标题"}]):
         with pytest.raises(CaseError) as excinfo:
             writes.apply_write(
-                database, case["id"], run.id, "document", bad, auth["user"],
+                database, case["id"], run.id, bad, auth["user"],
             )
         assert excinfo.value.status_code == 422
     assert database.agent_writes.count_documents({}) == 0
@@ -438,7 +349,7 @@ def _written_case(client: TestClient, auth: dict):
     database = client.app.state.database
     thread, run = _locked_run(database, auth, case)
     record = writes.apply_write(
-        database, case["id"], run.id, "document", DRAFT_BLOCKS, auth["user"],
+        database, case["id"], run.id, DRAFT_BLOCKS, auth["user"],
     )
     return database, thread, case, record
 
@@ -520,7 +431,8 @@ def _publish(database, repository, run, artifact=None, write_record=None, parts=
         created_at=datetime.now(UTC),
     )
     return repository.complete_run(
-        run.id, message, resources=[], artifact=artifact, write_record=write_record
+        run.id, message, resources=[], artifacts=[artifact] if artifact else [],
+        write_record=write_record,
     )
 
 
@@ -538,7 +450,7 @@ def _assert_document_version_created(database, case, run, artifact) -> None:
 
 def test_document_generation_creates_readonly_version(client: TestClient) -> None:
     auth = _login(client)
-    database, thread, case, run, artifact = _pending_document_artifact(
+    database, _thread, case, run, artifact = _pending_document_artifact(
         client, auth, _document()
     )
     _assert_document_version_created(database, case, run, artifact)
@@ -546,7 +458,7 @@ def test_document_generation_creates_readonly_version(client: TestClient) -> Non
 
 def test_document_generation_cancel_keeps_body(client: TestClient) -> None:
     auth = _login(client)
-    database, thread, case, run, artifact = _pending_document_artifact(
+    database, _thread, case, run, _artifact = _pending_document_artifact(
         client, auth, _document()
     )
     assert AgentRepository(database).cancel_run(run.id)
@@ -590,18 +502,25 @@ def test_document_generation_frozen_case_reports_freeze_reason(client: TestClien
     assert message["parts"][0]["output"]["detail"] == "AI版本未保存：案例已冻结，未创建独立版本"
 
 
-def test_document_generation_allows_existing_body(client: TestClient) -> None:
+def test_document_generation_refuses_existing_body(client: TestClient) -> None:
     auth = _login(client)
-    database, _thread, _case, _run, artifact = _pending_document_artifact(
-        client, auth, _document(*PARAGRAPHS)
-    )
-    assert artifact.kind == "document"
-    assert client.app.state.database.agent_artifacts.count_documents({}) == 0
+    case = _create_case(client, auth, _document(*PARAGRAPHS))
+    database = client.app.state.database
+    thread, run = _locked_run(database, auth, case)
+    with pytest.raises(CaseError) as excinfo:
+        artifacts.propose_document_artifact(
+            database, case["id"], thread.id, run.id, DRAFT_BLOCKS, "整篇调整",
+            [], auth["user"],
+        )
+    assert excinfo.value.status_code == 422
+    assert database.agent_artifacts.count_documents({}) == 0
+    run_row = database.agent_runs.find_one({"id": run.id})
+    assert "writePath" not in run_row
 
 
 def test_document_generation_has_no_candidate_card(client: TestClient) -> None:
     auth = _login(client)
-    database, thread, case, run, artifact = _pending_document_artifact(
+    database, _thread, _case, run, artifact = _pending_document_artifact(
         client, auth, _document()
     )
     _publish(database, AgentRepository(database), run, artifact)
@@ -615,7 +534,7 @@ def test_document_generation_has_no_candidate_card(client: TestClient) -> None:
 def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         database=database, case_id=case["id"], thread_id=run.thread_id,
-        run_id=run.id, user=user, proposed=None, wrote=wrote, evidence=[],
+        run_id=run.id, user=user, proposed_artifacts=[], wrote=wrote, evidence=[],
         annotation_id=None,
     )
 
@@ -632,16 +551,16 @@ def test_write_document_tool_reports_only_real_success(client: TestClient) -> No
     database = client.app.state.database
     _thread, run = _locked_run(database, auth, case)
     deps = _deps(database, case, run, auth["user"])
-    output = asyncio.run(_call(deps, "document", DRAFT_BLOCKS, "初稿"))
+    output = asyncio.run(_call(deps, DRAFT_BLOCKS, "初稿"))
     assert output["status"] == "written"
     assert output["undoable"] is True
     assert deps.wrote is True
     with pytest.raises(ModelRetry):
-        asyncio.run(_call(deps, "document", DRAFT_BLOCKS, "重复写入"))
+        asyncio.run(_call(deps, DRAFT_BLOCKS, "重复写入"))
 
 
-async def _call(deps, scope, blocks, summary):
-    return await write_document(_ctx(deps), scope, blocks, summary)
+async def _call(deps, blocks, summary):
+    return await write_document(_ctx(deps), blocks, summary)
 
 
 def test_write_document_tool_retries_on_guard_failure(client: TestClient) -> None:
@@ -653,8 +572,8 @@ def test_write_document_tool_retries_on_guard_failure(client: TestClient) -> Non
     _thread, run = _locked_run(database, auth, case)
     deps = _deps(database, case, run, auth["user"])
     with pytest.raises(ModelRetry) as excinfo:
-        asyncio.run(_call(deps, "document", DRAFT_BLOCKS, "初稿"))
-    assert "不能整篇覆盖" in str(excinfo.value)
+        asyncio.run(_call(deps, DRAFT_BLOCKS, "初稿"))
+    assert "正文已有内容" in str(excinfo.value)
     assert deps.wrote is False
     assert database.agent_writes.count_documents({}) == 0
 
@@ -669,7 +588,7 @@ def test_propose_document_tool_stages_pending_candidate(client: TestClient) -> N
     deps = _deps(database, case, run, auth["user"])
     output = asyncio.run(propose_document(_ctx(deps), DRAFT_BLOCKS, "依据资料初稿"))
     assert output["kind"] == "document"
-    assert deps.proposed is not None
+    assert deps.proposed_artifacts
     with pytest.raises(ModelRetry):
         asyncio.run(propose_document(_ctx(deps), DRAFT_BLOCKS, "再次提议"))
     assert database.agent_artifacts.count_documents({}) == 0
@@ -688,7 +607,7 @@ def test_document_candidate_blocks_direct_write_before_body_side_effect(
 
     asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
     with pytest.raises(ModelRetry):
-        asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+        asyncio.run(_call(write_deps, DRAFT_BLOCKS, "直接写入"))
 
     assert database.cases.find_one({"id": case["id"]})["revision"] == 1
     assert database.agent_writes.count_documents({}) == 0
@@ -705,7 +624,7 @@ def test_direct_write_blocks_document_candidate_before_candidate_side_effect(
     write_deps = _deps(database, case, run, auth["user"])
     candidate_deps = _deps(database, case, run, auth["user"])
 
-    output = asyncio.run(_call(write_deps, "document", DRAFT_BLOCKS, "直接写入"))
+    output = asyncio.run(_call(write_deps, DRAFT_BLOCKS, "直接写入"))
     assert output["status"] == "written"
     with pytest.raises(ModelRetry):
         asyncio.run(propose_document(_ctx(candidate_deps), DRAFT_BLOCKS, "完整生成"))
@@ -722,7 +641,7 @@ def _concurrent_write_call(kind, deps, start):
     try:
         output = asyncio.run(
             propose_document(_ctx(deps), DRAFT_BLOCKS, "完整生成")
-            if kind == "candidate" else _call(deps, "document", DRAFT_BLOCKS, "直接写入")
+            if kind == "candidate" else _call(deps, DRAFT_BLOCKS, "直接写入")
         )
         return kind, "ok", output
     except ModelRetry as error:
@@ -765,29 +684,47 @@ def test_concurrent_document_and_direct_write_claim_one_path(
     _assert_concurrent_write_result(database, case, run, results)
 
 
-def test_write_tools_only_available_to_author_runs() -> None:
-    domain_tools = {tool.__name__ for tool in domain_capability().tools}
+def test_existing_document_only_registers_revision_tools() -> None:
+    conversation = SimpleNamespace(reader=False, case={"document": _document("已有正文")})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
     reader_tools = {tool.__name__ for tool in reader_capability().tools}
-    assert {"write_document", "propose_document", "propose_revision"} <= domain_tools
+    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
     assert domain_tools & reader_tools == {"search_corpus", "read_source"}
 
 
+def test_default_template_only_registers_revision_tools() -> None:
+    from app.modules.cases.template import new_case_document
+
+    conversation = SimpleNamespace(reader=False, case={"document": new_case_document()})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
+
+    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
+
+
+def test_empty_draft_retains_existing_generation_tools() -> None:
+    conversation = SimpleNamespace(reader=False, case={"document": _document()})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
+    assert {"write_document", "propose_document", "propose_revision"} <= domain_tools
+
+
 def _tool_contract(name: str) -> tuple[dict, Any]:
-    tool = next(item for item in domain_capability().tools if item.__name__ == name)
+    tool = next(
+        item for item in domain_capability(generate_document=True).tools
+        if item.__name__ == name
+    )
     schema = Tool(tool, takes_ctx=True).function_schema
     return schema.json_schema, schema.validator
 
 
 def test_write_tools_sdk_contract_schema_and_validator() -> None:
-    """生产 Tool 契约：真实块字段与 scope 枚举对模型可见，坏参数被 SDK 指出。"""
+    """初稿工具不向模型暴露直写范围；坏参数被 SDK 指出。"""
     schema, validator = _tool_contract("write_document")
-    assert schema["properties"]["scope"]["enum"] == ["document", "selection"]
+    assert set(schema["properties"]) == {"blocks", "summary"}
     fields = {key for block in schema["$defs"].values() for key in block["properties"]}
     assert fields == {"type", "text", "items", "paragraphs", "level"}
     with pytest.raises(ValidationError) as excinfo:
         validator.validate_python(
-            {"scope": "document",
-             "blocks": [{"type": "paragraph", "content": "误用content"}]}
+            {"blocks": [{"type": "paragraph", "content": "误用content"}]}
         )
     assert excinfo.value.errors()[0]["loc"] == ("blocks", 0, "paragraph", "text")
     candidate_schema, candidate = _tool_contract("propose_document")
@@ -812,7 +749,7 @@ def _visibility_parts() -> list[dict]:
         {"type": "tool-read_source", "state": "output-available",
          "output": {"status": "ok", "usedSourceRef": restricted}},
         {"type": "tool-write_document", "state": "output-available",
-         "input": {"scope": "document", "summary": "初稿摘要",
+         "input": {"summary": "初稿摘要",
                    "blocks": [{"type": "paragraph", "text": "初稿正文"}]},
          "output": {"status": "written", "writeId": "w-1"}},
         {"type": "tool-propose_document", "state": "output-available",
@@ -838,7 +775,7 @@ def test_visibility_masks_document_write_parts_and_blocks() -> None:
     assert kept == parts
 
 
-# ---- 端到端：流式运行内直接写入 + 撤销接口 ----
+# ---- 端到端：流式运行内生成空稿 + 撤销接口 ----
 
 
 def _submit(client: TestClient, auth: dict, case_id: str, model: FunctionModel,
@@ -878,7 +815,7 @@ def _await_run(database, thread_id: str, status: str, deadline: float = 10) -> d
 def _write_then_text_model() -> FunctionModel:
     call = ModelResponse(parts=[ToolCallPart(
         tool_name="write_document",
-        args={"scope": "document", "blocks": DRAFT_BLOCKS, "summary": "按资料生成初稿"},
+        args={"blocks": DRAFT_BLOCKS, "summary": "按资料生成初稿"},
     )])
     issued: list[bool] = []
 

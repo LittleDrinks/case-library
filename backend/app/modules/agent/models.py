@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 MessageRole = Literal["user", "assistant"]
 RunStatus = Literal["active", "completed", "failed", "cancelled"]
 TerminalRunStatus = Literal["completed", "failed", "cancelled"]
@@ -21,8 +20,8 @@ ThreadEventType = Literal[
     "document.written",
     "document.undone",
 ]
-ArtifactStatus = Literal["pending", "accepted", "rejected", "expired"]
-ArtifactDecision = Literal["accepted", "rejected"]
+ArtifactStatus = Literal["pending", "accepted", "rejected", "expired", "superseded"]
+ArtifactDecision = Literal["accepted", "rejected", "superseded"]
 ArtifactKind = Literal["range", "document"]
 WriteStatus = Literal["written", "undone"]
 SourceKind = Literal["case", "knowledge", "material", "attachment"]
@@ -83,14 +82,14 @@ class AgentRun(BaseModel):
     )
     target: ArtifactTarget | None = Field(
         default=None,
-        description="Run 创建时锁定的教师非空选区；无选区不自动锁定全文",
+        description="Run 创建时验证的教师选区，作为修订默认目标；明确指向其他位置时仍按完整正文定位",
     )
     submitted_version_id: str | None = Field(
         default=None, alias="submittedVersionId",
         description="审核 Run 创建时锁定的待审提交版本；撤回或再提交后基线失效",
     )
     annotation_id: str | None = Field(default=None, alias="annotationId")
-    write_path: Literal["document", "direct_write"] | None = Field(
+    write_path: Literal["document", "direct_write", "revision"] | None = Field(
         default=None, alias="writePath", exclude=True,
     )
     resources: list[dict[str, str]] = Field(default_factory=list)
@@ -153,12 +152,13 @@ class AgentArtifact(BaseModel):
     sources: list[SourceRef] = Field(default_factory=list)
     decided_by: str | None = Field(default=None, alias="decidedBy")
     decided_at: datetime | None = Field(default=None, alias="decidedAt")
+    write_id: str | None = Field(default=None, alias="writeId")
     version_id: str | None = Field(default=None, alias="versionId")
     created_at: datetime = Field(alias="createdAt")
 
 
 class AgentWrite(BaseModel):
-    """显式直接写入的落地记录：恰好一次写正文，保留撤销所需的前后文档。"""
+    """正文写入记录：保存应用前后文档，供版本、审计与撤销使用。"""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -166,6 +166,7 @@ class AgentWrite(BaseModel):
     case_id: str = Field(alias="caseId")
     thread_id: str = Field(alias="threadId")
     run_id: str = Field(alias="runId")
+    artifact_id: str | None = Field(default=None, alias="artifactId")
     status: WriteStatus = "written"
     scope: Literal["document", "selection"]
     summary: str = ""

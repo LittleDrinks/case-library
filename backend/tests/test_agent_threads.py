@@ -260,7 +260,9 @@ def test_artifact_decision_rejects_other_thread_id_without_side_effects(client: 
     assert accepted.status_code == 200
     artifact = database.agent_artifacts.find_one({"id": "artifact-a"})
     assert artifact["status"] == "accepted" and artifact["versionId"]
-    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 1
+    case = database.cases.find_one({"id": "c-draft-1"})
+    assert case["revision"] == 2
+    assert case["document"]["content"][0]["content"][0]["text"] == "替换"
     assert database.case_versions.find_one({"id": artifact["versionId"]})["kind"] == "ai"
 
 
@@ -273,7 +275,7 @@ def test_artifact_decision_repeat_still_binds_thread(client: TestClient) -> None
     _insert_artifact(database, owner.id, "artifact-a")
     assert _decide_artifact(client, auth, owner.id, "artifact-a").status_code == 200
     decided_revision = database.cases.find_one({"id": "c-draft-1"})["revision"]
-    assert decided_revision == 1
+    assert decided_revision == 2
 
     response = _decide_artifact(client, auth, other.id, "artifact-a")
 

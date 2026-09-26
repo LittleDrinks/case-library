@@ -4,6 +4,7 @@ import AgentChatPanel from "./AgentChatPanel.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -152,12 +153,26 @@ async function openOtherThread(wrapper) {
   await wrapper.get('[data-testid="agent-thread-open"]').trigger("click");
 }
 
-function mountPanel(overrides = {}) {
+function createRevisionWorkbench() {
+  return {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockResolvedValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+    apply: vi.fn().mockResolvedValue(true),
+  };
+}
+
+function mountPanel(overrides = {}, revisionWorkbench = createRevisionWorkbench()) {
+  const provide = {
+    [CONVERSATION_SOURCES_KEY]: conversationStore,
+    [REVISION_WORKBENCH_KEY]: revisionWorkbench,
+  };
   return mount(AgentChatPanel, {
     props: { caseRecord: { id: "case-1", revision: 1 }, ...overrides },
     global: {
       stubs: { RouterLink: true },
-      provide: { [CONVERSATION_SOURCES_KEY]: conversationStore },
+      provide,
     },
   });
 }
@@ -843,6 +858,28 @@ function tracerSnapshot() {
   };
 }
 
+function revisionSnapshot(status, includeSecond = false) {
+  const result = tracerSnapshot();
+  result.artifacts = tracerArtifacts(status).map((item) => ({ ...item, kind: "range" }));
+  if (includeSecond) {
+    result.artifacts.push({
+      ...result.artifacts[0], id: "artifact-10",
+      target: { from: 30, to: 35, quote: "第三段原文" },
+      replacement: "第三段新文",
+    });
+    const proposalIndex = result.messages[1].parts.findIndex((part) => part.type === "tool-propose_revision");
+    result.messages[1].parts.splice(proposalIndex + 1, 0, {
+      type: "tool-propose_revision", toolCallId: "t4", state: "output-available",
+      input: {}, output: { artifactId: "artifact-10" },
+    });
+  }
+  if (status === "accepted") {
+    result.artifacts[0].writeId = "write-9";
+    result.writes = [{ id: "write-9", status: "written", scope: "selection" }];
+  }
+  return result;
+}
+
 it("renders the tracer skill load, sources and pending artifact card", async () => {
   api.agentThread.mockResolvedValue(structuredClone(tracerSnapshot()));
   const wrapper = mountPanel();
@@ -858,6 +895,233 @@ it("renders the tracer skill load, sources and pending artifact card", async () 
   expect(artifact.text()).toContain("替换为：替换后的第二段");
   expect(artifact.text()).toContain("依据：科学家精神案例");
   expect(wrapper.text()).toContain("已生成单段修订候选");
+});
+
+it("previews and applies a located suggestion without opening its AI version", async () => {
+  let snapshots = 0;
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
+    snapshots++ < 3 ? revisionSnapshot("pending") : revisionSnapshot("accepted"),
+  )));
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+    apply: vi.fn().mockResolvedValue(true),
+  };
+  const result = {
+    artifact: { ...revisionSnapshot("accepted").artifacts[0], writeId: "write-9" },
+    case: { id: "case-1", revision: 2, document: { type: "doc", content: [] } },
+    applied: true,
+    steps: [{ stepType: "replace" }],
+    write: { id: "write-9", status: "written", revision: 2 },
+  };
+  api.agentDecide.mockResolvedValue(result);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({ id: "artifact-9" }));
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "accepted", "csrf");
+  expect(workbench.flush).toHaveBeenCalled();
+  expect(workbench.apply).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "artifact-9" }), result.steps,
+  );
+  expect(wrapper.emitted("case-revised")[0][0]).toMatchObject({ revision: 2 });
+  expect(wrapper.emitted("versions-updated")).toEqual([[]]);
+  expect(wrapper.emitted("open-version")).toBeUndefined();
+  expect(wrapper.get('[data-testid="agent-undo-revision"]').exists()).toBe(true);
+});
+
+it("does not apply a revision when the workbench cannot flush the current document", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending"));
+  const workbench = createRevisionWorkbench();
+  workbench.flush.mockResolvedValue(false);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-accept"]').trigger("click");
+  await flushPromises();
+
+  expect(workbench.flush).toHaveBeenCalledTimes(2);
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[role="alert"]').text()).toContain("正文尚未保存");
+  wrapper.unmount();
+});
+
+it("keeps the newest card selected when overlapping preview requests finish out of order", async () => {
+  const firstPreview = deferred();
+  const secondPreview = deferred();
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending", true));
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn((artifact) => artifact.id === "artifact-9"
+      ? firstPreview.promise : secondPreview.promise),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  const firstCard = wrapper.get('[data-artifact-id="artifact-9"] .revision-suggestion-head');
+  const secondCard = wrapper.get('[data-artifact-id="artifact-10"] .revision-suggestion-head');
+  await firstCard.trigger("click");
+  await vi.waitFor(() => expect(workbench.preview).toHaveBeenCalledTimes(1));
+  await secondCard.trigger("click");
+  await vi.waitFor(() => expect(workbench.preview).toHaveBeenCalledTimes(2));
+
+  secondPreview.resolve(true);
+  await flushPromises();
+  firstPreview.resolve(true);
+  await flushPromises();
+
+  expect(firstCard.attributes("aria-expanded")).toBe("false");
+  expect(secondCard.attributes("aria-expanded")).toBe("true");
+  wrapper.unmount();
+});
+
+it.each(["accepted", "expired", "superseded"])(
+  "lets a %s suggestion open its read-only record and locate the body",
+  async (status) => {
+    api.agentThread.mockResolvedValue(revisionSnapshot(status));
+    const workbench = {
+      clearPreview: vi.fn(),
+      preview: vi.fn().mockResolvedValue(true),
+    };
+    const wrapper = mountPanel({ readOnly: true }, workbench);
+    await flushPromises();
+
+    await wrapper.get(".revision-suggestion-head").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".revision-suggestion-details").text()).toContain("第二段原文");
+    expect(wrapper.find('[data-testid="agent-accept"]').exists()).toBe(false);
+    expect(workbench.clearPreview).toHaveBeenCalled();
+    expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({
+      id: "artifact-9", status, locateOnly: true,
+    }));
+    wrapper.unmount();
+  },
+);
+
+it("reports when a historical suggestion has no unique body location", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("accepted"));
+  const workbench = {
+    clearPreview: vi.fn(),
+    preview: vi.fn().mockResolvedValue(false),
+  };
+  const wrapper = mountPanel({ readOnly: true }, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+
+  expect(wrapper.get('[role="alert"]').text()).toContain(
+    "正文中没有唯一匹配位置，无法定位这条历史建议",
+  );
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({
+    id: "artifact-9", locateOnly: true,
+  }));
+  wrapper.unmount();
+});
+
+it("clears a revision preview after keeping the original text", async () => {
+  const pending = revisionSnapshot("pending");
+  const rejected = revisionSnapshot("rejected");
+  api.agentThread.mockResolvedValueOnce(structuredClone(pending))
+    .mockResolvedValueOnce(structuredClone(pending))
+    .mockResolvedValue(structuredClone(rejected));
+  api.agentDecide.mockResolvedValue({ artifact: { status: "rejected" }, case: null });
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-reject"]').trigger("click");
+  await flushPromises();
+
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "rejected", "csrf");
+  expect(workbench.clearPreview).toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("rejected");
+});
+
+it("only supersedes a suggestion when its refinement message is sent", async () => {
+  let superseded = false;
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
+    revisionSnapshot(superseded ? "superseded" : "pending"),
+  )));
+  const workbench = {
+    flush: vi.fn().mockResolvedValue(true),
+    preview: vi.fn().mockReturnValue(true),
+    clearPreview: vi.fn(),
+    isCurrent: vi.fn().mockReturnValue(true),
+  };
+  const fetch = vi.fn().mockImplementation(() => {
+    superseded = true;
+    return Promise.resolve(answerResponse());
+  });
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await flushPromises();
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="composer-revision"]').exists()).toBe(true);
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("pending");
+
+  await wrapper.get('[aria-label="移除微调上下文"]').trigger("click");
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("pending");
+  expect(api.agentDecide).not.toHaveBeenCalled();
+
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await flushPromises();
+  expect(api.agentDecide).not.toHaveBeenCalled();
+
+  await wrapper.setProps({ writingContext: {
+    from: 31, to: 39, quote: "第三段的新选区", sameBlock: true,
+  } });
+  await sendComposerMessage(wrapper, "请写得更简洁");
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(postedParts(fetch)).toContainEqual({
+    type: "data-revision", data: { artifactId: "artifact-9" },
+  });
+  expect(postedParts(fetch)).toContainEqual({
+    type: "data-selection", data: { from: 31, to: 39, quote: "第三段的新选区" },
+  });
+});
+
+it("keeps the old suggestion available when refinement submission fails", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending"));
+  const fetch = vi.fn().mockRejectedValue(new Error("连接中断"));
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await sendComposerMessage(wrapper, "请继续微调");
+
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status"))
+    .toBe("pending");
+  expect(wrapper.get('[data-testid="composer-revision"]').exists()).toBe(true);
 });
 
 function tracerPartsSnapshot() {

@@ -1,6 +1,6 @@
 <script setup>
 import { ChevronDown, LoaderCircle, MessageSquareText } from "@lucide/vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { useAgentChat } from "../composables/useAgentChat.js";
@@ -10,10 +10,12 @@ import {
   runAnchor, runError, runForMessage, runLabel, sourceStatusLabel,
 } from "../lib/agentTimeline.js";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
+import RevisionSuggestionCard from "./RevisionSuggestionCard.vue";
 import AgentComposer from "./AgentComposer.vue";
 import AgentResourceTrace from "./AgentResourceTrace.vue";
 import AgentThreadList from "./AgentThreadList.vue";
 import { useConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
@@ -31,7 +33,7 @@ const emit = defineEmits(["prompt-inserted",
 
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
-  decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId,
+  decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId, refresh,
   listThreads, selectThread, createThread, renameThread, undoWrite,
   skills, catalog, reloadCatalog,
 } = useAgentChat(
@@ -51,6 +53,11 @@ const runStatusAttr = computed(() => (
     ? "active" : threadState.value?.latestRun?.status || "none"
 ));
 const decideError = ref("");
+const expandedRevisionId = ref("");
+const revisionContext = ref(null);
+const composer = ref(null);
+const decidingArtifacts = reactive(new Set());
+const revisionWorkbench = inject(REVISION_WORKBENCH_KEY);
 const conversationSources = useConversationSources();
 const sourceStates = reactive(new Map());
 const sourceChecks = new Map();
@@ -65,6 +72,7 @@ let pendingWriteSync = false;
 let hydratedWriteThread = "";
 let hydratedVersionThread = "";
 let versionOpenGeneration = 0;
+let revisionPreviewGeneration = 0;
 let threadSwitchDepth = 0;
 
 function sourceRefs() {
@@ -215,6 +223,10 @@ function tailArtifacts() {
   return artifacts.value.filter((artifact) => !linked.has(artifact.id) && !placed.has(artifact.id));
 }
 
+function isRevisionSuggestion(artifact) {
+  return artifact?.kind === "range" && !artifact?.annotationId;
+}
+
 const mode = ref("chat");
 const threads = ref([]);
 const threadsLoading = ref(false);
@@ -319,6 +331,7 @@ function closeThreads() {
 
 onBeforeUnmount(() => {
   versionOpenGeneration += 1;
+  revisionPreviewGeneration += 1;
   pendingVersionOpenIds.clear();
   versionOpenInFlightIds.clear();
   stopThreadsPolling();
@@ -364,6 +377,7 @@ async function chooseThread(id) {
     threadSwitchDepth += 1;
     versionOpenGeneration += 1;
     emit("clear-writing-context");
+    clearRevisionContext();
     try {
       await selectThread(id);
     } finally {
@@ -380,6 +394,7 @@ async function addThread() {
   threadSwitchDepth += 1;
   versionOpenGeneration += 1;
   emit("clear-writing-context");
+  clearRevisionContext();
   try {
     await createThread();
   } finally {
@@ -403,14 +418,90 @@ function statusText() {
 
 async function acceptArtifact(artifactId) {
   decideError.value = "";
-  const artifact = artifacts.value.find((item) => item.id === artifactId);
+  revisionPreviewGeneration += 1;
+  let artifact = artifacts.value.find((item) => item.id === artifactId);
   try {
+    if (isRevisionSuggestion(artifact)) {
+      if (!await prepareRevisionDecision()) return;
+      artifact = artifacts.value.find((item) => item.id === artifactId);
+      if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
+      if (!revisionWorkbench.isCurrent(artifact)) {
+        throw new Error("目标原文已变化，这条建议不能应用");
+      }
+      decidingArtifacts.add(artifactId);
+      const result = await decide(artifactId, "accepted");
+      if (result.applied && result.steps?.length) {
+        const applied = await revisionWorkbench.apply(artifact, result.steps);
+        if (!applied) decideError.value = "正文已保存，但编辑器未能载入撤销步骤，请刷新工作台";
+      }
+      if (!result.applied || !result.steps?.length) revisionWorkbench.clearPreview();
+      expandedRevisionId.value = "";
+      emit("case-revised", result.case);
+      emit("versions-updated");
+      return;
+    }
     const result = await decide(artifactId, "accepted");
     emit("case-revised", result.case);
     await openArtifactVersion(artifact, result);
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
+  } finally {
+    decidingArtifacts.delete(artifactId);
   }
+}
+
+async function prepareRevisionDecision() {
+  if (!await revisionWorkbench.flush()) {
+    throw new Error("正文尚未保存，请保存后重试");
+  }
+  await refresh();
+  return true;
+}
+
+async function locateHistoricalRevision(artifact) {
+  revisionWorkbench.clearPreview();
+  return revisionWorkbench.preview({ ...artifact, locateOnly: true });
+}
+
+async function previewCurrentRevision(artifact, isCurrentRequest) {
+  if (!await prepareRevisionDecision() || !isCurrentRequest()) return;
+  const current = artifacts.value.find((item) => item.id === artifact.id);
+  if (!current) throw new Error("这条建议已不存在，请刷新后重试");
+  if (current.status !== "pending") {
+    const located = await locateHistoricalRevision(current);
+    if (!isCurrentRequest()) return;
+    if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
+    return;
+  }
+  const previewed = await revisionWorkbench.preview(current);
+  if (!isCurrentRequest()) return;
+  if (!previewed) throw new Error("目标原文已变化，无法预览这条建议");
+}
+
+async function previewRevision(artifact) {
+  const generation = ++revisionPreviewGeneration;
+  const isCurrentRequest = () => generation === revisionPreviewGeneration
+    && expandedRevisionId.value === artifact.id;
+  decideError.value = "";
+  expandedRevisionId.value = artifact.id;
+  try {
+    if (props.readOnly || artifact.status !== "pending") {
+      const located = await locateHistoricalRevision(artifact);
+      if (!isCurrentRequest()) return;
+      if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
+      return;
+    }
+    await previewCurrentRevision(artifact, isCurrentRequest);
+  } catch (requestError) {
+    if (isCurrentRequest()) decideError.value = requestError.message || "预览失败";
+  }
+}
+
+function collapseRevision(artifactId) {
+  if (expandedRevisionId.value !== artifactId) return;
+  revisionPreviewGeneration += 1;
+  expandedRevisionId.value = "";
+  revisionWorkbench.clearPreview();
 }
 
 function historyVersion(history, versionId, runId) {
@@ -545,10 +636,62 @@ async function undoWriteRecord(writeId) {
   }
 }
 
+function refineRevision(artifactId) {
+  decideError.value = "";
+  try {
+    const artifact = artifacts.value.find((item) => item.id === artifactId);
+    if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
+    revisionContext.value = artifact;
+    emit("clear-writing-context");
+    void nextTick(() => composer.value?.focusDraft?.());
+  } catch (requestError) {
+    decideError.value = requestError.message || "微调失败";
+  }
+}
+
+function clearRevisionContext() {
+  revisionPreviewGeneration += 1;
+  revisionContext.value = null;
+  revisionWorkbench.clearPreview();
+}
+
+function revisionCardProps(artifact) {
+  return {
+    artifact,
+    expanded: expandedRevisionId.value === artifact.id,
+    sending: sending.value,
+    deciding: decidingArtifacts.has(artifact.id),
+    decideError: decideError.value,
+    sourceState,
+    readOnly: props.readOnly,
+  };
+}
+
+const revisionCardEvents = {
+  expand: previewRevision,
+  collapse: collapseRevision,
+  accept: acceptArtifact,
+  reject: rejectArtifact,
+  refine: refineRevision,
+};
+
 function contextParts() {
   const parts = conversationSources.sources.value.map((source) => ({
     type: "data-source", data: { sourceType: source.sourceType, id: source.id },
   }));
+  if (revisionContext.value?.target) {
+    const target = revisionContext.value.target;
+    parts.push({ type: "data-revision", data: { artifactId: revisionContext.value.id } });
+    const selection = props.writingContext;
+    const usable = selection?.sameBlock && Number.isInteger(selection.from)
+      && Number.isInteger(selection.to) && selection.to > selection.from;
+    parts.push({ type: "data-selection", data: {
+      from: usable ? selection.from : target.from,
+      to: usable ? selection.to : target.to,
+      quote: usable ? selection.quote : target.quote,
+    } });
+    return parts;
+  }
   const selection = props.writingContext;
   const usable = selection?.sameBlock && Number.isInteger(selection.from)
     && Number.isInteger(selection.to) && selection.to > selection.from;
@@ -564,13 +707,57 @@ function contextParts() {
 async function sendMessage({ text, skillId }) {
   // 必须在等待 send 前发出：切面板/线程会卸载本组件，finally 里的 emit 会丢失
   if (props.writingContext?.annotationId) emit("annotation-run", threadId.value);
-  await send(text, contextParts(), skillId);
+  try {
+    if (revisionContext.value) {
+      await prepareRevisionDecision();
+      const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
+      if (!current || current.status !== "pending") {
+        revisionContext.value = null;
+        throw new Error("目标原文已变化，微调上下文已失效");
+      }
+      if (!revisionWorkbench.isCurrent(current)) {
+        revisionContext.value = null;
+        throw new Error("目标原文已变化，微调上下文已失效");
+      }
+      revisionContext.value = current;
+    }
+    await send(text, contextParts(), skillId);
+    const current = artifacts.value.find((item) => item.id === revisionContext.value?.id);
+    if (current?.status === "superseded") revisionContext.value = null;
+  } catch (requestError) {
+    decideError.value = requestError.message || "消息发送失败";
+  }
 }
+
+watch(() => props.caseRecord.revision, async () => {
+  if (!threadId.value) return;
+  try {
+    await refresh();
+    if (!revisionContext.value) return;
+    const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
+    if (["pending", "superseded"].includes(current?.status)) revisionContext.value = current;
+    else {
+      revisionContext.value = null;
+      decideError.value = "目标原文已变化，微调上下文已失效";
+    }
+  } catch { /* 工作台正文照常可用；发送时会再次刷新建议状态。 */ }
+});
+watch(status, (current) => {
+  if (current !== "streaming" || !revisionContext.value) return;
+  const artifactId = revisionContext.value.id;
+  void refresh().then(() => {
+    if (revisionContext.value?.id !== artifactId) return;
+    const artifact = artifacts.value.find((item) => item.id === artifactId);
+    if (artifact?.status === "superseded") revisionContext.value = null;
+  }).catch(() => {});
+});
 
 async function rejectArtifact(artifactId) {
   decideError.value = "";
   try {
     await decide(artifactId, "rejected");
+    const artifact = artifacts.value.find((item) => item.id === artifactId);
+    if (isRevisionSuggestion(artifact)) revisionWorkbench.clearPreview();
   } catch (requestError) {
     decideError.value = requestError.message || "决定失败";
   }
@@ -669,6 +856,11 @@ function retryMessageHasAnnotation(messageId) {
                 class="ai-skill-chip"
                 data-testid="message-selection"
               >正文选区：{{ part.data?.quote }}</p>
+              <p
+                v-else-if="part.type === 'data-revision'"
+                class="ai-skill-chip"
+                data-testid="message-revision"
+              >微调修订建议</p>
               <p v-else-if="part.type === 'data-source'" class="ai-source-chip" data-testid="message-source">
                 <template v-for="source in sourcesOf(part)" :key="sourceRefId(source)">
                   <a v-if="sourceState(source).state === 'available' && sourceUrl(source)" :href="sourceUrl(source)" target="_blank" rel="noopener noreferrer">来源：{{ sourceTitle(source) }}</a>
@@ -714,7 +906,7 @@ function retryMessageHasAnnotation(messageId) {
                 </div>
               </details>
               <AgentArtifactCard
-                v-if="part.type.startsWith('tool-') && linkedArtifact(part)"
+                v-if="part.type.startsWith('tool-') && linkedArtifact(part) && !isRevisionSuggestion(linkedArtifact(part))"
                 :artifact="linkedArtifact(part)"
                 :sending="sending"
                 :decide-error="decideError"
@@ -723,6 +915,26 @@ function retryMessageHasAnnotation(messageId) {
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
+              <template v-else-if="part.type.startsWith('tool-') && linkedArtifact(part)">
+                <RevisionSuggestionCard
+                  v-bind="revisionCardProps(linkedArtifact(part))"
+                  v-on="revisionCardEvents"
+                />
+                <div
+                  v-if="linkedArtifact(part).status === 'accepted' && linkedArtifact(part).writeId && !readOnly"
+                  class="agent-write-actions"
+                  data-testid="revision-write-actions"
+                >
+                  <span v-if="writeState({ output: { id: linkedArtifact(part).writeId } }) === 'undone'" data-testid="agent-write-undone">已撤销修改</span>
+                  <button
+                    v-else
+                    type="button"
+                    data-testid="agent-undo-revision"
+                    :disabled="undoingWrites.has(linkedArtifact(part).writeId)"
+                    @click="undoWriteRecord(linkedArtifact(part).writeId)"
+                  >撤销修改</button>
+                </div>
+              </template>
               <div
                 v-if="part.type === 'tool-write_document' && part.output?.status === 'written' && !readOnly"
                 class="agent-write-actions"
@@ -739,7 +951,7 @@ function retryMessageHasAnnotation(messageId) {
               </div>
             </template>
             <AgentArtifactCard
-              v-for="artifact in messageArtifacts(message)"
+              v-for="artifact in messageArtifacts(message).filter((item) => !isRevisionSuggestion(item))"
               :key="artifact.id"
               :artifact="artifact"
               :sending="sending"
@@ -748,6 +960,12 @@ function retryMessageHasAnnotation(messageId) {
               :read-only="readOnly"
               @accept="acceptArtifact"
               @reject="rejectArtifact"
+            />
+            <RevisionSuggestionCard
+              v-for="artifact in messageArtifacts(message).filter(isRevisionSuggestion)"
+              :key="artifact.id"
+              v-bind="revisionCardProps(artifact)"
+              v-on="revisionCardEvents"
             />
             <div
               v-if="showRunStatus(message)"
@@ -772,7 +990,7 @@ function retryMessageHasAnnotation(messageId) {
         </template>
         <p v-if="globalError" class="ai-message-error" role="alert">{{ displayError }}</p>
         <AgentArtifactCard
-          v-for="artifact in tailArtifacts()"
+          v-for="artifact in tailArtifacts().filter((item) => !isRevisionSuggestion(item))"
           :key="artifact.id"
           :artifact="artifact"
           :sending="sending"
@@ -782,9 +1000,17 @@ function retryMessageHasAnnotation(messageId) {
           @accept="acceptArtifact"
           @reject="rejectArtifact"
         />
+        <RevisionSuggestionCard
+          v-for="artifact in tailArtifacts().filter(isRevisionSuggestion)"
+          :key="artifact.id"
+          v-bind="revisionCardProps(artifact)"
+          v-on="revisionCardEvents"
+        />
+        <p v-if="decideError" class="ai-message-error" role="alert">{{ decideError }}</p>
       </div>
       <button v-if="!nearBottom && messages.length" type="button" class="agent-latest" @click="scrollToLatest"><ChevronDown :size="14" />最新消息</button>
       <AgentComposer
+        ref="composer"
         :case-id="caseRecord.id"
         :version-id="versionId"
         :read-only="readOnly || review"
@@ -793,12 +1019,14 @@ function retryMessageHasAnnotation(messageId) {
         :busy="loading || sending || recovering"
         :thread-id="threadId || ''"
         :writing-context="writingContext"
-      :prompt-request="promptRequest"
-      @prompt-inserted="emit('prompt-inserted')"
+        :revision-context="revisionContext"
+        :prompt-request="promptRequest"
+        @prompt-inserted="emit('prompt-inserted')"
         :skills="skills"
         :catalog="catalog"
         @send="sendMessage"
         @clear-selection="emit('clear-writing-context')"
+        @clear-revision="clearRevisionContext"
         @reload-catalog="reloadCatalog"
       />
     </template>

@@ -128,7 +128,13 @@ def annotation_instructions(annotation: dict | None) -> str:
 
 def _selection_line(selections: list[dict], reader: bool = False) -> str:
     if not selections:
-        return "本条消息没有正文选区；不得把整篇正文当作默认修订目标。"
+        if reader:
+            return "本条消息没有正文选区；当前对话只可讨论正文，不能生成或应用修订。"
+        return (
+            "本条消息没有正文选区；不要默认改写全文。作者明确指向章节或内容时，"
+            "按完整正文位置索引定位；明确要求全文修订时，按实际位置逐段调用"
+            " propose_revision 生成多条建议；目标有歧义时先澄清。"
+        )
     items = "；".join(
         f"from={item['from']}，to={item['to']}，原文：{item['quote']}"
         for item in selections
@@ -137,9 +143,10 @@ def _selection_line(selections: list[dict], reader: bool = False) -> str:
         return f"本条消息正文选区（服务端已按当前正文验证的原生位置）：{items}。"
     return (
         f"本条消息正文选区（服务端已按当前正文验证的原生位置）：{items}。"
-        "作者没有指明其他段落时，调用 propose_revision 须把上述 from、to 原样"
-        "作为 start、end，不得自行计算或调整位置，也不得要求作者填写字符位置。"
-        "局部请求只能处理上述选区，不能扩展为整篇正文。"
+        "选区是默认修改目标时，把上述 from、to 原样作为 start、end。作者明确指向其他"
+        "段落、章节或全文时，依据完整正文位置索引使用该目标位置，不得沿用当前选区。"
+        "调用 propose_revision 时不得自行计算字符位置，也不得要求作者填写字符位置。"
+        "目标不明确时先澄清，不要自行扩大修改范围。"
     )
 
 

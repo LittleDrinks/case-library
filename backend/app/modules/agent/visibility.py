@@ -59,6 +59,10 @@ def visible_snapshot(database, snapshot: AgentSnapshot, user: dict) -> AgentSnap
     return snapshot.model_copy(update={"messages": messages, "artifacts": artifacts})
 
 
+def visible_artifact(database, artifact: AgentArtifact, user: dict) -> AgentArtifact:
+    return _visible_artifact(SourceGate(database, user, artifact.case_id), artifact)
+
+
 def visible_parts(gate: SourceGate, parts: list[dict]) -> list[dict]:
     """助手消息引用的任一来源不可读时隐藏正文文本，工具输出逐项遮蔽。"""
     tainted = any(not gate.readable(ref) for ref in _message_refs(parts))

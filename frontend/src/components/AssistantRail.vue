@@ -1,5 +1,9 @@
 <script setup>
-import { ChevronDown, ChevronUp, History, MessageCircle, Paperclip, Sparkles } from "@lucide/vue";
+import {
+  ChevronDown, ChevronUp, History, MessageCircle, Paperclip,
+  PanelRightClose, PanelRightOpen, Sparkles,
+} from "@lucide/vue";
+import { ref } from "vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import CommentPanel from "./CommentPanel.vue";
@@ -41,26 +45,55 @@ const tabs = [
   { id: "comments", label: "批注", icon: MessageCircle },
   { id: "files", label: "附件", icon: Paperclip },
 ];
+const panelCollapsed = ref(false);
+
 function select(tab) {
+  const closedMobileDrawer = !props.open
+    && window.matchMedia?.("(max-width: 800px)").matches;
+  panelCollapsed.value = !closedMobileDrawer && props.active === tab && !panelCollapsed.value;
   emit("select", tab);
 }
+
+function toggleDrawer() {
+  if (!props.open) panelCollapsed.value = false;
+  emit("toggle");
+}
+
+function expandPanel() {
+  panelCollapsed.value = false;
+}
+
+defineExpose({ expandPanel });
 </script>
 
 <template>
-  <aside class="assistant-rail" :class="{ open }">
+  <aside class="assistant-rail" :class="{ open, collapsed: panelCollapsed }">
     <nav class="assistant-tabs" aria-label="辅助面板">
+      <button
+        class="panel-collapse-toggle"
+        type="button"
+        :title="panelCollapsed ? '展开侧栏' : '收起侧栏'"
+        :aria-label="panelCollapsed ? '展开侧栏' : '收起侧栏'"
+        @click="panelCollapsed = !panelCollapsed"
+      >
+        <PanelRightOpen v-if="panelCollapsed" :size="17" aria-hidden="true" />
+        <PanelRightClose v-else :size="17" aria-hidden="true" />
+      </button>
       <button
         v-for="tab in tabs"
         :key="tab.id"
         type="button"
         :class="{ active: active === tab.id }"
+        :title="tab.label"
+        :aria-label="tab.label"
+        :aria-pressed="active === tab.id"
         v-show="(tab.id !== 'history' || historyAvailable) && (!readOnly || tab.id !== 'comments')"
         @click="select(tab.id)"
       >
         <component :is="tab.icon" :size="17" aria-hidden="true" />
         <b>{{ tab.label }}</b>
       </button>
-      <button class="drawer-toggle" type="button" :title="open ? '收起面板' : '展开面板'" @click="emit('toggle')">
+      <button class="drawer-toggle" type="button" :title="open ? '收起面板' : '展开面板'" :aria-label="open ? '收起面板' : '展开面板'" @click="toggleDrawer">
         <ChevronDown v-if="open" :size="18" aria-hidden="true" />
         <ChevronUp v-else :size="18" aria-hidden="true" />
       </button>

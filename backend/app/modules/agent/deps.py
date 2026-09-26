@@ -27,6 +27,7 @@ class ToolDeps:
     selections: list[dict] = field(default_factory=list)
     hits: list[SourceRef] = field(default_factory=list)
     evidence: list[SourceRef] = field(default_factory=list)
-    proposed: AgentArtifact | None = None
+    proposed_artifacts: list[AgentArtifact] = field(default_factory=list)
+    revision_path_claimed: bool = False
     wrote: bool = False
     write_record: dict | None = None

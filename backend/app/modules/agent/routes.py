@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
-from app.modules.agent import prosemirror
+from app.modules.agent import blocks, prosemirror
 from app.modules.agent.case_area import (
     annotation_instructions, catalog_instructions, retained_sources, selection_from_parts,
 )
@@ -25,6 +25,7 @@ from app.modules.agent.models import (
     AgentThreadSummary,
     ArtifactDecision,
     ArtifactTarget,
+    SourceRef,
     write_view,
 )
 from app.modules.agent.writes import undo_write
@@ -49,6 +50,7 @@ from app.modules.agent.skills import (
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
+from app.modules.cases.service import CaseError
 from app.modules.cases.published import (
     published_view,
     version_readable,
@@ -88,6 +90,7 @@ class RunPlan:
     selections: list[dict] = field(default_factory=list)
     annotation_id: str | None = None
     annotation: dict | None = None
+    revision_context: dict | None = None
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -350,12 +353,54 @@ def _run_plan(repository, thread, adapter: VercelAIAdapter, project) -> RunPlan:
 
 def _validate_plan(
     database, case: dict, plan: RunPlan, version_id: str | None = None,
-    user: dict | None = None,
+    user: dict | None = None, thread_id: str | None = None,
 ) -> RunPlan:
     plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
     plan.annotation_id = _annotation_from_parts(database, case, plan, version_id, user)
+    plan.revision_context = _revision_from_parts(
+        database, case, plan, thread_id, user,
+    )
     return plan
+
+
+def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
+    parts = [part for part in plan.parts if part.get("type") == "data-revision"]
+    if not parts:
+        return None
+    if (
+        len(parts) != 1 or plan.annotation_id or not user
+        or case["ownerId"] != user["id"] or not thread_id
+    ):
+        raise HTTPException(status_code=403, detail="修订上下文不可用")
+    data = parts[0].get("data")
+    artifact_id = data.get("artifactId") if isinstance(data, dict) else None
+    if not isinstance(artifact_id, str) or not artifact_id:
+        raise HTTPException(status_code=422, detail="修订上下文格式无效")
+    artifact = database.agent_artifacts.find_one({
+        "id": artifact_id, "caseId": case["id"], "threadId": thread_id,
+        "kind": "range", "annotationId": None,
+    })
+    if (
+        not artifact or artifact.get("status") not in {"pending", "superseded"}
+        or (artifact.get("status") == "superseded" and artifact.get("decidedBy") != user["id"])
+    ):
+        raise HTTPException(status_code=409, detail="原修订建议已不可微调")
+    from app.modules.agent.source_reader import revalidate_sources
+
+    sources = [SourceRef.model_validate(source) for source in artifact.get("sources") or []]
+    if not revalidate_sources(database, user, case["id"], sources):
+        raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
+    return {
+        "artifactId": artifact_id,
+        "status": artifact["status"],
+        "from": artifact["target"]["from"],
+        "to": artifact["target"]["to"],
+        "quote": artifact["target"]["quote"],
+        "replacement": artifact["replacement"],
+        "reason": artifact.get("reason") or "",
+        "sources": sources,
+    }
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
@@ -581,7 +626,7 @@ def _plan_for(repository, thread, adapter, database, user, conversation):
     project = parts_projector(database, user, conversation.case["id"])
     return _validate_plan(
         database, conversation.case, _run_plan(repository, thread, adapter, project),
-        conversation.version_id, user,
+        conversation.version_id, user, thread.id,
     )
 
 
@@ -609,14 +654,24 @@ def _start_context(
     worker_id = request.app.state.agent_worker_id
     run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
                      worker_id, [bound.binding_record() for bound in bounds], lock)
+    revision = plan.revision_context
+    if revision and revision["status"] == "pending":
+        try:
+            decide_artifact(
+                database, conversation.case["id"], thread.id,
+                revision["artifactId"], user, "superseded",
+            )
+        except CaseError as error:
+            repository.fail_run(run.id, worker_id)
+            _abort_start(lease)
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
     return _run_context(request, database, settings, user, conversation, repository,
                         thread, adapter, plan, run, selection, lease, worker_id, bounds)
 
 
 def _run_lock_for(conversation: Conversation, plan: RunPlan):
-    """Run 创建即冻结写入控制信息：基线修订号与锁定选区。
+    """Run 创建即冻结基线与默认选区；明确位置由模型按完整正文定位。
 
-    是否直接写入由模型结合完整对话理解并选择工具；服务端不解析消息文本。
     审核对话锁定当前待审提交版本，撤回或再提交后旧 Run 基线失效。
     """
     if conversation.reader:
@@ -656,7 +711,23 @@ def _base_instructions(conversation: Conversation, refs, plan) -> str:
         conversation.case.get("title") or "未命名案例", refs,
         plan.selected, plan.selections, conversation.reader,
     )
-    return instructions + annotation_instructions(plan.annotation)
+    return instructions + annotation_instructions(plan.annotation) + revision_instructions(
+        plan.revision_context,
+    )
+
+
+def revision_instructions(context: dict | None) -> str:
+    if not context:
+        return ""
+    return (
+        "\n\n教师正在微调一条已停用的修订建议。结合教师本条要求、上一版建议及其理由，"
+        "重新给出可确认的修订建议；没有明确新目标时，默认继续修改上一版的原文范围。"
+        "教师明确指向其他段落、章节或全文时，按完整正文位置索引定位该目标，"
+        "不得把上一版范围当作硬边界；提议位置和原文仍由服务端验证。"
+        f"\n上一版目标：from={context['from']}，to={context['to']}，原文：{context['quote']}"
+        f"\n上一版建议：{context['replacement']}"
+        f"\n上一版理由：{context['reason']}"
+    )
 
 
 def _run_deps(request, database, settings, user, conversation, thread, run, refs, plan):
@@ -667,6 +738,7 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         store=request.app.state.blob_store, version_id=conversation.version_id,
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
+        evidence=list((plan.revision_context or {}).get("sources") or []),
     )
 
 
@@ -677,7 +749,12 @@ def _capabilities(conversation: Conversation, bounds) -> list:
         if conversation.review:
             capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
-    return [domain_capability()] + [bound_skill_capability(bound) for bound in bounds]
+    generate_document = blocks.document_blank(
+        conversation.case.get("document") or {}
+    )
+    return [domain_capability(generate_document=generate_document)] + [
+        bound_skill_capability(bound) for bound in bounds
+    ]
 
 
 def _selection(database, settings, user_id: str):
@@ -700,10 +777,7 @@ def _lease(database, user_id: str, selection):
 
 
 def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
-    """Run 创建即锁定 baseRevision；仅当恰好一个非空选区时锁定目标范围。
-
-    无选区不锁目标，提议修订将被拒绝，不由模型推断或自动锁定段落。
-    """
+    """保存正文基线和默认选区；明确章节可由模型从完整位置索引中定位。"""
     if len(plan.selections) != 1:
         return case.get("revision"), None
     row = plan.selections[0]

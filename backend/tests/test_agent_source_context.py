@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 
 from app.modules.agent import agent, prosemirror
 from app.modules.agent.artifacts import decide_artifact, propose_artifact
-from app.modules.agent.models import ArtifactTarget, SourceRef
+from app.modules.agent.models import AgentRun, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.source_reader import read_source
 from app.modules.cases.service import CaseError
@@ -31,7 +32,7 @@ def _csrf(auth: dict) -> dict:
     return {"X-CSRF-Token": auth["csrfToken"]}
 
 
-def _seed_source(database, public: str = "public") -> None:
+def _seed_source(database, public: str = "public", case_id: str = "c-draft-1") -> None:
     database.cases.insert_one({
         "id": "c-source-22", "ownerId": "other", "publicationStatus": public,
         "workflowStatus": "published", "publishedVersionId": "v-source-22",
@@ -41,16 +42,16 @@ def _seed_source(database, public: str = "public") -> None:
         "title": "固定来源", "document": _document("固定版本正文"),
     })
     database.case_sources.insert_one({
-        "id": "src-22", "caseId": "c-draft-1", "sourceCaseId": "c-source-22",
+        "id": "src-22", "caseId": case_id, "sourceCaseId": "c-source-22",
         "versionId": "v-source-22", "versionNumber": 4, "title": "固定来源",
     })
 
 
-def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict]):
+def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict], model=None):
     thread = client.get(f"/api/cases/{case_id}/agent/thread").json()["id"]
     body = {"id": "source-context", "trigger": "submit-message",
             "messages": [{"id": "source-message", "role": "user", "parts": parts}]}
-    with agent.override(model=TestModel(custom_output_text="完成", call_tools=[])):
+    with agent.override(model=model or TestModel(custom_output_text="完成", call_tools=[])):
         return client.post(f"/api/cases/{case_id}/agent/thread/{thread}/stream",
                            headers=_csrf(auth), json=body)
 
@@ -69,6 +70,59 @@ def test_read_source_rechecks_source_publication(client: TestClient) -> None:
     result = read_source(client.app.state.database, None, {"id": "u-user-demo", "role": "user"},
                          "c-draft-1", "case", "src-22")
     assert result == {"status": "no_access", "detail": "来源案例内容当前不可读"}
+
+
+def test_refinement_revalidates_source_refs_loaded_from_storage(client: TestClient) -> None:
+    auth = _auth(client)
+    case = _selection_case(client, auth)
+    database = client.app.state.database
+    _seed_source(database, case_id=case["id"])
+    repository = AgentRepository(database)
+    thread = repository.default_thread(case["id"], auth["user"]["id"])
+    run = AgentRun(
+        id="run-refine-source", thread_id=thread.id, user_id=auth["user"]["id"],
+        user_message_id="user-refine-source", assistant_message_id="assistant-refine-source",
+        status="completed", started_at=datetime.now(UTC), finished_at=datetime.now(UTC),
+    )
+    database.agent_runs.insert_one(run.model_dump(by_alias=True, mode="python"))
+    target = prosemirror.text_blocks(case["document"])[1]
+    database.agent_artifacts.insert_one({
+        "id": "artifact-refine-source", "caseId": case["id"], "threadId": thread.id,
+        "runId": run.id, "baseRevision": case["revision"], "kind": "range",
+        "target": {"from": target["start"], "to": target["end"], "quote": "第二段需要修订。"},
+        "replacement": "已有修订建议。", "reason": "来源支持的修改理由。",
+        "sources": [{
+            "kind": "case", "id": "src-22", "title": "固定来源", "version": "v4",
+            "versionId": "v-source-22", "sourceCaseId": "c-source-22",
+            "location": "case:c-source-22@v-source-22",
+        }],
+        "status": "pending", "decidedBy": None, "createdAt": datetime.now(UTC),
+    })
+
+    async def propose_refinement(messages, _info):
+        called = any(
+            getattr(part, "part_kind", "") == "tool-call"
+            and part.tool_name == "propose_revision"
+            for message in messages for part in getattr(message, "parts", [])
+        )
+        if not called:
+            yield _revision_delta(target["start"], target["end"])
+            return
+        yield "已生成微调建议，等待作者确认。"
+
+    response = _post_parts(client, auth, case["id"], [
+        {"type": "text", "text": "请微调这条建议"},
+        {"type": "data-revision", "data": {"artifactId": "artifact-refine-source"}},
+        {"type": "data-selection", "data": {
+            "from": target["start"], "to": target["end"], "quote": "第二段需要修订。",
+        }},
+    ], FunctionModel(stream_function=propose_refinement))
+
+    assert response.status_code == 200, response.text
+    assert database.agent_artifacts.find_one({"id": "artifact-refine-source"})["status"] == "superseded"
+    snapshot = AgentRepository(database).snapshot(thread)
+    refinement = next(item for item in snapshot.artifacts if item.id != "artifact-refine-source")
+    assert [source.version_id for source in refinement.sources] == ["v-source-22"]
 
 
 def test_forged_source_part_is_rejected_before_run(client: TestClient) -> None:
@@ -140,8 +194,10 @@ def _submit_selection(client: TestClient, auth: dict, case_id: str, model) -> di
 def _assert_selection_context(context: str) -> None:
     assert "服务端已按当前正文验证的原生位置" in context
     assert "from=11，to=19，原文：第二段需要修订。" in context
-    assert "不得自行计算或调整位置，也不得要求作者填写字符位置" in context
-    assert "把上述 from、to 原样作为 start、end" in context
+    assert "选区是默认修改目标时，把上述 from、to 原样作为 start、end" in context
+    assert "作者明确指向其他段落、章节或全文时，依据完整正文位置索引使用该目标位置" in context
+    assert "不得沿用当前选区" in context
+    assert "不得自行计算字符位置，也不得要求作者填写字符位置" in context
 
 
 def _assert_pending_target(database, case_id: str) -> None:
@@ -213,5 +269,6 @@ def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
     database.cases.update_one({"id": "c-source-22"}, {"$set": {"publicationStatus": "public"}})
     result = decide_artifact(database, "c-draft-1", thread.id, artifact.id, user, "accepted")
     assert result["artifact"].version_id
-    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 1
+    assert result["applied"] is True
+    assert database.cases.find_one({"id": "c-draft-1"})["revision"] == 2
     assert database.case_versions.find_one({"id": result["artifact"].version_id})["kind"] == "ai"

@@ -45,11 +45,11 @@ function lifecycleDocument(marker) {
   };
 }
 
-async function createCase(request, marker) {
+async function createCase(request, marker, document = lifecycleDocument(marker)) {
   const auth = await (await request.get("/api/auth/session")).json();
   const response = await request.post("/api/cases", {
     headers: { "X-CSRF-Token": auth.csrfToken },
-    data: { title: marker, document: lifecycleDocument(marker) },
+    data: { title: marker, document },
   });
   expect(response.ok()).toBe(true);
   return response.json();
@@ -225,22 +225,48 @@ async function buttonLayout(buttons) {
 async function assertMiddleLayout(page) {
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.locator(".outline-wrap")).toBeVisible();
+  expect((await page.locator(".outline-wrap").boundingBox()).width).toBeLessThanOrEqual(55);
+  await page.locator(".outline-wrap").getByRole("button", { name: "展开目录" }).click();
+  await expect.poll(async () => (await page.locator(".outline-wrap").boundingBox())?.width).toBeGreaterThanOrEqual(170);
+  const outline = await page.locator(".outline-wrap").boundingBox();
   const rail = await page.locator(".assistant-rail").boundingBox();
   const paper = await page.locator(".document-paper").boundingBox();
-  expect(rail.width).toBeGreaterThanOrEqual(355);
-  expect(rail.width).toBeLessThanOrEqual(365);
-  expect(paper.x + paper.width).toBeLessThanOrEqual(rail.x);
+  expect(outline.width).toBeLessThanOrEqual(190);
+  expect(rail.width).toBeGreaterThanOrEqual(440);
+  expect(rail.width).toBeLessThanOrEqual(448);
+  expect(rail.x + rail.width).toBeLessThanOrEqual(1025);
+  expect(paper.x).toBeGreaterThanOrEqual(outline.x + outline.width - 1);
+  expect(paper.x + paper.width).toBeLessThanOrEqual(1025);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
+  await expect.poll(async () => (await page.locator(".assistant-rail").boundingBox())?.width).toBeLessThanOrEqual(45);
+  const collapsedRail = await page.locator(".assistant-rail").boundingBox();
+  const collapsedPaper = await page.locator(".document-paper").boundingBox();
+  expect(collapsedPaper.x + collapsedPaper.width).toBeLessThanOrEqual(collapsedRail.x + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+  await page.getByRole("button", { name: "展开侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
+  await expect.poll(async () => (await page.locator(".assistant-rail").boundingBox())?.width).toBeGreaterThanOrEqual(440);
 }
 
 async function assertDesktopLayout(page) {
   await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.reload();
   await expect(page.locator(".outline-wrap")).toBeVisible();
+  const outline = await page.locator(".outline-wrap").boundingBox();
   const rail = await page.locator(".assistant-rail").boundingBox();
   const paper = await page.locator(".document-paper").boundingBox();
-  expect(rail.width).toBeGreaterThanOrEqual(405);
-  expect(rail.width).toBeLessThanOrEqual(415);
-  expect(paper.width).toBeLessThanOrEqual(820);
+  expect(outline.width).toBeGreaterThanOrEqual(210);
+  expect(outline.width).toBeLessThanOrEqual(230);
+  expect(rail.width).toBeGreaterThanOrEqual(440);
+  expect(rail.width).toBeLessThanOrEqual(448);
+  expect(paper.width).toBeGreaterThanOrEqual(780);
+  expect(paper.width).toBeLessThanOrEqual(800);
+  expect(outline.x + outline.width).toBeLessThanOrEqual(paper.x + 1);
+  expect(paper.x + paper.width).toBeLessThanOrEqual(rail.x + 1);
+  expect(rail.x + rail.width).toBeLessThanOrEqual(1601);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1600);
   const items = page.locator(".outline-panel button:not(.outline-collapse)");
   const index = (await items.count()) - 1;
@@ -444,6 +470,44 @@ test("作者登录后编辑案例，自动保存并在刷新后恢复", async ({
   }
 });
 
+test("长文目录定位、格式操作和自动保存保持可用", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const created = await createCase(request, `长文工作台 ${Date.now()}`, {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "长文教学案例" }] },
+      ...Array.from({ length: 24 }, (_, index) => [
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: `第${index + 1}章 教学环节` }] },
+        { type: "paragraph", content: [{ type: "text", text: `长文事实段落 ${index + 1}：${"课程目标、实践任务与评价依据需要逐项对应。".repeat(18)}` }] },
+      ]).flat(),
+    ],
+  });
+  await page.goto(`/#/workbench/${created.id}`);
+  const outline = page.locator(".outline-wrap");
+  await expect(outline.getByRole("button", { name: "展开目录" })).toBeVisible();
+  await outline.getByRole("button", { name: "展开目录" }).click();
+
+  const column = page.locator(".canvas-column");
+  expect(await column.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  const headings = page.locator(".canvas-editor h1, .canvas-editor h2");
+  const lastHeading = headings.last();
+  const lastOutlineItem = page.locator(".outline-panel button:not(.outline-collapse)").last();
+  await lastOutlineItem.click();
+  await expect(lastHeading).toBeInViewport();
+
+  const formatToolbar = page.getByRole("toolbar", { name: "正文格式" });
+  await expect(formatToolbar).toBeVisible();
+  await page.locator(".canvas-editor p").first().selectText();
+  await page.getByRole("button", { name: "加粗", exact: true }).click();
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 8000 });
+  const saved = await (await request.get(`/api/cases/${created.id}`)).json();
+  const formattedParagraph = saved.document.content.find((node) => node.type === "paragraph");
+  expect(formattedParagraph.content[0].marks).toContainEqual({ type: "bold" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
+
 test("客户端切换案例时重新绑定正文与草稿", async ({ page }) => {
   await login(page);
   const request = page.context().request;
@@ -494,18 +558,48 @@ test("手机工作台使用正文单栏和可收起辅助面板", async ({ page 
   await login(page);
 
   await expect(page.locator(".document-paper")).toBeVisible();
-  await expect(page.locator(".outline-wrap")).toBeHidden();
+  await expect(page.locator(".canvas-workspace")).toHaveClass(/outline-collapsed/);
+  await expect(page.locator(".outline-wrap")).toBeVisible();
+  await expect.poll(async () => (await page.locator(".outline-wrap").boundingBox())?.width).toBeLessThanOrEqual(45);
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/open/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   const titleBox = await page.locator(".document-title").boundingBox();
   const bylineBox = await page.locator(".document-byline").boundingBox();
   expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(bylineBox.y + 1);
 
   await page.locator(".assistant-tabs").getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.locator(".assistant-rail")).toHaveClass(/open/);
+  await expect(page.getByLabel("向 AI 提问")).toBeVisible();
+  await expect.poll(async () => (await page.locator(".assistant-rail").boundingBox())?.width).toBeGreaterThanOrEqual(389);
+  const mobileRail = await page.locator(".assistant-rail").boundingBox();
+  expect(mobileRail.x).toBeGreaterThanOrEqual(0);
+  expect(mobileRail.x + mobileRail.width).toBeLessThanOrEqual(391);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect.poll(async () => (await page.locator(".assistant-rail").boundingBox())?.height).toBeGreaterThan(390);
   await capture(page, "workbench-mobile");
   await page.getByRole("button", { name: "收起面板" }).click();
   await expect(page.locator(".assistant-rail")).not.toHaveClass(/open/);
+});
+
+test("窄屏目录宽度不受桌面辅助栏收起状态覆盖", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await login(page);
+  const outline = page.locator(".outline-wrap");
+  await outline.getByRole("button", { name: "展开目录" }).click();
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const workspace = page.locator(".canvas-workspace");
+  const firstTrack = () => workspace.evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns.split(" ")[0]
+  ));
+  await expect.poll(firstTrack).toBe("120px");
+  expect((await page.locator(".document-paper").boundingBox()).width).toBeGreaterThanOrEqual(210);
+
+  await outline.getByRole("button", { name: "收起目录" }).click();
+  await expect.poll(firstTrack).toBe("40px");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("390px 审核头完整展示全部审核动作", async ({ page }) => {
@@ -654,6 +748,7 @@ test("管理员下线隐藏案例后作者才能继续编辑", async ({ page }) 
 
 async function openHistoryTimeline(page) {
   await page.getByRole("button", { name: "版本历史" }).click();
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
   await page.getByRole("button", { name: /^查看历史版本 v1 · .+$/ }).click();
 }
 
@@ -719,6 +814,25 @@ test("作者从版本时间线打开只读 Tab，取消与确认恢复行为正�
   await expectRestoredTimeline(page, marker);
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "true");
+});
+
+test("批注浮窗询问 AI 会展开已收起的辅助栏", async ({ page }) => {
+  await login(page);
+  const request = page.context().request;
+  const marker = `浮窗提问 ${Date.now()}`;
+  const created = await createCase(request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.locator(".canvas-editor p", { hasText: marker }).selectText();
+  await page.getByRole("button", { name: "添加选区批注" }).click();
+  const float = page.locator(".annotation-float");
+  await float.getByLabel("批注内容").fill("补全教学背景");
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await expect(page.locator(".assistant-rail")).toHaveClass(/collapsed/);
+  await float.getByRole("button", { name: "询问AI" }).click();
+  await expect(page.locator(".assistant-rail")).not.toHaveClass(/collapsed/);
+  await expect(page.locator(".agent-chat-panel")).toBeVisible();
+  await expect(page.getByLabel("向 AI 提问")).toHaveValue(/补全教学背景/);
+  await expect(float).toBeVisible();
 });
 
 test("刷新后历史版本仍可从时间线重新打开为只读 Tab", async ({ page }) => {
@@ -805,8 +919,16 @@ test("恢复历史版本后保留恢复前草稿批注且当前面板刷新一�
   const marker = `恢复批注保留 ${Date.now()}`;
   const created = await stageFrozenVersion(page, request, marker);
   await addDraftAnnotation(page, marker);
+  const vueErrors = [];
+  page.on("pageerror", (error) => vueErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" && /nextSibling|emitsOptions/.test(message.text())) {
+      vueErrors.push(message.text());
+    }
+  });
   await openHistoryTimeline(page); await overwriteDialogStep(page, "确认恢复");
   await page.getByRole("button", { name: "批注", exact: true }).click();
+  expect(vueErrors).toEqual([]);
   await expectPreservedDraftAnnotation(page, request, created.id);
   await page.reload();
   await page.getByRole("button", { name: "批注", exact: true }).click();

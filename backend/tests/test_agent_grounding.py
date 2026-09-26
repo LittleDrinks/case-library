@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from app.modules.agent import agent
+from app.modules.agent.repository import AgentRepository
 
 
 _TAGGED_CASE_TAG_IDS = [
@@ -156,7 +157,9 @@ def _assert_seed_context(context: str) -> None:
         "理论/思政要点：科技自立自强、科学技术创新观、风险评价与决策",
         "课程简称或表述含糊时，不得擅自替换或扩写为其他课程",
         "search_corpus 是平台检索", "status=ok` 只证明本次成功读取",
-        "来源没有明确支持的数字、日期、引语和书目", "不能扩展为整篇正文",
+        "来源没有明确支持的数字、日期、引语和书目",
+        "选区通常是本轮修改的默认目标", "不得让当前选区阻止明确指向",
+        "明确要求全文修订时，按实际位置逐段调用 propose_revision 生成多条建议",
     ))
 
 
@@ -269,7 +272,7 @@ def test_platform_search_tool_marks_scope_without_network_claim(client: TestClie
     assert outputs[0]["total"] == 0 and "tagCatalog" in outputs[0]
 
 
-def test_selected_request_keeps_the_server_validated_scope(client: TestClient) -> None:
+def test_selected_request_treats_the_range_as_default_context(client: TestClient) -> None:
     auth = _auth(client)
     case = _create_selection_case(client, auth)
     seen: list[str] = []
@@ -279,4 +282,151 @@ def test_selected_request_keeps_the_server_validated_scope(client: TestClient) -
     )
     assert response.status_code == 200, response.text
     assert "from=7，to=15，原文：第二段需要修订。" in seen[0]
-    assert "局部请求只能处理上述选区，不能扩展为整篇正文" in seen[0]
+    assert "明确指向其他段落、章节或全文时，应按完整正文位置索引定位" in seen[0]
+
+
+def test_author_context_contains_full_document_with_editor_positions(client: TestClient) -> None:
+    auth = _auth(client)
+    tail = "文末仍在完整上下文。"
+    document = {"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 1},
+         "content": [{"type": "text", "text": "第一章"}]},
+        {"type": "paragraph", "content": [{"type": "text", "text": "x" * 12001}]},
+        {"type": "paragraph", "content": [{"type": "text", "text": tail}]},
+    ]}
+    created = client.post(
+        "/api/cases", headers=_csrf(auth),
+        json={"title": "全文定位案例", "document": document},
+    )
+    assert created.status_code == 200, created.text
+    seen: list[str] = []
+    response = _stream_post(
+        client, auth, created.json()["id"], "grounding-full-document",
+        "grounding-full-document-user", [{"type": "text", "text": "请修改第一章"}],
+        _answer_model(seen),
+    )
+    assert response.status_code == 200, response.text
+    assert "位置索引" in seen[0]
+    assert "第一章" in seen[0] and tail in seen[0]
+    assert "[6..12007]" in seen[0]
+
+
+def test_model_can_publish_multiple_positioned_suggestions_without_a_selection(
+    client: TestClient,
+) -> None:
+    auth = _auth(client)
+    case = _create_selection_case(client, auth)
+    outputs: list[dict] = []
+
+    async def propose_each_paragraph(messages, _info):
+        calls = [
+            part for message in messages for part in getattr(message, "parts", [])
+            if getattr(part, "part_kind", "") == "tool-call"
+            and part.tool_name == "propose_revision"
+        ]
+        if not calls:
+            yield _tool_call("propose_revision", {
+                "start": 1, "end": 5, "replacement": "第一段的新版本。", "reason": "理清表达",
+            }, "revision-first")
+            return
+        if len(calls) == 1:
+            yield _tool_call("propose_revision", {
+                "start": 7, "end": 15, "replacement": "第二段的新版本。", "reason": "补充重点",
+            }, "revision-second")
+            return
+        outputs.extend(_tool_outputs(messages, "propose_revision"))
+        yield "已为正文的两个位置分别提供建议。"
+        yield "已为正文的两个位置分别提供建议。"
+
+    response = _stream_post(
+        client, auth, case["id"], "grounding-multiple-revisions",
+        "grounding-multiple-revisions-user", [
+            {"type": "text", "text": "请修改全文需要改进的段落"},
+        ], FunctionModel(stream_function=propose_each_paragraph),
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(outputs) == 2
+    assert [item["quote"] for item in outputs] == ["第一段。", "第二段需要修订。"]
+    assert all(item["artifactId"] for item in outputs)
+    snapshot = AgentRepository(client.app.state.database).snapshot(
+        AgentRepository(client.app.state.database).default_thread(
+            case["id"], auth["user"]["id"],
+        )
+    )
+    assert [item.target.quote for item in snapshot.artifacts] == [
+        "第一段。", "第二段需要修订。",
+    ]
+
+
+def test_refinement_context_is_bound_to_the_current_thread_and_target(client: TestClient) -> None:
+    auth = _auth(client)
+    case = _create_selection_case(client, auth)
+    database = client.app.state.database
+    thread_id = _thread_id(client, case["id"])
+    database.agent_artifacts.insert_one({
+        "id": "artifact-refine", "caseId": case["id"], "threadId": thread_id,
+        "runId": "run-prior", "baseRevision": case["revision"], "kind": "range",
+        "target": {"from": 7, "to": 15, "quote": "第二段需要修订。"},
+        "replacement": "上一版修改建议。", "reason": "补充案例的分析依据。",
+        "sources": [], "status": "superseded", "decidedBy": auth["user"]["id"],
+        "createdAt": DateTime.now(UTC),
+    })
+    parts = [
+        {"type": "text", "text": "请修改第一段，不要改旧建议所在的第二段"},
+        {"type": "data-revision", "data": {"artifactId": "artifact-refine"}},
+        {"type": "data-selection", "data": {"from": 1, "to": 5}},
+    ]
+    seen: list[str] = []
+    response = _stream_post(
+        client, auth, case["id"], "grounding-refinement", "grounding-refinement-user",
+        parts, _answer_model(seen),
+    )
+    assert response.status_code == 200, response.text
+    _assert_context_contains(seen[0], (
+        "教师正在微调一条已停用的修订建议", "原文：第二段需要修订。",
+        "上一版建议：上一版修改建议。", "上一版理由：补充案例的分析依据。",
+        "明确指向其他段落、章节或全文时，应按完整正文位置索引定位",
+    ))
+
+    revised_document = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "前置：第一段。"}]},
+        _SELECTION_DOCUMENT["content"][1],
+    ]}
+    saved = client.patch(
+        f"/api/cases/{case['id']}", headers=_csrf(auth), json={
+            "revision": case["revision"], "document": revised_document,
+            "steps": [{"stepType": "replace", "from": 1, "to": 1,
+                       "slice": {"content": [{"type": "text", "text": "前置："}]}}],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    mapped = database.agent_artifacts.find_one({"id": "artifact-refine"})
+    assert mapped["status"] == "superseded"
+    assert mapped["target"] == {"from": 10, "to": 18, "quote": "第二段需要修订。"}
+    mapped_parts = [
+        {"type": "text", "text": "继续微调原建议"},
+        {"type": "data-revision", "data": {"artifactId": "artifact-refine"}},
+        {"type": "data-selection", "data": {"from": 10, "to": 18}},
+    ]
+    mapped_response = _stream_post(
+        client, auth, case["id"], "grounding-refinement-mapped",
+        "grounding-refinement-mapped-user", mapped_parts, _answer_model(seen),
+    )
+    assert mapped_response.status_code == 200, mapped_response.text
+    assert "原文：第二段需要修订。" in seen[-1]
+
+    foreign = dict(database.agent_artifacts.find_one({"id": "artifact-refine"}))
+    foreign.pop("_id", None)
+    foreign.update({"id": "artifact-foreign", "threadId": "thread-foreign"})
+    database.agent_artifacts.insert_one(foreign)
+    forged_parts = [
+        *parts[:-2],
+        {"type": "data-revision", "data": {"artifactId": "artifact-foreign"}},
+        {"type": "data-selection", "data": {"from": 10, "to": 18}},
+    ]
+    denied = _stream_post(
+        client, auth, case["id"], "grounding-refinement-foreign",
+        "grounding-refinement-foreign-user", forged_parts, _answer_model(None),
+    )
+    assert denied.status_code == 409

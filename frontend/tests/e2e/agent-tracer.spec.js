@@ -134,7 +134,10 @@ async function addAnnotation(page, quote = TARGET_TEXT) {
   await float.getByLabel("批注内容").fill("请依据资料收紧这一段表述。");
   await float.getByRole("button", { name: "保存意见", exact: true }).click();
   await expect(float).toContainText("请依据资料收紧这一段表述。");
-  await page.getByRole("button", { name: "批注", exact: true }).click();
+  await page.getByRole("dialog", { name: "批注浮窗" })
+    .getByRole("button", { name: "关闭批注浮窗" }).click();
+  const commentsTab = page.getByRole("button", { name: "批注", exact: true });
+  await expect(commentsTab).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".comment-card")).toHaveCount(1);
   const response = await page.context().request.get(
     `/api/cases/${await currentCaseId(page)}/annotations`,
@@ -184,19 +187,22 @@ async function sendSelection(page) {
 async function sendRequest(page) {
   await selectCanvasTarget(page);
   await sendSelection(page);
-  const artifact = page.getByTestId("agent-artifact");
-  await expect(artifact).toBeVisible({ timeout: 30_000 });
-  await expect(artifact).toHaveAttribute("data-artifact-status", "pending");
+  const suggestion = page.getByTestId("revision-suggestion");
+  await expect(suggestion).toBeVisible({ timeout: 30_000 });
+  await expect(suggestion).toHaveAttribute("data-artifact-status", "pending");
 }
 
 async function acceptedViaApi(page, caseId) {
   const caseApi = await page.context().request.get(`/api/cases/${caseId}`);
   const persisted = await caseApi.json();
-  expect(persisted.revision).toBe(1);
-  expect(persisted.document.content[1].content[0].text).toBe(TARGET_TEXT);
+  expect(persisted.revision).toBe(2);
+  expect(persisted.document.content[0].content[0].text).toBe("第一段保持原样。");
+  expect(persisted.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  expect(persisted.document.content[1].content[0].text).not.toBe(TARGET_TEXT);
   const history = await (await page.context().request.get(`/api/cases/${caseId}/history`)).json();
   const ai = history.versions.find((version) => version.kind === "ai");
-  expect(ai?.document.content[1].content[0].text).toContain(REPLACEMENT_MARK);
+  expect(history.versions).toHaveLength(1);
+  expect(ai?.document).toEqual(persisted.document);
   return ai;
 }
 
@@ -207,10 +213,10 @@ async function reloadRestoresTracer(page, caseId) {
   await expandSearchTool(page);
   await expect(page.getByTestId("agent-skill-resource")).toContainText("生态保护案例");
   await expect(page.getByTestId("agent-source").first()).toBeVisible();
-  const artifact = page.getByTestId("agent-artifact");
-  await expect(artifact).toHaveAttribute("data-artifact-status", "accepted");
-  await expect(artifact).toContainText(REPLACEMENT_MARK);
-  await expect(artifact).toContainText("原文：第二段：教学目标需要更明确的评价依据。");
+  const suggestion = page.getByTestId("revision-suggestion");
+  await expect(suggestion).toHaveAttribute("data-artifact-status", "accepted");
+  await expect(page.locator(".canvas-editor").first()).toContainText(REPLACEMENT_MARK);
+  await expect(page.locator(".canvas-editor").first()).not.toContainText(TARGET_TEXT);
 }
 
 async function prepareTracer(page, playwright) {
@@ -239,8 +245,19 @@ test("单段修订 tracer：发送、检索、生成、接受、刷新恢复全�
 });
 
 async function sendAnnotationRound(page, text, annotationId) {
-  await page.getByRole("button", { name: "批注", exact: true }).click();
-  const card = page.locator(".comment-card");
+  const rail = page.locator(".assistant-rail");
+  const commentsTab = page.getByRole("button", { name: "批注", exact: true });
+  const commentsPanel = rail.locator(".comment-panel");
+  if (!await commentsPanel.isVisible()) {
+    if ((await rail.getAttribute("class")).split(/\s+/).includes("collapsed")) {
+      await rail.getByRole("button", { name: "展开侧栏", exact: true }).click();
+    }
+    if (await commentsTab.getAttribute("aria-pressed") !== "true") {
+      await commentsTab.click();
+    }
+  }
+  await expect(commentsPanel).toBeVisible();
+  const card = commentsPanel.locator(".comment-card");
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "让 AI 修订" }).click();
   await selectPublishedSkill(page);
@@ -267,6 +284,14 @@ async function prepareAnnotationDiscussion(page, playwright, quote = TARGET_TEXT
   await selectPublishedSkill(page);
   const annotations = await addAnnotation(page, quote);
   return { created, annotation: annotations[0] };
+}
+
+async function expandCommentsPanel(page) {
+  const expandSidebar = page.getByRole("button", { name: "展开侧栏", exact: true });
+  if (await expandSidebar.isVisible()) await expandSidebar.click();
+  await expect(page.getByRole("button", { name: "批注", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".comment-card")).toBeVisible();
 }
 
 async function expectAnnotationHistory(page) {
@@ -423,7 +448,9 @@ test("无关正文编辑后浏览器仍可采用有效修订", async ({ page, pl
 test("批注讨论生成中切到批注面板：后台完成后当前历史自动出现新修订", async ({ page, playwright }) => {
   test.setTimeout(150_000);
   await prepareAnnotationDiscussion(page, playwright);
-  await page.locator(".comment-card").getByRole("button", { name: "让 AI 修订" }).click();
+  await expandCommentsPanel(page);
+  const comment = page.locator(".comment-card");
+  await comment.getByRole("button", { name: "让 AI 修订" }).click();
   await selectPublishedSkill(page);
   await page.getByLabel("向 AI 提问").fill("第一轮：请结合当前选区生成修订候选。");
   await page.getByRole("button", { name: "发送", exact: true }).click();
@@ -435,17 +462,23 @@ test("批注讨论生成中切到批注面板：后台完成后当前历史自�
 });
 
 async function acceptAndVerify(page, caseId) {
+  const suggestion = page.getByTestId("revision-suggestion");
+  await expect(suggestion).toHaveAttribute("data-artifact-status", "pending");
+  await suggestion.locator(".revision-suggestion-head").click();
+  await expect(suggestion.locator(".revision-suggestion-location")).toHaveText(TARGET_TEXT);
+  await expect(page.locator(".revision-preview-old").first()).toContainText(TARGET_TEXT);
+  await expect(page.locator(".revision-preview-new").first()).toContainText(REPLACEMENT_MARK);
+
   const response = page.waitForResponse((item) => (
     item.request().method() === "POST" && new URL(item.url()).pathname.endsWith("/decision")
   ));
-  await page.getByTestId("agent-accept").click();
+  await suggestion.getByTestId("agent-accept").click();
   const accepted = await response;
   expect(accepted.ok()).toBe(true);
   expect((await accepted.json()).artifact.status).toBe("accepted");
-  const version = await acceptedViaApi(page, caseId);
-  const tab = page.getByRole("tab", { name: `AI版本 v${version.number} · ${version.title}` });
-  await expect(tab).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".version-paper")).toContainText(REPLACEMENT_MARK);
+  await expect(suggestion).toHaveAttribute("data-artifact-status", "accepted");
+  await acceptedViaApi(page, caseId);
+  await expect(page.locator(".canvas-editor").first()).toContainText(REPLACEMENT_MARK);
 }
 
 async function adminSession(playwright) {

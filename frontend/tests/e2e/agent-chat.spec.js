@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { getSchema } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { Transform } from "@tiptap/pm/transform";
 
 const ANSWER = "隔离模型回答：已依据当前可见资源完成分析。";
+const ORIGINAL_TEXT = "当前案例测试正文";
+const PROPOSED_TEXT = "通过建议应用的新正文";
 const PROVIDER_BASE_URL = process.env.E2E_PROVIDER_BASE_URL || "http://ai-provider:8080/v1";
 
 async function login(page) {
@@ -23,12 +28,28 @@ function caseDocument(text) {
   };
 }
 
-async function createCase(page) {
+function paragraphBlock(text) {
+  return { type: "paragraph", content: [{ type: "text", text }] };
+}
+
+async function createCase(page, text = ORIGINAL_TEXT) {
   const response = await page.context().request.post("/api/cases", {
     headers: { "X-CSRF-Token": await csrf(page) },
     data: {
       title: `Chat seam ${Date.now()}`,
-      document: caseDocument("当前案例测试正文"),
+      document: caseDocument(text),
+    },
+  });
+  expect(response.ok()).toBe(true);
+  return response.json();
+}
+
+async function createBlankCase(page) {
+  const response = await page.context().request.post("/api/cases", {
+    headers: { "X-CSRF-Token": await csrf(page) },
+    data: {
+      title: `Blank draft seam ${Date.now()}`,
+      document: { type: "doc", content: [] },
     },
   });
   expect(response.ok()).toBe(true);
@@ -150,91 +171,25 @@ async function reloadAndAssertChat(page, caseId, persisted) {
   await expect.poll(() => chatSnapshot(page, caseId)).toMatchObject(persisted);
 }
 
-async function assertSavedAiVersion(page, caseId) {
-  const history = await (await page.context().request.get(`/api/cases/${caseId}/history`)).json();
-  expect(history.versions).toHaveLength(1);
-  expect(history.versions[0].kind).toBe("ai");
-  const snapshot = await chatSnapshot(page, caseId);
-  const tool = snapshot.messages.flatMap((message) => message.parts)
-    .find((part) => part.type === "tool-propose_document");
-  expect(tool.output.status).toBe("created");
-  expect(tool.output.versionId).toBe(history.versions[0].id);
-  expect(snapshot.artifacts).toEqual([]);
-  return history.versions[0];
+async function caseRecord(page, caseId) {
+  const response = await page.context().request.get(`/api/cases/${caseId}`);
+  expect(response.ok()).toBe(true);
+  return response.json();
 }
 
-async function openAiVersion(page, version) {
-  await page.getByLabel("版本历史").click();
-  const historyButton = page.getByRole("button", {
-    name: `查看历史版本 AI版本 v${version.number} · ${version.title}`,
-    exact: true,
-  });
-  await expect(historyButton).toBeVisible();
-  await historyButton.click();
-  await expect(page.getByText(`AI生成版本 v${version.number} · 只读`)).toBeVisible();
-  await expect(page.locator(".version-paper .canvas-editor")).toHaveAttribute("contenteditable", "false");
+async function caseHistory(page, caseId) {
+  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
+  expect(response.ok()).toBe(true);
+  return response.json();
 }
 
-async function selectCurrentDraft(page) {
-  await page.locator(".version-tabs").hover();
-  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
-  await expect(draftTab).toBeVisible();
-  await draftTab.click();
-  await expect(draftTab).toHaveAttribute("aria-selected", "true");
-}
-
-async function assertCurrentDraft(page, version) {
-  const draftTab = page.getByRole("tab", { name: "当前教师稿", exact: true });
-  await expect(draftTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".version-paper")).toHaveCount(0);
-  await expect(page.getByLabel("案例标题")).toBeVisible();
-  await expect(page.getByLabel("案例标题")).toHaveValue(version.title);
-  await expect(page.locator(".canvas-editor").first()).toHaveAttribute("contenteditable", "true");
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+function documentText(value) {
+  if (!value || typeof value !== "object") return "";
+  return `${value.text || ""}${(value.content || []).map(documentText).join("")}`;
 }
 
 function versionIdentity(history) {
   return history.versions.map(({ id, number, kind }) => ({ id, number, kind }));
-}
-
-async function expectHistoryUnchanged(page, caseId, before) {
-  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
-  expect(response.ok()).toBe(true);
-  const after = await response.json();
-  expect(after.versions).toHaveLength(before.versions.length);
-  expect(versionIdentity(after)).toEqual(versionIdentity(before));
-  return after;
-}
-
-async function assertRestoredHistory(page, caseId, version, beforeCase) {
-  const response = await page.context().request.get(`/api/cases/${caseId}/history`);
-  expect(response.ok()).toBe(true);
-  const history = await response.json();
-  expect(history.versions).toHaveLength(3);
-  expect(history.versions[0]).toEqual(expect.objectContaining({ id: version.id, number: 1, kind: "ai", document: version.document }));
-  expect(history.versions[1]).toEqual(expect.objectContaining({
-    number: 2, kind: "manual", title: "恢复前的当前稿", document: beforeCase.document,
-    sourceRevision: beforeCase.revision,
-  }));
-  expect(history.versions[2]).toEqual(expect.objectContaining({ number: 3, kind: "restore", restoredFromId: version.id, document: version.document }));
-  return history;
-}
-
-async function overwriteAiVersion(page, caseId, version) {
-  const beforeResponse = await page.context().request.get(`/api/cases/${caseId}`);
-  expect(beforeResponse.ok()).toBe(true);
-  const before = await beforeResponse.json();
-  await page.locator(".version-paper-actions .version-restore").click();
-  await expect(page.locator(".overwrite-target")).toContainText(`AI版本 v${version.number} · ${version.title}`);
-  const restoreResponse = page.waitForResponse((response) => (
-    response.request().method() === "POST"
-    && new URL(response.url()).pathname.endsWith("/lifecycle")
-    && response.request().postDataJSON()?.command === "overwrite"
-  ));
-  await page.getByRole("button", { name: "确认恢复", exact: true }).click();
-  expect((await restoreResponse).ok()).toBe(true);
-  await assertCurrentDraft(page, version);
-  return assertRestoredHistory(page, caseId, version, before);
 }
 
 test("deterministic Chat stream persists the server-owned thread across reload", async ({ page }) => {
@@ -255,20 +210,32 @@ test("deterministic Chat stream persists the server-owned thread across reload",
   await reloadAndAssertChat(page, created.id, persisted);
 });
 
-test("完整生成通过真实 Run 保存 AI 版本并可只读打开、恢复和刷新", async ({ page }) => {
+test("空白稿整篇初稿由真实 Run 写入当前稿并可撤销", async ({ page }) => {
   await login(page);
   await configureChat(page);
-  const created = await createCase(page);
+  const created = await createBlankCase(page);
   await openChat(page, created.id);
   await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
-  const version = await assertSavedAiVersion(page, created.id);
-  await openAiVersion(page, version);
-  await overwriteAiVersion(page, created.id, version);
-  await page.reload();
-  await selectCurrentDraft(page);
-  await assertCurrentDraft(page, version);
-  const history = await (await page.context().request.get(`/api/cases/${created.id}/history`)).json();
-  expect(history.versions[0].id).toBe(version.id);
+  const snapshot = await chatSnapshot(page, created.id);
+  const write = snapshot.messages.flatMap((message) => message.parts)
+    .find((part) => part.type === "tool-write_document");
+  expect(write.input).not.toHaveProperty("scope");
+  expect(write.output.status).toBe("written");
+  expect(write.output.versionStatus).toBe("created");
+  expect(snapshot.artifacts).toEqual([]);
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  const historyAfterWrite = await caseHistory(page, created.id);
+  expect(historyAfterWrite.versions).toHaveLength(1);
+  expect(historyAfterWrite.versions[0]).toMatchObject({ id: write.output.versionId, kind: "ai" });
+
+  await page.getByRole("button", { name: "返回当前教师稿" }).click();
+  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
+  await page.getByTestId("agent-undo-write").click();
+  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  await expect.poll(async () => documentText((await caseRecord(page, created.id)).document))
+    .toBe("");
+  expect(versionIdentity(await caseHistory(page, created.id)))
+    .toEqual(versionIdentity(historyAfterWrite));
 });
 
 async function selectDraftRange(page, text) {
@@ -285,39 +252,166 @@ async function waitSelectionAttached(page, quote) {
   await expect(chip).toHaveAttribute("title", quote);
 }
 
-async function directWriteAndUndo(page, created, version, historyBefore, message) {
-  await selectDraftRange(page, "AI生成正文");
-  await waitSelectionAttached(page, "AI生成正文");
+async function proposeRevisionApplyAndUndo(page, created, message, selected) {
+  if (selected) {
+    await selectDraftRange(page, ORIGINAL_TEXT);
+    await waitSelectionAttached(page, ORIGINAL_TEXT);
+  }
   await sendChat(page, message);
-  await expect(page.locator(".canvas-editor").first()).toContainText("直接写入替换的新正文");
-  const undo = page.getByTestId("agent-undo-write").last();
-  await expect(undo).toBeVisible();
-  await undo.click();
-  await expect(page.getByTestId("agent-write-undone").last()).toBeVisible();
-  await expect(page.locator(".canvas-editor").first()).toContainText("AI生成正文");
-  const history = await expectHistoryUnchanged(page, created.id, historyBefore);
-  const aiVersion = history.versions.find(({ id }) => id === version.id);
-  expect(aiVersion).toBeDefined();
-  expect(aiVersion.kind).toBe("ai");
+  const snapshot = await chatSnapshot(page, created.id);
+  const revision = snapshot.messages.flatMap((item) => item.parts)
+    .find((part) => part.type === "tool-propose_revision");
+  expect(revision, "已有正文修改必须先生成修订建议").toBeDefined();
+  expect(revision.input).toMatchObject({
+    start: 1,
+    end: ORIGINAL_TEXT.length + 1,
+    replacement: PROPOSED_TEXT,
+  });
+  expect(revision.input.reason).toBeTruthy();
+  expect(snapshot.messages.flatMap((item) => item.parts).map((part) => part.type))
+    .not.toContain("tool-write_document");
+  expect(snapshot.messages.flatMap((item) => item.parts).map((part) => part.type))
+    .not.toContain("tool-propose_document");
+  const artifact = snapshot.artifacts.find(({ id }) => id === revision.output.artifactId);
+  expect(artifact).toMatchObject({
+    status: "pending",
+    target: { quote: ORIGINAL_TEXT },
+    replacement: PROPOSED_TEXT,
+  });
+
+  const card = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await expect(card).toHaveAttribute("data-artifact-status", "pending");
+  await expect(page.locator(".canvas-editor").first()).toContainText(ORIGINAL_TEXT);
+  await card.locator(".revision-suggestion-head").click();
+  await expect(card.locator(".revision-suggestion-location")).toHaveText(ORIGINAL_TEXT);
+  await expect(page.locator(".revision-preview-old").first()).toContainText(ORIGINAL_TEXT);
+  await expect(page.locator(".revision-preview-new").first()).toContainText(PROPOSED_TEXT);
+  await expect(page.locator(".canvas-editor").first()).toContainText(ORIGINAL_TEXT);
+
+  await card.getByTestId("agent-accept").click();
+  await expect(card).toHaveAttribute("data-artifact-status", "accepted");
+  await expect.poll(async () => documentText((await caseRecord(page, created.id)).document))
+    .toContain(PROPOSED_TEXT);
+  const historyAfterApply = await caseHistory(page, created.id);
+  expect(historyAfterApply.versions).toHaveLength(1);
+  expect(historyAfterApply.versions[0].kind).toBe("ai");
+
+  await page.getByTestId("agent-undo-revision").click();
+  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  await expect.poll(async () => documentText((await caseRecord(page, created.id)).document))
+    .toBe(ORIGINAL_TEXT);
+  expect(versionIdentity(await caseHistory(page, created.id)))
+    .toEqual(versionIdentity(historyAfterApply));
 }
 
-for (const message of ["帮我把这段话写入正文试试", "请直接写入替换选中文字"]) {
-  test(`自然直接写入「${message}」写当前稿并撤销，独立 AI 版本保留`, async ({ page }) => {
+for (const scenario of [
+  { message: "帮我把这段话写入正文试试", selected: false },
+  { message: "请为选中文字提出修改建议", selected: true },
+]) {
+  test(`已有正文请求「${scenario.message}」先预览修订，应用后可撤销`, async ({ page }) => {
     await login(page);
     await configureChat(page);
     const created = await createCase(page);
     await openChat(page, created.id);
-    await sendGenerationAndWaitForPersistence(page, created.id, "请完整生成全文");
-    const version = await assertSavedAiVersion(page, created.id);
-    await openAiVersion(page, version);
-    const restoredHistory = await overwriteAiVersion(page, created.id, version);
-    await page.reload();
-    await selectCurrentDraft(page);
-    await assertCurrentDraft(page, version);
-    await openChatPanel(page);
-    await directWriteAndUndo(page, created, version, restoredHistory, message);
+    await proposeRevisionApplyAndUndo(page, created, scenario.message, scenario.selected);
   });
 }
+
+test("历史建议遇到重复替换正文时明确提示无法定位", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendChat(page, "请直接修改并给出长理由");
+  const snapshot = await chatSnapshot(page, created.id);
+  const revision = snapshot.messages.flatMap((item) => item.parts)
+    .find((part) => part.type === "tool-propose_revision");
+  const card = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await card.locator(".revision-suggestion-head").click();
+  await card.getByTestId("agent-accept").click();
+  await expect(card).toHaveAttribute("data-artifact-status", "accepted");
+
+  const current = await caseRecord(page, created.id);
+  const schema = getSchema([StarterKit]);
+  const transform = new Transform(schema.nodeFromJSON(current.document));
+  transform.insert(0, [
+    schema.nodeFromJSON(paragraphBlock(PROPOSED_TEXT)),
+    schema.nodeFromJSON(paragraphBlock("插入的间隔段落")),
+  ]);
+  const response = await page.context().request.patch(`/api/cases/${created.id}`, {
+    headers: { "X-CSRF-Token": await csrf(page) },
+    data: {
+      revision: current.revision,
+      document: transform.doc.toJSON(),
+      steps: transform.steps.map((step) => step.toJSON()),
+    },
+  });
+  expect(response.ok()).toBe(true);
+  await page.reload();
+  await openChatPanel(page);
+  const historicalCard = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await page.evaluate(() => {
+    window.historicalParagraphScrolls = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(options) {
+      if (this.matches(".canvas-editor p")) window.historicalParagraphScrolls.push(this.textContent);
+      return original.call(this, options);
+    };
+  });
+
+  await historicalCard.locator(".revision-suggestion-head").click();
+  await expect(historicalCard.getByRole("alert"))
+    .toContainText("正文中没有唯一匹配位置，无法定位这条历史建议");
+  expect(await page.evaluate(() => window.historicalParagraphScrolls)).toEqual([]);
+});
+
+test("长建议理由可在卡片内滚动到底部使用修改操作", async ({ page }) => {
+  await login(page);
+  await configureChat(page);
+  const created = await createCase(page);
+  await openChat(page, created.id);
+  await sendChat(page, "请直接修改并给出长理由");
+  await expect.poll(async () => (await chatSnapshot(page, created.id)).latestRun?.status)
+    .toBe("completed");
+
+  const snapshot = await chatSnapshot(page, created.id);
+  const revision = snapshot.messages.flatMap((item) => item.parts)
+    .find((part) => part.type === "tool-propose_revision");
+  const card = page.locator(
+    `[data-testid="revision-suggestion"][data-artifact-id="${revision.output.artifactId}"]`,
+  );
+  await card.locator(".revision-suggestion-head").click();
+
+  const details = card.locator(".revision-suggestion-details");
+  const scroll = await details.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    const button = element.querySelector('[data-testid="agent-accept"]');
+    const container = element.getBoundingClientRect();
+    const action = button.getBoundingClientRect();
+    return {
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      overflowY: getComputedStyle(element).overflowY,
+      actionTop: action.top,
+      actionBottom: action.bottom,
+      containerTop: container.top,
+      containerBottom: container.bottom,
+    };
+  });
+  expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+  expect(scroll.overflowY).toBe("auto");
+  expect(scroll.actionTop).toBeGreaterThanOrEqual(scroll.containerTop);
+  expect(scroll.actionBottom).toBeLessThanOrEqual(scroll.containerBottom);
+
+  await card.getByTestId("agent-accept").click();
+  await expect(card).toHaveAttribute("data-artifact-status", "accepted");
+});
 
 async function submitMessage(page, text) {
   await page.getByLabel("向 AI 提问").fill(text);

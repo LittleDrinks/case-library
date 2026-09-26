@@ -28,6 +28,11 @@ const replacedDocument = {
 };
 
 async function setup(options = {}) {
+  if (!document.getElementById("workbench-format-toolbar")) {
+    const toolbar = document.createElement("div");
+    toolbar.id = "workbench-format-toolbar";
+    document.body.appendChild(toolbar);
+  }
   const wrapper = mount(CanvasEditor, {
     props: { document: caseDocument, editable: true, ...options },
   });
@@ -54,6 +59,14 @@ function paragraphTextNode(paragraph) {
 function clearDomSelection() {
   globalThis.getSelection().removeAllRanges();
   globalThis.document.dispatchEvent(new Event("selectionchange"));
+}
+
+function toolbarButton(label) {
+  return document.querySelector(`#workbench-format-toolbar [aria-label="${label}"]`);
+}
+
+function triggerToolbarButton(label) {
+  toolbarButton(label).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 }
 
 function pressEditorKey(editor, key) {
@@ -169,7 +182,7 @@ it("工具栏创建的编号列表序列化为默认起点", async () => {
   };
   const { wrapper } = await setup({ document });
 
-  await wrapper.get('[aria-label="编号列表"]').trigger("mousedown");
+  triggerToolbarButton("编号列表");
 
   expect(wrapper.vm.editor.getJSON()).toEqual({
     type: "doc",
@@ -293,7 +306,7 @@ it("选中文字可关联资料，工具栏可取消引用", async () => {
   });
   await nextTick();
   await framesSettled();
-  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+  triggerToolbarButton("取消当前引用");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toBeUndefined();
 });
 
@@ -327,15 +340,15 @@ it("光标锚点引用可整段取消且无残留", async () => {
   const source = { sourceType: "case", id: "src-1", number: 2, title: "引用案例" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
   const editor = await insertAnchorAtEnd(wrapper, source);
-  const cancel = wrapper.get('[aria-label="取消当前引用"]');
-  expect(cancel.attributes("disabled")).toBeUndefined();
-  await cancel.trigger("mousedown");
+  const cancel = toolbarButton("取消当前引用");
+  expect(cancel.hasAttribute("disabled")).toBe(false);
+  triggerToolbarButton("取消当前引用");
   const nodes = editor.getJSON().content[1].content;
   expect(nodes).toHaveLength(1);
   expect(nodes[0].text).toBe("案例原文");
   expect(nodes.every((node) => !node.marks)).toBe(true);
   await framesSettled();
-  expect(cancel.attributes("disabled")).toBeDefined();
+  expect(cancel.hasAttribute("disabled")).toBe(true);
 });
 
 it("Backspace 删除引用正文标记并保留正文与资料区来源", async () => {
@@ -417,7 +430,7 @@ it("相邻粗体不同来源引用内部取消只移除当前来源标记", asyn
 
   editor.commands.setTextSelection(15);
   await framesSettled();
-  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+  triggerToolbarButton("取消当前引用");
 
   expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
   expect(editor.getJSON().content[0].content
@@ -473,7 +486,7 @@ it("引用锚点后的后续输入不带引用标记", async () => {
   expect(nodes.at(-1).text).toBe("继续输入");
   expect(nodes.at(-1).marks).toBeUndefined();
   await framesSettled();
-  expect(wrapper.get('[aria-label="取消当前引用"]').attributes("disabled")).toBeDefined();
+  expect(toolbarButton("取消当前引用").hasAttribute("disabled")).toBe(true);
 });
 
 it("游标移到锚点前界取消只删锚点不误伤正文", async () => {
@@ -484,9 +497,9 @@ it("游标移到锚点前界取消只删锚点不误伤正文", async () => {
   // 游标移到锚点前界（13）：取消应仅删除锚点，保留前后正文。
   editor.commands.setTextSelection({ from: 13, to: 13 });
   await framesSettled();
-  const cancel = wrapper.get('[aria-label="取消当前引用"]');
-  expect(cancel.attributes("disabled")).toBeUndefined();
-  await cancel.trigger("mousedown");
+  const cancel = toolbarButton("取消当前引用");
+  expect(cancel.hasAttribute("disabled")).toBe(false);
+  triggerToolbarButton("取消当前引用");
   const after = editor.getJSON().content[1].content;
   expect(after).toHaveLength(1);
   expect(after[0].text).toBe("案例原文继续输入");
@@ -761,4 +774,174 @@ it("挂起锚点失效或清空后移除临时高亮", async () => {
   expect(wrapper.find(".pending-anchor").exists()).toBe(false);
   await wrapper.setProps({ pendingAnchor: { ...pending, quote: "案例原文" } });
   expect(wrapper.get(".pending-anchor").text()).toBe("案例原文");
+});
+
+it("显示正文内修订差异并用原生 steps 应用，保留撤销历史", async () => {
+  const { wrapper } = await setup();
+  const editor = wrapper.vm.editor;
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
+  expect(wrapper.get(".revision-preview-new").text()).toBe("新正文");
+  const steps = editor.state.tr.insertText("新正文", 9, 13).steps.map((step) => step.toJSON());
+  expect(await wrapper.vm.applyRevisionSteps(steps, target)).toBe(true);
+  await nextTick();
+
+  expect(editor.state.doc.textBetween(9, 12)).toBe("新正文");
+  expect(wrapper.get(".revision-applied-new").text()).toBe("新正文");
+  expect(wrapper.emitted("change")).toBeUndefined();
+  expect(editor.commands.undo()).toBe(true);
+  expect(editor.state.doc.textBetween(9, 13)).toBe("案例原文");
+  expect(wrapper.emitted("change")).toHaveLength(1);
+});
+
+it("等正文平滑滚动结束后再展示修订预览", async () => {
+  const { wrapper } = await setup();
+  const scrollColumn = wrapper.element;
+  scrollColumn.classList.add("canvas-column");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn(() => {
+    window.setTimeout(() => {
+      scrollColumn.scrollTop = 24;
+      scrollColumn.dispatchEvent(new Event("scroll"));
+    }, 40);
+  });
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+
+  const preview = wrapper.vm.previewRevision(target);
+  await new Promise((resolve) => window.setTimeout(resolve, 70));
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  await preview;
+
+  expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
+});
+
+it("locates an applied record by its replacement without showing a stale preview", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const target = {
+    id: "artifact-accepted", from: 9, to: 13, quote: "案例原文",
+    replacement: "替换后的正文", status: "accepted", locateOnly: true,
+  };
+
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
+});
+
+it("does not guess a historical location when the replacement text repeats", async () => {
+  const replacement = "替换后的正文";
+  const documentWithRepeatedReplacement = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "一、教学说明" }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
+      { type: "paragraph", content: [{ type: "text", text: "后来插入的间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: replacement }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithRepeatedReplacement, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraphs = wrapper.findAll(".canvas-editor p");
+  paragraphs.forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-repeated", from: 9, to: 9 + replacement.length,
+    quote: "旧原文", replacement, status: "accepted", locateOnly: true,
+  })).toBe(false);
+
+  expect(domAtPos).not.toHaveBeenCalled();
+  paragraphs.forEach(({ element }) => expect(element.scrollIntoView).not.toHaveBeenCalled());
+});
+
+it("does not use a replacement when the original historical quote is ambiguous", async () => {
+  const documentWithAmbiguousQuote = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "间隔段落" }] },
+      { type: "paragraph", content: [{ type: "text", text: "旧原文" }] },
+      { type: "paragraph", content: [{ type: "text", text: "唯一替换" }] },
+    ],
+  };
+  const { wrapper } = await setup({ document: documentWithAmbiguousQuote, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  wrapper.findAll(".canvas-editor p")
+    .forEach(({ element }) => { element.scrollIntoView = vi.fn(); });
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-ambiguous-quote", from: 1, to: 4, quote: "旧原文",
+    replacement: "唯一替换", status: "superseded", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+});
+
+it("does not locate an unapplied historical suggestion by its replacement", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const domAtPos = vi.spyOn(wrapper.vm.editor.view, "domAtPos");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-rejected", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "替换后的正文", status: "rejected", locateOnly: true,
+  })).toBe(false);
+  expect(domAtPos).not.toHaveBeenCalled();
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("does not report a historical record located when its text is absent", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+
+  expect(await wrapper.vm.previewRevision({
+    id: "artifact-missing", from: 9, to: 13, quote: "已不存在的原文",
+    replacement: "也已不存在", status: "accepted", locateOnly: true,
+  })).toBe(false);
+  expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("discards a preview whose smooth scroll finishes after a newer request", async () => {
+  const { wrapper } = await setup();
+  const scrollColumn = wrapper.element;
+  scrollColumn.classList.add("canvas-column");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const first = {
+    id: "artifact-first", from: 9, to: 13, quote: "案例原文", replacement: "第一条修改",
+  };
+  const second = { ...first, id: "artifact-second", replacement: "第二条修改" };
+
+  const firstPreview = wrapper.vm.previewRevision(first);
+  const secondPreview = wrapper.vm.previewRevision(second);
+  scrollColumn.dispatchEvent(new Event("scroll"));
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+
+  expect(await firstPreview).toBe(false);
+  expect(await secondPreview).toBe(true);
+  expect(wrapper.get(".revision-preview-new").text()).toBe("第二条修改");
+});
+
+it("目标原文变化后清除差异并拒绝应用", async () => {
+  const { wrapper } = await setup();
+  const editor = wrapper.vm.editor;
+  const target = {
+    id: "artifact-1", from: 9, to: 13, quote: "案例原文", replacement: "新正文",
+  };
+  wrapper.vm.previewRevision(target);
+  editor.view.dispatch(editor.state.tr.insertText("已改", 9, 13));
+  await nextTick();
+
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  expect(wrapper.vm.isRevisionCurrent(target)).toBe(false);
+  expect(await wrapper.vm.applyRevisionSteps([], target)).toBe(false);
 });

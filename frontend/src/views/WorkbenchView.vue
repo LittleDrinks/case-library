@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from "vue";
-import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, RefreshCw, X } from "@lucide/vue";
+import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, PanelLeft, RefreshCw, X } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
@@ -17,6 +17,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
+import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
@@ -44,6 +45,7 @@ const loadError = ref("");
 const conflict = ref(null);
 const activeTool = ref("ai");
 const drawerOpen = ref(false);
+const assistantRail = ref(null);
 const actionNotice = shallowRef(null);
 const actionSuccessNotice = shallowRef(null);
 const busyAction = ref("");
@@ -61,13 +63,28 @@ let pendingSteps = [];
 let annotationRunPoll = null;
 const sources = ref([]);
 const canvasEditor = ref(null);
+provide(REVISION_WORKBENCH_KEY, {
+  flush: () => flushAutosave(),
+  preview: (artifact) => canvasEditor.value?.previewRevision?.({
+    ...artifact.target,
+    id: artifact.id,
+    replacement: artifact.replacement,
+    status: artifact.status,
+    locateOnly: artifact.locateOnly,
+  }) || false,
+  clearPreview: () => canvasEditor.value?.clearRevisionPreview?.(),
+  isCurrent: (artifact) => canvasEditor.value?.isRevisionCurrent?.(artifact.target) || false,
+  apply: (artifact, steps) => canvasEditor.value?.applyRevisionSteps?.(steps, {
+    ...artifact.target, replacement: artifact.replacement,
+  }) || false,
+});
 const versionEditor = ref(null);
 const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
 const overwriteTarget = ref(null);
 const historyRefreshKey = ref(0);
-const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
+const outlineCollapsed = ref(window.innerWidth < 1600);
 const ACTION_NOTICE_DURATION = 3000;
 let actionNoticeTimeout = null;
 
@@ -478,7 +495,6 @@ async function loadTagCatalog() {
 
 function toggleOutline() {
   outlineCollapsed.value = !outlineCollapsed.value;
-  localStorage.setItem("canvas-outline-collapsed", outlineCollapsed.value ? "1" : "0");
 }
 
 function locateHeading(order) {
@@ -490,6 +506,12 @@ function selectRailTool(tool) {
   if (contentMutationBusy.value) return;
   closeAnnotationFloat();
   selectTool(tool);
+}
+
+function selectHeaderTool(tool) {
+  if (contentMutationBusy.value) return;
+  selectRailTool(tool);
+  assistantRail.value?.expandPanel();
 }
 
 function selectTool(tool) {
@@ -600,6 +622,7 @@ function askAnnotationAi(annotation) {
     sameBlock: annotation.anchorState !== "changed" && annotation.anchorState !== "deleted",
   };
   selectTool("ai");
+  assistantRail.value?.expandPanel();
 }
 
 function requestLifecycle(command) {
@@ -818,10 +841,22 @@ onBeforeUnmount(() => {
         :busy-action="headerBusyAction"
         :history-available="historyAvailable"
         :public-case-id="publicCaseId"
-        @tool="selectRailTool"
+        @tool="selectHeaderTool"
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
+      <div v-show="editable" class="workbench-format-row">
+        <button
+          type="button"
+          class="outline-format-toggle"
+          :aria-expanded="!outlineCollapsed"
+          :title="outlineCollapsed ? '展开目录' : '收起目录'"
+          :aria-label="outlineCollapsed ? '展开目录' : '收起目录'"
+          @click="toggleOutline"
+        ><PanelLeft :size="16" aria-hidden="true" /></button>
+        <span class="toolbar-divider" aria-hidden="true" />
+        <div id="workbench-format-toolbar" />
+      </div>
       <ReviewDecisionDialog
         :command="decisionCommand"
         :busy="busyAction === decisionCommand"
@@ -948,6 +983,7 @@ onBeforeUnmount(() => {
           </article>
         </main>
         <AssistantRail
+          ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
           :version-id="readerVersion"

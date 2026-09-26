@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref } from "vue";
 import { ChevronDown, LoaderCircle, Tags, X } from "@lucide/vue";
+import { ElPopover } from "element-plus";
+import "element-plus/theme-chalk/el-popper.css";
+import "element-plus/theme-chalk/el-popover.css";
 import { tagIndex } from "../lib/tagCatalog.js";
 
 const props = defineProps({
@@ -13,6 +16,14 @@ const props = defineProps({
 const emit = defineEmits(["update:tagIds", "retry"]);
 const open = ref(false);
 const query = ref("");
+const queryInput = ref(null);
+const fallbackPlacements = ["top-start", "bottom-start"];
+const popperOptions = {
+  modifiers: [{
+    name: "preventOverflow",
+    options: { boundary: "viewport", rootBoundary: "viewport", padding: 12, altAxis: true, tether: false },
+  }],
+};
 const selectableGroups = computed(() => props.groups
   .filter((group) => group.enabled !== false)
   .map((group) => ({ ...group, tags: group.tags.filter((tag) => tag.enabled !== false) }))
@@ -40,6 +51,10 @@ function toggle(id, event) {
 function remove(id) {
   emit("update:tagIds", props.tagIds.filter(item => item !== id));
 }
+
+function focusSearch() {
+  queryInput.value?.focus({ preventScroll: true });
+}
 </script>
 
 <template>
@@ -58,9 +73,23 @@ function remove(id) {
       </ul>
       <span v-else-if="editable" class="case-tags-state">未设置标签</span>
       <div v-if="editable" class="case-tag-editor">
-        <button type="button" :aria-expanded="open" @click="open = !open">设置标签<ChevronDown :size="12" /></button>
-        <div v-if="open" class="case-tag-popover">
-          <input v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
+        <ElPopover
+          v-model:visible="open"
+          trigger="click"
+          placement="bottom-start"
+          :fallback-placements="fallbackPlacements"
+          :popper-options="popperOptions"
+          :width="300"
+          popper-class="case-tag-popover"
+          :show-arrow="false"
+          @after-enter="focusSearch"
+        >
+          <template #reference>
+            <button type="button" class="case-tag-trigger" :aria-expanded="open">
+              设置标签<ChevronDown :size="12" />
+            </button>
+          </template>
+          <input ref="queryInput" v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
           <p v-if="!selectableGroups.length" class="case-tags-state">暂无可选标签</p>
           <fieldset v-for="group in filteredGroups" :key="group.id">
             <legend>{{ group.name }}<b v-if="group.requiredForSubmission">投稿必填</b></legend>
@@ -69,7 +98,7 @@ function remove(id) {
               <span>{{ tag.name }}</span>
             </label>
           </fieldset>
-        </div>
+        </ElPopover>
       </div>
     </template>
   </div>
