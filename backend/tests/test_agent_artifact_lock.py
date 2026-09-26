@@ -132,6 +132,52 @@ def test_without_selection_no_target_is_locked(client: TestClient) -> None:
     assert run.get("target") is None
 
 
+def test_sending_a_refinement_message_supersedes_its_pending_suggestion(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+
+    response = _send(client, auth, case["id"], [
+        {"type": "text", "text": "请微调这条建议"},
+        {"type": "data-revision", "data": {"artifactId": artifact.id}},
+        {"type": "data-selection", "data": {
+            "from": FIRST.from_pos, "to": FIRST.to_pos,
+        }},
+    ])
+
+    assert response.status_code == 200, response.text
+    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "superseded"
+    assert database.agent_messages.count_documents({
+        "threadId": thread.id, "role": "user",
+        "parts.type": "data-revision", "parts.data.artifactId": artifact.id,
+    }) == 1
+
+
+def test_rejected_refinement_message_keeps_its_suggestion_pending(
+        client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+    run_count = database.agent_runs.count_documents({"threadId": thread.id})
+
+    response = _send(client, auth, case["id"], [
+        {"type": "text", "text": "请微调这条建议"},
+        {"type": "data-revision", "data": {"artifactId": artifact.id}},
+        {"type": "data-selection", "data": {
+            "from": FIRST.from_pos, "to": SECOND.to_pos,
+        }},
+    ])
+
+    assert response.status_code == 422
+    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "pending"
+    assert database.agent_runs.count_documents({"threadId": thread.id}) == run_count
+
+
 def test_selection_inside_list_and_quote_blocks_locks(client: TestClient) -> None:
     document = {"type": "doc", "content": [
         {"type": "bulletList", "content": [

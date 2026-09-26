@@ -775,6 +775,15 @@ def test_existing_document_only_registers_revision_tools() -> None:
     assert domain_tools & reader_tools == {"search_corpus", "read_source"}
 
 
+def test_default_template_only_registers_revision_tools() -> None:
+    from app.modules.cases.template import new_case_document
+
+    conversation = SimpleNamespace(reader=False, case={"document": new_case_document()})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
+
+    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
+
+
 def test_empty_draft_retains_existing_generation_tools() -> None:
     conversation = SimpleNamespace(reader=False, case={"document": _document()})
     domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}

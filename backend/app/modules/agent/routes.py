@@ -49,6 +49,7 @@ from app.modules.agent.skills import (
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
+from app.modules.cases.service import CaseError
 from app.modules.cases.published import (
     published_view,
     version_readable,
@@ -377,16 +378,20 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
         raise HTTPException(status_code=422, detail="修订上下文格式无效")
     artifact = database.agent_artifacts.find_one({
         "id": artifact_id, "caseId": case["id"], "threadId": thread_id,
-        "status": "superseded", "kind": "range", "annotationId": None,
-        "decidedBy": user["id"],
+        "kind": "range", "annotationId": None,
     })
-    if not artifact:
+    if (
+        not artifact or artifact.get("status") not in {"pending", "superseded"}
+        or (artifact.get("status") == "superseded" and artifact.get("decidedBy") != user["id"])
+    ):
         raise HTTPException(status_code=409, detail="原修订建议已不可微调")
     from app.modules.agent.source_reader import revalidate_sources
 
     if not revalidate_sources(database, user, case["id"], artifact.get("sources") or []):
         raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
     return {
+        "artifactId": artifact_id,
+        "status": artifact["status"],
         "from": artifact["target"]["from"],
         "to": artifact["target"]["to"],
         "quote": artifact["target"]["quote"],
@@ -646,6 +651,17 @@ def _start_context(
     worker_id = request.app.state.agent_worker_id
     run = _start_run(repository, thread, user["id"], plan, assistant_id, lease,
                      worker_id, [bound.binding_record() for bound in bounds], lock)
+    revision = plan.revision_context
+    if revision and revision["status"] == "pending":
+        try:
+            decide_artifact(
+                database, conversation.case["id"], thread.id,
+                revision["artifactId"], user, "superseded",
+            )
+        except CaseError as error:
+            repository.fail_run(run.id, worker_id)
+            _abort_start(lease)
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
     return _run_context(request, database, settings, user, conversation, repository,
                         thread, adapter, plan, run, selection, lease, worker_id, bounds)
 
@@ -729,7 +745,7 @@ def _capabilities(conversation: Conversation, bounds) -> list:
         if conversation.review:
             capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
-    generate_document = blocks.document_rewritable(
+    generate_document = blocks.document_blank(
         conversation.case.get("document") or {}
     )
     return [domain_capability(generate_document=generate_document)] + [

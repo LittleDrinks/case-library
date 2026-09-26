@@ -154,8 +154,10 @@ def decide_artifact(
             database, case_id, thread_id, artifact_id, user, decision, session
         ),
     )
+    from app.modules.agent.visibility import visible_artifact
+
     result = {
-        "artifact": _visible_decision_artifact(database, artifact, case, user),
+        "artifact": visible_artifact(database, artifact, user),
         "case": case_view(case),
         "applied": applied,
     }
@@ -164,12 +166,6 @@ def decide_artifact(
     if steps:
         result["steps"] = steps
     return result
-
-
-def _visible_decision_artifact(database, artifact, case, user):
-    from app.modules.agent.visibility import visible_artifact
-
-    return visible_artifact(database, artifact, user)
 
 
 def _decide(database, case_id, thread_id, artifact_id, user, decision, session):

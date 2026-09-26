@@ -940,18 +940,9 @@ it("clears a revision preview after keeping the original text", async () => {
 
 it("only supersedes a suggestion when its refinement message is sent", async () => {
   let superseded = false;
-  const order = [];
   api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
     revisionSnapshot(superseded ? "superseded" : "pending"),
   )));
-  api.agentDecide.mockImplementation(() => {
-    order.push("supersede");
-    superseded = true;
-    return Promise.resolve({
-      artifact: { ...revisionSnapshot("superseded").artifacts[0] },
-      case: { id: "case-1", revision: 1 }, applied: false,
-    });
-  });
   const workbench = {
     flush: vi.fn().mockResolvedValue(true),
     preview: vi.fn().mockReturnValue(true),
@@ -959,7 +950,7 @@ it("only supersedes a suggestion when its refinement message is sent", async () 
     isCurrent: vi.fn().mockReturnValue(true),
   };
   const fetch = vi.fn().mockImplementation(() => {
-    order.push("send");
+    superseded = true;
     return Promise.resolve(answerResponse());
   });
   vi.stubGlobal("fetch", fetch);
@@ -986,14 +977,32 @@ it("only supersedes a suggestion when its refinement message is sent", async () 
     from: 31, to: 39, quote: "第三段的新选区", sameBlock: true,
   } });
   await sendComposerMessage(wrapper, "请写得更简洁");
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "superseded", "csrf");
-  expect(order).toEqual(["supersede", "send"]);
+  expect(api.agentDecide).not.toHaveBeenCalled();
   expect(postedParts(fetch)).toContainEqual({
     type: "data-revision", data: { artifactId: "artifact-9" },
   });
   expect(postedParts(fetch)).toContainEqual({
     type: "data-selection", data: { from: 31, to: 39, quote: "第三段的新选区" },
   });
+});
+
+it("keeps the old suggestion available when refinement submission fails", async () => {
+  api.agentThread.mockResolvedValue(revisionSnapshot("pending"));
+  const fetch = vi.fn().mockRejectedValue(new Error("连接中断"));
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel();
+  await flushPromises();
+
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await sendComposerMessage(wrapper, "请继续微调");
+
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status"))
+    .toBe("pending");
+  expect(wrapper.get('[data-testid="composer-revision"]').exists()).toBe(true);
 });
 
 function tracerPartsSnapshot() {

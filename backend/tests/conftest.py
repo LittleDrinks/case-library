@@ -114,8 +114,33 @@ class PassthroughSession:
         return callback(None)
 
 
+def _make_partial_indexes_idempotent(collection) -> None:
+    create_index = collection.create_index
+
+    def create_index_once(keys, *args, **kwargs):
+        partial = kwargs.get("partialFilterExpression")
+        if kwargs.get("unique") and partial is not None:
+            keys = list(keys)
+            name = kwargs.get("name") or "_".join(
+                f"{field}_{direction}" for field, direction in keys
+            )
+            existing = collection.index_information().get(name)
+            if (
+                existing
+                and existing.get("key") == keys
+                and existing.get("unique") is True
+                and existing.get("partialFilterExpression") == partial
+            ):
+                return name
+        return create_index(keys, *args, **kwargs)
+
+    collection.create_index = create_index_once
+
+
 def _test_database():
     database = mongomock.MongoClient()["case_library_test"]
+    _make_partial_indexes_idempotent(database.case_versions)
+    _make_partial_indexes_idempotent(database.agent_writes)
     _seed_catalog_generation(database)
     _seed_worker_state(database)
     database.client.admin.command = lambda _name: {"ok": 1, "isWritablePrimary": True}

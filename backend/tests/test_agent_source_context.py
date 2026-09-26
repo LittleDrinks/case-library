@@ -140,8 +140,10 @@ def _submit_selection(client: TestClient, auth: dict, case_id: str, model) -> di
 def _assert_selection_context(context: str) -> None:
     assert "服务端已按当前正文验证的原生位置" in context
     assert "from=11，to=19，原文：第二段需要修订。" in context
-    assert "不得自行计算或调整位置，也不得要求作者填写字符位置" in context
-    assert "把上述 from、to 原样作为 start、end" in context
+    assert "选区是默认修改目标时，把上述 from、to 原样作为 start、end" in context
+    assert "作者明确指向其他段落、章节或全文时，依据完整正文位置索引使用该目标位置" in context
+    assert "不得沿用当前选区" in context
+    assert "不得自行计算字符位置，也不得要求作者填写字符位置" in context
 
 
 def _assert_pending_target(database, case_id: str) -> None:

@@ -685,32 +685,21 @@ async function sendMessage({ text, skillId }) {
   if (props.writingContext?.annotationId) emit("annotation-run", threadId.value);
   try {
     if (revisionContext.value) {
-      const artifactId = revisionContext.value.id;
       await prepareRevisionDecision();
-      let current = artifacts.value.find((item) => item.id === artifactId);
-      if (!current || !["pending", "superseded"].includes(current.status)) {
+      const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
+      if (!current || current.status !== "pending") {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
       }
-      if (current.status === "pending") {
-        if (revisionWorkbench && !revisionWorkbench.isCurrent?.(current)) {
-          revisionContext.value = null;
-          throw new Error("目标原文已变化，微调上下文已失效");
-        }
-        decidingArtifacts.add(artifactId);
-        try {
-          const result = await decide(artifactId, "superseded");
-          current = result.artifact;
-        } finally {
-          decidingArtifacts.delete(artifactId);
-        }
-        revisionWorkbench?.clearPreview?.();
-        expandedRevisionId.value = "";
+      if (revisionWorkbench && !revisionWorkbench.isCurrent?.(current)) {
+        revisionContext.value = null;
+        throw new Error("目标原文已变化，微调上下文已失效");
       }
       revisionContext.value = current;
     }
     await send(text, contextParts(), skillId);
-    revisionContext.value = null;
+    const current = artifacts.value.find((item) => item.id === revisionContext.value?.id);
+    if (current?.status === "superseded") revisionContext.value = null;
   } catch (requestError) {
     decideError.value = requestError.message || "消息发送失败";
   }
@@ -728,6 +717,15 @@ watch(() => props.caseRecord.revision, async () => {
       decideError.value = "目标原文已变化，微调上下文已失效";
     }
   } catch { /* 工作台正文照常可用；发送时会再次刷新建议状态。 */ }
+});
+watch(status, (current) => {
+  if (current !== "streaming" || !revisionContext.value) return;
+  const artifactId = revisionContext.value.id;
+  void refresh().then(() => {
+    if (revisionContext.value?.id !== artifactId) return;
+    const artifact = artifacts.value.find((item) => item.id === artifactId);
+    if (artifact?.status === "superseded") revisionContext.value = null;
+  }).catch(() => {});
 });
 
 async function rejectArtifact(artifactId) {
