@@ -7,6 +7,7 @@ export const TOOL_STATUS_LABELS = {
   ok: "已完成", pending: "处理中", created: "已创建", not_saved: "未保存",
   unavailable: "无法读取", not_found: "未找到",
   no_access: "当前身份无权限读取", empty: "内容为空", error: "读取失败",
+  written: "已写入",
   denied: "操作被拒绝", rejected: "已拒绝", failed: "执行失败",
 };
 export const ARTIFACT_STATUS_LABELS = {

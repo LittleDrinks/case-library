@@ -96,6 +96,18 @@ function revisionFailureSnapshot() {
   return snapshot;
 }
 
+function directWriteSnapshot() {
+  const snapshot = completedSnapshot();
+  snapshot.messages[1].parts = [{
+    type: "tool-write_document",
+    toolCallId: "tool-call-write-317",
+    state: "output-available",
+    input: { scope: "document" },
+    output: { status: "written", id: "write-317" },
+  }];
+  return snapshot;
+}
+
 async function mountPanel(page, snapshotForThread, onStreamRequest = () => {}) {
   const readSnapshot = typeof snapshotForThread === "function"
     ? snapshotForThread : () => structuredClone(snapshotForThread);
@@ -206,4 +218,16 @@ test("revision tool validation gives its domain reason and keeps the diagnostic"
   await expect(log).toBeVisible();
   await log.locator("summary").click();
   await expect(log.locator("pre")).toHaveText(REASON_ERROR);
+});
+
+test("successful document writes show a concrete state consistent with the result", async ({ page }) => {
+  await mountPanel(page, directWriteSnapshot());
+
+  const trace = page.locator('[data-testid="agent-tool-trace"]');
+  await expect(trace).toBeVisible();
+  const summary = trace.locator("summary").first();
+  await expect(summary).toContainText("直接写入正文 · 已写入");
+  await expect(summary).not.toContainText("结果状态未知");
+  await summary.click();
+  await expect(trace.locator(".agent-tool-line").last()).toHaveText("已写入正文，可撤销");
 });

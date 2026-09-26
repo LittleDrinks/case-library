@@ -16,6 +16,9 @@ describe("tool running states", () => {
   it("maps terminal states to readable labels including failures", () => {
     expect(toolState({ state: "input-available" })).toBe("进行中");
     expect(toolState({ state: "output-available", output: { status: "ok" } })).toBe("已完成");
+    expect(toolState({
+      type: "tool-write_document", state: "output-available", output: { status: "written" },
+    })).toBe("已写入");
     expect(toolState({ state: "output-available", output: { status: "no_access" } })).toBe("当前身份无权限读取");
     expect(toolState({ state: "output-available", output: { status: "future_status" } }))
       .toBe("结果状态未知");
