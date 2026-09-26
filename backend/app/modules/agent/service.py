@@ -288,7 +288,13 @@ async def execute_run(context: RunContext, supervisor) -> None:
         await _drain(context)
     finally:
         monitor.cancel()
-        await asyncio.to_thread(_finalize, context)
+        finalize_task = asyncio.create_task(asyncio.to_thread(_finalize, context))
+        try:
+            await asyncio.shield(finalize_task)
+        except asyncio.CancelledError:
+            # Owner loss cancels the model task, but terminal persistence must finish first.
+            await finalize_task
+            raise
         if context.supervisor is not None:
             context.supervisor.unregister(context.run.id)
 
