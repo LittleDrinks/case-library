@@ -285,6 +285,37 @@ def test_selected_request_treats_the_range_as_default_context(client: TestClient
     assert "明确指向其他段落、章节或全文时，应按完整正文位置索引定位" in seen[0]
 
 
+def test_sent_selection_persists_the_server_validated_quote(client: TestClient) -> None:
+    auth = _auth(client)
+    case = _create_selection_case(client, auth)
+    parts = [
+        {"type": "text", "text": "请处理选中的内容"},
+        {"type": "data-selection", "data": {
+            "from": 7, "to": 15, "quote": "浏览器提供的旧原文",
+        }},
+    ]
+    response = _stream_post(
+        client, auth, case["id"], "grounding-selection-snapshot",
+        "grounding-selection-snapshot-user", parts, _answer_model(None),
+    )
+    assert response.status_code == 200, response.text
+
+    edited_document = deepcopy(_SELECTION_DOCUMENT)
+    edited_document["content"][1]["content"][0]["text"] = "后来改过的正文。"
+    client.app.state.database.cases.update_one(
+        {"id": case["id"]}, {"$set": {"document": edited_document}},
+    )
+
+    snapshot = client.get(f"/api/cases/{case['id']}/agent/thread").json()
+    selection = next(
+        part for part in snapshot["messages"][0]["parts"]
+        if part["type"] == "data-selection"
+    )
+    assert selection["data"] == {
+        "from": 7, "to": 15, "quote": "第二段需要修订。",
+    }
+
+
 def test_author_context_contains_full_document_with_editor_positions(client: TestClient) -> None:
     auth = _auth(client)
     tail = "文末仍在完整上下文。"
