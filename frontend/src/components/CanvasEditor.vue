@@ -676,7 +676,9 @@ defineExpose({
 </script>
 
 <template>
-  <EditorToolbar v-if="editable" :editor="editor" />
+  <Teleport to="#workbench-format-toolbar">
+    <EditorToolbar v-if="editable" :editor="editor" />
+  </Teleport>
   <button
     v-if="selection"
     class="annotation-trigger"

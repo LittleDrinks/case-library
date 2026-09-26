@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from "vue";
-import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, RefreshCw, X } from "@lucide/vue";
+import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, PanelLeft, RefreshCw, X } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
@@ -78,7 +78,7 @@ const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
 const overwriteTarget = ref(null);
 const historyRefreshKey = ref(0);
-const outlineCollapsed = ref(localStorage.getItem("canvas-outline-collapsed") === "1");
+const outlineCollapsed = ref(window.innerWidth < 1600);
 const ACTION_NOTICE_DURATION = 3000;
 let actionNoticeTimeout = null;
 
@@ -493,7 +493,6 @@ async function loadTagCatalog() {
 
 function toggleOutline() {
   outlineCollapsed.value = !outlineCollapsed.value;
-  localStorage.setItem("canvas-outline-collapsed", outlineCollapsed.value ? "1" : "0");
 }
 
 function locateHeading(order) {
@@ -828,6 +827,18 @@ onBeforeUnmount(() => {
         @export="exportCase"
         @lifecycle="requestLifecycle"
       />
+      <div v-if="editable" class="workbench-format-row">
+        <button
+          type="button"
+          class="outline-format-toggle"
+          :aria-expanded="!outlineCollapsed"
+          :title="outlineCollapsed ? '展开目录' : '收起目录'"
+          :aria-label="outlineCollapsed ? '展开目录' : '收起目录'"
+          @click="toggleOutline"
+        ><PanelLeft :size="16" aria-hidden="true" /></button>
+        <span class="toolbar-divider" aria-hidden="true" />
+        <div id="workbench-format-toolbar" />
+      </div>
       <ReviewDecisionDialog
         :command="decisionCommand"
         :busy="busyAction === decisionCommand"

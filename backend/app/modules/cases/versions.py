@@ -138,6 +138,7 @@ def _record(database, case: dict, run, document: dict, source_revision: int, ses
         source_revision, run.user_id, session,
     )
     version["sourceRunId"] = run.id
+    version["sourceArtifactId"] = None
     return version
 
 

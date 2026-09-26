@@ -182,11 +182,13 @@ def _apply_document_write(ctx, scope, blocks, summary):
     return record
 
 
-def domain_capability() -> Capability:
-    """平台基础能力立即常驻，不依赖是否选择 Skill；写工具仅作者运行可用。"""
+def domain_capability(*, generate_document: bool) -> Capability:
+    """空稿保留初稿生成；已有正文只提供修订建议。"""
+    tools = [search_corpus, read_source, propose_revision]
+    if generate_document:
+        tools.extend([propose_document, write_document])
     return Capability(
-        tools=[search_corpus, read_source, propose_revision, propose_document,
-               write_document]
+        tools=tools,
     )
 
 

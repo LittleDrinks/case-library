@@ -157,7 +157,9 @@ def _assert_seed_context(context: str) -> None:
         "理论/思政要点：科技自立自强、科学技术创新观、风险评价与决策",
         "课程简称或表述含糊时，不得擅自替换或扩写为其他课程",
         "search_corpus 是平台检索", "status=ok` 只证明本次成功读取",
-        "来源没有明确支持的数字、日期、引语和书目", "不能扩展为其他段落或整篇正文",
+        "来源没有明确支持的数字、日期、引语和书目",
+        "选区通常是本轮修改的默认目标", "不得让当前选区阻止明确指向",
+        "明确要求全文修订时，按实际位置逐段调用 propose_revision 生成多条建议",
     ))
 
 
@@ -270,7 +272,7 @@ def test_platform_search_tool_marks_scope_without_network_claim(client: TestClie
     assert outputs[0]["total"] == 0 and "tagCatalog" in outputs[0]
 
 
-def test_selected_request_keeps_the_server_validated_scope(client: TestClient) -> None:
+def test_selected_request_treats_the_range_as_default_context(client: TestClient) -> None:
     auth = _auth(client)
     case = _create_selection_case(client, auth)
     seen: list[str] = []
@@ -280,7 +282,7 @@ def test_selected_request_keeps_the_server_validated_scope(client: TestClient) -
     )
     assert response.status_code == 200, response.text
     assert "from=7，to=15，原文：第二段需要修订。" in seen[0]
-    assert "当前选区是本轮修订范围，不得扩展为其他段落或整篇正文" in seen[0]
+    assert "明确指向其他段落、章节或全文时，应按完整正文位置索引定位" in seen[0]
 
 
 def test_author_context_contains_full_document_with_editor_positions(client: TestClient) -> None:
@@ -371,9 +373,9 @@ def test_refinement_context_is_bound_to_the_current_thread_and_target(client: Te
         "createdAt": DateTime.now(UTC),
     })
     parts = [
-        {"type": "text", "text": "请把这条建议写得更简洁"},
+        {"type": "text", "text": "请修改第一段，不要改旧建议所在的第二段"},
         {"type": "data-revision", "data": {"artifactId": "artifact-refine"}},
-        {"type": "data-selection", "data": {"from": 7, "to": 15}},
+        {"type": "data-selection", "data": {"from": 1, "to": 5}},
     ]
     seen: list[str] = []
     response = _stream_post(
@@ -384,6 +386,7 @@ def test_refinement_context_is_bound_to_the_current_thread_and_target(client: Te
     _assert_context_contains(seen[0], (
         "教师正在微调一条已停用的修订建议", "原文：第二段需要修订。",
         "上一版建议：上一版修改建议。", "上一版理由：补充案例的分析依据。",
+        "明确指向其他段落、章节或全文时，应按完整正文位置索引定位",
     ))
 
     revised_document = {"type": "doc", "content": [

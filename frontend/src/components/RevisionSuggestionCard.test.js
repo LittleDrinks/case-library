@@ -37,6 +37,27 @@ it("原文变化状态可查看理由但没有应用或微调操作", async () =
   expect(wrapper.find(".revision-suggestion-actions").exists()).toBe(false);
 });
 
+it("键盘聚焦会展开并定位建议", async () => {
+  const wrapper = mount(RevisionSuggestionCard, { props: { artifact } });
+
+  await wrapper.get(".revision-suggestion-head").trigger("focusin", { relatedTarget: null });
+
+  expect(wrapper.get(".revision-suggestion").classes()).toContain("expanded");
+  expect(wrapper.emitted("expand")[0][0]).toEqual(artifact);
+});
+
+it("已停用建议仍可展开查看记录，但没有应用操作", async () => {
+  const wrapper = mount(RevisionSuggestionCard, {
+    props: { artifact: { ...artifact, status: "superseded" } },
+  });
+
+  expect(wrapper.get(".revision-suggestion-head").attributes("disabled")).toBeUndefined();
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+
+  expect(wrapper.get(".revision-suggestion-details").text()).toContain("案例原文");
+  expect(wrapper.find(".revision-suggestion-actions").exists()).toBe(false);
+});
+
 it("应用或微调时给旧标题划线并折叠卡片", async () => {
   vi.useFakeTimers();
   const wrapper = mount(RevisionSuggestionCard, { props: { artifact, expanded: true } });

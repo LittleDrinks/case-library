@@ -28,6 +28,11 @@ const replacedDocument = {
 };
 
 async function setup(options = {}) {
+  if (!document.getElementById("workbench-format-toolbar")) {
+    const toolbar = document.createElement("div");
+    toolbar.id = "workbench-format-toolbar";
+    document.body.appendChild(toolbar);
+  }
   const wrapper = mount(CanvasEditor, {
     props: { document: caseDocument, editable: true, ...options },
   });
@@ -54,6 +59,14 @@ function paragraphTextNode(paragraph) {
 function clearDomSelection() {
   globalThis.getSelection().removeAllRanges();
   globalThis.document.dispatchEvent(new Event("selectionchange"));
+}
+
+function toolbarButton(label) {
+  return document.querySelector(`#workbench-format-toolbar [aria-label="${label}"]`);
+}
+
+function triggerToolbarButton(label) {
+  toolbarButton(label).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 }
 
 function pressEditorKey(editor, key) {
@@ -204,7 +217,7 @@ it("选中文字可关联资料，工具栏可取消引用", async () => {
   });
   await nextTick();
   await framesSettled();
-  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+  triggerToolbarButton("取消当前引用");
   expect(wrapper.vm.editor.getJSON().content[1].content[0].marks).toBeUndefined();
 });
 
@@ -238,15 +251,15 @@ it("光标锚点引用可整段取消且无残留", async () => {
   const source = { sourceType: "case", id: "src-1", number: 2, title: "引用案例" };
   const { wrapper } = await setup({ annotatable: true, sources: [source] });
   const editor = await insertAnchorAtEnd(wrapper, source);
-  const cancel = wrapper.get('[aria-label="取消当前引用"]');
-  expect(cancel.attributes("disabled")).toBeUndefined();
-  await cancel.trigger("mousedown");
+  const cancel = toolbarButton("取消当前引用");
+  expect(cancel.hasAttribute("disabled")).toBe(false);
+  triggerToolbarButton("取消当前引用");
   const nodes = editor.getJSON().content[1].content;
   expect(nodes).toHaveLength(1);
   expect(nodes[0].text).toBe("案例原文");
   expect(nodes.every((node) => !node.marks)).toBe(true);
   await framesSettled();
-  expect(cancel.attributes("disabled")).toBeDefined();
+  expect(cancel.hasAttribute("disabled")).toBe(true);
 });
 
 it("Backspace 删除引用正文标记并保留正文与资料区来源", async () => {
@@ -328,7 +341,7 @@ it("相邻粗体不同来源引用内部取消只移除当前来源标记", asyn
 
   editor.commands.setTextSelection(15);
   await framesSettled();
-  await wrapper.get('[aria-label="取消当前引用"]').trigger("mousedown");
+  triggerToolbarButton("取消当前引用");
 
   expect(editor.state.doc.firstChild.textContent).toBe("Before firstsecond after");
   expect(editor.getJSON().content[0].content
@@ -384,7 +397,7 @@ it("引用锚点后的后续输入不带引用标记", async () => {
   expect(nodes.at(-1).text).toBe("继续输入");
   expect(nodes.at(-1).marks).toBeUndefined();
   await framesSettled();
-  expect(wrapper.get('[aria-label="取消当前引用"]').attributes("disabled")).toBeDefined();
+  expect(toolbarButton("取消当前引用").hasAttribute("disabled")).toBe(true);
 });
 
 it("游标移到锚点前界取消只删锚点不误伤正文", async () => {
@@ -395,9 +408,9 @@ it("游标移到锚点前界取消只删锚点不误伤正文", async () => {
   // 游标移到锚点前界（13）：取消应仅删除锚点，保留前后正文。
   editor.commands.setTextSelection({ from: 13, to: 13 });
   await framesSettled();
-  const cancel = wrapper.get('[aria-label="取消当前引用"]');
-  expect(cancel.attributes("disabled")).toBeUndefined();
-  await cancel.trigger("mousedown");
+  const cancel = toolbarButton("取消当前引用");
+  expect(cancel.hasAttribute("disabled")).toBe(false);
+  triggerToolbarButton("取消当前引用");
   const after = editor.getJSON().content[1].content;
   expect(after).toHaveLength(1);
   expect(after[0].text).toBe("案例原文继续输入");

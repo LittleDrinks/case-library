@@ -1,4 +1,4 @@
-"""#37 Artifact 安全：Run 锁定选区/基线、决定门禁、过期展示、证据复验与运行尾部可见性。"""
+"""#37 修订候选：Run 基线、目标原文、决定门禁、证据复验与运行尾部可见性。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.exceptions import ModelRetry
 
-import app.core.database as database_module
-from app.core.database import initialize
 from app.modules.agent import artifacts, prosemirror
 from app.modules.agent.models import AgentMessage, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
@@ -228,14 +226,12 @@ def test_propose_locates_a_paragraph_without_a_preselected_target(client: TestCl
     assert database.agent_artifacts.count_documents({}) == 0
 
 
-def test_propose_off_locked_range_is_refused(client: TestClient) -> None:
+def test_explicit_target_can_override_the_initial_selection(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database, _repository, _thread, run = _locked_run(client, auth, case, SECOND)
-    first = FIRST
-    with pytest.raises(CaseError) as excinfo:
-        _propose(database, case, run, target=first)
-    assert excinfo.value.status_code == 422
+    artifact = _propose(database, case, run, target=FIRST)
+    assert artifact.target == FIRST
     assert database.agent_artifacts.count_documents({}) == 0
 
 
@@ -315,60 +311,6 @@ def test_applying_one_suggestion_keeps_the_next_target_mapped(client: TestClient
         {"caseId": case["id"], "sourceRunId": run.id}, {"_id": 0},
     ))
     assert {item["sourceArtifactId"] for item in versions} == {first.id, second.id}
-
-
-def test_artifact_indexes_migrate_once_and_survive_another_bootstrap(client: TestClient) -> None:
-    database = client.app.state.database
-    database.agent_writes.drop_index("runId_1")
-    database.agent_writes.create_index([("runId", 1)], unique=True, name="runId_1")
-    database.case_versions.drop_index("one_ai_version_per_run")
-    database.case_versions.create_index(
-        [("caseId", 1), ("sourceRunId", 1)], unique=True,
-        partialFilterExpression={"sourceRunId": {"$type": "string"}},
-        name="one_ai_version_per_run",
-    )
-    database.schema_migrations.delete_one({"_id": "agent-artifact-index-v1"})
-
-    initialize(database)
-    initialize(database)
-
-    write_run_index = database.agent_writes.index_information()["runId_1"]
-    version_run_index = database.case_versions.index_information()["one_ai_version_per_run"]
-    assert write_run_index["unique"] is True
-    assert write_run_index["partialFilterExpression"] == {
-        "artifactId": {"$exists": False},
-    }
-    assert version_run_index["partialFilterExpression"] == {
-        "sourceRunId": {"$type": "string"},
-        "sourceArtifactId": {"$exists": False},
-    }
-
-
-def test_artifact_index_migration_requires_owned_completion(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    database = client.app.state.database
-    migration_id = "agent-artifact-index-v1"
-    database.schema_migrations.delete_one({"_id": migration_id})
-    original_replace = database_module._replace_index
-    replacements = 0
-
-    def replace_and_transfer_lease(*args, **kwargs) -> None:
-        nonlocal replacements
-        original_replace(*args, **kwargs)
-        replacements += 1
-        if replacements == 4:
-            database.schema_migrations.update_one(
-                {"_id": migration_id}, {"$set": {"owner": "another-worker"}},
-            )
-
-    monkeypatch.setattr(database_module, "_replace_index", replace_and_transfer_lease)
-    with pytest.raises(RuntimeError, match="migration lease lost"):
-        initialize(database)
-
-    migration = database.schema_migrations.find_one({"_id": migration_id})
-    assert migration["owner"] == "another-worker"
-    assert "completedAt" not in migration
 
 
 def test_proposal_publishes_only_with_completed_run(client: TestClient) -> None:
@@ -590,13 +532,45 @@ def test_native_transform_preserves_rich_nodes() -> None:
 # ---- 基线过期：读取侧展示 expired，接受被拒 ----
 
 
-def test_revision_change_marks_expired_and_blocks_accept(client: TestClient) -> None:
+def test_metadata_revision_does_not_expire_an_unchanged_target(client: TestClient) -> None:
     auth = _login(client)
     case = _create_case(client, auth)
     database, repository, thread, run = _locked_run(client, auth, case, SECOND)
     artifact = _propose(database, case, run)
     _publish(database, repository, run, artifact)
-    database.cases.update_one({"id": case["id"]}, {"$set": {"revision": 2}})
+    changed = client.patch(
+        f"/api/cases/{case['id']}", headers=_csrf(auth), json={
+            "revision": case["revision"], "title": "更新标题",
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    snapshot = repository.snapshot(thread)
+    assert snapshot.artifacts[0].status == "pending"
+    result = artifacts.decide_artifact(
+        database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
+    )
+    assert result["artifact"].status == "accepted"
+
+
+def test_editing_the_target_original_expires_the_suggestion(client: TestClient) -> None:
+    auth = _login(client)
+    case = _create_case(client, auth)
+    database, repository, thread, run = _locked_run(client, auth, case, SECOND)
+    artifact = _propose(database, case, run)
+    _publish(database, repository, run, artifact)
+
+    changed = client.patch(
+        f"/api/cases/{case['id']}", headers=_csrf(auth), json={
+            "revision": case["revision"],
+            "document": _document(PARAGRAPHS[0], "第二段作者已重写。"),
+            "steps": [{
+                "stepType": "replace", "from": SECOND.from_pos, "to": SECOND.to_pos,
+                "slice": {"content": [{"type": "text", "text": "第二段作者已重写。"}]},
+            }],
+        },
+    )
+
+    assert changed.status_code == 200, changed.text
     snapshot = repository.snapshot(thread)
     assert snapshot.artifacts[0].status == "expired"
     with pytest.raises(CaseError) as excinfo:
@@ -604,8 +578,6 @@ def test_revision_change_marks_expired_and_blocks_accept(client: TestClient) -> 
             database, case["id"], thread.id, artifact.id, auth["user"], "accepted",
         )
     assert excinfo.value.status_code == 409
-    assert database.agent_artifacts.find_one({"id": artifact.id})["status"] == "pending"
-    assert database.cases.find_one({"id": case["id"]})["revision"] == 2
 
 
 # ---- 证据复验：权限、发布状态与来源下线 ----

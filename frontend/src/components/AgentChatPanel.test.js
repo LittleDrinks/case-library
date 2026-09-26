@@ -938,14 +938,19 @@ it("clears a revision preview after keeping the original text", async () => {
   expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("rejected");
 });
 
-it("keeps a superseded suggestion as message-local context for the next request", async () => {
-  let snapshots = 0;
+it("only supersedes a suggestion when its refinement message is sent", async () => {
+  let superseded = false;
+  const order = [];
   api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(
-    snapshots++ < 3 ? revisionSnapshot("pending") : revisionSnapshot("superseded"),
+    revisionSnapshot(superseded ? "superseded" : "pending"),
   )));
-  api.agentDecide.mockResolvedValue({
-    artifact: { ...revisionSnapshot("superseded").artifacts[0] },
-    case: { id: "case-1", revision: 1 }, applied: false,
+  api.agentDecide.mockImplementation(() => {
+    order.push("supersede");
+    superseded = true;
+    return Promise.resolve({
+      artifact: { ...revisionSnapshot("superseded").artifacts[0] },
+      case: { id: "case-1", revision: 1 }, applied: false,
+    });
   });
   const workbench = {
     flush: vi.fn().mockResolvedValue(true),
@@ -953,7 +958,10 @@ it("keeps a superseded suggestion as message-local context for the next request"
     clearPreview: vi.fn(),
     isCurrent: vi.fn().mockReturnValue(true),
   };
-  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  const fetch = vi.fn().mockImplementation(() => {
+    order.push("send");
+    return Promise.resolve(answerResponse());
+  });
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountPanel({}, workbench);
   await flushPromises();
@@ -962,15 +970,29 @@ it("keeps a superseded suggestion as message-local context for the next request"
   await flushPromises();
   await wrapper.get('[data-testid="agent-refine"]').trigger("click");
   await flushPromises();
-  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "superseded", "csrf");
+  expect(api.agentDecide).not.toHaveBeenCalled();
   expect(wrapper.get('[data-testid="composer-revision"]').exists()).toBe(true);
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("pending");
 
+  await wrapper.get('[aria-label="移除微调上下文"]').trigger("click");
+  expect(wrapper.get('[data-testid="revision-suggestion"]').attributes("data-artifact-status")).toBe("pending");
+  expect(api.agentDecide).not.toHaveBeenCalled();
+
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await flushPromises();
+  expect(api.agentDecide).not.toHaveBeenCalled();
+
+  await wrapper.setProps({ writingContext: {
+    from: 31, to: 39, quote: "第三段的新选区", sameBlock: true,
+  } });
   await sendComposerMessage(wrapper, "请写得更简洁");
+  expect(api.agentDecide).toHaveBeenCalledWith("case-1", "thread-tracer", "artifact-9", "superseded", "csrf");
+  expect(order).toEqual(["supersede", "send"]);
   expect(postedParts(fetch)).toContainEqual({
     type: "data-revision", data: { artifactId: "artifact-9" },
   });
   expect(postedParts(fetch)).toContainEqual({
-    type: "data-selection", data: { from: 9, to: 14, quote: "第二段原文" },
+    type: "data-selection", data: { from: 31, to: 39, quote: "第三段的新选区" },
   });
 });
 

@@ -1,11 +1,4 @@
-"""Agent 直接写入正文：模型按对话选用工具，服务端校验执行、恰好一次、可撤销。
-
-是否直接写入由模型结合完整对话理解并选择；服务端不解析中文措辞。
-写入时重验作者与工作版本门禁、Run 基线修订号、Thread 与目标案例绑定、
-只读拒绝；范围守卫（整篇仅真空文档/未编辑模板，选区仅锁定范围）全部
-通过才写入；写入保留结构化块与撤销所需前后文档，撤销按修订号守卫精
-确恢复。
-"""
+"""空白/未编辑模板初稿写入：服务端校验，保留前后正文供撤销。"""
 
 from __future__ import annotations
 
@@ -77,7 +70,9 @@ def _new_write_record(case, run, scope, normalized, user, summary, document, ste
         base_revision=case["revision"], result_revision=case["revision"] + 1,
         created_by=user["id"], created_at=_now(),
     )
-    return record.model_dump(by_alias=True, mode="python", exclude_none=True)
+    result = record.model_dump(by_alias=True, mode="python", exclude_none=True)
+    result["artifactId"] = None
+    return result
 
 
 def _commit_write(database, case_id, user, run, write, steps, scope, session) -> dict:

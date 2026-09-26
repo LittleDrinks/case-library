@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 from app.core.dependencies import get_database, get_settings
 from app.core.ids import new_id
 from app.modules.agent.artifacts import decide_artifact
-from app.modules.agent import prosemirror
+from app.modules.agent import blocks, prosemirror
 from app.modules.agent.case_area import (
     annotation_instructions, catalog_instructions, retained_sources, selection_from_parts,
 )
@@ -386,12 +386,9 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
 
     if not revalidate_sources(database, user, case["id"], artifact.get("sources") or []):
         raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
-    if len(plan.selections) != 1 or any(
-        plan.selections[0].get(key) != artifact["target"].get(key)
-        for key in ("from", "to", "quote")
-    ):
-        raise HTTPException(status_code=409, detail="修订上下文与正文目标不一致")
     return {
+        "from": artifact["target"]["from"],
+        "to": artifact["target"]["to"],
         "quote": artifact["target"]["quote"],
         "replacement": artifact["replacement"],
         "reason": artifact.get("reason") or "",
@@ -654,9 +651,8 @@ def _start_context(
 
 
 def _run_lock_for(conversation: Conversation, plan: RunPlan):
-    """Run 创建即冻结写入控制信息：基线修订号与锁定选区。
+    """Run 创建即冻结基线与默认选区；明确位置由模型按完整正文定位。
 
-    是否直接写入由模型结合完整对话理解并选择工具；服务端不解析消息文本。
     审核对话锁定当前待审提交版本，撤回或再提交后旧 Run 基线失效。
     """
     if conversation.reader:
@@ -705,9 +701,12 @@ def revision_instructions(context: dict | None) -> str:
     if not context:
         return ""
     return (
-        "\n\n教师正在微调一条已停用的修订建议。原文范围仍由服务端锁定；"
-        "结合教师本条要求、上一版建议及其理由，重新给出一条可确认的修订建议。"
-        f"\n原文：{context['quote']}\n上一版建议：{context['replacement']}"
+        "\n\n教师正在微调一条已停用的修订建议。结合教师本条要求、上一版建议及其理由，"
+        "重新给出可确认的修订建议；没有明确新目标时，默认继续修改上一版的原文范围。"
+        "教师明确指向其他段落、章节或全文时，按完整正文位置索引定位该目标，"
+        "不得把上一版范围当作硬边界；提议位置和原文仍由服务端验证。"
+        f"\n上一版目标：from={context['from']}，to={context['to']}，原文：{context['quote']}"
+        f"\n上一版建议：{context['replacement']}"
         f"\n上一版理由：{context['reason']}"
     )
 
@@ -730,7 +729,12 @@ def _capabilities(conversation: Conversation, bounds) -> list:
         if conversation.review:
             capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
-    return [domain_capability()] + [bound_skill_capability(bound) for bound in bounds]
+    generate_document = blocks.document_rewritable(
+        conversation.case.get("document") or {}
+    )
+    return [domain_capability(generate_document=generate_document)] + [
+        bound_skill_capability(bound) for bound in bounds
+    ]
 
 
 def _selection(database, settings, user_id: str):
@@ -753,10 +757,7 @@ def _lease(database, user_id: str, selection):
 
 
 def _run_lock(case: dict, plan: RunPlan) -> tuple[int | None, ArtifactTarget | None]:
-    """Run 创建即锁定 baseRevision；仅当恰好一个非空选区时锁定目标范围。
-
-    无选区不锁目标，提议修订将被拒绝，不由模型推断或自动锁定段落。
-    """
+    """保存正文基线和默认选区；明确章节可由模型从完整位置索引中定位。"""
     if len(plan.selections) != 1:
         return case.get("revision"), None
     row = plan.selections[0]

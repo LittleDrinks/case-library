@@ -83,7 +83,7 @@ class AgentRun(BaseModel):
     )
     target: ArtifactTarget | None = Field(
         default=None,
-        description="Run 创建时验证的教师选区；没有选区时，候选范围由完整正文位置索引定位",
+        description="Run 创建时验证的教师选区，作为修订默认目标；明确指向其他位置时仍按完整正文定位",
     )
     submitted_version_id: str | None = Field(
         default=None, alias="submittedVersionId",

@@ -237,11 +237,7 @@ class AgentRepository:
         return [write_view(row) for row in rows]
 
     def _snapshot_artifacts(self, thread: AgentThread, session) -> list[AgentArtifact]:
-        revision = _case_revision(self.database, thread.case_id, session)
-        return [
-            expired_artifact_view(artifact, revision)
-            for artifact in self.artifacts(thread.id, session)
-        ]
+        return self.artifacts(thread.id, session)
 
     def events_after(
         self, thread_id: str, after_seq: int, limit: int = 200
@@ -1038,19 +1034,3 @@ def review_baseline_current(database, run_id: str, session=None) -> bool:
         {"id": thread["caseId"]}, {"submittedVersionId": 1}, session=session,
     )
     return bool(case and case.get("submittedVersionId") == run["submittedVersionId"])
-
-
-def _case_revision(database, case_id: str, session) -> int | None:
-    case = database.cases.find_one({"id": case_id}, {"revision": 1}, session=session)
-    return case.get("revision") if case else None
-
-
-def expired_artifact_view(artifact: AgentArtifact, revision: int | None) -> AgentArtifact:
-    """正文修订号已越过候选基线时，读取侧展示 expired；不回写存储状态。"""
-    if (
-        artifact.status == "pending" and revision is not None
-        and revision != artifact.base_revision
-        and artifact.annotation_id is None
-    ):
-        return artifact.model_copy(update={"status": "expired"})
-    return artifact

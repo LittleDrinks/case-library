@@ -1,6 +1,6 @@
 """工作台修订建议：Run 锁定正文基线，校验后暂存提议并随完成统一提交。
 
-工具可在完整正文位置索引中定位一个段落；教师选区存在时仍锁定该范围。
+教师选区是默认目标，明确章节可从完整位置索引定位；服务端校验段落和原文。
 工具调用期只构建不落库，Artifact 与助手消息在 Run 完成事务中一起发布。
 """
 
@@ -25,7 +25,6 @@ from app.modules.agent.prosemirror import ParagraphChangedError, ParagraphNotFou
 from app.modules.agent.repository import (
     AgentRepository,
     claim_run_write_path,
-    expired_artifact_view,
     transaction,
 )
 from app.modules.agent.source_reader import revalidate_sources
@@ -56,7 +55,7 @@ def propose_document_artifact(
     blocks_input: object, reason: str,
     sources: list[SourceRef], user: dict,
 ) -> AgentArtifact:
-    """构建整篇 AI 版本草稿；已有教师正文也允许独立生成。"""
+    """构建新稿初稿候选；已有正文的修改由段落修订建议承接。"""
     case = _current_case(database, case_id)
     _verify_writer(case, user)
     normalized = _document_candidate(database, run_id, case, blocks_input)
@@ -104,12 +103,7 @@ def _ensure_no_artifact(database, run_id: str) -> None:
 
 
 def _revision_target(database, run_id, case: dict, start: int, end: int) -> ArtifactTarget:
-    run = _verify_run_baseline(database, run_id, case)
-    lock = run.get("target")
-    if lock:
-        if (lock["from"], lock["to"]) != (start, end):
-            raise CaseError(422, "修订目标必须与教师选定的范围一致")
-        return ArtifactTarget(from_pos=lock["from"], to_pos=lock["to"], quote=lock["quote"])
+    _verify_run_baseline(database, run_id, case)
     try:
         prosemirror.selection_block(case["document"], start, end)
         quote = prosemirror.text_between(case["document"], start, end)
@@ -175,8 +169,7 @@ def decide_artifact(
 def _visible_decision_artifact(database, artifact, case, user):
     from app.modules.agent.visibility import visible_artifact
 
-    current = expired_artifact_view(artifact, case.get("revision"))
-    return visible_artifact(database, current, user)
+    return visible_artifact(database, artifact, user)
 
 
 def _decide(database, case_id, thread_id, artifact_id, user, decision, session):
@@ -256,11 +249,9 @@ def _verify_writer(case: dict, user: dict) -> None:
 
 
 def _accept_candidate(database, case, artifact, user, session) -> tuple[dict, dict | None, list]:
-    """把当前段落候选写入教师稿，并为编辑器保留可撤销的 ProseMirror steps。"""
+    """把已确认的段落候选写入教师稿，并保留可撤销的 ProseMirror steps。"""
     if artifact.kind == "document":
         return _candidate_ai_version(database, case, artifact, user, session), None, []
-    if case["revision"] != artifact.base_revision:
-        raise CaseError(409, "正文已更新，修订候选已过期")
     document, steps = _resolved_document(case, artifact)
     from app.modules.cases.snapshots import record_snapshot
 
@@ -335,7 +326,7 @@ def _link_candidate_version(database, case, artifact, record, session) -> None:
 
 
 def _resolved_document(case: dict, artifact: AgentArtifact) -> tuple[dict, list[dict]]:
-    """范围候选按锁定选区替换；整篇候选由规范化块重建结构化文档。"""
+    """范围候选按已验证的目标原文替换；整篇候选按规范化块重建文档。"""
     if artifact.kind == "document":
         return prosemirror.replace_document(
             case["document"], blocks.structured_document(artifact.blocks)

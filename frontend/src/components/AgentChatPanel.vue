@@ -459,11 +459,16 @@ async function prepareRevisionDecision() {
 async function previewRevision(artifact) {
   decideError.value = "";
   expandedRevisionId.value = artifact.id;
+  if (props.readOnly || ["accepted", "expired"].includes(artifact.status)) return;
   try {
     if (!await prepareRevisionDecision()) return;
     const current = artifacts.value.find((item) => item.id === artifact.id);
-    if (!current || current.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
-    if (!await revisionWorkbench?.preview?.(current)) throw new Error("目标原文已变化，无法预览这条建议");
+    if (!current) throw new Error("这条建议已不存在，请刷新后重试");
+    if (["accepted", "expired"].includes(current.status)) return;
+    if (!await revisionWorkbench?.preview?.(current)) {
+      if (current.status === "pending") throw new Error("目标原文已变化，无法预览这条建议");
+      return;
+    }
     expandedRevisionId.value = current.id;
   } catch (requestError) {
     decideError.value = requestError.message || "预览失败";
@@ -608,27 +613,16 @@ async function undoWriteRecord(writeId) {
   }
 }
 
-async function refineRevision(artifactId) {
+function refineRevision(artifactId) {
   decideError.value = "";
   try {
-    if (!await prepareRevisionDecision()) return;
     const artifact = artifacts.value.find((item) => item.id === artifactId);
     if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
-    if (revisionWorkbench && !revisionWorkbench.isCurrent?.(artifact)) {
-      throw new Error("目标原文已变化，这条建议不能微调");
-    }
-    decidingArtifacts.add(artifactId);
-    const result = await decide(artifactId, "superseded");
-    revisionWorkbench?.clearPreview?.();
-    expandedRevisionId.value = "";
-    revisionContext.value = result.artifact;
+    revisionContext.value = artifact;
     emit("clear-writing-context");
-    await nextTick();
-    composer.value?.focusDraft?.();
+    void nextTick(() => composer.value?.focusDraft?.());
   } catch (requestError) {
     decideError.value = requestError.message || "微调失败";
-  } finally {
-    decidingArtifacts.delete(artifactId);
   }
 }
 
@@ -664,8 +658,13 @@ function contextParts() {
   if (revisionContext.value?.target) {
     const target = revisionContext.value.target;
     parts.push({ type: "data-revision", data: { artifactId: revisionContext.value.id } });
+    const selection = props.writingContext;
+    const usable = selection?.sameBlock && Number.isInteger(selection.from)
+      && Number.isInteger(selection.to) && selection.to > selection.from;
     parts.push({ type: "data-selection", data: {
-      from: target.from, to: target.to, quote: target.quote,
+      from: usable ? selection.from : target.from,
+      to: usable ? selection.to : target.to,
+      quote: usable ? selection.quote : target.quote,
     } });
     return parts;
   }
@@ -686,11 +685,27 @@ async function sendMessage({ text, skillId }) {
   if (props.writingContext?.annotationId) emit("annotation-run", threadId.value);
   try {
     if (revisionContext.value) {
+      const artifactId = revisionContext.value.id;
       await prepareRevisionDecision();
-      const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
-      if (!current || current.status !== "superseded") {
+      let current = artifacts.value.find((item) => item.id === artifactId);
+      if (!current || !["pending", "superseded"].includes(current.status)) {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
+      }
+      if (current.status === "pending") {
+        if (revisionWorkbench && !revisionWorkbench.isCurrent?.(current)) {
+          revisionContext.value = null;
+          throw new Error("目标原文已变化，微调上下文已失效");
+        }
+        decidingArtifacts.add(artifactId);
+        try {
+          const result = await decide(artifactId, "superseded");
+          current = result.artifact;
+        } finally {
+          decidingArtifacts.delete(artifactId);
+        }
+        revisionWorkbench?.clearPreview?.();
+        expandedRevisionId.value = "";
       }
       revisionContext.value = current;
     }
@@ -707,7 +722,7 @@ watch(() => props.caseRecord.revision, async () => {
     await refresh();
     if (!revisionContext.value) return;
     const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
-    if (current?.status === "superseded") revisionContext.value = current;
+    if (["pending", "superseded"].includes(current?.status)) revisionContext.value = current;
     else {
       revisionContext.value = null;
       decideError.value = "目标原文已变化，微调上下文已失效";

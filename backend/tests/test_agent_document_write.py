@@ -30,6 +30,7 @@ from app.modules.agent.skills import (
     reader_capability,
     write_document,
 )
+from app.modules.agent.routes import _capabilities
 from app.modules.cases.service import CaseError
 
 PARAGRAPHS = ("第一段保持不变。", "第二段需要修订。")
@@ -766,15 +767,25 @@ def test_concurrent_document_and_direct_write_claim_one_path(
     _assert_concurrent_write_result(database, case, run, results)
 
 
-def test_write_tools_only_available_to_author_runs() -> None:
-    domain_tools = {tool.__name__ for tool in domain_capability().tools}
+def test_existing_document_only_registers_revision_tools() -> None:
+    conversation = SimpleNamespace(reader=False, case={"document": _document("已有正文")})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
     reader_tools = {tool.__name__ for tool in reader_capability().tools}
-    assert {"write_document", "propose_document", "propose_revision"} <= domain_tools
+    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
     assert domain_tools & reader_tools == {"search_corpus", "read_source"}
 
 
+def test_empty_draft_retains_existing_generation_tools() -> None:
+    conversation = SimpleNamespace(reader=False, case={"document": _document()})
+    domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
+    assert {"write_document", "propose_document", "propose_revision"} <= domain_tools
+
+
 def _tool_contract(name: str) -> tuple[dict, Any]:
-    tool = next(item for item in domain_capability().tools if item.__name__ == name)
+    tool = next(
+        item for item in domain_capability(generate_document=True).tools
+        if item.__name__ == name
+    )
     schema = Tool(tool, takes_ctx=True).function_schema
     return schema.json_schema, schema.validator
 

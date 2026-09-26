@@ -17,6 +17,7 @@ const emit = defineEmits(["expand", "collapse", "accept", "reject", "refine"]);
 const locallyExpanded = ref(props.expanded);
 const collapsing = ref(false);
 const pendingCollapse = ref(null);
+let pointerDown = false;
 const completed = computed(() => ["accepted", "superseded"].includes(props.artifact.status));
 const title = computed(() => {
   const value = props.artifact.target?.section || props.artifact.target?.quote || "正文修订";
@@ -52,7 +53,6 @@ onBeforeUnmount(() => {
 });
 
 function toggle() {
-  if (completed.value) return;
   if (locallyExpanded.value) {
     locallyExpanded.value = false;
     emit("collapse", props.artifact.id);
@@ -60,6 +60,12 @@ function toggle() {
     locallyExpanded.value = true;
     emit("expand", props.artifact);
   }
+}
+
+function focusCard(event) {
+  if (pointerDown || event.currentTarget.contains(event.relatedTarget)) return;
+  locallyExpanded.value = true;
+  emit("expand", props.artifact);
 }
 
 function clickAction(event, name) {
@@ -75,12 +81,16 @@ function clickAction(event, name) {
     :data-artifact-id="artifact.id"
     :data-artifact-status="artifact.status"
     data-testid="revision-suggestion"
+    @pointerdown="pointerDown = true"
+    @pointerup="pointerDown = false"
+    @pointercancel="pointerDown = false"
+    @pointerleave="pointerDown = false"
+    @focusin="focusCard"
   >
     <button
       type="button"
       class="revision-suggestion-head"
       :aria-expanded="locallyExpanded"
-      :disabled="completed"
       @click="toggle"
     >
       <component :is="locallyExpanded ? ChevronDown : ChevronRight" :size="14" aria-hidden="true" />
