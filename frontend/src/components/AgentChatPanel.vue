@@ -72,6 +72,7 @@ let pendingWriteSync = false;
 let hydratedWriteThread = "";
 let hydratedVersionThread = "";
 let versionOpenGeneration = 0;
+let revisionPreviewGeneration = 0;
 let threadSwitchDepth = 0;
 
 function sourceRefs() {
@@ -330,6 +331,7 @@ function closeThreads() {
 
 onBeforeUnmount(() => {
   versionOpenGeneration += 1;
+  revisionPreviewGeneration += 1;
   pendingVersionOpenIds.clear();
   versionOpenInFlightIds.clear();
   stopThreadsPolling();
@@ -416,6 +418,7 @@ function statusText() {
 
 async function acceptArtifact(artifactId) {
   decideError.value = "";
+  revisionPreviewGeneration += 1;
   let artifact = artifacts.value.find((item) => item.id === artifactId);
   try {
     if (isRevisionSuggestion(artifact)) {
@@ -456,27 +459,48 @@ async function prepareRevisionDecision() {
   return true;
 }
 
+async function locateHistoricalRevision(artifact) {
+  revisionWorkbench?.clearPreview?.();
+  return revisionWorkbench?.preview?.({ ...artifact, locateOnly: true });
+}
+
+async function previewCurrentRevision(artifact, isCurrentRequest) {
+  if (!await prepareRevisionDecision() || !isCurrentRequest()) return;
+  const current = artifacts.value.find((item) => item.id === artifact.id);
+  if (!current) throw new Error("这条建议已不存在，请刷新后重试");
+  if (current.status !== "pending") {
+    const located = await locateHistoricalRevision(current);
+    if (!isCurrentRequest()) return;
+    if (located === false) throw new Error("暂时无法定位这条建议对应的正文");
+    return;
+  }
+  const previewed = await revisionWorkbench?.preview?.(current);
+  if (!isCurrentRequest()) return;
+  if (!previewed) throw new Error("目标原文已变化，无法预览这条建议");
+}
+
 async function previewRevision(artifact) {
+  const generation = ++revisionPreviewGeneration;
+  const isCurrentRequest = () => generation === revisionPreviewGeneration
+    && expandedRevisionId.value === artifact.id;
   decideError.value = "";
   expandedRevisionId.value = artifact.id;
-  if (props.readOnly || ["accepted", "expired"].includes(artifact.status)) return;
   try {
-    if (!await prepareRevisionDecision()) return;
-    const current = artifacts.value.find((item) => item.id === artifact.id);
-    if (!current) throw new Error("这条建议已不存在，请刷新后重试");
-    if (["accepted", "expired"].includes(current.status)) return;
-    if (!await revisionWorkbench?.preview?.(current)) {
-      if (current.status === "pending") throw new Error("目标原文已变化，无法预览这条建议");
+    if (props.readOnly || artifact.status !== "pending") {
+      const located = await locateHistoricalRevision(artifact);
+      if (!isCurrentRequest()) return;
+      if (located === false) throw new Error("暂时无法定位这条建议对应的正文");
       return;
     }
-    expandedRevisionId.value = current.id;
+    await previewCurrentRevision(artifact, isCurrentRequest);
   } catch (requestError) {
-    decideError.value = requestError.message || "预览失败";
+    if (isCurrentRequest()) decideError.value = requestError.message || "预览失败";
   }
 }
 
 function collapseRevision(artifactId) {
   if (expandedRevisionId.value !== artifactId) return;
+  revisionPreviewGeneration += 1;
   expandedRevisionId.value = "";
   revisionWorkbench?.clearPreview?.();
 }
@@ -627,6 +651,7 @@ function refineRevision(artifactId) {
 }
 
 function clearRevisionContext() {
+  revisionPreviewGeneration += 1;
   revisionContext.value = null;
   revisionWorkbench?.clearPreview?.();
 }

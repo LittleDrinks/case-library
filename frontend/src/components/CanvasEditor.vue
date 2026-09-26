@@ -30,6 +30,7 @@ let annotationRefreshPending = false;
 let selectedAnnotation = null;
 let applyingServerRevision = false;
 let revisionEnterTimer = null;
+let revisionPreviewGeneration = 0;
 
 function sectionName(activeEditor, position) {
   let section = "正文";
@@ -311,6 +312,38 @@ function pendingAnchorRange(doc, pending) {
   }
 }
 
+function findTextRange(doc, text, preferredFrom) {
+  if (!text) return null;
+  let nearest = null;
+  doc.descendants((node, position) => {
+    if (!node.isTextblock) return;
+    const segments = [];
+    let cursor = position + 1;
+    node.forEach((child) => {
+      const value = child.isText ? child.text : child.type.name === "hardBreak" ? "\n" : "";
+      if (value) segments.push({ from: cursor, text: value });
+      cursor += child.nodeSize;
+    });
+    const blockText = segments.map((segment) => segment.text).join("");
+    const offset = blockText.indexOf(text);
+    if (offset < 0) return;
+    let consumed = 0;
+    let from = null;
+    for (const segment of segments) {
+      if (offset < consumed + segment.text.length) {
+        from = segment.from + offset - consumed;
+        break;
+      }
+      consumed += segment.text.length;
+    }
+    if (from === null) return;
+    const candidate = { from, to: from + text.length };
+    const distance = Math.abs(from - preferredFrom);
+    if (!nearest || distance < nearest.distance) nearest = { ...candidate, distance };
+  });
+  return nearest && { from: nearest.from, to: nearest.to };
+}
+
 function annotationMarks(doc, annotations) {
   return annotations.flatMap((annotation) => {
     const range = annotationAnchor(annotation, doc);
@@ -431,11 +464,19 @@ function waitForScrollToSettle(container) {
 }
 
 async function previewRevision(target) {
+  const generation = ++revisionPreviewGeneration;
   const activeEditor = editor.value;
-  if (!activeEditor || !props.editable || !pendingAnchorRange(activeEditor.state.doc, target)) return false;
+  if (!activeEditor || (!props.editable && !target.locateOnly)) return false;
+  const doc = activeEditor.state.doc;
+  const currentRange = target.locateOnly
+    ? findTextRange(doc, target.status === "accepted" ? target.replacement : target.quote, target.from)
+      || findTextRange(doc, target.replacement, target.from)
+    : pendingAnchorRange(doc, target);
+  if (!currentRange && !target.locateOnly) return false;
+  const position = currentRange?.from ?? Math.max(0, Math.min(target.from, doc.content.size));
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview: null, entered: null }));
   try {
-    let element = activeEditor.view.domAtPos(target.from).node;
+    let element = activeEditor.view.domAtPos(position).node;
     if (element.nodeType !== Node.ELEMENT_NODE) element = element.parentElement;
     const block = element?.closest("p, h1, h2, h3, li");
     if (block?.scrollIntoView) {
@@ -444,6 +485,8 @@ async function previewRevision(target) {
       await scrollComplete;
     }
   } catch { /* Decoration still provides the preview if scrolling is unavailable. */ }
+  if (generation !== revisionPreviewGeneration) return false;
+  if (target.locateOnly) return true;
   if (!isRevisionCurrent(target)) return false;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
     preview: { ...target, phase: "preview" }, entered: null,
@@ -452,6 +495,7 @@ async function previewRevision(target) {
 }
 
 function clearRevisionPreview() {
+  revisionPreviewGeneration += 1;
   const activeEditor = editor.value;
   if (!activeEditor) return;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
@@ -465,6 +509,7 @@ function isRevisionCurrent(target) {
 }
 
 async function applyRevisionSteps(steps, target) {
+  revisionPreviewGeneration += 1;
   const activeEditor = editor.value;
   if (!activeEditor || !isRevisionCurrent(target) || !Array.isArray(steps) || !steps.length) {
     return false;

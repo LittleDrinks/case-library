@@ -733,6 +733,42 @@ it("等正文平滑滚动结束后再展示修订预览", async () => {
   expect(wrapper.get(".revision-preview-old").text()).toBe("案例原文");
 });
 
+it("locates an applied record by its replacement without showing a stale preview", async () => {
+  const { wrapper } = await setup({ document: replacedDocument, editable: false });
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const target = {
+    id: "artifact-accepted", from: 9, to: 13, quote: "案例原文",
+    replacement: "替换后的正文", status: "accepted", locateOnly: true,
+  };
+
+  expect(await wrapper.vm.previewRevision(target)).toBe(true);
+  expect(paragraph.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  expect(wrapper.find(".revision-preview-old").exists()).toBe(false);
+  expect(wrapper.find(".revision-preview-new").exists()).toBe(false);
+});
+
+it("discards a preview whose smooth scroll finishes after a newer request", async () => {
+  const { wrapper } = await setup();
+  const scrollColumn = wrapper.element;
+  scrollColumn.classList.add("canvas-column");
+  const paragraph = wrapper.get(".canvas-editor p").element;
+  paragraph.scrollIntoView = vi.fn();
+  const first = {
+    id: "artifact-first", from: 9, to: 13, quote: "案例原文", replacement: "第一条修改",
+  };
+  const second = { ...first, id: "artifact-second", replacement: "第二条修改" };
+
+  const firstPreview = wrapper.vm.previewRevision(first);
+  const secondPreview = wrapper.vm.previewRevision(second);
+  scrollColumn.dispatchEvent(new Event("scroll"));
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+
+  expect(await firstPreview).toBe(false);
+  expect(await secondPreview).toBe(true);
+  expect(wrapper.get(".revision-preview-new").text()).toBe("第二条修改");
+});
+
 it("目标原文变化后清除差异并拒绝应用", async () => {
   const { wrapper } = await setup();
   const editor = wrapper.vm.editor;

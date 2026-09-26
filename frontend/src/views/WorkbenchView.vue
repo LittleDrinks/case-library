@@ -65,7 +65,11 @@ const canvasEditor = ref(null);
 provide(REVISION_WORKBENCH_KEY, {
   flush: () => flushAutosave(),
   preview: (artifact) => canvasEditor.value?.previewRevision?.({
-    ...artifact.target, id: artifact.id, replacement: artifact.replacement,
+    ...artifact.target,
+    id: artifact.id,
+    replacement: artifact.replacement,
+    status: artifact.status,
+    locateOnly: artifact.locateOnly,
   }) || false,
   clearPreview: () => canvasEditor.value?.clearRevisionPreview?.(),
   isCurrent: (artifact) => canvasEditor.value?.isRevisionCurrent?.(artifact.target) || false,

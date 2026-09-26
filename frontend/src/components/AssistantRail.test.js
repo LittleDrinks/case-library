@@ -105,10 +105,28 @@ it("uses the persistent Agent chat as the only AI entry", () => {
 
 it("keeps comments and attachments on the same assistant rail", async () => {
   const wrapper = render({ active: "comments" });
-  await wrapper.get(".assistant-tabs button:nth-child(1)").trigger("click");
+  await wrapper.get('[aria-label="AI"]').trigger("click");
   expect(wrapper.emitted("select")).toEqual([["ai"]]);
   await wrapper.setProps({ active: "files" });
   expect(wrapper.text()).toContain("附件");
+});
+
+it("places collapse first and toggles the active panel like the confirmed workbench", async () => {
+  const wrapper = render();
+  const collapse = wrapper.get(".panel-collapse-toggle");
+  expect(wrapper.findAll(".assistant-tabs > button")[0].classes()).toContain("panel-collapse-toggle");
+
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
+  await wrapper.get('[aria-label="AI"]').trigger("click");
+  expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
+
+  await wrapper.get('[aria-label="历史版本"]').trigger("click");
+  await wrapper.setProps({ active: "history" });
+  await wrapper.get('[aria-label="历史版本"]').trigger("click");
+  expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
+  await collapse.trigger("click");
+  expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
 });
 
 it("keeps the AI draft while switching through integrated rail panels", async () => {
@@ -145,8 +163,8 @@ it("sends annotation context through the real rail chat after editable prefill",
 it("uses the read-only rail for public discussion and资料", () => {
   const wrapper = render({ readOnly: true, user: { id: "user-1" }, active: "ai" });
   expect(wrapper.findComponent({ name: "AgentChatPanel" }).props("readOnly")).toBe(true);
-  expect(wrapper.findAll(".assistant-tabs > button")[1].isVisible()).toBe(true);
-  expect(wrapper.findAll(".assistant-tabs > button")[2].isVisible()).toBe(false);
+  expect(wrapper.get('[aria-label="历史版本"]').isVisible()).toBe(true);
+  expect(wrapper.get('[aria-label="批注"]').isVisible()).toBe(false);
 });
 
 it("requires login before opening a private reader discussion", () => {
@@ -167,7 +185,7 @@ it("keeps review chat private to review mode while annotations stay available", 
   const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
   const panel = wrapper.findComponent({ name: "AgentChatPanel" });
   expect(panel.props("review")).toBe(true);
-  expect(wrapper.findAll(".assistant-tabs > button")[2].isVisible()).toBe(true);
+  expect(wrapper.get('[aria-label="批注"]').isVisible()).toBe(true);
 });
 
 it("exposes the fourth history entry and forwards manual version creation", () => {
