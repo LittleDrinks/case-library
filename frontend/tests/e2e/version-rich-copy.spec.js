@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+const baseOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL).origin;
+
+test.use({
+  launchOptions: {
+    args: [`--unsafely-treat-insecure-origin-as-secure=${baseOrigin}`],
+  },
+});
+
 const historicalDocument = {
   type: "doc",
   content: [
@@ -84,10 +92,10 @@ async function mockWorkbenchApi(page) {
 
 test("selected history pastes with formatting into rich text and readable text targets", async ({ page, context }) => {
   const mutations = await mockWorkbenchApi(page);
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://127.0.0.1:5201",
-  });
   await page.goto("/#/workbench/copy-case");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: new URL(page.url()).origin,
+  });
   await expect(page.getByLabel("案例标题")).toHaveValue("当前教师稿标题");
 
   await page.getByRole("button", { name: "版本历史" }).click();
