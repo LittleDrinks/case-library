@@ -70,9 +70,12 @@ async def run_stream(repository, run_id, case_id, user, access_check, project):
         readable = all(gate.readable(ref) for ref in row.get("sources", []))
         chunks = row.get("chunks", [])
         if readable:
-            for chunk in chunks:
-                if chunk["type"] not in {"finish", "error", "abort"}:
-                    yield sse_data(chunk)
+            body = "".join(
+                sse_data(chunk) for chunk in chunks
+                if chunk["type"] not in {"finish", "error", "abort"}
+            )
+            if body:
+                yield body
         index += len(chunks)
         if run["status"] != "active" and len(chunks) < 200:
             for chunk in _run_terminal_chunks(repository, run, project):
