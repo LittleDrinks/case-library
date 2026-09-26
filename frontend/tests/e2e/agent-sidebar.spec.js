@@ -453,6 +453,7 @@ test("移动端 15 条已选资料不挤压输入框且按钮不重叠", async (
   test.setTimeout(60_000);
   await prepareSelectedSources(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await openChat(page);
   await expectMobileContext(page);
   const box = await composerGeometry(page);
   expect(box.scrollWidth).toBeLessThanOrEqual(box.width + 1);
