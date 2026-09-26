@@ -4,6 +4,8 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
+const RUN_SNAPSHOT_POLL_MS = 500;
+
 function textParts(message) {
   return (message?.parts || [])
     .filter((part) => part.type === "text")
@@ -149,11 +151,43 @@ function replaceChat(state, chat) {
   state.chat.value = chat;
 }
 
-async function refreshSnapshot(caseId, state, generation, threadId = state.threadId.value) {
+function stopRunSnapshotPolling(state, poll = state.runSnapshotPoll) {
+  if (!poll || state.runSnapshotPoll !== poll) return;
+  clearInterval(poll.timer);
+  state.runSnapshotPoll = null;
+}
+
+function startRunSnapshotPolling(caseId, state, generation, threadId) {
+  const poll = { pending: false, timer: null };
+  state.runSnapshotPoll = poll;
+  poll.timer = setInterval(() => {
+    if (state.runSnapshotPoll !== poll) return;
+    if (!isCurrent(state, generation) || state.threadId.value !== threadId
+      || !["submitted", "streaming"].includes(state.chat.value?.status)) {
+      stopRunSnapshotPolling(state, poll);
+      return;
+    }
+    if (poll.pending) return;
+    poll.pending = true;
+    void refreshSnapshot(caseId, state, generation, threadId,
+      () => state.runSnapshotPoll === poll)
+      .catch(() => {})
+      .finally(() => { poll.pending = false; });
+  }, RUN_SNAPSHOT_POLL_MS);
+  return poll;
+}
+
+async function refreshSnapshot(
+  caseId, state, generation, threadId = state.threadId.value, mayApply = () => true,
+) {
   const snapshot = await api.agentThread(caseId, threadId);
-  if (isCurrent(state, generation) && state.threadId.value === threadId) {
-    state.snapshot.value = snapshot;
+  if (!isCurrent(state, generation) || state.threadId.value !== threadId || !mayApply()) {
+    return snapshot;
   }
+  const current = state.snapshot.value;
+  if (Number.isInteger(current?.eventSeq)
+    && (!Number.isInteger(snapshot?.eventSeq) || snapshot.eventSeq < current.eventSeq)) return current;
+  state.snapshot.value = snapshot;
   return snapshot;
 }
 
@@ -209,6 +243,7 @@ async function loadChat(caseId, state, generation) {
 }
 
 async function selectThread(caseId, state, threadId) {
+  stopRunSnapshotPolling(state);
   const generation = (state.generation += 1);
   state.recovering.value = false;
   state.loading.value = true;
@@ -239,9 +274,15 @@ function messageParts(state, text, contextParts, skillId) {
 async function sendChat(caseId, state, text, generation, contextParts = [], skillId = "") {
   const threadId = state.threadId.value;
   if (!isCurrent(state, generation) || !state.chat.value) return;
+  let poll;
   try {
-    await state.chat.value.sendMessage({ parts: messageParts(state, text, contextParts, skillId) });
+    const sending = state.chat.value.sendMessage({
+      parts: messageParts(state, text, contextParts, skillId),
+    });
+    poll = startRunSnapshotPolling(caseId, state, generation, threadId);
+    await sending;
   } finally {
+    stopRunSnapshotPolling(state, poll);
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
 }
@@ -277,9 +318,13 @@ async function retryChat(caseId, state, generation, messageId) {
   if (!isCurrent(state, generation) || !state.chat.value) return;
   await rebuild(caseId, state, generation, threadId);
   if (!isCurrent(state, generation) || !state.chat.value) return;
+  let poll;
   try {
-    await state.chat.value.regenerate({ messageId });
+    const retrying = state.chat.value.regenerate({ messageId });
+    poll = startRunSnapshotPolling(caseId, state, generation, threadId);
+    await retrying;
   } finally {
+    stopRunSnapshotPolling(state, poll);
     if (isCurrent(state, generation)) await settle(caseId, state, generation, threadId);
   }
 }
@@ -335,7 +380,7 @@ function createState(caseId, versionId, mode) {
     threadId: ref(null), loading: ref(true), error: ref(""), stopping: ref(false), recovering: ref(false),
     skills: ref([]), catalog: ref("loading"),
     versionId, mode, preferenceKey: preferenceKey(caseId, versionId, mode),
-    generation: 0, catalogGeneration: 0, disposed: false,
+    generation: 0, catalogGeneration: 0, disposed: false, runSnapshotPoll: null,
   };
 }
 
@@ -372,6 +417,7 @@ function computedState(state) {
 }
 
 function reload(caseId, state) {
+  stopRunSnapshotPolling(state);
   state.generation += 1;
   return loadChat(caseId, state, state.generation);
 }
@@ -386,6 +432,7 @@ function bindLifecycle(state, recover) {
   onBeforeUnmount(() => {
     window.removeEventListener("online", recover);
     state.disposed = true;
+    stopRunSnapshotPolling(state);
     state.generation += 1;
     state.catalogGeneration += 1;
     detachChat(state);
