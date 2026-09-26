@@ -488,6 +488,14 @@ function insertCitation(source) {
   return inserted ? "inserted" : "unpositioned";
 }
 
+function clipboardContent() {
+  if (!editor.value) return null;
+  return {
+    html: editor.value.getHTML(),
+    text: editor.value.getText({ blockSeparator: "\n" }),
+  };
+}
+
 function selectAnnotation(annotation) {
   const activeEditor = editor.value;
   if (!activeEditor || annotation.anchorState === "deleted" || annotation.anchorState === "changed") return false;
@@ -498,7 +506,7 @@ function selectAnnotation(annotation) {
   return true;
 }
 
-defineExpose({ selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor });
+defineExpose({ selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor, clipboardContent });
 </script>
 
 <template>

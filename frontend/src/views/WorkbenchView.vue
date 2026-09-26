@@ -17,7 +17,7 @@ import { api } from "../api.js";
 import { createAutosave } from "../composables/useAutosave.js";
 import { createCrashDraft } from "../composables/useCrashDraft.js";
 import { CONVERSATION_SOURCES_KEY, createConversationSources } from "../composables/useConversationSources.js";
-import { documentOutline, documentText, normalizeDocument } from "../lib/document.js";
+import { documentOutline, normalizeDocument } from "../lib/document.js";
 import { citationSignature } from "../lib/citation.js";
 import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
@@ -61,6 +61,7 @@ let pendingSteps = [];
 let annotationRunPoll = null;
 const sources = ref([]);
 const canvasEditor = ref(null);
+const versionEditor = ref(null);
 const decisionCommand = ref("");
 const openVersionTabs = ref([]);
 const activeTabId = ref("draft");
@@ -725,12 +726,21 @@ function overwriteFailed(error) {
 }
 
 async function copyVersion() {
-  if (!activeVersion.value || !navigator.clipboard?.writeText) {
+  if (!activeVersion.value || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
     showActionNotice("当前环境不支持复制，请使用浏览器复制功能");
     return;
   }
   try {
-    await navigator.clipboard.writeText(documentText(activeVersion.value.document));
+    const content = versionEditor.value?.clipboardContent?.();
+    if (!content) {
+      showActionNotice("复制失败，请使用浏览器复制功能");
+      return;
+    }
+    const clipboardItem = new ClipboardItem({
+      "text/html": new Blob([content.html], { type: "text/html" }),
+      "text/plain": new Blob([content.text], { type: "text/plain" }),
+    });
+    await navigator.clipboard.write([clipboardItem]);
     showActionNotice(`已复制${versionLabel(activeVersion.value)}正文`, "success");
   } catch {
     showActionNotice("复制失败，请使用浏览器复制功能");
@@ -927,6 +937,7 @@ onBeforeUnmount(() => {
               </div>
             </header>
             <CanvasEditor
+              ref="versionEditor"
               :key="activeVersion.id"
               :document="activeVersion.document"
               :editable="false"
