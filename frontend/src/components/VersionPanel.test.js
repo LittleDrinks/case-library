@@ -40,6 +40,16 @@ it("版本时间线按新到旧列出投稿版本并可打开只读 Tab", async 
   expect(wrapper.emitted("open-version")).toEqual([[versions[2]]]);
 });
 
+it("opens review feedback with its matching submission version", async () => {
+  const reviewed = { ...versions[2], review: { versionNumber: 1, reasonTypes: ["其他"], message: "第一轮意见" } };
+  api.caseHistory.mockResolvedValue({ versions: [versions[1], reviewed], events: [] });
+  const wrapper = render();
+  await flushPromises();
+  expect(wrapper.findAll(".version-review-status")).toHaveLength(1);
+  await wrapper.get('[aria-label="查看 v1 审核意见"]').trigger("click");
+  expect(wrapper.emitted("open-review")).toEqual([[reviewed]]);
+});
+
 it("时间线不展示内部快照，并保留普通保存不建版本说明", async () => {
   api.caseHistory.mockResolvedValue({
     versions, events: [],

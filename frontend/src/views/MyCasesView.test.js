@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, test, vi } from "vitest";
 import MyCasesView from "./MyCasesView.vue";
+import CaseCard from "../components/CaseCard.vue";
 import { api } from "../api.js";
 
 const push = vi.fn();
@@ -71,6 +72,14 @@ test("普通草稿不显示退回意见", async () => {
   const wrapper = await renderCases([card({ title: "普通稿" })]);
   expect(wrapper.find(".case-card-notice").exists()).toBe(false);
   expect(wrapper.text()).toContain("普通稿");
+});
+
+test("已发布案例从我的案例进入作者工作台以另开新稿", async () => {
+  const wrapper = await renderCases([card({ workflowStatus: "published", publicationStatus: "public" })]);
+  const published = wrapper.getComponent(CaseCard);
+  expect(published.props("destination")).toEqual({ name: "workbench", params: { id: "c-1" } });
+  expect(published.get(".case-card-action").text()).toContain("进入工作台");
+  wrapper.unmount();
 });
 
 test("未知状态明确报错，重试后恢复案例列表", async () => {

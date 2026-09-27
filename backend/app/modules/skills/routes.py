@@ -13,7 +13,9 @@ from app.modules.skills.parse import MAX_PACKAGE_BYTES
 from app.modules.skills.service import (
     SkillError,
     admin_list,
+    delete_version,
     publish_version,
+    unpublish_version,
     read_published_content,
     read_published_resource,
     published_catalog,
@@ -75,6 +77,30 @@ def publish_skill(
 ) -> dict:
     _require_admin(user)
     return {"skill": publish_version(database, skill_id, body.versionId)}
+
+
+@admin_router.post("/{skill_id}/unpublish")
+def unpublish_skill(
+    skill_id: str,
+    body: PublishBody,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> dict:
+    _require_admin(user)
+    return {"skill": unpublish_version(database, skill_id, body.versionId)}
+
+
+@admin_router.delete("/{skill_id}/versions/{version_id}", status_code=204)
+def delete_skill_version(
+    skill_id: str,
+    version_id: str,
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> None:
+    _require_admin(user)
+    delete_version(database, skill_id, version_id)
 
 
 @router.get("")

@@ -64,6 +64,14 @@ class RunContext:
     failure: Exception | None = None
 
 
+def _current_user_prompt(context: RunContext) -> str:
+    selections = context.deps.selections if context.deps else []
+    if not selections:
+        return context.prompt
+    quotes = "\n".join(item["quote"] for item in selections)
+    return f"本条消息附带的正文选区：\n{quotes}\n\n本轮要求：{context.prompt}"
+
+
 def _run_kwargs(context: RunContext, model=None) -> dict:
     database = context.deps.database if context.deps else None
     values = {
@@ -74,7 +82,7 @@ def _run_kwargs(context: RunContext, model=None) -> dict:
             context.case, database=database, extra=context.instructions,
             reader=context.reader, review=context.review,
         ),
-        "user_prompt": context.prompt,
+        "user_prompt": _current_user_prompt(context),
         "deps": context.deps,
         "cancellation_token": context.token,
     }
@@ -385,7 +393,7 @@ def _complete(context: RunContext) -> None:
         _terminal(context, context.repository.fail_run)
         return
     artifacts = context.deps.proposed_artifacts if context.deps else []
-    reader = context.reader and not context.review
+    reader = context.reader and bool(context.case.get("versionId"))
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
         resources=_run_resources(_assistant_parts_of(context), context.bounds,
@@ -412,7 +420,7 @@ def _review_accessible(context: RunContext) -> bool:
 def _reader_accessible(context: RunContext) -> bool:
     if context.review:
         return _review_accessible(context)
-    return not context.reader or version_readable_by_id(
+    return not context.case.get("versionId") or version_readable_by_id(
         context.repository.database, context.case["id"], context.case.get("versionId")
     )
 

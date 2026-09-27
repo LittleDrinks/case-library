@@ -30,7 +30,7 @@ const props = defineProps({
   sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
-  "change", "selection", "writing-context", "annotate", "annotation-click", "ask-ai",
+  "change", "selection", "writing-context", "annotate", "annotation-click",
 ]);
 const selection = ref(null);
 const cursorPlaced = ref(false);
@@ -137,12 +137,12 @@ function validSelection(activeEditor) {
 }
 
 function selectionIsCapturable(activeEditor, context) {
-  return (props.editable || props.annotatable) && !activeEditor.state.selection.empty && context.quote.trim()
+  return !activeEditor.state.selection.empty && context.quote.trim()
     && !selectionNeedsSync(activeEditor);
 }
 
 function validDomSelection(activeEditor, range) {
-  if (!range || !(props.editable || props.annotatable) || range.from >= range.to) return false;
+  if (!range || range.from >= range.to) return false;
   const $from = activeEditor.state.doc.resolve(range.from);
   const $to = activeEditor.state.doc.resolve(range.to);
   return $from.parent.isTextblock && $to.parent.isTextblock
@@ -257,6 +257,7 @@ function handleSelectionChange() {
   // Editor selection updates and explicit clears still pass through the
   // editor callbacks below.
   if (!range) return;
+  if (selection.value?.from === range.from && selection.value?.to === range.to) return;
   discardSelection(annotationMatchesRange(range));
   scheduleSelectionCapture();
 }
@@ -405,8 +406,7 @@ function revisionDecorations(doc, state) {
   const preview = state.preview;
   if (preview && pendingAnchorRange(doc, preview)) {
     if (preview.from < preview.to) decorations.push(Decoration.inline(preview.from, preview.to, {
-      class: preview.phase === "leaving"
-        ? "revision-preview-old leaving" : "revision-preview-old",
+      class: "revision-preview-old",
     }, { revisionPreview: true }));
     decorations.push(Decoration.widget(preview.to, () => {
       const node = window.document.createElement("span");
@@ -517,7 +517,7 @@ async function previewRevision(target) {
   if (target.locateOnly) return true;
   if (!isRevisionCurrent(target)) return false;
   activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, {
-    preview: { ...target, phase: "preview" }, entered: null,
+    preview: target, entered: null,
   }));
   return true;
 }
@@ -540,13 +540,6 @@ async function applyRevisionSteps(steps, target) {
   revisionPreviewGeneration += 1;
   const activeEditor = editor.value;
   if (!activeEditor || !isRevisionCurrent(target) || !Array.isArray(steps) || !steps.length) {
-    return false;
-  }
-  const preview = { ...target, phase: "leaving" };
-  activeEditor.view.dispatch(activeEditor.state.tr.setMeta(revisionKey, { preview }));
-  await new Promise((resolve) => window.setTimeout(resolve, 180));
-  if (!isRevisionCurrent(target)) {
-    clearRevisionPreview();
     return false;
   }
   let transaction = activeEditor.state.tr;
@@ -753,8 +746,15 @@ function selectAnnotation(annotation) {
   return true;
 }
 
+function refinementTarget(artifact) {
+  const doc = editor.value?.state.doc;
+  if (!doc) return null;
+  const range = historicalTargetRange(doc, { ...artifact.target, ...artifact });
+  return range ? { ...range, quote: doc.textBetween(range.from, range.to, "\n", "\n") } : null;
+}
+
 defineExpose({
-  selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor,
+  refinementTarget, selectAnnotation, clearSelection, recaptureSelection, insertCitation, getPendingAnchor,
   previewRevision, clearRevisionPreview, isRevisionCurrent, applyRevisionSteps, clipboardContent,
 });
 </script>
@@ -763,6 +763,6 @@ defineExpose({
   <Teleport to="#workbench-format-toolbar">
     <EditorToolbar v-if="editable" :editor="editor" />
   </Teleport>
-  <SelectionToolbar v-if="editable && editor" :editor="editor" @ask-ai="emit('ask-ai')" />
+  <SelectionToolbar v-if="editable && editor" :editor="editor" />
   <EditorContent :editor="editor" />
 </template>

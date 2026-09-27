@@ -688,7 +688,7 @@ def test_existing_document_only_registers_revision_tools() -> None:
     conversation = SimpleNamespace(reader=False, case={"document": _document("已有正文")})
     domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
     reader_tools = {tool.__name__ for tool in reader_capability().tools}
-    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
+    assert domain_tools == {"search_corpus", "read_source", "read_review_feedback", "propose_revision"}
     assert domain_tools & reader_tools == {"search_corpus", "read_source"}
 
 
@@ -698,7 +698,7 @@ def test_default_template_only_registers_revision_tools() -> None:
     conversation = SimpleNamespace(reader=False, case={"document": new_case_document()})
     domain_tools = {tool.__name__ for tool in _capabilities(conversation, [])[0].tools}
 
-    assert domain_tools == {"search_corpus", "read_source", "propose_revision"}
+    assert domain_tools == {"search_corpus", "read_source", "read_review_feedback", "propose_revision"}
 
 
 def test_empty_draft_retains_existing_generation_tools() -> None:
@@ -910,3 +910,87 @@ def test_undo_api_rejects_non_author(client: TestClient) -> None:
     )
     assert response.status_code == 403
     assert database.cases.find_one({"id": case["id"]})["revision"] == 2
+
+
+def _accepted_range(client, auth):
+    case = _create_case(client, auth, _document(*PARAGRAPHS))
+    database = client.app.state.database
+    thread, run = _locked_run(database, auth, case)
+    artifact = artifacts.propose_artifact(
+        database, case['id'], thread.id, run.id, 1, len(PARAGRAPHS[0]) + 1,
+        '第一段修订后。', '润色', [], auth['user'],
+    )
+    assert _publish(database, AgentRepository(database), run, artifact)
+    result = artifacts.decide_artifact(
+        database, case['id'], thread.id, artifact.id, auth['user'], 'accepted',
+    )
+    path = f"/api/cases/{case['id']}/agent/thread/{thread.id}/writes/{result['write']['id']}"
+    return database, case, thread, artifact, result, path
+
+
+def test_revision_can_be_reapplied_and_undone_repeatedly(client: TestClient):
+    auth = _login(client)
+    database, original, thread, artifact, accepted, path = _accepted_range(client, auth)
+    for _ in range(2):
+        undone = client.post(path + '/undo', headers=_csrf(auth)).json()
+        assert undone['case']['document'] == original['document']
+        revision = undone['case']['revision']
+        response = client.post(path + '/redo', headers=_csrf(auth), json={'revision': revision})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['case']['document'] == accepted['case']['document']
+        assert result['case']['revision'] == revision + 1
+        assert result['write']['status'] == 'written'
+        assert result['steps']
+        replay = client.post(path + '/redo', headers=_csrf(auth), json={'revision': revision})
+        assert replay.status_code == 200
+        assert replay.json()['case']['revision'] == revision + 1
+        assert not replay.json()['steps']
+    assert database.agent_writes.count_documents({'artifactId': artifact.id}) == 1
+    assert AgentRepository(database).snapshot(thread).writes[0].status == 'written'
+
+
+@pytest.mark.parametrize('change', ['document', 'status', 'user', 'source'])
+def test_redo_revision_rechecks_current_document_permissions_and_sources(client: TestClient, change):
+    auth = _login(client)
+    database, case, thread, artifact, accepted, path = _accepted_range(client, auth)
+    undone = client.post(path + '/undo', headers=_csrf(auth)).json()
+    revision = undone['case']['revision']
+    if change == 'document':
+        database.cases.update_one({'id': case['id']}, {'$set': {'document': _document('另改的正文')}, '$inc': {'revision': 1}})
+    elif change == 'status':
+        database.cases.update_one({'id': case['id']}, {'$set': {'workflowStatus': 'pending'}})
+    elif change == 'user':
+        auth = _admin(client)
+    else:
+        database.agent_artifacts.update_one({'id': artifact.id}, {'$set': {'sources': [{'kind': 'material', 'id': 'missing-source', 'title': '已移除的来源'}]}})
+    before = database.cases.find_one({'id': case['id']})
+    response = client.post(path + '/redo', headers=_csrf(auth), json={'revision': revision})
+    assert response.status_code in (403, 404, 409), response.text
+    after = database.cases.find_one({'id': case['id']})
+    assert after['document'] == before['document']
+    assert after['revision'] == before['revision']
+
+
+def test_revision_undo_redo_preserves_template_empty_paragraphs(client):
+    auth = _login(client)
+    document = _document("待修改的原文")
+    document["content"].append({"type": "paragraph", "content": []})
+    case = _create_case(client, auth, document)
+    database = client.app.state.database
+    thread, run = _locked_run(database, auth, case)
+    artifact = artifacts.propose_artifact(
+        database, case["id"], thread.id, run.id, 1, len("待修改的原文") + 1,
+        "修改后的正文", "细化表述", [], auth["user"],
+    )
+    assert _publish(database, AgentRepository(database), run, artifact)
+    accepted = artifacts.decide_artifact(database, case["id"], thread.id, artifact.id, auth["user"], "accepted")
+    path = f"/api/cases/{case['id']}/agent/thread/{thread.id}/writes/{accepted['write']['id']}"
+    for _ in range(2):
+        response = client.post(path + "/undo", headers=_csrf(auth))
+        assert response.status_code == 200, response.text
+        restored = response.json()["case"]
+        assert restored["document"] == case["document"]
+        response = client.post(path + "/redo", headers=_csrf(auth), json={"revision": restored["revision"]})
+        assert response.status_code == 200, response.text
+        assert response.json()["case"]["document"] == accepted["case"]["document"]

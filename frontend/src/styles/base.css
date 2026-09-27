@@ -5,6 +5,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --bg: #f6f4ef;
+  --navigation-height: 58px;
   --brand: #ba1c22;
   --brand-strong: #961519;
   --brand-soft: #f8eeed;

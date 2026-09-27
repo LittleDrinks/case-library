@@ -108,6 +108,19 @@ it("uses the persistent Agent chat as the only AI entry", () => {
   expect(wrapper.text()).not.toContain("对话");
 });
 
+it("shows full review feedback in its own panel and preserves the AI chat when switching", async () => {
+  const feedback = { versionNumber: 7, reasonTypes: ["内容需要补充或修改"], message: "第一段意见\n\n第二段意见".repeat(80) };
+  const wrapper = render({ feedback, active: "feedback" });
+  expect(wrapper.get(".review-feedback-message").text()).toBe(feedback.message);
+  expect(wrapper.get(".review-feedback-reasons").text()).toContain(feedback.reasonTypes[0]);
+  const chat = wrapper.getComponent({ name: "AgentChatPanel" }).element;
+  await wrapper.get('[aria-label="审核意见"][type="button"]').trigger("click");
+  expect(wrapper.emitted("select")).toEqual([["feedback"]]);
+  await wrapper.setProps({ active: "ai" });
+  expect(wrapper.find(".review-feedback").exists()).toBe(false);
+  expect(wrapper.getComponent({ name: "AgentChatPanel" }).element).toBe(chat);
+});
+
 it("keeps AI and attachments on the rail without an annotation entry", async () => {
   const wrapper = render({ active: "files" });
   expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);

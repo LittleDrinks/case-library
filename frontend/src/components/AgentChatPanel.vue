@@ -34,7 +34,7 @@ const emit = defineEmits(["prompt-inserted",
 const {
   messages, status, chatError, loading, error, settings, send, stop, retry, recovering,
   decide, artifacts, writes, threadState, threadId, stopping, retryableMessageId, refresh,
-  listThreads, selectThread, createThread, renameThread, undoWrite,
+  listThreads, selectThread, createThread, renameThread, undoWrite, redoWrite,
   skills, catalog, reloadCatalog,
 } = useAgentChat(
   props.caseRecord.id,
@@ -208,9 +208,22 @@ function showRunStatus(message) {
   return runAnchor(message, run, messages.value);
 }
 
-function linkedArtifact(part) {
-  const artifactId = part.output?.artifactId;
-  return artifactId ? artifacts.value.find((artifact) => artifact.id === artifactId) : null;
+function provisionalRevision(part, message) {
+  const output = part.output;
+  if (part.type !== "tool-propose_revision" || !output?.artifactId || !output.quote) return null;
+  const run = messageRun(message);
+  const active = run?.status === "active" || (sending.value && message === messages.value.at(-1));
+  if (!active || !Number.isInteger(output.from) || !Number.isInteger(output.to)) return null;
+  return {
+    id: output.artifactId, kind: "range", status: "pending", provisional: true,
+    target: { from: output.from, to: output.to, quote: output.quote },
+    replacement: output.replacement, reason: output.reason, sources: output.sources || [],
+  };
+}
+
+function linkedArtifact(part, message) {
+  const artifact = artifacts.value.find((item) => item.id === part.output?.artifactId);
+  return artifact || provisionalRevision(part, message);
 }
 
 function linkedArtifactIds() {
@@ -248,7 +261,7 @@ const threadRuns = computed(() => {
 });
 
 function pauseFollowing(event) {
-  if (event.target.closest("summary")) nearBottom.value = false;
+  if (event.target.closest("summary, .revision-suggestion")) nearBottom.value = false;
 }
 
 function trackScroll() {
@@ -452,18 +465,20 @@ async function acceptArtifact(artifactId) {
     if (isRevisionSuggestion(artifact)) {
       if (!await prepareRevisionDecision()) return;
       artifact = artifacts.value.find((item) => item.id === artifactId);
-      if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
+      if (!artifact || !revisionActionable(artifact)) throw new Error("这条建议已失效，请刷新后重试");
       if (!revisionWorkbench.isCurrent(artifact)) {
         throw new Error("目标原文已变化，这条建议不能应用");
       }
       decidingArtifacts.add(artifactId);
-      const result = await decide(artifactId, "accepted");
+      const result = revisionUndone(artifact)
+        ? await redoWrite(artifact.writeId, props.caseRecord.revision)
+        : await decide(artifactId, "accepted");
+      localUndoneWrites.delete(artifact.writeId);
       if (result.applied && result.steps?.length) {
         const applied = await revisionWorkbench.apply(artifact, result.steps);
         if (!applied) decideError.value = "正文已保存，但编辑器未能载入撤销步骤，请刷新工作台";
       }
       if (!result.applied || !result.steps?.length) revisionWorkbench.clearPreview();
-      expandedRevisionId.value = "";
       emit("case-revised", result.case);
       emit("versions-updated");
       return;
@@ -488,14 +503,25 @@ async function prepareRevisionDecision() {
 
 async function locateHistoricalRevision(artifact) {
   revisionWorkbench.clearPreview();
-  return revisionWorkbench.preview({ ...artifact, locateOnly: true });
+  return revisionWorkbench.preview({
+    ...artifact, status: revisionUndone(artifact) ? "pending" : artifact.status, locateOnly: true,
+  });
+}
+
+function revisionUndone(artifact) {
+  return artifact?.status === "accepted" && artifact.writeId
+    && writeState({ output: { id: artifact.writeId } }) === "undone";
+}
+
+function revisionActionable(artifact) {
+  return artifact.status === "pending" || revisionUndone(artifact);
 }
 
 async function previewCurrentRevision(artifact, isCurrentRequest) {
   if (!await prepareRevisionDecision() || !isCurrentRequest()) return;
   const current = artifacts.value.find((item) => item.id === artifact.id);
   if (!current) throw new Error("这条建议已不存在，请刷新后重试");
-  if (current.status !== "pending") {
+  if (!revisionActionable(current)) {
     const located = await locateHistoricalRevision(current);
     if (!isCurrentRequest()) return;
     if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
@@ -513,7 +539,11 @@ async function previewRevision(artifact) {
   decideError.value = "";
   expandedRevisionId.value = artifact.id;
   try {
-    if (props.readOnly || artifact.status !== "pending") {
+    if (artifact.provisional) {
+      if (!await revisionWorkbench.preview(artifact)) throw new Error("目标原文已变化，无法预览这条建议");
+      return;
+    }
+    if (props.readOnly || !revisionActionable(artifact)) {
       const located = await locateHistoricalRevision(artifact);
       if (!isCurrentRequest()) return;
       if (located === false) throw new Error("正文中没有唯一匹配位置，无法定位这条历史建议");
@@ -654,6 +684,11 @@ async function undoWriteRecord(writeId) {
   undoingWrites.add(writeId);
   decideError.value = "";
   try {
+    revisionPreviewGeneration += 1;
+    revisionWorkbench?.clearPreview();
+    if (revisionWorkbench && !await revisionWorkbench.flush()) {
+      throw new Error("正文尚未保存，请保存后重试");
+    }
     const result = await undoWrite(writeId);
     localUndoneWrites.add(writeId);
     emit("case-revised", result.case);
@@ -664,12 +699,23 @@ async function undoWriteRecord(writeId) {
   }
 }
 
+function refinementContext(artifact) {
+  if (!artifact || !["pending", "accepted"].includes(artifact.status)) {
+    throw new Error("这条建议已失效，请刷新后重试");
+  }
+  if (artifact.status === "pending") return artifact;
+  const target = revisionWorkbench.refinementTarget({
+    ...artifact, status: revisionUndone(artifact) ? "pending" : "accepted",
+  });
+  if (!target) throw new Error("正文中没有唯一匹配位置，请重新选中要修改的文字");
+  return { ...artifact, target };
+}
+
 function refineRevision(artifactId) {
   decideError.value = "";
   try {
     const artifact = artifacts.value.find((item) => item.id === artifactId);
-    if (!artifact || artifact.status !== "pending") throw new Error("这条建议已失效，请刷新后重试");
-    revisionContext.value = artifact;
+    revisionContext.value = refinementContext(artifact);
     emit("clear-writing-context");
     void nextTick(() => composer.value?.focusDraft?.());
   } catch (requestError) {
@@ -688,7 +734,8 @@ function revisionCardProps(artifact) {
     artifact,
     expanded: expandedRevisionId.value === artifact.id,
     sending: sending.value,
-    deciding: decidingArtifacts.has(artifact.id),
+    deciding: decidingArtifacts.has(artifact.id) || undoingWrites.has(artifact.writeId),
+    writeStatus: writeState({ output: { id: artifact.writeId } }),
     decideError: decideError.value,
     sourceState,
     readOnly: props.readOnly,
@@ -701,6 +748,7 @@ const revisionCardEvents = {
   accept: acceptArtifact,
   reject: rejectArtifact,
   refine: refineRevision,
+  undo: undoWriteRecord,
 };
 
 function contextParts() {
@@ -739,19 +787,20 @@ async function sendMessage({ text, skillId }) {
     if (revisionContext.value) {
       await prepareRevisionDecision();
       const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
-      if (!current || current.status !== "pending") {
+      if (!current || !["pending", "accepted"].includes(current.status)) {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
       }
-      if (!revisionWorkbench.isCurrent(current)) {
+      const context = refinementContext(current);
+      if (!revisionWorkbench.isCurrent(context)) {
         revisionContext.value = null;
         throw new Error("目标原文已变化，微调上下文已失效");
       }
-      revisionContext.value = current;
+      revisionContext.value = context;
     }
     await send(text, contextParts(), skillId);
     const current = artifacts.value.find((item) => item.id === revisionContext.value?.id);
-    if (current?.status === "superseded") revisionContext.value = null;
+    if (current?.status === "superseded" || current?.status === "accepted" && !chatError.value) revisionContext.value = null;
   } catch (requestError) {
     decideError.value = requestError.message || "消息发送失败";
   }
@@ -763,7 +812,7 @@ watch(() => props.caseRecord.revision, async () => {
     await refresh();
     if (!revisionContext.value) return;
     const current = artifacts.value.find((item) => item.id === revisionContext.value.id);
-    if (["pending", "superseded"].includes(current?.status)) revisionContext.value = current;
+    if (["pending", "accepted"].includes(current?.status)) revisionContext.value = refinementContext(current);
     else {
       revisionContext.value = null;
       decideError.value = "目标原文已变化，微调上下文已失效";
@@ -778,6 +827,13 @@ watch(status, (current) => {
     const artifact = artifacts.value.find((item) => item.id === artifactId);
     if (artifact?.status === "superseded") revisionContext.value = null;
   }).catch(() => {});
+});
+
+watch(() => statusRun.value?.status, (value) => {
+  if (!["failed", "cancelled"].includes(value) || !expandedRevisionId.value) return;
+  if (!artifacts.value.some((item) => item.id === expandedRevisionId.value)) {
+    collapseRevision(expandedRevisionId.value);
+  }
 });
 
 async function rejectArtifact(artifactId) {
@@ -944,8 +1000,8 @@ function retryMessageHasAnnotation(messageId) {
                 </div>
               </details>
               <AgentArtifactCard
-                v-if="part.type.startsWith('tool-') && linkedArtifact(part) && !isRevisionSuggestion(linkedArtifact(part))"
-                :artifact="linkedArtifact(part)"
+                v-if="part.type.startsWith('tool-') && linkedArtifact(part, message) && !isRevisionSuggestion(linkedArtifact(part, message))"
+                :artifact="linkedArtifact(part, message)"
                 :sending="sending"
                 :decide-error="decideError"
                 :source-state="sourceState"
@@ -953,25 +1009,11 @@ function retryMessageHasAnnotation(messageId) {
                 @accept="acceptArtifact"
                 @reject="rejectArtifact"
               />
-              <template v-else-if="part.type.startsWith('tool-') && linkedArtifact(part)">
+              <template v-else-if="part.type.startsWith('tool-') && linkedArtifact(part, message)">
                 <RevisionSuggestionCard
-                  v-bind="revisionCardProps(linkedArtifact(part))"
+                  v-bind="revisionCardProps(linkedArtifact(part, message))"
                   v-on="revisionCardEvents"
                 />
-                <div
-                  v-if="linkedArtifact(part).status === 'accepted' && linkedArtifact(part).writeId && !readOnly"
-                  class="agent-write-actions"
-                  data-testid="revision-write-actions"
-                >
-                  <span v-if="writeState({ output: { id: linkedArtifact(part).writeId } }) === 'undone'" data-testid="agent-write-undone">已撤销修改</span>
-                  <button
-                    v-else
-                    type="button"
-                    data-testid="agent-undo-revision"
-                    :disabled="undoingWrites.has(linkedArtifact(part).writeId)"
-                    @click="undoWriteRecord(linkedArtifact(part).writeId)"
-                  >撤销修改</button>
-                </div>
               </template>
               <div
                 v-if="part.type === 'tool-write_document' && part.output?.status === 'written' && !readOnly"

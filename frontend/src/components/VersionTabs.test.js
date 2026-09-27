@@ -28,15 +28,6 @@ it("切换与关闭版本 Tab 只发事件，不改 Tab 数据", async () => {
   expect(wrapper.findAll(".version-tab-chip")).toHaveLength(2);
 });
 
-it("覆盖入口只在只读版本 Tab 激活时出现", async () => {
-  const draft = render();
-  expect(draft.find("button.overwrite-entry").exists()).toBe(false);
-  const version = render({ active: "cv-1" });
-  expect(version.get("button.overwrite-entry").text()).toContain("恢复此版本");
-  await version.get("button.overwrite-entry").trigger("click");
-  expect(version.emitted("overwrite")).toHaveLength(1);
-});
-
 it("没有可打开的版本时只显示固定的教师稿 Tab", () => {
   const wrapper = render({ tabs: [] });
   expect(wrapper.findAll('[role="tab"]')).toHaveLength(1);

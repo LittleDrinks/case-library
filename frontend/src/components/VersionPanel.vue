@@ -13,7 +13,7 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
   csrfToken: { type: String, default: "" },
 });
-const emit = defineEmits(["open-version", "version-created", "version-deleted"]);
+const emit = defineEmits(["open-version", "open-review", "version-created", "version-deleted"]);
 const versions = ref([]);
 const deleting = ref(false);
 const deleteTarget = ref(null);
@@ -116,6 +116,7 @@ onMounted(loadHistory);
           <div class="version-meta">
             <small>{{ time(version.createdAt) }}</small>
             <b>{{ versionLabel(version) }}</b>
+            <button v-if="version.review" class="version-review-status" type="button" :aria-label="`查看 v${version.number} 审核意见`" @click="emit('open-review', version)">已退回 · 查看意见</button>
           </div>
           <div class="version-actions">
           <button type="button" :aria-label="`查看历史版本 ${versionLabel(version)}`" @click="emit('open-version', version)">

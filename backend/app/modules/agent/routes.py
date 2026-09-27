@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import DataUIPart, TextUIPart
 from starlette.responses import StreamingResponse
@@ -28,7 +28,7 @@ from app.modules.agent.models import (
     SourceRef,
     write_view,
 )
-from app.modules.agent.writes import undo_write
+from app.modules.agent.writes import redo_write, undo_write
 from app.modules.agent.recovery import (
     RunStream,
     events_stream,
@@ -125,7 +125,7 @@ def _gate_case(database, case_id: str, user: dict) -> dict:
     """case 级门禁先于任何 Thread 枚举：不可读 404；非作者可读但未公开保持 403。
 
     审核中（pending/reviewing）案例对管理员放行：这是审核工作台合法上下文；
-    作者线程发送侧仍由 _editable_case 拦截，读者仍按公开性拒之门外。
+    作者冻结稿允许只读讨论，读者仍按公开性拒之门外。
     """
     case = _existing_case(database, case_id)
     reviewable = case.get("workflowStatus") in REVIEWABLE_STATES
@@ -172,7 +172,8 @@ def _conversation(
     if mode is not None:
         raise HTTPException(status_code=422, detail="对话模式无效")
     if not version_id:
-        return Conversation(_author_case(database, case_id, user), None, False)
+        case = _author_case(database, case_id, user)
+        return Conversation(case, None, case.get("workflowStatus") != "draft")
     case = _gate_case(database, case_id, user)
     version = _readable_version(database, case, version_id)
     return Conversation(published_view(case, version), version_id, True)
@@ -201,7 +202,7 @@ def _thread_conversation(
     if thread.version_id is None:
         if case["ownerId"] != user["id"]:
             raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
-        return Conversation(case, None, False), thread
+        return Conversation(case, None, case.get("workflowStatus") != "draft"), thread
     version = _readable_version(database, case, thread.version_id)
     return Conversation(published_view(case, version), thread.version_id, True), thread
 
@@ -398,7 +399,7 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
         "kind": "range", "annotationId": None,
     })
     if (
-        not artifact or artifact.get("status") not in {"pending", "superseded"}
+        not artifact or artifact.get("status") not in {"pending", "superseded", "accepted"}
         or (artifact.get("status") == "superseded" and artifact.get("decidedBy") != user["id"])
     ):
         raise HTTPException(status_code=409, detail="原修订建议已不可微调")
@@ -407,16 +408,30 @@ def _revision_from_parts(database, case, plan, thread_id, user) -> dict | None:
     sources = [SourceRef.model_validate(source) for source in artifact.get("sources") or []]
     if not revalidate_sources(database, user, case["id"], sources):
         raise HTTPException(status_code=409, detail="修订依据当前不可读，不能继续微调")
+    target = _refinement_target(database, artifact, plan)
     return {
         "artifactId": artifact_id,
         "status": artifact["status"],
-        "from": artifact["target"]["from"],
-        "to": artifact["target"]["to"],
-        "quote": artifact["target"]["quote"],
+        "writeStatus": target.get("writeStatus"),
+        "from": target["from"],
+        "to": target["to"],
+        "quote": target["quote"],
         "replacement": artifact["replacement"],
         "reason": artifact.get("reason") or "",
         "sources": sources,
     }
+
+
+def _refinement_target(database, artifact, plan):
+    if artifact["status"] != "accepted":
+        return artifact["target"]
+    write = database.agent_writes.find_one({
+        "id": artifact.get("writeId"), "artifactId": artifact["id"],
+        "caseId": artifact["caseId"], "threadId": artifact["threadId"],
+    })
+    if not write or write.get("status") not in {"written", "undone"} or len(plan.selections) != 1:
+        raise HTTPException(status_code=409, detail="请重新选中当前正文后微调")
+    return {**plan.selections[0], "writeStatus": write["status"]}
 
 
 def _annotation_from_parts(database, case, plan, version_id, user) -> str | None:
@@ -628,6 +643,8 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     assistant_id = new_id("message")
     adapter = await _adapter(request, assistant_id)
     plan = _plan_for(repository, thread, adapter, database, user, conversation)
+    if conversation.reader and (plan.revision_context or plan.annotation_id):
+        raise HTTPException(status_code=409, detail="只读对话不能修改修订或批注状态")
     if conversation.reader and plan.skills and not conversation.review:
         raise HTTPException(status_code=422, detail="AI 能力不可用")
     context = _start_context(
@@ -740,12 +757,13 @@ def _base_instructions(conversation: Conversation, refs, plan) -> str:
 def revision_instructions(context: dict | None) -> str:
     if not context:
         return ""
+    state = {"written": "已应用", "undone": "已撤销"}.get(context.get("writeStatus"), "已停用")
     return (
-        "\n\n教师正在微调一条已停用的修订建议。结合教师本条要求、上一版建议及其理由，"
+        f"\n\n教师正在微调一条{state}的修订建议。结合教师本条要求、上一版建议及其理由，"
         "重新给出可确认的修订建议；没有明确新目标时，默认继续修改上一版的原文范围。"
         "教师明确指向其他段落、章节或全文时，按完整正文位置索引定位该目标，"
         "不得把上一版范围当作硬边界；提议位置和原文仍由服务端验证。"
-        f"\n上一版目标：from={context['from']}，to={context['to']}，原文：{context['quote']}"
+        f"\n当前修改目标：from={context['from']}，to={context['to']}，原文：{context['quote']}"
         f"\n上一版建议：{context['replacement']}"
         f"\n上一版理由：{context['reason']}"
     )
@@ -767,7 +785,7 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
 def _capabilities(conversation: Conversation, bounds) -> list:
     """审核对话在读者只读工具面之上允许加载已发布 Skill；写工具永不出现。"""
     if conversation.reader:
-        capabilities = [reader_capability()]
+        capabilities = [reader_capability(internal=conversation.version_id is None)]
         if conversation.review:
             capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
@@ -871,6 +889,7 @@ def _run_fields(lease, worker_id, skill_bindings, lock, annotation_id=None):
         "base_revision": base_revision, "target": target,
         "annotation_id": annotation_id,
         "submitted_version_id": submitted_version_id,
+        "read_only": base_revision is None,
     }
 
 
@@ -942,7 +961,7 @@ def _event_response(database, user, repository, conversation, thread, cursor):
 
 
 def _event_access_check(database, conversation: Conversation, thread: AgentThread):
-    if not conversation.reader or conversation.review:
+    if not conversation.version_id:
         return None
     return lambda: version_readable_by_id(database, thread.case_id, thread.version_id)
 
@@ -995,3 +1014,20 @@ def undo_thread_write(
     _author_case(database, case_id, user)
     result = undo_write(database, case_id, thread_id, write_id, user)
     return {"write": write_view(result["write"]), "case": case_view(result["case"])}
+
+
+class RedoWriteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+
+
+@router.post("/{case_id}/agent/thread/{thread_id}/writes/{write_id}/redo")
+def redo_thread_write(
+    case_id: str, thread_id: str, write_id: str, body: RedoWriteBody,
+    database=Depends(get_database), user: dict = Depends(require_user),
+    _session: dict = Depends(require_csrf),
+) -> dict:
+    _author_case(database, case_id, user)
+    result = redo_write(database, case_id, thread_id, write_id, user, body.revision)
+    return {"write": write_view(result["write"]), "case": case_view(result["case"]),
+            "steps": result["steps"], "applied": bool(result["steps"])}

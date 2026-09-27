@@ -146,6 +146,11 @@ export const api = {
       + `/writes/${encodeURIComponent(writeId)}/undo`,
     jsonOptions("POST", {}, csrfToken),
   ),
+  agentRedoWrite: (caseId, threadId, writeId, revision, csrfToken) => request(
+    `/api/cases/${encodeURIComponent(caseId)}/agent/thread/${encodeURIComponent(threadId)}`
+      + `/writes/${encodeURIComponent(writeId)}/redo`,
+    jsonOptions("POST", { revision }, csrfToken),
+  ),
   aiSettings: () => request("/api/ai/settings"),
   saveAISettings: (settings, csrfToken) => request(
     "/api/ai/settings", jsonOptions("PUT", settings, csrfToken),
@@ -166,6 +171,14 @@ export const api = {
   publishSkillVersion: (id, versionId, csrfToken) => request(
     `/api/admin/skills/${encodeURIComponent(id)}/publish`,
     jsonOptions("POST", { versionId }, csrfToken),
+  ),
+  unpublishSkillVersion: (id, versionId, csrfToken) => request(
+    `/api/admin/skills/${encodeURIComponent(id)}/unpublish`,
+    jsonOptions("POST", { versionId }, csrfToken),
+  ),
+  deleteSkillVersion: (id, versionId, csrfToken) => request(
+    `/api/admin/skills/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}`,
+    jsonOptions("DELETE", undefined, csrfToken),
   ),
   listCaseMaterials: (id, versionId) => request(
     `${materialRoot(id)}${versionQuery(versionId)}`,

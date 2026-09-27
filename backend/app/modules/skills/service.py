@@ -92,23 +92,84 @@ def upload_package(database: Database, store: BlobStore, data: bytes) -> dict:
 
 def publish_version(database: Database, skill_id: str, version_id: str) -> dict:
     """发布指定版本：仅移动已发布指针；重复发布同一版本不改写发布时间。"""
-    version = _skill_version(database, skill_id, version_id)
+    with database.client.start_session() as session:
+        return session.with_transaction(
+            lambda active: _publish_version(database, skill_id, version_id, active)
+        )
+
+
+def _publish_version(database, skill_id, version_id, session):
+    version = _skill_version(database, skill_id, version_id, session)
     now = _now()
     skill = database.skills.find_one_and_update(
         {"id": skill_id, "publishedVersionId": {"$ne": version["id"]}},
         {"$set": {"publishedVersionId": version["id"], "publishedAt": now}},
         return_document=ReturnDocument.AFTER,
+        session=session,
     )
     return skill_view(skill if skill is not None else _skill_or_404(database, skill_id))
+
+
+def unpublish_version(database: Database, skill_id: str, version_id: str) -> dict:
+    """仅取消管理员看到的当前版本，避免撤销其他管理员刚发布的版本。"""
+    skill = database.skills.find_one_and_update(
+        {"id": skill_id, "publishedVersionId": version_id},
+        {"$set": {"publishedVersionId": None, "updatedAt": _now()},
+         "$unset": {"publishedAt": ""}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if skill is None:
+        _skill_or_404(database, skill_id)
+        raise SkillError(409, "发布状态已变化，请刷新后重试")
+    return skill_view(skill)
+
+
+def delete_version(database: Database, skill_id: str, version_id: str) -> None:
+    """移除可选版本，保留已固化调用所需的内容与包字节。"""
+    with database.client.start_session() as session:
+        session.with_transaction(
+            lambda active: _delete_version(database, skill_id, version_id, active)
+        )
+
+
+def _delete_version(database, skill_id, version_id, session):
+    _skill_version(database, skill_id, version_id, session)
+    skill = database.skills.find_one({"id": skill_id}, session=session)
+    if skill.get("publishedVersionId") == version_id:
+        raise SkillError(409, "当前发布版本不能删除，请先取消发布")
+    now = _now()
+    database.skill_versions.update_one(
+        {"id": version_id}, {"$set": {"deletedAt": now}}, session=session,
+    )
+    changes = {"updatedAt": now}
+    if skill.get("latestVersionId") == version_id:
+        changes.update(_latest_active_fields(database, skill_id, session))
+    database.skills.update_one({"id": skill_id}, {"$set": changes}, session=session)
+
+
+def _latest_active_fields(database, skill_id, session):
+    versions = list(database.skill_versions.find(
+        {"skillId": skill_id, "deletedAt": {"$exists": False}}, session=session,
+    ))
+    if not versions:
+        return {"latestVersionId": None, "latestVersionNumber": 0}
+    latest = max(versions, key=lambda version: int(version["version"][1:]))
+    return {
+        "latestVersionId": latest["id"],
+        "latestVersionNumber": int(latest["version"][1:]),
+        "name": latest["name"], "description": latest["description"],
+    }
 
 
 def admin_list(database: Database) -> list[dict]:
     skills = []
     for skill in database.skills.find().sort("createdAt", 1):
         versions = database.skill_versions.find(
-            {"skillId": skill["id"]}
+            {"skillId": skill["id"], "deletedAt": {"$exists": False}}
         ).sort("createdAt", 1)
-        skills.append({**skill_view(skill), "versions": [version_view(v) for v in versions]})
+        visible = [version_view(v) for v in versions]
+        if visible:
+            skills.append({**skill_view(skill), "versions": visible})
     return skills
 
 
@@ -214,6 +275,17 @@ def _mark_latest_version(
     database: Database, package: SkillPackage, version_id: str, number: int, now: str
 ) -> dict | None:
     """仅当版本号新于 latestVersionNumber 才前进：写时核验 filter，指针不倒退。"""
+    with database.client.start_session() as session:
+        return session.with_transaction(lambda active: _mark_active_latest_version(
+            database, package, version_id, number, now, active,
+        ))
+
+
+def _mark_active_latest_version(database, package, version_id, number, now, session):
+    if not database.skill_versions.find_one(
+        {"id": version_id, "deletedAt": {"$exists": False}}, session=session,
+    ):
+        return None
     newer = {"$or": [
         {"latestVersionNumber": {"$exists": False}},
         {"latestVersionNumber": {"$lt": number}},
@@ -224,7 +296,7 @@ def _mark_latest_version(
     }
     return database.skills.find_one_and_update(
         {"id": package.name, **newer}, {"$set": changes},
-        return_document=ReturnDocument.AFTER,
+        return_document=ReturnDocument.AFTER, session=session,
     )
 
 
@@ -235,8 +307,11 @@ def _skill_or_404(database: Database, skill_id: str) -> dict:
     return skill
 
 
-def _skill_version(database: Database, skill_id: str, version_id: str) -> dict:
-    version = database.skill_versions.find_one({"id": version_id, "skillId": skill_id})
+def _skill_version(database: Database, skill_id: str, version_id: str, session=None) -> dict:
+    version = database.skill_versions.find_one(
+        {"id": version_id, "skillId": skill_id, "deletedAt": {"$exists": False}},
+        session=session,
+    )
     if version is None:
         raise SkillError(404, "Skill 版本不存在")
     return version

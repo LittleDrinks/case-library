@@ -2,10 +2,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, it, vi } from "vitest";
 import AdminSkillsView from "./AdminSkillsView.vue";
 import { api } from "../api.js";
+import { ElPopconfirm } from "element-plus";
 
 vi.mock("../api.js", () => ({
   api: {
-    listAdminSkills: vi.fn(), uploadSkillPackage: vi.fn(), publishSkillVersion: vi.fn(),
+    listAdminSkills: vi.fn(), uploadSkillPackage: vi.fn(), publishSkillVersion: vi.fn(), deleteSkillVersion: vi.fn(), unpublishSkillVersion: vi.fn(),
   },
 }));
 vi.mock("../session.js", () => ({
@@ -45,6 +46,11 @@ async function uploadPackage(wrapper) {
   return file;
 }
 
+function confirmAction(wrapper, prefix) {
+  wrapper.findAllComponents(ElPopconfirm).find(item => item.props("title").startsWith(prefix))
+    .vm.$emit("confirm", new MouseEvent("click"));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   api.listAdminSkills.mockResolvedValue(structuredClone(skillList));
@@ -55,9 +61,47 @@ it("lists skills with versions and marks the published one", async () => {
   await flushPromises();
 
   expect(wrapper.text()).toContain("思政案例生成");
-  expect(wrapper.text()).toContain("已发布");
+  expect(wrapper.text()).toContain("未启用");
   expect(wrapper.get('[data-testid="skill-version-published"]').text()).toContain("当前发布");
   expect(wrapper.text()).toContain("v2");
+});
+
+it("deletes a non-current version only after confirmation and reloads the list", async () => {
+  const wrapper = mountView();
+  await flushPromises();
+  expect(wrapper.find('[data-testid="skill-delete-ver-1"]').exists()).toBe(false);
+  await wrapper.get('[data-testid="skill-delete-ver-2"]').trigger("click");
+  expect(api.deleteSkillVersion).not.toHaveBeenCalled();
+  api.deleteSkillVersion.mockResolvedValue(undefined);
+  api.listAdminSkills.mockResolvedValue([{ ...skillList[0], versions: [skillList[0].versions[0]] }]);
+  confirmAction(wrapper, "删除 ");
+  await flushPromises();
+  expect(api.deleteSkillVersion).toHaveBeenCalledWith("skill-1", "ver-2", "csrf");
+  expect(wrapper.text()).not.toContain("v2");
+});
+
+it("keeps the version visible when deletion fails", async () => {
+  api.deleteSkillVersion.mockRejectedValue(new Error("当前发布版本不能删除，请先取消发布"));
+  const wrapper = mountView();
+  await flushPromises();
+  confirmAction(wrapper, "删除 ");
+  await flushPromises();
+  expect(wrapper.get('[role="alert"]').text()).toContain("当前发布版本不能删除");
+  expect(wrapper.text()).toContain("v2");
+});
+
+it("unpublishes the current version and then exposes its delete action", async () => {
+  const wrapper = mountView();
+  await flushPromises();
+  await wrapper.get('[data-testid="skill-unpublish-ver-1"]').trigger("click");
+  expect(api.unpublishSkillVersion).not.toHaveBeenCalled();
+  api.unpublishSkillVersion.mockResolvedValue({});
+  api.listAdminSkills.mockResolvedValue([{ ...skillList[0], publishedVersionId: null }]);
+  confirmAction(wrapper, "取消发布 ");
+  await flushPromises();
+  expect(api.unpublishSkillVersion).toHaveBeenCalledWith("skill-1", "ver-1", "csrf");
+  expect(wrapper.find('[data-testid="skill-version-published"]').exists()).toBe(false);
+  expect(wrapper.find('[data-testid="skill-delete-ver-1"]').exists()).toBe(true);
 });
 
 it("publishes an unpublished version through the publish command", async () => {
@@ -101,7 +145,6 @@ it("uploads a package, shows the recognized metadata and publishes directly", as
   expect(api.uploadSkillPackage).toHaveBeenCalledWith(file, "csrf");
   expect(wrapper.text()).toContain("识别结果");
   expect(wrapper.text()).toContain("v1");
-  expect(wrapper.text()).toContain("2.0 KB");
 
   await wrapper.get('[data-testid="skill-publish-uploaded"]').trigger("click");
   await flushPromises();

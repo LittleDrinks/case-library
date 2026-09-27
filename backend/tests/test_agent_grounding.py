@@ -461,3 +461,64 @@ def test_refinement_context_is_bound_to_the_current_thread_and_target(client: Te
         "grounding-refinement-foreign-user", forged_parts, _answer_model(None),
     )
     assert denied.status_code == 409
+
+
+def test_applied_revision_refines_current_selection_without_superseding_history(client):
+    auth = _auth(client)
+    case = _create_selection_case(client, auth)
+    database = client.app.state.database
+    thread_id = _thread_id(client, case["id"])
+    database.agent_artifacts.insert_one({
+        "id": "artifact-applied-refine", "caseId": case["id"], "threadId": thread_id,
+        "runId": "run-prior", "baseRevision": case["revision"], "kind": "range",
+        "target": {"from": 7, "to": 10, "quote": "旧原文"},
+        "replacement": "第二段需要修订。", "reason": "补充表达", "sources": [],
+        "status": "accepted", "writeId": "write-refine", "createdAt": DateTime.now(UTC),
+    })
+    database.agent_writes.insert_one({
+        "id": "write-refine", "caseId": case["id"], "threadId": thread_id,
+        "status": "written", "artifactId": "artifact-applied-refine",
+        "runId": "run-prior", "scope": "selection", "resultRevision": case["revision"],
+    })
+    parts = [
+        {"type": "text", "text": "再具体一点"},
+        {"type": "data-revision", "data": {"artifactId": "artifact-applied-refine"}},
+        {"type": "data-selection", "data": {"from": 7, "to": 15}},
+    ]
+    seen = []
+    async def refine(messages, info):
+        seen.append(info.instructions)
+        if not _called(messages, "propose_revision"):
+            yield _tool_call("propose_revision", {
+                "start": 7, "end": 15, "replacement": "再次微调后的正文。", "reason": "补充细节",
+            }, "applied-refine-tool")
+            return
+        yield "已提出新的修订建议。"
+
+    response = _stream_post(client, auth, case["id"], "applied-refine", "applied-user", parts, FunctionModel(stream_function=refine))
+    assert response.status_code == 200, response.text
+    assert "当前修改目标：from=7，to=15，原文：第二段需要修订。" in seen[0]
+    assert "已应用" in seen[0]
+    assert database.agent_artifacts.find_one({"id": "artifact-applied-refine"})["status"] == "accepted"
+    new = database.agent_artifacts.find_one({"caseId": case["id"], "status": "pending"})
+    assert new["target"] == {"from": 7, "to": 15, "quote": "第二段需要修订。"}
+    assert new["replacement"] == "再次微调后的正文。"
+
+
+def test_current_selection_is_in_the_current_model_message(client):
+    auth = _auth(client)
+    case = _create_selection_case(client, auth)
+    prompts = []
+
+    async def inspect(messages, _info):
+        prompts.extend(part.content for message in messages for part in message.parts
+                       if getattr(part, "part_kind", "") == "user-prompt")
+        yield "已理解本轮选区。"
+
+    response = _stream_post(client, auth, case["id"], "selected-current-turn", "selected-user", [
+        {"type": "text", "text": "be more specific"},
+        {"type": "data-selection", "data": {"from": 7, "to": 15}},
+    ], FunctionModel(stream_function=inspect))
+    assert response.status_code == 200
+    assert "第二段需要修订。" in prompts[-1]
+    assert "be more specific" in prompts[-1]

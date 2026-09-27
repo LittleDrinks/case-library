@@ -189,6 +189,28 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+test("选材返回时打开资料面板，包括窄屏抽屉", async () => {
+  state.route.query = { panel: "files" };
+  const wrapper = await renderCase();
+  const rail = wrapper.findComponent({ name: "AssistantRail" });
+  expect(rail.props("active")).toBe("files");
+  expect(rail.props("open")).toBe(true);
+  wrapper.unmount();
+});
+
+test.each(["pending", "reviewing", "published"])("%s 正文只读但选区继续传给 AI 面板", async (workflowStatus) => {
+  const wrapper = await renderCase({ workflowStatus });
+  const canvas = wrapper.findComponent({ name: "CanvasEditor" });
+  const rail = wrapper.findComponent({ name: "AssistantRail" });
+  expect(canvas.props("editable")).toBe(false);
+  expect(rail.props("readOnly")).toBe(true);
+  const context = { from: 1, to: 3, quote: "正文", sameBlock: true };
+  canvas.vm.$emit("writing-context", context);
+  await flushPromises();
+  expect(rail.props("writingContext")).toEqual(context);
+  wrapper.unmount();
+});
+
 test("草稿作者的动作按钮由服务端 availableActions 驱动", async () => {
   const wrapper = await renderCase();
   expect(wrapper.find('button[aria-label="提交审核"]').exists()).toBe(true);
@@ -268,9 +290,35 @@ test("退回草稿展示最近审核意见", async () => {
     versionNumber: 2, actorId: "admin-1", createdAt: "2026-09-01T00:00:00Z",
   };
   const wrapper = await renderCase({ lastReview });
-  const banner = wrapper.get(".review-return-banner");
-  expect(banner.text()).toContain("退回修改（v2）：事实、数据或来源需要核实、内容需要补充或修改");
-  expect(banner.text()).toContain("第三节数据来源需标注");
+  const banner = wrapper.get(".review-feedback-entry");
+  expect(banner.text()).toContain("退回修改");
+  expect(banner.text()).toContain("v2");
+  const rail = wrapper.getComponent({ name: "AssistantRail" });
+  rail.vm.expandPanel = vi.fn();
+  await banner.trigger("click");
+  expect(rail.vm.expandPanel).toHaveBeenCalledOnce();
+  expect(rail.props("feedback")).toEqual(lastReview);
+  expect(rail.props("active")).toBe("feedback");
+  expect(rail.props("open")).toBe(true);
+  expect(wrapper.find(".canvas-column .review-feedback-message").exists()).toBe(false);
+});
+
+test("重投后历史意见按所选版本显示，不混入新版本", async () => {
+  const wrapper = await renderCase({ workflowStatus: "pending", lastReview: null });
+  const rail = wrapper.getComponent({ name: "AssistantRail" });
+  rail.vm.expandPanel = vi.fn();
+  const review = { versionNumber: 1, reasonTypes: ["其他"], message: "第一轮意见\n补充来源" };
+  rail.vm.$emit("open-review", versionFixture({ review }));
+  await flushPromises();
+  expect(rail.props("feedback")).toEqual(review);
+  expect(rail.props("active")).toBe("feedback");
+  expect(wrapper.get(".version-review").text()).toContain("审核意见");
+  rail.vm.$emit("open-version", versionFixture({ id: "cv-new", number: 2, review: null }));
+  await flushPromises();
+  expect(rail.props("feedback")).toBeNull();
+  expect(wrapper.find(".version-review").exists()).toBe(false);
+  await wrapper.get('button[aria-label="v1 · 首次提交"]').trigger("click");
+  expect(rail.props("feedback")).toEqual(review);
 });
 
 test("提交校验失败展示服务端消息", async () => {
@@ -381,7 +429,7 @@ test("复制与插入引用共用可关闭的成功提示，旧计时器不清�
     expect(wrapper.find(".action-notice").exists()).toBe(false);
     expect(wrapper.get('.conflict-banner[role="alert"]').text())
       .toContain("案例已在其他页面更新");
-    expect(wrapper.get(".review-return-banner").text()).toContain("事实、数据或来源需要核实");
+    expect(wrapper.get(".review-feedback-entry").text()).toContain("查看审核意见");
   } finally {
     wrapper?.unmount();
     clearLocalDraft("user-1", "case-1");
@@ -607,7 +655,7 @@ test("非作者打开历史版本时不显示恢复入口", async () => {
 
 async function openOverwriteDialog(wrapper) {
   await wrapper.get('[data-testid="rail-open"]').trigger("click");
-  await wrapper.get("button.overwrite-entry").trigger("click");
+  await wrapper.get("button.version-restore").trigger("click");
   return wrapper.getComponent(OverwriteConfirmDialog);
 }
 
@@ -845,7 +893,7 @@ test("公开阅读页目录加载中不把内部 ID 当作名称", async () => {
   expect(wrapper.get("[aria-label='案例标签']").text()).toContain("科学家精神");
 });
 
-test("工作台移除批注入口，选区可直接交给 AI 讨论", async () => {
+test("工作台移除批注入口，展开 AI 侧栏可讨论正文选区", async () => {
   api.getCase.mockResolvedValue(caseFixture());
   api.listAnnotations.mockResolvedValue([]);
   api.agentThread.mockResolvedValue({ id: "thread-1", messages: [], artifacts: [], activeRun: null, latestRun: null });
@@ -868,7 +916,7 @@ test("工作台移除批注入口，选区可直接交给 AI 讨论", async () =
   expect(canvas.props("annotations")).toEqual([]);
   canvas.vm.editor.commands.setTextSelection({ from: 1, to: 3 });
   await flushPromises();
-  await canvas.findComponent({ name: "BubbleMenu" }).get('[aria-label="带选区问 AI"]').trigger("click");
+  await rail.get('[aria-label="展开侧栏"]').trigger("click");
   await flushPromises();
   expect(rail.classes()).not.toContain("collapsed");
   const chat = rail.findComponent({ name: "AgentChatPanel" });

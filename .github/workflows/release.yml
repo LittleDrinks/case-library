@@ -24,8 +24,8 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$'
-          display="$(printf '%s\n' "$VERSION" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+)-alpha\.[0-9]+$/alpha-v\1/')"
+          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-pre-alpha\.[0-9]+$'
+          display="Case Library $VERSION"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "display_name=$display" >> "$GITHUB_OUTPUT"
       - name: Require current main commit

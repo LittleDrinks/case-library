@@ -184,8 +184,9 @@ function citationWidget(number) {
 function appendCitationNumber(decorations, numbers, range) {
   const number = numbers.get(range.key);
   if (number == null) return;
+  // 光标可停在编号两侧，拖选时不强制重置浏览器选区的锚点。
   decorations.push(Decoration.widget(range.end, () => citationWidget(number), {
-    side: 1, key: `${range.key}:${range.end}:${number}`,
+    side: 1, relaxedSide: true, key: `${range.key}:${range.end}:${number}`,
   }));
 }
 

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from "vue";
-import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, PanelLeft, RefreshCw, X } from "@lucide/vue";
+import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, MessageSquare, PanelLeft, RefreshCw, X } from "@lucide/vue";
 import { useRoute } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
@@ -41,8 +41,8 @@ const tagCatalogError = ref("");
 const loading = ref(true);
 const loadError = ref("");
 const conflict = ref(null);
-const activeTool = ref("ai");
-const drawerOpen = ref(false);
+const activeTool = ref(route.query?.panel === "files" ? "files" : "ai");
+const drawerOpen = ref(route.query?.panel === "files");
 const assistantRail = ref(null);
 const actionNotice = shallowRef(null);
 const actionSuccessNotice = shallowRef(null);
@@ -71,6 +71,7 @@ provide(REVISION_WORKBENCH_KEY, {
     locateOnly: artifact.locateOnly,
   }) || false,
   clearPreview: () => canvasEditor.value?.clearRevisionPreview?.(),
+  refinementTarget: (artifact) => canvasEditor.value?.refinementTarget?.(artifact),
   isCurrent: (artifact) => canvasEditor.value?.isRevisionCurrent?.(artifact.target) || false,
   apply: (artifact, steps) => canvasEditor.value?.applyRevisionSteps?.(steps, {
     ...artifact.target, replacement: artifact.replacement,
@@ -98,7 +99,8 @@ const activeDocument = computed(() => (
   onDraftTab.value ? document.value : activeVersion.value.document
 ));
 const historicalVersion = computed(() => Boolean(activeVersion.value));
-const assistantReadOnly = computed(() => readerMode.value || historicalVersion.value);
+const assistantReadOnly = computed(() => readerMode.value || historicalVersion.value
+  || reviewMode.value || workflowStatus.value !== "draft");
 const outline = computed(() => documentOutline(activeDocument.value));
 watch(readerVersion, () => conversationSources.clear());
 const reviewMode = computed(() => route.name === "case-review");
@@ -150,6 +152,9 @@ const lifecycleActions = computed(() => {
 });
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
+));
+const reviewFeedback = computed(() => (
+  activeVersion.value ? activeVersion.value.review : lastReview.value
 ));
 const LIFECYCLE_META = {
   submit: { label: "提交审核", primary: true, area: "author" },
@@ -687,8 +692,15 @@ function openVersionTab(version) {
   clearWritingContext();
   if (!openVersionTabs.value.some((tab) => tab.id === version.id)) {
     openVersionTabs.value = [...openVersionTabs.value, version];
+  } else {
+    openVersionTabs.value = openVersionTabs.value.map(tab => tab.id === version.id ? version : tab);
   }
   activeTabId.value = version.id;
+}
+
+function openReviewVersion(version) {
+  openVersionTab(version);
+  selectHeaderTool("feedback");
 }
 
 function closeVersionTab(id) {
@@ -808,6 +820,9 @@ watch(autosave.revision, (value) => {
 watch(readerMode, (value) => {
   if (value && activeTool.value === "comments") activeTool.value = "ai";
 });
+watch(reviewFeedback, (value) => {
+  if (!value && activeTool.value === "feedback") activeTool.value = "ai";
+});
 onMounted(() => {
   loadCase();
   loadTagCatalog();
@@ -914,21 +929,24 @@ onBeforeUnmount(() => {
             :tabs="versionTabItems"
             :active="activeTabId"
             :disabled="Boolean(headerBusyAction)"
-            :overwritable="overwriteAllowed"
             @select="selectTab"
             @close="closeVersionTab"
-            @overwrite="requestOverwrite"
           />
           <template v-if="onDraftTab">
             <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
               <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
             </div>
-            <div v-if="lastReview" class="conflict-banner review-return-banner" role="status">
-              <AlertTriangle :size="17" aria-hidden="true" />
-              <span>
-                退回修改（v{{ lastReview.versionNumber }}）：{{ lastReview.reasonTypes.join("、") }}<template v-if="lastReview.message"> — {{ lastReview.message }}</template>
-              </span>
-            </div>
+            <button
+              v-if="lastReview"
+              type="button"
+              class="review-feedback-entry"
+              aria-controls="review-feedback-panel"
+              @click="selectHeaderTool('feedback')"
+            >
+              <MessageSquare :size="15" aria-hidden="true" />
+              <span>退回修改 · v{{ lastReview.versionNumber }}</span>
+              <span class="review-feedback-entry-link">查看审核意见</span>
+            </button>
             <article class="document-paper">
               <textarea ref="titleInput" class="document-title" :value="title" :readonly="!editable" rows="1" aria-label="案例标题" @input="changeTitle" />
               <div class="document-byline"><span>{{ caseRecord.course || "课程未设置" }}</span><span>{{ caseRecord.typeName || "教学案例" }}</span></div>
@@ -952,7 +970,6 @@ onBeforeUnmount(() => {
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="updateWritingContext"
-                @ask-ai="selectHeaderTool('ai')"
               />
             </article>
           </template>
@@ -963,6 +980,7 @@ onBeforeUnmount(() => {
               <div class="version-paper-actions">
                 <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />返回当前教师稿</button>
                 <button type="button" class="version-copy" @click="copyVersion"><Copy :size="14" aria-hidden="true" />复制正文</button>
+                <button v-if="reviewFeedback" type="button" class="version-review" @click="selectHeaderTool('feedback')"><MessageSquare :size="14" aria-hidden="true" />审核意见</button>
                 <button v-if="overwriteAllowed" type="button" class="version-restore" @click="requestOverwrite"><RefreshCw :size="14" aria-hidden="true" />恢复此版本</button>
               </div>
             </header>
@@ -981,6 +999,7 @@ onBeforeUnmount(() => {
           ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
+          :feedback="reviewFeedback"
           :version-id="readerVersion"
           :sources="sources"
           :sources-loading="sourcesLoading"
@@ -1013,6 +1032,7 @@ onBeforeUnmount(() => {
           @clear-writing-context="clearWritingContext"
           @insert-citation="insertSourceCitation"
           @open-version="openVersionTab"
+          @open-review="openReviewVersion"
           @versions-updated="refreshVersionHistory"
           @version-created="handleVersionCreated"
           @version-deleted="closeVersionTab"

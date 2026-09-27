@@ -16,6 +16,7 @@ from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef, write_view
 from app.modules.agent.repository import claim_run_write_path
+from app.modules.agent.review_feedback import REVIEW_INSTRUCTIONS, read_review_feedback
 from app.modules.agent.search import CorpusSearchParams
 from app.modules.agent.search import search_corpus as search_platform_corpus
 from app.modules.agent.source_reader import read_source as read_domain_source
@@ -35,12 +36,13 @@ async def search_corpus(ctx: RunContext[ToolDeps], params: CorpusSearchParams) -
     return {"scope": "platform", **result}
 
 
-def reader_capability() -> Capability:
+def reader_capability(*, internal: bool = False) -> Capability:
     """读者只读领域能力：注册检索与安全来源读取，不注册写工具。"""
     return Capability(
         id=READER_CAPABILITY_ID,
         description="检索平台公开资料辅助阅读讨论",
-        tools=[search_corpus, read_source],
+        tools=[search_corpus, read_source, *([read_review_feedback] if internal else [])],
+        instructions=REVIEW_INSTRUCTIONS if internal else None,
     )
 
 
@@ -71,7 +73,12 @@ def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
 async def propose_revision(
     ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str = ""
 ) -> dict:
-    """按正文位置提出建议；同轮目标不能重叠，其他不重叠位置仍可继续。"""
+    """按正文位置提出可由教师确认的建议，同轮目标不能重叠。
+
+    replacement 是直接写入正文的文字，不含 Markdown 标记。不虚构教材、
+    章节、课程主题或审核要求；未给定的时间、人数只能作为可调整的建议。
+    reason 说明实际改动，AI 自拟的建议不能冒充审核员的要求。
+    """
     require_revision_reason(reason)
     if ctx.deps.annotation_id and ctx.deps.proposed_artifacts:
         raise ModelRetry("批注讨论本轮只能提议一条选区修订")
@@ -186,11 +193,12 @@ def _apply_document_write(ctx, blocks, summary):
 
 def domain_capability(*, generate_document: bool) -> Capability:
     """空稿保留初稿生成；已有正文只提供修订建议。"""
-    tools = [search_corpus, read_source, propose_revision]
+    tools = [search_corpus, read_source, read_review_feedback, propose_revision]
     if generate_document:
         tools.extend([propose_document, write_document])
     return Capability(
         tools=tools,
+        instructions=REVIEW_INSTRUCTIONS,
     )
 
 

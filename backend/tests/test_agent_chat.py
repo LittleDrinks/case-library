@@ -477,12 +477,15 @@ def test_agent_route_rechecks_case_editability(client: TestClient) -> None:
     )
 
     assert client.get(THREAD_PATH).status_code == 200
-    response = client.post(
-        f"{THREAD_PATH}/{thread_id}/stream",
-        headers=_csrf(auth),
-        json=_body("不可编辑请求"),
-    )
-    assert response.status_code == 409
+    with client.app.state.agent.override(model=TestModel(custom_output_text="正文只读，可以讨论")):
+        response = client.post(
+            f"{THREAD_PATH}/{thread_id}/stream",
+            headers=_csrf(auth),
+            json=_body("不可编辑请求"),
+        )
+    assert response.status_code == 200
+    run = client.app.state.database.agent_runs.find_one({"threadId": thread_id})
+    assert run["status"] == "completed" and run["readOnly"] is True
 
 
 def test_agent_route_rejects_cross_case_thread_access(client: TestClient) -> None:

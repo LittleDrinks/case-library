@@ -355,6 +355,14 @@ async function undoWrite(caseId, state, generation, threadId, writeId) {
   return result;
 }
 
+async function redoWrite(caseId, state, generation, threadId, writeId, revision) {
+  const result = await api.agentRedoWrite(caseId, threadId, writeId, revision, session.csrfToken);
+  if (isCurrent(state, generation) && state.threadId.value === threadId) {
+    await refreshSnapshot(caseId, state, generation, threadId);
+  }
+  return result;
+}
+
 async function renameThread(caseId, state, threadId, title) {
   const summary = await api.agentRenameThread(caseId, threadId, title, session.csrfToken);
   if (state.threadId.value === threadId && state.snapshot.value) {
@@ -460,6 +468,7 @@ function exposedApi(caseId, state, at) {
     retry: (messageId) => retryChat(caseId, state, at(), messageId),
     decide: (id, decision) => decideArtifact(caseId, state, at(), id, decision),
     undoWrite: (writeId) => undoWrite(caseId, state, at(), state.threadId.value, writeId),
+    redoWrite: (writeId, revision) => redoWrite(caseId, state, at(), state.threadId.value, writeId, revision),
     refresh: () => refreshSnapshot(caseId, state, at()),
     reload: () => reload(caseId, state),
   };

@@ -53,7 +53,7 @@ watch(() => props.command, resetForm);
       @keydown.esc="cancel"
     >
       <section
-        class="review-decision-dialog"
+        class="review-decision-dialog review-reject-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="review-decision-title"
@@ -65,24 +65,33 @@ watch(() => props.command, resetForm);
           </button>
         </header>
         <form @submit.prevent="submit">
-          <fieldset>
-            <legend>退回原因（至少选择一项）</legend>
-            <label v-for="reason in reasons" :key="reason" class="review-decision-reason">
-              <input
-                :ref="reason === reasons[0] ? setFirstReasonInput : undefined"
-                v-model="reasonTypes"
-                type="checkbox"
-                :value="reason"
+          <div class="review-decision-fields">
+            <fieldset>
+              <legend>退回原因（至少选择一项）</legend>
+              <label v-for="reason in reasons" :key="reason" class="review-decision-reason">
+                <input
+                  :ref="reason === reasons[0] ? setFirstReasonInput : undefined"
+                  v-model="reasonTypes"
+                  type="checkbox"
+                  :value="reason"
+                  :disabled="busy"
+                />
+                <span>{{ reason }}</span>
+              </label>
+            </fieldset>
+            <label>
+              <span class="review-message-label">留言（可选）<span>{{ message.length }} / 4000</span></span>
+              <textarea
+                v-model="message"
+                aria-label="留言（可选）"
+                placeholder="可分段说明需要修改的位置、问题和建议"
+                maxlength="4000"
+                rows="8"
                 :disabled="busy"
               />
-              <span>{{ reason }}</span>
             </label>
-          </fieldset>
-          <label>
-            <span>留言（可选）</span>
-            <textarea v-model="message" maxlength="4000" rows="5" :disabled="busy" />
-          </label>
-          <p v-if="error" class="review-decision-error" role="alert">{{ error }}</p>
+            <p v-if="error" class="review-decision-error" role="alert">{{ error }}</p>
+          </div>
           <footer>
             <button type="button" :disabled="busy" @click="cancel">取消</button>
             <button class="primary" type="submit" :disabled="!reasonTypes.length || busy">

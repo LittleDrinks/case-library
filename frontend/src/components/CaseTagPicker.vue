@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { ChevronDown, LoaderCircle, Tags, X } from "@lucide/vue";
+import { ChevronDown, LoaderCircle, Search, Tags, X } from "@lucide/vue";
 import { ElPopover } from "element-plus";
 import "element-plus/theme-chalk/el-popper.css";
 import "element-plus/theme-chalk/el-popover.css";
@@ -106,7 +106,7 @@ function focusSearch() {
           placement="bottom-start"
           :fallback-placements="fallbackPlacements"
           :popper-options="popperOptions"
-          :width="300"
+          :width="320"
           popper-class="case-tag-popover"
           :show-arrow="false"
           @after-enter="focusSearch"
@@ -116,11 +116,18 @@ function focusSearch() {
               设置标签<ChevronDown :size="12" />
             </button>
           </template>
-          <input ref="queryInput" v-model="query" type="search" aria-label="查找标签" placeholder="查找标签" />
+          <div class="case-tag-popover-header">
+            <div class="case-tag-popover-title"><strong>设置标签</strong><span>{{ labels.length ? `已选 ${labels.length} 项` : '可多选' }}</span></div>
+            <div class="case-tag-search">
+              <Search :size="15" aria-hidden="true" />
+              <input ref="queryInput" v-model="query" type="search" aria-label="查找标签" placeholder="搜索标签或分组" />
+            </div>
+          </div>
           <p v-if="!selectableGroups.length" class="case-tags-state">暂无可选标签</p>
+          <p v-else-if="!filteredGroups.length" class="case-tags-state">未找到匹配的标签</p>
           <fieldset v-for="group in filteredGroups" :key="group.id">
             <legend>{{ group.name }}<b v-if="group.requiredForSubmission">投稿必填</b></legend>
-            <label v-for="tag in group.tags" :key="tag.id">
+            <label v-for="tag in group.tags" :key="tag.id" :class="{ selected: tagIds.includes(tag.id) }">
               <input type="checkbox" :checked="tagIds.includes(tag.id)" @change="toggle(tag.id, $event)" />
               <span>{{ tag.name }}</span>
             </label>

@@ -368,3 +368,90 @@ def test_republish_same_version_keeps_published_at(client: TestClient) -> None:
 def _published_at(client: TestClient, auth: dict) -> str | None:
     listing = client.get("/api/admin/skills", headers=_csrf(auth)).json()
     return next(row for row in listing if row["id"] == SKILL_ID)["publishedAt"]
+
+
+def test_delete_version_preserves_bound_content_and_current_publication(client):
+    from app.modules.skills.service import bind_published_skill
+
+    admin = _login(client, ADMIN)
+    first = _upload(client, admin, build_package()).json()["version"]
+    _publish(client, admin, SKILL_ID, first["id"])
+    bound = bind_published_skill(client.app.state.database, client.app.state.blob_store, SKILL_ID)
+    path = f"/api/admin/skills/{SKILL_ID}/versions/{first['id']}"
+    assert client.delete(path, headers=_csrf(admin)).status_code == 409
+    second = _upload(client, admin, build_package(_altered_files("new"))).json()["version"]
+    _publish(client, admin, SKILL_ID, second["id"])
+    assert client.delete(path, headers=_csrf(admin)).status_code == 204
+    listing = client.get("/api/admin/skills").json()
+    assert [v["id"] for v in listing[0]["versions"]] == [second["id"]]
+    assert _publish(client, admin, SKILL_ID, first["id"]).status_code == 404
+    assert client.delete(path, headers=_csrf(admin)).status_code == 404
+    assert bound.read_resource(TEMPLATE_PATH) == TEMPLATE_TEXT
+    assert client.app.state.database.skill_versions.find_one({"id": first["id"]})["body"] == bound.body
+    assert client.get(SKILLS_PATH).json()[0]["versionId"] == second["id"]
+
+
+def test_delete_last_version_hides_skill_and_reupload_keeps_version_sequence(client):
+    admin = _login(client, ADMIN)
+    first = _upload(client, admin, build_package()).json()["version"]
+    second = _upload(client, admin, build_package()).json()["version"]
+    for version in [second, first]:
+        path = f"/api/admin/skills/{SKILL_ID}/versions/{version['id']}"
+        assert client.delete(path, headers=_csrf(admin)).status_code == 204
+        listing = client.get("/api/admin/skills").json()
+        if version == second:
+            assert listing[0]["latestVersionId"] == first["id"]
+        else:
+            assert listing == []
+    third = _upload(client, admin, build_package()).json()["version"]
+    assert third["version"] == "v3"
+    assert len(client.get("/api/admin/skills").json()[0]["versions"]) == 1
+
+
+def test_delete_skill_version_requires_admin_csrf_and_matching_skill(client):
+    admin = _login(client, ADMIN)
+    version = _upload(client, admin, build_package()).json()["version"]
+    path = f"/api/admin/skills/{SKILL_ID}/versions/{version['id']}"
+    assert client.delete(path).status_code == 403
+    wrong_path = f"/api/admin/skills/another-skill/versions/{version['id']}"
+    assert client.delete(wrong_path, headers=_csrf(admin)).status_code == 404
+    teacher = _login_teacher(client)
+    assert client.delete(path, headers=_csrf(teacher)).status_code == 403
+
+
+def test_unpublish_then_delete_preserves_existing_binding(client):
+    from app.modules.skills.service import bind_published_skill
+
+    admin = _login(client, ADMIN)
+    version = _upload(client, admin, build_package()).json()["version"]
+    _publish(client, admin, SKILL_ID, version["id"])
+    bound = bind_published_skill(client.app.state.database, client.app.state.blob_store, SKILL_ID)
+    response = client.post(
+        f"/api/admin/skills/{SKILL_ID}/unpublish", headers=_csrf(admin),
+        json={"versionId": version["id"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["skill"]["publishedVersionId"] is None
+    assert client.get(SKILLS_PATH).json() == []
+    assert client.get(f"{SKILLS_PATH}/{SKILL_ID}/content").status_code == 404
+    listing = client.get("/api/admin/skills").json()
+    assert listing[0]["versions"][0]["id"] == version["id"]
+    assert listing[0]["publishedAt"] is None
+    path = f"/api/admin/skills/{SKILL_ID}/versions/{version['id']}"
+    assert client.delete(path, headers=_csrf(admin)).status_code == 204
+    assert client.get("/api/admin/skills").json() == []
+    assert bound.read_resource(TEMPLATE_PATH) == TEMPLATE_TEXT
+
+
+def test_unpublish_checks_permissions_and_rejects_stale_version(client):
+    admin = _login(client, ADMIN)
+    first = _upload(client, admin, build_package()).json()["version"]
+    second = _upload(client, admin, build_package()).json()["version"]
+    _publish(client, admin, SKILL_ID, second["id"])
+    path = f"/api/admin/skills/{SKILL_ID}/unpublish"
+    body = {"versionId": second["id"]}
+    assert client.post(path, json=body).status_code == 403
+    assert client.post(path, headers=_csrf(admin), json={"versionId":first["id"]}).status_code == 409
+    assert client.get(SKILLS_PATH).json()[0]["versionId"] == second["id"]
+    teacher = _login_teacher(client)
+    assert client.post(path, headers=_csrf(teacher), json=body).status_code == 403

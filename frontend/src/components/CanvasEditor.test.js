@@ -155,12 +155,10 @@ it("捕获正文选区的精确位置、引用和当前修订号", async () => {
   await selectParagraph(wrapper);
   const captured = wrapper.emitted("selection").filter((event) => event[0]).at(-1)[0];
   expect(captured).toMatchObject({ quote: "案例原文", revision: 3, from: 9, to: 13 });
-  for (const label of ["选区加粗", "选区斜体", "编辑选区链接", "带选区问 AI"]) {
+  for (const label of ["选区加粗", "选区斜体", "编辑选区链接"]) {
     expect(wrapper.findComponent({ name: "BubbleMenu" }).find(`[aria-label="${label}"]`).exists()).toBe(true);
   }
   expect(wrapper.find('[aria-label="添加选区批注"]').exists()).toBe(false);
-  await wrapper.findComponent({ name: "BubbleMenu" }).get('[aria-label="带选区问 AI"]').trigger("click");
-  expect(wrapper.emitted("ask-ai")).toHaveLength(1);
 });
 
 it("编号列表序列化只包含后端接受的起点属性", async () => {
@@ -986,4 +984,34 @@ it("提交后切换只读并恢复编辑不会破坏编辑器挂载", async () =
   expect(wrapper.get('.ProseMirror').attributes('contenteditable')).toBe('true');
   await wrapper.setProps({ document: replacedDocument });
   expect(wrapper.get('.ProseMirror').text()).toContain('替换后的正文');
+});
+
+it("只读正文仍能捕获 AI 选区，且不显示格式工具或插入引用", async () => {
+  const { wrapper } = await setup({ editable: false, annotatable: false });
+  await selectParagraph(wrapper);
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toMatchObject({ from: 9, to: 13, quote: "案例原文" });
+  expect(wrapper.get(".ProseMirror").attributes("contenteditable")).toBe("false");
+  expect(wrapper.findComponent({ name: "SelectionToolbar" }).exists()).toBe(false);
+  expect(wrapper.vm.insertCitation({ sourceType: "material", id: "source" })).toBe("readonly");
+  expect(wrapper.emitted("change")).toBeUndefined();
+});
+
+it("相同的原生选区通知不会短暂清空已传给 AI 的选区", async () => {
+  const wrapper = mount(CanvasEditor, { attachTo: document.body, props: { document: caseDocument, editable: false } });
+  mounted.push(wrapper);
+  await vi.waitUntil(() => wrapper.find(".canvas-editor p").exists());
+  await selectParagraph(wrapper);
+  const context = wrapper.emitted("writing-context").at(-1)[0];
+  expect(context.quote).toBe("案例原文");
+  expect(globalThis.getSelection().toString()).toBe("案例原文");
+  document.dispatchEvent(new Event("selectionchange"));
+  expect(wrapper.emitted("writing-context").at(-1)[0]).toEqual(context);
+});
+
+it("微调已应用建议使用新正文的位置，撤销后使用原文", async () => {
+  const { wrapper } = await setup({ document: replacedDocument });
+  const artifact = { status: "accepted", target: { from: 9, to: 13, quote: "案例原文" }, replacement: "替换后的正文" };
+  expect(wrapper.vm.refinementTarget(artifact)).toEqual({ from: 9, to: 15, quote: "替换后的正文" });
+  await wrapper.setProps({ document: caseDocument });
+  expect(wrapper.vm.refinementTarget({ ...artifact, status: "pending" })).toEqual({ from: 9, to: 13, quote: "案例原文" });
 });

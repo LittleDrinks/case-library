@@ -161,7 +161,7 @@ def _mapping_for_change(document: dict, updated: dict, steps: list[dict] | None)
         applied, mapping = prosemirror.apply_steps(document, steps)
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise CaseError(409, "正文位置映射无效，请重新保存") from error
-    if applied != updated:
+    if not prosemirror.documents_equal(applied, updated):
         raise CaseError(409, "正文变更与位置映射不一致，请重新保存")
     return mapping
 

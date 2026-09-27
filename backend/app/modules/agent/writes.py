@@ -1,4 +1,4 @@
-"""空正文初稿写入：服务端校验，保留前后正文供撤销。"""
+"""AI 正文写入与修订重做：服务端校验，保留前后正文供撤销。"""
 
 from __future__ import annotations
 
@@ -145,6 +145,62 @@ def _undo_target(database, case_id, thread_id, write_id, user, session) -> dict:
     if not write:
         raise CaseError(404, "写入记录不存在")
     return write
+
+
+def redo_write(database: Database, case_id: str, thread_id: str, write_id: str,
+               user: dict, revision: int) -> dict:
+    """重新应用已撤销的局部修订；校验当前正文与权限，保留同一写入的操作事件。"""
+    return transaction(database, lambda session: _redo(
+        database, case_id, thread_id, write_id, user, revision, session,
+    ))
+
+
+def _redo(database, case_id, thread_id, write_id, user, revision, session):
+    write = _undo_target(database, case_id, thread_id, write_id, user, session)
+    case = _writable_case(database, case_id, user, session)
+    _redo_revision_source(database, case_id, write, user, session)
+    if write["status"] == "written" and write["baseRevision"] == revision:
+        return {"write": write, "case": case, "steps": []}
+    if (write["status"] != "undone" or case["revision"] != revision
+            or case["document"] != write["beforeDocument"]):
+        raise CaseError(409, "正文已更新，不能再次应用此修改")
+    record_snapshot(database, case, user, "pre_agent_decision", session)
+    replay = {**write, "baseRevision": revision, "resultRevision": revision + 1}
+    from app.modules.annotations.service import document_mapping
+
+    steps = write["documentSteps"]
+    mapping = document_mapping(case["document"], write["document"], steps)
+    _commit_written_document(database, case_id, user, replay, steps, mapping, session)
+    row = database.agent_writes.find_one_and_update(
+        {"id": write_id, "status": "undone"},
+        {"$set": {"status": "written", "baseRevision": revision,
+                  "resultRevision": revision + 1},
+         "$unset": {"undoneBy": "", "undoneAt": ""}},
+        return_document=ReturnDocument.AFTER, session=session,
+    )
+    if not row:
+        raise CaseError(409, "修改状态已变化，请刷新后重试")
+    _append_event(database, thread_id, "document.written", write["runId"],
+                  {"writeId": write_id, "scope": "selection", "operation": "redo",
+                   "revision": revision + 1}, session)
+    updated = database.cases.find_one({"id": case_id}, session=session)
+    return {"write": row, "case": updated, "steps": steps}
+
+
+def _redo_revision_source(database, case_id, write, user, session):
+    from app.modules.agent.models import AgentArtifact
+    from app.modules.agent.source_reader import revalidate_sources
+
+    row = database.agent_artifacts.find_one(
+        {"id": write.get("artifactId"), "caseId": case_id,
+         "threadId": write["threadId"], "status": "accepted", "kind": "range"},
+        session=session,
+    )
+    if not row or row.get("annotationId"):
+        raise CaseError(409, "只有已确认的正文修订可再次应用")
+    artifact = AgentArtifact.model_validate({k: v for k, v in row.items() if k != "_id"})
+    if not revalidate_sources(database, user, case_id, artifact.sources):
+        raise CaseError(409, "修订依据当前不可读，不能再次应用")
 
 
 def _restore_document(database, case_id, write, user, session) -> dict:

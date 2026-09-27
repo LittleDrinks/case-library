@@ -56,6 +56,15 @@ describe("document write scope summaries", () => {
 });
 
 describe("tool result summaries", () => {
+  it("审核意见展示所属版本和无记录结果", () => {
+    const type = "tool-read_review_feedback";
+    expect(toolParamSummary({ type, input: {} })).toBe("最近一次退回意见");
+    expect(toolParamSummary({ type, input: { version_number: 9 } })).toBe("提交版本：v9");
+    expect(toolResultSummary({ type, state: "output-available", output: { status: "ok", versionNumber: 9 } }))
+      .toBe("已读取 v9 审核意见");
+    expect(toolResultSummary({ type, state: "output-available", output: { status: "empty", detail: "暂无退回意见" } }))
+      .toBe("暂无退回意见");
+  });
   it("summarizes result counts without leaking raw payloads", () => {
     expect(toolResultSummary({ type: "tool-search_corpus", state: "output-available", output: { sources: [{}, {}] } }))
       .toBe("2 条来源");

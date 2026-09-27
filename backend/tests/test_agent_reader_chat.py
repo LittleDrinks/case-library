@@ -136,7 +136,8 @@ def test_author_draft_context_stays_author_only(client: TestClient) -> None:
     owner = _login(client, {"username": "admin", "password": "admin123"})
     snapshot = client.get(THREAD_PATH)
     assert snapshot.status_code == 200
-    assert _send(client, owner, snapshot.json()["id"], "新 Run").status_code == 409
+    with agent.override(model=TestModel(custom_output_text="只读讨论")):
+        assert _send(client, owner, snapshot.json()["id"], "新 Run").status_code == 200
 
 
 def test_cross_reader_threads_are_not_enumerable(client: TestClient) -> None:
@@ -298,7 +299,7 @@ def test_historically_approved_versions_stay_readable(client: TestClient) -> Non
     assert response.status_code == 200
 
 
-def test_owner_history_stays_readable_while_new_runs_stay_blocked(client: TestClient) -> None:
+def test_owner_history_and_read_only_discussion_remain_available(client: TestClient) -> None:
     for case_id, account in (
         ("c-pending-1", READER), ("c-02", {"username": "admin", "password": "admin123"}),
     ):
@@ -311,10 +312,14 @@ def test_owner_history_stays_readable_while_new_runs_stay_blocked(client: TestCl
         assert client.post(
             f"{path}/{thread_id}/cancel", headers=_csrf(auth)
         ).json()["status"] == "idle"
-        assert client.post(
-            f"{path}/{thread_id}/stream", headers=_csrf(auth),
-            json={"id": "writer", "trigger": "submit-message", "messages": [_message("新 Run")]},
-        ).status_code == 409
+        with agent.override(model=TestModel(custom_output_text="只读讨论")):
+            response = client.post(
+                f"{path}/{thread_id}/stream", headers=_csrf(auth),
+                json={"id": "writer", "trigger": "submit-message", "messages": [_message("新 Run")]},
+            )
+        assert response.status_code == 200
+        run = client.app.state.database.agent_runs.find_one({"threadId": thread_id})
+        assert run["status"] == "completed" and run["readOnly"] is True
 
 
 def _version_mismatch_requests(client: TestClient, auth: dict, thread_id: str, wrong: str):

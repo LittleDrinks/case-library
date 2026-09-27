@@ -1,6 +1,7 @@
 export const TOOL_LABELS = {
   load_capability: "加载 Skill", search_corpus: "检索案例", list_tag_catalog: "查询标签",
   read_source: "阅读来源", propose_revision: "生成修订建议",
+  read_review_feedback: "读取审核意见",
   propose_document: "生成 AI 版本", write_document: "直接写入正文",
 };
 export const TOOL_STATUS_LABELS = {
@@ -52,6 +53,8 @@ export function sourcesOf(part) {
 
 export function toolParamSummary(part) {
   const input = part.input || {};
+  const brief = briefToolParams(part, input);
+  if (brief !== null) return brief;
   if (toolName(part) === "search_corpus") {
     const scope = input.kind && input.kind !== "all" ? `（范围：${input.kind}）` : "";
     return `检索词：${input.query ?? ""}${scope}`;
@@ -61,12 +64,19 @@ export function toolParamSummary(part) {
     return Number.isInteger(input.start) && Number.isInteger(input.end)
       ? `目标：${input.start}–${input.end}` : "";
   }
-  if (toolName(part) === "propose_document") return "范围：全文（AI版本）";
   if (toolName(part) === "write_document") {
     return input.scope === "selection" ? "范围：选区" : "范围：全文";
   }
-  if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
   return "";
+}
+
+function briefToolParams(part, input) {
+  if (toolName(part) === "read_review_feedback") {
+    return input.version_number ? `提交版本：v${input.version_number}` : "最近一次退回意见";
+  }
+  if (toolName(part) === "propose_document") return "范围：全文（AI版本）";
+  if (toolName(part) === "list_tag_catalog") return input.query ? `筛选：${input.query}` : "";
+  return null;
 }
 
 export function toolResultSummary(part, run = null) {
@@ -75,6 +85,9 @@ export function toolResultSummary(part, run = null) {
   }
   if (part.state !== "output-available") return "";
   const output = part.output || {};
+  if (part.type === "tool-read_review_feedback") {
+    return reviewFeedbackSummary(output);
+  }
   if (part.type === "tool-propose_document") {
     return documentResultSummary(output);
   }
@@ -89,6 +102,10 @@ export function toolResultSummary(part, run = null) {
   if (part.type === "tool-search_corpus" && !output.sources?.length) return "依据不足，未找到可用来源";
   if (part.type === "tool-search_corpus") return `${(output.sources || []).length} 条来源`;
   return "";
+}
+
+function reviewFeedbackSummary(output) {
+  return output.status === "ok" ? `已读取 v${output.versionNumber} 审核意见` : output.detail || "未读取到审核意见";
 }
 
 export function toolFailureSummary(part, runStatus = "") {

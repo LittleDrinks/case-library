@@ -142,7 +142,7 @@ onMounted(loadAttachments);
       <button :class="{ active: folder === 'materials' }" type="button" @click="folder = 'materials'">{{ materialLabel }}</button>
       <button :class="{ active: folder === 'sources' }" type="button" @click="folder = 'sources'">{{ sourceLabel }}</button>
     </div>
-    <p v-if="folder === 'sources'" class="panel-hint">全部保留资料进入 Word 来源清单；点击条目动作可在正文插入引用。</p>
+    <p v-if="folder === 'sources'" class="panel-hint">保留的资料将列入 Word 来源清单，可按需插入正文引用。</p>
     <div class="panel-scroll">
       <div v-if="loading" class="panel-empty"><Paperclip :size="24" /><span>正在加载案例资料</span></div>
       <div v-else-if="error" class="attachment-error" role="alert">
@@ -155,6 +155,9 @@ onMounted(loadAttachments);
           <div class="attachment-copy">
             <b>〔{{ row.number }}〕{{ row.title }}</b>
             <span>{{ sourceMeta(row) || sourceKind(row) }}</span>
+            <small v-if="!row.contentAvailable"><LockKeyhole :size="12" />内容按权限开放</small>
+          </div>
+          <div class="source-actions">
             <button
               type="button"
               class="conversation-toggle"
@@ -163,36 +166,35 @@ onMounted(loadAttachments);
               :data-testid="'conversation-toggle-' + row.id"
               @click="conversationSources.toggle(row)"
             >{{ conversationSources.has(row) ? "已用于对话 ✓" : "用于对话" }}</button>
-            <small v-if="!row.contentAvailable"><LockKeyhole :size="12" />内容按权限开放</small>
+            <button
+              v-if="editable"
+              class="attachment-icon source-citation"
+              type="button"
+              :aria-label="`插入引用${row.title}`"
+              :title="`插入引用 ${row.title}`"
+              :disabled="Boolean(busy)"
+              @mousedown.prevent
+              @click="emit('insert-citation', row)"
+            ><Quote :size="14" /><span>插入引用</span></button>
+            <a
+              v-if="row.contentAvailable && row.url"
+              class="attachment-icon"
+              :href="row.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="`打开来源${row.title}`"
+              :title="`打开固定版本：${row.title}`"
+            ><ExternalLink :size="16" /></a>
+            <button
+              v-if="editable"
+              class="attachment-icon"
+              type="button"
+              :aria-label="`移除来源${row.title}`"
+              :title="`移除来源 ${row.title}`"
+              :disabled="Boolean(busy)"
+              @click="removeSource(row)"
+            ><Trash2 :size="16" /></button>
           </div>
-          <button
-            v-if="editable"
-            class="attachment-icon"
-            type="button"
-            :aria-label="`插入引用${row.title}`"
-            :title="`插入引用 ${row.title}`"
-            :disabled="Boolean(busy)"
-            @mousedown.prevent
-            @click="emit('insert-citation', row)"
-          ><Quote :size="16" /></button>
-          <a
-            v-if="row.contentAvailable && row.url"
-            class="attachment-icon"
-            :href="row.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            :aria-label="`打开来源${row.title}`"
-            :title="`打开固定版本：${row.title}`"
-          ><ExternalLink :size="16" /></a>
-          <button
-            v-if="editable"
-            class="attachment-icon"
-            type="button"
-            :aria-label="`移除来源${row.title}`"
-            :title="`移除来源 ${row.title}`"
-            :disabled="Boolean(busy)"
-            @click="removeSource(row)"
-          ><Trash2 :size="16" /></button>
         </li>
       </ul>
       <div v-else-if="folder === 'files' && !rows.length" class="panel-empty"><Paperclip :size="24" /><span>暂无附件</span></div>

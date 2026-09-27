@@ -58,26 +58,62 @@ it("已停用建议仍可展开查看记录，但没有应用操作", async () =
   expect(wrapper.find(".revision-suggestion-actions").exists()).toBe(false);
 });
 
-it("应用或微调时给旧标题划线并折叠卡片", async () => {
+it("微调后标记旧建议但保留展开状态", async () => {
   vi.useFakeTimers();
   const wrapper = mount(RevisionSuggestionCard, { props: { artifact, expanded: true } });
   await wrapper.setProps({ artifact: { ...artifact, status: "superseded" } });
   await vi.advanceTimersByTimeAsync(260);
 
   expect(wrapper.classes()).toContain("complete");
-  expect(wrapper.classes()).not.toContain("expanded");
+  expect(wrapper.classes()).toContain("expanded");
   expect(wrapper.get(".revision-suggestion-title").text()).toBe("案例原文");
-  expect(wrapper.emitted("collapse")).toEqual([["artifact-1"]]);
+  expect(wrapper.emitted("collapse")).toBeUndefined();
 });
 
-it("保留原文时折叠卡片但不划掉标题", async () => {
+it("保留原文时维持卡片展开且不划掉标题", async () => {
   vi.useFakeTimers();
   const wrapper = mount(RevisionSuggestionCard, { props: { artifact, expanded: true } });
   await wrapper.setProps({ artifact: { ...artifact, status: "rejected" } });
   await vi.advanceTimersByTimeAsync(260);
 
   expect(wrapper.classes()).not.toContain("complete");
-  expect(wrapper.classes()).not.toContain("expanded");
+  expect(wrapper.classes()).toContain("expanded");
   expect(wrapper.get(".revision-suggestion-title").text()).toBe("案例原文");
-  expect(wrapper.emitted("collapse")).toEqual([["artifact-1"]]);
+  expect(wrapper.emitted("collapse")).toBeUndefined();
+});
+
+it("应用后保留展开状态，撤销入口位于卡片内", async () => {
+  const wrapper = mount(RevisionSuggestionCard, { props: { artifact, expanded: true } });
+  await wrapper.setProps({ artifact: { ...artifact, status: "accepted", writeId: "write-1" } });
+  expect(wrapper.classes()).not.toContain("collapsing");
+  const undo = wrapper.get('[data-testid="agent-undo-revision"]');
+  await undo.trigger("click");
+  expect(wrapper.emitted("undo")).toEqual([["write-1"]]);
+  expect(wrapper.classes()).toContain("expanded");
+});
+
+it("撤销后显示真实状态并可再次应用", async () => {
+  const wrapper = mount(RevisionSuggestionCard, {
+    props: { artifact: { ...artifact, status: "accepted", writeId: "write-1" }, writeStatus: "undone", expanded: true },
+  });
+  expect(wrapper.get(".revision-suggestion-status").text()).toBe("已撤销");
+  expect(wrapper.find('[data-testid="agent-undo-revision"]').exists()).toBe(false);
+  await wrapper.get('[data-testid="agent-redo-revision"]').trigger("click");
+  expect(wrapper.emitted("accept")).toEqual([["artifact-1"]]);
+});
+
+it.each(["written", "undone"])("已应用建议在 %s 状态仍可微调", async (writeStatus) => {
+  const wrapper = mount(RevisionSuggestionCard, {
+    props: { artifact: { ...artifact, status: "accepted", writeId: "write-1" }, writeStatus, expanded: true },
+  });
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  expect(wrapper.emitted("refine")).toEqual([[artifact.id]]);
+});
+
+it("流式建议可展开，但生成结束前不能应用", async () => {
+  const wrapper = mount(RevisionSuggestionCard, { props: { artifact: { ...artifact, provisional: true } } });
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  expect(wrapper.get(".revision-suggestion-details").isVisible()).toBe(true);
+  expect(wrapper.get('[data-testid="agent-accept"]').attributes("disabled")).toBeDefined();
+  expect(wrapper.get(".revision-suggestion-status").text()).toBe("生成中");
 });

@@ -580,7 +580,8 @@ def test_docx_export_aligns_manual_lines_split_by_hard_break(
     assert ai_indent.get(w("left")) == "420"
     assert ai_indent.get(w("firstLine")) is None
     assert any(
-        paragraph_text(item).startswith(f"〔1〕 {material['title']}．")
+        paragraph_text(item).startswith(f"{material['title']}．")
+        and item.find("w:pPr/w:numPr/w:numId", NS) is not None
         for item in root.iter(w("p"))
     )
 
@@ -810,17 +811,60 @@ def test_docx_export_numbers_citations_and_links_all_retained_sources() -> None:
     root, targets = docx_xml_and_links(build_case_docx(case, cited_entries()))
     texts = [paragraph_text(item) for item in root.iter(w("p"))]
     assert "加粗依据斜体依据〔1〕后续正文再次引用〔2〕" in texts
-    references = [text for text in texts if text.startswith("〔")]
+    references = [paragraph_text(p) for p in root.iter(w("p"))
+                  if p.find("w:bookmarkStart", NS) is not None]
     assert references == [
-        "〔1〕 图片资料．图像库．链接",
-        "〔2〕 引用案例．上海大学．v2．链接",
-        "〔3〕 未用附件．链接",
+        "图片资料．图像库．链接",
+        "引用案例．上海大学．v2．链接",
+        "未用附件．链接",
     ]
     assert targets == {
         "https://case.test/api/materials/image-1/content",
         CASE_VERSION_URL,
         "https://case.test/api/cases/c-1/attachments/unused-1/content?versionId=version-2",
     }
+
+
+def test_docx_citations_are_native_cross_references_to_numbered_sources() -> None:
+    document = cited_document()
+    document["content"].insert(0, {"type": "orderedList", "content": [_item("正文自有编号")]})
+    document["content"].append({"type": "paragraph", "content": [
+        {"type": "text", "text": "另一段再次引用第一条", "marks": [citation("material", "image-1")]},
+    ]})
+    data = build_case_docx({"title": "重复交叉引用", "document": document}, cited_entries())
+    root, _ = docx_xml_and_links(data)
+    instructions = [node.text.strip() for node in root.findall(".//w:instrText", NS)]
+    references = [code for code in instructions if code.startswith("REF ")]
+    assert len(references) == 3, "正文引用必须是 Word REF 域，不能只是上标文本"
+    targets = [code.split()[1] for code in references]
+    assert targets[0] == targets[2] and targets[0] != targets[1]
+    assert all(r"\h" in code and r"\n" in code for code in references)
+    source_paragraphs = [p for p in root.iter(w("p")) if p.find("w:bookmarkStart", NS) is not None]
+    assert len(source_paragraphs) == 3, "未在正文引用的保留来源也可被交叉引用"
+    bookmarks = {p.find("w:bookmarkStart", NS).get(w("name")): p for p in source_paragraphs}
+    assert set(targets) <= bookmarks.keys()
+    assert all(p.find("w:pPr/w:numPr/w:numId", NS) is not None for p in source_paragraphs)
+    ids = {p.find("w:pPr/w:numPr/w:numId", NS).get(w("val")) for p in source_paragraphs}
+    assert len(ids) == 1, "文末来源必须共享独立的自动编号序列"
+    for p in source_paragraphs:
+        assert p.find("w:bookmarkStart", NS).get(w("id")) == p.find("w:bookmarkEnd", NS).get(w("id"))
+    assert "图片资料" in paragraph_text(bookmarks[targets[0]])
+    assert "引用案例" in paragraph_text(bookmarks[targets[1]])
+    fields = [node.get(w("fldCharType")) for node in root.findall(".//w:fldChar", NS)]
+    assert fields == ["begin", "separate", "end"] * 3
+    assert "〔1〕" in paragraph_text(root)
+    with ZipFile(BytesIO(data)) as package:
+        numbering = parse_xml(package.read("word/numbering.xml"))
+    num = next(n for n in numbering.findall("w:num", NS) if n.get(w("numId")) in ids)
+    abstract_id = num.find("w:abstractNumId", NS).get(w("val"))
+    abstract = next(n for n in numbering.findall("w:abstractNum", NS) if n.get(w("abstractNumId")) == abstract_id)
+    assert abstract.find("w:lvl/w:lvlText", NS).get(w("val")) == "〔%1〕"
+    body_num = paragraph(root, "正文自有编号").find("w:pPr/w:numPr/w:numId", NS).get(w("val"))
+    assert body_num not in ids
+    assert all(r"\* CHARFORMAT" in code for code in references)
+    for node in root.findall(".//w:r", NS):
+        if node.find("w:instrText", NS) is not None:
+            assert node.find("w:rPr/w:vertAlign", NS).get(w("val")) == "superscript"
 
 
 def test_docx_material_source_link_opens_platform_page_and_keeps_download_access(

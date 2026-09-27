@@ -155,8 +155,9 @@ def _clean(record: dict) -> dict:
     return cleaned
 
 
-def _history_version(record: dict, case: dict, user: dict) -> dict:
+def _history_version(record: dict, case: dict, user: dict, review: dict | None) -> dict:
     cleaned = _clean(record)
+    cleaned["review"] = _last_review(review, record) if review else None
     if case["ownerId"] != user["id"]:
         cleaned["annotations"] = []
     return cleaned
@@ -536,18 +537,39 @@ def execute_lifecycle(database: Database, case_id: str, body: dict, user: dict) 
         )
 
 
-def get_history(database: Database, case_id: str, user: dict) -> dict:
+def _history_case(database: Database, case_id: str, user: dict) -> dict:
     case = database.cases.find_one({"id": case_id})
     if not case:
         raise CaseError(404, "案例不存在")
     if user["role"] != "admin" and case["ownerId"] != user["id"]:
         raise CaseError(403, "无权查看版本历史")
+    return case
+
+
+def get_review_feedback(database: Database, case_id: str, user: dict,
+                        version_number: int | None = None) -> dict:
+    _history_case(database, case_id, user)
+    query = {"caseId": case_id, "action": "reject"}
+    if version_number is not None:
+        query["round"] = version_number
+    event = database.lifecycle_events.find_one(query, sort=[("round", -1), ("createdAt", -1)])
+    if not event:
+        return {"status": "empty", "detail": "该版本没有退回意见" if version_number else "暂无退回意见"}
+    return {
+        "status": "ok", "caseId": case_id, "versionId": event["versionId"],
+        **_last_review(event, {"number": event["round"]}),
+    }
+
+
+def get_history(database: Database, case_id: str, user: dict) -> dict:
+    case = _history_case(database, case_id, user)
     versions = database.case_versions.find(
         {"caseId": case_id, "kind": {"$in": list(FORMAL_VERSION_KINDS)}}
     ).sort("number", 1)
-    events = database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1)
+    events = list(database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1))
+    reviews = {event["versionId"]: event for event in events if event["action"] == "reject"}
     return {
         "caseId": case_id,
-        "versions": [_history_version(row, case, user) for row in versions],
+        "versions": [_history_version(row, case, user, reviews.get(row["id"])) for row in versions],
         "events": [_clean(row) for row in events],
     }

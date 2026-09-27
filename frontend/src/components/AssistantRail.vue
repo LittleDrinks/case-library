@@ -1,18 +1,20 @@
 <script setup>
 import {
-  ChevronDown, ChevronUp, History, Paperclip,
+  ChevronDown, ChevronUp, History, MessageSquare, Paperclip,
   PanelRightClose, PanelRightOpen, Sparkles,
 } from "@lucide/vue";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
 import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
+import ReviewFeedback from "./ReviewFeedback.vue";
 
 const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  feedback: { type: Object, default: null },
   historical: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
   sources: { type: Array, default: () => [] },
@@ -33,16 +35,17 @@ const emit = defineEmits(["prompt-inserted", "select-annotation",
   "select", "toggle", "case-refreshed", "mutation-state",
   "case-revised", "annotations", "annotations-refresh", "ask-ai", "annotation-run",
   "sources-retry", "clear-writing-context", "insert-citation",
-  "open-version", "versions-updated",
+  "open-version", "open-review", "versions-updated",
   "version-created",
   "version-deleted",
 ]);
 
-const tabs = [
+const tabs = computed(() => [
   { id: "ai", label: "AI", icon: Sparkles },
   { id: "history", label: "历史版本", icon: History },
   { id: "files", label: "附件", icon: Paperclip },
-];
+  ...(props.feedback ? [{ id: "feedback", label: "审核意见", icon: MessageSquare }] : []),
+]);
 const panelCollapsed = ref(false);
 
 function select(tab) {
@@ -146,6 +149,7 @@ defineExpose({ expandPanel });
       @mutation-state="emit('mutation-state', $event)"
       @insert-citation="emit('insert-citation', $event)"
     />
+    <ReviewFeedback v-if="active === 'feedback' && feedback" :review="feedback" />
     <VersionPanel
       v-if="active === 'history'"
       :case-record="caseRecord"
@@ -154,6 +158,7 @@ defineExpose({ expandPanel });
       :csrf-token="user?.csrfToken || ''"
       @open-version="emit('open-version', $event)"
       @version-created="emit('version-created', $event)"
+      @open-review="emit('open-review', $event)"
       @version-deleted="emit('version-deleted', $event)"
     />
   </aside>

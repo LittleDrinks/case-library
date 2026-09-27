@@ -262,12 +262,13 @@ class AgentRepository:
         base_revision: int | None = None, target: ArtifactTarget | None = None,
         annotation_id: str | None = None,
         submitted_version_id: str | None = None,
+        read_only: bool = False,
     ) -> AgentRun:
         try:
             return _transaction(self.database, lambda session: self._start_run(
                 thread, user_id, parts, metadata, assistant_id, client_request_id,
                 owner_id, quota_ids, skill_bindings, session, default_title,
-                base_revision, target, annotation_id, submitted_version_id,
+                base_revision, target, annotation_id, submitted_version_id, read_only,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -277,6 +278,7 @@ class AgentRepository:
         owner_id, quota_ids, skill_bindings, session, default_title=None,
         base_revision=None, target=None, annotation_id: str | None = None,
         submitted_version_id: str | None = None,
+        read_only: bool = False,
     ) -> AgentRun:
         run_id, message_id = new_id("run"), new_id("message")
         message_seq = self._reserve_start(thread, run_id, client_request_id, session, default_title)
@@ -286,6 +288,7 @@ class AgentRepository:
             skill_bindings, base_revision, target,
             annotation_id, submitted_version_id,
         )
+        run.read_only = run.read_only or read_only
         self._insert_start_records(message, run, session)
         self._append_start_events(thread.id, run, message.id, session)
         return run
@@ -295,13 +298,14 @@ class AgentRepository:
                   skill_bindings: list[dict[str, str]] | None = None,
                   base_revision: int | None = None, target: ArtifactTarget | None = None,
                   annotation_id: str | None = None,
-                  submitted_version_id: str | None = None) -> AgentRun:
+                  submitted_version_id: str | None = None,
+                  read_only: bool = False) -> AgentRun:
         """重试失败消息：新 Run 引用原用户消息，不插入新消息。"""
         try:
             return _transaction(self.database, lambda session: self._retry_run(
                 thread, user_message_id, assistant_id, owner_id, quota_ids,
                 skill_bindings, base_revision, target, session, annotation_id,
-                submitted_version_id,
+                submitted_version_id, read_only,
             ))
         except DuplicateKeyError as error:
             raise ActiveRunError from error
@@ -309,7 +313,7 @@ class AgentRepository:
     def _retry_run(
         self, thread, user_message_id, assistant_id, owner_id, quota_ids,
         skill_bindings, base_revision, target, session, annotation_id,
-        submitted_version_id,
+        submitted_version_id, read_only,
     ) -> AgentRun:
         message = self._retry_message(thread, user_message_id, session)
         run_id = new_id("run")
@@ -318,7 +322,7 @@ class AgentRepository:
         return self._insert_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
             skill_bindings,
-            base_revision, target, session, annotation_id, submitted_version_id,
+            base_revision, target, session, annotation_id, submitted_version_id, read_only,
         )
 
     def _retry_message(self, thread, user_message_id: str, session):
@@ -334,12 +338,13 @@ class AgentRepository:
         self, thread, message, assistant_id, run_id, owner_id, quota_ids,
         skill_bindings, base_revision, target, session,
         annotation_id,
-        submitted_version_id,
+        submitted_version_id, read_only,
     ) -> AgentRun:
         run = _new_retry_run(
             thread, message, assistant_id, run_id, owner_id, quota_ids,
             skill_bindings, base_revision, target, annotation_id, submitted_version_id,
         )
+        run.read_only = run.read_only or read_only
         self.database.agent_runs.insert_one(_run_document(run), session=session)
         self._append_event(
             thread.id, "run.started", run.id,

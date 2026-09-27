@@ -536,6 +536,30 @@ def test_reviewer_returns_without_annotations_and_owner_sees_reason(
     assert view["availableActions"] == ["submit", "overwrite"]
 
 
+def test_review_feedback_stays_with_each_submission_after_resubmitting(client):
+    admin, case, first, started = _review_round(client)
+    expected = {}
+    for message in ["第一轮意见\n请补充来源。", "第二轮意见\n请调整格式。"]:
+        expected[started["version"]["id"]] = message
+        _decide(client, admin, started, "reject", reasonTypes=["内容需要补充或修改"], message=message)
+        owner = _relogin(client)
+        draft = client.get(f"/api/cases/{case['id']}").json()
+        submitted = _transition_json(client, case["id"], owner["csrfToken"], "submit", draft)
+        assert submitted["case"]["lastReview"] is None
+        admin = _relogin(client, "admin", "admin123")
+        started = _transition_json(client, case["id"], admin["csrfToken"], "start", submitted["case"])
+    for account in ["admin", "user"]:
+        _relogin(client, account, account + "123")
+        history = client.get(f"/api/cases/{case['id']}/history").json()
+        versions = {row["id"]: row for row in history["versions"]}
+        for version_id, message in expected.items():
+            assert versions[version_id]["review"]["message"] == message
+            assert versions[version_id]["review"]["versionNumber"] == versions[version_id]["number"]
+        assert versions[started["version"]["id"]]["review"] is None
+    client.cookies.clear()
+    assert client.get(f"/api/cases/{case['id']}/history").status_code == 401
+
+
 def _review_annotation(client, admin, case):
     response = client.post(
         f"/api/cases/{case['id']}/annotations",

@@ -6,9 +6,8 @@ const props = defineProps({
   tabs: { type: Array, default: () => [] },
   active: { type: String, default: "draft" },
   disabled: { type: Boolean, default: false },
-  overwritable: { type: Boolean, default: true },
 });
-const emit = defineEmits(["select", "close", "overwrite"]);
+const emit = defineEmits(["select", "close"]);
 const expanded = ref(false);
 let closeTimer;
 const visible = computed(() => expanded.value);
@@ -68,7 +67,7 @@ onBeforeUnmount(() => clearTimeout(closeTimer));
             :aria-label="tab.label"
             :aria-selected="active === tab.id"
             @click="emit('select', tab.id)"
-          >{{ tab.label }}</button>
+          ><span class="version-tab-label">{{ tab.label }}</span></button>
           <button
             class="close-version-tab"
             type="button"
@@ -78,13 +77,6 @@ onBeforeUnmount(() => clearTimeout(closeTimer));
           ><X :size="12" /></button>
         </div>
       </div>
-      <button
-        v-if="active !== 'draft' && overwritable"
-        class="overwrite-entry"
-        type="button"
-        :disabled="disabled"
-        @click="emit('overwrite')"
-      >恢复此版本</button>
     </div>
   </nav>
 </template>

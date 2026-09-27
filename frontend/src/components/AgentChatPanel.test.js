@@ -9,7 +9,7 @@ import { REVISION_WORKBENCH_KEY } from "../composables/revisionWorkbench.js";
 vi.mock("../api.js", () => ({
   api: {
     agentThread: vi.fn(), aiSettings: vi.fn(), agentDecide: vi.fn(),
-    agentCancel: vi.fn(), agentThreads: vi.fn(), agentCreateThread: vi.fn(), agentUndoWrite: vi.fn(), listSkills: vi.fn(),
+    agentCancel: vi.fn(), agentThreads: vi.fn(), agentCreateThread: vi.fn(), agentUndoWrite: vi.fn(), agentRedoWrite: vi.fn(), listSkills: vi.fn(),
     getCase: vi.fn(), getPublicCase: vi.fn(), getMaterial: vi.fn(), search: vi.fn(), listSources: vi.fn(),
     caseHistory: vi.fn(),
   },
@@ -503,10 +503,12 @@ it("keeps conversation context across panel remounts so tab switches never wipe 
   expect(parts.map((part) => part.type)).toEqual(["text", "data-source"]);
 });
 
-it("reader discussion binds its version and does not send an edit Skill", async () => {
+it("reader discussion binds its version, sends the selection and does not send an edit Skill", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
-  const wrapper = mountPanel({ versionId: "version-2", readOnly: true });
+  const wrapper = mountPanel({ versionId: "version-2", readOnly: true,
+    writingContext: { from: 9, to: 13, quote: "案例原文", sameBlock: true },
+  });
   await flushPromises();
   expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2", "");
   expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
@@ -514,7 +516,10 @@ it("reader discussion binds its version and does not send an edit Skill", async 
   await wrapper.get('[aria-label="发送"]').trigger("click");
   await flushPromises();
   const body = JSON.parse(fetch.mock.calls[0][1].body);
-  expect(body.messages.at(-1).parts).toEqual([{ type: "text", text: "只读问题" }]);
+  expect(body.messages.at(-1).parts).toEqual([
+    { type: "text", text: "只读问题" },
+    { type: "data-selection", data: { from: 9, to: 13 } },
+  ]);
 });
 
 it("review discussion allows Skill selection while preserving review mode and read-only composer", async () => {
@@ -1996,5 +2001,90 @@ it("continues the same reply during recovery and keeps one message at completion
   await vi.waitFor(() => expect(wrapper.text()).not.toContain("正在恢复连接"));
   expect(wrapper.text().match(/前半后半/g)).toHaveLength(1);
   expect(fetch.mock.calls).toHaveLength(1);
+  wrapper.unmount();
+});
+
+
+it("keeps undo and reapply inside the same revision card across snapshot refresh", async () => {
+  let current = revisionSnapshot("accepted");
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(current)));
+  api.agentUndoWrite.mockImplementation(() => {
+    current.writes[0].status = "undone";
+    return Promise.resolve({write: current.writes[0], case: {id: "case-1", revision: 3}});
+  });
+  api.agentRedoWrite.mockImplementation(() => {
+    current.writes[0].status = "written";
+    return Promise.resolve({write: current.writes[0], case: {id: "case-1", revision: 4}, applied: true, steps: [{stepType: "replace"}]});
+  });
+  const workbench = createRevisionWorkbench();
+  workbench.apply = vi.fn().mockResolvedValue(true);
+  const wrapper = mountPanel({caseRecord: {id: "case-1", revision: 3}}, workbench);
+  await flushPromises();
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  const card = wrapper.get('[data-testid="revision-suggestion"]');
+  await card.get('[data-testid="agent-undo-revision"]').trigger("click");
+  await flushPromises();
+  expect(card.get(".revision-suggestion-status").text()).toBe("已撤销");
+  expect(card.classes()).toContain("expanded");
+  await card.get('[data-testid="agent-redo-revision"]').trigger("click");
+  await flushPromises();
+  expect(api.agentRedoWrite).toHaveBeenCalledWith("case-1", "thread-tracer", "write-9", 3, "csrf");
+  expect(workbench.apply).toHaveBeenCalled();
+  expect(card.get(".revision-suggestion-status").text()).toBe("已应用");
+  expect(card.find('[data-testid="agent-undo-revision"]').exists()).toBe(true);
+  expect(card.classes()).toContain("expanded");
+});
+
+it("locates the restored original for an undone revision in a readonly workspace", async () => {
+  const current = revisionSnapshot("accepted");
+  current.writes[0].status = "undone";
+  api.agentThread.mockResolvedValue(current);
+  const workbench = createRevisionWorkbench();
+  const wrapper = mountPanel({readOnly: true}, workbench);
+  await flushPromises();
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({status: "pending", locateOnly: true}));
+  expect(wrapper.find('[data-testid="agent-redo-revision"]').exists()).toBe(false);
+});
+
+it.each(["written", "undone"])("refines an accepted suggestion against its current %s text", async (writeStatus) => {
+  const snapshot = revisionSnapshot("accepted");
+  snapshot.writes[0].status = writeStatus;
+  api.agentThread.mockImplementation(() => Promise.resolve(structuredClone(snapshot)));
+  const target = { from: 9, to: 20, quote: writeStatus === "written" ? "已应用的新正文" : "恢复的原文" };
+  const workbench = { ...createRevisionWorkbench(), refinementTarget: vi.fn().mockReturnValue(target) };
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  await wrapper.get('[data-testid="agent-refine"]').trigger("click");
+  await sendComposerMessage(wrapper, "再具体一点");
+  expect(postedParts(fetch)).toContainEqual({ type: "data-selection", data: target });
+  expect(postedParts(fetch)).toContainEqual({ type: "data-revision", data: { artifactId: "artifact-9" } });
+  expect(api.agentDecide).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it("previews a streamed revision before the run publishes artifacts", async () => {
+  const snapshot = revisionSnapshot("pending");
+  const artifact = snapshot.artifacts[0];
+  snapshot.artifacts = [];
+  snapshot.activeRun = { ...snapshot.latestRun, status: "active" };
+  snapshot.latestRun = snapshot.activeRun;
+  const part = snapshot.messages[1].parts.find((part) => part.type === "tool-propose_revision");
+  part.output = { artifactId: artifact.id, ...artifact.target, replacement: artifact.replacement, reason: artifact.reason };
+  api.agentThread.mockResolvedValue(snapshot);
+  const workbench = createRevisionWorkbench();
+  const wrapper = mountPanel({}, workbench);
+  await flushPromises();
+  await wrapper.get(".revision-suggestion-head").trigger("click");
+  await flushPromises();
+  expect(workbench.preview).toHaveBeenCalledWith(expect.objectContaining({ id: artifact.id, provisional: true }));
+  expect(workbench.flush).not.toHaveBeenCalled();
+  expect(wrapper.get('[data-testid="agent-accept"]').attributes("disabled")).toBeDefined();
   wrapper.unmount();
 });

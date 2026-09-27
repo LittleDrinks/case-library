@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Check, LoaderCircle, Search } from "@lucide/vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ArrowLeft, Check, LoaderCircle, Search } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api.js";
 import CatalogPagination from "../components/CatalogPagination.vue";
@@ -10,13 +10,17 @@ import { rememberMaterialReturn, restoreMaterialReturn } from "../lib/materialNa
 import { searchWithSyncRetry } from "../lib/searchSyncRetry.js";
 import { session } from "../session.js";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 const route = useRoute();
 const router = useRouter();
 const query = ref("");
 const materials = ref([]);
+const tableScroll = ref(null);
 const facets = ref({});
+const overview = ref(null);
+const overviewError = ref(false);
+let overviewGeneration = 0;
 const authority = ref("");
 const materialType = ref("");
 const externalOnly = ref(false);
@@ -59,6 +63,26 @@ function facetCount(name, value) {
   return facets.value[name]?.find(row => row.value === value)?.count || 0;
 }
 
+function overviewCount(authority) {
+  if (!overview.value) return "—";
+  if (!authority) return overview.value.total;
+  return overview.value.facets.authority?.find(row => row.value === authority)?.count || 0;
+}
+
+async function loadOverview() {
+  const current = ++overviewGeneration;
+  overviewError.value = false;
+  try {
+    const payload = await searchWithSyncRetry(
+      () => api.search("", "material", null, 1),
+      () => current === overviewGeneration,
+    );
+    if (current === overviewGeneration) overview.value = payload;
+  } catch {
+    if (current === overviewGeneration) overviewError.value = true;
+  }
+}
+
 function searchFilters() {
   return {
     ...(authority.value ? { authority: [authority.value] } : {}),
@@ -79,6 +103,7 @@ async function load(activeCursor = cursor.value) {
     );
     if (current !== searchGeneration) return;
     materials.value = payload.items;
+    if (tableScroll.value) tableScroll.value.scrollTop = 0;
     updateMetadata(payload);
     page.value = payload.page;
     nextCursor.value = payload.nextCursor;
@@ -172,7 +197,7 @@ async function mountSelected() {
   try {
     for (const id of ids) await mountOne(id);
     mounted.value = await api.listCaseMaterials(caseId.value);
-    await router.push({ name: "workbench", params: { id: caseId.value } });
+    await router.push({ name: "workbench", params: { id: caseId.value }, query: { panel: "files" } });
     selected.value = [];
   } catch (caught) {
     error.value = caught.message || "素材加入失败";
@@ -186,7 +211,7 @@ function selectView(mode) {
     updateRoute({ view: "all", authority: mode });
     return;
   }
-  updateRoute({ view: mode, authority: mode === "all" ? "" : authority.value });
+  updateRoute({ view: mode, authority: "" });
 }
 
 function selectFilter(name, value) {
@@ -216,7 +241,11 @@ function syncSearchRoute() {
 watch(() => route.fullPath, syncSearchRoute, { immediate: true });
 watch(caseId, loadContext, { immediate: true });
 
-onBeforeUnmount(invalidateSearch);
+onMounted(loadOverview);
+onBeforeUnmount(() => {
+  invalidateSearch();
+  overviewGeneration += 1;
+});
 </script>
 
 <template>
@@ -225,15 +254,16 @@ onBeforeUnmount(invalidateSearch);
     <main id="main-content" class="material-shell">
       <header class="material-heading">
         <div><span class="home-eyebrow">资源检索</span><h1>素材掌控台</h1><p>检索、筛选并将真实素材带回案例编写</p></div>
-        <RouterLink v-if="caseId" :to="{ name: 'workbench', params: { id: caseId } }">返回当前案例</RouterLink>
+        <RouterLink v-if="caseId" :to="{ name: 'workbench', params: { id: caseId }, query: { panel: 'files' } }"><ArrowLeft :size="14" />返回当前案例</RouterLink>
       </header>
       <div class="material-explorer">
         <aside class="material-filter">
           <h2>工作视图</h2>
           <button v-if="caseId" :class="{ active: viewMode === 'mounted' }" type="button" @click="selectView('mounted')"><span>当前案例候选</span><b>{{ mounted.length }}</b></button>
-          <button :class="{ active: viewMode === 'all' && authority === 'original' }" type="button" @click="selectView('original')"><span>最新权威材料</span><b>{{ facetCount('authority', 'original') }}</b></button>
-          <button :class="{ active: viewMode === 'all' && authority === 'pending' }" type="button" @click="selectView('pending')"><span>需复核来源</span><b>{{ facetCount('authority', 'pending') }}</b></button>
-          <button :class="{ active: viewMode === 'all' && !authority }" type="button" @click="selectView('all')"><span>全部可见素材</span><b>{{ visibleCount }}</b></button>
+          <button :class="{ active: viewMode === 'all' && authority === 'original' }" type="button" @click="selectView('original')"><span>最新权威材料</span><b>{{ overviewCount('original') }}</b></button>
+          <button :class="{ active: viewMode === 'all' && authority === 'pending' }" type="button" @click="selectView('pending')"><span>需复核来源</span><b>{{ overviewCount('pending') }}</b></button>
+          <button :class="{ active: viewMode === 'all' && !authority }" type="button" @click="selectView('all')"><span>全部可见素材</span><b>{{ overviewCount() }}</b></button>
+          <p v-if="overviewError" class="material-count-error" role="status">数量加载失败 <button type="button" @click="loadOverview">重试</button></p>
           <fieldset><legend>来源权威性</legend><label><input name="authority" type="radio" :checked="!authority" @change="selectFilter('authority', '')" /><span>全部</span><small>{{ visibleCount }}</small></label><label><input name="authority" type="radio" :checked="authority === 'original'" @change="selectFilter('authority', 'original')" /><span>原始权威</span><small>{{ facetCount('authority', 'original') }}</small></label><label><input name="authority" type="radio" :checked="authority === 'secondary'" @change="selectFilter('authority', 'secondary')" /><span>可靠二手</span><small>{{ facetCount('authority', 'secondary') }}</small></label><label><input name="authority" type="radio" :checked="authority === 'pending'" @change="selectFilter('authority', 'pending')" /><span>待核验</span><small>{{ facetCount('authority', 'pending') }}</small></label></fieldset>
           <fieldset><legend>素材类型</legend><label><input name="material-type" type="radio" :checked="!materialType" @change="selectFilter('materialType', '')" />全部</label><label v-for="item in types" :key="item.value"><input name="material-type" type="radio" :checked="materialType === item.value" @change="selectFilter('materialType', item.value)" />{{ item.value }} <small>{{ item.count }}</small></label></fieldset>
           <fieldset><legend>使用条件</legend><label><input type="checkbox" :checked="externalOnly" @change="selectExternal" /><span>仅可对外使用</span><small>{{ facetCount('accessLevel', 'public') }}</small></label></fieldset>
@@ -249,12 +279,14 @@ onBeforeUnmount(invalidateSearch);
             </button>
           </div>
           <p v-if="error" class="error-state" role="alert">{{ error }}</p>
-          <div class="material-table-wrap">
-            <CatalogPagination v-if="total" :page="page" :total="total" :next-cursor="nextCursor" :previous-cursor="previousCursor" @change="selectPage" />
-            <table><thead><tr><th v-if="caseId" class="selection-column">选择</th><th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th class="download-column">下载</th></tr></thead><tbody><tr v-for="item in materials" :key="item.id"><td v-if="caseId" class="selection-column" data-label="选择"><span v-if="mountedIds.has(item.id)" class="mounted-label">已加入</span><input v-else v-model="selected" type="checkbox" :value="item.id" :aria-label="`选择${item.title}`" :disabled="!item.contentAvailable || !editable || busy" /></td><td data-label="素材"><b><RouterLink :to="materialDetailLocation(item)" @click="rememberReturn">{{ item.title }}</RouterLink></b><small>{{ item.summary }}</small></td><td data-label="来源">{{ item.source }}</td><td data-label="类型">{{ item.materialType }}</td><td data-label="权威性">{{ { original: '原始权威来源', secondary: '可靠二手来源', pending: '待核验线索' }[item.authority] }}</td><td class="download-column" data-label="下载"><MaterialDownloadAction :material="item" /></td></tr></tbody></table>
+          <div ref="tableScroll" class="material-table-wrap">
+            <table><thead><tr><th v-if="caseId" class="selection-column">选择</th><th class="material-title-column">素材</th><th>来源</th><th>类型</th><th>权威性</th><th class="download-column">下载</th></tr></thead><tbody><tr v-for="item in materials" :key="item.id" :class="{ selected: selected.includes(item.id) }"><td v-if="caseId" class="selection-column" data-label="选择"><span v-if="mountedIds.has(item.id)" class="mounted-label">已加入</span><input v-else v-model="selected" type="checkbox" :value="item.id" :aria-label="`选择${item.title}`" :disabled="!item.contentAvailable || !editable || busy" /></td><td data-label="素材"><b><RouterLink :to="materialDetailLocation(item)" @click="rememberReturn">{{ item.title }}</RouterLink></b><small>{{ item.summary }}</small></td><td data-label="来源">{{ item.source || "—" }}</td><td data-label="类型">{{ item.materialType || "—" }}</td><td data-label="权威性">{{ { original: '原始权威来源', secondary: '可靠二手来源', pending: '待核验线索' }[item.authority] }}</td><td class="download-column" data-label="下载"><MaterialDownloadAction :material="item" /></td></tr></tbody></table>
             <p v-if="!materials.length" class="search-empty">当前筛选下没有结果</p>
-            <CatalogPagination v-if="total" :page="page" :total="total" :next-cursor="nextCursor" :previous-cursor="previousCursor" @change="selectPage" />
           </div>
+          <footer class="material-pagination-bar">
+            <span>每页 {{ PAGE_SIZE }} 条<span v-if="!nextCursor && !previousCursor"> · 共 {{ total }} 条</span></span>
+            <CatalogPagination v-if="total" :page="page" :total="total" :next-cursor="nextCursor" :previous-cursor="previousCursor" @change="selectPage" />
+          </footer>
         </section>
       </div>
     </main>

@@ -23,7 +23,7 @@ const actionLabels = {
   draft: "继续编辑",
   pending: "查看提交",
   reviewing: "查看审核",
-  published: "查看公开页",
+  published: "进入工作台",
 };
 
 function isReturned(item) {
@@ -48,10 +48,7 @@ const groupedCases = computed(() => groups.map((group) => ({
 const returnedCases = computed(() => cases.value.filter(isReturned));
 
 function caseDestination(item) {
-  const publiclyReadable = item.workflowStatus === "published"
-    && item.publicationStatus === "public";
-  const name = publiclyReadable ? "case-public" : "workbench";
-  return { name, params: { id: item.id } };
+  return { name: "workbench", params: { id: item.id } };
 }
 
 function cardStatus(item) {

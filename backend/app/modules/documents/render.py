@@ -16,6 +16,9 @@ from docx.text.run import Run
 
 from app.modules.cases.document_schema import validate_prosemirror_document
 from app.modules.documents.fonts import embed_title_font
+from app.modules.documents.references import (
+    add_citation, bookmark_reference, configure_reference_numbering,
+)
 from app.modules.documents.styles import (
     BODY_FONT,
     BODY_SIZE,
@@ -67,12 +70,6 @@ def _inline_atoms(
     return atoms
 
 
-def _add_citation_run(paragraph: Paragraph, number: int, font: str, size: int) -> None:
-    run = paragraph.add_run(f"〔{number}〕")
-    set_run_font(run, font, size)
-    run.font.superscript = True
-
-
 def _format_marks(run: Run, node: dict) -> None:
     marks = _mark_types(node)
     run.bold = "bold" in marks
@@ -99,7 +96,7 @@ def _add_inlines(
             continue
         number = numbers.get(key)
         if number is not None:
-            _add_citation_run(paragraph, number, font, size)
+            add_citation(paragraph, number, font, size)
 
 
 def _add_title(document: DocxDocument, title: str) -> None:
@@ -279,7 +276,7 @@ def _link_style() -> OxmlElement:
 
 
 def _reference_line(paragraph: Paragraph, entry: dict) -> None:
-    label = f"〔{entry['number']}〕 {entry['title']}"
+    label = entry["title"]
     if entry.get("source"):
         label += f"．{entry['source']}"
     if entry.get("version"):
@@ -298,10 +295,17 @@ def _add_references(document: DocxDocument, entries: list[dict]) -> None:
     format_heading(paragraph)
     run = paragraph.add_run("参考资料")
     set_run_font(run, HEADING_FONT, HEADING_SIZE)
+    num_id = _new_numbering(document, "List Number", 1)
+    configure_reference_numbering(document, num_id)
     for entry in entries:
         line = document.add_paragraph()
-        format_body(line)
+        format_body(line, indented=False)
+        line.paragraph_format.left_indent = Pt(30)
+        line.paragraph_format.first_line_indent = -Pt(30)
+        line.paragraph_format.tab_stops.add_tab_stop(Pt(30))
+        _bind_numbering(line, num_id)
         _reference_line(line, entry)
+        bookmark_reference(line, entry["number"])
 
 
 def build_case_docx(case: dict, entries: list[dict]) -> bytes:

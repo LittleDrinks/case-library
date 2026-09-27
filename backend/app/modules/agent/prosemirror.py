@@ -63,6 +63,11 @@ def _result(transform: Transform) -> tuple[dict[str, Any], list[dict[str, Any]]]
     return document, [step.to_json() for step in transform.steps]
 
 
+def documents_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """按原生节点比较正文，空 content 的省略不构成内容变化。"""
+    return _document(left).eq(_document(right))
+
+
 def replace_document(document: dict[str, Any], updated: dict[str, Any]):
     source, target = _document(document), _document(updated)
     transform = Transform(source).replace(0, source.content.size, Slice(target.content, 0, 0))
