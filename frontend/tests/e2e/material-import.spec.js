@@ -212,6 +212,8 @@ async function expectMaterialAbsent(page, caseId, title) {
 async function expectWorkbenchMaterial(page, title) {
   const panel = page.locator("section.attachment-panel");
   const materialsTab = page.getByRole("button", { name: /素材 \d+/ });
+  const expandRail = page.getByLabel("辅助面板").getByRole("button", { name: "展开侧栏" });
+  if (await expandRail.isVisible()) await expandRail.click();
   if (!await materialsTab.isVisible()) {
     await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
   }

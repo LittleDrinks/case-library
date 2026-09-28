@@ -225,6 +225,15 @@ async function expectMidGeneration(page, caseId, threadId) {
 }
 
 async function expectSameRunTerminal(page, caseId, threadId, runId, question) {
+  await expect.poll(async () => {
+    const snapshot = await threadSnapshot(page, caseId, threadId);
+    return {
+      runId: snapshot.latestRun.id,
+      activeRunId: snapshot.activeRun?.id || null,
+      status: snapshot.latestRun.status,
+      eventSeq: snapshot.eventSeq,
+    };
+  }, { timeout: 15000 }).toEqual({ runId, activeRunId: null, status: "completed", eventSeq: 4 });
   const snapshot = await threadSnapshot(page, caseId, threadId);
   expect(snapshot.latestRun.id).toBe(runId);
   expectSingleExchange(snapshot, question);
