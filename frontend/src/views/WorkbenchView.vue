@@ -823,12 +823,17 @@ watch(readerMode, (value) => {
 watch(reviewFeedback, (value) => {
   if (!value && activeTool.value === "feedback") activeTool.value = "ai";
 });
+function openFilesPanelFromRoute() {
+  if (route.query?.panel !== "files") return;
+  activeTool.value = "files";
+  drawerOpen.value = true;
+  nextTick(() => assistantRail.value?.expandPanel());
+}
+watch(() => route.query?.panel, openFilesPanelFromRoute);
 onMounted(() => {
   loadCase();
   loadTagCatalog();
-  if (route.query?.panel === "files") {
-    nextTick(() => assistantRail.value?.expandPanel());
-  }
+  openFilesPanelFromRoute();
 });
 onBeforeUnmount(() => {
   clearActionNotice();
