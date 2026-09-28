@@ -126,9 +126,6 @@ assert_installed() {
   startup_command="$startup_command meilisearch search-init search-worker app frontend"
   grep -Fq "$startup_command" "$log"
 }
-install_run latest "$temporary/server"
-assert_installed "$temporary/server" "$temporary/docker.log"
-grep -Fq 'releases/latest/download/case-library-deploy.tar.gz' "$temporary/curl.log"
 install_run pre-alpha.1 "$temporary/server-selector"
 assert_installed "$temporary/server-selector" "$temporary/docker.log"
 grep -Fq 'releases/download/pre-alpha.1/case-library-deploy.tar.gz' "$temporary/curl.log"

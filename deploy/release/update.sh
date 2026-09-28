@@ -62,12 +62,8 @@ install_bundle() {
 }
 
 release_path() {
-  selector="${1:-latest}"
-  test "$selector" = latest && {
-    printf '%s\n' releases/latest/download
-    return
-  }
-  printf '%s\n' "$selector" | grep -Eq '^pre-alpha\.[0-9]+$' || fail "Use latest or pre-alpha.N"
+  selector="${1:-}"
+  printf '%s\n' "$selector" | grep -Eq '^pre-alpha\.[0-9]+$' || fail "Usage: ./update.sh pre-alpha.N"
   printf '%s\n' "releases/download/$selector"
 }
 
@@ -76,7 +72,7 @@ compose() {
 }
 
 command -v docker >/dev/null 2>&1 || fail "Docker Engine with Compose is required"
-release="$(release_path "${1:-latest}")"
+release="$(release_path "${1:-}")"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 base_url="https://github.com/LittleDrinks/case-library/$release"

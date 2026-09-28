@@ -157,4 +157,4 @@ jobs:
           gh release create "$VERSION" "$RELEASE_DIR"/* \
             --prerelease \
             --title "$DISPLAY_NAME" \
-            --notes "Run ./update.sh to install or update this release."
+            --notes "Run ./update.sh $VERSION to install or update this release."
