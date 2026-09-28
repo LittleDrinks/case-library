@@ -6,7 +6,7 @@ async function login(page) {
   await page.getByLabel("用户名").fill("user");
   await page.getByLabel("密码").fill("user123");
   await page.getByRole("button", { name: "登录", exact: true }).click();
-  await expect(page).toHaveURL(/#\/workbench\/c-draft-1$/);
+  await expect(page).toHaveURL(/#\/workbench\/c-draft-1(?:\?panel=files)?$/);
 }
 
 async function clearMaterials(request) {
@@ -205,7 +205,7 @@ test("公共检索列表在手机端无横向溢出", async ({ page }) => {
 async function selectMaterial(page, title) {
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
-  await expect(page).toHaveURL(/#\/workbench\/c-draft-1$/);
+  await expect(page).toHaveURL(/#\/workbench\/c-draft-1(?:\?panel=files)?$/);
 }
 
 async function searchKnownMaterial(page, title) {
@@ -235,10 +235,15 @@ async function searchKnownMaterial(page, title) {
 }
 
 async function assertMaterialAttached(page, title) {
-  await expect(page).toHaveURL(/#\/workbench\/c-draft-1$/);
-  await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
-  await page.getByRole("button", { name: /素材 1/ }).click();
-  await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#\/workbench\/c-draft-1(?:\?panel=files)?$/);
+  const panel = page.locator("section.attachment-panel");
+  const materialsTab = page.getByRole("button", { name: /素材 \d+/ });
+  if (!await materialsTab.isVisible()) {
+    await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
+  }
+  await expect(materialsTab).toBeVisible();
+  await materialsTab.click();
+  await expect(panel.getByText(title, { exact: true })).toBeVisible();
 }
 
 async function enterCatalogFromWorkbench(page) {
@@ -312,15 +317,15 @@ test("素材掌控台在手机端无横向溢出", async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("素材掌控台按 20 条分页、可进详情并恢复案例上下文", async ({ page }) => {
+test("素材掌控台按 10 条分页、可进详情并恢复案例上下文", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await openCatalogFirstScreen(page, "/#/materials?caseId=c-draft-1", async () => {
     await expect(page.getByText(/第 1 页 · 共/).first()).toBeVisible();
   });
-  await expect(page.locator("tbody tr")).toHaveCount(20);
-  await expect(page.locator(".catalog-pagination")).toHaveCount(2);
+  await expect(page.locator("tbody tr")).toHaveCount(10);
+  await expect(page.locator(".catalog-pagination")).toHaveCount(1);
   const secondPage = expectSearchPageRequest(page, "material", true);
   await page.getByRole("button", { name: "下一页" }).first().click();
   await secondPage;

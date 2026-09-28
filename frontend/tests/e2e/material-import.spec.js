@@ -180,7 +180,7 @@ async function mountApprovedMaterial(page, caseId, title) {
   await openApprovedMaterialSearch(page, caseId, title);
   await page.getByLabel(`选择${title}`).check();
   await page.getByRole("button", { name: "加入当前案例" }).click();
-  await expect.poll(() => new URL(page.url()).hash).toBe(`#/workbench/${caseId}`);
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/workbench/${caseId}?panel=files`);
 }
 
 async function expectDownloadedFile(page, linkName, filename, content) {
@@ -210,9 +210,14 @@ async function expectMaterialAbsent(page, caseId, title) {
 }
 
 async function expectWorkbenchMaterial(page, title) {
-  await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
-  await page.getByRole("button", { name: /素材 1/ }).click();
-  await expect(page.locator("section.attachment-panel").getByText(title, { exact: true })).toBeVisible();
+  const panel = page.locator("section.attachment-panel");
+  const materialsTab = page.getByRole("button", { name: /素材 \d+/ });
+  if (!await materialsTab.isVisible()) {
+    await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
+  }
+  await expect(materialsTab).toBeVisible();
+  await materialsTab.click();
+  await expect(panel.getByText(title, { exact: true })).toBeVisible();
 }
 
 async function reviewImportedCandidates(page, marker, filename, rejected, title) {

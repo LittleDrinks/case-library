@@ -60,7 +60,7 @@ grep -Fq '    uses: ./.github/workflows/ci.yml' "$release_workflow"
 grep -Fq '    needs: [validate-tag, tests]' "$release_workflow"
 grep -Fq 'gh release view "$GITHUB_REF_NAME"' "$release_workflow"
 ! grep -Fq -- '--clobber' "$release_workflow"
-grep -Fq -- '-alpha\.' "$release_workflow"
+grep -Fq -- '-pre-alpha\.' "$release_workflow"
 grep -Fq 'display="Case Library $VERSION"' "$release_workflow"
 grep -Fq '"$DISPLAY_NAME"' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
@@ -143,7 +143,7 @@ cp "$release_dir/update.sh" "$temporary/server-bad/update.sh"
 if PATH="$temporary/fake-bin:$PATH" RELEASE_FIXTURE="$temporary/release" \
   CURL_LOG="$temporary/curl.log" DOCKER_LOG="$temporary/docker-bad.log" \
   "$temporary/server-bad/update.sh" v0.1.0 2>/dev/null; then
-  echo "update.sh must reject non-alpha selectors" >&2
+  echo "update.sh must reject invalid selectors" >&2
   exit 1
 fi
 test ! -s "$temporary/docker-bad.log"

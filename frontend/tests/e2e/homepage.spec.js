@@ -136,18 +136,15 @@ test("教师在审核开始后看到查看审核入口", async ({ page }) => {
   await expect(reviewing.getByRole("link", { name: "查看审核" })).toBeVisible();
 });
 
-test("已发布案例从我的案例和工作台进入公开页", async ({ page }) => {
+test("已发布案例从我的案例进入工作台并可另开新稿", async ({ page }) => {
   await login(page, "admin", "admin123");
   await page.goto("/#/my-cases");
   const published = page.locator(".case-card", { hasText: PUBLIC_CASE });
 
-  await published.getByRole("link", { name: "查看公开页" }).click();
-  await expect(page).toHaveURL(/#\/cases\/c-02$/);
+  await published.getByRole("link", { name: "进入工作台" }).click();
+  await expect(page).toHaveURL(/#\/workbench\/c-02$/);
   await expect(page.locator(".workspace-header")).toBeVisible();
-  await expect(page.locator(".case-status")).toContainText("只读");
-  await expect(page.locator(".canvas-editor")).toHaveAttribute("contenteditable", "false");
-  await expect(page.getByRole("link", { name: "进入工作台" })).toHaveCount(0);
-  await page.goto("/#/workbench/c-02");
+  await expect(page.getByRole("button", { name: "另开新稿" })).toBeVisible();
   const publicLink = page.locator(".workspace-header").getByRole("link", { name: "查看公开页" });
   await expect(publicLink).toBeVisible();
   await publicLink.click();

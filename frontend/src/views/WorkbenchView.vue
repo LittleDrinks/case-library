@@ -826,6 +826,9 @@ watch(reviewFeedback, (value) => {
 onMounted(() => {
   loadCase();
   loadTagCatalog();
+  if (route.query?.panel === "files") {
+    nextTick(() => assistantRail.value?.expandPanel());
+  }
 });
 onBeforeUnmount(() => {
   clearActionNotice();
@@ -970,6 +973,7 @@ onBeforeUnmount(() => {
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="updateWritingContext"
+                @ask-ai="selectHeaderTool('ai')"
               />
             </article>
           </template>

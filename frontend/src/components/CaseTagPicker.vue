@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronDown, LoaderCircle, Search, Tags, X } from "@lucide/vue";
 import { ElPopover } from "element-plus";
 import "element-plus/theme-chalk/el-popper.css";
@@ -65,7 +65,7 @@ function closeOnEscape(event) {
   if (!open.value || event.key !== "Escape") return;
   event.preventDefault();
   open.value = false;
-  triggerButton.value?.focus();
+  nextTick(() => triggerButton.value?.focus({ preventScroll: true }));
 }
 
 onMounted(() => {

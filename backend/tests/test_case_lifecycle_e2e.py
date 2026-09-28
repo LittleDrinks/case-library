@@ -57,7 +57,8 @@ def _assert_frozen_submission(opener, csrf: str, case: dict, result: dict) -> No
     assert result["version"]["id"] == result["case"]["submittedVersionId"]
     assert result["version"]["document"] == case["document"]
     history = request(opener, "GET", f"/api/cases/{case['id']}/history")[1]
-    assert history["versions"] == [result["version"]]
+    assert [{key: value for key, value in row.items() if key != "review"}
+            for row in history["versions"]] == [result["version"]]
     status, _body = request(
         opener,
         "PATCH",
@@ -357,7 +358,9 @@ def _assert_overwrite_history(history: dict, submitted: dict, changed: dict) -> 
     assert [row["number"] for row in versions] == [1, 2, 3]
     assert [row["kind"] for row in versions] == ["submission", "manual", "restore"]
     submission, baseline, restored = versions
-    assert submission == submitted["version"]
+    assert {
+        key: value for key, value in submission.items() if key != "review"
+    } == submitted["version"]
     assert baseline["title"] == "恢复前的当前稿"
     assert baseline["document"] == changed["document"]
     assert baseline["sourceRevision"] == changed["revision"]

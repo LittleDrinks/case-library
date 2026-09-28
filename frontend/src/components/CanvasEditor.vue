@@ -30,7 +30,7 @@ const props = defineProps({
   sources: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
-  "change", "selection", "writing-context", "annotate", "annotation-click",
+  "change", "selection", "writing-context", "annotate", "annotation-click", "ask-ai",
 ]);
 const selection = ref(null);
 const cursorPlaced = ref(false);
@@ -763,6 +763,6 @@ defineExpose({
   <Teleport to="#workbench-format-toolbar">
     <EditorToolbar v-if="editable" :editor="editor" />
   </Teleport>
-  <SelectionToolbar v-if="editable && editor" :editor="editor" />
+  <SelectionToolbar v-if="editable && editor" :editor="editor" @ask-ai="emit('ask-ai')" />
   <EditorContent :editor="editor" />
 </template>

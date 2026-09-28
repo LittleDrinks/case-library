@@ -74,7 +74,10 @@ for (const withMessage of [true, false]) {
     await login(page);
     await page.goto(`/#/workbench/${created.id}`);
     await page.reload();
-    const notice = page.locator(".review-return-banner");
+    const entry = page.locator(".review-feedback-entry");
+    await expect(entry).toContainText(`退回修改 · v1`);
+    await entry.click();
+    const notice = page.locator("#review-feedback-panel");
     for (const reason of reasons) await expect(notice).toContainText(reason);
     if (withMessage) await expect(notice).toContainText(message);
     await expect(page.getByRole("button", { name: "批注", exact: true })).toHaveCount(0);
