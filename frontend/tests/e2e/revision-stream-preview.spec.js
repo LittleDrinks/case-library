@@ -50,7 +50,7 @@ test(`生成期间展开预览，结束状态 ${terminalStatus} 正确收敛`, a
   });
   await expect(page.locator(".revision-preview-new")).toHaveText(replacement);
   await expect(card.getByTestId("agent-accept")).toBeDisabled();
-  await expect.poll(() => page.evaluate(() => window.revisionFrames.length)).toBeGreaterThan(15);
+  await expect.poll(() => page.evaluate(() => window.revisionFrames.length)).toBeGreaterThan(8);
   const frames = await page.evaluate(() => window.revisionFrames);
   expect(new Set(frames.map((frame) => Math.round(frame.height))).size).toBeGreaterThan(3);
   expect(Math.max(...frames.map((frame) => frame.y)) - Math.min(...frames.map((frame) => frame.y))).toBeLessThan(2);

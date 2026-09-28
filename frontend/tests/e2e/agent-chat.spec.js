@@ -300,7 +300,7 @@ async function proposeRevisionApplyAndUndo(page, created, message, selected) {
   expect(historyAfterApply.versions[0].kind).toBe("ai");
 
   await page.getByTestId("agent-undo-revision").click();
-  await expect(page.getByTestId("agent-write-undone")).toBeVisible();
+  await expect(card.locator(".revision-suggestion-status")).toHaveText("已撤销");
   await expect.poll(async () => documentText((await caseRecord(page, created.id)).document))
     .toBe(ORIGINAL_TEXT);
   expect(versionIdentity(await caseHistory(page, created.id)))
