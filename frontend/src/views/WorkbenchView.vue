@@ -412,6 +412,8 @@ async function loadCase() {
     loadError.value = error.message || "案例加载失败";
   } finally {
     loading.value = false;
+    await nextTick();
+    openFilesPanelFromRoute();
   }
 }
 
@@ -827,7 +829,7 @@ function openFilesPanelFromRoute() {
   if (route.query?.panel !== "files") return;
   activeTool.value = "files";
   drawerOpen.value = true;
-  nextTick(() => assistantRail.value?.expandPanel());
+  nextTick(() => assistantRail.value?.expandPanel?.());
 }
 watch(() => route.query?.panel, openFilesPanelFromRoute);
 onMounted(() => {
