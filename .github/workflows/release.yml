@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["*"]
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-pre-alpha\.[0-9]+$'
+          printf '%s\n' "$VERSION" | grep -Eq '^pre-alpha\.[0-9]+$'
           display="Case Library $VERSION"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "display_name=$display" >> "$GITHUB_OUTPUT"
@@ -155,5 +155,6 @@ jobs:
           RELEASE_DIR: ${{ runner.temp }}/release
         run: |
           gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
+            --prerelease \
             --title "$DISPLAY_NAME" \
             --notes "Run ./update.sh to install or update this release."

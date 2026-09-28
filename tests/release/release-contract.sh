@@ -60,7 +60,7 @@ grep -Fq '    uses: ./.github/workflows/ci.yml' "$release_workflow"
 grep -Fq '    needs: [validate-tag, tests]' "$release_workflow"
 grep -Fq 'gh release view "$GITHUB_REF_NAME"' "$release_workflow"
 ! grep -Fq -- '--clobber' "$release_workflow"
-grep -Fq -- '-pre-alpha\.' "$release_workflow"
+grep -Fq -- 'pre-alpha\.' "$release_workflow"
 grep -Fq 'display="Case Library $VERSION"' "$release_workflow"
 grep -Fq '"$DISPLAY_NAME"' "$release_workflow"
 grep -Fq 'org.opencontainers.image.source' "$release_workflow"
@@ -68,12 +68,12 @@ for image in app frontend mongo_init meilisearch minio; do
   grep -Fq "steps.images.outputs.$image" "$release_workflow"
 done
 
-CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app:v0.1.0-pre-alpha.1" \
-CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend:v0.1.0-pre-alpha.1" \
-CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init:v0.1.0-pre-alpha.1" \
-CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch:v0.1.0-pre-alpha.1" \
-CASE_LIBRARY_MINIO_IMAGE="ghcr.io/littledrinks/case-library-minio:v0.1.0-pre-alpha.1" \
-  "$project_dir/scripts/package-release.sh" v0.1.0-pre-alpha.1 "$temporary/release"
+CASE_LIBRARY_APP_IMAGE="ghcr.io/littledrinks/case-library-app:pre-alpha.1" \
+CASE_LIBRARY_FRONTEND_IMAGE="ghcr.io/littledrinks/case-library-frontend:pre-alpha.1" \
+CASE_LIBRARY_MONGO_INIT_IMAGE="ghcr.io/littledrinks/case-library-mongo-init:pre-alpha.1" \
+CASE_LIBRARY_MEILISEARCH_IMAGE="ghcr.io/littledrinks/case-library-meilisearch:pre-alpha.1" \
+CASE_LIBRARY_MINIO_IMAGE="ghcr.io/littledrinks/case-library-minio:pre-alpha.1" \
+  "$project_dir/scripts/package-release.sh" pre-alpha.1 "$temporary/release"
 
 test -f "$temporary/release/case-library-deploy.tar.gz"
 test -f "$temporary/release/update.sh"
@@ -117,9 +117,9 @@ assert_installed() {
   root="$1" log="$2"
   grep -Eq '^APP_SECRET=.{64}$' "$root/.env"
   grep -Eq '^MINIO_ROOT_PASSWORD=.{64}$' "$root/.env"
-  grep -Fq "CASE_LIBRARY_RELEASE_VERSION=v0.1.0-pre-alpha.1" "$root/images.env"
-  grep -Fq "CASE_LIBRARY_APP_IMAGE=ghcr.io/littledrinks/case-library-app:v0.1.0-pre-alpha.1" "$root/images.env"
-  grep -Fq "CASE_LIBRARY_MINIO_IMAGE=ghcr.io/littledrinks/case-library-minio:v0.1.0-pre-alpha.1" "$root/images.env"
+  grep -Fq "CASE_LIBRARY_RELEASE_VERSION=pre-alpha.1" "$root/images.env"
+  grep -Fq "CASE_LIBRARY_APP_IMAGE=ghcr.io/littledrinks/case-library-app:pre-alpha.1" "$root/images.env"
+  grep -Fq "CASE_LIBRARY_MINIO_IMAGE=ghcr.io/littledrinks/case-library-minio:pre-alpha.1" "$root/images.env"
   grep -Fq 'config --quiet' "$log"
   grep -Fq 'pull' "$log"
   startup_command='up -d --wait --force-recreate production-config-check mongo-init'
@@ -129,9 +129,9 @@ assert_installed() {
 install_run latest "$temporary/server"
 assert_installed "$temporary/server" "$temporary/docker.log"
 grep -Fq 'releases/latest/download/case-library-deploy.tar.gz' "$temporary/curl.log"
-install_run v0.1.0-pre-alpha.1 "$temporary/server-selector"
+install_run pre-alpha.1 "$temporary/server-selector"
 assert_installed "$temporary/server-selector" "$temporary/docker.log"
-grep -Fq 'releases/download/v0.1.0-pre-alpha.1/case-library-deploy.tar.gz' "$temporary/curl.log"
+grep -Fq 'releases/download/pre-alpha.1/case-library-deploy.tar.gz' "$temporary/curl.log"
 test "$(wc -l < "$temporary/curl.log")" -eq 1
 if grep -Fq 'releases/latest/download' "$temporary/curl.log"; then
   echo "Explicit selector must not use the latest download path" >&2
