@@ -158,13 +158,13 @@ it("opens the selected panel on the first click while the drawer is closed", asy
   expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
 });
 
-it("collapses the current desktop panel on its first click", async () => {
+it("opens the selected desktop panel on its first click", async () => {
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
   const wrapper = render({ open: false, active: "ai" });
 
   await wrapper.get('[aria-label="AI"]').trigger("click");
 
-  expect(wrapper.get(".assistant-rail").classes()).toContain("collapsed");
+  expect(wrapper.get(".assistant-rail").classes()).not.toContain("collapsed");
 });
 
 it("closes the mobile drawer when its active tab is clicked and reopens on the next click", async () => {
