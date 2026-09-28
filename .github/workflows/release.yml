@@ -154,7 +154,7 @@ jobs:
           DISPLAY_NAME: ${{ needs.validate-tag.outputs.display_name }}
           RELEASE_DIR: ${{ runner.temp }}/release
         run: |
-          gh release create "$VERSION" "$RELEASE_DIR"/* --latest \
+          gh release create "$VERSION" "$RELEASE_DIR"/* \
             --prerelease \
             --title "$DISPLAY_NAME" \
             --notes "Run ./update.sh to install or update this release."
