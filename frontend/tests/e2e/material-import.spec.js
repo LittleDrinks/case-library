@@ -212,10 +212,12 @@ async function expectMaterialAbsent(page, caseId, title) {
 async function expectWorkbenchMaterial(page, title) {
   const panel = page.locator("section.attachment-panel");
   const materialsTab = page.getByRole("button", { name: /素材 \d+/ });
-  const expandRail = page.getByLabel("辅助面板").getByRole("button", { name: "展开侧栏" });
+  const rail = page.getByLabel("辅助面板");
+  const expandRail = rail.getByRole("button", { name: "展开侧栏" });
   if (await expandRail.isVisible()) await expandRail.click();
-  if (!await materialsTab.isVisible()) {
-    await page.getByLabel("辅助面板").getByRole("button", { name: "附件" }).click();
+  const attachmentTab = rail.getByRole("button", { name: "附件" });
+  if (await attachmentTab.getAttribute("aria-pressed") !== "true") {
+    await attachmentTab.click();
   }
   await expect(materialsTab).toBeVisible();
   await materialsTab.click();
