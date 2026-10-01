@@ -1143,8 +1143,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .console-heading p { margin:6px 0 0; color:var(--ink-3); font-size:12px; }
 .console-case-toggle { display:flex; gap:8px; align-items:center; color:var(--ink-2); font-size:13px; }
 .console-case-toggle input { accent-color:var(--brand); }
+.console-notice { padding:10px 16px; font-size:12px; color:var(--green); background:var(--green-soft); border-bottom:1px solid var(--line); }
 .console-scope { font-size:10px; color:var(--ink-3); padding:2px 5px; border:1px solid var(--line); border-radius:3px; white-space:nowrap; }
 .console-file-heading { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.material-filter .private-summary { font-size:11px; color:var(--ink-3); margin-top:18px; padding-top:14px; border-top:1px solid var(--line); line-height:1.6; }
+.material-filter .private-summary b { display:block; color:var(--ink-2); margin-bottom:5px; font-weight:500; }
 .material-table .quiet-label { color:var(--ink-3); font-size:11px; }
 .material-download-btn:disabled { color:var(--ink-3); cursor:not-allowed; opacity:.55; }
 .material-pagination select { border:1px solid var(--line); background:var(--paper); border-radius:4px; padding:4px; color:var(--ink-2); font:inherit; }
@@ -1189,6 +1192,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .console-search-field input { font-size:13px; }
   .material-selection-bar { flex-wrap:wrap; }
   .material-pagination { align-items:flex-start; }
+  .material-filter .private-summary { display:none; }
   .drawer-body.detail-layout { grid-template-columns:minmax(0,1fr); }
   .detail-reading, .detail-facts { padding:16px; }
   .detail-facts { border-left:0; border-top:1px solid var(--line); }
@@ -1221,6 +1225,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .filter-view { min-height:34px; padding-block:6px; margin-bottom:3px; }
   .filter-section { margin-top:14px; }
   .filter-type { min-height:30px; padding-block:4px; }
+  .material-filter .private-summary { margin-top:14px; padding-top:10px; }
 }
 @media(max-width:700px) {
   .drawer-body.detail-layout { grid-template-columns:minmax(0,1fr); }
@@ -1229,47 +1234,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .standalone-detail-header { flex-wrap:wrap; padding:22px; }
   .standalone-detail h1 { font-size:24px; }
   .standalone-detail .detail-reading,.standalone-detail .detail-facts { padding:18px; }
-}
-
-.selection-review { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 24px; border-bottom:1px solid var(--line); background:#faf9f6; max-height:112px; overflow:auto; flex-shrink:0; }
-.selected-resource { display:inline-flex; align-items:center; gap:9px; padding:4px 8px; border:1px solid var(--line); border-radius:5px; font-size:12px; }
-.selected-resource button { width:22px; height:22px; color:var(--ink-3); font-size:17px; }
-.selected-resource button:hover,.selection-clear:hover { color:var(--brand); }
-.selection-clear { font-size:12px; color:var(--ink-3); }
-.admin-main.case-preview-main { width:min(1888px,100%); padding:24px 28px 50px; }
-.case-preview-shell { background:var(--paper); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); overflow:hidden; }
-.case-preview-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:18px; padding:24px 30px; border-bottom:1px solid var(--line); }
-.case-preview-heading h1 { font:650 27px/1.5 "STSong",serif; margin-top:6px; }
-.case-draft-label { font-size:12px; color:var(--ink-3); }
-.case-select-more { padding:10px 17px; border:1px solid var(--line-strong); border-radius:6px; color:var(--brand); font-size:14px; }
-.case-select-more:hover { background:var(--brand-soft); }
-.case-preview-workspace { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(360px,1fr); min-height:620px; }
-.case-preview-document { padding:38px 42px; }
-.case-section-label { color:var(--ink-3); font-size:12px; }
-.case-preview-document h2 { font:600 20px/1.6 "STSong",serif; margin:24px 0 12px; }
-.case-preview-document p { line-height:2; color:var(--ink-2); max-width:650px; }
-.case-preview-document .case-draft-note { color:var(--ink-3); font-size:12px; margin-top:50px; }
-.case-preview-sources { border-left:1px solid var(--line); padding:24px; background:#faf9f6; min-width:0; }
-.case-preview-sources:focus { outline:none; }
-.case-source-heading { display:flex; align-items:center; justify-content:space-between; padding-bottom:16px; }
-.case-source-heading h2 { font-size:16px; font-weight:600; }
-.case-source-heading > span { color:var(--ink-3); font-size:12px; }
-.case-preview-sources ul { list-style:none; }
-.case-preview-sources li { display:flex; align-items:center; gap:14px; padding:18px 0; border-bottom:1px solid var(--line); }
-.case-preview-sources .file-info { min-width:0; }
-.case-preview-sources .file-name-link { text-align:left; font-size:14px; font-weight:600; }
-.just-added-label { display:inline-block; color:var(--brand); background:var(--brand-soft); font-size:11px; padding:2px 7px; border-radius:4px; margin-top:6px; }
-@media(max-width:900px){
-  .case-preview-workspace { grid-template-columns:minmax(0,1fr); min-height:0; }
-  .case-preview-sources { border-left:0; border-top:1px solid var(--line); }
-  .case-preview-document { padding:24px; }
-}
-@media(max-width:500px){
-  .admin-main.case-preview-main { padding:18px 12px 40px; }
-  .case-preview-heading { padding:18px; }
-  .case-preview-heading h1 { font-size:23px; }
-  .case-preview-sources { padding:18px; }
-  .selection-review { padding-inline:16px; }
 }
 </style>
 </head>
@@ -1466,9 +1430,7 @@ let state = {
 
 const currentCaseName = '城市记忆与社区更新';
 const mountedInCase = new Set(['reading', 'policy', 'image', 'casepdf']);
-let caseScreenActive=params.get('screen')==='case';
-let recentMountedIds=[];
-const consoleTitle=document.title;
+let consoleNotice = '';
 if (currentVariant === 'D') {
   state.query = params.get('q') || '';
   state.scopeFilter = params.get('category') || '';
@@ -1573,7 +1535,7 @@ function renderTable() {
                     </div>
                   </div>
                 </td>
-                ${currentVariant === 'B' ? `<td>${r.scope === 'knowledge' ? '共享资料' : '案例资料'}</td>` : ''}
+                ${currentVariant === 'B' ? `<td>${r.scope === 'knowledge' ? '通用知识' : '案例资料'}</td>` : ''}
                 <td>${r.access}</td>
                 <td>${r.refs.length} 个案例</td>
                 <td>
@@ -1591,7 +1553,7 @@ function renderTable() {
       </div>
       ${currentVariant === 'B' ? `
         <div class="table-footer">
-          显示 ${items.length} 项
+          显示 ${items.length} 项 · 私人资料 17 项 / 43 MB（仅统计占用，不展示文件名和内容）
         </div>
       ` : ''}
     </div>
@@ -1631,6 +1593,13 @@ function renderVariantA() {
           </ul>
         </div>
 
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-note">
+          <strong>私人资料</strong>
+          17 项 / 43 MB<br>
+          仅统计占用，不展示文件名和内容。
+        </div>
       </aside>
 
       <section>
@@ -1665,7 +1634,7 @@ function renderVariantB() {
         全部 (${allCount})
       </button>
       <button class="tab-button ${state.scope === 'knowledge' ? 'active' : ''}" data-scope="knowledge">
-        共享资料 (${knowledgeCount})
+        通用知识 (${knowledgeCount})
       </button>
       <button class="tab-button ${state.scope === 'case' ? 'active' : ''}" data-scope="case">
         案例资料 (${caseCount})
@@ -1733,6 +1702,9 @@ function renderVariantC() {
         </p>
         ${renderToolbar()}
         ${renderTable()}
+        <div style="margin-top: 20px; font-size: 12px; color: var(--ink-3);">
+          私人资料 17 项 / 43 MB · 仅统计占用
+        </div>
       </section>
     </div>
   `;
@@ -1763,7 +1735,7 @@ function renderVariantD() {
   const typeCandidates = consoleResources('materialType');
   const activeFilters = [
     state.query && ['query', `搜索：${state.query}`],
-    state.scopeFilter && ['scopeFilter', state.scopeFilter === 'knowledge' ? '共享资料' : '案例资料'],
+    state.scopeFilter && ['scopeFilter', state.scopeFilter === 'knowledge' ? '通用知识' : '案例资料'],
     state.authority && ['authority', authorityLabels[state.authority]],
     state.materialType && ['materialType', state.materialType],
     state.accessLevel && ['accessLevel', '仅公开资料'],
@@ -1777,7 +1749,7 @@ function renderVariantD() {
         <div class="filter-content" id="filter-content">
           <nav class="filter-views" aria-label="资料范围">
             ${scopeButton('', '全部可见资料', scopes.length)}
-            ${scopeButton('knowledge', '共享资料', scopes.filter(r=>r.scope==='knowledge').length)}
+            ${scopeButton('knowledge', '通用知识', scopes.filter(r=>r.scope==='knowledge').length)}
             ${scopeButton('case', '案例资料', scopes.filter(r=>r.scope==='case').length)}
             ${state.caseMode?`<button type="button" class="filter-view ${state.viewMode==='mounted'?'active':''}" data-console-view="mounted" aria-pressed="${state.viewMode==='mounted'}"><span>当前案例资料</span><b>${mountedInCase.size}</b></button>`:''}
           </nav>
@@ -1787,18 +1759,19 @@ function renderVariantD() {
             ${types.map(type=>`<button class="filter-type ${state.materialType===type?'active':''}" data-console-type="${esc(type)}" aria-pressed="${state.materialType===type}">${esc(type)}<small>${typeCandidates.filter(r=>r.materialType===type).length}</small></button>`).join('')}
           </div></div>
           <div class="filter-section"><label class="filter-public"><input id="public-only" type="checkbox" ${state.accessLevel?'checked':''}>仅公开资料</label></div>
+          <div class="private-summary"><b>私人资料 · 17 项 / 43 MB</b>仅统计占用，不展示文件名和内容。</div>
         </div>
       </aside>
       <section class="material-results" aria-label="素材结果">
         <form class="material-search-form" id="console-search-form" role="search"><div class="search-controls"><div class="console-search-field">${searchIcon}<input id="console-query" type="text" aria-label="搜索素材" value="${esc(state.query)}" placeholder="搜索文件名、来源、案例…" autocomplete="off"><button class="search-clear" id="clear-console-query" type="button" aria-label="清空搜索" ${state.query?'':'hidden'}>×</button></div><button class="search-submit" type="submit">搜索</button></div><label class="console-case-toggle"><input id="case-mode" type="checkbox" ${state.caseMode?'checked':''}>为案例选材</label></form>
         <div class="console-result-bar" aria-live="polite"><span class="console-result-count">${activeFilters.length?'找到':'全部'} <strong>${filtered.length}</strong> 项资料</span>${activeFilters.map(([key,label])=>`<button class="active-filter" data-clear-filter="${key}" aria-label="取消${esc(label)}">${esc(label)}<span aria-hidden="true">×</span></button>`).join('')}${activeFilters.length?'<button class="clear-all-filters" data-reset-console>清除全部</button>':''}</div>
         ${state.caseMode?`<div class="material-selection-bar"><div class="case-selection-info"><span>当前草稿：${currentCaseName}</span><small>已选择 ${state.selected.length} 条</small></div><button id="mount-selected" ${state.selected.length?'':'disabled'}>加入当前案例</button></div>`:''}
-        ${state.caseMode&&state.selected.length?`<div class="selection-review" aria-label="已选资料">${state.selected.map(id=>{const r=resources.find(r=>r.id===id);return `<span class="selected-resource">${esc(r.name)}<button data-deselect="${r.id}" aria-label="取消选择${esc(r.name)}">×</button></span>`}).join('')}<button class="selection-clear" id="clear-selected">清空选择</button></div>`:''}
+        ${consoleNotice?`<div class="console-notice" role="status">${esc(consoleNotice)}</div>`:''}
         <div class="material-table-wrap">
           <table class="material-table"><thead><tr>${state.caseMode?'<th class="selection-col">选择</th>':''}<th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th>范围</th><th class="download-col">文件</th></tr></thead><tbody>
           ${items.map(r=>`<tr class="${state.selected.includes(r.id)?'selected':''}">
             ${state.caseMode?`<td class="selection-col">${mountedInCase.has(r.id)?'<span class="mounted-label">已加入</span>':r.scope==='knowledge'?`<input type="checkbox" data-select="${r.id}" aria-label="选择${esc(r.name)}" ${state.selected.includes(r.id)?'checked':''}>`:'<span class="quiet-label">案例专属</span>'}</td>`:''}
-            <td><div class="file-cell"><div class="file-icon"><span class="file-type">${r.type}</span></div><div class="file-info"><div class="console-file-heading"><button class="file-name-link" data-open="${r.id}">${esc(r.name)}</button><span class="console-scope">${r.scope==='knowledge'?'共享资料':'案例资料'}</span></div><span class="file-meta">${esc(r.description)} · ${r.size}</span></div></div></td>
+            <td><div class="file-cell"><div class="file-icon"><span class="file-type">${r.type}</span></div><div class="file-info"><div class="console-file-heading"><button class="file-name-link" data-open="${r.id}">${esc(r.name)}</button><span class="console-scope">${r.scope==='knowledge'?'通用知识':'案例资料'}</span></div><span class="file-meta">${esc(r.description)} · ${r.size}</span></div></div></td>
             <td>${esc(r.source)}</td><td>${esc(r.materialType)}</td><td>${authorityLabels[r.authority]}</td><td>${r.access}</td>
             <td class="download-col"><button class="material-download-btn" disabled title="示例文件，没有可下载原件" aria-label="${esc(r.name)}下载示例">${downloadIcon}</button></td>
           </tr>`).join('')}
@@ -1817,7 +1790,8 @@ function consoleUpdate(change, resetPage = true) {
   if(pendingQuery&&!Object.hasOwn(change,'query'))state.query=pendingQuery.value;
   Object.assign(state, change);
   if (resetPage) state.page = 1;
-  if(Object.hasOwn(change,'caseMode')&&!change.caseMode)state.selected=[];
+  state.selected = [];
+  consoleNotice = '';
   const url = new URL(location.href);
   for (const [key,value] of Object.entries({q:state.query,category:state.scopeFilter,authority:state.authority,materialType:state.materialType,publicOnly:state.accessLevel?'1':'',context:state.caseMode?'case':'',view:state.viewMode==='mounted'?'mounted':''})) {
     if (value) url.searchParams.set(key,value); else url.searchParams.delete(key);
@@ -1861,58 +1835,20 @@ function bindConsole() {
     state.selected=input.checked?[...state.selected,input.dataset.select]:state.selected.filter(id=>id!==input.dataset.select);
     render();
   });
-  document.querySelectorAll('[data-deselect]').forEach(button=>button.onclick=()=>{state.selected=state.selected.filter(id=>id!==button.dataset.deselect);render()});
-  document.getElementById('clear-selected')?.addEventListener('click',()=>{state.selected=[];render()});
   document.getElementById('mount-selected')?.addEventListener('click',()=>{
     const ids=state.selected.filter(id=>resources.find(r=>r.id===id)?.scope==='knowledge'&&!mountedInCase.has(id));
-    if(!ids.length)return;
     for (const id of ids) {
       mountedInCase.add(id);
       const r=resources.find(r=>r.id===id);
       if(!r.refs.some(ref=>ref.case===currentCaseName))r.refs.push({case:currentCaseName,meta:'当前草稿 · 资料区（示例）'});
     }
     state.selected=[];
-    const url=new URL(location.href);
-    url.searchParams.set('screen','case');
-    url.searchParams.set('panel','files');
-    history.pushState(null,'',url);
-    caseScreenActive=true;
-    recentMountedIds=ids;
-    renderCasePage();
+    consoleNotice=`已将 ${ids.length} 份资料加入当前案例（示例）`;
+    render();
   });
 }
 
-// A small case view demonstrates the return destination; all data stays in memory.
-function renderCasePage() {
-  clearTimeout(consoleSearchTimer);
-  const caseRows=resources.filter(r=>mountedInCase.has(r.id)).sort((a,b)=>Number(recentMountedIds.includes(b.id))-Number(recentMountedIds.includes(a.id)));
-  document.querySelector('.admin-main').className='admin-main case-preview-main';
-  document.querySelector('.admin-breadcrumb').textContent=`我的案例 / ${currentCaseName}`;
-  document.querySelector('.variant-switcher').hidden=true;
-  document.querySelectorAll('.site-nav a').forEach((a,index)=>a.classList.toggle('active',index===1));
-  document.title=`${currentCaseName} · 案例原型`;
-  document.getElementById('app').innerHTML=`<div class="case-preview-shell"><header class="case-preview-heading"><div><span class="case-draft-label">草稿</span><h1>${currentCaseName}</h1></div><button class="case-select-more" id="case-select-more">选用已有资料</button></header><div class="case-preview-workspace"><article class="case-preview-document"><span class="case-section-label">案例正文</span><h2>教学情境</h2><p>学生走进社区，通过现场走访、访谈与资料阅读，了解城市更新中的公共需求、历史记忆和社区生活。</p><h2>讨论与思考</h2><p>结合社区调研记录与相关政策，讨论城市更新如何回应居民需求，以及工程实践中的公共责任。</p><p class="case-draft-note">案例正文为示例。选入的资料保留在右侧资料区，正文引文按创作需要插入。</p></article><aside class="case-preview-sources" id="case-resource-list" aria-label="案例资料区" tabindex="-1"><div class="case-source-heading"><h2>资料区</h2><span>${caseRows.length} 项</span></div><ul>${caseRows.map(r=>`<li data-case-resource="${r.id}" class="${recentMountedIds.includes(r.id)?'recently-added':''}"><div class="file-icon"><span class="file-type">${r.type}</span></div><div class="file-info"><button class="file-name-link" data-open="${r.id}">${esc(r.name)}</button><div class="file-meta">${esc(r.version)} · ${r.size}</div>${recentMountedIds.includes(r.id)?'<span class="just-added-label">刚加入</span>':''}</div></li>`).join('')}</ul></aside></div></div>`;
-  attachEventListeners();
-  document.getElementById('case-select-more').onclick=()=>{
-    const url=new URL(location.href);
-    url.searchParams.delete('screen');url.searchParams.delete('panel');
-    url.searchParams.set('context','case');
-    history.pushState(null,'',url);
-    caseScreenActive=false;state.caseMode=true;
-    render();
-  };
-  const list=document.getElementById('case-resource-list');
-  list.focus({preventScroll:true});
-  if(innerWidth<=900)list.scrollIntoView({block:'start'});
-}
-
 function render() {
-  if(caseScreenActive){renderCasePage();return}
-  document.querySelector('.admin-main').className='admin-main';
-  document.querySelector('.admin-breadcrumb').textContent='管理后台 / 资料管理';
-  document.querySelector('.variant-switcher').hidden=false;
-  document.title=consoleTitle;
-  document.querySelectorAll('.site-nav a').forEach((a,index)=>a.classList.toggle('active',index===3));
   let html = '';
 
   if (currentVariant === 'A') {
@@ -2013,7 +1949,7 @@ function resourceDetailBody(resource) {
           </section>
           <aside class="detail-facts" aria-label="资料信息">
             <section class="drawer-section"><h3 class="section-title">素材信息</h3>
-              <div class="info-row"><span class="info-label">归属</span><span class="info-value">${esc(resource.scope==='knowledge'?'共享资料':resource.description+' · 案例资料')}</span></div>
+              <div class="info-row"><span class="info-label">归属</span><span class="info-value">${esc(resource.scope==='knowledge'?'通用知识':resource.description+' · 案例资料')}</span></div>
               <div class="info-row"><span class="info-label">来源</span><span class="info-value">${esc(resource.source)}</span></div>
               <div class="info-row"><span class="info-label">资料类型</span><span class="info-value">${esc(resource.materialType||resource.type)}</span></div>
               <div class="info-row"><span class="info-label">权威性</span><span class="info-value">${authorityLabels[resource.authority]||'未记录'}</span></div>
@@ -2081,6 +2017,7 @@ function switchVariant(delta) {
     status: 'all',
     viewMode:'all',authority:'',materialType:'',accessLevel:'',page:1,pageSize:10,scopeFilter:'',filtersOpen:false,selected:[],caseMode:false
   };
+  consoleNotice = '';
 
   closeDrawer();
 
@@ -2114,7 +2051,6 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  if(caseScreenActive)return;
   if (e.target.closest('input, textarea, select, [contenteditable]')) {
     return;
   }
@@ -2126,12 +2062,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') {
     switchVariant(1);
   }
-});
-
-window.addEventListener('popstate',()=>{
-  closeDrawer();
-  caseScreenActive=new URL(location.href).searchParams.get('screen')==='case';
-  render();
 });
 
 // The same fixture opens as a standalone detail page in a new tab.
