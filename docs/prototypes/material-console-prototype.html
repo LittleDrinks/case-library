@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>资料管理 · 案例库原型</title>
+<title>素材掌控台 · 整合原型</title>
 <style>
 :root {
   --bg: #f6f4ef;
@@ -516,7 +516,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   position: fixed;
   inset: 0;
   background: rgba(38, 34, 31, .25);
-  z-index: 300;
+  z-index: 100;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1034,6 +1034,495 @@ button:focus-visible, input:focus-visible, select:focus-visible {
     font-size: 9px;
   }
 }
+
+/* Material Console (Variant D) */
+.material-console {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.material-filter {
+  padding: 16px 14px;
+  border-right: 1px solid var(--line);
+  background: #fafaf8;
+  overflow-y: auto;
+}
+
+.material-filter h2 {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin: 0 0 10px;
+}
+
+.material-filter > button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  margin-bottom: 6px;
+  transition: background .15s, color .15s;
+}
+
+.material-filter > button:hover {
+  background: var(--line-soft);
+  color: var(--ink);
+}
+
+.material-filter > button.active {
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.material-filter > button b {
+  font-size: 11px;
+  color: var(--ink-3);
+  padding: 2px 6px;
+  background: var(--line-soft);
+  border-radius: 3px;
+}
+
+.material-filter > button.active b {
+  background: rgba(186, 28, 34, .12);
+  color: var(--brand);
+}
+
+.material-filter fieldset {
+  margin: 18px 0 0;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.material-filter legend {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.material-filter label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 13px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.material-filter input[type="radio"],
+.material-filter input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.material-filter label small {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.material-results {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+
+.material-search-form {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.material-search-form svg {
+  color: var(--ink-3);
+}
+
+.material-search-form input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.material-search-form input:focus {
+  border-color: var(--brand);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+.material-search-form button {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius);
+  background: var(--ink-2);
+  color: #fff;
+  font-weight: 600;
+  transition: background .15s;
+}
+
+.material-search-form button:hover {
+  background: var(--ink);
+}
+
+.material-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fafaf8;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.material-selection-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 13px;
+  transition: all .15s;
+}
+
+.material-selection-bar button:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.material-selection-bar button:disabled {
+  opacity: 1;
+  border-color: var(--line);
+  background: var(--line-soft);
+  color: var(--ink-3);
+}
+
+.material-table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.material-table {
+  width: 100%;
+  min-width: 800px;
+  border-collapse: collapse;
+}
+
+.material-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 11px 12px;
+  background: #fafaf8;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  border-bottom: 1px solid var(--line);
+}
+
+.material-table td {
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.material-table tbody tr {
+  transition: background .1s;
+}
+
+.material-table tbody tr:hover {
+  background: rgba(186, 28, 34, .02);
+}
+
+.material-table tbody tr.selected {
+  background: var(--brand-soft);
+}
+
+.material-table tbody tr.mounted {
+  background: var(--green-soft);
+}
+
+.material-table th.selection-col {
+  width: 70px;
+  text-align: center;
+}
+
+.material-table td.selection-col {
+  text-align: center;
+}
+
+.material-table input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.material-table .mounted-label {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.material-table .file-name-link {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.material-table .file-name-link:hover {
+  color: var(--brand);
+}
+
+.material-table .file-summary {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-table th.download-col {
+  width: 70px;
+  text-align: center;
+}
+
+.material-table td.download-col {
+  text-align: center;
+}
+
+.material-download-btn {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--brand);
+  transition: all .15s;
+}
+
+.material-download-btn:hover {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
+.material-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: #fafaf8;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.material-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.material-pagination button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 13px;
+  transition: all .15s;
+}
+
+.material-pagination button:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--ink-3);
+}
+
+.material-pagination button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.material-pagination button.active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+
+.case-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 13px;
+}
+
+.case-mode-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .material-console {
+    grid-template-columns: 1fr;
+  }
+
+  .material-filter {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 12px;
+    max-height: 200px;
+  }
+
+  .material-filter > button {
+    display: inline-flex;
+    width: auto;
+    margin-right: 6px;
+  }
+
+  .material-filter fieldset {
+    display: inline-block;
+    margin-right: 12px;
+    padding-right: 12px;
+    border-top: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  .material-filter legend {
+    display: inline;
+    margin-right: 8px;
+  }
+
+  .material-filter label {
+    display: inline-flex;
+    margin-right: 10px;
+  }
+}
+</style>
+<style>
+.admin-main.console-wide { width:min(1440px,100%); }
+.material-results, .material-table-wrap { min-width: 0; }
+.material-table .file-cell { min-width: 250px; }
+.material-table th:first-child { min-width: 300px; }
+.console-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.console-heading p { margin:6px 0 0; color:var(--ink-3); font-size:12px; }
+.console-case-toggle { display:flex; gap:8px; align-items:center; color:var(--ink-2); font-size:13px; }
+.console-case-toggle input { accent-color:var(--brand); }
+.console-notice { padding:10px 16px; font-size:12px; color:var(--green); background:var(--green-soft); border-bottom:1px solid var(--line); }
+.console-scope { font-size:10px; color:var(--ink-3); padding:2px 5px; border:1px solid var(--line); border-radius:3px; white-space:nowrap; }
+.console-file-heading { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.material-filter .private-summary { font-size:11px; color:var(--ink-3); margin-top:22px; padding-top:14px; border-top:1px solid var(--line); }
+.material-filter .private-summary b { display:block; color:var(--ink-2); margin-bottom:5px; font-weight:500; }
+.material-table .quiet-label { color:var(--ink-3); font-size:11px; }
+.material-download-btn:disabled { color:var(--ink-3); cursor:not-allowed; opacity:.55; }
+.material-pagination select { border:1px solid var(--line); background:var(--paper); border-radius:4px; padding:4px; color:var(--ink-2); font:inherit; }
+.variant-switcher[inert] { visibility:hidden; }
+.drawer-body.detail-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); padding:0; gap:0; }
+.detail-reading { min-width:0; padding:24px; background:#f3f1ed; }
+.detail-preview-tools { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+.detail-preview-tools .file-info { min-width:0; }
+.detail-facts { min-width:0; padding:24px; border-left:1px solid var(--line); }
+.sample-page { width:min(100%,540px); min-height:520px; margin:auto; padding:48px 40px; background:white; border:1px solid var(--line); box-shadow:0 8px 24px #2925210a; }
+.sample-page .document-label { font-size:11px; color:var(--ink-3); letter-spacing:2px; }
+.sample-page h3 { margin:28px 0 18px; font:650 24px/1.5 "STSong",serif; color:var(--ink); }
+.sample-page .document-source { font-size:12px; color:var(--ink-3); padding-bottom:24px; border-bottom:1px solid var(--line); }
+.sample-page h4 { font-size:14px; font-weight:600; margin:30px 0 12px; }
+.sample-page p { font-size:13px; color:var(--ink-2); line-height:1.9; }
+.sample-lines { display:grid; gap:12px; margin:26px 0; }
+.sample-lines span { height:4px; background:#e8e5df; border-radius:2px; }
+.sample-lines span:last-child { width:65%; }
+.sample-page .document-page { text-align:center; margin:40px 0 0; color:var(--ink-3); font-size:11px; }
+.sample-image { display:grid; place-items:center; min-height:340px; padding:28px; border:1px solid var(--line); background:white; }
+.sample-image svg { max-width:100%; height:auto; }
+.preview-caption { color:var(--ink-3); font-size:11px; margin:14px 0 0; text-align:center; }
+@media(min-width:901px){
+  .admin-main.console-wide { height:calc(100dvh - 58px); display:flex; flex-direction:column; padding:22px 28px 92px; }
+  .console-wide .admin-breadcrumb { flex-shrink:0; margin-bottom:18px; }
+  .console-wide #app { display:flex; flex-direction:column; flex:1; min-height:0; }
+  .console-wide .page-header { flex-shrink:0; margin-bottom:18px; }
+  .console-wide .material-console { flex:1; min-height:0; }
+  .console-wide .material-results { min-height:0; }
+  .console-wide .material-filter { min-height:0; }
+  .console-wide .material-table-wrap { min-height:0; }
+  .console-wide .material-search-form,.console-wide .material-pagination,.console-wide .material-selection-bar,.console-wide .case-mode-toggle { flex-shrink:0; }
+}
+@media(max-width:900px){ .material-console { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:500px){
+  .console-heading { align-items:flex-start; flex-direction:column; }
+  .material-filter { max-height:240px; }
+  .material-search-form { grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:12px; }
+  .material-search-form > svg { display:none; }
+  .material-search-form input { min-width:0; }
+  .material-selection-bar { flex-wrap:wrap; }
+  .material-pagination { align-items:flex-start; }
+  .material-filter .private-summary { display:none; }
+  .drawer-body.detail-layout { grid-template-columns:minmax(0,1fr); }
+  .detail-reading, .detail-facts { padding:16px; }
+  .detail-facts { border-left:0; border-top:1px solid var(--line); }
+  .sample-page { min-height:360px; padding:28px 22px; }
+  .sample-page h3 { font-size:20px; }
+  .sample-image { min-height:220px; padding:16px; }
+}
 </style>
 </head>
 <body>
@@ -1083,6 +1572,8 @@ const resources = [
     version: '第 1 版',
     updated: '2025-09-18',
     valid: '未设有效期',
+    authority: 'secondary',
+    materialType: '学习资料',
     refs: [
       { case: '城市记忆与社区更新', meta: '已发布 v2 · 资料区' },
       { case: '工程伦理与职业责任', meta: '已发布 v1 · 资料区' }
@@ -1103,6 +1594,8 @@ const resources = [
     version: '第 3 版',
     updated: '2025-08-25',
     valid: '第 3 版，2025 年修订',
+    authority: 'original',
+    materialType: '教材',
     refs: [
       { case: '工程伦理与职业责任', meta: '已发布 v1 · 资料区' }
     ]
@@ -1122,6 +1615,8 @@ const resources = [
     version: '2024 版',
     updated: '2024-12-20',
     valid: '文件载明有效期至 2025-12-31',
+    authority: 'pending',
+    materialType: '政策文件',
     refs: [
       { case: '城市记忆与社区更新', meta: '已发布 v2 · 资料区' }
     ]
@@ -1141,6 +1636,8 @@ const resources = [
     version: '随案例发布 v2',
     updated: '2025-04-18',
     valid: '拍摄于 2025-04-18',
+    authority: 'original',
+    materialType: '图片',
     refs: [
       { case: '城市记忆与社区更新', meta: '已发布 v2 · 正文插图 / 资料区' }
     ]
@@ -1160,6 +1657,8 @@ const resources = [
     version: '随案例发布 v2',
     updated: '2025-04-20',
     valid: '此次走访的访谈记录',
+    authority: 'original',
+    materialType: '文档',
     refs: [
       { case: '城市记忆与社区更新', meta: '已发布 v2 · 资料区' }
     ]
@@ -1179,6 +1678,8 @@ const resources = [
     version: '随案例发布 v1',
     updated: '2025-03-12',
     valid: '用于本案例说明',
+    authority: 'secondary',
+    materialType: '图片',
     refs: [
       { case: '工程伦理与职业责任', meta: '已发布 v1 · 正文插图 / 资料区' }
     ]
@@ -1189,19 +1690,41 @@ const resources = [
 const variants = {
   A: { name: '方案 A · 分类导航', desc: '侧边栏分知识与案例资料' },
   B: { name: '方案 B · 统一清单', desc: '顶部标签切换所有资料类型' },
-  C: { name: '方案 C · 按案例查看', desc: '左侧树导航按案例组织' }
+  C: { name: '方案 C · 按案例查看', desc: '左侧树导航按案例组织' },
+  D: { name: '方案 D · 素材掌控台', desc: '工作视图与权威性筛选' }
 };
 
 const params = new URLSearchParams(location.search);
-let currentVariant = params.get('variant') || 'A';
-if (!variants[currentVariant]) currentVariant = 'A';
+let currentVariant = params.get('variant') || 'D';
+if (!variants[currentVariant]) currentVariant = 'D';
 
 let state = {
   scope: currentVariant === 'B' ? 'all' : 'knowledge',
   context: 'knowledge',
   query: '',
-  status: 'all'
+  status: 'all',
+  // D variant specific
+  viewMode: 'all',
+  authority: '',
+  materialType: '',
+  accessLevel: '',
+  page: 1,
+  pageSize: 3,
+  selected: [],
+  caseMode: false
 };
+
+const currentCaseName = '城市记忆与社区更新';
+const mountedInCase = new Set(['reading', 'policy', 'image', 'casepdf']);
+let consoleNotice = '';
+if (currentVariant === 'D') {
+  state.query = params.get('q') || '';
+  state.authority = params.get('authority') || '';
+  state.materialType = params.get('materialType') || '';
+  state.accessLevel = params.get('publicOnly') === '1' ? 'public' : '';
+  state.caseMode = params.get('context') === 'case';
+  state.viewMode = state.caseMode && params.get('view') === 'mounted' ? 'mounted' : 'all';
+}
 
 // Utilities
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1472,6 +1995,115 @@ function renderVariantC() {
   `;
 }
 
+function consoleResources(omit = '') {
+  return resources.filter(r =>
+    (state.viewMode !== 'mounted' || mountedInCase.has(r.id)) &&
+    (omit === 'authority' || !state.authority || r.authority === state.authority) &&
+    (omit === 'materialType' || !state.materialType || r.materialType === state.materialType) &&
+    (!state.accessLevel || r.access === '公开') &&
+    (!state.query || `${r.name} ${r.source} ${r.description}`.toLowerCase().includes(state.query.toLowerCase()))
+  );
+}
+
+const authorityLabels = { original: '原始权威', secondary: '可靠二手', pending: '待核验' };
+const downloadIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5"/></svg>';
+
+function renderVariantD() {
+  const filtered = consoleResources();
+  const pageCount = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+  state.page = Math.min(state.page, pageCount);
+  const items = filtered.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+  const types = [...new Set(resources.map(r => r.materialType))];
+  const authorities = consoleResources('authority');
+  const typeCandidates = consoleResources('materialType');
+  const viewButton = (value, label, count, active) => `<button type="button" data-console-view="${value}" class="${active ? 'active' : ''}"><span>${label}</span><b>${count}</b></button>`;
+  return `
+    <div class="page-header console-heading">
+      <div class="page-title"><div><h1>素材掌控台</h1><p>查找资料、核对来源，查看它们在案例中的使用。</p></div></div>
+      <label class="console-case-toggle"><input id="case-mode" type="checkbox" ${state.caseMode ? 'checked' : ''}>为案例选材</label>
+    </div>
+    <div class="material-console">
+      <aside class="material-filter" aria-label="素材筛选">
+        <h2>工作视图</h2>
+        ${state.caseMode ? viewButton('mounted', '当前案例资料', mountedInCase.size, state.viewMode === 'mounted') : ''}
+        ${viewButton('original', '权威来源', resources.filter(r=>r.authority==='original').length, state.viewMode==='all'&&state.authority==='original')}
+        ${viewButton('pending', '需复核来源', resources.filter(r=>r.authority==='pending').length, state.viewMode==='all'&&state.authority==='pending')}
+        ${viewButton('all', '全部可见资料', resources.length, state.viewMode==='all'&&!state.authority)}
+        <fieldset><legend>来源权威性</legend>
+          <label><input type="radio" name="console-authority" value="" ${!state.authority?'checked':''}><span>全部</span><small>${authorities.length}</small></label>
+          ${Object.entries(authorityLabels).map(([value,label])=>`<label><input type="radio" name="console-authority" value="${value}" ${state.authority===value?'checked':''}><span>${label}</span><small>${authorities.filter(r=>r.authority===value).length}</small></label>`).join('')}
+        </fieldset>
+        <fieldset><legend>资料类型</legend>
+          <label><input type="radio" name="console-type" value="" ${!state.materialType?'checked':''}><span>全部</span><small>${typeCandidates.length}</small></label>
+          ${types.map(type=>`<label><input type="radio" name="console-type" value="${esc(type)}" ${state.materialType===type?'checked':''}><span>${esc(type)}</span><small>${typeCandidates.filter(r=>r.materialType===type).length}</small></label>`).join('')}
+        </fieldset>
+        <fieldset><legend>可见范围</legend><label><input id="public-only" type="checkbox" ${state.accessLevel?'checked':''}><span>仅公开资料</span></label></fieldset>
+        <div class="private-summary"><b>私人资料 · 17 项 / 43 MB</b>仅统计占用，不展示文件名和内容。</div>
+      </aside>
+      <section class="material-results" aria-label="素材结果">
+        <form class="material-search-form" id="console-search-form" role="search">${searchIcon}<input id="console-query" aria-label="搜索素材" value="${esc(state.query)}" placeholder="搜索文件名、来源或案例"><button type="submit">搜索</button></form>
+        ${state.caseMode ? `<div class="case-mode-toggle">当前草稿：${currentCaseName}</div><div class="material-selection-bar"><span>已选择 ${state.selected.length} 条</span><button id="mount-selected" ${state.selected.length?'':'disabled'}>加入当前案例</button></div>` : ''}
+        ${consoleNotice ? `<div class="console-notice" role="status">${esc(consoleNotice)}</div>` : ''}
+        <div class="material-table-wrap">
+          <table class="material-table"><thead><tr>${state.caseMode?'<th class="selection-col">选择</th>':''}<th>素材</th><th>来源</th><th>类型</th><th>权威性</th><th>范围</th><th class="download-col">文件</th></tr></thead><tbody>
+          ${items.map(r=>`<tr class="${state.selected.includes(r.id)?'selected':''}">
+            ${state.caseMode?`<td class="selection-col">${mountedInCase.has(r.id)?'<span class="mounted-label">已加入</span>':r.scope==='knowledge'?`<input type="checkbox" data-select="${r.id}" aria-label="选择${esc(r.name)}" ${state.selected.includes(r.id)?'checked':''}>`:'<span class="quiet-label">案例专属</span>'}</td>`:''}
+            <td><div class="file-cell"><div class="file-icon"><span class="file-type">${r.type}</span></div><div class="file-info"><div class="console-file-heading"><button class="file-name-link" data-open="${r.id}">${esc(r.name)}</button><span class="console-scope">${r.scope==='knowledge'?'通用知识':'案例资料'}</span></div><span class="file-meta">${esc(r.description)} · ${r.size}</span></div></div></td>
+            <td>${esc(r.source)}</td><td>${esc(r.materialType)}</td><td>${authorityLabels[r.authority]}</td><td>${r.access}</td>
+            <td class="download-col"><button class="material-download-btn" disabled title="示例文件，没有可下载原件" aria-label="${esc(r.name)}下载示例">${downloadIcon}</button></td>
+          </tr>`).join('')}
+          </tbody></table>
+          ${items.length?'':`<div class="empty-state">${emptyIcon}<p>当前筛选下没有结果</p><button class="action-button" id="reset-console">清除筛选</button></div>`}
+        </div>
+        <footer class="material-pagination"><span>共 ${filtered.length} 项 · 每页 <select id="console-page-size" aria-label="每页条数"><option value="3" ${state.pageSize===3?'selected':''}>3</option><option value="10" ${state.pageSize===10?'selected':''}>10</option></select> 项</span><div class="material-pagination-controls"><button id="console-prev" aria-label="上一页" ${state.page===1?'disabled':''}>←</button><span>${state.page} / ${pageCount}</span><button id="console-next" aria-label="下一页" ${state.page===pageCount?'disabled':''}>→</button></div></footer>
+      </section>
+    </div>`;
+}
+
+function consoleUpdate(change, resetPage = true) {
+  Object.assign(state, change);
+  if (resetPage) state.page = 1;
+  state.selected = [];
+  consoleNotice = '';
+  const url = new URL(location.href);
+  for (const [key,value] of Object.entries({q:state.query,authority:state.authority,materialType:state.materialType,publicOnly:state.accessLevel?'1':'',context:state.caseMode?'case':'',view:state.viewMode==='mounted'?'mounted':''})) {
+    if (value) url.searchParams.set(key,value); else url.searchParams.delete(key);
+  }
+  history.replaceState(null,'',url);
+  render();
+}
+
+function bindConsole() {
+  document.getElementById('console-search-form').onsubmit=e=>{e.preventDefault();consoleUpdate({query:document.getElementById('console-query').value.trim()})};
+  document.getElementById('case-mode').onchange=e=>consoleUpdate({caseMode:e.target.checked,viewMode:'all'});
+  document.querySelectorAll('[data-console-view]').forEach(button=>button.onclick=()=>{
+    const mode=button.dataset.consoleView;
+    consoleUpdate({viewMode:mode==='mounted'?'mounted':'all',authority:['original','pending'].includes(mode)?mode:''});
+  });
+  document.querySelectorAll('[name="console-authority"]').forEach(input=>input.onchange=()=>consoleUpdate({authority:input.value}));
+  document.querySelectorAll('[name="console-type"]').forEach(input=>input.onchange=()=>consoleUpdate({materialType:input.value}));
+  document.getElementById('public-only').onchange=e=>consoleUpdate({accessLevel:e.target.checked?'public':''});
+  document.getElementById('console-page-size').onchange=e=>consoleUpdate({pageSize:Number(e.target.value)});
+  document.getElementById('console-prev').onclick=()=>consoleUpdate({page:state.page-1},false);
+  document.getElementById('console-next').onclick=()=>consoleUpdate({page:state.page+1},false);
+  document.getElementById('reset-console')?.addEventListener('click',()=>consoleUpdate({query:'',authority:'',materialType:'',accessLevel:'',viewMode:'all'}));
+  document.querySelectorAll('[data-select]').forEach(input=>input.onchange=()=>{
+    state.selected=input.checked?[...state.selected,input.dataset.select]:state.selected.filter(id=>id!==input.dataset.select);
+    render();
+  });
+  document.getElementById('mount-selected')?.addEventListener('click',()=>{
+    const ids=state.selected.filter(id=>resources.find(r=>r.id===id)?.scope==='knowledge'&&!mountedInCase.has(id));
+    for (const id of ids) {
+      mountedInCase.add(id);
+      const r=resources.find(r=>r.id===id);
+      if(!r.refs.some(ref=>ref.case===currentCaseName))r.refs.push({case:currentCaseName,meta:'当前草稿 · 资料区（示例）'});
+    }
+    state.selected=[];
+    consoleNotice=`已将 ${ids.length} 份资料加入当前案例（示例）`;
+    render();
+  });
+}
+
 function render() {
   let html = '';
 
@@ -1479,17 +2111,21 @@ function render() {
     html = renderVariantA();
   } else if (currentVariant === 'B') {
     html = renderVariantB();
-  } else {
+  } else if (currentVariant === 'C') {
     html = renderVariantC();
+  } else {
+    html = renderVariantD();
   }
 
   document.getElementById('app').innerHTML = html;
+  document.querySelector('.admin-main').classList.toggle('console-wide',currentVariant==='D');
 
   // Update variant label
   const v = variants[currentVariant];
   document.getElementById('variant-name').textContent = v.name;
 
   attachEventListeners();
+  if(currentVariant==='D')bindConsole();
 }
 
 function attachEventListeners() {
@@ -1546,121 +2182,56 @@ function attachEventListeners() {
 let detailReturnFocus = null;
 let detailPreviousOverflow = '';
 
+function samplePreview(resource) {
+  if (['JPG', 'PNG'].includes(resource.type)) {
+    return `<div class="sample-image"><svg viewBox="0 0 540 350" role="img" aria-label="图片预览示例"><rect width="540" height="350" rx="8" fill="#ece9e1"/><circle cx="434" cy="68" r="27" fill="#d8b877"/><path d="M0 254 Q140 208 280 250 T540 229 V350 H0" fill="#cbd3c3"/><rect x="83" y="116" width="125" height="149" fill="#d3c1ab"/><path d="m70 116 75-55 75 55" fill="#ab8673"/><rect x="250" y="133" width="170" height="132" fill="#ddd1c1"/><path d="m238 133 97-58 97 58" fill="#ae9581"/><g fill="#817e70"><rect x="101" y="143" width="25" height="32"/><rect x="157" y="143" width="25" height="32"/><rect x="276" y="155" width="29" height="29"/><rect x="341" y="155" width="29" height="29"/></g><path d="M214 350 Q224 295 255 250 H318 Q285 297 299 350" fill="#e6ddcf"/><g fill="#5f7161"><circle cx="457" cy="197" r="28"/><rect x="452" y="207" width="10" height="78"/><circle cx="48" cy="218" r="28"/><rect x="43" y="230" width="10" height="60"/></g></svg></div>`;
+  }
+  return `<div class="sample-page"><span class="document-label">${esc(resource.materialType || '学习文档')} · 示例预览</span><h3>${esc(resource.name.replace(/\.pdf$/i,''))}</h3><div class="document-source">${esc(resource.source)} · ${esc(resource.version)}</div><h4>资料概要</h4><p>${esc(resource.description)}。供阅读、学习与案例创作时查阅。</p><div class="sample-lines"><span></span><span></span><span></span><span></span></div><h4>时间与版本</h4><p>${esc(resource.valid)}</p><div class="sample-lines"><span></span><span></span><span></span></div><p class="document-page">1</p></div>`;
+}
+
 function openDrawer(id) {
   const resource = resources.find(r => r.id === id);
   if (!resource) return;
-
   if (!document.querySelector('.drawer-mask')) {
     detailReturnFocus = document.activeElement;
     detailPreviousOverflow = document.body.style.overflow;
   }
   document.body.style.overflow = 'hidden';
-
-  const drawer = `
+  document.getElementById('drawer-root').innerHTML = `
     <div class="drawer-mask">
       <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-        <div class="drawer-header">
-          <h2 class="drawer-title" id="drawer-title">${esc(resource.name)}</h2>
-          <button class="drawer-close" id="close-drawer" aria-label="关闭">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M5 5l10 10M15 5L5 15"/>
-            </svg>
-          </button>
-        </div>
-
-        <div class="drawer-body">
-          <div class="file-preview">
-            <div class="preview-icon">${resource.type}</div>
-            <div class="preview-meta">${resource.size} · 内容预览</div>
-          </div>
-
-          <div class="drawer-section">
-            <h3 class="section-title">基本信息</h3>
-            <div class="info-row">
-              <span class="info-label">归属</span>
-              <span class="info-value">${resource.scope === 'knowledge' ? '通用知识' : resource.description}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">来源</span>
-              <span class="info-value">${esc(resource.source)}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">可见范围</span>
-              <span class="info-value">${resource.access}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">当前版本</span>
-              <span class="info-value">${esc(resource.version)}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">最近更新</span>
-              <span class="info-value">${resource.updated}</span>
-            </div>
-          </div>
-
-          <div class="drawer-section">
-            <h3 class="section-title">引用情况</h3>
-            ${resource.refs.length > 0 ? `
-              <ul class="ref-list">
-                ${resource.refs.map(ref => `
-                  <li class="ref-item">
-                    <div class="ref-title">${esc(ref.case)}</div>
-                    <div class="ref-meta">${esc(ref.meta)}</div>
-                  </li>
-                `).join('')}
-              </ul>
-            ` : '<p class="alert alert-info">暂无案例引用此资料</p>'}
-          </div>
-
-          <div class="drawer-section">
-            <h3 class="section-title">时间与适用性</h3>
-            <p class="alert alert-info">
-              ${esc(resource.valid)}
-            </p>
-            ${resource.state === 'review' ? `
-              <div class="alert alert-warning" style="margin-top: 12px;">
-                这份政策文件标记为"待核查"，可能已有后续文件。到期是否自动限制使用，尚待决定。
-              </div>
-            ` : ''}
-          </div>
-
-          <div class="drawer-section">
-            <details class="details-toggle">
-              <summary>存储与技术信息</summary>
-              <div class="info-row" style="margin-top: 12px;">
-                <span class="info-label">对象存储</span>
-                <span class="info-value">MinIO</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">元数据</span>
-                <span class="info-value">MongoDB</span>
-              </div>
-              <p class="alert alert-info" style="margin-top: 16px;">
-                统一存储不要求采用统一的知识与案例资料入口。
-              </p>
-            </details>
-          </div>
+        <div class="drawer-header"><h2 class="drawer-title" id="drawer-title">${esc(resource.name)}</h2><button class="drawer-close" id="close-drawer" aria-label="关闭"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+        <div class="drawer-body detail-layout">
+          <section class="detail-reading" aria-label="文件预览">
+            <div class="detail-preview-tools"><div class="file-icon"><span class="file-type">${resource.type}</span></div><div class="file-info"><strong>${esc(resource.name)}</strong><div class="file-meta">${resource.type} · ${resource.size}</div></div></div>
+            ${samplePreview(resource)}
+            <p class="preview-caption">示例预览 · 未载入原始文件</p>
+          </section>
+          <aside class="detail-facts" aria-label="资料信息">
+            <section class="drawer-section"><h3 class="section-title">素材信息</h3>
+              <div class="info-row"><span class="info-label">归属</span><span class="info-value">${esc(resource.scope==='knowledge'?'通用知识':resource.description+' · 案例资料')}</span></div>
+              <div class="info-row"><span class="info-label">来源</span><span class="info-value">${esc(resource.source)}</span></div>
+              <div class="info-row"><span class="info-label">资料类型</span><span class="info-value">${esc(resource.materialType||resource.type)}</span></div>
+              <div class="info-row"><span class="info-label">权威性</span><span class="info-value">${authorityLabels[resource.authority]||'未记录'}</span></div>
+              <div class="info-row"><span class="info-label">可见范围</span><span class="info-value">${resource.access}</span></div>
+              <div class="info-row"><span class="info-label">当前版本</span><span class="info-value">${esc(resource.version)}</span></div>
+              <div class="info-row"><span class="info-label">最近更新</span><span class="info-value">${esc(resource.updated)}</span></div>
+            </section>
+            <section class="drawer-section"><h3 class="section-title">引用情况</h3><ul class="ref-list">${resource.refs.map(ref=>`<li class="ref-item"><div class="ref-title">${esc(ref.case)}</div><div class="ref-meta">${esc(ref.meta)}</div></li>`).join('')}</ul></section>
+            <section class="drawer-section"><h3 class="section-title">时间与适用性</h3><p class="alert alert-info">${esc(resource.valid)}</p>${resource.state==='review'?'<p class="alert alert-warning" style="margin-top:12px">待核查，可能已有后续文件。有效日期与是否可继续使用分别判断。</p>':''}</section>
+          </aside>
         </div>
       </div>
-    </div>
-  `;
-
-  document.getElementById('drawer-root').innerHTML = drawer;
-
-  // Close handlers
-  document.getElementById('close-drawer').addEventListener('click', closeDrawer);
-  document.querySelector('.drawer-mask').addEventListener('click', e => {
-    if (e.target.classList.contains('drawer-mask')) {
-      closeDrawer();
-    }
-  });
-
-  // Focus management
+    </div>`;
+  document.querySelectorAll('.site-header,.admin-main,.variant-switcher').forEach(el=>el.inert=true);
+  document.getElementById('close-drawer').onclick=closeDrawer;
+  document.querySelector('.drawer-mask').onclick=e=>{if(e.target.classList.contains('drawer-mask'))closeDrawer()};
   document.getElementById('close-drawer').focus();
 }
 
 function closeDrawer() {
   document.getElementById('drawer-root').innerHTML = '';
+  document.querySelectorAll('.site-header,.admin-main,.variant-switcher').forEach(el=>el.inert=false);
   document.body.style.overflow = detailPreviousOverflow;
   if (detailReturnFocus?.isConnected) detailReturnFocus.focus();
   detailReturnFocus = null;
@@ -1677,14 +2248,17 @@ function switchVariant(delta) {
     scope: currentVariant === 'B' ? 'all' : 'knowledge',
     context: 'knowledge',
     query: '',
-    status: 'all'
+    status: 'all',
+    viewMode:'all',authority:'',materialType:'',accessLevel:'',page:1,pageSize:3,selected:[],caseMode:false
   };
+  consoleNotice = '';
 
   closeDrawer();
 
   // Update URL
   const url = new URL(location.href);
   url.searchParams.set('variant', currentVariant);
+  ['q','authority','materialType','publicOnly','context','view'].forEach(key=>url.searchParams.delete(key));
   history.replaceState(null, '', url);
 
   render();
@@ -1697,6 +2271,17 @@ document.getElementById('next-variant').addEventListener('click', () => switchVa
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeDrawer();
+    return;
+  }
+  const dialog=document.querySelector('[role=dialog]');
+  if(dialog){
+    if(e.key==='Tab'){
+      const controls=[...dialog.querySelectorAll('button:not([disabled]),a[href],input,select,textarea,summary,[tabindex]')].filter(el=>el.tabIndex>=0&&el.getClientRects().length);
+      const first=controls[0],last=controls[controls.length-1];
+      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}
+      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}
+    }
+    return;
   }
 
   if (e.target.closest('input, textarea, select, [contenteditable]')) {
