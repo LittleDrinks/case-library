@@ -150,8 +150,8 @@ ColPali 官方仓库当前已将 `colpali-engine` 标为 deprecated，建议新�
 - 已定：一份资料可包含 PDF、Markdown 和图片，仍是一条检索资料。
 - 已定：原文与整理／解读区分，自动正文由管理员确认后启用 AI；原件照常可读、可下载、可选入案例。
 - 已定：首版提供管理员主动调用外部 OCR 的入口，也允许上传外部解析结果。
-- 当前优先待定：同一著作多版次是否共用入口，独立资料如何组织为合集，一个版次可否含多个组成文档。引用时需要准确定位具体来源，不能让 AI 按文件名猜版次。
-- 等上述粒度确定后再问：打开资料时优先显示原件还是正文，AI 默认使用哪些正文角色。
+- 用户最新方向：独立资料以合集组织，不同书籍版次放入合集，一本书的章节留在统一素材内。按此方向形成结构草案，等待整体确认；多册本的归属仍未定。引用时需要准确定位具体来源，不能让 AI 按文件名猜版次。
+- 正在重新询问：部分章节是否先开放、案例是否指定使用范围、默认阅读入口和 AI 默认正文角色。
 - 待定：新版资料提醒、历史失效资料的选用方式和共享新闻维护方式。案例引用固定版本已确定，问题在展示与主动升级体验。
 
 查阅结果已经足以支持“资料包＋CPU 优先＋可选 API”的候选方案，但不足以认定任何解析器在本服务器最优、任何扫描件都能准确解析，或者目前已具备多模态 RAG。
@@ -172,3 +172,11 @@ ColPali 官方仓库当前已将 `colpali-engine` 标为 deprecated，建议新�
 | [backup-bundle-tool.sh](../../scripts/backup-bundle-tool.sh)：45–49、184–188 | 备份与恢复校验枚举 attachments、版本/快照附件、素材候选中的单 `blobId`。 | 新资料包文件和派生产物引用必须一起纳入枚举与恢复校验，否则数据库里有条目但原件/Markdown/图片可能未完整备份。 |
 
 本节的需求补充是基于代码的推论；具体 schema、处理任务和 provider 实现仍待产品问题收敛，未实施。当前已经确认的统一检索保留案例/共享归属、勾选跨搜索筛选翻页保留、部分失败留页，与上述解析路线相容，不应因为新增文件格式重新翻掉这些选择。
+
+## 10. 出版版次、文件形态与合集补充
+
+Zotero 的书目字段分别记录版次、出版日期、出版社等；附件是条目的文件；相关条目可以关联同一作品的不同版本；合集聚合条目而不复制它们。[字段](https://www.zotero.org/support/kb/item_types_and_fields#fields_for_books_and_periodicals)、[附件](https://www.zotero.org/support/attaching_files)、[相关条目](https://www.zotero.org/support/related)、[合集](https://www.zotero.org/support/collections_and_tags#the_zotero_collections_model)。
+
+美国国会图书馆 BIBFRAME 区分 Work 的概念内容、Instance 的出版形态与 Item 的实体／电子副本。它支持分别看待内容身份和副本，并没有规定本平台多个版次必须共用一个资料 ID；本文不建议引入完整 BIBFRAME 层级。[官方模型说明](https://www.loc.gov/bibframe/docs/bibframe2-model.html)。
+
+本项目据此提出：具体出版版次作为一条素材，同版原 PDF、OCR PDF、正文与图片属于该素材；章节作为内部目录，可能定位整书 PDF 页码，也可能定位章节文件。不同出版版次通过合集或相关资料展示，修正 OCR 属于平台维护修订。具体模型见 [结构草案](../planning/material-bundle-shape-20261001.md)，它仍待整体确认，原型没有实现这些 schema 或目录能力。
