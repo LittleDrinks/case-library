@@ -73,7 +73,16 @@ def make_garden():
     return image
 
 
-def make_pdf(garden):
+def make_revised_garden(garden):
+    image = garden.copy()
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((562, 758, 689, 795), fill=(111, 169, 181), outline=(66, 119, 132), width=5)
+    draw.arc((576, 764, 676, 789), start=190, end=350, fill=(213, 236, 232), width=4)
+    image.save(ASSETS / "garden-observation-revised.png", optimize=True)
+    return image
+
+
+def make_pdf(garden, output_name="field-observation-guide.pdf", revision=False):
     width, height = 1240, 1754
     paper = (250, 249, 245)
     ink = (39, 48, 43)
@@ -83,14 +92,17 @@ def make_pdf(garden):
 
     page1 = Image.new("RGB", (width, height), paper)
     d = ImageDraw.Draw(page1)
-    d.text((112, 90), "NORTHBANK FIELD NOTES     /     04", font=font(21, True), fill=green)
+    header = "NORTHBANK FIELD NOTES     /     REVISION 2" if revision else "NORTHBANK FIELD NOTES     /     04"
+    d.text((112, 90), header, font=font(21, True), fill=green)
     d.line((112, 142, 1128, 142), fill=(211, 217, 205), width=3)
-    d.text((112, 218), "Small garden water, slowly", font=font(62, True), fill=ink)
+    title = "Small garden water, revision 2" if revision else "Small garden water, slowly"
+    d.text((112, 218), title, font=font(62, True), fill=ink)
     d.text((114, 315), "A short observation guide for community learning", font=font(28), fill=muted)
     d.rounded_rectangle((112, 416, 1128, 710), radius=24, fill=(235, 241, 230))
     d.text((153, 458), "FIELD QUESTION", font=font(19, True), fill=green)
     d.text((153, 505), "What changes after a light rain?", font=font(36, True), fill=ink)
-    d.text((153, 570), "Follow water from the garden path to one planting bed.", font=font(25), fill=ink)
+    prompt = "Compare the path edge and planting bed after light rain." if revision else "Follow water from the garden path to one planting bed."
+    d.text((153, 570), prompt, font=font(25), fill=ink)
     d.text((112, 805), "01   Notice the ground", font=font(31, True), fill=ink)
     d.text((112, 864), "Look for darker soil, shallow channels, and places where water", font=font(25), fill=ink)
     d.text((112, 904), "rests. Record what you can see before drawing an explanation.", font=font(25), fill=ink)
@@ -105,7 +117,7 @@ def make_pdf(garden):
 
     page2 = Image.new("RGB", (width, height), paper)
     d = ImageDraw.Draw(page2)
-    d.text((112, 90), "NORTHBANK FIELD NOTES     /     04", font=font(21, True), fill=green)
+    d.text((112, 90), header, font=font(21, True), fill=green)
     d.line((112, 142, 1128, 142), fill=(211, 217, 205), width=3)
     d.text((112, 208), "03   Map a simple route", font=font(36, True), fill=ink)
     d.text((112, 265), "Trace one path with three stops: edge, bed, and barrel.", font=font(24), fill=muted)
@@ -121,7 +133,10 @@ def make_pdf(garden):
     d.text((112, 1642), "Synthetic teaching sample  ·  Fictional source and publication edition", font=font(18), fill=muted)
     d.text((1094, 1640), "02", font=font(23, True), fill=green)
 
-    page1.save(ASSETS / "field-observation-guide.pdf", "PDF", save_all=True, append_images=[page2], resolution=150.0)
+    page1.save(ASSETS / output_name, "PDF", save_all=True, append_images=[page2], resolution=150.0)
 
 
-make_pdf(make_garden())
+original_garden = make_garden()
+revised_garden = make_revised_garden(original_garden)
+make_pdf(original_garden)
+make_pdf(revised_garden, "field-observation-guide-revised.pdf", revision=True)

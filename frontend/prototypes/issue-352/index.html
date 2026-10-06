@@ -496,7 +496,7 @@
           { label: "管理员确认完整素材包", action: { type: "CONFIRM_BUNDLE" } },
           { label: "回到案例，核对仍使用旧确认版", action: { type: "SET_VIEW", view: "case" } },
           { label: "作者主动升级到新确认版", action: { type: "UPGRADE_CASE" } },
-          { label: "替换文件，建立待确认的新版本", action: { type: "REPLACE_FILE", fileId: "md-notes" } },
+          { label: "替换主 PDF，建立待确认的新版本", action: { type: "REPLACE_FILE", fileId: "pdf-main" } },
           { label: "核对 AI 仍使用上一确认版", action: { type: "SET_VIEW", view: "case" } }
         ]
       }
@@ -505,6 +505,11 @@
     const ORIGINAL_NOTES = `# Garden observation notes\n\n**Fictional source:** Northbank Learning Studio<br>\n**Publication:** Small Garden Water, edition 1 (2025)<br>\n**Section:** Field record / paragraph 3\n\n## Before the walk\n\nChoose one planting bed and one nearby path edge. Visit both after the same light shower, and use the same short observation interval.\n\n## Record what is visible\n\n1. Note the time and location.\n2. Describe changes in soil color and the shape of any shallow channel.\n3. Mark direct observations separately from possible explanations.\n\nThe sample image in this package is a generated illustration for this demonstration. It does not document a real garden.\n\n> “The path edge is darker than the bed after the shower.”\n\n## Reading note\n\n### Paragraph 3 - Interpretation\n\nParagraph 3 is an interpretation prompt for a fictional classroom activity. It is not a measurement of runoff or a claim about water quality.`;
     const REVISED_NOTES = `# Garden observation notes, revision 2\n\n**Fictional source:** Northbank Learning Studio<br>\n**Publication:** Small Garden Water, edition 1 (2025)<br>\n**Section:** Field record / paragraph 3\n\n## Before the walk\n\nChoose a planting bed and a nearby path edge. Visit both after the same light shower, and use the same observation interval.\n\n## Record what is visible\n\n1. Note the time and location.\n2. Describe changes in soil color and any visible shallow channel.\n3. Separate direct observations from explanations that still need checking.\n\nThe sample garden image is a generated illustration for this demonstration and does not document a real place.\n\n> “The path edge is darker than the bed after the shower.”\n\n## Reading note\n\n### Paragraph 3 - Interpretation\n\nParagraph 3 is an interpretation prompt for a fictional classroom activity. It is not a measurement of runoff or water quality.`;
     const SUPPLEMENTAL_NOTES = `# Supplemental garden record\n\n**Fictional source:** Northbank Learning Studio  \n**Publication:** Small Garden Water, edition 1 (2025)  \n**Section:** Follow-up / paragraph 1\n\nRepeat the observation on a second day. Keep the location and observation interval the same, then compare only what was directly recorded.`;
+    const REVISED_FILE_ASSETS = {
+      pdf: { name: "field-observation-guide-revised.pdf", path: "assets/field-observation-guide-revised.pdf" },
+      md: { name: "field-notes-revised.md", path: "assets/field-notes-revised.md" },
+      image: { name: "garden-observation-revised.png", path: "assets/garden-observation-revised.png" }
+    };
 
     const clone = value => structuredClone(value);
     const makeFiles = () => [
@@ -653,9 +658,9 @@
         case "REPLACE_FILE": {
           const file = next.bundle.files.find(item => item.id === action.fileId);
           if (file) {
-            file.name = "field-notes-revised.md";
-            file.path = "assets/field-notes-revised.md";
-            file.type = "md";
+            const replacement = REVISED_FILE_ASSETS[file.type];
+            if (!replacement || replacement.path === file.path) break;
+            Object.assign(file, replacement);
             addPackageVersion(next);
           }
           break;
@@ -685,6 +690,9 @@
           if (isVersionConfirmed(next, next.bundle.version) && next.case.sourceVersion < next.bundle.version) {
             next.case.history.push({ version: next.case.sourceVersion, citations: citationsForVersion(next, next.case.sourceVersion) });
             next.case.sourceVersion = next.bundle.version;
+            next.case.materials.forEach(material => {
+              if (material.id === "garden-pack") material.version = next.bundle.version;
+            });
           } else if (!isVersionConfirmed(next, next.bundle.version)) {
             next.notice = "新版整包完成处理并经管理员确认后，作者才能升级案例引用。";
           }
@@ -903,11 +911,13 @@
     function fileTools(file, index) {
       const mainDeleteNeedsReplacement = file.main;
       const validReplacement = state.bundle.files.some(item => item.id === state.bundle.replacementCandidate && item.id !== file.id);
+      const replacement = REVISED_FILE_ASSETS[file.type];
+      const canReplace = replacement && replacement.path !== file.path;
       return `<div class="file-tools">
         <button class="icon-button small" type="button" title="上移文件" aria-label="上移 ${escapeHtml(file.name)}" data-action="move-file" data-file="${file.id}" data-delta="-1" ${index === 0 ? "disabled" : ""}><span aria-hidden="true">↑</span></button>
         <button class="icon-button small" type="button" title="下移文件" aria-label="下移 ${escapeHtml(file.name)}" data-action="move-file" data-file="${file.id}" data-delta="1" ${index === state.bundle.files.length - 1 ? "disabled" : ""}><span aria-hidden="true">↓</span></button>
         <button class="icon-button small" type="button" title="${file.main ? "当前主文件" : "设为主文件"}" aria-label="${file.main ? "当前主文件" : `设 ${escapeHtml(file.name)} 为主文件`}" data-action="set-main" data-file="${file.id}" ${file.main ? "disabled" : ""}><span aria-hidden="true">${file.main ? "★" : "☆"}</span></button>
-        <button class="icon-button small" type="button" title="替换为合成修订文件" aria-label="替换 ${escapeHtml(file.name)}" data-action="replace-file" data-file="${file.id}" ${file.type !== "md" ? "disabled" : ""}><span aria-hidden="true">↻</span></button>
+        <button class="icon-button small" type="button" title="${canReplace ? "替换为同类型合成修订文件" : "当前已是合成修订文件"}" aria-label="替换 ${escapeHtml(file.name)}" data-action="replace-file" data-file="${file.id}" ${canReplace ? "" : "disabled"}><span aria-hidden="true">↻</span></button>
         <button class="icon-button small danger" type="button" title="${mainDeleteNeedsReplacement && !validReplacement ? "先指定替代主文件" : "移除文件"}" aria-label="移除 ${escapeHtml(file.name)}" data-action="remove-file" data-file="${file.id}" ${mainDeleteNeedsReplacement && !validReplacement ? "disabled" : ""}><span aria-hidden="true">×</span></button>
       </div>`;
     }
