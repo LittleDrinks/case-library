@@ -1,0 +1,1095 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>#352 素材包原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f7f4;
+      --surface: #fff;
+      --ink: #202b27;
+      --muted: #67746d;
+      --line: #d9e1db;
+      --green: #347253;
+      --green-soft: #e8f2eb;
+      --blue: #2c6a80;
+      --blue-soft: #e9f2f6;
+      --rust: #a9533f;
+      --rust-soft: #f9ece7;
+      --amber: #8c641e;
+      --amber-soft: #f7f0df;
+      --shadow: 0 16px 46px #14241c30;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button, a, select, input { accent-color: var(--green); }
+    button { color: inherit; cursor: pointer; }
+    button:disabled { cursor: default; opacity: .46; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    a { color: inherit; }
+    .topbar {
+      min-height: 62px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      aspect-ratio: 1;
+      border-radius: 6px;
+      background: var(--green);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 750;
+    }
+    .brand-name { font-weight: 700; white-space: nowrap; }
+    .top-meta { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+    .demo-mark { padding: 4px 8px; border: 1px solid #c4d8cb; border-radius: 4px; background: var(--green-soft); color: #245b3c; }
+    .layout {
+      width: min(1540px, 100%);
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 310px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .demo-panel {
+      position: sticky;
+      top: 16px;
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      padding: 18px;
+      background: #edf2ee;
+      border: 1px solid #d1ddd4;
+      border-radius: 6px;
+    }
+    .demo-panel h1 { margin: 0; font-size: 17px; line-height: 1.35; }
+    .demo-purpose { margin: 8px 0 13px; color: var(--muted); font-size: 12px; }
+    .demo-state {
+      padding: 9px 10px;
+      margin-bottom: 16px;
+      border-left: 3px solid var(--rust);
+      background: #fff;
+      color: #59655f;
+      font-size: 11px;
+    }
+    .demo-section-title { margin: 18px 0 8px; font-size: 11px; color: var(--muted); font-weight: 700; }
+    .scene-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .scene-tab {
+      min-height: 34px;
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+    }
+    .scene-tab:hover { background: #fff; }
+    .scene-tab[aria-selected="true"] { border-color: #bfd3c5; background: #fff; color: #235d3b; font-weight: 650; }
+    .scene-copy { margin: 10px 0 8px; color: #4f5c55; font-size: 12px; }
+    .scene-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+    .scene-steps li {
+      position: relative;
+      padding: 6px 7px 6px 28px;
+      color: var(--muted);
+      font-size: 11px;
+      counter-increment: step;
+    }
+    .scene-steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 4px;
+      top: 5px;
+      width: 17px;
+      height: 17px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #bdc9c0;
+      border-radius: 50%;
+      background: #f7f9f7;
+      font-size: 10px;
+    }
+    .scene-steps li.current { color: var(--ink); font-weight: 650; }
+    .scene-steps li.current::before { border-color: var(--green); background: var(--green); color: white; }
+    .scene-steps li.complete { color: #38704f; }
+    .scene-actions { display: flex; gap: 7px; margin-top: 9px; }
+    .button-quiet, .button-line, .button-primary, .icon-button {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+    }
+    .button-quiet, .button-line, .button-primary { padding: 6px 10px; }
+    .button-quiet { color: var(--muted); font-size: 11px; }
+    .button-line { font-size: 12px; }
+    .button-primary { border-color: var(--green); background: var(--green); color: #fff; font-weight: 650; }
+    .button-primary:hover:not(:disabled) { background: #285f43; }
+    .button-line:hover:not(:disabled), .button-quiet:hover:not(:disabled), .icon-button:hover:not(:disabled) { background: #f2f6f3; }
+    .demo-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+    .failure-toggle { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: #46534c; }
+    .failure-toggle input { margin: 3px 0 0; }
+    .state-box { border-top: 1px solid #d1ddd4; margin-top: 16px; padding-top: 11px; }
+    .state-box summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+    .state-content { margin-top: 10px; }
+    .state-row { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 7px; padding: 5px 0; border-bottom: 1px solid #dbe4dd; font-size: 10px; }
+    .state-row strong { color: #59675e; font-weight: 600; }
+    .state-row span { overflow-wrap: anywhere; }
+    .state-file { padding: 5px 7px; margin-top: 4px; border-left: 2px solid #b7c6ba; background: #f8faf8; font-size: 10px; }
+    .state-muted { color: var(--muted); }
+
+    .product { min-width: 0; }
+    .product-nav {
+      min-height: 42px;
+      display: flex;
+      align-items: stretch;
+      gap: 4px;
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-button {
+      padding: 0 14px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .nav-button[aria-current="page"] { border-color: var(--green); color: var(--ink); font-weight: 700; }
+    .view-root { padding: 22px 4px 42px; min-width: 0; }
+    .page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+    .page-heading h2 { margin: 0; font-size: 22px; line-height: 1.35; }
+    .page-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .eyebrow { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+    .heading-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .inline-actions { display: flex; align-items: center; gap: 6px; }
+    .icon-button { width: 34px; min-width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; color: #47564d; text-decoration: none; }
+    .icon-button span { font-size: 17px; line-height: 1; }
+    .icon-button.small { width: 28px; min-width: 28px; min-height: 28px; height: 28px; }
+    .icon-button.danger { color: var(--rust); }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border-radius: 3px;
+      background: #edf1ef;
+      color: #526158;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .tag.pending { background: var(--amber-soft); color: #735016; }
+    .tag.ready { background: var(--green-soft); color: #27603e; }
+    .tag.failed { background: var(--rust-soft); color: #8a402f; }
+    .tag.blue { background: var(--blue-soft); color: #285b6e; }
+    .notice { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); color: #674c1b; font-size: 12px; }
+    .notice.error { border-color: var(--rust); background: var(--rust-soft); color: #7a392c; }
+    .notice.success { border-color: var(--green); background: var(--green-soft); color: #26593a; }
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 24px 0 10px; }
+    .section-head h3 { margin: 0; font-size: 15px; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 11px; }
+    .case-intro { max-width: 820px; margin: 0 0 22px; color: #4f5b55; font-size: 14px; }
+    .case-source-list { border-top: 1px solid var(--line); }
+    .case-source-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 2px;
+      border-bottom: 1px solid var(--line);
+    }
+    .case-source-row strong { display: block; font-size: 13px; font-weight: 650; }
+    .case-source-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .case-source-row .row-actions { display: flex; align-items: center; gap: 6px; }
+    .answer-block { margin-top: 26px; padding: 17px 0 0; border-top: 1px solid var(--line); }
+    .answer-block h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: 15px; }
+    .answer-block p { max-width: 810px; margin: 0; color: #3b4941; font-size: 13px; }
+    .citation-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+    .citation {
+      min-width: min(245px,100%);
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      text-align: left;
+    }
+    .citation:hover { border-color: #aac4b2; background: #f9fbf9; }
+    .citation strong { display: block; margin-top: 5px; font-size: 11px; }
+    .citation small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .version-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 11px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .version-strip p { margin: 0; color: #4e5d53; font-size: 11px; }
+    .version-strip strong { color: var(--ink); }
+    .history-list { margin: 0; padding: 0; list-style: none; }
+    .history-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .text-link { padding: 2px 0; border: 0; background: none; color: var(--blue); text-decoration: underline; text-underline-offset: 2px; text-align: left; }
+
+    .search-tools { display: grid; grid-template-columns: minmax(200px,1fr) 180px; gap: 9px; margin: 16px 0 10px; }
+    .search-tools input, .search-tools select, .replacement-select {
+      min-height: 38px;
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #cbd6ce;
+      border-radius: 4px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .selection-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; color: var(--muted); font-size: 11px; }
+    .selection-summary strong { color: var(--ink); }
+    .result-list { border-top: 1px solid var(--line); }
+    .result-row { display: grid; grid-template-columns: 25px minmax(0,1fr) auto; align-items: start; gap: 10px; padding: 13px 4px; border-bottom: 1px solid var(--line); }
+    .result-row input { margin: 4px 0 0; }
+    .result-row h3 { margin: 0; font-size: 13px; font-weight: 650; }
+    .result-row p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+    .result-meta { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+    .result-status { color: var(--muted); font-size: 10px; }
+    .selection-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-top: 14px; }
+    .selection-footer .fail-list { color: var(--rust); font-size: 11px; }
+    .pagination { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+
+    .detail-facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 18px; padding-bottom: 15px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .detail-facts strong { color: var(--ink); font-weight: 600; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(260px,.8fr); gap: 28px; align-items: start; }
+    .file-list { border-top: 1px solid var(--line); }
+    .file-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      gap: 10px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .file-mainline { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .file-open {
+      display: grid;
+      place-items: center;
+      flex: 0 0 32px;
+      width: 32px;
+      height: 38px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: #fff;
+      color: var(--blue);
+      font-size: 9px;
+      font-weight: 800;
+    }
+    .file-name-edit { flex: 1; min-width: 0; display: flex; gap: 5px; }
+    .file-name-edit input { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); font-size: 11px; }
+    .file-name-edit input:hover, .file-name-edit input:focus { border-color: var(--line); background: #fff; }
+    .file-statusline { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 4px 0 0 40px; color: var(--muted); font-size: 10px; }
+    .file-tools { display: flex; align-items: center; gap: 3px; }
+    .processing-panel { padding: 0 0 0 16px; border-left: 1px solid var(--line); }
+    .processing-panel h3 { margin: 0 0 7px; font-size: 14px; }
+    .processing-panel p { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+    .process-summary { padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .process-summary strong { display: block; font-size: 13px; }
+    .process-summary small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .process-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .replacement-line { display: flex; align-items: center; gap: 8px; margin-top: 15px; color: var(--muted); font-size: 10px; }
+    .replacement-line label { white-space: nowrap; }
+    .replacement-select { min-height: 32px; padding: 4px 7px; font-size: 10px; }
+    .add-file-line { margin-top: 13px; }
+    .add-file-line button { color: var(--blue); }
+    .detail-help { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
+
+    .reader-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      background: #17251ec2;
+    }
+    .reader-window {
+      display: flex;
+      flex-direction: column;
+      width: 80vw;
+      height: 80vh;
+      max-width: 1320px;
+      min-height: 360px;
+      overflow: hidden;
+      border: 1px solid #ccd7cf;
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+    .reader-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-height: 57px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .reader-heading { flex: 1; min-width: 0; }
+    .reader-heading strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .reader-heading small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .reader-tools { display: flex; align-items: center; gap: 7px; }
+    .reader-tools select { max-width: 205px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: white; font-size: 11px; }
+    .pdf-tools { display: flex; align-items: center; gap: 5px; }
+    .pdf-counter { min-width: 54px; color: var(--muted); text-align: center; font-size: 10px; }
+    .reader-download { color: var(--green); }
+    .reader-content { min-height: 0; flex: 1; background: #edf1ee; }
+    .reader-content iframe { display: block; width: 100%; height: 100%; border: 0; background: #e4e9e5; }
+    .markdown-source { width: min(780px,100%); height: 100%; overflow: auto; margin: 0 auto; padding: 32px 38px; background: #fff; color: #2e3b33; font: 13px/1.8 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .image-reader { display: grid; place-items: center; width: 100%; height: 100%; padding: 20px; overflow: auto; }
+    .image-reader img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; background: white; }
+    .reader-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 5px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .reader-footer strong { color: var(--ink); }
+    .reader-footer-actions { display: flex; align-items: center; gap: 9px; }
+    .reader-footer-actions .button-quiet { min-height: 27px; padding: 3px 7px; font-size: 10px; }
+    .empty-state { padding: 24px 0; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 280px minmax(0,1fr); padding: 14px; gap: 14px; }
+      .demo-panel { padding: 14px; }
+      .detail-grid { grid-template-columns: minmax(0,1fr); gap: 20px; }
+      .processing-panel { padding: 15px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+    }
+    @media (max-width: 760px) {
+      .topbar { padding: 0 13px; min-height: 54px; }
+      .top-meta { gap: 6px; font-size: 10px; }
+      .top-meta .qa-word { display: none; }
+      .layout { display: flex; flex-direction: column; padding: 10px; }
+      .demo-panel { position: static; order: 1; width: 100%; max-height: none; }
+      .product { order: 0; width: 100%; }
+      .product-nav { overflow-x: auto; }
+      .nav-button { flex: 0 0 auto; min-height: 39px; padding: 0 10px; }
+      .view-root { padding: 16px 2px 32px; }
+      .page-heading { flex-wrap: wrap; }
+      .page-heading h2 { font-size: 19px; }
+      .search-tools { grid-template-columns: minmax(0,1fr) 132px; }
+      .detail-facts { gap: 7px 12px; }
+      .reader-mask { padding: 0; }
+      .reader-window { width: 96vw; height: 92vh; min-height: 300px; }
+      .reader-header { flex-wrap: wrap; gap: 6px; padding: 8px; }
+      .reader-heading { flex-basis: calc(100% - 48px); }
+      .reader-tools { width: 100%; justify-content: space-between; gap: 4px; }
+      .reader-tools select { flex: 1; min-width: 0; max-width: 170px; }
+      .pdf-counter { min-width: 46px; }
+      .markdown-source { padding: 20px 16px; font-size: 11px; }
+      .case-source-row { grid-template-columns: minmax(0,1fr); }
+      .case-source-row .row-actions { justify-content: flex-start; }
+      .version-strip { align-items: flex-start; flex-direction: column; }
+    }
+    @media (max-width: 430px) {
+      .brand-name { font-size: 12px; }
+      .brand { gap: 7px; }
+      .brand-mark { width: 26px; }
+      .demo-mark { padding: 3px 5px; }
+      .search-tools { grid-template-columns: 1fr; }
+      .result-row { grid-template-columns: 22px minmax(0,1fr); }
+      .result-meta { grid-column: 2; justify-content: flex-start; }
+      .file-row { grid-template-columns: minmax(0,1fr); }
+      .file-tools { justify-content: flex-end; }
+      .replacement-line { align-items: flex-start; flex-direction: column; }
+      .replacement-select { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">材</span><span class="brand-name">教学资料室</span></div>
+    <div class="top-meta"><span class="demo-mark">原型演示</span><span class="qa-word">人工 QA 待确认</span></div>
+  </header>
+  <div class="layout">
+    <aside id="demo-panel" class="demo-panel" aria-label="演示场景与状态"></aside>
+    <main class="product">
+      <nav id="product-nav" class="product-nav" aria-label="资料导航"></nav>
+      <div id="view-root" class="view-root"></div>
+    </main>
+  </div>
+  <div id="reader-root"></div>
+
+  <script>
+    const CATALOG = [
+      { id: "rain-card", title: "雨后花圃观察图卡", source: "北岸学习工作室", edition: "观察卡 · 2025", category: "图片", files: 2 },
+      { id: "soil-guide", title: "土壤表面观察手册", source: "青禾课堂资料社", edition: "学习手册 · 2024", category: "指南", files: 3 },
+      { id: "route-map", title: "校园种植路线图", source: "纸鸢教学编辑部", edition: "路线图 · 2025", category: "图片", files: 2 },
+      { id: "riverside-log", title: "河岸微地形记录", source: "青禾课堂资料社", edition: "课堂记录 · 2025", category: "记录", files: 3 },
+      { id: "pollinator-sheet", title: "花园访客观察页", source: "纸鸢教学编辑部", edition: "观察页 · 2024", category: "指南", files: 2 }
+    ];
+
+    const SCENES = {
+      read: {
+        label: "阅读与入口",
+        description: "切换 PDF、Markdown 与图片，查看真实 PDF 翻页、下载、浮窗、详情页和新标签入口。",
+        startView: "detail",
+        steps: [
+          { label: "打开 PDF 阅读浮窗", action: { type: "OPEN_READER", fileId: "pdf-main" } },
+          { label: "切换到 Markdown", action: { type: "SET_READER_TYPE", fileType: "md" } },
+          { label: "切换到图片", action: { type: "SET_READER_TYPE", fileType: "image" } },
+          { label: "返回 PDF 并翻到第 2 页", action: { type: "SET_READER_TYPE", fileType: "pdf" } },
+          { label: "阅读第 2 页", action: { type: "SET_READER_PAGE", page: 2 } },
+          { label: "关闭浮窗", action: { type: "CLOSE_READER" } },
+          { label: "打开独立详情页的新标签入口", action: { type: "RECORD_EVENT", label: "已从独立详情页打开新标签" }, effect: "new-tab" }
+        ]
+      },
+      manage: {
+        label: "文件管理与主文件",
+        description: "添加、重命名、排序和移除文件；删除主文件时先指定替代文件。",
+        startView: "detail",
+        steps: [
+          { label: "添加一份合成 Markdown 文件", action: { type: "ADD_FILE" } },
+          { label: "重命名新文件", action: { type: "RENAME_FILE", fileId: "supplement-1", name: "garden-follow-up.md" } },
+          { label: "将新文件向上移动一位", action: { type: "MOVE_FILE", fileId: "supplement-1", delta: -1 } },
+          { label: "未指定替代文件时尝试删除主文件", action: { type: "REMOVE_FILE", fileId: "pdf-main" } },
+          { label: "明确指定 Markdown 文件为替代", action: { type: "SET_REPLACEMENT", fileId: "md-notes" } },
+          { label: "删除原主文件并使用指定替代", action: { type: "REMOVE_FILE", fileId: "pdf-main" } }
+        ]
+      },
+      single: {
+        label: "单份整包加入",
+        description: "将一条资料作为完整素材包加入案例；成功后直接返回案例资料区。",
+        startView: "search",
+        steps: [
+          { label: "进入资料检索", action: { type: "SET_VIEW", view: "search" } },
+          { label: "选择一条完整资料", action: { type: "TOGGLE_SELECTED", materialId: "route-map" } },
+          { label: "加入案例并返回案例资料区", action: { type: "ADD_SELECTION" } }
+        ]
+      },
+      batch: {
+        label: "跨页选材与部分失败",
+        description: "选择跨搜索与翻页保留；模拟部分失败留在检索页，再只重试失败项。",
+        startView: "search",
+        failOnAdd: true,
+        steps: [
+          { label: "选择雨后观察图卡", action: { type: "TOGGLE_SELECTED", materialId: "rain-card" } },
+          { label: "筛选指南类资料", action: { type: "SET_CATEGORY", value: "指南" } },
+          { label: "在筛选结果中再选一条", action: { type: "TOGGLE_SELECTED", materialId: "soil-guide" } },
+          { label: "恢复全部类别", action: { type: "SET_CATEGORY", value: "全部" } },
+          { label: "搜索河岸记录", action: { type: "SET_SEARCH", value: "河岸" } },
+          { label: "在搜索结果中再选一条", action: { type: "TOGGLE_SELECTED", materialId: "riverside-log" } },
+          { label: "清除搜索并进入第 2 页", action: { type: "CLEAR_SEARCH_AND_PAGE", page: 2 } },
+          { label: "在第 2 页再选一条", action: { type: "TOGGLE_SELECTED", materialId: "pollinator-sheet" } },
+          { label: "批量加入：一项失败并留在本页", action: { type: "ADD_SELECTION" } },
+          { label: "仅重试未成功项", action: { type: "RETRY_ADDS" } }
+        ]
+      },
+      version: {
+        label: "整包确认与旧版引用",
+        description: "任一文件失败或未完成时整包待处理；确认新包后仍需作者主动升级案例引用。",
+        startView: "detail",
+        steps: [
+          { label: "处理整包中尚未完成的文件", action: { type: "PROCESS_BUNDLE" } },
+          { label: "只重试处理失败的文件", action: { type: "RETRY_FAILED_PROCESSING" } },
+          { label: "管理员确认完整素材包", action: { type: "CONFIRM_BUNDLE" } },
+          { label: "回到案例，核对仍使用旧确认版", action: { type: "SET_VIEW", view: "case" } },
+          { label: "作者主动升级到新确认版", action: { type: "UPGRADE_CASE" } },
+          { label: "替换文件，建立待确认的新版本", action: { type: "REPLACE_FILE", fileId: "md-notes" } },
+          { label: "核对 AI 仍使用上一确认版", action: { type: "SET_VIEW", view: "case" } }
+        ]
+      }
+    };
+
+    const ORIGINAL_NOTES = `# Garden observation notes\n\n**Fictional source:** Northbank Learning Studio<br>\n**Publication:** Small Garden Water, edition 1 (2025)<br>\n**Section:** Field record / paragraph 3\n\n## Before the walk\n\nChoose one planting bed and one nearby path edge. Visit both after the same light shower, and use the same short observation interval.\n\n## Record what is visible\n\n1. Note the time and location.\n2. Describe changes in soil color and the shape of any shallow channel.\n3. Mark direct observations separately from possible explanations.\n\nThe sample image in this package is a generated illustration for this demonstration. It does not document a real garden.\n\n> “The path edge is darker than the bed after the shower.”\n\n## Reading note\n\n### Paragraph 3 - Interpretation\n\nParagraph 3 is an interpretation prompt for a fictional classroom activity. It is not a measurement of runoff or a claim about water quality.`;
+    const REVISED_NOTES = `# Garden observation notes, revision 2\n\n**Fictional source:** Northbank Learning Studio<br>\n**Publication:** Small Garden Water, edition 1 (2025)<br>\n**Section:** Field record / paragraph 3\n\n## Before the walk\n\nChoose a planting bed and a nearby path edge. Visit both after the same light shower, and use the same observation interval.\n\n## Record what is visible\n\n1. Note the time and location.\n2. Describe changes in soil color and any visible shallow channel.\n3. Separate direct observations from explanations that still need checking.\n\nThe sample garden image is a generated illustration for this demonstration and does not document a real place.\n\n> “The path edge is darker than the bed after the shower.”\n\n## Reading note\n\n### Paragraph 3 - Interpretation\n\nParagraph 3 is an interpretation prompt for a fictional classroom activity. It is not a measurement of runoff or water quality.`;
+    const SUPPLEMENTAL_NOTES = `# Supplemental garden record\n\n**Fictional source:** Northbank Learning Studio  \n**Publication:** Small Garden Water, edition 1 (2025)  \n**Section:** Follow-up / paragraph 1\n\nRepeat the observation on a second day. Keep the location and observation interval the same, then compare only what was directly recorded.`;
+
+    const clone = value => structuredClone(value);
+    const makeFiles = () => [
+      { id: "pdf-main", name: "field-observation-guide.pdf", type: "pdf", path: "assets/field-observation-guide.pdf", main: true, processing: "done" },
+      { id: "md-notes", name: "field-notes.md", type: "md", path: "assets/field-notes.md", main: false, processing: "done" },
+      { id: "garden-image", name: "garden-observation.png", type: "image", path: "assets/garden-observation.png", main: false, processing: "done" }
+    ];
+    const createInitialState = () => {
+      const confirmedFiles = makeFiles();
+      const currentFiles = makeFiles().map(file => ({ ...file, processing: "pending" }));
+      return {
+        view: "case",
+        bundle: {
+          id: "garden-pack",
+          title: "小型花园用水：观察指南",
+          source: "北岸学习工作室",
+          edition: "学习资料 · 2025 年第 1 版",
+          version: 2,
+          files: currentFiles,
+          confirmed: [{ number: 1, files: confirmedFiles }],
+          replacementCandidate: "",
+          nextSupplement: 1
+        },
+        case: {
+          title: "雨后花圃观察课",
+          sourceVersion: 1,
+          materials: [{ id: "garden-pack", version: 1 }],
+          history: []
+        },
+        search: { query: "", category: "全部", page: 1, pageSize: 3, selected: [], failed: [] },
+        reader: { open: false, fileId: "pdf-main", version: null, page: 1 },
+        demo: { scene: null, step: 0, failOnAdd: false, failOnProcessing: false, lastEvent: "演示初始状态" },
+        notice: ""
+      };
+    };
+
+    const findSnapshot = (state, version) => state.bundle.confirmed.find(item => item.number === version);
+    const filesForVersion = (state, version) => version == null ? state.bundle.files : (findSnapshot(state, version)?.files || []);
+    const fileTypeLabel = type => ({ pdf: "PDF", md: "Markdown", image: "图片" }[type] || type);
+    const fileTypeSymbol = type => ({ pdf: "PDF", md: "MD", image: "IMG" }[type] || type);
+    const processLabel = value => ({ done: "处理完成", pending: "未处理", failed: "处理失败" }[value] || value);
+    const packageStatus = state => {
+      if (findSnapshot(state, state.bundle.version)) return "已确认";
+      return state.bundle.files.some(file => file.processing !== "done") ? "待处理" : "待确认";
+    };
+    const isVersionConfirmed = (state, version) => Boolean(findSnapshot(state, version));
+    const citationsForVersion = (state, version) => {
+      const files = filesForVersion(state, version);
+      const pdf = files.find(file => file.id === "pdf-main");
+      const notes = files.find(file => file.id === "md-notes");
+      return [
+        ...(pdf ? [{ kind: "原件", fileId: pdf.id, fileName: pdf.name, location: "PDF · 第 2 页", version }] : []),
+        ...(notes ? [{ kind: "解读", fileId: notes.id, fileName: notes.name, location: "Markdown · 第 3 段", version }] : [])
+      ];
+    };
+    const addPackageVersion = state => {
+      state.bundle.version += 1;
+      state.bundle.files = state.bundle.files.map(file => ({ ...file, processing: "pending" }));
+      state.notice = `文件内容已变更，整包 v${state.bundle.version} 重新待处理。`;
+    };
+    const addMaterialToCase = (state, id) => {
+      if (!state.case.materials.some(item => item.id === id)) state.case.materials.push({ id, version: 1 });
+    };
+
+    function transition(state, action) {
+      if (action.type === "START_SCENE") {
+        const next = createInitialState();
+        const scene = SCENES[action.sceneId];
+        next.view = scene.startView;
+        next.demo.scene = action.sceneId;
+        next.demo.failOnAdd = Boolean(scene.failOnAdd);
+        next.demo.failOnProcessing = action.sceneId === "version";
+        next.demo.lastEvent = `开始场景：${scene.label}`;
+        return next;
+      }
+      if (action.type === "ADVANCE_SCENE") {
+        const scene = SCENES[state.demo.scene];
+        const step = scene?.steps[state.demo.step];
+        if (!step) return state;
+        const advanced = transition(state, step.action);
+        advanced.demo.step = state.demo.step + 1;
+        advanced.demo.lastEvent = step.label;
+        return advanced;
+      }
+
+      const next = clone(state);
+      next.notice = "";
+      switch (action.type) {
+        case "SET_VIEW":
+          next.view = action.view;
+          break;
+        case "OPEN_READER":
+          next.reader = { open: true, fileId: action.fileId, version: action.version ?? null, page: action.page || 1 };
+          break;
+        case "CLOSE_READER":
+          next.reader.open = false;
+          break;
+        case "SET_READER_TYPE": {
+          const file = filesForVersion(next, next.reader.version).find(item => item.type === action.fileType);
+          if (file) next.reader.fileId = file.id;
+          if (action.fileType === "pdf") next.reader.page = action.page || 1;
+          break;
+        }
+        case "SET_READER_PAGE":
+          next.reader.page = Math.max(1, Math.min(2, action.page));
+          break;
+        case "ADD_FILE": {
+          const number = next.bundle.nextSupplement++;
+          next.bundle.files.push({ id: `supplement-${number}`, name: `garden-follow-up-${number}.md`, type: "md", path: "assets/supplemental-observation.md", main: false, processing: "pending" });
+          addPackageVersion(next);
+          break;
+        }
+        case "RENAME_FILE": {
+          const file = next.bundle.files.find(item => item.id === action.fileId);
+          if (file && action.name.trim()) file.name = action.name.trim();
+          break;
+        }
+        case "MOVE_FILE": {
+          const index = next.bundle.files.findIndex(item => item.id === action.fileId);
+          const destination = index + action.delta;
+          if (index >= 0 && destination >= 0 && destination < next.bundle.files.length) {
+            const [file] = next.bundle.files.splice(index, 1);
+            next.bundle.files.splice(destination, 0, file);
+          }
+          break;
+        }
+        case "SET_MAIN":
+          next.bundle.files.forEach(file => { file.main = file.id === action.fileId; });
+          break;
+        case "SET_REPLACEMENT":
+          next.bundle.replacementCandidate = action.fileId;
+          break;
+        case "REMOVE_FILE": {
+          const file = next.bundle.files.find(item => item.id === action.fileId);
+          if (!file) break;
+          if (file.main && !next.bundle.files.some(item => item.id === next.bundle.replacementCandidate && item.id !== file.id)) {
+            next.notice = "删除主文件前，必须明确指定另一份文件作为主文件。";
+            break;
+          }
+          if (file.main) next.bundle.files.find(item => item.id === next.bundle.replacementCandidate).main = true;
+          next.bundle.files = next.bundle.files.filter(item => item.id !== file.id);
+          next.bundle.replacementCandidate = "";
+          addPackageVersion(next);
+          break;
+        }
+        case "REPLACE_FILE": {
+          const file = next.bundle.files.find(item => item.id === action.fileId);
+          if (file) {
+            file.name = "field-notes-revised.md";
+            file.path = "assets/field-notes-revised.md";
+            file.type = "md";
+            addPackageVersion(next);
+          }
+          break;
+        }
+        case "PROCESS_BUNDLE":
+          next.bundle.files.forEach(file => {
+            if (file.processing !== "pending") return;
+            if (file.id === "garden-image" && next.demo.failOnProcessing) {
+              file.processing = "failed";
+              next.demo.failOnProcessing = false;
+            } else {
+              file.processing = "done";
+            }
+          });
+          break;
+        case "RETRY_FAILED_PROCESSING":
+          next.bundle.files.forEach(file => { if (file.processing === "failed") file.processing = "done"; });
+          break;
+        case "CONFIRM_BUNDLE":
+          if (next.bundle.files.every(file => file.processing === "done")) {
+            if (!findSnapshot(next, next.bundle.version)) next.bundle.confirmed.push({ number: next.bundle.version, files: clone(next.bundle.files) });
+          } else {
+            next.notice = "所有文件处理完成后，管理员才能确认整个素材包。";
+          }
+          break;
+        case "UPGRADE_CASE":
+          if (isVersionConfirmed(next, next.bundle.version) && next.case.sourceVersion < next.bundle.version) {
+            next.case.history.push({ version: next.case.sourceVersion, citations: citationsForVersion(next, next.case.sourceVersion) });
+            next.case.sourceVersion = next.bundle.version;
+          } else if (!isVersionConfirmed(next, next.bundle.version)) {
+            next.notice = "新版整包完成处理并经管理员确认后，作者才能升级案例引用。";
+          }
+          break;
+        case "SET_SEARCH":
+          next.search.query = action.value;
+          next.search.page = 1;
+          break;
+        case "CLEAR_SEARCH_AND_PAGE":
+          next.search.query = "";
+          next.search.category = "全部";
+          next.search.page = action.page;
+          break;
+        case "SET_CATEGORY":
+          next.search.category = action.value;
+          next.search.page = 1;
+          break;
+        case "SET_PAGE":
+          next.search.page = action.page;
+          break;
+        case "TOGGLE_SELECTED": {
+          const selected = new Set(next.search.selected);
+          if (selected.has(action.materialId)) selected.delete(action.materialId);
+          else if (!next.case.materials.some(item => item.id === action.materialId)) selected.add(action.materialId);
+          next.search.selected = [...selected];
+          break;
+        }
+        case "SET_FAIL_ON_ADD":
+          next.demo.failOnAdd = action.value;
+          break;
+        case "ADD_SELECTION": {
+          const failed = [];
+          for (const id of next.search.selected) {
+            if (id === "rain-card" && next.demo.failOnAdd) failed.push(id);
+            else addMaterialToCase(next, id);
+          }
+          next.demo.failOnAdd = false;
+          next.search.failed = failed;
+          next.search.selected = failed;
+          if (failed.length) {
+            next.search.query = "";
+            next.search.category = "全部";
+            next.search.page = 1;
+            next.notice = "部分素材包加入失败。已成功的项目已加入案例；失败项保留在检索页，可单独重试。";
+          }
+          else next.view = "case";
+          break;
+        }
+        case "RETRY_ADDS":
+          next.search.failed.forEach(id => addMaterialToCase(next, id));
+          next.search.failed = [];
+          next.search.selected = [];
+          next.view = "case";
+          break;
+        case "RECORD_EVENT":
+          next.demo.lastEvent = action.label;
+          break;
+        default:
+          return state;
+      }
+      if (action.type !== "RECORD_EVENT") next.demo.lastEvent = action.label || action.type;
+      return next;
+    }
+
+    let state = createInitialState();
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character]));
+    const assetPath = file => file.path;
+    const currentSnapshotFiles = version => filesForVersion(state, version);
+    const readFile = () => currentSnapshotFiles(state.reader.version).find(file => file.id === state.reader.fileId);
+    const catalogEntry = id => CATALOG.find(item => item.id === id);
+    const packageFileName = file => `${file.name} · ${fileTypeLabel(file.type)}`;
+    const caseVersionLabel = () => `v${state.case.sourceVersion}`;
+
+    function renderNav() {
+      const items = [
+        ["case", "案例资料"], ["search", "资料检索"], ["detail", "素材详情"]
+      ];
+      document.querySelector("#product-nav").innerHTML = items.map(([view, label]) =>
+        `<button class="nav-button" type="button" data-action="set-view" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}">${label}</button>`
+      ).join("");
+    }
+
+    function renderStatePanel() {
+      const scene = state.demo.scene ? SCENES[state.demo.scene].label : "未选择";
+      const activeSceneStep = state.demo.scene ? SCENES[state.demo.scene].steps[state.demo.step] : null;
+      const selectedNames = state.search.selected.map(id => catalogEntry(id)?.title || id);
+      const failedNames = state.search.failed.map(id => catalogEntry(id)?.title || id);
+      const caseMaterials = state.case.materials.map(item => `${item.id === "garden-pack" ? state.bundle.title : catalogEntry(item.id)?.title || item.id} v${item.version}`).join("、");
+      const citations = citationsForVersion(state, state.case.sourceVersion).map(item => `${item.kind}：${item.fileName} · ${item.location} · v${item.version}`).join("；");
+      const historyCitations = state.case.history.flatMap(item => item.citations.map(citation => `v${item.version}：${citation.kind} ${citation.fileName} · ${citation.location}`)).join("；");
+      const readerFile = filesForVersion(state, state.reader.version).find(file => file.id === state.reader.fileId);
+      const readerState = state.reader.open ? `${readerFile?.name || "文件不存在"} · ${state.reader.version == null ? `最新 v${state.bundle.version}` : `历史 v${state.reader.version}`} · ${readerFile?.type === "pdf" ? `第 ${state.reader.page} 页` : fileTypeLabel(readerFile?.type || "")} ` : "已关闭";
+      const rows = [
+        ["场景 / 步骤", `${scene} · ${state.demo.scene ? `${state.demo.step}/${SCENES[state.demo.scene].steps.length}` : "未启动"}`],
+        ["当前页面", ({ case: "案例资料区", search: "资料检索", detail: "素材详情" }[state.view])],
+        ["资料身份", `${state.bundle.source} · ${state.bundle.edition}`],
+        ["案例固定引用", `${caseVersionLabel()}（${isVersionConfirmed(state, state.case.sourceVersion) ? "已确认" : "版本记录"}）`],
+        ["案例全部资料包", caseMaterials || "无"],
+        ["AI 实际引用", citations || "无"],
+        ["历史引用来源", historyCitations || "无"],
+        ["素材最新版本", `v${state.bundle.version} · ${packageStatus(state)}`],
+        ["已确认版本", state.bundle.confirmed.map(item => `v${item.number}`).join("、") || "无"],
+        ["选材条件", `“${state.search.query || "全部"}” / ${state.search.category} / 第 ${state.search.page} 页`],
+        ["已选整包", selectedNames.length ? selectedNames.join("、") : "无"],
+        ["加入失败项", failedNames.length ? failedNames.join("、") : "无"],
+        ["阅读器", readerState],
+        ["失败模拟", `加入 ${state.demo.failOnAdd ? "开启" : "关闭"} · 处理 ${state.demo.failOnProcessing ? "开启" : "关闭"}`],
+        ["最近操作", state.demo.lastEvent],
+        ["人工体验", "待确认"]
+      ];
+      const files = state.bundle.files.map(file =>
+        `<div class="state-file"><strong>${escapeHtml(file.name)}</strong> · ${file.main ? "主文件" : "包内文件"} · ${processLabel(file.processing)}</div>`
+      ).join("");
+      document.querySelector("#demo-panel").innerHTML = `
+        <h1>场景与状态</h1>
+        <p class="demo-purpose">本演示检查素材包状态与案例引用如何随操作变化。</p>
+        <div class="demo-state">原型 · 仅内存状态 · 所有场景的人工 QA 均待确认</div>
+        <div class="demo-section-title">逐场景入口</div>
+        <div class="scene-tabs" role="tablist" aria-label="演示场景">
+          ${Object.entries(SCENES).map(([id, scene]) => `<button class="scene-tab" type="button" role="tab" data-action="start-scene" data-scene="${id}" aria-selected="${state.demo.scene === id}">${scene.label}</button>`).join("")}
+        </div>
+        ${state.demo.scene ? `
+          <p class="scene-copy">${SCENES[state.demo.scene].description}</p>
+          <ol class="scene-steps">${SCENES[state.demo.scene].steps.map((step, index) => `<li class="${index < state.demo.step ? "complete" : index === state.demo.step ? "current" : ""}">${step.label}</li>`).join("")}</ol>
+          <div class="scene-actions">
+            ${activeSceneStep?.effect === "new-tab" ? `<a class="button-primary" href="?view=detail" target="_blank" rel="noopener" data-action="advance-scene-link">执行第 ${state.demo.step + 1} 步</a>` : `<button class="button-primary" type="button" data-action="advance-scene" ${state.demo.step >= SCENES[state.demo.scene].steps.length ? "disabled" : ""}>${state.demo.step >= SCENES[state.demo.scene].steps.length ? "场景已走完" : `执行第 ${state.demo.step + 1} 步`}</button>`}
+            <button class="button-quiet" type="button" data-action="reset-scene">重置</button>
+          </div>` : `<p class="scene-copy">选择一个入口后逐步体验；切换入口会重置到该场景的合成初始状态。</p>`}
+        <div class="demo-section-title">演示开关</div>
+        <label class="failure-toggle"><input type="checkbox" data-action="set-add-failure" ${state.demo.failOnAdd ? "checked" : ""}>批量加入时模拟“雨后花圃观察图卡”失败</label>
+        <details class="state-box" open>
+          <summary>完整相关状态</summary>
+          <div class="state-content">
+            ${rows.map(([label, value]) => `<div class="state-row"><strong>${label}</strong><span>${escapeHtml(value)}</span></div>`).join("")}
+            <div class="state-row"><strong>包内文件</strong><span>${files || "无"}</span></div>
+          </div>
+        </details>
+        ${state.notice ? `<div class="notice ${state.notice.includes("失败") || state.notice.includes("必须") ? "error" : ""}" role="status">${escapeHtml(state.notice)}</div>` : ""}
+      `;
+    }
+
+    function statusTag(status) {
+      const tone = status.startsWith("已确认") || status === "处理完成" ? "ready" : status === "处理失败" ? "failed" : "pending";
+      return `<span class="tag ${tone}">${status}</span>`;
+    }
+
+    function renderCase() {
+      const latestStatus = packageStatus(state);
+      const newVersionReady = isVersionConfirmed(state, state.bundle.version) && state.case.sourceVersion < state.bundle.version;
+      const references = state.case.materials.map(material => {
+        if (material.id === "garden-pack") return `<div class="case-source-row"><div><strong>${escapeHtml(state.bundle.title)}</strong><small>${escapeHtml(state.bundle.source)} · ${escapeHtml(state.bundle.edition)} · 案例使用 v${material.version}</small></div><div class="row-actions">${statusTag(material.version === state.bundle.version && latestStatus === "已确认" ? "已确认" : "已确认版本")}<button class="button-line" type="button" data-action="set-view" data-view="detail">素材详情</button></div></div>`;
+        const entry = catalogEntry(material.id);
+        return entry ? `<div class="case-source-row"><div><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.source)} · ${escapeHtml(entry.edition)} · 整包 v${material.version}</small></div><div class="row-actions"><span class="tag ready">已加入</span></div></div>` : "";
+      }).join("");
+      const citations = citationsForVersion(state, state.case.sourceVersion);
+      const citationMarkup = citations.length ? citations.map(citation => `<button class="citation" type="button" data-action="open-reader" data-file="${citation.fileId}" data-version="${citation.version}"><span class="tag ${citation.kind === "原件" ? "blue" : "pending"}">${citation.kind}</span><strong>${escapeHtml(citation.fileName)}</strong><small>${citation.location} · 引用版本 v${citation.version}</small></button>`).join("") : `<p class="empty-state">当前引用版本没有可展示的文件来源。</p>`;
+      const oldHistory = state.case.history.length ? `<ul class="history-list">${state.case.history.map(item => `<li><span class="tag">历史引用 v${item.version}</span>${item.citations.map(citation => `<button class="text-link" type="button" data-action="open-reader" data-file="${citation.fileId}" data-version="${citation.version}">${escapeHtml(citation.fileName)} · ${citation.location} · ${citation.kind}</button>`).join("")}</li>`).join("")}</ul>` : `<p class="empty-state">尚无版本升级记录。</p>`;
+      let versionMessage = `案例继续引用已确认的 v${state.case.sourceVersion}；素材最新 v${state.bundle.version} 处于${latestStatus}。`;
+      if (newVersionReady) versionMessage = `素材 v${state.bundle.version} 已整包确认，案例仍固定引用 v${state.case.sourceVersion}；作者可主动升级。`;
+      if (state.case.sourceVersion === state.bundle.version && latestStatus === "已确认") versionMessage = `案例已主动升级并使用整包确认的 v${state.case.sourceVersion}。`;
+      return `
+        <div class="page-heading"><div><span class="eyebrow">当前案例</span><h2>${escapeHtml(state.case.title)}</h2><p>课程资料与引用版本</p></div><div class="heading-actions"><button class="button-line" type="button" data-action="set-view" data-view="search">添加资料</button></div></div>
+        <p class="case-intro">在花圃中记录降雨后的可见变化，并把直接观察与解释分开整理。</p>
+        <div class="section-head"><h3>案例资料</h3><p>${state.case.materials.length} 条完整素材包</p></div>
+        <div class="case-source-list">${references || `<p class="empty-state">案例尚无资料。</p>`}</div>
+        <div class="version-strip"><p>${escapeHtml(versionMessage)}</p><button class="button-primary" type="button" data-action="upgrade-case" ${newVersionReady ? "" : "disabled"}>主动升级到 v${state.bundle.version}</button></div>
+        <section class="answer-block" aria-labelledby="answer-title">
+          <h3 id="answer-title"><span class="tag blue">演示回答</span>资料引用记录 · v${state.case.sourceVersion}</h3>
+          <p>记录显示，雨后路径边缘颜色较深；这条可见描述来自素材原件。把它解释为排水方向仍属于课堂解读，需要与现场观察分开标记。</p>
+          <div class="citation-list" aria-label="回答引用来源">${citationMarkup}</div>
+        </section>
+        <section class="answer-block" aria-labelledby="history-title"><h3 id="history-title">历史引用</h3>${oldHistory}</section>
+      `;
+    }
+
+    function visibleCatalog() {
+      const query = state.search.query.trim().toLocaleLowerCase();
+      return CATALOG.filter(item => {
+        const text = `${item.title} ${item.source} ${item.edition}`.toLocaleLowerCase();
+        return (!query || text.includes(query)) && (state.search.category === "全部" || item.category === state.search.category);
+      });
+    }
+
+    function renderSearch() {
+      const results = visibleCatalog();
+      const pageCount = Math.max(1, Math.ceil(results.length / state.search.pageSize));
+      const page = Math.min(state.search.page, pageCount);
+      const pageItems = results.slice((page - 1) * state.search.pageSize, page * state.search.pageSize);
+      const rows = pageItems.length ? pageItems.map(item => {
+        const selected = state.search.selected.includes(item.id);
+        const added = state.case.materials.some(material => material.id === item.id);
+        const failed = state.search.failed.includes(item.id);
+        return `<div class="result-row">
+          <input type="checkbox" aria-label="选择整包：${escapeHtml(item.title)}" data-action="toggle-selection" data-material="${item.id}" ${selected ? "checked" : ""} ${added ? "disabled" : ""}>
+          <div><h3>${escapeHtml(item.title)} ${failed ? `<span class="tag failed">加入失败</span>` : ""}</h3><p>${escapeHtml(item.source)} · ${escapeHtml(item.edition)} · ${item.files} 个文件 · ${escapeHtml(item.category)}</p></div>
+          <div class="result-meta">${added ? `<span class="tag ready">已在案例</span>` : `<span class="result-status">整包加入</span>`}</div>
+        </div>`;
+      }).join("") : `<p class="empty-state">没有符合条件的资料。</p>`;
+      const selectedOutside = state.search.selected.filter(id => !pageItems.some(item => item.id === id)).map(id => catalogEntry(id)?.title || id);
+      return `
+        <div class="page-heading"><div><span class="eyebrow">资料库</span><h2>检索完整素材包</h2><p>一条资料对应一个来源与出版版次</p></div></div>
+        <div class="search-tools"><input id="search-query" type="search" value="${escapeHtml(state.search.query)}" aria-label="搜索资料" placeholder="搜索标题或来源"><select id="category-filter" aria-label="筛选资料类型">${["全部", "图片", "指南", "记录"].map(value => `<option ${state.search.category === value ? "selected" : ""}>${value}</option>`).join("")}</select></div>
+        <div class="selection-summary"><span><strong>${state.search.selected.length}</strong> 条已选整包</span><span>${selectedOutside.length ? `其他筛选中的已选项：${escapeHtml(selectedOutside.join("、"))}` : "选择会跨搜索、筛选和翻页保留"}</span></div>
+        <div class="result-list">${rows}</div>
+        <div class="selection-footer">
+          <div>${state.search.failed.length ? `<span class="fail-list">未成功：${escapeHtml(state.search.failed.map(id => catalogEntry(id)?.title || id).join("、"))}</span>` : ""}</div>
+          <div class="inline-actions">
+            ${state.search.failed.length ? `<button class="button-line" type="button" data-action="retry-adds">重试失败项 (${state.search.failed.length})</button>` : ""}
+            <button class="button-primary" type="button" data-action="add-selection" ${state.search.selected.length ? "" : "disabled"}>加入案例资料 (${state.search.selected.length})</button>
+          </div>
+        </div>
+        <div class="selection-footer"><span class="state-muted">${results.length} 条结果</span><div class="pagination"><button class="icon-button small" type="button" title="上一页" aria-label="上一页" data-action="set-page" data-page="${Math.max(1, page - 1)}" ${page <= 1 ? "disabled" : ""}><span aria-hidden="true">‹</span></button><span>第 ${page} / ${pageCount} 页</span><button class="icon-button small" type="button" title="下一页" aria-label="下一页" data-action="set-page" data-page="${Math.min(pageCount, page + 1)}" ${page >= pageCount ? "disabled" : ""}><span aria-hidden="true">›</span></button></div></div>
+      `;
+    }
+
+    function fileTools(file, index) {
+      const mainDeleteNeedsReplacement = file.main;
+      const validReplacement = state.bundle.files.some(item => item.id === state.bundle.replacementCandidate && item.id !== file.id);
+      return `<div class="file-tools">
+        <button class="icon-button small" type="button" title="上移文件" aria-label="上移 ${escapeHtml(file.name)}" data-action="move-file" data-file="${file.id}" data-delta="-1" ${index === 0 ? "disabled" : ""}><span aria-hidden="true">↑</span></button>
+        <button class="icon-button small" type="button" title="下移文件" aria-label="下移 ${escapeHtml(file.name)}" data-action="move-file" data-file="${file.id}" data-delta="1" ${index === state.bundle.files.length - 1 ? "disabled" : ""}><span aria-hidden="true">↓</span></button>
+        <button class="icon-button small" type="button" title="${file.main ? "当前主文件" : "设为主文件"}" aria-label="${file.main ? "当前主文件" : `设 ${escapeHtml(file.name)} 为主文件`}" data-action="set-main" data-file="${file.id}" ${file.main ? "disabled" : ""}><span aria-hidden="true">${file.main ? "★" : "☆"}</span></button>
+        <button class="icon-button small" type="button" title="替换为合成修订文件" aria-label="替换 ${escapeHtml(file.name)}" data-action="replace-file" data-file="${file.id}" ${file.type !== "md" ? "disabled" : ""}><span aria-hidden="true">↻</span></button>
+        <button class="icon-button small danger" type="button" title="${mainDeleteNeedsReplacement && !validReplacement ? "先指定替代主文件" : "移除文件"}" aria-label="移除 ${escapeHtml(file.name)}" data-action="remove-file" data-file="${file.id}" ${mainDeleteNeedsReplacement && !validReplacement ? "disabled" : ""}><span aria-hidden="true">×</span></button>
+      </div>`;
+    }
+
+    function renderDetail() {
+      const status = packageStatus(state);
+      const allDone = state.bundle.files.every(file => file.processing === "done");
+      const failedCount = state.bundle.files.filter(file => file.processing === "failed").length;
+      const pendingCount = state.bundle.files.filter(file => file.processing === "pending").length;
+      const alreadyConfirmed = isVersionConfirmed(state, state.bundle.version);
+      const rows = state.bundle.files.map((file, index) => `<div class="file-row">
+        <div>
+          <div class="file-mainline">
+            <button class="file-open" type="button" title="阅读 ${escapeHtml(file.name)}" aria-label="阅读 ${escapeHtml(file.name)}" data-action="open-reader" data-file="${file.id}">${fileTypeSymbol(file.type)}</button>
+            <form class="file-name-edit" data-rename-form="${file.id}"><input aria-label="重命名 ${escapeHtml(file.name)}" value="${escapeHtml(file.name)}"><button class="icon-button small" type="submit" title="保存文件名" aria-label="保存文件名"><span aria-hidden="true">✓</span></button></form>
+          </div>
+          <div class="file-statusline">${file.main ? `<span class="tag blue">主文件</span>` : `<span class="tag">包内文件</span>`}<span>${processLabel(file.processing)}</span><a class="text-link" href="${escapeHtml(assetPath(file))}" download title="下载原件">下载原件</a></div>
+        </div>
+        ${fileTools(file, index)}
+      </div>`).join("");
+      const replacementOptions = state.bundle.files.filter(file => !file.main).map(file => `<option value="${file.id}" ${state.bundle.replacementCandidate === file.id ? "selected" : ""}>${escapeHtml(file.name)}</option>`).join("");
+      const processingText = status === "待处理" ? `${pendingCount} 个未处理，${failedCount} 个失败；整包仍不可供 AI 使用。` : status === "待确认" ? "全部文件处理完成，等待管理员按整包确认。" : `管理员已确认 v${state.bundle.version}，整包可供新引用选择。`;
+      return `
+        <div class="page-heading"><div><span class="eyebrow">资料详情</span><h2>${escapeHtml(state.bundle.title)}</h2><p>${escapeHtml(state.bundle.source)} · ${escapeHtml(state.bundle.edition)}</p></div><div class="heading-actions"><button class="button-line" type="button" data-action="open-reader" data-file="${state.bundle.files.find(file => file.main)?.id || state.bundle.files[0]?.id}">阅读主文件</button><a class="icon-button" href="?view=detail" target="_blank" rel="noopener" title="在新标签页打开独立详情" aria-label="在新标签页打开独立详情"><span aria-hidden="true">↗</span></a></div></div>
+        <div class="detail-facts"><span>素材最新版本 <strong>v${state.bundle.version}</strong></span><span>整包状态 ${statusTag(status)}</span><span>案例引用 <strong>v${state.case.sourceVersion}</strong></span><span>出版版次 <strong>2025 年第 1 版</strong></span></div>
+        ${state.notice ? `<div class="notice ${state.notice.includes("失败") || state.notice.includes("必须") ? "error" : ""}" role="status">${escapeHtml(state.notice)}</div>` : ""}
+        <div class="detail-grid">
+          <section aria-labelledby="files-heading">
+            <div class="section-head"><h3 id="files-heading">素材包文件</h3><p>${state.bundle.files.length} 个文件</p></div>
+            <div class="file-list">${rows || `<p class="empty-state">至少保留一份文件。</p>`}</div>
+            <div class="replacement-line"><label for="replacement-select">删除主文件时的替代项</label><select id="replacement-select" class="replacement-select"><option value="">先选择替代文件</option>${replacementOptions}</select></div>
+            <p class="detail-help">主文件用于默认阅读；设定主文件不会改变整包处理范围。</p>
+            <div class="add-file-line"><button class="text-link" type="button" data-action="add-file">＋ 添加合成文件</button></div>
+          </section>
+          <section class="processing-panel" aria-labelledby="process-heading">
+            <h3 id="process-heading">整包处理与确认</h3>
+            <p>${processingText}文件在待处理期间仍可阅读和下载原件。</p>
+            <div class="process-summary"><strong>${status}</strong><small>处理对象：当前版本全部 ${state.bundle.files.length} 个文件</small></div>
+            <div class="process-actions">
+              <button class="button-line" type="button" data-action="process-bundle" ${pendingCount ? "" : "disabled"}>处理未完成文件</button>
+              <button class="button-line" type="button" data-action="retry-processing" ${failedCount ? "" : "disabled"}>重试失败文件 (${failedCount})</button>
+              <button class="button-primary" type="button" data-action="confirm-bundle" ${allDone && !alreadyConfirmed ? "" : "disabled"}>管理员整包确认</button>
+            </div>
+            <p class="detail-help">任何文件失败或未完成，整包保持待处理；新增、替换或移除文件会建立新版本并重新待确认。</p>
+          </section>
+        </div>
+      `;
+    }
+
+    function renderView() {
+      const root = document.querySelector("#view-root");
+      root.innerHTML = state.view === "case" ? renderCase() : state.view === "search" ? renderSearch() : renderDetail();
+    }
+
+    function markdownFor(file) {
+      if (file.path.endsWith("field-notes-revised.md")) return REVISED_NOTES;
+      if (file.path.endsWith("supplemental-observation.md")) return SUPPLEMENTAL_NOTES;
+      return ORIGINAL_NOTES;
+    }
+
+    function renderReader() {
+      const root = document.querySelector("#reader-root");
+      if (!state.reader.open) { root.innerHTML = ""; return; }
+      const file = readFile();
+      if (!file) { root.innerHTML = ""; return; }
+      const files = currentSnapshotFiles(state.reader.version);
+      const switcher = files.map(item => `<option value="${item.id}" ${item.id === file.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("");
+      let content = "";
+      let location = "";
+      if (file.type === "pdf") {
+        content = `<iframe title="${escapeHtml(file.name)} 第 ${state.reader.page} 页" src="${escapeHtml(assetPath(file))}#page=${state.reader.page}&toolbar=0&navpanes=0"></iframe>`;
+        location = `<div class="pdf-tools"><button class="icon-button small" type="button" title="上一页" aria-label="上一页" data-action="reader-page" data-page="${Math.max(1, state.reader.page - 1)}" ${state.reader.page <= 1 ? "disabled" : ""}><span aria-hidden="true">‹</span></button><span class="pdf-counter">${state.reader.page} / 2 页</span><button class="icon-button small" type="button" title="下一页" aria-label="下一页" data-action="reader-page" data-page="${Math.min(2, state.reader.page + 1)}" ${state.reader.page >= 2 ? "disabled" : ""}><span aria-hidden="true">›</span></button></div>`;
+      } else if (file.type === "md") {
+        content = `<pre class="markdown-source">${escapeHtml(markdownFor(file))}</pre>`;
+        location = `<span class="tag">Markdown 阅读</span>`;
+      } else {
+        content = `<div class="image-reader"><img src="${escapeHtml(assetPath(file))}" alt="合成花圃观察图"></div>`;
+        location = `<span class="tag">图片预览</span>`;
+      }
+      const sourceVersion = state.reader.version == null ? `素材最新版本 v${state.bundle.version}` : `历史确认版本 v${state.reader.version}`;
+      const guidedStep = state.demo.scene === "read" ? SCENES.read.steps[state.demo.step] : null;
+      const guidedControl = guidedStep ? `<button class="button-quiet" type="button" data-action="advance-scene">演示：${escapeHtml(guidedStep.label)} →</button>` : "";
+      root.innerHTML = `<div class="reader-mask" data-action="close-reader-mask">
+        <section class="reader-window" role="dialog" aria-modal="true" aria-label="阅读 ${escapeHtml(file.name)}" data-reader-window>
+          <header class="reader-header">
+            <div class="reader-heading"><strong>${escapeHtml(file.name)}</strong><small>${escapeHtml(sourceVersion)} · ${file.main ? "主文件" : "素材包文件"}</small></div>
+            <div class="reader-tools">
+              <select aria-label="切换素材包文件" data-action="reader-file">${switcher}</select>
+              ${location}
+              <a class="icon-button reader-download" href="${escapeHtml(assetPath(file))}" download title="下载原件" aria-label="下载原件"><span aria-hidden="true">↓</span></a>
+              <button class="icon-button" type="button" title="关闭阅读浮窗" aria-label="关闭阅读浮窗" data-action="close-reader"><span aria-hidden="true">×</span></button>
+            </div>
+          </header>
+          <div class="reader-content">${content}</div>
+          <footer class="reader-footer"><span>来源：${escapeHtml(state.bundle.source)} · ${escapeHtml(state.bundle.edition)}</span><div class="reader-footer-actions">${guidedControl}<span><strong>${fileTypeLabel(file.type)}</strong> · ${escapeHtml(sourceVersion)}</span></div></footer>
+        </section>
+      </div>`;
+    }
+
+    function render() {
+      renderNav();
+      renderStatePanel();
+      renderView();
+      renderReader();
+    }
+
+    function dispatch(action) {
+      const active = document.activeElement;
+      const focusId = active?.id;
+      const selectionStart = active && "selectionStart" in active ? active.selectionStart : null;
+      const selectionEnd = active && "selectionEnd" in active ? active.selectionEnd : null;
+      state = transition(state, action);
+      render();
+      if (focusId) {
+        const restored = document.getElementById(focusId);
+        if (restored) {
+          restored.focus();
+          if (selectionStart != null && "setSelectionRange" in restored) restored.setSelectionRange(selectionStart, selectionEnd);
+        }
+      }
+    }
+
+    function runSceneStep() {
+      dispatch({ type: "ADVANCE_SCENE" });
+    }
+
+    document.addEventListener("click", event => {
+      const button = event.target.closest("[data-action]");
+      if (!button || button.matches("input, select")) return;
+      const type = button.dataset.action;
+      const fileId = button.dataset.file;
+      if (type === "start-scene") return dispatch({ type: "START_SCENE", sceneId: button.dataset.scene });
+      if (type === "advance-scene") return runSceneStep();
+      if (type === "advance-scene-link") { setTimeout(() => dispatch({ type: "ADVANCE_SCENE" }), 0); return; }
+      if (type === "reset-scene") return dispatch({ type: "START_SCENE", sceneId: state.demo.scene });
+      if (type === "set-view") return dispatch({ type: "SET_VIEW", view: button.dataset.view });
+      if (type === "open-reader") return dispatch({ type: "OPEN_READER", fileId, version: button.dataset.version == null ? null : Number(button.dataset.version) });
+      if (type === "close-reader") return dispatch({ type: "CLOSE_READER" });
+      if (type === "close-reader-mask") {
+        if (event.target === button) dispatch({ type: "CLOSE_READER" });
+        return;
+      }
+      if (type === "reader-page") return dispatch({ type: "SET_READER_PAGE", page: Number(button.dataset.page) });
+      if (type === "reader-file") return;
+      if (type === "add-file") return dispatch({ type: "ADD_FILE" });
+      if (type === "move-file") return dispatch({ type: "MOVE_FILE", fileId, delta: Number(button.dataset.delta) });
+      if (type === "set-main") return dispatch({ type: "SET_MAIN", fileId });
+      if (type === "remove-file") return dispatch({ type: "REMOVE_FILE", fileId });
+      if (type === "replace-file") return dispatch({ type: "REPLACE_FILE", fileId });
+      if (type === "process-bundle") return dispatch({ type: "PROCESS_BUNDLE" });
+      if (type === "retry-processing") return dispatch({ type: "RETRY_FAILED_PROCESSING" });
+      if (type === "confirm-bundle") return dispatch({ type: "CONFIRM_BUNDLE" });
+      if (type === "upgrade-case") return dispatch({ type: "UPGRADE_CASE" });
+      if (type === "toggle-selection") return dispatch({ type: "TOGGLE_SELECTED", materialId: button.dataset.material });
+      if (type === "set-page") return dispatch({ type: "SET_PAGE", page: Number(button.dataset.page) });
+      if (type === "add-selection") return dispatch({ type: "ADD_SELECTION" });
+      if (type === "retry-adds") return dispatch({ type: "RETRY_ADDS" });
+    });
+
+    document.addEventListener("input", event => {
+      if (event.target.id === "search-query") dispatch({ type: "SET_SEARCH", value: event.target.value });
+    });
+    document.addEventListener("change", event => {
+      if (event.target.id === "category-filter") dispatch({ type: "SET_CATEGORY", value: event.target.value });
+      if (event.target.id === "replacement-select") dispatch({ type: "SET_REPLACEMENT", fileId: event.target.value });
+      if (event.target.matches("[data-action='set-add-failure']")) dispatch({ type: "SET_FAIL_ON_ADD", value: event.target.checked });
+      if (event.target.matches("[data-action='toggle-selection']")) dispatch({ type: "TOGGLE_SELECTED", materialId: event.target.dataset.material });
+      if (event.target.matches("[data-action='reader-file']")) dispatch({ type: "OPEN_READER", fileId: event.target.value, version: state.reader.version });
+    });
+    document.addEventListener("submit", event => {
+      const form = event.target.closest("[data-rename-form]");
+      if (!form) return;
+      event.preventDefault();
+      dispatch({ type: "RENAME_FILE", fileId: form.dataset.renameForm, name: form.querySelector("input").value });
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && state.reader.open) dispatch({ type: "CLOSE_READER" });
+    });
+
+    const initialView = new URLSearchParams(window.location.search).get("view");
+    if (initialView === "detail") state.view = "detail";
+    render();
+  </script>
+</body>
+</html>
