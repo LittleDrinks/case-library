@@ -21,10 +21,6 @@ const actionForm = reactive({ temporaryPassword: "", reason: "" });
 const activePage = computed(() => activeTab.value === "accounts" ? accounts.value : operations.value);
 const totalPages = computed(() => Math.max(1, Math.ceil(activePage.value.total / activePage.value.pageSize)));
 
-function publicError(reason, fallback) {
-  return formatApiError(reason, fallback);
-}
-
 function requiredTextError(value, label, maxLength) {
   const text = value.trim();
   if (!text) return `${label}不能为空`;
@@ -38,7 +34,7 @@ async function loadAccounts(page = 1) {
   try {
     accounts.value = await api.listManagedAccounts(searchQuery.value, page);
   } catch (reason) {
-    error.value = publicError(reason, "账号列表加载失败");
+    error.value = formatApiError(reason, "账号列表加载失败");
   } finally {
     loading.value = false;
   }
@@ -50,7 +46,7 @@ async function loadOperations(page = 1) {
   try {
     operations.value = await api.listAccountOperations(page);
   } catch (reason) {
-    error.value = publicError(reason, "操作记录加载失败");
+    error.value = formatApiError(reason, "操作记录加载失败");
   } finally {
     loading.value = false;
   }
@@ -91,7 +87,7 @@ async function openAccount() {
     openForm.reason = "";
     await loadAccounts(1);
   } catch (reason) {
-    actionError.value = publicError(reason, "开户失败");
+    actionError.value = formatApiError(reason, "开户失败");
   } finally {
     saving.value = false;
   }
@@ -139,7 +135,7 @@ async function submitAction() {
     cancelAction();
     await loadAccounts(accounts.value.page);
   } catch (reason) {
-    actionError.value = publicError(reason, kind === "reset" ? "密码重置失败" : "强制退出失败");
+    actionError.value = formatApiError(reason, kind === "reset" ? "密码重置失败" : "强制退出失败");
   } finally {
     saving.value = false;
   }
