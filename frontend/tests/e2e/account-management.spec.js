@@ -62,6 +62,9 @@ test("管理员可通过页面开户、恢复密码、撤销会话并查阅持�
   await firstUser.getByLabel("新密码", { exact: true }).fill(changedPassword);
   await firstUser.getByLabel("确认新密码").fill(changedPassword);
   await firstUser.getByRole("button", { name: "保存新密码" }).click();
+  await expect(firstUser).toHaveURL(/#\/login/);
+  expect((await firstUser.request.get("/api/auth/session")).status()).toBe(401);
+  await signIn(firstUser, first.username, changedPassword);
   await expect(firstUser).toHaveURL(/#\/$/);
   const ownerId = (await (await firstUser.request.get("/api/auth/session")).json()).user.id;
   await firstUser.goto("/#/my-cases");
@@ -86,6 +89,9 @@ test("管理员可通过页面开户、恢复密码、撤销会话并查阅持�
   await firstUser.getByLabel("新密码", { exact: true }).fill(recoveredPassword);
   await firstUser.getByLabel("确认新密码").fill(recoveredPassword);
   await firstUser.getByRole("button", { name: "保存新密码" }).click();
+  await expect(firstUser).toHaveURL(/#\/login/);
+  expect((await firstUser.request.get("/api/auth/session")).status()).toBe(401);
+  await signIn(firstUser, first.username, recoveredPassword);
   await expect(firstUser).toHaveURL(/#\/$/);
   await firstUser.goto("/#/my-cases");
   await expect(firstUser.getByRole("heading", { name: "我的案例" })).toBeVisible();
@@ -131,4 +137,83 @@ test("账号搜索和重复开户失败会显示服务端错误", async ({ page 
   await expect(page.locator(".account-row")).toHaveCount(1);
   await expect(page.locator(".account-row")).toContainText("admin");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("账号管理拒绝空白用户名和理由且不产生写入", async ({ page, browser }) => {
+  const target = accountCredentials();
+  const unused = accountCredentials();
+  const resetPassword = `Issue357-Unused-${randomUUID()}!a`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page, "admin", "admin123");
+  await page.goto("/#/admin/accounts");
+  await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
+  const opened = await page.evaluate(async account => {
+    const adminSession = await fetch("/api/auth/session").then(response => response.json());
+    const response = await fetch("/api/admin/accounts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": adminSession.csrfToken,
+      },
+      body: JSON.stringify({
+        username: account.username,
+        temporaryPassword: account.temporaryPassword,
+        reason: "合成空白理由回归",
+      }),
+    });
+    return response.status;
+  }, target);
+  expect(opened).toBe(201);
+  await page.reload();
+  await page.getByLabel("搜索用户名").fill(target.username);
+  await page.getByRole("button", { name: "搜索账号" }).click();
+  await expect(page.locator(".account-row").filter({ hasText: target.username })).toBeVisible();
+  const targetSession = await browser.newPage();
+  await signIn(targetSession, target.username, target.temporaryPassword);
+  const operationResponse = await page.request.get("/api/admin/account-operations");
+  const initialOperations = (await operationResponse.json()).total;
+
+  const openForm = page.locator(".account-open-form");
+  await page.getByLabel("用户名", { exact: true }).fill("   ");
+  await page.getByLabel("临时密码", { exact: true }).fill(unused.temporaryPassword);
+  await openForm.getByLabel("操作理由").fill("合成空白用户名验证");
+  await openForm.getByRole("button", { name: "开户" }).click();
+  await expect(page.getByRole("alert")).toHaveText("用户名不能为空");
+  await page.getByLabel("用户名", { exact: true }).fill(unused.username);
+  await openForm.getByLabel("操作理由").fill("   ");
+  await openForm.getByRole("button", { name: "开户" }).click();
+  await expect(page.getByRole("alert")).toHaveText("操作理由不能为空");
+  const unusedListing = await page.request.get(`/api/admin/accounts?q=${encodeURIComponent(unused.username)}`);
+  expect((await unusedListing.json()).total).toBe(0);
+
+  const accountRow = page.locator(".account-row").filter({ hasText: target.username });
+  await accountRow.getByRole("button", { name: "重置临时密码" }).click();
+  const actionForm = page.locator(".account-action-form");
+  await actionForm.getByLabel("新临时密码").fill(resetPassword);
+  await actionForm.getByLabel("操作理由").fill("   ");
+  await actionForm.getByRole("button", { name: "确认" }).click();
+  await expect(page.getByRole("alert")).toHaveText("操作理由不能为空");
+  await expect(targetSession).toHaveURL(/#\/change-password$/);
+  expect(await targetSession.evaluate(async () => (
+    await fetch("/api/auth/session").then(response => response.status)
+  ))).toBe(200);
+  const resetLoginStatus = await targetSession.evaluate(async credentials => (
+    await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credentials),
+    }).then(response => response.status)
+  ), { username: target.username, password: resetPassword });
+  expect(resetLoginStatus).toBe(401);
+  await actionForm.getByRole("button", { name: "取消" }).click();
+
+  await accountRow.getByRole("button", { name: "强制退出" }).click();
+  await page.locator(".account-action-form").getByLabel("操作理由").fill("   ");
+  await page.locator(".account-action-form").getByRole("button", { name: "确认" }).click();
+  await expect(page.getByRole("alert")).toHaveText("操作理由不能为空");
+  expect(await targetSession.evaluate(async () => (
+    await fetch("/api/auth/session").then(response => response.status)
+  ))).toBe(200);
+  expect((await (await page.request.get("/api/admin/account-operations")).json()).total).toBe(initialOperations);
+  await targetSession.close();
 });

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api } from "./api.js";
+import { api, ApiError, formatApiError } from "./api.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -27,6 +27,29 @@ it("binds reader threads and public cases to the requested version", async () =>
 it("does not expose the retired token-stream client helpers", () => {
   expect(api.streamAI).toBeUndefined();
   expect(api.chat).toBeUndefined();
+});
+
+it("formats field validation errors without exposing submitted values", () => {
+  const error = new ApiError({ status: 422 }, {
+    detail: [
+      {
+        type: "string_too_short",
+        loc: ["body", "username"],
+        input: "   ",
+      },
+      {
+        type: "string_too_long",
+        loc: ["body", "reason"],
+        ctx: { max_length: 500 },
+        input: "synthetic overlong reason",
+      },
+    ],
+  });
+
+  expect(error.message).toBe("用户名不能为空；操作理由不能超过 500 个字符");
+  expect(formatApiError(error, "操作失败")).toBe("用户名不能为空；操作理由不能超过 500 个字符");
+  expect(JSON.stringify(error.validationErrors)).not.toContain("input");
+  expect(JSON.stringify(error.validationErrors)).not.toContain("synthetic overlong reason");
 });
 
 it("posts artifact decisions to the thread-scoped endpoint", async () => {

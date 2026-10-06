@@ -110,16 +110,25 @@ def test_admin_opened_account_must_change_password_before_business_access(
         assert login.json()["user"]["mustChangePassword"] is True
         assert new_user.get("/api/cases?scope=mine").status_code == 403
 
+        changed_password = _password()
         changed = new_user.post(
             "/api/auth/change-password",
             headers={"X-CSRF-Token": login.json()["csrfToken"]},
             json={
                 "currentPassword": temporary_password,
-                "newPassword": _password(),
+                "newPassword": changed_password,
             },
         )
 
-        assert changed.status_code == 200
+        assert changed.status_code == 204
+        assert changed.content == b""
+        assert new_user.get("/api/auth/session").status_code == 401
+        assert new_user.get("/api/cases?scope=mine").status_code == 401
+        relogin = new_user.post(
+            "/api/auth/login",
+            json={"username": username, "password": changed_password},
+        )
+        assert relogin.status_code == 200
         session = new_user.get("/api/auth/session")
         assert session.status_code == 200
         assert session.json()["user"]["id"] == account["id"]
@@ -219,7 +228,14 @@ def test_admin_force_logout_invalidates_sessions_without_changing_password(
                 "newPassword": current_password,
             },
         )
-        assert changed.status_code == 200
+        assert changed.status_code == 204
+        assert first.get("/api/auth/session").status_code == 401
+        first_relogin = first.post(
+            "/api/auth/login",
+            json={"username": username, "password": current_password},
+        )
+        assert first_relogin.status_code == 200
+        assert first_relogin.json()["user"]["id"] == account_id
         other_login = second.post(
             "/api/auth/login",
             json={"username": username, "password": current_password},

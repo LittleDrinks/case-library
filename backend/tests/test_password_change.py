@@ -96,7 +96,7 @@ def change_password(client: TestClient, csrf: str, current: str, new: str):
     )
 
 
-def test_password_change_revokes_old_sessions_and_keeps_rotated_session(
+def test_password_change_revokes_old_sessions_and_requires_relogin(
     client: TestClient,
 ) -> None:
     first = login(client, "10000001", CURRENT_PASSWORD).json()
@@ -106,15 +106,16 @@ def test_password_change_revokes_old_sessions_and_keeps_rotated_session(
         changed = change_password(
             client, first["csrfToken"], CURRENT_PASSWORD, NEW_PASSWORD
         )
-        assert changed.status_code == 200
-        assert client.get("/api/auth/session").status_code == 200
-        new_cookie = client.cookies.get(COOKIE_NAME)
-        if not old_cookie or not new_cookie or old_cookie == new_cookie:
-            raise AssertionError("密码修改未轮换当前会话")
+        assert changed.status_code == 204
+        assert changed.content == b""
+        assert old_cookie
+        assert client.cookies.get(COOKIE_NAME) is None
+        assert client.get("/api/auth/session").status_code == 401
         assert other.get("/api/auth/session").status_code == 401
         with TestClient(client.app) as stale:
             stale.cookies.set(COOKIE_NAME, old_cookie)
             assert stale.get("/api/auth/session").status_code == 401
+    assert login(client, "10000001", NEW_PASSWORD).status_code == 200
     assert client.get("/api/auth/session").json()["user"]["mustChangePassword"] is False
 
 

@@ -122,12 +122,26 @@ def _change_temporary_password(
         {"currentPassword": temporary_password, "newPassword": new_password},
         old_login["csrfToken"],
     )
-    _expect_status(status, 200)
-    if changed["user"]["id"] != account_id or changed["user"]["mustChangePassword"]:
-        raise AssertionError("改密后账号会话状态不正确")
-    _expect_status(_request(current_session, "GET", "/api/cases?scope=mine")[0], 200)
+    _expect_status(status, 204)
+    if changed is not None:
+        raise AssertionError("改密响应不应返回认证会话")
+    _expect_status(_request(current_session, "GET", "/api/auth/session")[0], 401)
     _expect_status(_request(concurrent_session, "GET", "/api/auth/session")[0], 401)
-    return current_session, concurrent_session
+    status, _old_password_login = _request(
+        _opener(),
+        "POST",
+        "/api/auth/login",
+        {"username": username, "password": temporary_password},
+    )
+    _expect_status(status, 401)
+    current_session = _opener()
+    new_login = _login(current_session, username, new_password)
+    if new_login["user"]["id"] != account_id or new_login["user"]["mustChangePassword"]:
+        raise AssertionError("重新登录未保留账号身份或改密状态")
+    _expect_status(_request(current_session, "GET", "/api/cases?scope=mine")[0], 200)
+    second_session = _opener()
+    _login(second_session, username, new_password)
+    return current_session, second_session
 
 
 def _reset_and_recover(
@@ -167,11 +181,17 @@ def _reset_and_recover(
         {"currentPassword": reset_password, "newPassword": recovered_password},
         first_login["csrfToken"],
     )
-    _expect_status(status, 200)
+    _expect_status(status, 204)
+    _expect_status(_request(recovered, "GET", "/api/auth/session")[0], 401)
+    recovered = _opener()
+    recovered_login = _login(recovered, username, recovered_password)
     if first_login["user"]["id"] != account_id:
         raise AssertionError("临时密码登录改变了账号身份")
     if not first_login["user"]["mustChangePassword"]:
         raise AssertionError("临时密码登录未要求首次改密")
+    if recovered_login["user"]["id"] != account_id:
+        raise AssertionError("重新登录改变了账号身份")
+    _expect_status(_request(recovered, "GET", "/api/cases?scope=mine")[0], 200)
     force_session = _opener()
     _login(force_session, username, recovered_password)
     return recovered, force_session
@@ -371,6 +391,118 @@ def test_account_management_public_http_sessions_and_audit_persist_in_mongodb() 
     )
 
 
+def test_public_http_rejects_invalid_account_fields_without_mutation() -> None:
+    admin, admin_session = _admin_session()
+    csrf = admin_session["csrfToken"]
+    account_id, username, temporary_password = _created_account(admin, csrf)
+    target_session = _opener()
+    _login(target_session, username, temporary_password)
+    operations_before = _request(
+        admin, "GET", "/api/admin/account-operations"
+    )[1]["total"]
+
+    invalid_username = _request(
+        admin,
+        "POST",
+        "/api/admin/accounts",
+        {
+            "username": "   ",
+            "temporaryPassword": _password(),
+            "reason": "合成空用户名校验",
+        },
+        csrf,
+    )
+    _expect_status(invalid_username[0], 422)
+
+    invalid_open_username = f"issue357-invalid-open-{uuid.uuid4().hex}"
+    invalid_open = _request(
+        admin,
+        "POST",
+        "/api/admin/accounts",
+        {
+            "username": invalid_open_username,
+            "temporaryPassword": _password(),
+            "reason": "   ",
+        },
+        csrf,
+    )
+    _expect_status(invalid_open[0], 422)
+    status, invalid_open_listing = _request(
+        admin,
+        "GET",
+        f"/api/admin/accounts?q={invalid_open_username}",
+    )
+    _expect_status(status, 200)
+    if invalid_open_listing["total"] != 0:
+        raise AssertionError("空白理由开户仍创建了账号")
+
+    long_reason_username = f"issue357-long-reason-{uuid.uuid4().hex}"
+    invalid_long_reason = _request(
+        admin,
+        "POST",
+        "/api/admin/accounts",
+        {
+            "username": long_reason_username,
+            "temporaryPassword": _password(),
+            "reason": "x" * 501,
+        },
+        csrf,
+    )
+    _expect_status(invalid_long_reason[0], 422)
+    status, long_reason_listing = _request(
+        admin,
+        "GET",
+        f"/api/admin/accounts?q={long_reason_username}",
+    )
+    _expect_status(status, 200)
+    if long_reason_listing["total"] != 0:
+        raise AssertionError("超长理由开户仍创建了账号")
+
+    invalid_reset = _request(
+        admin,
+        "POST",
+        f"/api/admin/accounts/{account_id}/temporary-password",
+        {"temporaryPassword": _password(), "reason": "   "},
+        csrf,
+    )
+    _expect_status(invalid_reset[0], 422)
+    _expect_status(_request(target_session, "GET", "/api/auth/session")[0], 200)
+    _expect_status(
+        _request(_opener(), "POST", "/api/auth/login", {
+            "username": username,
+            "password": temporary_password,
+        })[0],
+        200,
+    )
+
+    invalid_logout = _request(
+        admin,
+        "POST",
+        f"/api/admin/accounts/{account_id}/force-logout",
+        {"reason": "   "},
+        csrf,
+    )
+    _expect_status(invalid_logout[0], 422)
+    _expect_status(_request(target_session, "GET", "/api/auth/session")[0], 200)
+    for invalid_request in (
+        invalid_username,
+        invalid_open,
+        invalid_long_reason,
+        invalid_reset,
+        invalid_logout,
+    ):
+        details = invalid_request[1].get("detail")
+        if not isinstance(details, list) or any(
+            not isinstance(issue, dict) or "input" in issue for issue in details
+        ):
+            raise AssertionError("字段校验响应格式错误或回显了输入")
+    operations_after = _request(
+        admin, "GET", "/api/admin/account-operations"
+    )[1]["total"]
+    if operations_after != operations_before:
+        raise AssertionError("无效管理请求写入了操作记录")
+
+
 def test_concurrent_old_password_logins_are_invalidated_by_reset_and_change() -> None:
     admin, admin_session = _admin_session()
     account_id, username, temporary_password = _created_account(
@@ -409,15 +541,17 @@ def test_concurrent_old_password_logins_are_invalidated_by_reset_and_change() ->
         },
         reset_login["csrfToken"],
     )
-    _expect_status(change_result[0], 200)
+    _expect_status(change_result[0], 204)
     if login_result[0] not in (200, 401):
         raise AssertionError("并发改密登录返回非预期状态")
-    if (
-        change_result[1]["user"]["id"] != account_id
-        or change_result[1]["user"]["mustChangePassword"]
-    ):
-        raise AssertionError("并发改密未保留当前用户的新会话")
+    if change_result[1] is not None:
+        raise AssertionError("并发改密响应不应返回认证会话")
     _expect_status(_request(stale_change_login, "GET", "/api/auth/session")[0], 401)
+    _expect_status(_request(current, "GET", "/api/auth/session")[0], 401)
+    current = _opener()
+    current_login = _login(current, username, changed_password)
+    if current_login["user"]["id"] != account_id:
+        raise AssertionError("改密后重新登录改变了账号身份")
     status, current_session = _request(current, "GET", "/api/auth/session")
     _expect_status(status, 200)
     if current_session["user"]["id"] != account_id:

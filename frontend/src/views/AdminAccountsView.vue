@@ -1,7 +1,7 @@
 <script setup>
 import { ChevronLeft, ChevronRight, KeyRound, LoaderCircle, LogOut, RefreshCw, Search, Users, UserPlus, X } from "@lucide/vue";
 import { computed, onMounted, reactive, ref } from "vue";
-import { api } from "../api.js";
+import { api, formatApiError } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
 import { session } from "../session.js";
 
@@ -22,7 +22,14 @@ const activePage = computed(() => activeTab.value === "accounts" ? accounts.valu
 const totalPages = computed(() => Math.max(1, Math.ceil(activePage.value.total / activePage.value.pageSize)));
 
 function publicError(reason, fallback) {
-  return reason.message || fallback;
+  return formatApiError(reason, fallback);
+}
+
+function requiredTextError(value, label, maxLength) {
+  const text = value.trim();
+  if (!text) return `${label}不能为空`;
+  if (text.length > maxLength) return `${label}不能超过 ${maxLength} 个字符`;
+  return "";
 }
 
 async function loadAccounts(page = 1) {
@@ -63,9 +70,15 @@ async function selectTab(tab) {
 }
 
 async function openAccount() {
-  saving.value = true;
   actionError.value = "";
   notice.value = "";
+  const inputError = requiredTextError(openForm.username, "用户名", 80)
+    || requiredTextError(openForm.reason, "操作理由", 500);
+  if (inputError) {
+    actionError.value = inputError;
+    return;
+  }
+  saving.value = true;
   try {
     const account = await api.openManagedAccount({
       username: openForm.username.trim(),
@@ -102,9 +115,14 @@ function cancelAction() {
 async function submitAction() {
   if (!operationTarget.value || saving.value) return;
   const { account, kind } = operationTarget.value;
-  saving.value = true;
   actionError.value = "";
   notice.value = "";
+  const inputError = requiredTextError(actionForm.reason, "操作理由", 500);
+  if (inputError) {
+    actionError.value = inputError;
+    return;
+  }
+  saving.value = true;
   try {
     if (kind === "reset") {
       await api.resetManagedAccountPassword(account.id, {
