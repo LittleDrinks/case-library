@@ -130,7 +130,19 @@ def test_registration_reports_duplicate_and_invalid_credentials() -> None:
 
     blank_status, blank = _register("", password)
     assert blank_status == 422
-    assert blank and blank.get("detail")
+    assert blank["detail"]
+    assert any("at least 1 character" in item["msg"] for item in blank["detail"])
+
+    oversized_status, oversized = _register(
+        f"issue356-long-{uuid.uuid4().hex}", "é" * 37
+    )
+    assert oversized_status == 422
+    assert oversized == {"detail": "密码不能超过 72 字节"}
+
+    boundary_status, _boundary = _register(
+        f"issue356-boundary-{uuid.uuid4().hex}", "é" * 36
+    )
+    assert boundary_status == 201
 
     extra_status, _extra = _request(
         build_opener(),

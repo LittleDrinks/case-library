@@ -67,6 +67,10 @@ test("访客注册登录后可创建私人草稿、投稿并刷新确认作者�
 test("注册页面明确反馈重复用户名和弱密码", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const account = credentials();
+
+  await register(page, "   ", account.password);
+  await expect(page.getByRole("alert")).toHaveText("请输入用户名");
+
   await register(page, account.username, account.password);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page).toHaveURL(/#\/login\?/);
@@ -78,4 +82,9 @@ test("注册页面明确反馈重复用户名和弱密码", async ({ page }) => 
   await page.getByLabel("密码").fill("short");
   await page.getByRole("button", { name: "创建账号" }).click();
   await expect(page.getByRole("alert")).toHaveText("密码至少 12 个字符");
+
+  await page.getByLabel("用户名").fill(`issue356-${randomUUID()}`);
+  await page.getByLabel("密码").fill("x".repeat(73));
+  await page.getByRole("button", { name: "创建账号" }).click();
+  await expect(page.getByRole("alert")).toHaveText("密码不能超过 72 字节");
 });

@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import { useRouter, RouterLink } from "vue-router";
-import { ArrowRight, LoaderCircle } from "@lucide/vue";
+import CredentialForm from "../components/CredentialForm.vue";
 import { api } from "../api.js";
 
 const router = useRouter();
@@ -12,9 +12,13 @@ const submitting = ref(false);
 
 async function submit() {
   error.value = "";
+  const registered = username.value.trim();
+  if (!registered) {
+    error.value = "请输入用户名";
+    return;
+  }
   submitting.value = true;
   try {
-    const registered = username.value.trim();
     await api.register({ username: registered, password: password.value });
     await router.replace({ name: "login", query: { registered } });
   } catch (reason) {
@@ -33,37 +37,17 @@ async function submit() {
         <h1 id="register-title">“强国有我”思政案例库</h1>
         <p>创建账号</p>
       </div>
-      <form class="login-form" @submit.prevent="submit">
-        <label>
-          <span>用户名</span>
-          <input
-            v-model.trim="username"
-            name="username"
-            autocomplete="username"
-            maxlength="80"
-            autofocus
-            required
-          />
-        </label>
-        <label>
-          <span>密码</span>
-          <input
-            v-model="password"
-            name="password"
-            type="password"
-            autocomplete="new-password"
-            maxlength="128"
-            required
-          />
-        </label>
-        <p class="field-hint">密码至少 12 个字符</p>
-        <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-        <button class="login-submit" type="submit" :disabled="submitting">
-          <LoaderCircle v-if="submitting" :size="17" class="spin" aria-hidden="true" />
-          <span>{{ submitting ? "正在创建" : "创建账号" }}</span>
-          <ArrowRight v-if="!submitting" :size="17" aria-hidden="true" />
-        </button>
-      </form>
+      <CredentialForm
+        v-model:username="username"
+        v-model:password="password"
+        :error="error"
+        :submitting="submitting"
+        password-autocomplete="new-password"
+        password-hint="密码至少 12 个字符，且不超过 72 字节"
+        submit-label="创建账号"
+        submitting-label="正在创建"
+        @submit="submit"
+      />
       <RouterLink class="login-register-link" to="/login">返回登录</RouterLink>
     </section>
   </main>
