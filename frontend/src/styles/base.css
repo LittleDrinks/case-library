@@ -91,6 +91,16 @@ a { color: inherit; }
 }
 .login-form input:focus { border-color: var(--brand); outline: 0; box-shadow: 0 0 0 3px var(--brand-soft); }
 .form-error { margin: -4px 0 0; color: var(--red); font-size: 12px; }
+.form-success { margin: -12px 0 18px; color: #217a4b; font-size: 13px; }
+.field-hint { margin: -12px 0 0; color: var(--ink-3); font-size: 12px; }
+.login-register-link {
+  display: block;
+  margin-top: 18px;
+  color: var(--brand);
+  font-size: 13px;
+  text-align: center;
+}
+.login-register-link:hover { color: var(--brand-strong); }
 .login-submit {
   display: flex;
   align-items: center;

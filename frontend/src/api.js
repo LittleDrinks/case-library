@@ -95,6 +95,7 @@ function searchPath(query, kind, cursor, pageSize, filters = {}) {
 }
 
 export const api = {
+  register: (credentials) => request("/api/auth/register", jsonOptions("POST", credentials)),
   login: (credentials) => request("/api/auth/login", jsonOptions("POST", credentials)),
   session: () => request("/api/auth/session"),
   changePassword: (passwords, csrfToken) => request(

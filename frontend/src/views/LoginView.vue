@@ -2,11 +2,15 @@
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowRight, LoaderCircle } from "@lucide/vue";
+import { RouterLink } from "vue-router";
 import { login } from "../session.js";
 
 const route = useRoute();
 const router = useRouter();
-const username = ref("");
+const registeredUsername = typeof route.query.registered === "string"
+  ? route.query.registered
+  : "";
+const username = ref(registeredUsername);
 const password = ref("");
 const error = ref("");
 const submitting = ref(false);
@@ -45,6 +49,7 @@ async function submit() {
         <h1 id="login-title">“强国有我”思政案例库</h1>
         <p>账号登录</p>
       </div>
+      <p v-if="registeredUsername" class="form-success" role="status">账号创建成功，请登录</p>
       <form class="login-form" @submit.prevent="submit">
         <label>
           <span>用户名</span>
@@ -61,6 +66,7 @@ async function submit() {
           <ArrowRight v-if="!submitting" :size="17" aria-hidden="true" />
         </button>
       </form>
+      <RouterLink class="login-register-link" to="/register">创建账号</RouterLink>
     </section>
   </main>
 </template>

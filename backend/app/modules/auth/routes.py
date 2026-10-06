@@ -5,11 +5,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from app.core.config import Settings
 from app.core.dependencies import get_database, get_settings
 from app.modules.auth.dependencies import require_csrf, require_session
-from app.modules.auth.models import ChangePasswordRequest, LoginRequest, SessionView
+from app.modules.auth.models import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegistrationRequest,
+    SessionView,
+    UserView,
+)
 from app.modules.auth.service import (
     PasswordChangeError,
+    RegistrationError,
     authenticate,
     change_password,
+    register_user,
     user_view,
 )
 from app.modules.auth.sessions import (
@@ -39,6 +47,15 @@ def _set_cookie(response: Response, token: str, settings: Settings) -> None:
         samesite="strict",
         path="/",
     )
+
+
+@router.post("/register", status_code=201, response_model=UserView)
+def register(body: RegistrationRequest, database=Depends(get_database)):
+    try:
+        user = register_user(database, body.username, body.password)
+    except RegistrationError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    return user_view(user)
 
 
 @router.post("/login", response_model=SessionView)

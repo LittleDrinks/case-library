@@ -13,12 +13,14 @@ import MaterialImportView from "./views/MaterialImportView.vue";
 import MaterialDetailView from "./views/MaterialDetailView.vue";
 import MaterialExplorerView from "./views/MaterialExplorerView.vue";
 import MyCasesView from "./views/MyCasesView.vue";
+import RegisterView from "./views/RegisterView.vue";
 import SearchView from "./views/SearchView.vue";
 import WorkbenchView from "./views/WorkbenchView.vue";
 
 const routes = [
   { path: "/", name: "home", component: HomeView },
   { path: "/login", name: "login", component: LoginView },
+  { path: "/register", name: "register", component: RegisterView },
   { path: "/search", name: "search", component: SearchView },
   {
     path: "/materials",
