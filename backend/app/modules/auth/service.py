@@ -15,18 +15,19 @@ from app.modules.auth.passwords import (
 )
 
 
-class PasswordChangeError(ValueError):
+class AuthServiceError(ValueError):
     def __init__(self, detail: str, status_code: int) -> None:
         super().__init__(detail)
         self.detail = detail
         self.status_code = status_code
 
 
-class RegistrationError(ValueError):
-    def __init__(self, detail: str, status_code: int) -> None:
-        super().__init__(detail)
-        self.detail = detail
-        self.status_code = status_code
+class PasswordChangeError(AuthServiceError):
+    pass
+
+
+class RegistrationError(AuthServiceError):
+    pass
 
 
 def register_user(database: Database, username: str, password: str) -> dict:
