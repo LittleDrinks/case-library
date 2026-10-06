@@ -410,7 +410,7 @@ test("强制改密页可以退出并切换账号", async ({ page }) => {
   await login(page);
 });
 
-test("名单账号首登必须改密后才能进入工作台", async ({ page }) => {
+test("名单账号首登必须改密并重新登录后才能进入工作台", async ({ page }) => {
   const initial = "Demo-10000001-2026!";
   const replacement = `Roster-Changed-${Date.now()}!`;
   await signIn(page, "10000001", initial);
@@ -421,8 +421,19 @@ test("名单账号首登必须改密后才能进入工作台", async ({ page }) 
   await page.getByLabel("新密码", { exact: true }).fill(replacement);
   await page.getByLabel("确认新密码").fill(replacement);
   await page.getByRole("button", { name: "保存新密码" }).click();
+  await expect(page).toHaveURL(/#\/login$/);
+  await expect(page.getByLabel("用户名")).toBeVisible();
+  await expect.poll(async () => page.evaluate(async () => (
+    await fetch("/api/auth/session").then(response => response.status)
+  ))).toBe(401);
+
+  const rejectedOldPassword = await page.context().request.post("/api/auth/login", {
+    data: { username: "10000001", password: initial },
+  });
+  expect(rejectedOldPassword.status()).toBe(401);
+
+  await signIn(page, "10000001", replacement);
   await expect(page).toHaveURL(/#\/$/);
-  await expect((await page.context().request.get("/api/auth/session")).status()).toBe(200);
   await expectOwnWorkbench(page);
 });
 
