@@ -139,10 +139,11 @@ test("账号搜索和重复开户失败会显示服务端错误", async ({ page 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
-test("账号管理拒绝空白用户名和理由且不产生写入", async ({ page, browser }) => {
+test("账号管理清楚拒绝无效用户名和理由且不产生写入", async ({ page, browser }) => {
   const target = accountCredentials();
   const unused = accountCredentials();
   const resetPassword = `Issue357-Unused-${randomUUID()}!a`;
+  const tooLongReason = "r".repeat(501);
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "admin", "admin123");
   await page.goto("/#/admin/accounts");
@@ -180,6 +181,11 @@ test("账号管理拒绝空白用户名和理由且不产生写入", async ({ pa
   await openForm.getByRole("button", { name: "开户" }).click();
   await expect(page.getByRole("alert")).toHaveText("用户名不能为空");
   await page.getByLabel("用户名", { exact: true }).fill(unused.username);
+  await openForm.getByLabel("操作理由").fill(tooLongReason);
+  await openForm.getByRole("button", { name: "开户" }).click();
+  await expect(page.getByRole("alert")).toHaveText("操作理由不能超过 500 个字符");
+  const untouchedOperations = await page.request.get("/api/admin/account-operations");
+  expect((await untouchedOperations.json()).total).toBe(initialOperations);
   await openForm.getByLabel("操作理由").fill("   ");
   await openForm.getByRole("button", { name: "开户" }).click();
   await expect(page.getByRole("alert")).toHaveText("操作理由不能为空");
@@ -190,6 +196,13 @@ test("账号管理拒绝空白用户名和理由且不产生写入", async ({ pa
   await accountRow.getByRole("button", { name: "重置临时密码" }).click();
   const actionForm = page.locator(".account-action-form");
   await actionForm.getByLabel("新临时密码").fill(resetPassword);
+  await actionForm.getByLabel("操作理由").fill(tooLongReason);
+  await actionForm.getByRole("button", { name: "确认" }).click();
+  await expect(page.getByRole("alert")).toHaveText("操作理由不能超过 500 个字符");
+  expect((await (await page.request.get("/api/admin/account-operations")).json()).total).toBe(initialOperations);
+  expect(await targetSession.evaluate(async () => (
+    await fetch("/api/auth/session").then(response => response.status)
+  ))).toBe(200);
   await actionForm.getByLabel("操作理由").fill("   ");
   await actionForm.getByRole("button", { name: "确认" }).click();
   await expect(page.getByRole("alert")).toHaveText("操作理由不能为空");

@@ -189,7 +189,7 @@ onMounted(() => loadAccounts());
           <form class="account-open-form" @submit.prevent="openAccount">
             <label><span>用户名</span><input v-model="openForm.username" autocomplete="off" maxlength="80" required /></label>
             <label><span>临时密码</span><input v-model="openForm.temporaryPassword" type="password" autocomplete="new-password" maxlength="128" required /></label>
-            <label class="account-reason-field"><span>操作理由</span><input v-model="openForm.reason" maxlength="500" required /></label>
+            <label class="account-reason-field"><span>操作理由</span><input v-model="openForm.reason" required /></label>
             <button class="account-primary-button" type="submit" :disabled="saving">
               <LoaderCircle v-if="saving" class="spin" :size="16" aria-hidden="true" />
               <UserPlus v-else :size="16" aria-hidden="true" />
@@ -221,7 +221,7 @@ onMounted(() => loadAccounts());
             <span>新临时密码</span>
             <input v-model="actionForm.temporaryPassword" type="password" autocomplete="new-password" maxlength="128" required />
           </label>
-          <label><span>操作理由</span><input v-model="actionForm.reason" maxlength="500" required /></label>
+          <label><span>操作理由</span><input v-model="actionForm.reason" required /></label>
           <div class="account-action-buttons">
             <button class="account-primary-button" type="submit" :disabled="saving">
               <LoaderCircle v-if="saving" class="spin" :size="16" aria-hidden="true" />
