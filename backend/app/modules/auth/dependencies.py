@@ -24,6 +24,13 @@ def require_user(context: SessionContext = Depends(require_session)) -> dict:
     return _ready_user(context)
 
 
+def require_admin(context: SessionContext = Depends(require_session)) -> dict:
+    user = _ready_user(context)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可以访问")
+    return user
+
+
 def _ready_user(context: SessionContext) -> dict:
     if context.user["must_change_password"]:
         raise HTTPException(status_code=403, detail="请先修改初始密码")

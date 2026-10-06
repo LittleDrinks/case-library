@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from app.modules.auth.sessions import COOKIE_NAME
 
 CURRENT_PASSWORD = "Demo-10000001-2026!"
 NEW_PASSWORD = "Roster-Changed-2026!"
@@ -95,22 +96,26 @@ def change_password(client: TestClient, csrf: str, current: str, new: str):
     )
 
 
-def test_password_change_revokes_all_sessions_and_requires_login(
+def test_password_change_revokes_old_sessions_and_keeps_rotated_session(
     client: TestClient,
 ) -> None:
     first = login(client, "10000001", CURRENT_PASSWORD).json()
+    old_cookie = client.cookies.get(COOKIE_NAME)
     with TestClient(client.app) as other:
         assert login(other, "10000001", CURRENT_PASSWORD).status_code == 200
         changed = change_password(
             client, first["csrfToken"], CURRENT_PASSWORD, NEW_PASSWORD
         )
-        assert changed.status_code == 204
-        assert client.get("/api/auth/session").status_code == 401
+        assert changed.status_code == 200
+        assert client.get("/api/auth/session").status_code == 200
+        new_cookie = client.cookies.get(COOKIE_NAME)
+        if not old_cookie or not new_cookie or old_cookie == new_cookie:
+            raise AssertionError("密码修改未轮换当前会话")
         assert other.get("/api/auth/session").status_code == 401
-    assert login(client, "10000001", CURRENT_PASSWORD).status_code == 401
-    renewed = login(client, "10000001", NEW_PASSWORD)
-    assert renewed.status_code == 200
-    assert renewed.json()["user"]["mustChangePassword"] is False
+        with TestClient(client.app) as stale:
+            stale.cookies.set(COOKIE_NAME, old_cookie)
+            assert stale.get("/api/auth/session").status_code == 401
+    assert client.get("/api/auth/session").json()["user"]["mustChangePassword"] is False
 
 
 def test_password_change_rejects_a_weak_new_password(client: TestClient) -> None:

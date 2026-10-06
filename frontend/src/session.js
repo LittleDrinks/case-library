@@ -44,8 +44,7 @@ export async function login(credentials) {
 }
 
 export async function changePassword(passwords) {
-  await api.changePassword(passwords, session.csrfToken);
-  clearSession();
+  assignSession(await api.changePassword(passwords, session.csrfToken));
 }
 
 export async function logout() {

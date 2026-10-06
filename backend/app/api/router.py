@@ -6,6 +6,7 @@ from app.modules.ai.routes import admin_router as admin_ai_router
 from app.modules.ai.routes import router as ai_router
 from app.modules.agent.routes import router as agent_router
 from app.modules.auth.routes import router as auth_router
+from app.modules.auth.management_routes import router as admin_accounts_router
 from app.modules.attachments.routes import router as attachments_router
 from app.modules.cases.routes import router as cases_router
 from app.modules.case_materials.routes import router as case_materials_router
@@ -24,6 +25,7 @@ from app.modules.skills.routes import router as skills_router
 router = APIRouter()
 router.include_router(operations_router)
 router.include_router(auth_router)
+router.include_router(admin_accounts_router)
 router.include_router(agent_router)
 router.include_router(ai_router)
 router.include_router(admin_ai_router)

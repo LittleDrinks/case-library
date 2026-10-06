@@ -5,6 +5,7 @@ import "./styles/base.css";
 import "./styles/ai-settings.css";
 import "./styles/admin.css";
 import "./styles/admin-skills.css";
+import "./styles/admin-accounts.css";
 import "./styles/home.css";
 import "./styles/material-import.css";
 import "./styles/search-materials.css";

@@ -105,6 +105,23 @@ export const api = {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
   }),
+  listManagedAccounts: (query, page = 1, pageSize = 25) => request(
+    `/api/admin/accounts?q=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`,
+  ),
+  openManagedAccount: (account, csrfToken) => request(
+    "/api/admin/accounts", jsonOptions("POST", account, csrfToken),
+  ),
+  resetManagedAccountPassword: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/temporary-password`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  forceLogoutManagedAccount: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/force-logout`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  listAccountOperations: (page = 1, pageSize = 25) => request(
+    `/api/admin/account-operations?page=${page}&pageSize=${pageSize}`,
+  ),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
   listDrafts: (q, page = 1, pageSize = 20) => request(
     `/api/cases/drafts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`,

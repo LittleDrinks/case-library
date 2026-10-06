@@ -4,6 +4,7 @@ import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
+import AdminAccountsView from "./views/AdminAccountsView.vue";
 import AdminSkillsView from "./views/AdminSkillsView.vue";
 import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
 import HomeView from "./views/HomeView.vue";
@@ -67,6 +68,12 @@ const routes = [
     path: "/admin",
     name: "admin-dashboard",
     component: AdminDashboardView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/accounts",
+    name: "admin-accounts",
+    component: AdminAccountsView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {

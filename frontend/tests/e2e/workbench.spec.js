@@ -421,11 +421,8 @@ test("名单账号首登必须改密后才能进入工作台", async ({ page }) 
   await page.getByLabel("新密码", { exact: true }).fill(replacement);
   await page.getByLabel("确认新密码").fill(replacement);
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await expect(page).toHaveURL(/#\/login$/);
-  await signIn(page, "10000001", initial);
-  await expect(page.getByRole("alert")).toContainText("用户名或密码错误");
-  await signIn(page, "10000001", replacement);
   await expect(page).toHaveURL(/#\/$/);
+  await expect((await page.context().request.get("/api/auth/session")).status()).toBe(200);
   await expectOwnWorkbench(page);
 });
 

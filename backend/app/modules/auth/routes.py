@@ -78,20 +78,23 @@ def session(context: SessionContext = Depends(require_session)):
     return _session_payload(context)
 
 
-@router.post("/change-password", status_code=204)
+@router.post("/change-password", response_model=SessionView)
 def update_password(
     body: ChangePasswordRequest,
     response: Response,
     database=Depends(get_database),
+    settings: Settings = Depends(get_settings),
     record: dict = Depends(require_csrf),
 ):
     try:
-        change_password(
+        user = change_password(
             database, record["user_id"], body.currentPassword, body.newPassword
         )
     except PasswordChangeError as error:
         raise HTTPException(error.status_code, error.detail) from error
-    response.delete_cookie(COOKIE_NAME, path="/")
+    token, context = create_session(database, user, settings.session_ttl_seconds)
+    _set_cookie(response, token, settings)
+    return _session_payload(context)
 
 
 @router.post("/logout", status_code=204)

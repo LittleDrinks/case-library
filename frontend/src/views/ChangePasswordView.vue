@@ -20,7 +20,7 @@ async function submit() {
   submitting.value = true;
   try {
     await changePassword({ currentPassword: currentPassword.value, newPassword: newPassword.value });
-    await router.replace("/login");
+    await router.replace("/");
   } catch (reason) {
     error.value = reason.message || "密码修改失败";
   } finally {
