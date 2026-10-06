@@ -147,6 +147,7 @@
     .button-primary:hover:not(:disabled) { background: #285f43; }
     .button-line:hover:not(:disabled), .button-quiet:hover:not(:disabled), .icon-button:hover:not(:disabled) { background: #f2f6f3; }
     .demo-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+    .run-command { display: block; padding: 8px; border: 1px solid #d1ddd4; border-radius: 3px; background: #fff; font-size: 10px; overflow-wrap: anywhere; }
     .failure-toggle { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: #46534c; }
     .failure-toggle input { margin: 3px 0 0; }
     .state-box { border-top: 1px solid #d1ddd4; margin-top: 16px; padding-top: 11px; }
@@ -577,11 +578,16 @@
     const responseForVersion = (state, version) => {
       const sources = citationsForVersion(state, version);
       const pdf = sources.find(source => source.fileType === "pdf" && source.quote);
-      const note = sources.find(source => source.fileType === "md" && source.kind === "解读" && source.quote);
+      const markdown = sources.find(source => source.fileType === "md" && source.quote);
+      const note = markdown?.kind === "解读" ? markdown : null;
       const image = sources.find(source => source.fileType === "image");
       if (pdf && note) return {
         text: `原件记录显示：“${pdf.summary}”解读笔记补充：“${note.summary}”`,
         citations: [pdf, note]
+      };
+      if (pdf && markdown) return {
+        text: `原件记录显示：“${pdf.summary}”补充原件记录：“${markdown.summary}”`,
+        citations: [pdf, markdown]
       };
       if (pdf) return {
         text: `原件记录显示：“${pdf.summary}”当前确认版没有可引用的解读文字材料。`,
@@ -591,12 +597,17 @@
         text: `解读笔记内容：${note.summary}当前确认版没有 PDF 原件观察记录，不能据此断言现场现象。`,
         citations: [note]
       };
+      if (markdown) return {
+        text: `补充原件记录显示：“${markdown.summary}”该记录只支持其中明确写出的内容，不推断未记录的现场现象。`,
+        citations: [markdown]
+      };
       if (image) return {
         text: `当前确认版仅有图片来源。${image.summary}图片不包含可核验的文字记录，因此无法据此给出文字观察结论。`,
         citations: [image]
       };
       return { text: "当前确认版本没有可引用的来源，无法提供基于素材的回答。", citations: [] };
     };
+    const citationAttributes = citation => `data-action="open-reader" data-file="${citation.fileId}" data-version="${citation.version}" data-page="${citation.page || ""}" data-paragraph="${citation.paragraph || ""}"`;
     const ACTION_LABELS = {
       ADD_FILE: "添加素材文件",
       ADD_SELECTION: "将所选整包加入案例",
@@ -892,6 +903,9 @@
           </div>` : `<p class="scene-copy">选择一个入口后逐步体验；切换入口会重置到该场景的合成初始状态。</p>`}
         <div class="demo-section-title">演示开关</div>
         <label class="failure-toggle"><input type="checkbox" data-action="set-add-failure" ${state.demo.failOnAdd ? "checked" : ""}>批量加入时模拟“雨后花圃观察图卡”失败</label>
+        <div class="demo-section-title">完整下载运行</div>
+        <p class="scene-copy">在仓库根目录执行命令，再打开终端显示的地址：</p>
+        <code class="run-command">python3 -m http.server 4178 --directory frontend/prototypes/issue-352</code>
         <details class="state-box" open>
           <summary>完整相关状态</summary>
           <div class="state-content">
@@ -918,8 +932,8 @@
       }).join("");
       const response = responseForVersion(state, state.case.sourceVersion);
       const citations = response.citations;
-      const citationMarkup = citations.length ? citations.map(citation => `<button class="citation" type="button" data-action="open-reader" data-file="${citation.fileId}" data-version="${citation.version}" data-page="${citation.page || ""}" data-paragraph="${citation.paragraph || ""}"><span class="tag ${citation.kind === "原件" ? "blue" : "pending"}">${citation.kind}</span><strong>${escapeHtml(citation.fileName)}</strong><small>${escapeHtml(citation.location)} · 引用版本 v${citation.version}</small></button>`).join("") : `<p class="empty-state">当前确认版本没有可引用的来源。</p>`;
-      const oldHistory = state.case.history.length ? `<ul class="history-list">${state.case.history.map(item => `<li><span class="tag">历史引用 v${item.version}</span><p class="history-answer">${escapeHtml(item.answer)}</p>${item.citations.map(citation => `<button class="text-link" type="button" data-action="open-reader" data-file="${citation.fileId}" data-version="${citation.version}" data-page="${citation.page || ""}" data-paragraph="${citation.paragraph || ""}">${escapeHtml(citation.fileName)} · ${escapeHtml(citation.location)} · ${citation.kind}</button>`).join("")}</li>`).join("")}</ul>` : `<p class="empty-state">尚无版本升级记录。</p>`;
+      const citationMarkup = citations.length ? citations.map(citation => `<button class="citation" type="button" ${citationAttributes(citation)}><span class="tag ${citation.kind === "原件" ? "blue" : "pending"}">${citation.kind}</span><strong>${escapeHtml(citation.fileName)}</strong><small>${escapeHtml(citation.location)} · 引用版本 v${citation.version}</small></button>`).join("") : `<p class="empty-state">当前确认版本没有可引用的来源。</p>`;
+      const oldHistory = state.case.history.length ? `<ul class="history-list">${state.case.history.map(item => `<li><span class="tag">历史引用 v${item.version}</span><p class="history-answer">${escapeHtml(item.answer)}</p>${item.citations.map(citation => `<button class="text-link" type="button" ${citationAttributes(citation)}>${escapeHtml(citation.fileName)} · ${escapeHtml(citation.location)} · ${citation.kind}</button>`).join("")}</li>`).join("")}</ul>` : `<p class="empty-state">尚无版本升级记录。</p>`;
       let versionMessage = `案例继续引用已确认的 v${state.case.sourceVersion}；素材最新 v${state.bundle.version} 处于${latestStatus}。`;
       if (newVersionReady) versionMessage = `素材 v${state.bundle.version} 已整包确认，案例仍固定引用 v${state.case.sourceVersion}；作者可主动升级。`;
       if (state.case.sourceVersion === state.bundle.version && latestStatus === "已确认") versionMessage = `案例已主动升级并使用整包确认的 v${state.case.sourceVersion}。`;
