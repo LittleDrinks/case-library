@@ -45,6 +45,21 @@ def _register(username: str, password: str):
     )
 
 
+def _safe_validation_feedback(status: int, response, secrets: list[str]) -> bool:
+    if status != 422 or not isinstance(response, dict):
+        return False
+    details = response.get("detail")
+    if not isinstance(details, list) or not details:
+        return False
+    safe_fields = {"loc", "msg", "type"}
+    if any(
+        not isinstance(item, dict) or set(item) != safe_fields for item in details
+    ):
+        return False
+    serialized = json.dumps(response)
+    return all(secret not in serialized for secret in secrets)
+
+
 def test_registered_user_can_save_and_submit_a_private_case() -> None:
     username = f"issue356-{uuid.uuid4().hex}"
     password = _password()
@@ -111,6 +126,73 @@ def test_registered_user_can_save_and_submit_a_private_case() -> None:
     assert submitted["case"]["ownerId"] == owner_id
     assert submitted["case"]["workflowStatus"] == "pending"
     assert submitted["case"]["publicationStatus"] == "none"
+
+
+def test_registration_validation_omitting_username_does_not_echo_password() -> None:
+    password = _password()
+
+    status, response = _request(
+        build_opener(), "POST", "/api/auth/register", {"password": password}
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_registration_validation_rejects_129_character_password_safely() -> None:
+    password = "x" * 129
+
+    status, response = _request(
+        build_opener(),
+        "POST",
+        "/api/auth/register",
+        {"username": f"issue356-long-{uuid.uuid4().hex}", "password": password},
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_login_validation_omitting_username_does_not_echo_password() -> None:
+    password = _password()
+
+    status, response = _request(
+        build_opener(), "POST", "/api/auth/login", {"password": password}
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_password_change_validation_does_not_echo_whole_request_object() -> None:
+    username = f"issue356-change-{uuid.uuid4().hex}"
+    password = _password()
+    register_status, _registered = _register(username, password)
+    assert register_status == 201
+
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    login_status, login = _request(
+        opener,
+        "POST",
+        "/api/auth/login",
+        {"username": username, "password": password},
+    )
+    assert login_status == 200
+
+    status, response = _request(
+        opener,
+        "POST",
+        "/api/auth/change-password",
+        {"currentPassword": password},
+        login["csrfToken"],
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
 
 
 def test_registration_reports_duplicate_and_invalid_credentials() -> None:
