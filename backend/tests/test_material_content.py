@@ -78,6 +78,18 @@ def test_campus_material_requires_login(client: TestClient) -> None:
     assert (teacher.status_code, teacher.content) == (200, content)
 
 
+def test_admin_role_does_not_grant_campus_material_access(client: TestClient) -> None:
+    material_id, _admin = _approved_material(
+        client, "admin-campus.txt", b"campus-only", "campus"
+    )
+    admin = _login(client, "admin", "admin123")
+    assert admin["user"]["campusVerified"] is False
+
+    response = client.get(f"/api/materials/{material_id}/content")
+
+    assert response.status_code == 404
+
+
 def test_private_material_is_hidden_from_other_users(client: TestClient) -> None:
     material_id, _admin = _approved_material(
         client, "private.txt", b"private", "private"
