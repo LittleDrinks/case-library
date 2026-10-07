@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Mapping, Union
 
 from app.modules.search.models import TagExpression, TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 Kind = Literal["all", "case", "knowledge", "material"]
 Role = Literal["anonymous", "user", "admin"]
@@ -654,6 +655,7 @@ class MeilisearchCatalog:
             status = self._reader.health(index_uid)
             valid = status.generation == expected_generation
             valid = valid and status.index_epoch == expected_epoch
+            valid = valid and status.projection_version == PROJECTION_VERSION
             if not status.available or status.primary_key != "catalogId" or not valid:
                 raise ValueError("invalid stable catalog")
         except Exception as error:

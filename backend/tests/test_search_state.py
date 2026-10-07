@@ -6,6 +6,7 @@ import pytest
 
 from app.modules.search.meilisearch import CatalogKey, SearchUnavailable
 from app.modules.search.outbox import CatalogTarget
+from app.modules.search.projection import PROJECTION_VERSION
 from app.modules.search.state import MongoCatalogState
 
 
@@ -32,6 +33,7 @@ def _row() -> dict:
         "generation": "generation-1",
         "indexUid": "catalog-generation-1",
         "indexEpoch": "2026-08-14T00:00:00Z",
+        "projectionVersion": PROJECTION_VERSION,
         "control": [{"sequence": 7}],
         "rebuild": [],
         "worker": [{"_id": "catalog"}],
@@ -69,6 +71,8 @@ def _changed(**changes) -> list[dict]:
         _changed(rebuild=[{}]),
         _changed(worker=[]),
         _changed(stale=[{}]),
+        _changed(projectionVersion=PROJECTION_VERSION - 1),
+        _changed(projectionVersion=None),
         _changed(
             revocations=[{"logicalKey": f"case:c-{index}"} for index in range(101)]
         ),

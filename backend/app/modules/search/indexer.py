@@ -9,7 +9,7 @@ from pymongo.database import Database
 
 from app.modules.search.client import index_epoch, wait_task
 from app.modules.search.outbox import SearchOutbox
-from app.modules.search.projection import project_catalog_documents
+from app.modules.search.projection import PROJECTION_VERSION, project_catalog_documents
 
 BATCH_SIZE = 500
 FILTERABLE = (
@@ -212,6 +212,7 @@ def _generation_document(generation: str) -> dict:
         "catalogId": "catalog-meta",
         "docClass": "catalog-meta",
         "generation": generation,
+        "projectionVersion": PROJECTION_VERSION,
     }
 
 
@@ -279,6 +280,7 @@ class CatalogRebuilder:
             "generation": generation,
             "indexUid": uid,
             "indexEpoch": index_epoch(self.client, uid),
+            "projectionVersion": PROJECTION_VERSION,
             "retiredIndexUids": sorted(retired),
         }
 

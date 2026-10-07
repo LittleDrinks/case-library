@@ -14,6 +14,7 @@ from app.modules.search.meilisearch import (
     SearchUnavailable,
 )
 from app.modules.search.models import TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 
 class FakeReader:
@@ -268,9 +269,11 @@ class HealthyReader:
         primary_key="catalogId",
         generation="current-generation",
         epoch="epoch",
+        projection_version=PROJECTION_VERSION,
     ) -> None:
         self.status, self.primary_key = status, primary_key
         self.generation, self.epoch = generation, epoch
+        self.projection_version = projection_version
 
     def health(self, uid: str) -> CatalogHealth:
         assert uid == "catalog"
@@ -279,6 +282,7 @@ class HealthyReader:
             self.primary_key,
             self.generation,
             self.epoch,
+            self.projection_version,
         )
 
 
@@ -287,6 +291,13 @@ def test_health_requires_available_server_and_stable_catalog_primary_key() -> No
     for reader in (HealthyReader("unavailable"), HealthyReader(primary_key="id")):
         with pytest.raises(SearchUnavailable, match="检索暂不可用"):
             MeilisearchCatalog(reader).health("catalog", "current-generation", "epoch")
+
+
+def test_health_rejects_an_old_projection_version() -> None:
+    with pytest.raises(SearchUnavailable, match="检索暂不可用"):
+        MeilisearchCatalog(
+            HealthyReader(projection_version=PROJECTION_VERSION - 1)
+        ).health("catalog", "current-generation", "epoch")
 
 
 def test_health_requires_the_expected_catalog_generation() -> None:

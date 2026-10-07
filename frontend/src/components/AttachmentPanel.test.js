@@ -12,7 +12,9 @@ vi.mock("../api.js", () => ({
     listSources: vi.fn(),
     removeCaseSource: vi.fn().mockResolvedValue(null),
     getCase: vi.fn().mockResolvedValue({ id: "case-1" }),
-    attachmentContentUrl: (id, attachmentId) => `/api/cases/${id}/attachments/${attachmentId}/content`,
+    attachmentContentUrl: (id, attachmentId, versionId) => (
+      `/api/cases/${id}/attachments/${attachmentId}/content${versionId ? `?versionId=${versionId}` : ""}`
+    ),
   },
 }));
 
@@ -83,6 +85,21 @@ test("管理员角色本身不显示校内附件下载入口", async () => {
 
   expect(wrapper.find("[aria-label='下载campus.txt']").exists()).toBe(false);
   expect(wrapper.text()).toContain("仅已验证校内身份可下载");
+});
+
+test("冻结版本附件下载固定到当前版本，所有者仍可下载校内附件", async () => {
+  api.listAttachments.mockResolvedValue([
+    { id: "campus-1", name: "campus.txt", accessLevel: "campus", size: 12 },
+  ]);
+  const wrapper = await setup({
+    caseRecord: { id: "case-1", ownerId: "u1" },
+    versionId: "version-7",
+    user: { id: "u1", role: "teacher", campusVerified: false, csrfToken: "csrf" },
+    editable: false,
+  }, undefined, "files");
+
+  expect(wrapper.get("[aria-label='下载campus.txt']").attributes("href"))
+    .toBe("/api/cases/case-1/attachments/campus-1/content?versionId=version-7");
 });
 
 test("显式移除来源调用删除接口", async () => {

@@ -118,7 +118,7 @@ def _read_pinned_case(database, user: dict | None, row: dict) -> dict:
     if not version:
         return _failed(UNAVAILABLE, "来源版本已不可用")
     if not source_case_content_available(
-        database, row.get("sourceCaseId"), user, version["id"], False
+        database, row.get("sourceCaseId"), user, version["id"]
     ):
         return _failed(NO_ACCESS, "来源案例内容当前不可读")
     return _case_result(case, version, row["id"])
@@ -130,7 +130,7 @@ def _read_published_case(database, source_id: str) -> dict:
     version = database.case_versions.find_one({"id": version_id, "caseId": source_id}) if version_id else None
     if not case or not version:
         return _failed(UNAVAILABLE, "来源案例暂无已发布版本")
-    if not source_case_content_available(database, source_id, None, version_id, False):
+    if not source_case_content_available(database, source_id, None, version_id):
         return _failed(NO_ACCESS, "来源案例内容当前不可读")
     return _case_result(case, version)
 
@@ -163,7 +163,7 @@ def source_readable(
         return _area_entry_available(database, user, case_id, ref, version_id)
     if ref.kind == "case" and ref.version_id and ref.source_case_id:
         return source_case_content_available(
-            database, ref.source_case_id, user, ref.version_id, False
+            database, ref.source_case_id, user, ref.version_id
         )
     result = read_source(database, None, user, case_id, ref.kind, ref.id, version_id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}

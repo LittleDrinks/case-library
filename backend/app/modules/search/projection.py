@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+PROJECTION_VERSION = 2
+
 CASE_FIELDS = (
     "typeId",
     "typeName",

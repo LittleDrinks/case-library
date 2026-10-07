@@ -13,6 +13,7 @@ from app.main import create_app
 from app.modules.search.client import CatalogHealth
 from app.modules.search.meilisearch import SearchUnavailable
 from app.modules.search.outbox import SearchOutbox
+from app.modules.search.projection import PROJECTION_VERSION
 from conftest import MemoryBlobStore, ReadyCatalogState
 
 
@@ -193,7 +194,9 @@ def test_search_catalog_settings_are_loaded_from_environment(
 
 class ReadyReader:
     def health(self, _uid: str) -> CatalogHealth:
-        return CatalogHealth(True, "catalogId", "test-generation", "test-epoch")
+        return CatalogHealth(
+            True, "catalogId", "test-generation", "test-epoch", PROJECTION_VERSION
+        )
 
 
 def _configured_database():
@@ -210,6 +213,7 @@ def _catalog_generation() -> dict:
         "generation": "test-generation",
         "indexUid": "catalog-generation-test",
         "indexEpoch": "test-epoch",
+        "projectionVersion": PROJECTION_VERSION,
         "retiredIndexUids": [],
     }
 

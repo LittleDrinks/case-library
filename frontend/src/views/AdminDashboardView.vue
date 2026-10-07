@@ -14,15 +14,15 @@ const submissionHistory = computed(() => cases.value.filter((item) => (
 )));
 
 function needsReview(item) {
-  return ["pending", "reviewing"].includes(item.workflowStatus);
+  return ["pending", "reviewing"].includes(item.reviewRecordStatus);
 }
 
 function isPublished(item) {
-  return item.workflowStatus === "published";
+  return item.reviewRecordStatus === "published";
 }
 
 function reviewLabel(item) {
-  return item.workflowStatus === "pending" ? "待开始" : "审核中";
+  return item.reviewRecordStatus === "pending" ? "待开始" : "审核中";
 }
 
 function dateLabel(value) {
@@ -63,7 +63,7 @@ onMounted(loadCases);
           <header><div><span>案例管理</span><h2 id="review-queue-title">案例审核</h2></div><b>{{ reviewCases.length }}</b></header>
           <p v-if="!reviewCases.length" class="admin-empty">暂无待审核案例</p>
           <article v-for="item in reviewCases" :key="item.id" :aria-label="`待审核：${item.title}`">
-            <span :data-status="item.workflowStatus">{{ reviewLabel(item) }}</span>
+            <span :data-status="item.reviewRecordStatus">{{ reviewLabel(item) }}</span>
             <div><h3>{{ item.title }}</h3><p>{{ item.author || "作者待补充" }} · 提交更新 {{ dateLabel(item.updatedAt) }}</p></div>
             <RouterLink :to="{ name: 'case-review', params: { id: item.id }, query: { versionId: item.reviewVersionId } }">审核</RouterLink>
           </article>

@@ -50,14 +50,12 @@ def source_case_url(origin: str, source_case_id: str, version_id: str) -> str:
 
 def source_case_content_available(
     database: Database, source_case_id: str, user: dict | None,
-    version_id: str | None = None, internal: bool = False,
+    version_id: str | None = None,
 ) -> bool:
     source = database.cases.find_one({"id": source_case_id})
     if not source:
         return False
-    source_internal = internal and bool(
-        user and (user["role"] == "admin" or user["id"] == source["ownerId"])
-    )
+    source_internal = bool(user and user.get("id") == source.get("ownerId"))
     if version_id:
         version = find_version(database, source, version_id, source_internal)
         return bool(version and version_readable(
@@ -67,7 +65,7 @@ def source_case_content_available(
 
 
 def source_view(
-    database, row: dict, user: dict | None, origin: str, internal: bool = False
+    database, row: dict, user: dict | None, origin: str
 ) -> dict:
     source = _source_case_info(database, row["sourceCaseId"])
     return {
@@ -80,7 +78,7 @@ def source_view(
         "sourceUrl": source_case_url(origin, row["sourceCaseId"], row["versionId"]),
         "publishedAt": source.get("publishedAt"),
         "contentAvailable": source_case_content_available(
-            database, row["sourceCaseId"], user, row["versionId"], internal
+            database, row["sourceCaseId"], user, row["versionId"]
         ),
         "createdAt": row["createdAt"],
     }
@@ -172,7 +170,7 @@ def list_case_sources(
     _require_source_reader(database, case, user, version_id)
     internal = _internal_reader(case, user)
     rows = _source_rows(database, case, user, internal, version_id)
-    return [source_view(database, row, user, origin, internal) for row in rows]
+    return [source_view(database, row, user, origin) for row in rows]
 
 
 def _require_source_reader(database, case: dict, user: dict | None, version_id: str | None) -> None:

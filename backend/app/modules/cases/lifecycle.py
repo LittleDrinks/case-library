@@ -7,7 +7,10 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
-from app.modules.case_sources.service import snapshot_case_sources
+from app.modules.case_sources.service import (
+    snapshot_case_sources,
+    source_case_content_available,
+)
 from app.modules.cases.citations import citations_resolve
 from app.modules.cases.service import (
     CaseError,
@@ -18,7 +21,7 @@ from app.modules.cases.service import (
 )
 from app.modules.cases.submission_check import submission_issues
 from app.modules.cases.snapshots import overwrite_draft
-from app.modules.case_materials.service import snapshot_materials
+from app.modules.case_materials.service import project_material_rows, snapshot_materials
 from app.modules.search.outbox import SearchOutbox
 from app.modules.cases.versions import (
     FORMAL_VERSION_KINDS,
@@ -114,7 +117,7 @@ def _submit(database: Database, case: dict, user: dict, session) -> dict:
         raise CaseError(409, "案例状态已变化")
     database.case_versions.insert_one(version, session=session)
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _submission_version(database, case: dict, user: dict, session) -> tuple[str, dict]:
@@ -156,15 +159,38 @@ def _clean(record: dict) -> dict:
     return cleaned
 
 
-def _history_version(record: dict, case: dict, user: dict, review: dict | None) -> dict:
+def _version_view(database, record: dict, case: dict, user: dict) -> dict:
     cleaned = _clean(record)
-    cleaned["review"] = _last_review(review, record) if review else None
-    if case["ownerId"] != user["id"]:
+    cleaned["materials"] = project_material_rows(
+        database, record.get("materials", []), user
+    )
+    cleaned["caseSources"] = [
+        {
+            **row,
+            "contentAvailable": _source_case_content_available(database, row, user),
+        }
+        for row in record.get("caseSources", [])
+    ]
+    if user.get("role") == "admin" or case["ownerId"] != user["id"]:
         cleaned["annotations"] = []
     return cleaned
 
 
-def _result(case: dict, version: dict, event: dict, user: dict) -> dict:
+def _source_case_content_available(database, row: dict, user: dict | None) -> bool:
+    return source_case_content_available(
+        database, row["sourceCaseId"], user, row.get("versionId")
+    )
+
+
+def _history_version(
+    database, record: dict, case: dict, user: dict, review: dict | None
+) -> dict:
+    cleaned = _version_view(database, record, case, user)
+    cleaned["review"] = _last_review(review, record) if review else None
+    return cleaned
+
+
+def _result(database, case: dict, version: dict, event: dict, user: dict) -> dict:
     if not case:
         raise CaseError(409, "案例状态已变化")
     case_view = (
@@ -174,7 +200,7 @@ def _result(case: dict, version: dict, event: dict, user: dict) -> dict:
     )
     return {
         "case": case_view,
-        "version": _clean(version),
+        "version": _version_view(database, version, case, user),
         "event": _clean(event),
     }
 
@@ -232,7 +258,7 @@ def _start(database, case: dict, user: dict, session) -> dict:
         {"workflowStatus": "reviewing", "reviewStartedAt": now},
         session,
     )
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _withdraw(database, case: dict, user: dict, session) -> dict:
@@ -245,7 +271,7 @@ def _withdraw(database, case: dict, user: dict, session) -> dict:
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _mark_withdrawn(database, case: dict, version: dict, now: str, session) -> dict:
@@ -275,7 +301,7 @@ def _approve(database, case: dict, body: dict, user: dict, session) -> dict:
         now,
         session,
     )
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _require_active_review(case: dict) -> None:
@@ -440,7 +466,7 @@ def _return_for_revision(database, case: dict, body: dict, user: dict, session) 
     if not updated:
         raise CaseError(409, "案例状态已变化")
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _publication_change(database, case: dict, user: dict, action: str, session) -> dict:
@@ -457,7 +483,7 @@ def _publication_change(database, case: dict, user: dict, action: str, session) 
     _record_publication(database, case["id"], version, action == "hide", session)
     event = _event(case, user, version, now, action)
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _publication_states(action: str) -> tuple[str, str]:
@@ -496,7 +522,7 @@ def _reopen(database, case: dict, user: dict, session) -> dict:
         raise CaseError(409, "案例状态已变化")
     event = _event(case, user, version, now, "reopen")
     database.lifecycle_events.insert_one(event, session=session)
-    return _result(updated, version, event, user)
+    return _result(database, updated, version, event, user)
 
 
 def _mark_reopened(database, case: dict, version: dict, now: str, session) -> dict:
@@ -595,6 +621,9 @@ def get_history(database: Database, case_id: str, user: dict) -> dict:
     reviews = {event["versionId"]: event for event in events if event["action"] == "reject"}
     return {
         "caseId": case_id,
-        "versions": [_history_version(row, case, user, reviews.get(row["id"])) for row in versions],
+        "versions": [
+            _history_version(database, row, case, user, reviews.get(row["id"]))
+            for row in versions
+        ],
         "events": [_clean(row) for row in events],
     }

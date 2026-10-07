@@ -20,8 +20,10 @@ from app.modules.agent.deps import ToolDeps
 from app.modules.agent.skills import read_source, search_corpus
 from app.modules.agent.search import CorpusSearchParams
 from app.modules.attachments.storage import minio_blob_store
-from app.modules.search.client import create_reader
+from app.modules.search.client import create_client, create_reader, index_epoch, wait_task
+from app.modules.search.indexer import CatalogRebuilder
 from app.modules.search.meilisearch import MeilisearchCatalog
+from app.modules.search.outbox import SearchOutbox
 from app.modules.search.state import MongoCatalogState
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
@@ -160,6 +162,17 @@ def _database():
     return client, client["case_library_e2e"]
 
 
+def _search_corpus_when_ready(context, params):
+    deadline = time.monotonic() + 45
+    while True:
+        try:
+            return asyncio.run(search_corpus(context, params))
+        except RuntimeError as error:
+            if str(error) != "检索服务暂不可用" or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.2)
+
+
 def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
     author, author_auth = _login("user", "user123")
     admin, admin_auth = _login("admin", "admin123")
@@ -192,6 +205,26 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
 
     client, database = _database()
     try:
+        private_note = author.post(
+            f"/api/cases/{case_id}/annotations",
+            headers={"X-CSRF-Token": author_auth["csrfToken"]},
+            json={
+                "quote": marker,
+                "section": "正文",
+                "content": f"author-private-note-{marker}",
+                "source": "manual",
+                "revision": author.get(f"/api/cases/{case_id}").json()["revision"],
+                "from": 1,
+                "to": 1 + len(marker),
+            },
+        )
+        assert private_note.status_code == 201, private_note.text
+        reply = author.post(
+            f"/api/cases/{case_id}/annotations/{private_note.json()['id']}/replies",
+            headers={"X-CSRF-Token": author_auth["csrfToken"]},
+            json={"content": f"author-private-reply-{marker}"},
+        )
+        assert reply.status_code == 200, reply.text
         submitted = _transition(
             author,
             author_auth,
@@ -208,6 +241,11 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
         assert admin.get(f"/api/cases/{case_id}").status_code == 404
         assert admin.get(f"/api/cases/{case_id}/review").json()["document"] == stored["document"]
         assert admin.get(f"/api/cases/{case_id}/history").json()["versions"][0]["id"] == frozen_id
+        started = _transition(
+            admin, admin_auth, case_id, "start", submitted["case"]["revision"]
+        )
+        assert f"author-private-note-{marker}" not in str(started["version"])
+        assert f"author-private-reply-{marker}" not in str(started["version"])
         assert stranger.get(f"/api/cases/{case_id}/review").status_code == 403
         assert anonymous.get(f"/api/cases/{case_id}/review").status_code == 401
         assert admin.get(f"/api/cases/{case_id}/attachments").status_code == 404
@@ -227,11 +265,16 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
         assert admin.get(f"/api/cases/{case_id}/export.docx").status_code == 404
 
         review_thread = admin.get(
-            f"/api/cases/{case_id}/agent/thread", params={"mode": "review"}
+            f"/api/cases/{case_id}/agent/thread",
+            params={"versionId": frozen_id, "mode": "review"},
         )
         assert review_thread.status_code == 200
         thread = review_thread.json()
         assert thread["versionId"] == frozen_id
+        assert admin.get(
+            f"/api/cases/{case_id}/agent/thread",
+            params={"versionId": "cv-stale", "mode": "review"},
+        ).status_code == 409
         assert admin.get(f"/api/cases/{case_id}/agent/thread").status_code == 404
         assert author.get(
             f"/api/cases/{case_id}/agent/threads/{thread['id']}"
@@ -275,9 +318,6 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
         assert assistant["parts"][1]["output"]["status"] == "no_access"
         assert assistant["parts"][2]["output"]["sources"] == []
 
-        started = _transition(
-            admin, admin_auth, case_id, "start", submitted["case"]["revision"]
-        )
         _transition(
             admin,
             admin_auth,
@@ -515,8 +555,32 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
     assert {row["id"] for row in old_rows.json()} == {first["id"], second["id"], third["id"]}
 
 
+def test_submitted_version_without_annotations_cannot_be_deleted_after_withdrawal() -> None:
+    author, author_auth = _unverified_user()
+    admin, admin_auth = _unverified_user("admin")
+    marker = f"frozen-record-{uuid.uuid4().hex}"
+    case = _create_case(author, author_auth, marker)
+    submitted = _transition(author, author_auth, case["id"], "submit", case["revision"])
+    version_id = submitted["version"]["id"]
+    withdrawn = _transition(
+        author, author_auth, case["id"], "withdraw", submitted["case"]["revision"]
+    )
+    assert withdrawn["version"]["id"] == version_id
+    assert withdrawn["version"].get("annotations", []) == []
+
+    deleted = author.delete(
+        f"/api/cases/{case['id']}/versions/{version_id}",
+        headers={"X-CSRF-Token": author_auth["csrfToken"]},
+    )
+    assert deleted.status_code == 409, deleted.text
+    historical = admin.get(f"/api/cases/{case['id']}/review", params={"versionId": version_id})
+    assert historical.status_code == 200, historical.text
+    assert historical.json()["title"] == marker
+    assert admin.get(f"/api/cases/{case['id']}/history").json()["versions"][0]["id"] == version_id
+
+
 def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> None:
-    author, author_auth = _login("user", "user123")
+    author, author_auth = _unverified_user()
     admin, admin_auth = _unverified_user("admin")
     other, other_auth = _unverified_user()
     marker = f"private-search-{uuid.uuid4().hex}"
@@ -546,13 +610,22 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
     )
     case = _create_case(author, author_auth, f"case-{uuid.uuid4().hex}")
     attachment = _upload_private(author, author_auth, case["id"], marker)
+    campus_text = f"campus-{uuid.uuid4().hex}"
     campus_attachment = _upload_private(
-        author, author_auth, case["id"], f"campus-{uuid.uuid4().hex}", "campus"
+        author, author_auth, case["id"], campus_text, "campus"
     )
     publication = _published(author, author_auth, case["id"], material_id)
     version_id = publication["version"]["id"]
     frozen = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
     assert any(row["id"] == attachment["id"] for row in frozen["attachments"])
+    approved_material = publication["approved"]["version"]["materials"][0]
+    assert approved_material["contentAvailable"] is False
+    assert "summary" not in approved_material
+    admin_history = admin.get(f"/api/cases/{case['id']}/history")
+    assert admin_history.status_code == 200
+    historical_material = admin_history.json()["versions"][0]["materials"][0]
+    assert historical_material["contentAvailable"] is False
+    assert "summary" not in historical_material
 
     material_access = author.get(f"/api/materials/{material_id}/content")
     assert material_access.status_code == 200 and material_access.content == material_text.encode()
@@ -592,6 +665,20 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
         f"/api/cases/{case['id']}/attachments/{campus_attachment['id']}/content",
         params={"versionId": version_id},
     ).status_code == 403
+    owner_sources = author.get(
+        f"/api/cases/{case['id']}/sources", params={"versionId": version_id}
+    )
+    owner_campus = next(
+        row for row in owner_sources.json()["entries"]
+        if row["id"] == campus_attachment["id"]
+    )
+    assert owner_campus["contentAvailable"] is True
+    owner_download = author.get(
+        f"/api/cases/{case['id']}/attachments/{campus_attachment['id']}/content",
+        params={"versionId": version_id},
+    )
+    assert owner_download.status_code == 200
+    assert owner_download.content == campus_text.encode()
 
     deadline = time.monotonic() + 45
     owner_items = []
@@ -671,50 +758,53 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
             ref.kind == "attachment" and ref.id == attachment["id"]
             for ref in owner_deps.sources
         ), [ref.model_dump(by_alias=True) for ref in owner_deps.sources]
+        assert any(
+            ref.kind == "attachment" and ref.id == campus_attachment["id"]
+            for ref in owner_deps.sources
+        )
         owner_context = SimpleNamespace(deps=owner_deps)
         admin_context = SimpleNamespace(deps=admin_deps)
         other_context = SimpleNamespace(deps=other_deps)
-        owner_search = asyncio.run(
-            search_corpus(owner_context, CorpusSearchParams(query=marker, kind="case"))
+        owner_search = _search_corpus_when_ready(
+            owner_context, CorpusSearchParams(query=marker, kind="case")
         )
-        admin_search = asyncio.run(
-            search_corpus(admin_context, CorpusSearchParams(query=marker, kind="case"))
+        admin_search = _search_corpus_when_ready(
+            admin_context, CorpusSearchParams(query=marker, kind="case")
         )
-        other_corpus_search = asyncio.run(
-            search_corpus(other_context, CorpusSearchParams(query=marker, kind="case"))
+        other_corpus_search = _search_corpus_when_ready(
+            other_context, CorpusSearchParams(query=marker, kind="case")
         )
         assert [row["id"] for row in owner_search["sources"]] == [case["id"]]
         assert admin_search["sources"] == []
         assert other_corpus_search["sources"] == []
 
         owner_read = asyncio.run(read_source(owner_context, "attachment", attachment["id"]))
+        owner_campus_read = asyncio.run(
+            read_source(owner_context, "attachment", campus_attachment["id"])
+        )
         admin_read = asyncio.run(read_source(admin_context, "attachment", attachment["id"]))
         other_read = asyncio.run(read_source(other_context, "attachment", attachment["id"]))
         assert owner_read["status"] == "ok" and owner_read["content"] == marker, owner_read
+        assert owner_campus_read["status"] == "ok"
+        assert owner_campus_read["content"] == campus_text
         assert admin_read["status"] == "no_access"
         assert other_read["status"] == "no_access"
-        admin_campus_search = asyncio.run(
-            search_corpus(
-                admin_context,
-                CorpusSearchParams(query=campus_attachment["name"], kind="case"),
-            )
+        admin_campus_search = _search_corpus_when_ready(
+            admin_context,
+            CorpusSearchParams(query=campus_attachment["name"], kind="case"),
         )
         assert admin_campus_search["sources"] == []
         admin_campus_read = asyncio.run(
             read_source(admin_context, "attachment", campus_attachment["id"])
         )
         assert admin_campus_read["status"] == "no_access"
-        owner_material_search = asyncio.run(
-            search_corpus(
-                owner_context,
-                CorpusSearchParams(query=material_text, kind="material"),
-            )
+        owner_material_search = _search_corpus_when_ready(
+            owner_context,
+            CorpusSearchParams(query=material_text, kind="material"),
         )
-        admin_material_search = asyncio.run(
-            search_corpus(
-                admin_context,
-                CorpusSearchParams(query=material_text, kind="material"),
-            )
+        admin_material_search = _search_corpus_when_ready(
+            admin_context,
+            CorpusSearchParams(query=material_text, kind="material"),
         )
         assert [row["id"] for row in owner_material_search["sources"]] == [material_id]
         assert admin_material_search["sources"] == []
@@ -722,6 +812,87 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
         admin_material = asyncio.run(read_source(admin_context, "material", material_id))
         assert owner_material["status"] == "ok" and owner_material["content"] == material_text
         assert admin_material["status"] == "no_access"
+
+        search_client = create_client(
+            os.environ["MEILI_CONTRACT_URL"],
+            os.environ["MEILI_CONTRACT_KEY_FILE"],
+        )
+        current_catalog = database.search_catalog_generation.find_one({"_id": "catalog"})
+        previous_epoch = current_catalog["indexEpoch"]
+        legacy_catalog_id = f"case-{case['id']}-public"
+        legacy_document = {
+            "catalogId": legacy_catalog_id,
+            "id": case["id"],
+            "kind": "case",
+            "docClass": "case-public",
+            "title": "legacy projection synthetic case",
+            "summary": "",
+            "publishedAt": "2026-10-07",
+            "versionId": version_id,
+            "versionNumber": publication["version"]["number"],
+            "createdBy": author_auth["user"]["id"],
+            "searchableText": marker,
+        }
+        active_index = search_client.index(current_catalog["indexUid"])
+        wait_task(
+            search_client,
+            active_index.add_documents([legacy_document], primary_key="catalogId"),
+        )
+        database.search_catalog_generation.update_one(
+            {"_id": "catalog"}, {"$set": {"projectionVersion": 1}}
+        )
+
+        outbox_key = f"material:{material_id}"
+        SearchOutbox(database).record([outbox_key], session=None)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            pending = database.search_outbox.find_one({"_id": outbox_key})
+            generation = database.search_catalog_generation.find_one({"_id": "catalog"})
+            outbox_applied = pending is None or (
+                pending.get("appliedSequence", 0) >= pending.get("sequence", 1)
+            )
+            if (
+                outbox_applied
+                and generation["indexEpoch"] != previous_epoch
+                and generation.get("projectionVersion") == 1
+            ):
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("正常 outbox 更新未完成")
+        assert database.search_catalog_generation.find_one({"_id": "catalog"})[
+            "indexEpoch"
+        ] == index_epoch(search_client, current_catalog["indexUid"])
+        legacy_hits = active_index.search(
+            marker,
+            {"filter": 'kind = "case" AND docClass = "case-public"'},
+        )["hits"]
+        assert any(row.get("catalogId") == legacy_catalog_id for row in legacy_hits)
+
+        stale_http = admin.get(
+            "/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+        )
+        assert stale_http.status_code == 503
+        with pytest.raises(RuntimeError, match="检索服务暂不可用"):
+            asyncio.run(
+                search_corpus(
+                    admin_context, CorpusSearchParams(query=marker, kind="case")
+                )
+            )
+
+        index_prefix = current_catalog["indexUid"].split("-generation-", 1)[0]
+        CatalogRebuilder(database, search_client, index_prefix).rebuild()
+        rebuilt_generation = database.search_catalog_generation.find_one({"_id": "catalog"})
+        assert rebuilt_generation["projectionVersion"] == 2
+        clean_http = admin.get(
+            "/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+        )
+        assert clean_http.status_code == 200, clean_http.text
+        assert clean_http.json()["items"] == []
+        clean_tool = _search_corpus_when_ready(
+            admin_context, CorpusSearchParams(query=marker, kind="case")
+        )
+        assert clean_tool["sources"] == []
 
         stale_result_marker = f"forged-stale-private-search-item-{uuid.uuid4().hex}"
         provider_config = admin.put(

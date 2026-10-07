@@ -111,6 +111,7 @@ function removeSource(row) {
 }
 
 function canDownload(row) {
+  if (props.user && props.user.id === props.caseRecord.ownerId) return true;
   if (row.accessLevel === "public") return true;
   if (row.accessLevel === "campus") {
     return Boolean(props.user?.campusVerified);
@@ -211,7 +212,7 @@ onMounted(loadAttachments);
           <a
             v-if="canDownload(row)"
             class="attachment-icon"
-            :href="api.attachmentContentUrl(caseRecord.id, row.id)"
+            :href="api.attachmentContentUrl(caseRecord.id, row.id, versionId)"
             :aria-label="`下载${row.name}`"
             :title="`下载 ${row.name}`"
             download

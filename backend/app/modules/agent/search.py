@@ -86,7 +86,7 @@ def _search_item_readable(database, user: dict, item: dict) -> bool:
         return bool(material and can_read_material(material, user))
     if item.get("kind") == "case":
         return source_case_content_available(
-            database, item.get("id"), user, item.get("versionId"), False
+            database, item.get("id"), user, item.get("versionId")
         )
     return True
 

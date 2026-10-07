@@ -59,6 +59,25 @@ def _restricted_view(row: dict) -> dict:
     }
 
 
+def project_material_rows(
+    database: Database, rows: list[dict], user: dict | None
+) -> list[dict]:
+    projected = []
+    for row in rows:
+        material = database.materials.find_one(
+            {"id": row.get("materialId") or row["id"]}
+        )
+        if (
+            material
+            and material.get("status") == "active"
+            and can_read_material(material, user)
+        ):
+            projected.append(material_view(row))
+        else:
+            projected.append(_restricted_view(row))
+    return projected
+
+
 def snapshot_materials(database: Database, case_id: str, session) -> list[dict]:
     rows = database.case_materials.find({"caseId": case_id}, session=session).sort(
         "id", 1
@@ -72,14 +91,7 @@ def list_case_materials(
     case = _case(database, case_id)
     _require_reader(database, case, user, version_id)
     rows = _material_rows(database, case, user, version_id)
-    if _internal_reader(case, user):
-        return [material_view(row) for row in rows]
-    return [
-        material_view(row)
-        if can_read_material(_material_row(database, row), user)
-        else _restricted_view(row)
-        for row in rows
-    ]
+    return project_material_rows(database, rows, user)
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
@@ -112,13 +124,6 @@ def _version_materials(database, case: dict, version_id: str | None, internal: b
 
 def _mounted(case_id: str, material: dict) -> dict:
     return {**material_view(material), "caseId": case_id, "materialId": material["id"]}
-
-
-def _material_row(database, row: dict) -> dict:
-    if "createdBy" in row:
-        return row
-    live = database.materials.find_one({"id": row.get("materialId") or row["id"]})
-    return {**row, **(live or {})}
 
 
 def _insert(database, case_id, material, revision, user, session) -> dict:

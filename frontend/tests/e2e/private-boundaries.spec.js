@@ -104,6 +104,17 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   });
   expect(attachmentResponse.status()).toBe(201);
   const attachment = await attachmentResponse.json();
+  const currentCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const publicAttachmentResponse = await request.post(`/api/cases/${created.id}/attachments`, {
+    headers: { "X-CSRF-Token": attachmentAuth.csrfToken },
+    multipart: {
+      accessLevel: "public",
+      revision: String(currentCase.revision),
+      file: { name: "synthetic-public.txt", mimeType: "text/plain", buffer: Buffer.from(`public ${marker}`) },
+    },
+  });
+  expect(publicAttachmentResponse.status()).toBe(201);
+  const publicAttachment = await publicAttachmentResponse.json();
 
   await page.goto(`/#/workbench/${created.id}`);
   await page.getByRole("button", { name: "提交审核", exact: true }).click();
@@ -113,7 +124,14 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   expect(firstVersionId).toBeTruthy();
   await logout(page);
   await login(page, "admin", "admin123");
+  const reviewAgentResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.endsWith(`/api/cases/${created.id}/agent/thread`)
+      && url.searchParams.get("versionId") === firstVersionId
+      && url.searchParams.get("mode") === "review";
+  });
   await page.goto(`/#/admin/review/${created.id}`);
+  expect((await reviewAgentResponse).status()).toBe(200);
   await page.getByRole("button", { name: "开始审核", exact: true }).click();
   await expect(page.locator(".case-status")).toHaveText("审核中");
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
@@ -121,6 +139,13 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   await page.getByRole("button", { name: "附件", exact: true }).click();
   const attachmentPanel = page.locator(".attachment-panel");
   await expect(attachmentPanel.getByText("synthetic-private.txt", { exact: true })).toBeVisible();
+  const publicDownload = attachmentPanel.getByRole("link", { name: "下载synthetic-public.txt" });
+  await expect(publicDownload).toBeVisible();
+  const publicDownloadUrl = new URL(await publicDownload.getAttribute("href"), page.url());
+  expect(publicDownloadUrl.searchParams.get("versionId")).toBe(firstVersionId);
+  const publicDownloadResponse = await request.get(publicDownloadUrl.toString());
+  expect(publicDownloadResponse.status()).toBe(200);
+  expect(await publicDownloadResponse.body()).toEqual(Buffer.from(`public ${marker}`));
   await expect(attachmentPanel.getByRole("link", { name: "下载synthetic-private.txt" })).toHaveCount(0);
   await expect(attachmentPanel.getByText("仅作者可下载", { exact: false })).toBeVisible();
   const adminAuth = await session(request);
@@ -205,4 +230,25 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   expect((await request.get(
     `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
   )).status()).toBe(200);
+
+  const currentAdminAuth = await session(request);
+  const currentReview = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  const startCurrent = await request.post(`/api/cases/${created.id}/lifecycle`, {
+    headers: { "X-CSRF-Token": currentAdminAuth.csrfToken },
+    data: { command: "start", revision: currentReview.revision },
+  });
+  expect(startCurrent.status()).toBe(200);
+  const approveCurrent = await request.post(`/api/cases/${created.id}/lifecycle`, {
+    headers: { "X-CSRF-Token": currentAdminAuth.csrfToken },
+    data: {
+      command: "approve",
+      revision: (await startCurrent.json()).case.revision,
+      submittedVersionId: currentVersionId,
+    },
+  });
+  expect(approveCurrent.status()).toBe(200);
+  await page.goto("/#/admin");
+  await expect(page.locator(`article[aria-label="已发布：${marker} 修改稿"]`)).toBeVisible();
+  await expect(page.locator(`article[aria-label="已发布：${marker}"]`)).toHaveCount(0);
+  await expect(page.locator(`article[aria-label="已撤回：${marker}"]`)).toBeVisible();
 });

@@ -7,6 +7,7 @@ from pymongo.read_concern import ReadConcern
 
 from app.modules.search.meilisearch import CatalogKey, SearchUnavailable
 from app.modules.search.outbox import CatalogTarget
+from app.modules.search.projection import PROJECTION_VERSION
 
 MAX_REVOCATIONS = 100
 SYNC_LAG = timedelta(seconds=10)
@@ -93,7 +94,13 @@ def _revoked_keys(row: dict) -> tuple[CatalogKey, ...]:
 
 
 def _snapshot(row: dict | None) -> CatalogSnapshot:
-    if not row or row.get("rebuild") or row.get("stale") or not row.get("worker"):
+    if (
+        not row
+        or row.get("projectionVersion") != PROJECTION_VERSION
+        or row.get("rebuild")
+        or row.get("stale")
+        or not row.get("worker")
+    ):
         raise SearchUnavailable("检索目录正在同步")
     control = row.get("control") or [{}]
     return CatalogSnapshot(

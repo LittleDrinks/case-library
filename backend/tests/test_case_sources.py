@@ -428,10 +428,11 @@ def test_published_sources_visible_but_unauthorized_links_locked(
     client: TestClient,
 ) -> None:
     auth = login(client)
-    mount_source(client, auth, "c-02")
+    source_case_id = _published_source(client, auth, "作者自己的已发布来源")
+    mount_source(client, auth, source_case_id)
     private = upload_attachment(client, auth, "private")
     _submit_and_approve(client, auth, "c-draft-1")
-    _admin_command(client, "c-02", "hide")
+    _admin_command(client, source_case_id, "hide")
     _assert_published_source_access(client, private["id"])
 
 

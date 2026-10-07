@@ -153,14 +153,19 @@ def _require_review_admin(user: dict) -> None:
         raise HTTPException(status_code=403, detail="仅管理员可使用审核对话")
 
 
-def _review_case(database, case_id: str, user: dict) -> dict:
+def _review_case(
+    database, case_id: str, user: dict, version_id: str | None = None,
+) -> dict:
     """审核对话只绑定管理员当前有权审核的冻结投稿。"""
     case = _existing_case(database, case_id)
     _require_review_admin(user)
     if case.get("workflowStatus") not in REVIEWABLE_STATES:
         raise HTTPException(status_code=409, detail="仅待审案例可使用审核对话")
+    submitted_version_id = case.get("submittedVersionId")
+    if version_id and version_id != submitted_version_id:
+        raise HTTPException(status_code=409, detail="审核对话版本已变化")
     version = admin_frozen_version(
-        database, case, user, case.get("submittedVersionId")
+        database, case, user, submitted_version_id
     )
     if not version:
         raise HTTPException(status_code=404, detail="投稿不存在")
@@ -173,9 +178,7 @@ def _conversation(
 ) -> Conversation:
     """versionId 缺省为作者工作稿；给定则绑定可读已发布版；mode=review 为审核待审稿。"""
     if mode == REVIEW_MODE:
-        if version_id:
-            raise HTTPException(status_code=422, detail="审核对话绑定当前待审工作稿，不接受 versionId")
-        case = _review_case(database, case_id, user)
+        case = _review_case(database, case_id, user, version_id)
         return Conversation(case, case["submittedVersionId"], True, True)
     if mode is not None:
         raise HTTPException(status_code=422, detail="对话模式无效")
