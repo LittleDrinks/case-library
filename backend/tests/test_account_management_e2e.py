@@ -3,18 +3,51 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from threading import Barrier
+from typing import Any, Iterator
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 import pytest
 from pymongo import MongoClient
+from pymongo.database import Database
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
 MONGODB_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
 pytestmark = pytest.mark.e2e("CASE_LIBRARY_E2E_URL", "AUTH_QUERY_MONGODB_URI")
+
+ADMIN_ACCOUNT_STATE_PROJECTION = {
+    "_id": 0,
+    "password_hash": 1,
+    "role": 1,
+    "status": 1,
+    "must_change_password": 1,
+    "token_version": 1,
+}
+
+
+@dataclass(frozen=True)
+class _SyntheticAdmin:
+    account_id: str
+    username: str
+    manager: Any
+    session: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _AdminScenario:
+    database: Database
+    accounts: tuple[_SyntheticAdmin, ...]
+
+
+@dataclass(frozen=True)
+class _AccountSnapshots:
+    users: dict[str, dict[str, Any]]
+    session_counts: dict[str, int]
 
 
 def _password() -> str:
@@ -42,7 +75,7 @@ def _request(opener, method: str, path: str, body=None, csrf: str = ""):
         try:
             return error.code, json.loads(content)
         except json.JSONDecodeError:
-            return error.code, None
+            return error.code, content.decode()
 
 
 def _expect_status(actual: int, expected: int) -> None:
@@ -87,6 +120,147 @@ def _expect_redacted(payload, secrets: tuple[str, ...], message: str) -> None:
 def _admin_session():
     admin = _opener()
     return admin, _login(admin, "admin", "admin123")
+
+
+def _snapshot_original_admins(database: Database, fields: tuple[str, ...]):
+    projection = {"_id": 0, "id": 1}
+    projection.update({field: 1 for field in fields})
+    return list(database.users.find({"role": "admin"}, projection))
+
+
+def _create_synthetic_admin(
+    database: Database,
+    username_prefix: str,
+    created_ids: list[str],
+    campus_verified: bool,
+) -> _SyntheticAdmin:
+    manager = _opener()
+    username = f"{username_prefix}-{uuid.uuid4().hex}"
+    password = _password()
+    status, registered = _request(
+        manager,
+        "POST",
+        "/api/auth/register",
+        {"username": username, "password": password},
+    )
+    _expect_status(status, 201)
+    account_id = registered["id"]
+    created_ids.append(account_id)
+    grant = {"role": "admin"}
+    if campus_verified:
+        grant["campus_verified"] = True
+    database.users.update_one({"id": account_id}, {"$set": grant})
+    return _SyntheticAdmin(
+        account_id=account_id,
+        username=username,
+        manager=manager,
+        session=_login(manager, username, password),
+    )
+
+
+def _cleanup_synthetic_admins(
+    database: Database,
+    created_ids: list[str],
+    original_admins: list[dict[str, Any]],
+    restore_fields: tuple[str, ...],
+) -> None:
+    if created_ids:
+        database.users.delete_many({"id": {"$in": created_ids}})
+        database.sessions.delete_many({"user_id": {"$in": created_ids}})
+        database.account_management_operations.delete_many(
+            {
+                "$or": [
+                    {"actorId": {"$in": created_ids}},
+                    {"targetId": {"$in": created_ids}},
+                ]
+            }
+        )
+    for account in original_admins:
+        original_state = {
+            field: account[field] for field in restore_fields if field in account
+        }
+        database.users.update_one({"id": account["id"]}, {"$set": original_state})
+
+
+@contextmanager
+def _synthetic_admin_scenario(
+    database: Database,
+    account_count: int,
+    username_prefix: str,
+    *,
+    campus_verified: bool = False,
+    restore_fields: tuple[str, ...] = ("role",),
+) -> Iterator[_AdminScenario]:
+    original_admins = _snapshot_original_admins(database, restore_fields)
+    created_ids: list[str] = []
+    try:
+        database.users.update_many({"role": "admin"}, {"$set": {"role": "user"}})
+        accounts = tuple(
+            _create_synthetic_admin(
+                database, username_prefix, created_ids, campus_verified
+            )
+            for _ in range(account_count)
+        )
+        yield _AdminScenario(database=database, accounts=accounts)
+    finally:
+        _cleanup_synthetic_admins(
+            database, created_ids, original_admins, restore_fields
+        )
+
+
+def _snapshot_admin_accounts(scenario: _AdminScenario) -> _AccountSnapshots:
+    database = scenario.database
+    return _AccountSnapshots(
+        users={
+            account.account_id: database.users.find_one(
+                {"id": account.account_id}, ADMIN_ACCOUNT_STATE_PROJECTION
+            )
+            for account in scenario.accounts
+        },
+        session_counts={
+            account.account_id: database.sessions.count_documents(
+                {"user_id": account.account_id}
+            )
+            for account in scenario.accounts
+        },
+    )
+
+
+def _assert_account_unchanged(
+    scenario: _AdminScenario,
+    snapshots: _AccountSnapshots,
+    account: _SyntheticAdmin,
+) -> None:
+    state = scenario.database.users.find_one(
+        {"id": account.account_id}, ADMIN_ACCOUNT_STATE_PROJECTION
+    )
+    if state != snapshots.users[account.account_id]:
+        raise AssertionError("并发拒绝改动了目标账号")
+    session_count = scenario.database.sessions.count_documents(
+        {"user_id": account.account_id}
+    )
+    if session_count != snapshots.session_counts[account.account_id]:
+        raise AssertionError("并发拒绝撤销了目标账号会话")
+
+
+def _admin_change_after_barrier(
+    barrier: Barrier,
+    manager,
+    csrf: str,
+    target_id: str,
+    path: str,
+    body: dict[str, str],
+) -> int:
+    barrier.wait()
+    return _request(manager, "POST", path.format(target_id=target_id), body, csrf)[0]
+
+
+def _account_management_operations(manager) -> list[dict[str, Any]]:
+    status, _ = _request(manager, "GET", "/api/admin/accounts")
+    _expect_status(status, 200)
+    status, operations = _request(manager, "GET", "/api/admin/account-operations")
+    _expect_status(status, 200)
+    return operations["items"]
 
 
 def _registered_user(anonymous) -> tuple[str, str]:
@@ -465,6 +639,8 @@ def test_failed_audit_insert_rolls_back_status_session_and_result() -> None:
                 validator_installed = False
 
         _expect_status(status, 500)
+        if not isinstance(failure, str) or not failure.strip():
+            raise AssertionError("审计失败响应正文未保留")
         _expect_redacted(failure, (temporary_password,), "审计失败响应包含临时密码")
         unchanged_state = database.users.find_one(
             {"id": account_id}, account_projection
@@ -685,388 +861,302 @@ def test_concurrent_old_password_logins_are_invalidated_by_reset_and_change() ->
     _expect_status(_request(current, "GET", "/api/cases?scope=mine")[0], 200)
 
 
-def test_concurrent_last_available_admin_password_reset_preserves_management_access() -> None:
-    mongo = MongoClient(MONGODB_URI)
-    database = mongo.get_default_database()
-    original_admins = list(
-        database.users.find(
-            {"role": "admin"}, {"_id": 0, "id": 1, "role": 1}
-        )
-    )
-    created_ids: list[str] = []
-    try:
-        database.users.update_many({"role": "admin"}, {"$set": {"role": "user"}})
-        manager_a = _opener()
-        manager_b = _opener()
-        ids = []
-        usernames = []
-        sessions = []
-        for manager in (manager_a, manager_b):
-            username = f"issue357-last-admin-{uuid.uuid4().hex}"
-            password = _password()
-            status, registered = _request(
-                manager,
-                "POST",
-                "/api/auth/register",
-                {"username": username, "password": password},
-            )
-            _expect_status(status, 201)
-            account_id = registered["id"]
-            created_ids.append(account_id)
-            database.users.update_one(
-                {"id": account_id}, {"$set": {"role": "admin"}}
-            )
-            sessions.append(_login(manager, username, password))
-            ids.append(account_id)
-            usernames.append(username)
-
-        original_states = {
-            account_id: database.users.find_one(
-                {"id": account_id},
+def _run_concurrent_password_resets(scenario: _AdminScenario) -> list[int]:
+    barrier = Barrier(2)
+    requests = ((0, 1, _password()), (1, 0, _password()))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = tuple(
+            pool.submit(
+                _admin_change_after_barrier,
+                barrier,
+                scenario.accounts[actor_index].manager,
+                scenario.accounts[actor_index].session["csrfToken"],
+                scenario.accounts[target_index].account_id,
+                "/api/admin/accounts/{target_id}/temporary-password",
                 {
-                    "_id": 0,
-                    "password_hash": 1,
-                    "role": 1,
-                    "status": 1,
-                    "must_change_password": 1,
-                    "token_version": 1,
+                    "temporaryPassword": password,
+                    "reason": "并发最后管理员 E2E",
                 },
             )
-            for account_id in ids
-        }
-        original_session_counts = {
-            account_id: database.sessions.count_documents({"user_id": account_id})
-            for account_id in ids
-        }
-        start = Barrier(2)
-
-        def reset(manager, csrf: str, target_id: str, password: str):
-            start.wait()
-            return _request(
-                manager,
-                "POST",
-                f"/api/admin/accounts/{target_id}/temporary-password",
-                {"temporaryPassword": password, "reason": "并发最后管理员 E2E"},
-                csrf,
-            )[0]
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = (
-                pool.submit(
-                    reset, manager_a, sessions[0]["csrfToken"], ids[1], _password()
-                ),
-                pool.submit(
-                    reset, manager_b, sessions[1]["csrfToken"], ids[0], _password()
-                ),
-            )
-            statuses = [future.result() for future in futures]
-
-        if statuses.count(200) != 1 or any(
-            status not in (200, 401, 403) for status in statuses
-        ):
-            raise AssertionError(
-                f"并发临时密码操作未基于当前管理员状态授权：{statuses}"
-            )
-        losing_index = statuses.index(
-            next(status for status in statuses if status != 200)
+            for actor_index, target_index, password in requests
         )
-        losing_target_id = ids[1] if losing_index == 0 else ids[0]
-        losing_actor_id = ids[0] if losing_index == 0 else ids[1]
-        unchanged_target = database.users.find_one(
-            {"id": losing_target_id},
-            {
-                "_id": 0,
-                "password_hash": 1,
-                "role": 1,
-                "status": 1,
-                "must_change_password": 1,
-                "token_version": 1,
-            },
+        return [future.result() for future in futures]
+
+
+def _assert_last_admin_reset_statuses(statuses: list[int]) -> int:
+    if statuses.count(200) != 1 or any(
+        status not in (200, 401, 403) for status in statuses
+    ):
+        raise AssertionError(f"并发临时密码操作未基于当前管理员状态授权：{statuses}")
+    return statuses.index(next(status for status in statuses if status != 200))
+
+
+def _only_available_admin_id(database: Database) -> str:
+    available_filter = {
+        "role": "admin",
+        "status": "active",
+        "must_change_password": False,
+    }
+    if database.users.count_documents(available_filter) != 1:
+        raise AssertionError("并发操作后可用管理员数量不正确")
+    return database.users.find_one(available_filter, {"_id": 0, "id": 1})["id"]
+
+
+def _account_reset_operations(
+    operations: list[dict[str, Any]], account_ids: set[str]
+) -> list[dict[str, Any]]:
+    return [
+        operation
+        for operation in operations
+        if operation["action"] == "temporary_password_reset"
+        and operation["targetId"] in account_ids
+    ]
+
+
+def _assert_successful_reset_audit(
+    operations: list[dict[str, Any]], scenario: _AdminScenario
+) -> None:
+    successful = [
+        operation for operation in operations if operation["result"] == "success"
+    ]
+    if len(successful) != 1:
+        raise AssertionError("并发重置的成功结果没有与账号事务一致")
+    successful_target_id = successful[0]["targetId"]
+    expected_actor_id = next(
+        account.account_id
+        for account in scenario.accounts
+        if account.account_id != successful_target_id
+    )
+    if successful[0]["actorId"] != expected_actor_id:
+        raise AssertionError("临时密码成功记录的操作者不正确")
+
+
+def _assert_rejected_reset_audit(
+    operations: list[dict[str, Any]],
+    scenario: _AdminScenario,
+    statuses: list[int],
+    losing_index: int,
+) -> None:
+    rejected = [
+        operation for operation in operations if operation["result"] == "rejected"
+    ]
+    if statuses[losing_index] == 403:
+        target = scenario.accounts[1 - losing_index]
+        actor = scenario.accounts[losing_index]
+        rejected_target = next(
+            (
+                operation
+                for operation in rejected
+                if operation["targetId"] == target.account_id
+            ),
+            None,
         )
-        if unchanged_target != original_states[losing_target_id]:
-            raise AssertionError("并发拒绝改动了目标账号")
         if (
-            database.sessions.count_documents({"user_id": losing_target_id})
-            != original_session_counts[losing_target_id]
+            not rejected_target
+            or rejected_target["actorId"] != actor.account_id
+            or rejected_target["targetUsername"] != target.username
+            or rejected_target["reason"] != "并发最后管理员 E2E"
+            or not rejected_target["detail"]
         ):
-            raise AssertionError("并发拒绝撤销了目标账号会话")
-        available_admins = database.users.count_documents(
-            {"role": "admin", "status": "active", "must_change_password": False}
+            raise AssertionError("并发授权拒绝未记录操作者、对象、理由和结果")
+    elif rejected:
+        raise AssertionError("会话已失效的请求不应进入管理操作记录")
+
+
+def _assert_last_admin_reset_audit(
+    operations: list[dict[str, Any]],
+    scenario: _AdminScenario,
+    statuses: list[int],
+    losing_index: int,
+) -> None:
+    account_ids = {account.account_id for account in scenario.accounts}
+    reset_operations = _account_reset_operations(operations, account_ids)
+    _assert_successful_reset_audit(reset_operations, scenario)
+    _assert_rejected_reset_audit(reset_operations, scenario, statuses, losing_index)
+
+
+def _run_mixed_admin_removals(scenario: _AdminScenario) -> list[int]:
+    barrier = Barrier(3)
+    requests = (
+        (
+            0,
+            1,
+            "/api/admin/accounts/{target_id}/status",
+            {"status": "disabled", "reason": "并发停用管理员 E2E"},
+        ),
+        (
+            1,
+            2,
+            "/api/admin/accounts/{target_id}/role",
+            {"role": "user", "reason": "并发降级管理员 E2E"},
+        ),
+        (
+            2,
+            0,
+            "/api/admin/accounts/{target_id}/temporary-password",
+            {
+                "temporaryPassword": _password(),
+                "reason": "并发重置管理员 E2E",
+            },
+        ),
+    )
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = tuple(
+            pool.submit(
+                _admin_change_after_barrier,
+                barrier,
+                scenario.accounts[actor_index].manager,
+                scenario.accounts[actor_index].session["csrfToken"],
+                scenario.accounts[target_index].account_id,
+                path,
+                body,
+            )
+            for actor_index, target_index, path, body in requests
         )
-        if available_admins != 1:
-            raise AssertionError("并发操作后可用管理员数量不正确")
-        remaining_id = database.users.find_one(
+        return [future.result() for future in futures]
+
+
+def _assert_mixed_action_result(
+    scenario: _AdminScenario,
+    snapshots: _AccountSnapshots,
+    account: _SyntheticAdmin,
+    status: int,
+    action: str,
+) -> None:
+    if status != 200:
+        _assert_account_unchanged(scenario, snapshots, account)
+        return
+    state = scenario.database.users.find_one(
+        {"id": account.account_id}, ADMIN_ACCOUNT_STATE_PROJECTION
+    )
+    session_count = scenario.database.sessions.count_documents(
+        {"user_id": account.account_id}
+    )
+    original = snapshots.users[account.account_id]
+    if action == "disable":
+        if state["status"] != "disabled" or session_count != 0:
+            raise AssertionError("并发停用没有提交状态并撤销会话")
+    elif action == "demote":
+        if (
+            state["role"] != "user"
+            or session_count != snapshots.session_counts[account.account_id]
+        ):
+            raise AssertionError("并发降级没有即时变更角色或意外撤销会话")
+    elif action == "reset":
+        if (
+            state["password_hash"] == original["password_hash"]
+            or state["must_change_password"] is not True
+            or state["token_version"] != original["token_version"] + 1
+            or session_count != 0
+        ):
+            raise AssertionError("并发密码重置没有提交密码版本并撤销会话")
+
+
+def _assert_mixed_action_results(
+    scenario: _AdminScenario,
+    snapshots: _AccountSnapshots,
+    statuses: list[int],
+) -> None:
+    actions = (
+        (scenario.accounts[1], "disable"),
+        (scenario.accounts[2], "demote"),
+        (scenario.accounts[0], "reset"),
+    )
+    for status, (account, action) in zip(statuses, actions, strict=True):
+        _assert_mixed_action_result(scenario, snapshots, account, status, action)
+
+
+def _assert_mixed_statuses(statuses: list[int]) -> None:
+    if statuses.count(200) != 2 or any(
+        status not in (200, 401, 403, 409) for status in statuses
+    ):
+        raise AssertionError("混合并发管理员变更没有按持久化状态串行授权")
+
+
+def _only_available_mixed_admin(scenario: _AdminScenario) -> dict[str, Any]:
+    available = list(
+        scenario.database.users.find(
             {"role": "admin", "status": "active", "must_change_password": False},
-            {"_id": 0, "id": 1},
-        )["id"]
-        if remaining_id != losing_target_id:
-            raise AssertionError("并发密码重置未保留仍可授权的管理员")
-        remaining_manager = manager_a if remaining_id == ids[0] else manager_b
-        status, _ = _request(remaining_manager, "GET", "/api/admin/accounts")
-        _expect_status(status, 200)
-        status, operations = _request(
-            remaining_manager, "GET", "/api/admin/account-operations"
+            {"_id": 0, "id": 1, "campus_verified": 1},
         )
-        _expect_status(status, 200)
-        account_operations = [
-            operation
-            for operation in operations["items"]
-            if operation["action"] == "temporary_password_reset"
-            and operation["targetId"] in ids
-        ]
-        successful = [
-            operation
-            for operation in account_operations
-            if operation["result"] == "success"
-        ]
-        if len(successful) != 1:
-            raise AssertionError("并发重置的成功结果没有与账号事务一致")
-        successful_target_id = ids[1] if successful[0]["targetId"] == ids[0] else ids[0]
-        if successful[0]["actorId"] != successful_target_id:
-            raise AssertionError("临时密码成功记录的操作者不正确")
-        rejected = [
-            operation
-            for operation in account_operations
-            if operation["result"] == "rejected"
-        ]
-        if statuses[losing_index] == 403:
-            rejected_target = next(
-                (
-                    operation
-                    for operation in rejected
-                    if operation["targetId"] == losing_target_id
-                ),
-                None,
+    )
+    account_ids = {account.account_id for account in scenario.accounts}
+    if len(available) != 1 or available[0]["id"] not in account_ids:
+        raise AssertionError("混合并发操作没有保留唯一可用管理员")
+    if available[0].get("campus_verified") is not True:
+        raise AssertionError("角色或状态变化修改了校内资格")
+    return available[0]
+
+
+def _assert_mixed_admin_audit(
+    operations: list[dict[str, Any]],
+    scenario: _AdminScenario,
+    successful_count: int,
+) -> None:
+    account_ids = {account.account_id for account in scenario.accounts}
+    actions = {
+        "account_status_change",
+        "account_role_change",
+        "temporary_password_reset",
+    }
+    successful = [
+        operation
+        for operation in operations
+        if operation["targetId"] in account_ids
+        and operation["result"] == "success"
+        and operation["action"] in actions
+    ]
+    if len(successful) != successful_count:
+        raise AssertionError("并发成功结果没有全部写入账号操作记录")
+    reasons = {operation["reason"] for operation in successful}
+    if len(reasons) != len(successful) or any(
+        not operation["detail"] for operation in successful
+    ):
+        raise AssertionError("并发操作记录缺少理由或结果")
+
+
+def test_concurrent_last_available_admin_password_reset_preserves_management_access() -> (
+    None
+):
+    with MongoClient(MONGODB_URI) as mongo:
+        database = mongo.get_default_database()
+        with _synthetic_admin_scenario(database, 2, "issue357-last-admin") as scenario:
+            snapshots = _snapshot_admin_accounts(scenario)
+            statuses = _run_concurrent_password_resets(scenario)
+            losing_index = _assert_last_admin_reset_statuses(statuses)
+            losing_target = scenario.accounts[1 - losing_index]
+            _assert_account_unchanged(scenario, snapshots, losing_target)
+            remaining_id = _only_available_admin_id(database)
+            if remaining_id != losing_target.account_id:
+                raise AssertionError("并发密码重置未保留仍可授权的管理员")
+            remaining_admin = next(
+                account
+                for account in scenario.accounts
+                if account.account_id == remaining_id
             )
-            if (
-                not rejected_target
-                or rejected_target["actorId"] != losing_actor_id
-                or rejected_target["targetUsername"]
-                != usernames[ids.index(losing_target_id)]
-                or rejected_target["reason"] != "并发最后管理员 E2E"
-                or not rejected_target["detail"]
-            ):
-                raise AssertionError("并发授权拒绝未记录操作者、对象、理由和结果")
-        elif rejected:
-            raise AssertionError("会话已失效的请求不应进入管理操作记录")
-    finally:
-        if created_ids:
-            database.users.delete_many({"id": {"$in": created_ids}})
-            database.sessions.delete_many({"user_id": {"$in": created_ids}})
-            database.account_management_operations.delete_many(
-                {
-                    "$or": [
-                        {"actorId": {"$in": created_ids}},
-                        {"targetId": {"$in": created_ids}},
-                    ]
-                }
-            )
-        for account in original_admins:
-            database.users.update_one(
-                {"id": account["id"]}, {"$set": {"role": account["role"]}}
-            )
-        mongo.close()
+            operations = _account_management_operations(remaining_admin.manager)
+            _assert_last_admin_reset_audit(operations, scenario, statuses, losing_index)
 
 
 def test_mixed_concurrent_admin_removal_preserves_one_real_management_session() -> None:
-    mongo = MongoClient(MONGODB_URI)
-    database = mongo.get_default_database()
-    original_admins = list(
-        database.users.find(
-            {"role": "admin"},
-            {"_id": 0, "id": 1, "role": 1, "status": 1, "must_change_password": 1},
-        )
-    )
-    created_ids: list[str] = []
-    try:
-        database.users.update_many({"role": "admin"}, {"$set": {"role": "user"}})
-        managers = [_opener() for _ in range(3)]
-        ids = []
-        usernames = []
-        sessions = []
-        for manager in managers:
-            username = f"issue359-mixed-admin-{uuid.uuid4().hex}"
-            password = _password()
-            status, registered = _request(
-                manager,
-                "POST",
-                "/api/auth/register",
-                {"username": username, "password": password},
+    with MongoClient(MONGODB_URI) as mongo:
+        database = mongo.get_default_database()
+        with _synthetic_admin_scenario(
+            database,
+            3,
+            "issue359-mixed-admin",
+            campus_verified=True,
+            restore_fields=("role", "status", "must_change_password"),
+        ) as scenario:
+            snapshots = _snapshot_admin_accounts(scenario)
+            statuses = _run_mixed_admin_removals(scenario)
+            _assert_mixed_action_results(scenario, snapshots, statuses)
+            _assert_mixed_statuses(statuses)
+            remaining = _only_available_mixed_admin(scenario)
+            remaining_admin = next(
+                account
+                for account in scenario.accounts
+                if account.account_id == remaining["id"]
             )
-            _expect_status(status, 201)
-            account_id = registered["id"]
-            created_ids.append(account_id)
-            database.users.update_one(
-                {"id": account_id},
-                {"$set": {"role": "admin", "campus_verified": True}},
-            )
-            sessions.append(_login(manager, username, password))
-            ids.append(account_id)
-            usernames.append(username)
-
-        original_states = {
-            account_id: database.users.find_one(
-                {"id": account_id},
-                {
-                    "_id": 0,
-                    "password_hash": 1,
-                    "role": 1,
-                    "status": 1,
-                    "must_change_password": 1,
-                    "token_version": 1,
-                },
-            )
-            for account_id in ids
-        }
-        original_session_counts = {
-            account_id: database.sessions.count_documents({"user_id": account_id})
-            for account_id in ids
-        }
-
-        start = Barrier(3)
-
-        def disable(manager, csrf: str, target_id: str):
-            start.wait()
-            return _request(
-                manager,
-                "POST",
-                f"/api/admin/accounts/{target_id}/status",
-                {"status": "disabled", "reason": "并发停用管理员 E2E"},
-                csrf,
-            )[0]
-
-        def demote(manager, csrf: str, target_id: str):
-            start.wait()
-            return _request(
-                manager,
-                "POST",
-                f"/api/admin/accounts/{target_id}/role",
-                {"role": "user", "reason": "并发降级管理员 E2E"},
-                csrf,
-            )[0]
-
-        def reset(manager, csrf: str, target_id: str):
-            start.wait()
-            return _request(
-                manager,
-                "POST",
-                f"/api/admin/accounts/{target_id}/temporary-password",
-                {
-                    "temporaryPassword": _password(),
-                    "reason": "并发重置管理员 E2E",
-                },
-                csrf,
-            )[0]
-
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = (
-                pool.submit(disable, managers[0], sessions[0]["csrfToken"], ids[1]),
-                pool.submit(demote, managers[1], sessions[1]["csrfToken"], ids[2]),
-                pool.submit(reset, managers[2], sessions[2]["csrfToken"], ids[0]),
-            )
-            statuses = [future.result() for future in futures]
-
-        actions = (
-            (ids[1], "disable"),
-            (ids[2], "demote"),
-            (ids[0], "reset"),
-        )
-        for status, (target_id, action) in zip(statuses, actions, strict=True):
-            state = database.users.find_one(
-                {"id": target_id},
-                {
-                    "_id": 0,
-                    "password_hash": 1,
-                    "role": 1,
-                    "status": 1,
-                    "must_change_password": 1,
-                    "token_version": 1,
-                },
-            )
-            session_count = database.sessions.count_documents({"user_id": target_id})
-            original = original_states[target_id]
-            if status != 200:
-                if state != original:
-                    raise AssertionError("并发拒绝改动了目标账号")
-                if session_count != original_session_counts[target_id]:
-                    raise AssertionError("并发拒绝撤销了目标账号会话")
-            elif action == "disable":
-                if state["status"] != "disabled" or session_count != 0:
-                    raise AssertionError("并发停用没有提交状态并撤销会话")
-            elif action == "demote":
-                if (
-                    state["role"] != "user"
-                    or session_count != original_session_counts[target_id]
-                ):
-                    raise AssertionError("并发降级没有即时变更角色或意外撤销会话")
-            elif action == "reset":
-                if (
-                    state["password_hash"] == original["password_hash"]
-                    or state["must_change_password"] is not True
-                    or state["token_version"] != original["token_version"] + 1
-                    or session_count != 0
-                ):
-                    raise AssertionError("并发密码重置没有提交密码版本并撤销会话")
-
-        if statuses.count(200) != 2 or any(
-            status not in (200, 401, 403, 409) for status in statuses
-        ):
-            raise AssertionError("混合并发管理员变更没有按持久化状态串行授权")
-        available = list(
-            database.users.find(
-                {"role": "admin", "status": "active", "must_change_password": False},
-                {"_id": 0, "id": 1, "campus_verified": 1},
-            )
-        )
-        if len(available) != 1 or available[0]["id"] not in ids:
-            raise AssertionError("混合并发操作没有保留唯一可用管理员")
-        if any(row.get("campus_verified") is not True for row in available):
-            raise AssertionError("角色或状态变化修改了校内资格")
-        remaining = ids.index(available[0]["id"])
-        manager = managers[remaining]
-        _expect_status(_request(manager, "GET", "/api/admin/accounts")[0], 200)
-        status, operations = _request(manager, "GET", "/api/admin/account-operations")
-        _expect_status(status, 200)
-        successful = [
-            operation
-            for operation in operations["items"]
-            if operation["targetId"] in ids
-            and operation["result"] == "success"
-            and operation["action"]
-            in {
-                "account_status_change",
-                "account_role_change",
-                "temporary_password_reset",
-            }
-        ]
-        if len(successful) != statuses.count(200):
-            raise AssertionError("并发成功结果没有全部写入账号操作记录")
-        reasons = {operation["reason"] for operation in successful}
-        if len(reasons) != len(successful) or any(
-            not operation["detail"] for operation in successful
-        ):
-            raise AssertionError("并发操作记录缺少理由或结果")
-    finally:
-        if created_ids:
-            database.users.delete_many({"id": {"$in": created_ids}})
-            database.sessions.delete_many({"user_id": {"$in": created_ids}})
-            database.account_management_operations.delete_many(
-                {
-                    "$or": [
-                        {"actorId": {"$in": created_ids}},
-                        {"targetId": {"$in": created_ids}},
-                    ]
-                }
-            )
-        for account in original_admins:
-            database.users.update_one(
-                {"id": account["id"]},
-                {
-                    "$set": {
-                        "role": account["role"],
-                        "status": account["status"],
-                        "must_change_password": account["must_change_password"],
-                    }
-                },
-            )
-        mongo.close()
+            operations = _account_management_operations(remaining_admin.manager)
+            _assert_mixed_admin_audit(operations, scenario, statuses.count(200))
