@@ -462,10 +462,7 @@ def list_annotations(
                 raise CaseError(404, "案例版本不存在")
         query = {"caseId": case["id"], "versionId": version_id}
     elif user["role"] == "admin":
-        selected = case.get("submittedVersionId") or case.get("publishedVersionId")
-        if not selected:
-            raise CaseError(404, "投稿不存在")
-        return list_annotations(database, case_id, user, selected)
+        return list_annotations(database, case_id, user, _admin_list_version_id(case))
     else:
         query = _list_query(case, user)
     if _is_admin_reviewer(case, user):
@@ -480,6 +477,14 @@ def list_annotations(
         )
         for row in rows
     ]
+
+
+def _admin_list_version_id(case: dict) -> str:
+    """未指定版本时，管理员查看当前投稿或最近发布版本。"""
+    version_id = case.get("submittedVersionId") or case.get("publishedVersionId")
+    if not version_id:
+        raise CaseError(404, "投稿不存在")
+    return version_id
 
 
 def _list_query(case: dict, user: dict) -> dict:
