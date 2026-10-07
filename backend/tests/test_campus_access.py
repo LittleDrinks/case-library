@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+
+from app.modules.auth.management_service import (
+    AccountManagementError,
+    AccountManagementService,
+)
 
 
 def _register_and_login(client: TestClient, username: str) -> tuple[dict, str]:
@@ -249,3 +255,87 @@ def test_application_can_be_rejected_reapplied_approved_revoked_and_approved_aga
     assert "campus_access_revoked_at" not in client.app.state.database.users.find_one(
         {"id": applicant["user"]["id"]}
     )
+
+
+@pytest.mark.parametrize(
+    ("operation", "actor_change"),
+    [
+        ("approve", "demote"),
+        ("approve", "disable"),
+        ("reject", "demote"),
+        ("reject", "disable"),
+        ("revoke", "demote"),
+        ("revoke", "disable"),
+    ],
+)
+def test_campus_management_rechecks_actor_inside_transaction(
+    client: TestClient, operation: str, actor_change: str
+) -> None:
+    applicant_username = f"issue360-stale-actor-{uuid.uuid4().hex}"
+    applicant, _password = _register_and_login(client, applicant_username)
+    submitted = client.post(
+        "/api/auth/campus-access/applications",
+        headers={"X-CSRF-Token": applicant["csrfToken"]},
+        json={"applicantName": "合成申请人", "studentNumber": "SYN-360-STALE"},
+    )
+    assert submitted.status_code == 201
+    application_id = submitted.json()["id"]
+
+    actor_username = f"issue360-actor-{uuid.uuid4().hex}"
+    actor_session, _actor_password = _register_and_login(client, actor_username)
+    database = client.app.state.database
+    actor_id = actor_session["user"]["id"]
+    database.users.update_one({"id": actor_id}, {"$set": {"role": "admin"}})
+    stale_actor = database.users.find_one({"id": actor_id})
+
+    supervisor_username = f"issue360-supervisor-{uuid.uuid4().hex}"
+    supervisor_session, _supervisor_password = _register_and_login(
+        client, supervisor_username
+    )
+    supervisor_id = supervisor_session["user"]["id"]
+    database.users.update_one({"id": supervisor_id}, {"$set": {"role": "admin"}})
+    supervisor = database.users.find_one({"id": supervisor_id})
+    service = AccountManagementService(database)
+
+    if operation == "revoke":
+        service.decide_campus_application(
+            supervisor, application_id, "approved", "合成初次批准"
+        )
+    if actor_change == "demote":
+        service.change_role(supervisor, actor_id, "user", "合成撤销操作者角色")
+    else:
+        service.change_status(supervisor, actor_id, "disabled", "合成停用操作者")
+
+    with pytest.raises(AccountManagementError) as error:
+        if operation == "revoke":
+            service.revoke_campus_access(
+                stale_actor, application_id, "合成过期操作者撤销"
+            )
+        else:
+            decision = "approved" if operation == "approve" else "rejected"
+            service.decide_campus_application(
+                stale_actor, application_id, decision, "合成过期操作者决定"
+            )
+
+    assert error.value.status_code == 403
+    applicant_login = client.post(
+        "/api/auth/login", json={"username": applicant_username, "password": _password}
+    )
+    assert applicant_login.status_code == 200
+    status = client.get("/api/auth/campus-access").json()
+    application = status["applications"][0]
+    assert application["status"] == ("approved" if operation == "revoke" else "pending")
+    assert status["campusVerified"] is (operation == "revoke")
+    assert "campus_access_revoked_at" not in database.users.find_one(
+        {"id": applicant["user"]["id"]}
+    )
+    operation_name = {
+        "approve": "campus_access_approve",
+        "reject": "campus_access_reject",
+        "revoke": "campus_access_revoke",
+    }[operation]
+    rejected = next(
+        entry for entry in application["history"] if entry["action"] == operation_name
+    )
+    assert rejected["result"] == "rejected"
+    assert rejected["detail"] == "管理员权限已变化，请重新登录后重试"

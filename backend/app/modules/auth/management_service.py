@@ -208,6 +208,8 @@ class AccountManagementService:
 
         def decide(transaction) -> dict:
             options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
             application = self.database.campus_access_applications.find_one(
                 {"id": application_id}, **options
             )
@@ -238,7 +240,7 @@ class AccountManagementService:
                     **options,
                 )
             self._append_operation(
-                actor,
+                current_actor,
                 action,
                 reason,
                 user["id"],
@@ -278,6 +280,8 @@ class AccountManagementService:
     ) -> dict:
         def revoke(transaction) -> dict:
             options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
             application = self.database.campus_access_applications.find_one(
                 {"id": application_id}, **options
             )
@@ -312,7 +316,7 @@ class AccountManagementService:
             if changed.matched_count != 1:
                 raise AccountManagementError("账号资格已变化，不能重复撤销", 409)
             self._append_operation(
-                actor,
+                current_actor,
                 "campus_access_revoke",
                 reason,
                 user["id"],
