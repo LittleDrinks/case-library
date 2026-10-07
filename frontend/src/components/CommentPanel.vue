@@ -69,8 +69,10 @@ async function loadAnnotations() {
 }
 
 function annotationReadOnly(annotation) {
+  if (annotation.versionId == null) {
+    return props.review || props.historical || Boolean(props.versionId) || props.readOnly;
+  }
   if (props.review) return props.readOnly;
-  if (!annotation.versionId) return props.historical || props.readOnly;
   return isAdminOwner()
     && !["reviewing", "withdrawn", "returned"].includes(props.reviewRecordStatus);
 }
@@ -146,6 +148,7 @@ function askAi(annotation) {
 }
 
 function beginEdit(annotation) {
+  if (!canEdit(annotation)) return;
   editingId.value = annotation.id;
   editingContent.value = annotation.content;
   error.value = "";
@@ -158,7 +161,7 @@ function cancelEdit() {
 
 async function saveEdit(annotation) {
   const value = editingContent.value.trim();
-  if (!value || saving.value) return;
+  if (!canEdit(annotation) || !value || saving.value) return;
   saving.value = true;
   error.value = "";
   try {
@@ -279,7 +282,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
             <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
           </template>
           <textarea
-            v-if="editingId === annotation.id"
+            v-if="editingId === annotation.id && canEdit(annotation)"
             v-model="editingContent"
             class="comment-edit-input"
             aria-label="编辑批注"
@@ -298,7 +301,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
               </li>
             </ol>
           </div>
-          <div v-if="editingId === annotation.id" class="comment-owner-actions">
+          <div v-if="editingId === annotation.id && canEdit(annotation)" class="comment-owner-actions">
             <button type="button" :disabled="saving || !editingContent.trim()" @click="saveEdit(annotation)"><Check :size="14" />保存批注</button>
             <button type="button" :disabled="saving" @click="cancelEdit"><X :size="14" />取消</button>
           </div>
