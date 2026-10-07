@@ -201,10 +201,24 @@ def test_real_http_and_mongodb_preserve_application_approval_revocation_history(
         assert approved_again_status == 200
         assert approved_again["status"] == "approved"
 
+        stale_status, stale_result = _admin_action(
+            admin,
+            admin_session["csrfToken"],
+            third["id"],
+            "decision",
+            {"decision": "rejected", "reason": "合成过期重复决定"},
+        )
+        assert stale_status == 409
+        assert stale_result["detail"] == "申请已处理，不能重复决定"
+
         final_status, final = _request(applicant, "GET", "/api/auth/campus-access")
         assert final_status == 200
         assert final["campusVerified"] is True
         assert final["currentStatus"] == "approved"
+        assert final["applications"][0]["status"] == "approved"
+        assert final["applications"][0]["history"][-1]["result"] == "rejected"
+        assert final["applications"][0]["history"][-1]["reason"] == "合成过期重复决定"
+        assert final["applications"][0]["history"][-1]["actorUsername"] == "admin"
         assert [item["id"] for item in final["applications"]] == [
             third["id"],
             second["id"],
@@ -217,14 +231,15 @@ def test_real_http_and_mongodb_preserve_application_approval_revocation_history(
         assert "campus_access_revoked_at" not in database.users.find_one({"id": applicant_id})
         assert database.users.find_one({"id": applicant_id})["name"] == username
         assert database.campus_access_applications.count_documents({"userId": applicant_id}) == 3
-        assert database.account_management_operations.count_documents({}) == prior_operation_count + 7
+        assert database.account_management_operations.count_documents({}) == prior_operation_count + 8
         operations = list(
             database.account_management_operations.find(
                 {"campusApplicationId": {"$in": [first["id"], second["id"], third["id"]]}}
             )
         )
-        assert len(operations) == 7
-        assert all(operation["result"] == "success" for operation in operations)
+        assert len(operations) == 8
+        assert sum(operation["result"] == "success" for operation in operations) == 7
+        assert sum(operation["result"] == "rejected" for operation in operations) == 1
         assert all(operation["targetId"] == applicant_id for operation in operations)
         assert all(
             operation["actorId"] == applicant_id
@@ -241,7 +256,15 @@ def test_real_http_and_mongodb_preserve_application_approval_revocation_history(
             "合成身份核验通过",
             "合成资格复核后撤销",
             "合成再次人工核验通过",
+            "合成过期重复决定",
         }
+        failed_repeat = next(
+            operation
+            for operation in operations
+            if operation["reason"] == "合成过期重复决定"
+        )
+        assert failed_repeat["actorId"] == admin_id
+        assert failed_repeat["result"] == "rejected"
     finally:
         client.close()
 
