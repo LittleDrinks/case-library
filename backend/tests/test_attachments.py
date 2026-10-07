@@ -8,6 +8,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 
 from app.modules.attachments.text import DOCX_MEDIA_TYPE, MAX_SEARCH_TEXT_BYTES
+from app.modules.attachments.service import AttachmentError, _require_content_access
 
 
 def _login(client: TestClient, username: str, password: str) -> dict:
@@ -235,6 +236,39 @@ def test_admin_can_read_but_cannot_mutate_an_author_draft(client: TestClient) ->
 
     _assert_admin_can_read(client, created["id"])
     assert _delete_attachment(client, headers, created["id"]).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        {"id": "u-reader", "role": "user", "campus_verified": False},
+        {"id": "u-admin", "role": "admin", "campus_verified": False},
+    ],
+)
+def test_campus_attachment_requires_current_campus_grant(user: dict) -> None:
+    case = {"ownerId": "u-case-owner", "publicationStatus": "public"}
+    attachment = {"accessLevel": "campus"}
+
+    with pytest.raises(AttachmentError) as error:
+        _require_content_access(case, attachment, user)
+
+    assert error.value.status_code == 403
+
+
+def test_campus_attachment_allows_approved_user() -> None:
+    _require_content_access(
+        {"ownerId": "u-owner", "publicationStatus": "public"},
+        {"accessLevel": "campus"},
+        {"id": "u-reader", "role": "user", "campus_verified": True},
+    )
+
+
+def test_campus_attachment_allows_its_owner_without_changing_other_grants() -> None:
+    _require_content_access(
+        {"ownerId": "u-owner", "publicationStatus": "public"},
+        {"accessLevel": "campus"},
+        {"id": "u-owner", "role": "user", "campus_verified": False},
+    )
 
 
 def _assert_admin_can_read(client: TestClient, attachment_id: str) -> None:

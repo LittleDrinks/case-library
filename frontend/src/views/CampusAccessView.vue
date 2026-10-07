@@ -5,7 +5,7 @@ import { api, formatApiError } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
 import { session } from "../session.js";
 
-const status = ref({ campusVerified: false, currentStatus: "not_applied", applications: [] });
+const status = ref({ campusVerified: false, grantSource: null, currentStatus: "not_applied", applications: [] });
 const form = reactive({ applicantName: "", studentNumber: "" });
 const loading = ref(true);
 const saving = ref(false);
@@ -26,6 +26,7 @@ const statusLabels = {
 };
 
 function statusMessage() {
+  if (status.value.campusVerified && status.value.grantSource === "legacy") return "当前资格来自旧系统授权；如被撤销，需重新申请并等待人工批准。";
   if (status.value.campusVerified) return "当前账号已获准访问校内来源。";
   if (status.value.currentStatus === "pending") return "当前仍无校内访问资格，审核通过后状态会更新。";
   if (status.value.currentStatus === "rejected") return "当前仍无校内访问资格，可以重新提交申请。";
@@ -104,6 +105,7 @@ onMounted(loadStatus);
             <p>当前资格</p>
             <h2>{{ status.campusVerified ? "已获校内访问资格" : statusLabels[status.currentStatus] }}</h2>
             <span>{{ statusMessage() }}</span>
+            <span v-if="status.grantSource === 'legacy'" class="campus-access-source">{{ status.campusVerified ? "授权来源：旧系统" : "上次授权来源：旧系统" }}</span>
           </div>
         </section>
 

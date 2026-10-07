@@ -10,6 +10,7 @@ from pymongo.database import Database
 from app.modules.attachments.models import AccessLevel
 from app.modules.attachments.storage import BlobStore
 from app.modules.attachments.text import extract_search_text
+from app.modules.materials.service import campus_verified
 from app.modules.cases.published import find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
 
@@ -233,10 +234,14 @@ def _download_rows(database, case: dict, user: dict | None, version_id: str | No
 
 
 def _require_content_access(case: dict, attachment: dict, user: dict | None) -> None:
-    internal = bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
-    if internal or attachment["accessLevel"] == "public":
+    owner = bool(user and case["ownerId"] == user["id"])
+    if attachment["accessLevel"] == "public":
         return
-    if attachment["accessLevel"] == "campus" and user:
+    if attachment["accessLevel"] == "campus" and (owner or campus_verified(user)):
+        return
+    if attachment["accessLevel"] != "campus" and user and (
+        user["role"] == "admin" or owner
+    ):
         return
     raise AttachmentError(403, "无权读取该附件")
 

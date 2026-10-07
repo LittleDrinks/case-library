@@ -49,6 +49,16 @@ def find_session(database: Database, token: str | None) -> SessionContext | None
     return SessionContext(record, user)
 
 
+def load_current_user(database: Database, user: dict | None) -> dict | None:
+    """按稳定内部 ID 与会话版本读取当前活动账号。"""
+    if user is None:
+        return None
+    current = database.users.find_one({"id": user["id"], "status": "active"})
+    if not current or current.get("token_version") != user.get("token_version"):
+        return None
+    return current
+
+
 def delete_session(database: Database, token: str | None) -> None:
     if token:
         database.sessions.delete_one({"token_hash": _digest(token)})

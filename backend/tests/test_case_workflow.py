@@ -154,7 +154,7 @@ def _expected_admin_view() -> dict:
         "name": "演示管理员",
         "role": "admin",
         "mustChangePassword": False,
-        "campusVerified": False,
+        "campusVerified": True,
     }
 
 

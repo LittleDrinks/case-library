@@ -7,7 +7,7 @@ import mongomock
 import pytest
 from pymongo.errors import DuplicateKeyError
 
-from app.core.database import initialize
+from app.core.database import _mark_legacy_campus_grant, initialize
 from app.modules.auth.seed import DEMO_ACCOUNTS, _insert_user, seed_demo_users
 from app.modules.auth.service import authenticate
 from app.modules.cases.seed import SEED_PATH, seed_demo_cases
@@ -56,16 +56,14 @@ def test_demo_accounts_match_the_approved_roster() -> None:
     assert set(by_username) == {"admin", "user", "10000001", "10000002", "10000003"}
     assert by_username["10000001"]["name"] == "小杨"
     assert by_username["10000002"]["role"] == "admin"
-    assert all(
-        not account["campus_verified"]
-        for account in by_username.values()
-        if account["role"] == "admin"
-    )
+    assert by_username["admin"]["campus_verified"] is True
+    assert by_username["10000002"]["campus_verified"] is True
+    assert by_username["10000003"]["campus_verified"] is False
     assert by_username["10000003"]["status"] == "disabled"
 
 
-def test_auth_initialization_removes_legacy_admin_role_grants_only() -> None:
-    database = mongomock.MongoClient()["legacy_admin_campus_access"]
+def test_auth_initialization_marks_explicit_legacy_grants_without_changing_access() -> None:
+    database = mongomock.MongoClient()["legacy_campus_access_sources"]
     database.client.admin.command = lambda _name: {"ok": 1}
     initialize(database)
     database.users.insert_many(
@@ -77,21 +75,111 @@ def test_auth_initialization_removes_legacy_admin_role_grants_only() -> None:
                 "campus_verified": True,
             },
             {
-                "id": "u-approved-admin",
-                "username": "approved-admin",
-                "role": "admin",
+                "id": "u-legacy-user",
+                "username": "legacy-user",
+                "role": "user",
                 "campus_verified": True,
             },
+            {
+                "id": "u-unverified-admin",
+                "username": "unverified-admin",
+                "role": "admin",
+                "campus_verified": False,
+            },
         ]
-    )
-    database.campus_access_applications.insert_one(
-        {"id": "ca-approved-admin", "userId": "u-approved-admin", "status": "approved"}
     )
 
     initialize(database)
 
-    assert database.users.find_one({"id": "u-legacy-admin"})["campus_verified"] is False
-    assert database.users.find_one({"id": "u-approved-admin"})["campus_verified"] is True
+    admin = database.users.find_one({"id": "u-legacy-admin"})
+    ordinary = database.users.find_one({"id": "u-legacy-user"})
+    unverified_admin = database.users.find_one({"id": "u-unverified-admin"})
+    assert admin["campus_verified"] is True
+    assert admin["campus_access_grant_source"] == "legacy"
+    assert ordinary["campus_verified"] is True
+    assert ordinary["campus_access_grant_source"] == "legacy"
+    assert unverified_admin["campus_verified"] is False
+    assert "campus_access_grant_source" not in unverified_admin
+    assert database.campus_access_applications.count_documents({}) == 0
+
+
+def test_auth_initialization_preserves_application_source_and_revoked_legacy_grant() -> None:
+    database = mongomock.MongoClient()["campus_access_migration_restart"]
+    database.client.admin.command = lambda _name: {"ok": 1}
+    initialize(database)
+    database.users.insert_many([
+        {
+            "id": "u-promoted-admin", "username": "promoted-admin", "role": "admin",
+            "campus_verified": True,
+        },
+        {
+            "id": "u-approved-admin", "username": "approved-admin", "role": "admin",
+            "campus_verified": True,
+            "campus_access_grant_source": "application",
+            "campus_access_granted_by_application_id": "ca-approved-admin",
+        },
+    ])
+
+    initialize(database)
+    legacy = database.users.find_one({"id": "u-promoted-admin"})
+    assert legacy["campus_verified"] is True
+    assert legacy["campus_access_grant_source"] == "legacy"
+    database.users.update_one(
+        {"id": "u-promoted-admin"},
+        {"$set": {"campus_verified": False, "campus_access_revoked_at": "revoked"}},
+    )
+    initialize(database)
+    revoked = database.users.find_one({"id": "u-promoted-admin"})
+    approved = database.users.find_one({"id": "u-approved-admin"})
+    assert revoked["campus_verified"] is False
+    assert revoked["campus_access_revoked_at"] == "revoked"
+    assert revoked["campus_access_grant_source"] == "legacy"
+    assert approved["campus_verified"] is True
+    assert approved["campus_access_grant_source"] == "application"
+
+
+def test_stale_legacy_source_marker_cannot_restore_revoked_or_replace_application_grant() -> None:
+    database = mongomock.MongoClient()["campus_access_marker_race"]
+    database.users.insert_many([
+        {
+            "id": "u-revoked-legacy", "username": "revoked-legacy", "role": "admin",
+            "campus_verified": True,
+        },
+        {
+            "id": "u-new-approval", "username": "new-approval", "role": "user",
+            "campus_verified": True,
+        },
+    ])
+    stale_revoked = database.users.find_one({"id": "u-revoked-legacy"})
+    stale_approved = database.users.find_one({"id": "u-new-approval"})
+    database.users.update_one(
+        {"id": "u-revoked-legacy"},
+        {"$set": {
+            "campus_verified": False,
+            "campus_access_grant_source": "legacy",
+            "campus_access_revoked_at": "synthetic-revoked-at",
+        }},
+    )
+    database.users.update_one(
+        {"id": "u-new-approval"},
+        {"$set": {
+            "campus_verified": True,
+            "campus_access_grant_source": "application",
+            "campus_access_granted_by_application_id": "ca-synthetic-approval",
+        }},
+    )
+
+    _mark_legacy_campus_grant(database, stale_revoked)
+    _mark_legacy_campus_grant(database, stale_approved)
+
+    revoked = database.users.find_one({"id": "u-revoked-legacy"})
+    approved = database.users.find_one({"id": "u-new-approval"})
+    assert revoked["campus_verified"] is False
+    assert revoked["campus_access_grant_source"] == "legacy"
+    assert revoked["campus_access_revoked_at"] == "synthetic-revoked-at"
+    assert approved["campus_access_grant_source"] == "application"
+    assert approved["campus_access_granted_by_application_id"] == "ca-synthetic-approval"
+
 
 
 def test_disabled_demo_account_cannot_authenticate() -> None:

@@ -8,6 +8,7 @@ from app.modules.case_sources.service import (
     source_case_content_available,
     source_case_url,
 )
+from app.modules.materials.service import campus_verified
 from app.modules.materials.service import material_content_available
 
 
@@ -98,7 +99,7 @@ def _content_available(
         )
     if source_type == "material":
         return material_content_available(_material_row(database, row), user)
-    return internal or _attachment_readable(database, row, user, record)
+    return _attachment_readable(database, row, user, record)
 
 
 def _material_row(database: Database, row: dict) -> dict:
@@ -112,10 +113,11 @@ def _attachment_readable(database, row: dict, user: dict | None, record: dict) -
     level = row.get("accessLevel", "public")
     if level == "public":
         return True
-    if level == "campus":
-        return bool(user)
     case = record if "ownerId" in record else database.cases.find_one({"id": record["caseId"]})
-    return bool(user and (user["role"] == "admin" or case.get("ownerId") == user["id"]))
+    owner = bool(user and case and case.get("ownerId") == user["id"])
+    if level == "campus":
+        return owner or campus_verified(user)
+    return bool(user and (user["role"] == "admin" or owner))
 
 
 def _entry_url(

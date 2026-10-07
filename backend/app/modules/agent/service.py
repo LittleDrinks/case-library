@@ -418,11 +418,15 @@ def _review_accessible(context: RunContext) -> bool:
 
 
 def _reader_accessible(context: RunContext) -> bool:
-    if context.review:
-        return _review_accessible(context)
-    return not context.case.get("versionId") or version_readable_by_id(
+    if context.review and not _review_accessible(context):
+        return False
+    if not context.review and context.case.get("versionId") and not version_readable_by_id(
         context.repository.database, context.case["id"], context.case.get("versionId")
-    )
+    ):
+        return False
+    if context.deps and not context.deps.sources_readable():
+        return False
+    return True
 
 
 def _revoke_reader(context: RunContext) -> None:

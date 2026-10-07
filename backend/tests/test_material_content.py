@@ -82,6 +82,10 @@ def test_admin_role_does_not_grant_campus_material_access(client: TestClient) ->
     material_id, _admin = _approved_material(
         client, "admin-campus.txt", b"campus-only", "campus"
     )
+    database = client.app.state.database
+    database.users.update_one(
+        {"username": "admin"}, {"$set": {"campus_verified": False}}
+    )
     admin = _login(client, "admin", "admin123")
     assert admin["user"]["campusVerified"] is False
 

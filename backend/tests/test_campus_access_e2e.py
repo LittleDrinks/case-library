@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from http.cookiejar import CookieJar
+from io import BytesIO
+from pathlib import Path
 from threading import Barrier
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
@@ -39,6 +44,15 @@ def _request(opener, method: str, path: str, body=None, csrf: str = ""):
             return error.code, json.loads(content)
         except json.JSONDecodeError:
             return error.code, content.decode()
+
+
+def _event_text(opener, path: str) -> tuple[int, str]:
+    request = Request(f"{BASE_URL}{path}")
+    try:
+        with opener.open(request) as response:
+            return response.status, response.read().decode()
+    except HTTPError as error:
+        return error.code, error.read().decode()
 
 
 def _login(opener, username: str, password: str) -> dict:
@@ -507,4 +521,568 @@ def test_real_http_audit_insert_failure_rolls_back_campus_approval() -> None:
             validationLevel=original_validation_level,
             validationAction=original_validation_action,
         )
+        mongo.close()
+
+
+def test_real_http_history_snapshot_and_sse_recheck_revoked_campus_access() -> None:
+    username = f"issue360-history-{uuid.uuid4().hex}"
+    password = f"Issue360-{uuid.uuid4().hex}!a"
+    student_number = f"SYN-360-{uuid.uuid4().hex[:12]}"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo.get_default_database()
+
+    try:
+        anonymous = _opener()
+        registration_status, registered = _request(
+            anonymous,
+            "POST",
+            "/api/auth/register",
+            {"username": username, "password": password},
+        )
+        assert registration_status == 201
+        applicant = _opener()
+        session = _login(applicant, username, password)
+        submitted_status, application = _submit(
+            applicant, session["csrfToken"], "合成历史申请人", student_number
+        )
+        assert submitted_status == 201
+        admin = _opener()
+        admin_session = _login(admin, "admin", "admin123")
+        approved_status, approved = _admin_action(
+            admin,
+            admin_session["csrfToken"],
+            application["id"],
+            "decision",
+            {"decision": "approved", "reason": "合成历史回放资格批准"},
+        )
+        assert approved_status == 200 and approved["status"] == "approved"
+
+        case_status, case = _request(
+            applicant,
+            "POST",
+            "/api/cases",
+            {"title": f"合成校内来源历史 {uuid.uuid4().hex}"},
+            session["csrfToken"],
+        )
+        assert case_status == 200
+        thread_status, thread = _request(
+            applicant,
+            "POST",
+            f"/api/cases/{case['id']}/agent/threads",
+            {"title": "合成来源历史"},
+            session["csrfToken"],
+        )
+        assert thread_status == 201
+
+        material_id = f"m-issue360-history-{uuid.uuid4().hex}"
+        database.materials.insert_one(
+            {
+                "id": material_id,
+                "status": "active",
+                "title": "合成校内来源",
+                "accessLevel": "campus",
+                "createdBy": admin_session["user"]["id"],
+            }
+        )
+        message_id = f"message-issue360-history-{uuid.uuid4().hex}"
+        run_id = f"run-issue360-history-{uuid.uuid4().hex}"
+        marker = f"合成校内历史内容-{uuid.uuid4().hex}"
+        source = {
+            "kind": "material",
+            "id": material_id,
+            "title": "合成校内来源",
+            "location": f"material:{material_id}",
+        }
+        database.agent_messages.insert_one(
+            {
+                "id": message_id,
+                "threadId": thread["id"],
+                "runId": run_id,
+                "messageSeq": 0,
+                "role": "assistant",
+                "metadata": {},
+                "parts": [
+                    {
+                        "type": "tool-read_source",
+                        "output": {"status": "ok", "usedSourceRef": source},
+                    },
+                    {"type": "text", "text": marker},
+                ],
+                "createdAt": datetime.now(UTC),
+            }
+        )
+        database.agent_thread_events.insert_one(
+            {
+                "id": f"event-issue360-history-{uuid.uuid4().hex}",
+                "threadId": thread["id"],
+                "eventSeq": 1,
+                "type": "message.created",
+                "runId": run_id,
+                "payload": {"messageId": message_id},
+                "createdAt": datetime.now(UTC),
+            }
+        )
+        database.agent_threads.update_one(
+            {"id": thread["id"]}, {"$set": {"eventSeq": 1}}
+        )
+
+        snapshot_status, snapshot = _request(
+            applicant, "GET", f"/api/cases/{case['id']}/agent/threads/{thread['id']}"
+        )
+        assert snapshot_status == 200
+        assert marker in json.dumps(snapshot, ensure_ascii=False)
+        replay_status, replay = _event_text(
+            applicant, f"/api/cases/{case['id']}/agent/thread/{thread['id']}/events"
+        )
+        assert replay_status == 200 and marker in replay
+
+        revoked_status, revoked = _admin_action(
+            admin,
+            admin_session["csrfToken"],
+            application["id"],
+            "revoke",
+            {"reason": "合成历史回放资格撤销"},
+        )
+        assert revoked_status == 200 and revoked["status"] == "revoked"
+
+        snapshot_status, snapshot = _request(
+            applicant, "GET", f"/api/cases/{case['id']}/agent/threads/{thread['id']}"
+        )
+        assert snapshot_status == 200
+        assert marker not in json.dumps(snapshot, ensure_ascii=False)
+        assert "该回答引用的来源当前不可读，相关内容已隐藏" in json.dumps(
+            snapshot, ensure_ascii=False
+        )
+        replay_status, replay = _event_text(
+            applicant, f"/api/cases/{case['id']}/agent/thread/{thread['id']}/events"
+        )
+        assert replay_status == 200
+        assert marker not in replay
+        assert "该回答引用的来源当前不可读，相关内容已隐藏" in replay
+        assert database.users.find_one({"id": registered["id"]})[
+            "campus_access_revoked_at"
+        ]
+    finally:
+        mongo.close()
+
+
+@pytest.mark.e2e(
+    "CASE_LIBRARY_E2E_URL",
+    "AUTH_QUERY_MONGODB_URI",
+    "OBJECT_STORE_ENDPOINT",
+    "OBJECT_STORE_BUCKET",
+    "OBJECT_STORE_ACCESS_KEY_FILE",
+    "OBJECT_STORE_SECRET_KEY_FILE",
+    "MEILI_CONTRACT_URL",
+    "MEILI_CONTRACT_KEY_FILE",
+)
+def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
+    import meilisearch
+    from app.modules.agent.deps import ToolDeps
+    from app.modules.agent.models import SourceRef
+    from app.modules.agent.repository import AgentRepository
+    from app.modules.agent.search import CorpusSearchParams
+    from app.modules.agent.service import _reader_accessible
+    from app.modules.agent.skills import read_source as read_source_tool
+    from app.modules.agent.skills import search_corpus as search_corpus_tool
+    from app.modules.attachments.storage import MinioBlobStore
+    from app.modules.search.client import create_reader, index_epoch, wait_task
+    from app.modules.search.indexer import catalog_settings
+    from app.modules.search.meilisearch import MeilisearchCatalog
+    from app.modules.search.outbox import CatalogTarget
+    from app.modules.search.projection import project_catalog_documents
+    from app.modules.search.state import CatalogSnapshot
+    from minio import Minio
+
+    username = f"issue360-tool-{uuid.uuid4().hex}"
+    password = f"Issue360-{uuid.uuid4().hex}!a"
+    student_number = f"SYN-360-{uuid.uuid4().hex[:12]}"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo.get_default_database()
+    blob_id = f"issue360-{uuid.uuid4().hex}"
+    material_id = f"m-{blob_id}"
+    material_title = f"合成校内当前资格来源-{uuid.uuid4().hex}"
+    material_summary = f"合成校内摘要-{uuid.uuid4().hex}"
+    endpoint = os.environ["OBJECT_STORE_ENDPOINT"]
+    bucket = os.environ["OBJECT_STORE_BUCKET"]
+    access_key = Path(os.environ["OBJECT_STORE_ACCESS_KEY_FILE"]).read_text(
+        encoding="utf-8"
+    ).strip()
+    secret_key = Path(os.environ["OBJECT_STORE_SECRET_KEY_FILE"]).read_text(
+        encoding="utf-8"
+    ).strip()
+    client = Minio(
+        endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=os.getenv("OBJECT_STORE_SECURE", "").lower()
+        in {"1", "true", "yes", "on"},
+    )
+    store = MinioBlobStore(client, bucket)
+    material_text = f"合成校内来源正文-{uuid.uuid4().hex}"
+    meili_key = Path(os.environ["MEILI_CONTRACT_KEY_FILE"]).read_text(
+        encoding="utf-8"
+    ).strip()
+    meili_client = meilisearch.Client(os.environ["MEILI_CONTRACT_URL"], meili_key)
+    index_uid = f"campus_access_{uuid.uuid4().hex}"
+    index_created = False
+    catalog = None
+    catalog_state = None
+    blob_written = False
+
+    def tool_deps(user: dict, source: SourceRef, case_id: str, thread_id: str, run_id: str):
+        return ToolDeps(
+            database=database,
+            case_id=case_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            user=user,
+            catalog=catalog,
+            catalog_state=catalog_state,
+            secret_path="",
+            store=store,
+            hits=[source],
+        )
+
+    try:
+        store.put(
+            blob_id, BytesIO(material_text.encode()), len(material_text.encode()),
+            "text/plain",
+        )
+        blob_written = True
+        database.materials.insert_one({
+            "id": material_id,
+            "status": "active",
+            "title": material_title,
+            "summary": material_summary,
+            "source": "合成资料",
+            "excerpt": "合成校内素材摘录",
+            "materialType": "文档",
+            "authority": "original",
+            "tags": ["合成"],
+            "publicReferenceCount": 1,
+            "filename": "campus.txt",
+            "mediaType": "text/plain",
+            "size": len(material_text.encode()),
+            "blobId": blob_id,
+            "accessLevel": "campus",
+            "createdBy": "u-issue360-synthetic-owner",
+        })
+        wait_task(
+            meili_client,
+            meili_client.create_index(index_uid, {"primaryKey": "catalogId"}),
+        )
+        index_created = True
+        index = meili_client.index(index_uid)
+        wait_task(meili_client, index.update_settings(catalog_settings()))
+        projected = project_catalog_documents(
+            "material",
+            {
+                "id": material_id,
+                "status": "active",
+                "title": material_title,
+                "summary": material_summary,
+                "source": "合成资料",
+                "excerpt": "合成校内素材摘录",
+                "materialType": "文档",
+                "authority": "original",
+                "tags": ["合成"],
+                "publicReferenceCount": 1,
+                "blobId": blob_id,
+                "accessLevel": "campus",
+                "createdBy": "u-issue360-synthetic-owner",
+            },
+        )
+        wait_task(meili_client, index.add_documents(projected))
+        target = CatalogTarget(
+            f"campus-access-{uuid.uuid4().hex}",
+            index_uid,
+            index_epoch(meili_client, index_uid),
+        )
+        snapshot = CatalogSnapshot(target, 0, ())
+        catalog = MeilisearchCatalog(
+            create_reader(
+                os.environ["MEILI_CONTRACT_URL"],
+                os.environ["MEILI_CONTRACT_KEY_FILE"],
+            )
+        )
+        catalog_state = SimpleNamespace(read=lambda: snapshot)
+
+        anonymous = _opener()
+        registered_status, registered = _request(
+            anonymous,
+            "POST",
+            "/api/auth/register",
+            {"username": username, "password": password},
+        )
+        assert registered_status == 201
+        applicant = _opener()
+        applicant_session = _login(applicant, username, password)
+        applicant_id = registered["id"]
+        assert applicant_session["user"]["id"] == applicant_id
+        submitted_status, application = _submit(
+            applicant, applicant_session["csrfToken"], "合成工具申请人", student_number
+        )
+        assert submitted_status == 201
+
+        admin = _opener()
+        admin_session = _login(admin, "admin", "admin123")
+        case_id = f"c-review360-{uuid.uuid4().hex}"
+        thread_id = f"t-review360-{uuid.uuid4().hex}"
+        run_id = f"r-review360-{uuid.uuid4().hex}"
+        submitted_version_id = f"v-review360-{uuid.uuid4().hex}"
+        database.cases.insert_one({
+            "id": case_id,
+            "workflowStatus": "reviewing",
+            "submittedVersionId": submitted_version_id,
+        })
+        database.agent_threads.insert_one({"id": thread_id, "caseId": case_id})
+        database.agent_runs.insert_one({
+            "id": run_id,
+            "threadId": thread_id,
+            "userId": applicant_id,
+            "submittedVersionId": submitted_version_id,
+        })
+
+        promoted_status, promoted = _request(
+            admin,
+            "POST",
+            f"/api/admin/accounts/{applicant_id}/role",
+            {"role": "admin", "reason": "合成审核员角色准备"},
+            admin_session["csrfToken"],
+        )
+        assert promoted_status == 200 and promoted["role"] == "admin"
+        current_applicant = database.users.find_one({"id": applicant_id})
+        token_version = current_applicant["token_version"]
+        assert current_applicant["campus_verified"] is False
+        assert current_applicant["id"] == registered["id"]
+        assert current_applicant["name"] == username
+        source = SourceRef(kind="material", id=material_id, title=material_title)
+        deps = tool_deps(current_applicant, source, case_id, thread_id, run_id)
+        context = SimpleNamespace(
+            review=True,
+            case={"id": case_id, "versionId": None},
+            run=SimpleNamespace(id=run_id, user_id=applicant_id),
+            repository=AgentRepository(database),
+            deps=deps,
+        )
+        pending_search = asyncio.run(
+            search_corpus_tool(
+                SimpleNamespace(deps=deps),
+                CorpusSearchParams(query=material_title, kind="material"),
+            )
+        )
+        assert pending_search["items"][0]["contentAvailable"] is False
+        assert material_summary not in json.dumps(pending_search, ensure_ascii=False)
+        pending_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert pending_read["status"] == "no_access"
+
+        approved_status, approved = _admin_action(
+            admin, admin_session["csrfToken"], application["id"], "decision",
+            {"decision": "approved", "reason": "合成工具取材核验通过"},
+        )
+        assert approved_status == 200 and approved["status"] == "approved"
+        approved_search = asyncio.run(
+            search_corpus_tool(
+                SimpleNamespace(deps=deps),
+                CorpusSearchParams(query=material_title, kind="material"),
+            )
+        )
+        assert approved_search["items"][0]["contentAvailable"] is True
+        assert material_summary in json.dumps(approved_search, ensure_ascii=False)
+        first_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert first_read["status"] == "ok"
+        assert material_text in first_read["content"]
+        assert _reader_accessible(context) is True
+
+        revoked_status, revoked = _admin_action(
+            admin, admin_session["csrfToken"], application["id"], "revoke",
+            {"reason": "合成审核中校内资格撤销"},
+        )
+        assert revoked_status == 200 and revoked["status"] == "revoked"
+        revoked_search = asyncio.run(
+            search_corpus_tool(
+                SimpleNamespace(deps=deps),
+                CorpusSearchParams(query=material_title, kind="material"),
+            )
+        )
+        assert revoked_search["items"][0]["contentAvailable"] is False
+        assert material_summary not in json.dumps(revoked_search, ensure_ascii=False)
+        denied_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert denied_read["status"] == "no_access"
+        assert "content" not in denied_read
+        assert _reader_accessible(context) is False
+        assert database.users.find_one({"id": applicant_id})["role"] == "admin"
+
+        applicant_session = _login(applicant, username, password)
+        pending_status, reapplication = _submit(
+            applicant, applicant_session["csrfToken"], "合成工具再次申请人",
+            student_number + "-R",
+        )
+        assert pending_status == 201
+        pending_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert pending_read["status"] == "no_access"
+        pending_search = asyncio.run(
+            search_corpus_tool(
+                SimpleNamespace(deps=deps),
+                CorpusSearchParams(query=material_title, kind="material"),
+            )
+        )
+        assert pending_search["items"][0]["contentAvailable"] is False
+        assert material_summary not in json.dumps(pending_search, ensure_ascii=False)
+        approved_again_status, approved_again = _admin_action(
+            admin, admin_session["csrfToken"], reapplication["id"], "decision",
+            {"decision": "approved", "reason": "合成再次人工核验通过"},
+        )
+        assert approved_again_status == 200 and approved_again["status"] == "approved"
+        restored_search = asyncio.run(
+            search_corpus_tool(
+                SimpleNamespace(deps=deps),
+                CorpusSearchParams(query=material_title, kind="material"),
+            )
+        )
+        assert restored_search["items"][0]["contentAvailable"] is True
+        assert material_summary in json.dumps(restored_search, ensure_ascii=False)
+        restored_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert restored_read["status"] == "ok"
+        assert material_text in restored_read["content"]
+
+        force_logout_status, _force_logout = _request(
+            admin,
+            "POST",
+            f"/api/admin/accounts/{applicant_id}/force-logout",
+            {"reason": "合成过期 Run 会话撤销"},
+            admin_session["csrfToken"],
+        )
+        assert force_logout_status == 200
+        expired_read = asyncio.run(
+            read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
+        )
+        assert expired_read == {"status": "no_access", "detail": "当前账号不可读取来源"}
+        with pytest.raises(RuntimeError, match="当前账号不可继续检索"):
+            asyncio.run(
+                search_corpus_tool(
+                    SimpleNamespace(deps=deps),
+                    CorpusSearchParams(query=material_title, kind="material"),
+                )
+            )
+        assert _reader_accessible(context) is False
+        assert database.users.find_one({"id": applicant_id})["status"] == "active"
+        assert database.users.find_one({"id": applicant_id})["token_version"] > token_version
+        assert _request(applicant, "GET", "/api/auth/campus-access")[0] == 401
+    finally:
+        try:
+            if blob_written:
+                store.remove(blob_id)
+        finally:
+            try:
+                if index_created:
+                    wait_task(meili_client, meili_client.delete_index(index_uid))
+            finally:
+                database.materials.delete_one({"id": material_id})
+                mongo.close()
+
+
+@pytest.mark.e2e("CASE_LIBRARY_E2E_URL", "AUTH_QUERY_MONGODB_URI")
+def test_real_http_legacy_source_migration_keeps_explicit_revocation_after_restart() -> None:
+    from app.core.database import _mark_legacy_campus_grant, initialize
+
+    username = f"issue360-legacy-{uuid.uuid4().hex}"
+    password = f"Issue360-{uuid.uuid4().hex}!a"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo.get_default_database()
+
+    try:
+        anonymous = _opener()
+        registered_status, registered = _request(
+            anonymous,
+            "POST",
+            "/api/auth/register",
+            {"username": username, "password": password},
+        )
+        assert registered_status == 201
+        user_id = registered["id"]
+        database.users.update_one(
+            {"id": user_id},
+            {"$set": {"campus_verified": True}, "$unset": {
+                "campus_access_grant_source": "",
+                "campus_access_granted_by_application_id": "",
+            }},
+        )
+        stale_migration_row = database.users.find_one({"id": user_id})
+
+        admin = _opener()
+        admin_session = _login(admin, "admin", "admin123")
+        promoted_status, promoted = _request(
+            admin,
+            "POST",
+            f"/api/admin/accounts/{user_id}/role",
+            {"role": "admin", "reason": "合成既有资格账号角色提升"},
+            admin_session["csrfToken"],
+        )
+        assert promoted_status == 200 and promoted["role"] == "admin"
+
+        initialize(database)
+        legacy = database.users.find_one({"id": user_id})
+        assert legacy["campus_verified"] is True
+        assert legacy["campus_access_grant_source"] == "legacy"
+        assert legacy["id"] == user_id and legacy["name"] == username
+        assert database.campus_access_applications.count_documents({"userId": user_id}) == 0
+        grant_status, grants = _request(
+            admin, "GET", f"/api/admin/campus-access-legacy-grants?q={username}"
+        )
+        assert grant_status == 200
+        assert grants["items"] == [{
+            "userId": user_id, "username": username, "role": "admin",
+            "grantSource": "legacy",
+        }]
+
+        revoke_status, revoked = _request(
+            admin,
+            "POST",
+            f"/api/admin/campus-access-users/{user_id}/revoke-legacy",
+            {"reason": "合成旧系统资格明确撤销"},
+            admin_session["csrfToken"],
+        )
+        assert revoke_status == 200 and revoked["campusVerified"] is False
+        revoked_at = revoked["revokedAt"]
+        applicant = _opener()
+        applicant_session = _login(applicant, username, password)
+        pending_status, pending = _submit(
+            applicant, applicant_session["csrfToken"], "合成旧系统资格重申",
+            f"SYN-360-{uuid.uuid4().hex[:12]}",
+        )
+        assert pending_status == 201 and pending["status"] == "pending"
+        assert _request(applicant, "GET", "/api/auth/campus-access")[1][
+            "campusVerified"
+        ] is False
+        _mark_legacy_campus_grant(database, stale_migration_row)
+        initialize(database)
+
+        current = database.users.find_one({"id": user_id})
+        assert current["campus_verified"] is False
+        assert current["campus_access_grant_source"] == "legacy"
+        assert current["campus_access_revoked_at"] == revoked_at
+        assert current["role"] == "admin"
+        assert current["id"] == user_id and current["name"] == username
+        assert database.campus_access_applications.count_documents({"userId": user_id}) == 1
+        assert database.campus_access_applications.find_one({"userId": user_id})[
+            "status"
+        ] == "pending"
+        operation = database.account_management_operations.find_one({
+            "action": "campus_access_legacy_revoke", "targetId": user_id,
+        })
+        assert operation["reason"] == "合成旧系统资格明确撤销"
+        assert "campusApplicationId" not in operation
+    finally:
         mongo.close()

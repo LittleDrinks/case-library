@@ -189,12 +189,20 @@ export const api = {
     const params = new URLSearchParams({ q: query, status, page: String(page), pageSize: String(pageSize) });
     return request(`/api/admin/campus-access-applications?${params}`);
   },
+  listLegacyCampusGrants: (query = "", page = 1, pageSize = 50) => {
+    const params = new URLSearchParams({ q: query, page: String(page), pageSize: String(pageSize) });
+    return request(`/api/admin/campus-access-legacy-grants?${params}`);
+  },
   decideCampusAccessApplication: (id, decision, reason, csrfToken) => request(
     `/api/admin/campus-access-applications/${encodeURIComponent(id)}/decision`,
     jsonOptions("POST", { decision, reason }, csrfToken),
   ),
   revokeCampusAccessApplication: (id, reason, csrfToken) => request(
     `/api/admin/campus-access-applications/${encodeURIComponent(id)}/revoke`,
+    jsonOptions("POST", { reason }, csrfToken),
+  ),
+  revokeLegacyCampusGrant: (userId, reason, csrfToken) => request(
+    `/api/admin/campus-access-users/${encodeURIComponent(userId)}/revoke-legacy`,
     jsonOptions("POST", { reason }, csrfToken),
   ),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),

@@ -362,6 +362,33 @@ def test_material_source_url_uses_checked_content_redirect(client: TestClient) -
     assert (response.status_code, response.headers["location"]) == (307, source_url)
 
 
+def test_admin_role_alone_does_not_expose_campus_attachment_in_source_list(
+    client: TestClient,
+) -> None:
+    auth = login(client, "admin", "admin123")
+    database = client.app.state.database
+    database.users.update_one(
+        {"id": auth["user"]["id"]}, {"$set": {"campus_verified": False}}
+    )
+    database.attachments.insert_one({
+        "id": "att-campus-role-check", "caseId": "c-draft-1",
+        "name": "合成校内附件.txt", "mediaType": "text/plain", "size": 1,
+        "accessLevel": "campus", "blobId": "synthetic-campus-role-check",
+        "searchText": "合成校内附件内容", "createdAt": "2026-10-07T00:00:00Z",
+    })
+
+    response = client.get(
+        "/api/cases/c-draft-1/sources", headers=headers(auth)
+    )
+
+    assert response.status_code == 200
+    entry = next(
+        row for row in response.json()["entries"]
+        if row["id"] == "att-campus-role-check"
+    )
+    assert entry["contentAvailable"] is False
+
+
 def test_material_source_entries_keep_missing_and_disabled_rows_locked(
     client: TestClient,
 ) -> None:

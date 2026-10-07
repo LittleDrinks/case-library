@@ -10,6 +10,7 @@ from app.modules.cases.sources import ordered_entries
 from app.modules.agent.models import SourceRef
 from app.modules.agent.prosemirror import paragraphs
 from app.modules.attachments.text import extract_search_text
+from app.modules.auth.sessions import load_current_user
 from app.modules.case_sources.service import source_case_content_available
 from app.modules.materials.service import can_read_material
 
@@ -27,6 +28,15 @@ class _BlobFile:
 
 def read_source(database, store, user: dict | None, case_id: str,
                 source_type: str, source_id: str, version_id: str | None = None) -> dict:
+    current_user = load_current_user(database, user)
+    if user is not None and current_user is None:
+        return _failed(NO_ACCESS, "当前账号不可读取来源")
+    return _read_source(database, store, current_user, case_id,
+                        source_type, source_id, version_id)
+
+
+def _read_source(database, store, user: dict | None, case_id: str,
+                 source_type: str, source_id: str, version_id: str | None = None) -> dict:
     readers = {
         "attachment": lambda: _read_attachment(
             database, store, user, case_id, source_id, version_id
@@ -162,7 +172,7 @@ def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -
         return source_case_content_available(
             database, ref.source_case_id, user, ref.version_id, False
         )
-    result = read_source(database, None, user, case_id, ref.kind, ref.id)
+    result = _read_source(database, None, user, case_id, ref.kind, ref.id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
 
 
@@ -175,4 +185,7 @@ def _area_entry_available(database, user: dict | None, case_id: str, ref: Source
 
 def revalidate_sources(database, user: dict | None, case_id: str,
                        refs: list[SourceRef]) -> bool:
-    return all(source_readable(database, user, case_id, ref) for ref in refs)
+    current_user = load_current_user(database, user)
+    if user is not None and current_user is None:
+        return False
+    return all(source_readable(database, current_user, case_id, ref) for ref in refs)

@@ -22,7 +22,6 @@ def _account(row: dict[str, str]) -> dict:
         "must_change_password": row["must_change_password"] == "true",
         "campus_verified": (
             row.get("campus_verified", "false") == "true"
-            and row["role"] != "admin"
         ),
         "token_version": 0,
     }
@@ -45,6 +44,8 @@ def reject_demo_accounts(database: Database) -> None:
 def _user(account: dict) -> dict:
     user = {key: value for key, value in account.items() if key != "password"}
     user["password_hash"] = hash_password(account["password"])
+    if user["campus_verified"]:
+        user["campus_access_grant_source"] = "legacy"
     return user
 
 

@@ -35,6 +35,9 @@ def _initialize_auth(database: Database) -> None:
     database.account_management_operations.create_index(
         [("campusApplicationId", ASCENDING)]
     )
+    database.users.create_index(
+        [("campus_access_grant_source", ASCENDING), ("campus_verified", ASCENDING), ("username", ASCENDING)]
+    )
     database.campus_access_applications.create_index([("id", ASCENDING)], unique=True)
     database.campus_access_applications.create_index(
         [("userId", ASCENDING), ("submittedAt", DESCENDING)]
@@ -48,7 +51,6 @@ def _initialize_auth(database: Database) -> None:
         partialFilterExpression={"status": "pending"},
         name="one_pending_campus_application_per_user",
     )
-    _remove_legacy_admin_campus_grants(database)
     try:
         database.account_management_guards.update_one(
             {"_id": "available-admins"},
@@ -60,24 +62,40 @@ def _initialize_auth(database: Database) -> None:
             {"_id": "available-admins"}, {"_id": 1}
         ):
             raise
+    _mark_campus_grant_sources(database)
 
 
-def _remove_legacy_admin_campus_grants(database: Database) -> None:
-    legacy_admins = database.users.find(
-        {"role": "admin", "campus_verified": True}, {"_id": 1, "id": 1}
+def _mark_campus_grant_sources(database: Database) -> None:
+    database.users.update_many(
+        {
+            "campus_verified": True,
+            "campus_access_granted_by_application_id": {"$exists": True},
+            "campus_access_grant_source": {"$ne": "application"},
+        },
+        {"$set": {"campus_access_grant_source": "application"}},
     )
-    for user in legacy_admins:
-        latest_application = database.campus_access_applications.find_one(
-            {"userId": user["id"]},
-            {"_id": 0, "status": 1},
-            sort=[("submittedAt", DESCENDING), ("_id", DESCENDING)],
-        )
-        if latest_application and latest_application["status"] == "approved":
-            continue
-        database.users.update_one(
-            {"_id": user["_id"], "role": "admin", "campus_verified": True},
-            {"$set": {"campus_verified": False}},
-        )
+    unmarked = database.users.find(
+        {
+            "campus_verified": True,
+            "campus_access_granted_by_application_id": {"$exists": False},
+            "campus_access_grant_source": {"$exists": False},
+        },
+        {"_id": 1},
+    )
+    for user in unmarked:
+        _mark_legacy_campus_grant(database, user)
+
+
+def _mark_legacy_campus_grant(database: Database, user: dict) -> None:
+    database.users.update_one(
+        {
+            "_id": user["_id"],
+            "campus_verified": True,
+            "campus_access_granted_by_application_id": {"$exists": False},
+            "campus_access_grant_source": {"$exists": False},
+        },
+        {"$set": {"campus_access_grant_source": "legacy"}},
+    )
 
 
 def _initialize_cases(database: Database) -> None:

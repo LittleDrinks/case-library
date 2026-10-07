@@ -8,6 +8,7 @@ SSE 恢复、下一轮模型历史三个输出面都不得复述来源正文；�
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +26,10 @@ from app.modules.agent.visibility import (
     parts_projector,
 )
 from app.modules.agent.source_reader import read_source
+from app.modules.agent.models import SourceRef
+from app.modules.agent.deps import ToolDeps
+from app.modules.agent.service import _reader_accessible
+from app.modules.agent.repository import AgentRepository
 
 SOURCE_TEXT = "固定版本正文"
 LEAK_MARK = "科学家精神原典摘句"
@@ -249,7 +254,8 @@ def test_retry_model_history_excludes_revoked_source_body(client: TestClient) ->
 def test_read_source_ref_carries_structured_source_case_id(client: TestClient) -> None:
     database = client.app.state.database
     _seed_source(database)
-    result = read_source(database, None, {"id": "u-user-demo", "role": "user"},
+    user = database.users.find_one({"id": "u-user-demo"})
+    result = read_source(database, None, user,
                          "c-draft-1", "case", "src-22")
     assert result["status"] == "ok"
     assert result["usedSourceRef"]["sourceCaseId"] == "c-source-22"
@@ -368,7 +374,7 @@ def test_proposal_model_history_excludes_revoked_revision_body(client: TestClien
 def test_parts_projector_reverifies_permissions_per_call(client: TestClient) -> None:
     database = client.app.state.database
     _seed_source(database)
-    user = {"id": "u-user-demo", "role": "user"}
+    user = database.users.find_one({"id": "u-user-demo"})
     project = parts_projector(database, user, "c-draft-1")
     parts = [
         {"type": "tool-read_source", "output": {"status": "ok", "usedSourceRef": {
@@ -382,6 +388,109 @@ def test_parts_projector_reverifies_permissions_per_call(client: TestClient) -> 
     _revoke_source(database)
     assert project(parts)[1]["text"] == HIDDEN_ANSWER
     assert project(parts)[0]["output"]["status"] == "no_access"
+
+
+def test_parts_projector_reads_current_campus_grant_after_revoke(client: TestClient) -> None:
+    database = client.app.state.database
+    database.materials.insert_one({
+        "id": "m-campus-current", "status": "active", "title": "合成校内资料",
+        "accessLevel": "campus", "createdBy": "u-other",
+    })
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": True}}
+    )
+    user = database.users.find_one({"id": "u-user-demo"})
+    project = parts_projector(database, user, "c-draft-1")
+    parts = [
+        {"type": "tool-read_source", "output": {"status": "ok", "usedSourceRef": {
+            "kind": "material", "id": "m-campus-current", "title": "合成校内资料",
+            "location": "material:m-campus-current",
+        }}},
+        {"type": "text", "text": "合成校内正文"},
+    ]
+
+    assert project(parts)[1]["text"] == "合成校内正文"
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": False}}
+    )
+
+    revoked = project(parts)
+    assert revoked[1]["text"] == HIDDEN_ANSWER
+    assert revoked[0]["output"] == {"status": "no_access", "detail": "来源当前不可读"}
+
+
+def test_active_agent_run_rechecks_campus_sources_before_output(client: TestClient) -> None:
+    database = client.app.state.database
+    database.materials.insert_one({
+        "id": "m-run-campus", "status": "active", "title": "合成校内资料",
+        "accessLevel": "campus", "createdBy": "u-other",
+    })
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": True}}
+    )
+    stale_user = database.users.find_one({"id": "u-user-demo"})
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": False}}
+    )
+    source = SourceRef(kind="material", id="m-run-campus", title="合成校内资料")
+    deps = ToolDeps(
+        database=database, case_id="c-draft-1", thread_id="t-run", run_id="r-run",
+        user=stale_user, catalog=client.app.state.search_catalog,
+        catalog_state=client.app.state.catalog_state,
+        secret_path=client.app.state.settings.app_secret_file,
+        hits=[source],
+    )
+    context = SimpleNamespace(review=False, case={"versionId": None}, deps=deps)
+
+    assert _reader_accessible(context) is False
+
+
+def test_review_run_rechecks_campus_sources_after_admin_access_check(
+    client: TestClient,
+) -> None:
+    database = client.app.state.database
+    admin = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin123"}
+    ).json()["user"]
+    database.users.update_one(
+        {"id": admin["id"]}, {"$set": {"campus_verified": True}}
+    )
+    stale_user = database.users.find_one({"id": admin["id"]})
+    database.users.update_one(
+        {"id": admin["id"]}, {"$set": {"campus_verified": False}}
+    )
+    database.cases.insert_one({
+        "id": "c-review-campus-access", "workflowStatus": "reviewing",
+        "submittedVersionId": "v-review-campus-access",
+    })
+    database.agent_threads.insert_one({
+        "id": "t-review-campus-access", "caseId": "c-review-campus-access",
+    })
+    database.agent_runs.insert_one({
+        "id": "r-review-campus-access", "threadId": "t-review-campus-access",
+        "submittedVersionId": "v-review-campus-access",
+    })
+    database.materials.insert_one({
+        "id": "m-review-campus-access", "status": "active",
+        "title": "合成校内审核资料", "accessLevel": "campus", "createdBy": "u-other",
+    })
+    source = SourceRef(
+        kind="material", id="m-review-campus-access", title="合成校内审核资料"
+    )
+    deps = ToolDeps(
+        database=database, case_id="c-review-campus-access",
+        thread_id="t-review-campus-access", run_id="r-review-campus-access",
+        user=stale_user, catalog=client.app.state.search_catalog,
+        catalog_state=client.app.state.catalog_state,
+        secret_path=client.app.state.settings.app_secret_file, hits=[source],
+    )
+    context = SimpleNamespace(
+        review=True, case={"id": "c-review-campus-access", "versionId": None},
+        run=SimpleNamespace(id="r-review-campus-access", user_id=admin["id"]),
+        repository=AgentRepository(database), deps=deps,
+    )
+
+    assert _reader_accessible(context) is False
 
 
 @pytest.mark.parametrize("revoke_after_first_batch", [False, True])
@@ -434,7 +543,7 @@ def test_active_recovery_does_not_replay_revoked_source_chunks(client: TestClien
                 assert any(LEAK_MARK in chunk for chunk in chunks[:1])
                 result = "".join(chunks[1:])
                 assert LEAK_MARK not in result
-                assert HIDDEN_ANSWER in result
+                assert '"type":"abort"' in result or HIDDEN_ANSWER in result
             else:
                 result = "".join(chunks)
                 assert LEAK_MARK in result

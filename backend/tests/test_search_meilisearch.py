@@ -261,6 +261,33 @@ def test_restricted_title_hits_are_disjoint_redacted_and_unified() -> None:
     assert client.batches[0][0]["limit"] == 2
 
 
+def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> None:
+    unverified_reader = FakeReader(_result(), [])
+    MeilisearchCatalog(unverified_reader).search(
+        _anonymous_request(
+            kind="material",
+            principal=Principal("u-admin", "admin", verified=False),
+        )
+    )
+    unverified_filter = unverified_reader.batches[0][0]["filter"]
+
+    assert 'accessLevel IN ["public", "private"]' in unverified_filter
+    assert 'accessLevel = "campus"' in unverified_filter
+    assert 'docClass = "material-restricted"' in unverified_filter
+
+    verified_reader = FakeReader(_result(), [])
+    MeilisearchCatalog(verified_reader).search(
+        _anonymous_request(
+            kind="material",
+            principal=Principal("u-admin", "admin", verified=True),
+        )
+    )
+    verified_filter = verified_reader.batches[0][0]["filter"]
+
+    assert 'accessLevel IN ["public", "private"]' not in verified_filter
+    assert 'docClass = "material-full"' in verified_filter
+
+
 class HealthyReader:
     def __init__(
         self,

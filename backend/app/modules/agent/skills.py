@@ -111,6 +111,8 @@ def require_revision_reason(reason: str) -> str:
 
 
 def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, reason: str):
+    if not ctx.deps.sources_readable():
+        raise CaseError(403, "本轮来源当前不可读，不能继续复用")
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
         start, end, replacement, reason, list(ctx.deps.evidence), ctx.deps.user,
@@ -143,6 +145,8 @@ async def propose_document(
 
 
 def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: str) -> dict:
+    if not ctx.deps.sources_readable():
+        raise ModelRetry("本轮来源当前不可读，不能继续复用")
     try:
         artifact = artifacts.propose_document_artifact(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
@@ -181,6 +185,8 @@ async def _write_document(
 
 
 def _apply_document_write(ctx, blocks, summary):
+    if not ctx.deps.sources_readable():
+        raise ModelRetry("本轮来源当前不可读，不能继续复用")
     try:
         record = writes.apply_write(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.run_id,

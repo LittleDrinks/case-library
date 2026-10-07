@@ -286,7 +286,7 @@ def _mount_clause(request: CatalogRequest, kind: str) -> str:
 
 def _allowed(principal: Principal) -> str:
     if principal.role == "admin":
-        return ""
+        return "" if principal.verified else 'accessLevel IN ["public", "private"]'
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
     levels = '["public", "campus"]' if principal.verified else '["public"]'
@@ -301,7 +301,7 @@ def _own_private(principal: Principal) -> str:
 
 def _denied(principal: Principal) -> str:
     if principal.role == "admin":
-        return NEVER
+        return NEVER if principal.verified else 'accessLevel = "campus"'
     if principal.role == "anonymous":
         return 'accessLevel IN ["campus", "private"]'
     denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")

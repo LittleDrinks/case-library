@@ -13,7 +13,9 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.tools import Tool
 
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.search import CorpusSearchParams, search_corpus
+from app.modules.agent.search import CorpusSearchParams, search_corpus, search_platform
+from app.modules.agent.skills import read_source as read_source_tool
+from app.modules.agent.models import SourceRef
 from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.search.meilisearch import CatalogMetadata, CatalogPage
 from tests.test_agent_grounding import _auth, _stream_post, _tool_model
@@ -57,10 +59,11 @@ def _restricted_item() -> dict:
 
 def _deps(client: TestClient, catalog: PagedCatalog, user: dict | None = None) -> ToolDeps:
     client.app.state.search_catalog = catalog
+    database = client.app.state.database
     return ToolDeps(
-        database=client.app.state.database,
+        database=database,
         case_id="c-draft-1", thread_id="t-corpus", run_id="r-corpus",
-        user=user or {"id": "u-user-demo", "role": "user"},
+        user=user or database.users.find_one({"id": "u-user-demo"}),
         catalog=catalog, catalog_state=client.app.state.catalog_state,
         secret_path=client.app.state.settings.app_secret_file,
     )
@@ -164,6 +167,9 @@ def test_expression_plus_tag_ids_fails_explicitly(client) -> None:
 
 def test_restricted_hit_records_reference_without_content_leak(client) -> None:
     database = client.app.state.database
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": False}}
+    )
     database.materials.insert_one({
         "id": "m-restricted", "status": "active", "title": "校内受限素材",
         "accessLevel": "campus", "createdBy": "u-other",
@@ -178,6 +184,69 @@ def test_restricted_hit_records_reference_without_content_leak(client) -> None:
         deps.database, None, deps.user, deps.case_id, "material", "m-restricted",
     )
     assert result["status"] == "no_access"
+
+
+def test_tool_search_uses_current_campus_grant(client) -> None:
+    database = client.app.state.database
+    user = database.users.find_one({"id": "u-user-demo"})
+    database.users.update_one(
+        {"id": user["id"]}, {"$set": {"campus_verified": False}}
+    )
+    stale_user = {**user, "campus_verified": True}
+    catalog = PagedCatalog([_restricted_item()])
+    deps = _deps(client, catalog, stale_user)
+
+    search_platform(deps, CorpusSearchParams(kind="material"))
+
+    assert catalog.requests[0].principal.verified is False
+
+
+def test_read_source_tool_uses_current_campus_grant(client) -> None:
+    database = client.app.state.database
+    user = database.users.find_one({"id": "u-user-demo"})
+    database.users.update_one(
+        {"id": user["id"]}, {"$set": {"campus_verified": False}}
+    )
+    database.materials.insert_one({
+        "id": "m-tool-campus", "status": "active", "title": "合成校内资料",
+        "accessLevel": "campus", "createdBy": "u-other",
+    })
+    deps = _deps(client, PagedCatalog([]), {**user, "campus_verified": True})
+    deps.sources.append(SourceRef(kind="material", id="m-tool-campus", title="合成校内资料"))
+
+    result = asyncio.run(read_source_tool(SimpleNamespace(deps=deps), "material", "m-tool-campus"))
+
+    assert result["status"] == "no_access"
+    assert "content" not in result
+
+
+def test_read_source_tool_rejects_revoked_session_after_account_restore(client) -> None:
+    database = client.app.state.database
+    database.users.update_one(
+        {"id": "u-user-demo"},
+        {"$set": {"campus_verified": True, "status": "active"}},
+    )
+    stale_user = database.users.find_one({"id": "u-user-demo"})
+    source = SourceRef(kind="material", id="m-expired-session", title="合成校内资料")
+    database.materials.insert_one({
+        "id": source.id, "status": "active", "title": source.title,
+        "accessLevel": "campus", "createdBy": "u-other", "searchText": "受限正文",
+    })
+    database.users.update_one(
+        {"id": stale_user["id"]},
+        {"$inc": {"token_version": 1}, "$set": {"status": "disabled"}},
+    )
+    database.users.update_one(
+        {"id": stale_user["id"]}, {"$set": {"status": "active"}}
+    )
+    deps = _deps(client, PagedCatalog([]), stale_user)
+    deps.hits.append(source)
+
+    result = asyncio.run(
+        read_source_tool(SimpleNamespace(deps=deps), "material", source.id)
+    )
+
+    assert result == {"status": "no_access", "detail": "当前账号不可读取来源"}
 
 
 def _discovery_model(outputs: list) -> FunctionModel:

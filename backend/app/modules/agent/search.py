@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
+from app.modules.auth.sessions import load_current_user
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef
 from app.modules.cases.service import CaseError
@@ -90,7 +91,10 @@ def _search_request(params: CorpusSearchParams) -> SearchRequest:
 
 def search_platform(deps: ToolDeps, params: CorpusSearchParams) -> CorpusResult:
     """按当前用户权限调用现有检索服务，返回服务端构造的来源与结果页。"""
-    search = CatalogSearch(_search_request(params), deps.user, deps.secret_path)
+    user = load_current_user(deps.database, deps.user)
+    if deps.user is not None and user is None:
+        raise RuntimeError("当前账号不可继续检索")
+    search = CatalogSearch(_search_request(params), user, deps.secret_path)
     try:
         response = search_catalog(deps.database, deps.catalog, deps.catalog_state, search)
     except SearchUnavailable as error:

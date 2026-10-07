@@ -17,6 +17,7 @@ from app.modules.agent.models import (
     SourceRef,
 )
 from app.modules.agent.source_reader import source_readable
+from app.modules.auth.sessions import load_current_user
 
 HIDDEN_ANSWER = "该回答引用的来源当前不可读，相关内容已隐藏"
 HIDDEN_REVISION = "该候选引用的来源当前不可读，修订内容已隐藏"
@@ -29,13 +30,16 @@ class SourceGate:
 
     def __init__(self, database, user: dict | None, case_id: str) -> None:
         self.database = database
-        self.user = user
+        self._authenticated = user is not None
+        self.user = load_current_user(database, user)
         self.case_id = case_id
         self._readable: dict[tuple, bool] = {}
 
     def readable(self, raw: object) -> bool:
         ref = self._validated(raw)
         if ref is None:
+            return False
+        if self._authenticated and self.user is None:
             return False
         if ref.identity() not in self._readable:
             self._readable[ref.identity()] = source_readable(

@@ -34,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.campusAccessStatus.mockResolvedValue({
     campusVerified: false,
+    grantSource: null,
     currentStatus: "not_applied",
     applications: [],
   });
@@ -42,8 +43,8 @@ beforeEach(() => {
 it("submits self-reported identity and shows the persisted pending status", async () => {
   api.submitCampusAccessApplication.mockResolvedValue(application);
   api.campusAccessStatus
-    .mockResolvedValueOnce({ campusVerified: false, currentStatus: "not_applied", applications: [] })
-    .mockResolvedValueOnce({ campusVerified: false, currentStatus: "pending", applications: [application] });
+    .mockResolvedValueOnce({ campusVerified: false, grantSource: null, currentStatus: "not_applied", applications: [] })
+    .mockResolvedValueOnce({ campusVerified: false, grantSource: null, currentStatus: "pending", applications: [application] });
   const wrapper = mountView();
   await flushPromises();
 
@@ -59,4 +60,19 @@ it("submits self-reported identity and shows the persisted pending status", asyn
   expect(wrapper.text()).toContain("等待管理员审核");
   expect(wrapper.text()).toContain("合成申请人");
   expect(wrapper.find("form").exists()).toBe(false);
+});
+
+it("identifies a revoked legacy grant without inventing an application", async () => {
+  api.campusAccessStatus.mockResolvedValue({
+    campusVerified: false,
+    grantSource: "legacy",
+    currentStatus: "revoked",
+    applications: [],
+  });
+  const wrapper = mountView();
+  await flushPromises();
+
+  expect(wrapper.text()).toContain("已撤销");
+  expect(wrapper.text()).toContain("上次授权来源：旧系统");
+  expect(wrapper.text()).toContain("暂无申请记录");
 });

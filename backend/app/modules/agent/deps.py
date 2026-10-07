@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pymongo.database import Database
 
 from app.modules.agent.models import AgentArtifact, SourceRef
+from app.modules.agent.source_reader import revalidate_sources
 
 
 @dataclass(slots=True)
@@ -31,3 +32,10 @@ class ToolDeps:
     revision_path_claimed: bool = False
     wrote: bool = False
     write_record: dict | None = None
+
+    def sources_readable(self) -> bool:
+        """重验本轮检索命中与已读取证据；目录条目本身不代表已读取。"""
+        return revalidate_sources(
+            self.database, self.user, self.case_id,
+            [*self.hits, *self.evidence],
+        )

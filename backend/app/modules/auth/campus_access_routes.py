@@ -75,6 +75,7 @@ class AdminCampusApplicationView(CampusApplicationView):
 
 class CampusAccessStatusView(BaseModel):
     campusVerified: bool
+    grantSource: Literal["legacy", "application"] | None
     currentStatus: Literal[
         "not_applied", "pending", "approved", "rejected", "revoked"
     ]
@@ -86,6 +87,28 @@ class AdminCampusApplicationList(BaseModel):
     total: int
     page: int
     pageSize: int
+
+
+class LegacyCampusGrantView(BaseModel):
+    userId: str
+    username: str
+    role: Literal["admin", "user"]
+    grantSource: Literal["legacy"]
+
+
+class LegacyCampusGrantList(BaseModel):
+    items: list[LegacyCampusGrantView]
+    total: int
+    page: int
+    pageSize: int
+
+
+class LegacyCampusGrantRevokeView(BaseModel):
+    userId: str
+    username: str
+    campusVerified: bool
+    grantSource: Literal["legacy"]
+    revokedAt: str
 
 
 @router.get("/api/auth/campus-access", response_model=CampusAccessStatusView)
@@ -129,6 +152,41 @@ def list_campus_access_applications(
     return AccountManagementService(database).list_campus_access_applications(
         query, None if status == "all" else status, page, page_size
     )
+
+
+@router.get(
+    "/api/admin/campus-access-legacy-grants",
+    response_model=LegacyCampusGrantList,
+)
+def list_legacy_campus_grants(
+    query: Annotated[str, Query(alias="q", max_length=80)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(alias="pageSize", ge=1, le=100)] = 50,
+    database=Depends(get_database),
+    _admin: dict = Depends(require_admin),
+):
+    return AccountManagementService(database).list_legacy_campus_grants(
+        query, page, page_size
+    )
+
+
+@router.post(
+    "/api/admin/campus-access-users/{user_id}/revoke-legacy",
+    response_model=LegacyCampusGrantRevokeView,
+)
+def revoke_legacy_campus_access(
+    user_id: str,
+    body: CampusApplicationOperationRequest,
+    database=Depends(get_database),
+    admin: dict = Depends(require_admin),
+    _csrf: dict = Depends(require_csrf),
+):
+    try:
+        return AccountManagementService(database).revoke_legacy_campus_access(
+            admin, user_id, body.reason
+        )
+    except AccountManagementError as error:
+        raise HTTPException(error.status_code, error.detail) from error
 
 
 @router.post(

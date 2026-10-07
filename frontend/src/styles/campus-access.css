@@ -8,6 +8,7 @@
 .campus-access-current p { margin: 0; color: var(--ink-3); font-size: 12px; }
 .campus-access-current h2 { margin: 2px 0 0; font-size: 16px; font-weight: 650; }
 .campus-access-current span { display: block; margin-top: 4px; color: var(--ink-3); font-size: 13px; }
+.campus-access-current .campus-access-source { margin-top: 4px; font-size: 12px; }
 .campus-access-application { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
 .campus-access-application > header { display: flex; align-items: center; gap: 8px; color: var(--brand); }
 .campus-access-application h2, .campus-access-history h2 { margin: 0; color: var(--ink); font-size: 17px; font-weight: 650; }
@@ -57,6 +58,11 @@
 .campus-admin-action footer { display: flex; gap: 8px; margin-top: 10px; }
 .campus-admin-cancel { min-width: 72px; }
 .campus-admin-results { border-top: 1px solid var(--line); }
+.campus-admin-legacy { margin-top: 32px; border-top: 1px solid var(--line); }
+.campus-admin-legacy > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 10px; }
+.campus-admin-legacy > header div > span, .campus-admin-legacy > header > span { color: var(--ink-3); font-size: 12px; }
+.campus-admin-legacy h2 { margin: 3px 0 0; color: var(--ink); font-size: 17px; }
+.campus-admin-legacy .admin-state { margin: 0; }
 .campus-admin-row { padding: 16px 4px; border-bottom: 1px solid var(--line); }
 .campus-admin-row > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
 .campus-admin-applicant { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }

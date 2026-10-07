@@ -235,6 +235,7 @@ function actionLabel(action) {
     force_logout: "强制退出",
     account_status_change: "账号停用或恢复",
     account_role_change: "管理员角色变更",
+    campus_access_legacy_revoke: "撤销旧系统校内资格",
   }[action] || action;
 }
 

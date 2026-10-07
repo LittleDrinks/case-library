@@ -35,6 +35,7 @@ def test_applicant_can_submit_and_query_self_reported_campus_application(
     assert initial.status_code == 200
     assert initial.json() == {
         "campusVerified": False,
+        "grantSource": None,
         "currentStatus": "not_applied",
         "applications": [],
     }
@@ -88,6 +89,76 @@ def test_applicant_can_submit_and_query_self_reported_campus_application(
     assert draft.status_code == 200
     assert draft.json()["ownerId"] == session["user"]["id"]
     assert draft.json()["workflowStatus"] == "draft"
+
+
+def test_admin_can_revoke_legacy_grant_without_an_application_record(
+    client: TestClient,
+) -> None:
+    database = client.app.state.database
+    target = database.users.find_one({"username": "user"})
+    database.users.update_one(
+        {"id": target["id"]},
+        {"$set": {
+            "campus_verified": True,
+            "campus_access_grant_source": "legacy",
+        }},
+    )
+    admin = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin123"}
+    ).json()
+
+    listed = client.get("/api/admin/campus-access-legacy-grants?q=user")
+    assert listed.status_code == 200
+    assert listed.json()["items"] == [{
+        "userId": target["id"], "username": "user", "role": "user",
+        "grantSource": "legacy",
+    }]
+
+    revoked = client.post(
+        f"/api/admin/campus-access-users/{target['id']}/revoke-legacy",
+        headers={"X-CSRF-Token": admin["csrfToken"]},
+        json={"reason": "合成旧系统资格复核撤销"},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json() == {
+        "userId": target["id"], "username": "user", "campusVerified": False,
+        "grantSource": "legacy", "revokedAt": revoked.json()["revokedAt"],
+    }
+    stored = database.users.find_one({"id": target["id"]})
+    assert stored["campus_verified"] is False
+    assert stored["campus_access_grant_source"] == "legacy"
+    assert stored["campus_access_revoked_at"] == revoked.json()["revokedAt"]
+    assert database.campus_access_applications.count_documents({"userId": target["id"]}) == 0
+    operation = database.account_management_operations.find_one({
+        "action": "campus_access_legacy_revoke", "targetId": target["id"],
+    })
+    assert operation["reason"] == "合成旧系统资格复核撤销"
+    assert "campusApplicationId" not in operation
+
+    applicant = client.post(
+        "/api/auth/login", json={"username": "user", "password": "user123"}
+    ).json()
+    status = client.get("/api/auth/campus-access").json()
+    assert status["campusVerified"] is False
+    assert status["grantSource"] == "legacy"
+    assert status["currentStatus"] == "revoked"
+    pending = client.post(
+        "/api/auth/campus-access/applications",
+        headers={"X-CSRF-Token": applicant["csrfToken"]},
+        json={"applicantName": "合成重新申请", "studentNumber": "SYN-360-LEGACY"},
+    )
+    assert pending.status_code == 201
+    assert client.get("/api/auth/campus-access").json()["campusVerified"] is False
+    assert database.users.find_one({"id": target["id"]})[
+        "campus_access_grant_source"
+    ] == "legacy"
+
+    from app.core.database import initialize
+
+    initialize(database)
+    assert database.users.find_one({"id": target["id"]})[
+        "campus_verified"
+    ] is False
 
 
 def test_application_can_be_rejected_reapplied_approved_revoked_and_approved_again(

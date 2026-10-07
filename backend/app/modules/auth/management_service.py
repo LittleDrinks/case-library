@@ -95,9 +95,17 @@ class AccountManagementService:
             .sort([("submittedAt", -1), ("_id", -1)])
         )
         views = [_campus_application_view(self.database, row) for row in applications]
+        current_status = (
+            views[0]["status"]
+            if views
+            else "revoked"
+            if user.get("campus_access_revoked_at")
+            else "not_applied"
+        )
         return {
             "campusVerified": bool(user.get("campus_verified", False)),
-            "currentStatus": views[0]["status"] if views else "not_applied",
+            "grantSource": user.get("campus_access_grant_source"),
+            "currentStatus": current_status,
             "applications": views,
         }
 
@@ -200,6 +208,107 @@ class AccountManagementService:
             "pageSize": page_size,
         }
 
+    def list_legacy_campus_grants(self, query: str, page: int, page_size: int) -> dict:
+        criteria: dict = {
+            "campus_verified": True,
+            "campus_access_grant_source": "legacy",
+        }
+        if query:
+            expression = {"$regex": re.escape(query), "$options": "i"}
+            criteria["$or"] = [
+                {"username": expression},
+                {"id": expression},
+            ]
+        total = self.database.users.count_documents(criteria)
+        users = list(
+            self.database.users.find(
+                criteria, {"_id": 0, "id": 1, "username": 1, "role": 1}
+            )
+            .sort([("username", ASCENDING), ("id", ASCENDING)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return {
+            "items": [
+                {
+                    "userId": user["id"],
+                    "username": user["username"],
+                    "role": user["role"],
+                    "grantSource": "legacy",
+                }
+                for user in users
+            ],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+        }
+
+    def revoke_legacy_campus_access(
+        self, actor: dict, user_id: str, reason: str
+    ) -> dict:
+        def revoke(transaction) -> dict:
+            options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
+            user = self.database.users.find_one(
+                {
+                    "id": user_id,
+                    "campus_verified": True,
+                    "campus_access_grant_source": "legacy",
+                },
+                **options,
+            )
+            if not user:
+                raise AccountManagementError("旧系统校内资格不存在或已变化", 409)
+            now = datetime.now(UTC).isoformat()
+            changed = self.database.users.update_one(
+                {
+                    "_id": user["_id"],
+                    "campus_verified": True,
+                    "campus_access_grant_source": "legacy",
+                },
+                {"$set": {
+                    "campus_verified": False,
+                    "campus_access_revoked_at": now,
+                }},
+                **options,
+            )
+            if changed.matched_count != 1:
+                raise AccountManagementError("旧系统校内资格已变化，不能重复撤销", 409)
+            self._append_operation(
+                current_actor,
+                "campus_access_legacy_revoke",
+                reason,
+                user["id"],
+                user["username"],
+                "success",
+                "旧系统校内访问资格已撤销",
+                transaction,
+            )
+            return {
+                "userId": user["id"],
+                "username": user["username"],
+                "campusVerified": False,
+                "grantSource": "legacy",
+                "revokedAt": now,
+            }
+
+        try:
+            return self._with_transaction(revoke)
+        except AccountManagementError as error:
+            target = self.database.users.find_one(
+                {"id": user_id}, {"_id": 0, "username": 1}
+            )
+            self._record_rejection(
+                actor,
+                "campus_access_legacy_revoke",
+                reason,
+                user_id,
+                target.get("username") if target else None,
+                error,
+            )
+            raise
+
     def decide_campus_application(
         self, actor: dict, application_id: str, decision: str, reason: str
     ) -> dict:
@@ -234,7 +343,11 @@ class AccountManagementService:
                 self.database.users.update_one(
                     {"_id": user["_id"]},
                     {
-                        "$set": {"campus_verified": True},
+                        "$set": {
+                            "campus_verified": True,
+                            "campus_access_granted_by_application_id": application_id,
+                            "campus_access_grant_source": "application",
+                        },
                         "$unset": {"campus_access_revoked_at": ""},
                     },
                     **options,
@@ -309,7 +422,8 @@ class AccountManagementService:
                     "$set": {
                         "campus_verified": False,
                         "campus_access_revoked_at": now,
-                    }
+                    },
+                    "$unset": {"campus_access_granted_by_application_id": ""},
                 },
                 **options,
             )
