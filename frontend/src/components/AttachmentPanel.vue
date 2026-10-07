@@ -9,6 +9,7 @@ import { useConversationSources } from "../composables/useConversationSources.js
 
 const props = defineProps({
   caseRecord: { type: Object, required: true },
+  versionId: { type: String, default: "" },
   user: { type: Object, default: null },
   editable: { type: Boolean, required: true },
   beforeMutation: { type: Function, required: true },
@@ -38,9 +39,9 @@ async function loadAttachments() {
   error.value = "";
   try {
     [rows.value, materials.value, sources.value] = await Promise.all([
-      api.listAttachments(props.caseRecord.id),
-      api.listCaseMaterials(props.caseRecord.id),
-      api.listSources(props.caseRecord.id).then((result) => result.entries),
+      api.listAttachments(props.caseRecord.id, props.versionId),
+      api.listCaseMaterials(props.caseRecord.id, props.versionId),
+      api.listSources(props.caseRecord.id, props.versionId).then((result) => result.entries),
     ]);
   } catch (caught) {
     error.value = caught.message || "附件加载失败";
@@ -111,14 +112,15 @@ function removeSource(row) {
 
 function canDownload(row) {
   if (row.accessLevel === "public") return true;
-  if (row.accessLevel === "campus") return Boolean(props.user);
-  return Boolean(props.user && (
-    props.user.role === "admin" || props.user.id === props.caseRecord.ownerId
-  ));
+  if (row.accessLevel === "campus") {
+    return Boolean(props.user?.campusVerified || props.user?.role === "admin");
+  }
+  return Boolean(props.user && props.user.id === props.caseRecord.ownerId);
 }
 
 function restriction(row) {
-  return row.accessLevel === "campus" ? "登录后可下载" : "仅作者与管理员可下载";
+  if (row.accessLevel === "campus") return "仅已验证校内身份可下载";
+  return "仅作者可下载";
 }
 
 function sizeLabel(size) {

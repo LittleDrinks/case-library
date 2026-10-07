@@ -5,17 +5,28 @@ from __future__ import annotations
 from pymongo.database import Database
 
 from app.modules.agent.models import SourceRef
-from app.modules.cases.published import version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.sources import ordered_entries
 from app.modules.cases.service import CaseError
 
 SOURCE_TYPES = ("attachment", "material", "case")
 
 
-def area_rows(database: Database, case_id: str, version_id: str | None = None) -> dict[str, list[dict]]:
+def area_rows(
+    database: Database, case_id: str, version_id: str | None = None,
+    user: dict | None = None,
+) -> dict[str, list[dict]]:
+    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
     if version_id:
-        version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
+        version = admin_frozen_version(database, case, user, version_id)
+        if not version:
+            internal = bool(user and case.get("ownerId") == user.get("id"))
+            version = find_version(database, case, version_id, internal)
+            if not version or not version_readable(database, case, version_id, version, internal):
+                return _empty_rows()
         return _embedded_rows(version or {})
+    if not user or case.get("ownerId") != user.get("id"):
+        return _empty_rows()
     return {
         "attachment": list(database.attachments.find({"caseId": case_id}).sort("createdAt", 1)),
         "material": list(database.case_materials.find({"caseId": case_id}).sort("id", 1)),
@@ -27,7 +38,7 @@ def retained_sources(
     database: Database, case_id: str, user: dict | None = None,
     version_id: str | None = None,
 ) -> list[SourceRef]:
-    record = _catalog_record(database, case_id, version_id)
+    record = _catalog_record(database, case_id, user, version_id)
     refs = [_ref(kind, row, case_id) for kind in SOURCE_TYPES
             for row in record.get(_field(kind), [])]
     by_key = {(ref.kind, ref.id): ref for ref in refs}
@@ -45,18 +56,26 @@ def _embedded_rows(record: dict) -> dict[str, list[dict]]:
             "case": record.get("caseSources", [])}
 
 
-def _catalog_record(database, case_id: str, version_id: str | None) -> dict:
+def _empty_rows() -> dict[str, list[dict]]:
+    return {"attachment": [], "material": [], "case": []}
+
+
+def _catalog_record(database, case_id: str, user: dict | None, version_id: str | None) -> dict:
     case = database.cases.find_one({"id": case_id}) or {"id": case_id}
     if not version_id:
-        rows = area_rows(database, case_id)
+        rows = area_rows(database, case_id, user=user)
         return {**case, "attachments": rows["attachment"],
                 "materials": rows["material"], "caseSources": rows["case"]}
-    version = database.case_versions.find_one({"id": version_id, "caseId": case_id})
-    if not version or not version_readable(database, case, version_id, version, False):
+    rows = area_rows(database, case_id, version_id, user)
+    if not any(rows.values()):
         return {"id": version_id, "caseId": case_id, "document": {},
                 "attachments": [], "materials": [], "caseSources": []}
+    version = admin_frozen_version(database, case, user, version_id)
+    if not version:
+        internal = bool(user and case.get("ownerId") == user.get("id"))
+        version = find_version(database, case, version_id, internal)
     return {"id": version_id, "caseId": case_id, "document": version.get("document", {}),
-            **_embedded_rows(version)}
+            **rows}
 
 
 def _ref(kind: str, row: dict, case_id: str) -> SourceRef:
@@ -77,9 +96,10 @@ def _ref(kind: str, row: dict, case_id: str) -> SourceRef:
 
 
 def selection_from_parts(
-    database: Database, case_id: str, parts: list[dict], version_id: str | None = None
+    database: Database, case_id: str, parts: list[dict], version_id: str | None = None,
+    user: dict | None = None,
 ) -> list[dict]:
-    refs = retained_sources(database, case_id, version_id=version_id)
+    refs = retained_sources(database, case_id, user, version_id)
     selected = []
     for part in parts:
         if part.get("type") != "data-source":

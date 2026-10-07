@@ -19,7 +19,10 @@ const items = [
 const nextItems = [{ id: "case-2", kind: "case", title: "案例二" }];
 
 function snapshotOf(overrides = {}) {
-  return { revision: 1, query: "课程思政", items, ...overrides };
+  return {
+    revision: 1, query: "课程思政",
+    search: { q: "课程思政", kind: "all", pageSize: 20 }, items, ...overrides,
+  };
 }
 
 function sseHeaders() {
@@ -138,7 +141,8 @@ test("新修订到达后旧流式回答不得覆盖新回答", async () => {
   await flushPromises();
   expect(fetch).toHaveBeenCalledTimes(2);
   const body = JSON.parse(fetch.mock.calls[1][1].body);
-  expect(body.items.map((item) => item.id)).toEqual(["case-2"]);
+  expect(body.search.q).toBe("课程思政");
+  expect(body.items).toBeUndefined();
   expect(wrapper.text()).toContain("新回答");
   expect(wrapper.text()).not.toContain("旧回答");
 });
@@ -198,7 +202,7 @@ test("相同查询再次提交得到新修订仍重新生成", async () => {
   expect(JSON.parse(fetch.mock.calls[1][1].body).query).toBe("课程思政");
 });
 
-test("同 ID 摘录变化的新快照触发重新生成", async () => {
+test("同 ID 摘录变化的新快照触发重新生成但不发送客户端结果", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse("回答"));
   vi.stubGlobal("fetch", fetch);
   const wrapper = mountAnswer();
@@ -208,7 +212,8 @@ test("同 ID 摘录变化的新快照触发重新生成", async () => {
   await flushPromises();
   expect(fetch).toHaveBeenCalledTimes(2);
   const body = JSON.parse(fetch.mock.calls[1][1].body);
-  expect(body.items[0].summary).toBe("更新后的摘要");
+  expect(body.search.q).toBe("课程思政");
+  expect(body.items).toBeUndefined();
 });
 
 test("四种标记形式解析并统一呈现顺序编号，未知标记保持纯文本", async () => {
@@ -298,8 +303,8 @@ test("摘要请求最多携带当前结果前 15 条", async () => {
   mountAnswer({ snapshot: snapshotOf({ items: many }) });
   await flushPromises();
   const body = JSON.parse(fetch.mock.calls[0][1].body);
-  expect(body.items).toHaveLength(15);
-  expect(body.items[14].id).toBe("m-14");
+  expect(body.search).toEqual({ q: "课程思政", kind: "all", pageSize: 20 });
+  expect(body.items).toBeUndefined();
 });
 
 test("未登录时保留登录约束且不发起请求", async () => {

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
 
 STORAGE_FIELDS = (
@@ -169,29 +169,33 @@ def list_case_sources(
     database: Database, case_id: str, user: dict | None, version_id: str | None, origin: str
 ) -> list[dict]:
     case = _case(database, case_id)
-    _require_source_reader(case, user)
+    _require_source_reader(database, case, user, version_id)
     internal = _internal_reader(case, user)
-    rows = _source_rows(database, case, internal, version_id)
+    rows = _source_rows(database, case, user, internal, version_id)
     return [source_view(database, row, user, origin, internal) for row in rows]
 
 
-def _require_source_reader(case: dict, user: dict | None) -> None:
+def _require_source_reader(database, case: dict, user: dict | None, version_id: str | None) -> None:
     allowed = case["publicationStatus"] == "public" or bool(
-        user and (user["role"] == "admin" or user["id"] == case["ownerId"])
+        user and user["id"] == case["ownerId"]
     )
+    allowed = allowed or bool(admin_frozen_version(database, case, user, version_id))
     if not allowed:
         raise CaseError(404, "案例不存在")
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
+    return bool(user and user["id"] == case["ownerId"])
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
     return _is_internal(case, user) and case["publicationStatus"] != "public"
 
 
-def _source_rows(database, case: dict, internal: bool, version_id: str | None):
+def _source_rows(database, case: dict, user, internal: bool, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("caseSources", [])
     if not version_id and internal:
         return list(database.case_sources.find({"caseId": case["id"]}).sort("id", 1))
     return _version_rows(database, case, version_id or case.get("publishedVersionId"), internal)

@@ -189,4 +189,10 @@ class SearchSummaryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(max_length=200)
-    items: list[dict[str, object]] = Field(max_length=15)
+    search: SearchRequest
+
+    @model_validator(mode="after")
+    def query_matches_search(self) -> SearchSummaryRequest:
+        if self.search.q.strip() != self.query.strip():
+            raise ValueError("summary query must match its search request")
+        return self

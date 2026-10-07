@@ -108,11 +108,20 @@ def _now() -> str:
 
 
 def _can_read(case: dict, user: dict | None) -> bool:
-    return case["publicationStatus"] == "public" or _is_internal(case, user)
+    return (
+        case["publicationStatus"] == "public"
+        or _is_internal(case, user)
+        or bool(
+            user
+            and user["role"] == "admin"
+            and case.get("workflowStatus") == "published"
+            and case.get("publishedVersionId")
+        )
+    )
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
+    return bool(user and case["ownerId"] == user["id"])
 
 
 def _can_write(case: dict, user: dict) -> bool:
@@ -163,9 +172,81 @@ def get_public_case(database: Database, case_id: str) -> dict:
 def _reader_view(database: Database, case: dict, user: dict | None) -> dict:
     if _is_internal(case, user):
         return internal_case_view(case, user)
+    if user and user["role"] == "admin":
+        return _admin_published_view(database, case, user)
     from app.modules.cases.published import PublishedCaseReader
 
     return PublishedCaseReader(database).get(case)
+
+
+def _admin_published_view(database, case: dict, user: dict) -> dict:
+    version = database.case_versions.find_one(
+        {"id": case.get("publishedVersionId"), "caseId": case["id"]}
+    )
+    if not version:
+        raise CaseError(404, "案例不存在")
+    return frozen_case_view(case, version, user)
+
+
+def frozen_case_view(case: dict, version: dict, user: dict) -> dict:
+    from app.modules.cases.published import published_view
+
+    view = published_view(case, version)
+    view.update(
+        {
+            "workflowStatus": case["workflowStatus"],
+            "publicationStatus": case["publicationStatus"],
+            "revision": case["revision"],
+            "publishedVersionId": case.get("publishedVersionId"),
+            "submittedVersionId": case.get("submittedVersionId"),
+            "submittedAt": case.get("submittedAt"),
+            "ownerId": case["ownerId"],
+            "availableActions": available_actions(case, user),
+        }
+    )
+    return view
+
+
+def get_review_case(
+    database: Database, case_id: str, user: dict, version_id: str | None = None
+) -> dict:
+    from app.modules.cases.published import admin_review_record
+
+    if user.get("role") != "admin":
+        raise CaseError(403, "仅管理员可查看投稿审核")
+    case = database.cases.find_one({"id": case_id})
+    if not case:
+        raise CaseError(404, "投稿不存在")
+    selected = version_id or case.get("submittedVersionId") or case.get("publishedVersionId")
+    version, status = admin_review_record(database, case, user, selected)
+    if not version:
+        raise CaseError(404, "投稿不存在")
+    view = frozen_case_view(case, version, user)
+    view["reviewVersionId"] = version["id"]
+    view["reviewRecordStatus"] = status
+    view["isCurrentReviewVersion"] = bool(
+        (status in {"pending", "reviewing"}
+            and case.get("submittedVersionId") == version["id"])
+        or (status == "published" and case.get("publishedVersionId") == version["id"])
+    )
+    if status in {"withdrawn", "returned"}:
+        view["revision"] = version["sourceRevision"]
+        view["availableActions"] = []
+    if status == "returned":
+        event = database.lifecycle_events.find_one(
+            {"caseId": case_id, "versionId": version["id"], "action": "reject"}
+        )
+        if event:
+            view["reviewFeedback"] = {
+                "action": "reject",
+                "reasonTypes": event.get("reasonTypes", []),
+                "message": event.get("message", ""),
+                "annotationIds": event.get("annotationIds", []),
+                "versionNumber": version["number"],
+                "actorId": event["actorId"],
+                "createdAt": event["createdAt"],
+            }
+    return view
 
 
 def list_cases(database: Database, user: dict | None, scope: str) -> list[dict]:
@@ -232,10 +313,77 @@ def _list_my_cases(database: Database, user: dict | None) -> list[dict]:
 
 
 def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
+    from app.modules.cases.published import admin_review_record
+
     if not user or user["role"] != "admin":
         raise CaseError(403, "仅管理员可查看管理队列")
-    rows = database.cases.find({}).sort("updatedAt", DESCENDING)
-    return [case_card(case, include_owner=True, user=user) for case in rows]
+    rows = database.cases.find(
+        {
+            "$or": [
+                {"workflowStatus": {"$in": ["pending", "reviewing"]}},
+                {
+                    "workflowStatus": "published",
+                    "publicationStatus": {"$in": ["public", "hidden"]},
+                },
+            ]
+        }
+    ).sort("updatedAt", DESCENDING)
+    current = [
+        card
+        for case in rows
+        if (card := _admin_case_card(database, case, user)) is not None
+    ]
+    seen = {
+        (card["id"], card["reviewVersionId"])
+        for card in current
+        if card.get("reviewVersionId")
+    }
+    events = database.lifecycle_events.find(
+        {"action": {"$in": ["reject", "withdraw"]}},
+        {"caseId": 1, "versionId": 1, "action": 1},
+    ).sort("createdAt", DESCENDING)
+    for event in events:
+        key = (event.get("caseId"), event.get("versionId"))
+        if key in seen:
+            continue
+        case = database.cases.find_one({"id": key[0]})
+        if not case:
+            continue
+        version, status = admin_review_record(database, case, user, key[1])
+        if not version:
+            continue
+        snapshot = frozen_case_view(case, version, user)
+        card = case_card(snapshot, include_owner=True, user=user)
+        card.update({
+            "reviewVersionId": version["id"],
+            "reviewRecordStatus": status,
+            "versionNumber": version["number"],
+        })
+        current.append(card)
+        seen.add(key)
+    return current
+
+
+def _admin_case_card(database, case: dict, user: dict) -> dict | None:
+    version_id = (
+        case.get("submittedVersionId")
+        if case.get("workflowStatus") in {"pending", "reviewing"}
+        else case.get("publishedVersionId")
+    )
+    version = database.case_versions.find_one(
+        {"id": version_id, "caseId": case["id"]}
+    )
+    if not version:
+        return None
+    snapshot = frozen_case_view(case, version, user)
+    card = case_card(snapshot, include_owner=True, user=user)
+    card.update({"reviewVersionId": version["id"], "versionNumber": version["number"]})
+    card["reviewRecordStatus"] = (
+        case.get("workflowStatus")
+        if case.get("workflowStatus") in {"pending", "reviewing"}
+        else "published"
+    )
+    return card
 
 
 def create_case(database: Database, body: dict, user: dict) -> dict:

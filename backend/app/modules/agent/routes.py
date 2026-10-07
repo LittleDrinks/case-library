@@ -52,12 +52,13 @@ from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
 from app.modules.cases.service import CaseError
 from app.modules.cases.published import (
+    admin_frozen_version,
     published_view,
     version_readable,
     version_readable_by_id,
 )
 from app.modules.cases.lifecycle import WITHDRAWABLE_STATES as REVIEWABLE_STATES
-from app.modules.cases.service import case_view, get_case
+from app.modules.cases.service import case_view, frozen_case_view, get_case
 from app.modules.skills.service import BoundSkill, SkillError, bind_published_skill
 
 
@@ -152,12 +153,17 @@ def _require_review_admin(user: dict) -> None:
 
 
 def _review_case(database, case_id: str, user: dict) -> dict:
-    """审核对话门禁：仅管理员，且仅围绕待审（pending/reviewing）案例的当前工作稿。"""
+    """审核对话只绑定管理员当前有权审核的冻结投稿。"""
     case = _existing_case(database, case_id)
     _require_review_admin(user)
     if case.get("workflowStatus") not in REVIEWABLE_STATES:
         raise HTTPException(status_code=409, detail="仅待审案例可使用审核对话")
-    return case
+    version = admin_frozen_version(
+        database, case, user, case.get("submittedVersionId")
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="投稿不存在")
+    return frozen_case_view(case, version, user)
 
 
 def _conversation(
@@ -168,7 +174,8 @@ def _conversation(
     if mode == REVIEW_MODE:
         if version_id:
             raise HTTPException(status_code=422, detail="审核对话绑定当前待审工作稿，不接受 versionId")
-        return Conversation(_review_case(database, case_id, user), None, True, True)
+        case = _review_case(database, case_id, user)
+        return Conversation(case, case["submittedVersionId"], True, True)
     if mode is not None:
         raise HTTPException(status_code=422, detail="对话模式无效")
     if not version_id:
@@ -197,8 +204,10 @@ def _thread_conversation(
     thread = _thread(repository, thread_id, case_id, user["id"])
     _check_thread_version(thread, version_id)
     if thread.mode == REVIEW_MODE:
-        _require_review_admin(user)
-        return Conversation(case, None, True, True), thread
+        review_case = _review_case(database, case_id, user)
+        if thread.version_id != review_case.get("submittedVersionId"):
+            raise HTTPException(status_code=409, detail="审核投稿已更新")
+        return Conversation(review_case, thread.version_id, True, True), thread
     if thread.version_id is None:
         if case["ownerId"] != user["id"]:
             raise HTTPException(status_code=403, detail="仅案例作者可使用对话助手")
@@ -241,7 +250,7 @@ def show_thread(
         REVIEW_MODE if conversation.review else None,
     )
     snapshot = repository.snapshot(thread)
-    return visible_snapshot(database, snapshot, user)
+    return visible_snapshot(database, snapshot, user, conversation.version_id)
 
 
 async def _adapter(request: Request, message_id: str):
@@ -356,7 +365,9 @@ def _validate_plan(
     database, case: dict, plan: RunPlan, version_id: str | None = None,
     user: dict | None = None, thread_id: str | None = None,
 ) -> RunPlan:
-    plan.selected = selection_from_parts(database, case["id"], plan.parts, version_id)
+    plan.selected = selection_from_parts(
+        database, case["id"], plan.parts, version_id, user
+    )
     plan.selections = _document_selections(case.get("document") or {}, plan.parts)
     if not plan.retry_message_id:
         plan.parts = _persist_selection_snapshots(plan.parts, plan.selections)
@@ -555,7 +566,7 @@ def list_threads(
 ) -> list[AgentThreadSummary]:
     conversation = _conversation(database, case_id, user, version_id, mode)
     threads = _repository(database).list_threads(
-        case_id, user["id"], version_id or None,
+        case_id, user["id"], conversation.version_id,
         REVIEW_MODE if conversation.review else None,
     )
     return [_summary(thread) for thread in threads]
@@ -589,11 +600,11 @@ def show_named_thread(
     user: dict = Depends(require_user),
 ) -> AgentSnapshot:
     repository = _repository(database)
-    _, thread = _thread_conversation(
+    conversation, thread = _thread_conversation(
         database, case_id, user, repository, thread_id, version_id
     )
     snapshot = repository.snapshot(thread)
-    return visible_snapshot(database, snapshot, user)
+    return visible_snapshot(database, snapshot, user, conversation.version_id)
 
 
 @router.patch("/{case_id}/agent/threads/{thread_id}")
@@ -654,14 +665,17 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
     request.app.state.run_supervisor.start(context)
     return live_response(
         repository, context.run.id, case_id, user,
-        _event_access_check(database, conversation, thread),
-        parts_projector(database, user, case_id),
+        _event_access_check(database, user, conversation, thread),
+        parts_projector(database, user, case_id, conversation.version_id),
         context.worker_id,
+        version_id=conversation.version_id,
     )
 
 
 def _plan_for(repository, thread, adapter, database, user, conversation):
-    project = parts_projector(database, user, conversation.case["id"])
+    project = parts_projector(
+        database, user, conversation.case["id"], conversation.version_id
+    )
     return _validate_plan(
         database, conversation.case, _run_plan(repository, thread, adapter, project),
         conversation.version_id, user, thread.id,
@@ -785,7 +799,9 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
 def _capabilities(conversation: Conversation, bounds) -> list:
     """审核对话在读者只读工具面之上允许加载已发布 Skill；写工具永不出现。"""
     if conversation.reader:
-        capabilities = [reader_capability(internal=conversation.version_id is None)]
+        capabilities = [reader_capability(
+            internal=conversation.review or conversation.version_id is None
+        )]
         if conversation.review:
             capabilities += [bound_skill_capability(bound, defer_loading=False) for bound in bounds]
         return capabilities
@@ -952,17 +968,28 @@ def thread_events(
 
 
 def _event_response(database, user, repository, conversation, thread, cursor):
-    access_check = _event_access_check(database, conversation, thread)
-    project = parts_projector(database, user, thread.case_id)
+    access_check = _event_access_check(database, user, conversation, thread)
+    project = parts_projector(
+        database, user, thread.case_id, conversation.version_id
+    )
     if thread.active_run_id:
         return live_response(repository, thread.active_run_id, thread.case_id, user,
-                             access_check, project)
+                             access_check, project, version_id=conversation.version_id)
     return live_event_response(repository, thread, max(cursor, 0), access_check, project=project)
 
 
-def _event_access_check(database, conversation: Conversation, thread: AgentThread):
+def _event_access_check(database, user, conversation: Conversation, thread: AgentThread):
     if not conversation.version_id:
         return None
+    if conversation.review:
+        return lambda: bool(
+            admin_frozen_version(
+                database,
+                database.cases.find_one({"id": thread.case_id}) or {},
+                user,
+                thread.version_id,
+            )
+        )
     return lambda: version_readable_by_id(database, thread.case_id, thread.version_id)
 
 

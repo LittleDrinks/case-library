@@ -54,15 +54,15 @@ def _succeeded(ref: SourceRef, text: str) -> dict:
 
 
 def _area_row(database, case_id: str, kind: str, source_id: str,
-              version_id: str | None = None) -> dict | None:
-    rows = area_rows(database, case_id, version_id)[kind]
+              version_id: str | None = None, user: dict | None = None) -> dict | None:
+    rows = area_rows(database, case_id, version_id, user)[kind]
     keys = ("materialId", "id") if kind == "material" else ("id",)
     return next((row for row in rows if any(row.get(key) == source_id for key in keys)), None)
 
 
 def _read_attachment(database, store, user, case_id: str, source_id: str,
                      version_id: str | None = None) -> dict:
-    row = _area_row(database, case_id, "attachment", source_id, version_id)
+    row = _area_row(database, case_id, "attachment", source_id, version_id, user)
     if not row:
         return _failed(UNAVAILABLE, "附件已删除或不在资料区")
     try:
@@ -104,7 +104,7 @@ def _stream_text(content, row: dict) -> str:
 
 def _read_case(database, user: dict | None, case_id: str, source_id: str,
                version_id: str | None = None) -> dict:
-    mounted = _area_row(database, case_id, "case", source_id, version_id)
+    mounted = _area_row(database, case_id, "case", source_id, version_id, user)
     if mounted:
         return _read_pinned_case(database, user, mounted)
     return _read_published_case(database, source_id)
@@ -155,24 +155,32 @@ def _read_knowledge(database, source_id: str) -> dict:
     return _succeeded(ref, section.get("content") or "")
 
 
-def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
+def source_readable(
+    database, user: dict | None, case_id: str, ref: SourceRef,
+    version_id: str | None = None,
+) -> bool:
     if ref.kind == "attachment":
-        return _area_entry_available(database, user, case_id, ref)
+        return _area_entry_available(database, user, case_id, ref, version_id)
     if ref.kind == "case" and ref.version_id and ref.source_case_id:
         return source_case_content_available(
             database, ref.source_case_id, user, ref.version_id, False
         )
-    result = read_source(database, None, user, case_id, ref.kind, ref.id)
+    result = read_source(database, None, user, case_id, ref.kind, ref.id, version_id)
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
 
 
-def _area_entry_available(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
-    case = database.cases.find_one({"id": case_id}) or {"id": case_id}
-    entry = next((item for item in ordered_entries(database, case, user, "")
+def _area_entry_available(
+    database, user: dict | None, case_id: str, ref: SourceRef,
+    version_id: str | None = None,
+) -> bool:
+    from app.modules.agent.case_area import _catalog_record
+
+    record = _catalog_record(database, case_id, user, version_id)
+    entry = next((item for item in ordered_entries(database, record, user, "")
                   if item["sourceType"] == ref.kind and item["id"] == ref.id), None)
     return bool(entry and entry.get("contentAvailable"))
 
 
 def revalidate_sources(database, user: dict | None, case_id: str,
-                       refs: list[SourceRef]) -> bool:
-    return all(source_readable(database, user, case_id, ref) for ref in refs)
+                       refs: list[SourceRef], version_id: str | None = None) -> bool:
+    return all(source_readable(database, user, case_id, ref, version_id) for ref in refs)

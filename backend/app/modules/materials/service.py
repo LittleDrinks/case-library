@@ -179,9 +179,7 @@ def can_read_material(material: dict, user: dict | None) -> bool:
         return True
     if material.get("accessLevel") == "campus":
         return campus_verified(user)
-    return bool(
-        user and (user["role"] == "admin" or material.get("createdBy") == user["id"])
-    )
+    return bool(user and material.get("createdBy") == user["id"])
 
 
 def material_content_available(material: dict, user: dict | None) -> bool:

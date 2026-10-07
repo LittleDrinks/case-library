@@ -8,6 +8,8 @@ import { api } from "../api.js";
 const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
+  versionId: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
   annotationRefreshToken: { type: Number, default: 0 },
 });
 const emit = defineEmits([
@@ -48,7 +50,11 @@ async function loadAnnotations() {
   loading.value = true;
   error.value = "";
   try {
-    const next = props.user ? await api.listAnnotations(props.caseRecord.id) : [];
+    const loaded = props.user
+      ? await api.listAnnotations(props.caseRecord.id, props.versionId || undefined) : [];
+    const next = !props.versionId && props.caseRecord.workflowStatus === "draft"
+      && props.user?.id === props.caseRecord.ownerId
+      ? loaded.filter((row) => row.versionId == null) : loaded;
     if (generation !== loadGeneration) return;
     annotations.value = next;
     announce();
@@ -60,11 +66,13 @@ async function loadAnnotations() {
 }
 
 function canEdit(annotation) {
-  return annotation.createdBy === props.user?.id && annotation.status === "pending";
+  return !props.readOnly
+    && annotation.createdBy === props.user?.id && annotation.status === "pending";
 }
 
 function canDiscuss(annotation) {
-  if (annotation.status !== "pending" || (annotation.anchorState || "active") !== "active") return false;
+  if (props.readOnly || annotation.status !== "pending"
+      || (annotation.anchorState || "active") !== "active") return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -72,7 +80,7 @@ function canDiscuss(annotation) {
 }
 
 function canReply(annotation) {
-  if ((annotation.anchorState || "active") !== "active") return false;
+  if (props.readOnly || (annotation.anchorState || "active") !== "active") return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -213,7 +221,7 @@ async function merge(annotation) {
   }
 }
 
-watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
+watch(() => [props.caseRecord.id, props.versionId], loadAnnotations, { immediate: true });
 watch(() => props.annotationRefreshToken, loadAnnotations);
 </script>
 
@@ -288,7 +296,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
           </div>
             <button v-if="canReply(annotation)" class="comment-reply-toggle" type="button" :aria-expanded="replyingId === annotation.id" @click="replyingId = replyingId === annotation.id ? '' : annotation.id"><CornerUpLeft :size="14" />回复</button>
           <button
-            v-if="annotation.status === 'pending' && user?.id === caseRecord.ownerId"
+            v-if="!readOnly && annotation.status === 'pending' && user?.id === caseRecord.ownerId"
             class="comment-status-action"
             type="button"
             :disabled="saving"

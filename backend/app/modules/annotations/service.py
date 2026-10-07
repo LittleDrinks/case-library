@@ -64,15 +64,15 @@ def _case(database: Database, case_id: str, user: dict, session=None) -> dict:
     return case
 
 
-def _review_version(database: Database, case: dict, session=None) -> dict:
-    version = _find(
-        database.case_versions,
-        {"id": case.get("submittedVersionId"), "caseId": case["id"]},
-        session,
-    )
-    if case["workflowStatus"] != "reviewing" or not version:
-        raise CaseError(409, "仅审核中的版本可添加批注")
-    return version
+def _review_version(
+    database: Database, case: dict, version_id: str | None, session=None
+) -> tuple[dict, str]:
+    from app.modules.cases.published import admin_review_record
+
+    version, status = admin_review_record(database, case, {"role": "admin"}, version_id)
+    if not version or status not in {"reviewing", "withdrawn"}:
+        raise CaseError(409, "仅审核中或已撤回的投稿版本可添加指导批注")
+    return version, status
 
 
 def _utf16_size(value: str) -> int:
@@ -317,17 +317,21 @@ def reconcile_document_annotations(
     )
 
 
-def _target_document(database, case: dict, body: dict, user: dict, session):
+def _target_document(
+    database, case: dict, body: dict, user: dict, version_id: str | None, session
+):
     if body["source"] == "admin":
         if user["role"] != "admin":
             raise CaseError(403, "仅管理员可添加人工审核批注")
-        version = _review_version(database, case, session)
-        return version["document"], version["id"]
+        version, status = _review_version(database, case, version_id, session)
+        return version["document"], version, status
     if body["source"] != "manual" or case["ownerId"] != user["id"]:
         raise CaseError(403, "仅案例作者可添加手动批注")
+    if version_id:
+        raise CaseError(403, "作者手动批注只能写入当前私稿")
     if case["workflowStatus"] != "draft":
         raise CaseError(409, "仅草稿案例可添加手动批注")
-    return case["document"], None
+    return case["document"], None, None
 
 
 def _touch_case(database, case: dict, session) -> None:
@@ -356,16 +360,24 @@ def _annotation(case: dict, body: dict, user: dict, version_id: str | None) -> d
     }
 
 
-def _create_in_transaction(database, case_id: str, body: dict, user: dict, session) -> dict:
+def _create_in_transaction(
+    database, case_id: str, body: dict, user: dict,
+    version_id: str | None, session,
+) -> dict:
     case = _case(database, case_id, user, session)
-    document, version_id = _target_document(database, case, body, user, session)
-    if body["revision"] != case["revision"]:
-        raise RevisionConflict(case["revision"])
+    document, version, record_status = _target_document(
+        database, case, body, user, version_id, session
+    )
+    current_revision = (
+        version["sourceRevision"] if record_status == "withdrawn" else case["revision"]
+    ) if version else case["revision"]
+    if body["revision"] != current_revision:
+        raise RevisionConflict(current_revision)
     _require_anchor(document, body)
     _touch_case(database, case, session)
-    annotation = _annotation(case, body, user, version_id)
+    annotation = _annotation(case, body, user, version["id"] if version else None)
     database.annotations.insert_one(annotation, session=session)
-    return _view(annotation, case["revision"])
+    return _view(annotation, current_revision)
 
 
 def _transaction(database, callback):
@@ -373,17 +385,48 @@ def _transaction(database, callback):
         return session.with_transaction(lambda active: callback(active))
 
 
-def create_annotation(database: Database, case_id: str, body: dict, user: dict) -> dict:
+def create_annotation(
+    database: Database, case_id: str, body: dict, user: dict,
+    version_id: str | None = None,
+) -> dict:
     return _transaction(
         database,
-        lambda session: _create_in_transaction(database, case_id, body, user, session),
+        lambda session: _create_in_transaction(
+            database, case_id, body, user, version_id, session
+        ),
     )
 
 
-def list_annotations(database: Database, case_id: str, user: dict) -> list[dict]:
+def list_annotations(
+    database: Database, case_id: str, user: dict, version_id: str | None = None
+) -> list[dict]:
     case = _case(database, case_id, user)
-    rows = database.annotations.find(_list_query(case, user)).sort("createdAt", 1)
-    return [_view(row, case["revision"]) for row in rows]
+    if version_id:
+        if user["role"] == "admin":
+            from app.modules.cases.published import admin_review_record
+
+            version, _status = admin_review_record(database, case, user, version_id)
+            if not version:
+                raise CaseError(404, "投稿不存在")
+        else:
+            from app.modules.cases.published import find_version
+
+            version = find_version(database, case, version_id, True)
+            if not version:
+                raise CaseError(404, "案例版本不存在")
+        query = {"caseId": case["id"], "versionId": version_id}
+    elif user["role"] == "admin":
+        selected = case.get("submittedVersionId") or case.get("publishedVersionId")
+        if not selected:
+            raise CaseError(404, "投稿不存在")
+        return list_annotations(database, case_id, user, selected)
+    else:
+        version = None
+        query = _list_query(case, user)
+    if user["role"] == "admin":
+        query["source"] = {"$in": ["admin", "ai"]}
+    rows = database.annotations.find(query).sort("createdAt", 1)
+    return [_view(row, row.get("revision", case["revision"])) for row in rows]
 
 
 def _list_query(case: dict, user: dict) -> dict:

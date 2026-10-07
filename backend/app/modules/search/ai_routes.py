@@ -3,7 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.config import Settings
-from app.core.dependencies import get_database, get_settings
+from app.core.dependencies import (
+    get_catalog_state,
+    get_database,
+    get_search_catalog,
+    get_settings,
+)
 from app.modules.ai.quota import AIQuotaError, acquire_chat_lease
 from app.modules.ai.service import AIConfigurationError, resolve_provider
 from app.modules.auth.dependencies import require_csrf, require_user
@@ -15,6 +20,7 @@ from app.modules.search.ai import (
     summary_instructions,
     summary_response,
 )
+from app.modules.search.service import CatalogSearch, search_catalog
 
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -53,6 +59,8 @@ def _lease(database, user_id: str, selection):
 async def summary(
     request: Request,
     database=Depends(get_database),
+    catalog=Depends(get_search_catalog),
+    catalog_state=Depends(get_catalog_state),
     settings: Settings = Depends(get_settings),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
@@ -62,7 +70,14 @@ async def summary(
     body = parse_summary_request(adapter)
     if latest_query(adapter) != body.query:
         raise HTTPException(status_code=422, detail="检索摘要问题不一致")
+    results = search_catalog(
+        database,
+        catalog,
+        catalog_state,
+        CatalogSearch(body.search, user, settings.app_secret_file),
+    )
     selection = _selection(database, settings, user["id"])
     lease = _lease(database, user["id"], selection)
-    stream = stream_summary(adapter, selection, settings, summary_instructions(body), lease)
+    instructions = summary_instructions(body, results["items"])
+    stream = stream_summary(adapter, selection, settings, instructions, lease)
     return summary_response(adapter, stream)

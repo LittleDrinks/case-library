@@ -3,7 +3,7 @@ from __future__ import annotations
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
 from app.modules.materials.service import can_read_material
 from app.modules.search.outbox import SearchOutbox
@@ -31,10 +31,11 @@ def _case(database: Database, case_id: str) -> dict:
     return case
 
 
-def _require_reader(case: dict, user: dict | None) -> None:
+def _require_reader(database, case: dict, user: dict | None, version_id: str | None) -> None:
     allowed = case["publicationStatus"] == "public" or bool(
-        user and (user["role"] == "admin" or user["id"] == case["ownerId"])
+        user and user["id"] == case["ownerId"]
     )
+    allowed = allowed or bool(admin_frozen_version(database, case, user, version_id))
     if not allowed:
         raise CaseError(404, "案例不存在")
 
@@ -69,7 +70,7 @@ def list_case_materials(
     database: Database, case_id: str, user: dict | None, version_id: str | None
 ) -> list[dict]:
     case = _case(database, case_id)
-    _require_reader(case, user)
+    _require_reader(database, case, user, version_id)
     rows = _material_rows(database, case, user, version_id)
     if _internal_reader(case, user):
         return [material_view(row) for row in rows]
@@ -82,7 +83,7 @@ def list_case_materials(
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
+    return bool(user and user["id"] == case["ownerId"])
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
@@ -90,6 +91,9 @@ def _internal_reader(case: dict, user: dict | None) -> bool:
 
 
 def _material_rows(database, case: dict, user: dict | None, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("materials", [])
     internal = _internal_reader(case, user)
     if not version_id and internal:
         return snapshot_materials(database, case["id"], None)

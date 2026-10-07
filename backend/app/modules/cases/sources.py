@@ -14,7 +14,7 @@ from app.modules.materials.service import material_content_available
 def is_internal(record: dict, user: dict | None) -> bool:
     return bool(
         user and record.get("ownerId")
-        and (user["role"] == "admin" or record["ownerId"] == user["id"])
+        and record["ownerId"] == user["id"]
     )
 
 
@@ -115,7 +115,7 @@ def _attachment_readable(database, row: dict, user: dict | None, record: dict) -
     if level == "campus":
         return bool(user)
     case = record if "ownerId" in record else database.cases.find_one({"id": record["caseId"]})
-    return bool(user and (user["role"] == "admin" or case.get("ownerId") == user["id"]))
+    return bool(user and case.get("ownerId") == user["id"])
 
 
 def _entry_url(

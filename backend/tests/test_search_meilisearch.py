@@ -358,7 +358,11 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
             '(docClass = "case-private" AND createdBy = "u-1" OR '
             'docClass = "case-campus" AND createdBy != "u-1")',
         ),
-        (Principal("u-admin", "admin"), 'docClass = "case-private"'),
+        (
+            Principal("u-admin", "admin", verified=True),
+            '(docClass = "case-private" AND createdBy = "u-admin" OR '
+            'docClass = "case-campus" AND createdBy != "u-admin")',
+        ),
     ],
 )
 def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
@@ -369,7 +373,7 @@ def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
 
     case_filter = client.batches[0][0]["filter"]
     assert case_filter == f'kind = "case" AND {expected}'
-    assert ("createdBy" in case_filter) is (principal.role == "user")
+    assert ("createdBy" in case_filter) is (principal.role != "anonymous")
 
 
 def test_count_plan_applies_business_and_tag_conditions() -> None:

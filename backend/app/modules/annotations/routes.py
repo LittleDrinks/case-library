@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.dependencies import get_database
 from app.modules.agent.repository import AgentRepository
@@ -31,20 +33,25 @@ router = APIRouter(prefix="/api/cases/{case_id}/annotations", tags=["annotations
 def create(
     case_id: str,
     body: AnnotationCreate,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
     database=Depends(get_database),
     user: dict = Depends(require_user),
     _session: dict = Depends(require_csrf),
 ):
-    return create_annotation(database, case_id, body.model_dump(by_alias=True, exclude_none=True), user)
+    return create_annotation(
+        database, case_id, body.model_dump(by_alias=True, exclude_none=True), user,
+        version_id,
+    )
 
 
 @router.get("", response_model=list[AnnotationView], response_model_exclude_none=True)
 def index(
     case_id: str,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
     database=Depends(get_database),
     user: dict = Depends(require_user),
 ):
-    return list_annotations(database, case_id, user)
+    return list_annotations(database, case_id, user, version_id)
 
 
 @router.patch(

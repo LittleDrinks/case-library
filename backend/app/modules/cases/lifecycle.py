@@ -13,6 +13,7 @@ from app.modules.cases.service import (
     CaseError,
     RevisionConflict,
     case_metadata,
+    frozen_case_view,
     internal_case_view,
 )
 from app.modules.cases.submission_check import submission_issues
@@ -166,8 +167,13 @@ def _history_version(record: dict, case: dict, user: dict, review: dict | None) 
 def _result(case: dict, version: dict, event: dict, user: dict) -> dict:
     if not case:
         raise CaseError(409, "案例状态已变化")
+    case_view = (
+        frozen_case_view(case, version, user)
+        if user.get("role") == "admin"
+        else internal_case_view(case, user)
+    )
     return {
-        "case": internal_case_view(case, user),
+        "case": case_view,
         "version": _clean(version),
         "event": _clean(event),
     }
@@ -563,10 +569,29 @@ def get_review_feedback(database: Database, case_id: str, user: dict,
 
 def get_history(database: Database, case_id: str, user: dict) -> dict:
     case = _history_case(database, case_id, user)
-    versions = database.case_versions.find(
-        {"caseId": case_id, "kind": {"$in": list(FORMAL_VERSION_KINDS)}}
-    ).sort("number", 1)
-    events = list(database.lifecycle_events.find({"caseId": case_id}).sort("createdAt", 1))
+    if case["ownerId"] == user["id"]:
+        version_query = {
+            "caseId": case_id,
+            "kind": {"$in": list(FORMAL_VERSION_KINDS)},
+        }
+        event_query = {"caseId": case_id}
+    else:
+        submission_ids = [
+            row["versionId"]
+            for row in database.lifecycle_events.find(
+                {"caseId": case_id, "action": "submit"}, {"versionId": 1}
+            )
+        ]
+        if not submission_ids:
+            raise CaseError(403, "无权查看版本历史")
+        version_query = {
+            "caseId": case_id,
+            "id": {"$in": submission_ids},
+            "kind": "submission",
+        }
+        event_query = {"caseId": case_id, "versionId": {"$in": submission_ids}}
+    versions = database.case_versions.find(version_query).sort("number", 1)
+    events = list(database.lifecycle_events.find(event_query).sort("createdAt", 1))
     reviews = {event["versionId"]: event for event in events if event["action"] == "reject"}
     return {
         "caseId": case_id,

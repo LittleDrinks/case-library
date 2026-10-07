@@ -1,0 +1,556 @@
+from __future__ import annotations
+
+import asyncio
+import io
+import os
+import tempfile
+import time
+import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+import httpx
+import pytest
+from pymongo import MongoClient
+
+from app.core.config import Settings
+from app.modules.agent.case_area import retained_sources
+from app.modules.agent.deps import ToolDeps
+from app.modules.agent.skills import read_source, search_corpus
+from app.modules.agent.search import CorpusSearchParams
+from app.modules.attachments.storage import minio_blob_store
+from app.modules.search.client import create_reader
+from app.modules.search.meilisearch import MeilisearchCatalog
+from app.modules.search.state import MongoCatalogState
+
+BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
+pytestmark = pytest.mark.e2e(
+    "CASE_LIBRARY_E2E_URL",
+    "AUTH_QUERY_MONGODB_URI",
+    "MEILI_CONTRACT_URL",
+    "MEILI_CONTRACT_KEY_FILE",
+    "OBJECT_STORE_ENDPOINT",
+    "OBJECT_STORE_BUCKET",
+    "OBJECT_STORE_ACCESS_KEY_FILE",
+    "OBJECT_STORE_SECRET_KEY_FILE",
+)
+
+
+def _login(username: str, password: str) -> tuple[httpx.Client, dict]:
+    client = httpx.Client(base_url=BASE_URL)
+    response = client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    )
+    assert response.status_code == 200
+    return client, response.json()
+
+
+def _create_case(client: httpx.Client, auth: dict, title: str) -> dict:
+    document = {
+        "type": "doc",
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": title}]}],
+    }
+    response = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"title": title, "document": document},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _upload_private(
+    client: httpx.Client, auth: dict, case_id: str, content: str
+) -> dict:
+    case = client.get(f"/api/cases/{case_id}").json()
+    response = client.post(
+        f"/api/cases/{case_id}/attachments",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        data={"accessLevel": "private", "revision": case["revision"]},
+        files={"file": ("private-synthetic.txt", content.encode(), "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _transition(
+    client: httpx.Client,
+    auth: dict,
+    case_id: str,
+    command: str,
+    revision: int,
+    **extra,
+) -> dict:
+    response = client.post(
+        f"/api/cases/{case_id}/lifecycle",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={"command": command, "revision": revision, **extra},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _published(
+    client: httpx.Client, auth: dict, case_id: str, material_id: str | None = None
+) -> dict:
+    case = client.get(f"/api/cases/{case_id}").json()
+    if material_id:
+        mounted = client.post(
+            f"/api/cases/{case_id}/materials",
+            headers={"X-CSRF-Token": auth["csrfToken"]},
+            json={"materialId": material_id, "revision": case["revision"]},
+        )
+        assert mounted.status_code == 201, mounted.text
+        case = client.get(f"/api/cases/{case_id}").json()
+    submitted = _transition(client, auth, case_id, "submit", case["revision"])
+    admin, admin_auth = _login("admin", "admin123")
+    review = admin.get(f"/api/cases/{case_id}/review").json()
+    started = _transition(
+        admin, admin_auth, case_id, "start", review["revision"]
+    )
+    approved = _transition(
+        admin,
+        admin_auth,
+        case_id,
+        "approve",
+        started["case"]["revision"],
+        submittedVersionId=submitted["version"]["id"],
+    )
+    return {"version": submitted["version"], "admin": admin, "adminAuth": admin_auth, "approved": approved}
+
+
+def _database():
+    client = MongoClient(os.environ["AUTH_QUERY_MONGODB_URI"])
+    return client, client["case_library_e2e"]
+
+
+def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
+    author, author_auth = _login("user", "user123")
+    admin, admin_auth = _login("admin", "admin123")
+    stranger, _stranger_auth = _login("10000001", "Demo-10000001-2026!")
+    anonymous = httpx.Client(base_url=BASE_URL)
+    marker = f"private-review-{uuid.uuid4().hex}"
+    case = _create_case(author, author_auth, marker)
+    attachment = _upload_private(author, author_auth, case["id"], f"blob-{marker}")
+    case_id = case["id"]
+    content_path = f"/api/cases/{case_id}/attachments/{attachment['id']}/content"
+
+    assert author.get(f"/api/cases/{case_id}").status_code == 200
+    assert author.get(f"/api/cases/{case_id}/export.docx").status_code == 200
+    assert author.get(content_path).content == f"blob-{marker}".encode()
+    for reader in (admin, stranger, anonymous):
+        for path in (
+            f"/api/cases/{case_id}",
+            f"/api/cases/{case_id}/sources",
+            f"/api/cases/{case_id}/attachments",
+            f"/api/cases/{case_id}/export.docx",
+            content_path,
+        ):
+            assert reader.get(path).status_code in {401, 403, 404}
+    admin_list = admin.get("/api/cases", params={"scope": "admin"}).json()
+    assert case_id not in {row["id"] for row in admin_list}
+    assert admin.get("/api/cases/drafts", params={"q": marker}).json()["total"] == 0
+    assert admin.get(f"/api/cases/{case_id}/history").status_code == 403
+    assert stranger.get(f"/api/cases/{case_id}/history").status_code == 403
+    assert anonymous.get(f"/api/cases/{case_id}/history").status_code == 401
+
+    client, database = _database()
+    try:
+        submitted = _transition(
+            author,
+            author_auth,
+            case_id,
+            "submit",
+            author.get(f"/api/cases/{case_id}").json()["revision"],
+        )
+        frozen_id = submitted["version"]["id"]
+        stored = database.case_versions.find_one({"id": frozen_id, "caseId": case_id})
+        assert stored["title"] == marker
+        assert stored["attachments"][0]["id"] == attachment["id"]
+        assert stored["attachments"][0]["accessLevel"] == "private"
+
+        assert admin.get(f"/api/cases/{case_id}").status_code == 404
+        assert admin.get(f"/api/cases/{case_id}/review").json()["document"] == stored["document"]
+        assert admin.get(f"/api/cases/{case_id}/history").json()["versions"][0]["id"] == frozen_id
+        assert stranger.get(f"/api/cases/{case_id}/review").status_code == 403
+        assert anonymous.get(f"/api/cases/{case_id}/review").status_code == 401
+        assert admin.get(f"/api/cases/{case_id}/attachments").status_code == 404
+        frozen_attachments = admin.get(
+            f"/api/cases/{case_id}/attachments", params={"versionId": frozen_id}
+        )
+        assert frozen_attachments.status_code == 200
+        assert frozen_attachments.json()[0]["id"] == attachment["id"]
+        assert admin.get(
+            content_path, params={"versionId": frozen_id}
+        ).status_code == 403
+        source_rows = admin.get(
+            f"/api/cases/{case_id}/sources", params={"versionId": frozen_id}
+        ).json()["entries"]
+        assert len(source_rows) == 1 and source_rows[0]["contentAvailable"] is False
+        assert admin.get(f"/api/cases/{case_id}/review/export.docx").status_code == 200
+        assert admin.get(f"/api/cases/{case_id}/export.docx").status_code == 404
+
+        review_thread = admin.get(
+            f"/api/cases/{case_id}/agent/thread", params={"mode": "review"}
+        )
+        assert review_thread.status_code == 200
+        thread = review_thread.json()
+        assert thread["versionId"] == frozen_id
+        assert admin.get(f"/api/cases/{case_id}/agent/thread").status_code == 404
+        assert author.get(
+            f"/api/cases/{case_id}/agent/threads/{thread['id']}"
+        ).status_code == 404
+        ref = {
+            "kind": "attachment",
+            "id": attachment["id"],
+            "title": attachment["name"],
+            "snippet": f"blob-{marker}",
+            "location": f"attachment:{case_id}/{attachment['id']}",
+        }
+        database.agent_messages.insert_one(
+            {
+                "id": f"history-{uuid.uuid4().hex}",
+                "threadId": thread["id"],
+                "runId": f"synthetic-{uuid.uuid4().hex}",
+                "messageSeq": 1,
+                "role": "assistant",
+                "metadata": {},
+                "parts": [
+                    {"type": "text", "text": f"blob-{marker}"},
+                    {
+                        "type": "tool-read_source",
+                        "output": {
+                            "status": "ok",
+                            "content": f"blob-{marker}",
+                            "usedSourceRef": ref,
+                        },
+                    },
+                    {"type": "tool-search_corpus", "output": {"sources": [ref]}},
+                ],
+                "createdAt": datetime.now(UTC),
+            }
+        )
+        restored = admin.get(
+            f"/api/cases/{case_id}/agent/thread", params={"mode": "review"}
+        ).json()
+        assistant = restored["messages"][0]
+        assert f"blob-{marker}" not in str(assistant["parts"])
+        assert assistant["parts"][0]["text"] == "该回答引用的来源当前不可读，相关内容已隐藏"
+        assert assistant["parts"][1]["output"]["status"] == "no_access"
+        assert assistant["parts"][2]["output"]["sources"] == []
+
+        started = _transition(
+            admin, admin_auth, case_id, "start", submitted["case"]["revision"]
+        )
+        returned = _transition(
+            admin,
+            admin_auth,
+            case_id,
+            "reject",
+            started["case"]["revision"],
+            submittedVersionId=frozen_id,
+            reasonTypes=["内容需要补充或修改"],
+        )
+        author_case = author.get(f"/api/cases/{case_id}").json()
+        changed = author.patch(
+            f"/api/cases/{case_id}",
+            headers={"X-CSRF-Token": author_auth["csrfToken"]},
+            json={"title": f"{marker}-edited", "revision": author_case["revision"]},
+        )
+        assert changed.status_code == 200
+        resubmitted = _transition(
+            author,
+            author_auth,
+            case_id,
+            "submit",
+            changed.json()["revision"],
+        )
+        assert resubmitted["version"]["title"] == f"{marker}-edited"
+        assert resubmitted["version"]["id"] != frozen_id
+        current_review = admin.get(f"/api/cases/{case_id}/review").json()
+        assert current_review["submittedVersionId"] == resubmitted["version"]["id"]
+        assert current_review["title"] == f"{marker}-edited"
+    finally:
+        client.close()
+
+
+def _tool_deps(
+    database, user: dict, case_id: str, version_id: str, catalog, state, store,
+    secret_path: str,
+):
+    return ToolDeps(
+        database=database,
+        case_id=case_id,
+        thread_id=f"private-boundary-{user['id']}",
+        run_id="read-only-e2e",
+        user=user,
+        catalog=catalog,
+        catalog_state=state,
+        secret_path=secret_path,
+        store=store,
+        version_id=version_id,
+        sources=retained_sources(database, case_id, user, version_id),
+    )
+
+
+def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() -> None:
+    author, author_auth = _login("user", "user123")
+    admin, admin_auth = _login("admin", "admin123")
+    marker = f"withdrawn-review-{uuid.uuid4().hex}"
+    case = _create_case(author, author_auth, marker)
+    case_id = case["id"]
+    submitted = _transition(author, author_auth, case_id, "submit", case["revision"])
+    version_id = submitted["version"]["id"]
+    started = _transition(
+        admin, admin_auth, case_id, "start", submitted["case"]["revision"]
+    )
+
+    def add_guidance(content: str, revision: int) -> dict:
+        response = admin.post(
+            f"/api/cases/{case_id}/annotations?versionId={version_id}",
+            headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+            json={
+                "quote": marker,
+                "section": "正文",
+                "content": content,
+                "source": "admin",
+                "revision": revision,
+                "from": 1,
+                "to": 1 + len(marker),
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    first = add_guidance("请补充课程目标", started["case"]["revision"])
+    second = add_guidance("请核实材料来源", started["case"]["revision"])
+    withdrawn = _transition(
+        author, author_auth, case_id, "withdraw", started["case"]["revision"]
+    )
+    changed = author.patch(
+        f"/api/cases/{case_id}",
+        headers={"X-CSRF-Token": author_auth["csrfToken"]},
+        json={"title": f"{marker}-private-edit", "revision": withdrawn["case"]["revision"]},
+    )
+    assert changed.status_code == 200
+
+    assert admin.get(f"/api/cases/{case_id}").status_code == 404
+    assert admin.get(f"/api/cases/{case_id}/review").status_code == 404
+    frozen = admin.get(
+        f"/api/cases/{case_id}/review", params={"versionId": version_id}
+    )
+    assert frozen.status_code == 200, frozen.text
+    assert frozen.json()["title"] == marker
+    assert frozen.json()["reviewRecordStatus"] == "withdrawn"
+    assert frozen.json()["availableActions"] == []
+    assert marker + "-private-edit" not in frozen.text
+
+    current = frozen.json()
+    third = add_guidance("撤回后继续补充这一点", frozen.json()["revision"])
+    rows = admin.get(
+        f"/api/cases/{case_id}/annotations", params={"versionId": version_id}
+    )
+    assert rows.status_code == 200
+    assert {row["id"] for row in rows.json()} == {first["id"], second["id"], third["id"]}
+    assert {row["versionId"] for row in rows.json()} == {version_id}
+    replay = admin.post(
+        f"/api/cases/{case_id}/lifecycle",
+        headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+        json={
+            "command": "approve",
+            "revision": current["revision"],
+            "submittedVersionId": version_id,
+        },
+    )
+    assert replay.status_code == 409
+    author_rows = author.get(
+        f"/api/cases/{case_id}/annotations", params={"versionId": version_id}
+    )
+    assert author_rows.status_code == 200
+    assert {row["id"] for row in author_rows.json()} == {first["id"], second["id"], third["id"]}
+
+    resubmitted = _transition(
+        author, author_auth, case_id, "submit", changed.json()["revision"]
+    )
+    assert resubmitted["version"]["id"] != version_id
+    current_review = admin.get(f"/api/cases/{case_id}/review").json()
+    assert current_review["submittedVersionId"] == resubmitted["version"]["id"]
+    assert current_review["title"] == f"{marker}-private-edit"
+    old_review = admin.get(
+        f"/api/cases/{case_id}/review", params={"versionId": version_id}
+    )
+    assert old_review.status_code == 200 and old_review.json()["title"] == marker
+    assert old_review.json()["reviewRecordStatus"] == "withdrawn"
+    new_rows = author.get(
+        f"/api/cases/{case_id}/annotations",
+        params={"versionId": resubmitted["version"]["id"]},
+    )
+    assert new_rows.status_code == 200 and new_rows.json() == []
+    old_rows = author.get(
+        f"/api/cases/{case_id}/annotations", params={"versionId": version_id}
+    )
+    assert {row["id"] for row in old_rows.json()} == {first["id"], second["id"], third["id"]}
+
+
+def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> None:
+    author, author_auth = _login("user", "user123")
+    admin, admin_auth = _login("admin", "admin123")
+    other, _other_auth = _login("10000001", "Demo-10000001-2026!")
+    marker = f"private-search-{uuid.uuid4().hex}"
+    material_text = f"private-material-{uuid.uuid4().hex}"
+    mongo_client, database = _database()
+    settings = Settings.from_environment()
+    store = minio_blob_store(settings)
+    material_id = f"m-{uuid.uuid4().hex}"
+    blob_id = f"blob-{uuid.uuid4().hex}"
+    store.put(blob_id, io.BytesIO(material_text.encode()), len(material_text), "text/plain")
+    database.materials.insert_one(
+        {
+            "id": material_id,
+            "title": material_text,
+            "summary": "",
+            "source": "合成私人来源",
+            "sourceUrl": "",
+            "filename": "private-source.txt",
+            "mediaType": "text/plain",
+            "size": len(material_text),
+            "accessLevel": "private",
+            "status": "active",
+            "createdBy": author_auth["user"]["id"],
+            "blobId": blob_id,
+            "publicReferenceCount": 0,
+        }
+    )
+    case = _create_case(author, author_auth, f"case-{uuid.uuid4().hex}")
+    attachment = _upload_private(author, author_auth, case["id"], marker)
+    publication = _published(author, author_auth, case["id"], material_id)
+    version_id = publication["version"]["id"]
+
+    material_access = author.get(f"/api/materials/{material_id}/content")
+    assert material_access.status_code == 200 and material_access.content == material_text.encode()
+    assert admin.get(f"/api/materials/{material_id}/content").status_code == 404
+    with httpx.Client(base_url=BASE_URL) as public_client:
+        public_materials = public_client.get(
+            f"/api/cases/{case['id']}/materials", params={"versionId": version_id}
+        )
+    assert public_materials.status_code == 200
+    assert public_materials.json()[0]["contentAvailable"] is False
+    assert admin.get(
+        f"/api/cases/{case['id']}/materials", params={"versionId": version_id}
+    ).json()[0]["contentAvailable"] is False
+
+    deadline = time.monotonic() + 45
+    owner_items = []
+    while time.monotonic() < deadline:
+        response = author.get(
+            "/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+        )
+        if response.status_code == 200:
+            owner_items = response.json()["items"]
+            if any(item["id"] == case["id"] for item in owner_items):
+                break
+        time.sleep(1)
+    assert any(item["id"] == case["id"] for item in owner_items)
+    assert admin.get(
+        "/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+    ).json()["items"] == []
+    other_search = other.get(
+        "/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+    )
+    assert other_search.status_code in {200, 403}
+    if other_search.status_code == 200:
+        assert other_search.json()["items"] == []
+    anonymous_search = httpx.get(
+        f"{BASE_URL}/api/search", params={"q": marker, "kind": "case", "pageSize": 20}
+    )
+    assert anonymous_search.status_code == 200
+    assert anonymous_search.json()["items"] == []
+
+    try:
+        owner_record = database.users.find_one({"id": author_auth["user"]["id"]})
+        admin_record = database.users.find_one({"id": admin_auth["user"]["id"]})
+        other_record = database.users.find_one({"id": _other_auth["user"]["id"]})
+        catalog = MeilisearchCatalog(
+            create_reader(
+                os.environ["MEILI_CONTRACT_URL"],
+                os.environ["MEILI_CONTRACT_KEY_FILE"],
+            )
+        )
+        state = MongoCatalogState(database)
+        settings = Settings.from_environment()
+        store = minio_blob_store(settings)
+        cursor_key = tempfile.NamedTemporaryFile(delete=False)
+        cursor_key.write(uuid.uuid4().bytes)
+        cursor_key.close()
+        secret_path = cursor_key.name
+        owner_deps = _tool_deps(
+            database, owner_record, case["id"], version_id, catalog, state, store,
+            secret_path,
+        )
+        admin_deps = _tool_deps(
+            database, admin_record, case["id"], version_id, catalog, state, store,
+            secret_path,
+        )
+        other_deps = _tool_deps(
+            database, other_record, case["id"], version_id, catalog, state, store,
+            secret_path,
+        )
+        owner_context = SimpleNamespace(deps=owner_deps)
+        admin_context = SimpleNamespace(deps=admin_deps)
+        other_context = SimpleNamespace(deps=other_deps)
+        owner_search = asyncio.run(
+            search_corpus(owner_context, CorpusSearchParams(query=marker, kind="case"))
+        )
+        admin_search = asyncio.run(
+            search_corpus(admin_context, CorpusSearchParams(query=marker, kind="case"))
+        )
+        other_corpus_search = asyncio.run(
+            search_corpus(other_context, CorpusSearchParams(query=marker, kind="case"))
+        )
+        assert [row["id"] for row in owner_search["sources"]] == [case["id"]]
+        assert admin_search["sources"] == []
+        assert other_corpus_search["sources"] == []
+
+        owner_read = asyncio.run(read_source(owner_context, "attachment", attachment["id"]))
+        admin_read = asyncio.run(read_source(admin_context, "attachment", attachment["id"]))
+        other_read = asyncio.run(read_source(other_context, "attachment", attachment["id"]))
+        assert owner_read["status"] == "ok" and owner_read["content"] == marker
+        assert admin_read["status"] == "no_access"
+        assert other_read["status"] == "no_access"
+        owner_material_search = asyncio.run(
+            search_corpus(
+                owner_context,
+                CorpusSearchParams(query=material_text, kind="material"),
+            )
+        )
+        admin_material_search = asyncio.run(
+            search_corpus(
+                admin_context,
+                CorpusSearchParams(query=material_text, kind="material"),
+            )
+        )
+        assert [row["id"] for row in owner_material_search["sources"]] == [material_id]
+        assert admin_material_search["sources"] == []
+        owner_material = asyncio.run(read_source(owner_context, "material", material_id))
+        admin_material = asyncio.run(read_source(admin_context, "material", material_id))
+        assert owner_material["status"] == "ok" and owner_material["content"] == material_text
+        assert admin_material["status"] == "no_access"
+
+        stale = author.post(
+            "/api/search/summary",
+            headers={"X-CSRF-Token": author_auth["csrfToken"]},
+            json={
+                "id": "stale-summary",
+                "trigger": "submit-message",
+                "messages": [
+                    {"id": "stale-message", "role": "user", "parts": [{"type": "text", "text": marker}]}
+                ],
+                "query": marker,
+                "items": [{"id": case["id"], "kind": "case", "title": marker}],
+            },
+        )
+        assert stale.status_code == 422
+    finally:
+        if "secret_path" in locals():
+            os.unlink(secret_path)
+        mongo_client.close()

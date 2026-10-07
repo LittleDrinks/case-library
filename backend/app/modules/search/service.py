@@ -80,7 +80,7 @@ def _principal(user: dict | None) -> Principal:
 
 def _can_read(case: dict, user: dict) -> bool:
     return case.get("publicationStatus") == "public" or (
-        user["role"] == "admin" or case.get("ownerId") == user["id"]
+        case.get("ownerId") == user["id"]
     )
 
 
@@ -92,7 +92,7 @@ def _mount_filter(database, user, case_id: str | None) -> MountedFilter | None:
     case = database.cases.find_one({"id": case_id})
     if not case or not _can_read(case, user):
         raise CaseError(404, "案例不存在")
-    if user["role"] == "admin" or case.get("ownerId") == user["id"]:
+    if case.get("ownerId") == user["id"]:
         return MountedFilter("workingCaseIds", case_id)
     version_id = case.get("publishedVersionId")
     return MountedFilter("publishedVersionIds", version_id or "missing")

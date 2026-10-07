@@ -127,6 +127,7 @@ vi.mock("../session.js", () => ({
 vi.mock("../api.js", () => ({
   api: {
     getCase: vi.fn(),
+    getReviewCase: vi.fn(),
     getPublicCase: vi.fn(),
     saveCase: vi.fn(),
     lifecycleCase: vi.fn(),
@@ -163,14 +164,22 @@ function render(railStub = true) {
 }
 
 async function renderCase(overrides) {
-  api.getCase.mockResolvedValue(caseFixture(overrides));
+  if (state.route.name === "case-review") {
+    api.getReviewCase.mockResolvedValue(caseFixture(overrides));
+  } else {
+    api.getCase.mockResolvedValue(caseFixture(overrides));
+  }
   const wrapper = render();
   await flushPromises();
   return wrapper;
 }
 
 function renderActionNoticeWorkbench(overrides = {}) {
-  api.getCase.mockResolvedValue(caseFixture(overrides));
+  if (state.route.name === "case-review") {
+    api.getReviewCase.mockResolvedValue(caseFixture(overrides));
+  } else {
+    api.getCase.mockResolvedValue(caseFixture(overrides));
+  }
   return mount(WorkbenchView, {
     global: { stubs: {
       SiteHeader: true, CanvasEditor: ActionNoticeEditorProbe, OutlinePanel: true,
@@ -254,6 +263,28 @@ test("审核工作台保留管理员下线隐藏版本动作", async () => {
     availableActions: ["reopen", "restore"],
   });
   expect(wrapper.find('button[aria-label="下线编辑"]').exists()).toBe(true);
+});
+
+test("审核工作台读取当前冻结投稿并将版本传给资料区", async () => {
+  state.route.name = "case-review";
+  state.user = { id: "admin-1", role: "admin" };
+  const submitted = caseFixture({
+    title: "冻结投稿标题", ownerId: "user-9", workflowStatus: "reviewing",
+    submittedVersionId: "cv-submitted-1", availableActions: ["approve", "reject"],
+  });
+  api.getCase.mockResolvedValue(caseFixture({ title: "不应读取的实时案例" }));
+  api.getReviewCase.mockResolvedValue(submitted);
+
+  const wrapper = render();
+  await flushPromises();
+
+  expect(api.getReviewCase).toHaveBeenCalledWith("case-1");
+  expect(api.getCase).not.toHaveBeenCalled();
+  expect(api.listSources).toHaveBeenCalledWith("case-1", "cv-submitted-1");
+  expect(wrapper.findComponent({ name: "AssistantRail" }).props("versionId"))
+    .toBe("cv-submitted-1");
+  expect(wrapper.get(".document-title").element.value).toBe("冻结投稿标题");
+  wrapper.unmount();
 });
 
 test("公开响应的 publishedVersionId 固定来源版本", async () => {

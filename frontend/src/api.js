@@ -272,6 +272,9 @@ export const api = {
     "/api/cases", jsonOptions("POST", caseRecord, csrfToken),
   ),
   getCase: (id) => request(`/api/cases/${encodeURIComponent(id)}`),
+  getReviewCase: (id, versionId) => request(
+    `/api/cases/${encodeURIComponent(id)}/review${versionQuery(versionId)}`,
+  ),
   getPublicCase: (id, versionId) => request(
     `/api/cases/${encodeURIComponent(id)}/public${versionQuery(versionId)}`,
   ),
@@ -306,9 +309,11 @@ export const api = {
   updateTag: (id, patch, csrfToken) => request(
     `/api/tags/${encodeURIComponent(id)}`, jsonOptions("PATCH", patch, csrfToken),
   ),
-  listAnnotations: (id) => request(annotationRoot(id)),
-  createAnnotation: (id, annotation, csrfToken) => request(
-    annotationRoot(id), jsonOptions("POST", annotation, csrfToken),
+  listAnnotations: (id, versionId) => request(
+    `${annotationRoot(id)}${versionQuery(versionId)}`,
+  ),
+  createAnnotation: (id, annotation, csrfToken, versionId) => request(
+    `${annotationRoot(id)}${versionQuery(versionId)}`, jsonOptions("POST", annotation, csrfToken),
   ),
   updateAnnotation: (id, annotationId, annotation, csrfToken) => request(
     `${annotationRoot(id)}/${encodeURIComponent(annotationId)}`,
