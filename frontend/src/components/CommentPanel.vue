@@ -9,6 +9,9 @@ const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
   versionId: { type: String, default: "" },
+  review: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false },
+  reviewRecordStatus: { type: String, default: "" },
   readOnly: { type: Boolean, default: false },
   annotationRefreshToken: { type: Number, default: 0 },
 });
@@ -55,7 +58,8 @@ async function loadAnnotations() {
     if (generation !== loadGeneration) return;
     annotations.value = !props.versionId && props.caseRecord.workflowStatus === "draft"
       && props.user?.id === props.caseRecord.ownerId
-      ? loaded.filter((row) => row.versionId == null) : loaded;
+      ? loaded.filter((row) => row.versionId == null)
+      : loaded;
     announce();
   } catch (caught) {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
@@ -64,14 +68,33 @@ async function loadAnnotations() {
   }
 }
 
+function annotationReadOnly(annotation) {
+  if (props.review) return props.readOnly;
+  if (!annotation.versionId) return props.historical || props.readOnly;
+  return isAdminOwner()
+    && !["reviewing", "withdrawn", "returned"].includes(props.reviewRecordStatus);
+}
+
+function isAdminOwner() {
+  return props.user?.role === "admin"
+    && props.user?.id === props.caseRecord.ownerId;
+}
+
+function adminOwnerReturnedFeedback(annotation) {
+  return Boolean(
+    annotation.versionId && isAdminOwner() && props.reviewRecordStatus === "returned",
+  );
+}
+
 function canEdit(annotation) {
-  return !props.readOnly
+  return !annotationReadOnly(annotation) && !adminOwnerReturnedFeedback(annotation)
     && annotation.createdBy === props.user?.id && annotation.status === "pending";
 }
 
 function canDiscuss(annotation) {
-  if (props.readOnly || annotation.status !== "pending"
-      || (annotation.anchorState || "active") !== "active") return false;
+  if (annotationReadOnly(annotation) || annotation.status !== "pending"
+      || (annotation.anchorState || "active") !== "active"
+      || adminOwnerReturnedFeedback(annotation)) return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -79,7 +102,7 @@ function canDiscuss(annotation) {
 }
 
 function canReply(annotation) {
-  if (props.readOnly || (annotation.anchorState || "active") !== "active") return false;
+  if (annotationReadOnly(annotation) || (annotation.anchorState || "active") !== "active") return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -183,7 +206,7 @@ async function reply(annotation) {
 }
 
 async function setStatus(annotation, status) {
-  if (saving.value) return;
+  if (annotationReadOnly(annotation) || saving.value) return;
   invalidateAnnotationLoads();
   saving.value = true;
   error.value = "";
@@ -295,7 +318,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
           </div>
             <button v-if="canReply(annotation)" class="comment-reply-toggle" type="button" :aria-expanded="replyingId === annotation.id" @click="replyingId = replyingId === annotation.id ? '' : annotation.id"><CornerUpLeft :size="14" />回复</button>
           <button
-            v-if="!readOnly && annotation.status === 'pending' && user?.id === caseRecord.ownerId"
+            v-if="!annotationReadOnly(annotation) && annotation.status === 'pending' && user?.id === caseRecord.ownerId"
             class="comment-status-action"
             type="button"
             :disabled="saving"

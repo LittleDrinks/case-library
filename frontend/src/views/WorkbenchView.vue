@@ -187,6 +187,16 @@ const lifecycleActions = computed(() => {
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
 ));
+const annotationReviewStatus = computed(() => {
+  if (reviewMode.value) return caseRecord.value?.reviewRecordStatus || "";
+  const selected = activeVersion.value;
+  if (selected?.reviewRecordStatus) return selected.reviewRecordStatus;
+  if (selected?.review?.status) return selected.review.status;
+  if (selected?.id === caseRecord.value?.publishedVersionId) return "published";
+  if (selected?.id === caseRecord.value?.submittedVersionId) return workflowStatus.value || "";
+  if (lastReview.value?.action === "reject") return "returned";
+  return workflowStatus.value || "";
+});
 const reviewFeedback = computed(() => (
   caseRecord.value?.reviewFeedback
     || (activeVersion.value ? activeVersion.value.review : lastReview.value)
@@ -1093,6 +1103,7 @@ onBeforeUnmount(() => {
           :open="drawerOpen"
           :case-record="caseRecord"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :review-record-status="annotationReviewStatus"
           :historical="historicalVersion"
           :read-only="assistantReadOnly"
           :editable="editable"

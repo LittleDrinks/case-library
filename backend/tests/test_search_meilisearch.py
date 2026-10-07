@@ -254,12 +254,42 @@ def test_restricted_title_hits_are_disjoint_redacted_and_unified() -> None:
         'kind = "material" AND docClass = "material-full" AND accessLevel = "public"'
     ) in page_filter
     assert (
-        'kind = "material" AND accessLevel IN ["campus", "private"] '
+        'kind = "material" AND accessLevel = "campus" '
         'AND docClass = "material-restricted" AND publicReferenceCount > 0'
     ) in page_filter
     assert client.calls == [None]
     assert client.batches[0][0]["offset"] == 1
     assert client.batches[0][0]["limit"] == 2
+
+
+def test_restricted_material_metadata_never_includes_private_access() -> None:
+    from app.modules.search.meilisearch import (
+        NEVER,
+        _restricted_branch,
+        _restricted_count_plan,
+    )
+
+    unverified = _anonymous_request(
+        principal=Principal("u-other", "user"), kind="material"
+    )
+    filter_value = _restricted_branch(unverified)
+    assert 'accessLevel = "campus"' in filter_value
+    assert "private" not in filter_value
+    assert "private" not in _restricted_count_plan(unverified, "idx").payload[
+        "filter"
+    ]
+
+    verified = _anonymous_request(
+        principal=Principal("u-verified", "admin", True), kind="material"
+    )
+    verified_filter = _restricted_branch(verified)
+    verified_count_filter = _restricted_count_plan(verified, "idx").payload[
+        "filter"
+    ]
+    assert NEVER in verified_filter
+    assert NEVER in verified_count_filter
+    assert "private" not in verified_filter
+    assert "private" not in verified_count_filter
 
 
 class HealthyReader:

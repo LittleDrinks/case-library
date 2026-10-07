@@ -125,7 +125,10 @@ vi.mock("vue-router", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
 }));
 vi.mock("../session.js", () => ({
-  session: { user: state.user, csrfToken: "csrf-token" },
+  session: {
+    get user() { return state.user; },
+    csrfToken: "csrf-token",
+  },
 }));
 vi.mock("../api.js", () => ({
   api: {
@@ -266,6 +269,7 @@ test("审核工作台保留管理员下线隐藏版本动作", async () => {
   state.user = { id: "admin-1", role: "admin" };
   const wrapper = await renderCase({
     ownerId: "user-1", workflowStatus: "published", publicationStatus: "hidden",
+    publishedVersionId: "cv-2",
     availableActions: ["reopen", "restore"],
   });
   expect(wrapper.find('button[aria-label="下线编辑"]').exists()).toBe(true);

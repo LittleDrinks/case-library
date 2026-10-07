@@ -298,13 +298,10 @@ def _own_private(principal: Principal) -> str:
     )
 
 
-def _denied(principal: Principal) -> str:
-    if principal.role == "anonymous":
-        return 'accessLevel IN ["campus", "private"]'
-    denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
-    if not principal.verified:
-        denied = _or('accessLevel = "campus"', denied)
-    return denied
+def _restricted_material_filter(principal: Principal) -> str:
+    if principal.verified:
+        return NEVER
+    return 'accessLevel = "campus"'
 
 
 def _case_access(principal: Principal) -> str:
@@ -371,7 +368,7 @@ def _restricted_branch(request: CatalogRequest, skipped: str = "") -> str:
         return NEVER
     return _and(
         'kind = "material"',
-        _denied(request.principal),
+        _restricted_material_filter(request.principal),
         'docClass = "material-restricted"',
         "publicReferenceCount > 0",
         business,
@@ -437,7 +434,7 @@ def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
     if business != NEVER:
         denied = _and(
             'docClass = "material-restricted"',
-            _denied(request.principal),
+            _restricted_material_filter(request.principal),
             "publicReferenceCount > 0",
             business,
             _excluded(request, "material"),
