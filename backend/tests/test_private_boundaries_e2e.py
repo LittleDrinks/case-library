@@ -1090,6 +1090,10 @@ def test_approved_review_record_stays_version_scoped_after_reopen_and_resubmit(
         submittedVersionId=old_version_id,
     )
     assert approved["case"]["publishedVersionId"] == old_version_id
+    approved_cards = reviewer.get("/api/cases", params={"scope": "admin"}).json()
+    published_card = next(row for row in approved_cards if row["id"] == case["id"])
+    assert published_card["reviewVersionId"] == old_version_id
+    assert published_card["reviewRecordStatus"] == "published"
 
     current = owner.get(f"/api/cases/{case['id']}").json()
     reopened = _transition(owner, owner_auth, case["id"], "reopen", current["revision"])
@@ -1104,6 +1108,8 @@ def test_approved_review_record_stays_version_scoped_after_reopen_and_resubmit(
     assert reviewer_case.json()["title"] == marker
     assert f"{marker}-private-draft" not in reviewer_case.text
     assert reviewer.get(f"/api/cases/{case['id']}/public").json()["title"] == marker
+    reopened_cards = reviewer.get("/api/cases", params={"scope": "admin"}).json()
+    assert case["id"] not in {row["id"] for row in reopened_cards}
     old_review_while_draft = reviewer.get(
         f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}
     )
@@ -1128,6 +1134,11 @@ def test_approved_review_record_stays_version_scoped_after_reopen_and_resubmit(
     )
     new_version_id = resubmitted["version"]["id"]
     assert new_version_id != old_version_id
+    pending_cards = reviewer.get("/api/cases", params={"scope": "admin"}).json()
+    current_cards = [row for row in pending_cards if row["id"] == case["id"]]
+    assert len(current_cards) == 1
+    assert current_cards[0]["reviewVersionId"] == new_version_id
+    assert current_cards[0]["reviewRecordStatus"] == "pending"
 
     old_review = reviewer.get(
         f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}

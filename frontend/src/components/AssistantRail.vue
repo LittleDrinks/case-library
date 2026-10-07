@@ -170,7 +170,7 @@ defineExpose({ expandPanel });
       :case-record="caseRecord"
       :user="user"
       :version-id="versionId"
-      :read-only="review && caseRecord.reviewRecordStatus === 'returned'"
+      :read-only="historical || (review && !['reviewing', 'withdrawn'].includes(caseRecord.reviewRecordStatus))"
       :annotation-refresh-token="annotationRefreshToken"
       @annotations="emit('annotations', $event)"
       @select-annotation="emit('select-annotation', $event)"

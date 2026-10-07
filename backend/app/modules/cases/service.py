@@ -370,24 +370,20 @@ def _list_admin_cases(database: Database, user: dict | None) -> list[dict]:
 
 
 def _admin_case_card(database, case: dict, user: dict) -> dict | None:
+    from app.modules.cases.published import admin_review_record
+
     version_id = (
         case.get("submittedVersionId")
         if case.get("workflowStatus") in {"pending", "reviewing"}
         else case.get("publishedVersionId")
     )
-    version = database.case_versions.find_one(
-        {"id": version_id, "caseId": case["id"]}
-    )
+    version, status = admin_review_record(database, case, user, version_id)
     if not version:
         return None
     snapshot = frozen_case_view(case, version, user)
     card = case_card(snapshot, include_owner=True, user=user)
     card.update({"reviewVersionId": version["id"], "versionNumber": version["number"]})
-    card["reviewRecordStatus"] = (
-        case.get("workflowStatus")
-        if case.get("workflowStatus") in {"pending", "reviewing"}
-        else "published"
-    )
+    card["reviewRecordStatus"] = status
     return card
 
 
