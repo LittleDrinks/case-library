@@ -67,6 +67,31 @@ it("posts artifact decisions to the thread-scoped endpoint", async () => {
   expect(new Headers(options.headers).get("X-CSRF-Token")).toBe("csrf");
 });
 
+it("posts account status and role changes with their reason and CSRF token", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}", {
+    status: 200, headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetch);
+
+  await api.setManagedAccountStatus("user/1", {
+    status: "disabled", reason: "合成停用理由",
+  }, "csrf-status");
+  await api.setManagedAccountRole("user/1", {
+    role: "admin", reason: "合成授予理由",
+  }, "csrf-role");
+
+  expect(fetch.mock.calls[0][0]).toBe("/api/admin/accounts/user%2F1/status");
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+    status: "disabled", reason: "合成停用理由",
+  });
+  expect(new Headers(fetch.mock.calls[0][1].headers).get("X-CSRF-Token")).toBe("csrf-status");
+  expect(fetch.mock.calls[1][0]).toBe("/api/admin/accounts/user%2F1/role");
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    role: "admin", reason: "合成授予理由",
+  });
+  expect(new Headers(fetch.mock.calls[1][1].headers).get("X-CSRF-Token")).toBe("csrf-role");
+});
+
 it("serializes multi-select search facets as repeated query parameters", async () => {
   const fetch = vi.fn().mockResolvedValue(new Response("{}", {
     status: 200, headers: { "Content-Type": "application/json" },

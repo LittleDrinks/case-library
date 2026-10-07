@@ -38,6 +38,7 @@ class AccountManagementService:
                     "id": 1,
                     "username": 1,
                     "role": 1,
+                    "status": 1,
                     "must_change_password": 1,
                 },
             )
@@ -51,6 +52,7 @@ class AccountManagementService:
                     "id": account["id"],
                     "username": account["username"],
                     "role": account["role"],
+                    "status": account.get("status", "active"),
                     "mustChangePassword": bool(
                         account.get("must_change_password", False)
                     ),
@@ -127,10 +129,12 @@ class AccountManagementService:
         }
 
         def create(transaction) -> dict:
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
             options = _session_options(transaction)
             self.database.users.insert_one(user, **options)
             self._append_operation(
-                actor,
+                current_actor,
                 "account_open",
                 safe_reason,
                 user["id"],
@@ -189,27 +193,14 @@ class AccountManagementService:
         def reset(transaction) -> dict:
             options = _session_options(transaction)
             self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
             target = self.database.users.find_one({"id": target_id}, **options)
             if not target:
                 raise AccountManagementError("账号不存在", 404)
             if target.get("status") != "active":
                 raise AccountManagementError("账号当前不可用", 409)
-            if (
-                target.get("role") == "admin"
-                and not target.get("must_change_password", False)
-            ):
-                available_admins = self.database.users.count_documents(
-                    {
-                        "role": "admin",
-                        "status": "active",
-                        "must_change_password": False,
-                    },
-                    **options,
-                )
-                if available_admins <= 1:
-                    raise AccountManagementError(
-                        "不能将最后一个可用管理员设为临时密码状态", 409
-                    )
+            if _is_available_admin(target):
+                self._assert_another_admin_is_available(options)
             updated = self.database.users.find_one_and_update(
                 {
                     "_id": target["_id"],
@@ -231,7 +222,7 @@ class AccountManagementService:
                 raise AccountManagementError("账号已变化，请重试", 409)
             self.database.sessions.delete_many({"user_id": target_id}, **options)
             self._append_operation(
-                actor,
+                current_actor,
                 "temporary_password_reset",
                 safe_reason,
                 target_id,
@@ -261,6 +252,8 @@ class AccountManagementService:
 
         def revoke(transaction) -> dict:
             options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
             target = self.database.users.find_one({"id": target_id}, **options)
             if not target:
                 raise AccountManagementError("账号不存在", 404)
@@ -278,7 +271,7 @@ class AccountManagementService:
                 {"user_id": target_id}, **options
             )
             self._append_operation(
-                actor,
+                current_actor,
                 "force_logout",
                 safe_reason,
                 target_id,
@@ -305,6 +298,127 @@ class AccountManagementService:
             )
             raise
 
+    def change_status(
+        self, actor: dict, target_id: str, status: str, reason: str
+    ) -> dict:
+        safe_reason = reason.strip()
+
+        def update(transaction) -> dict:
+            options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
+            target = self.database.users.find_one({"id": target_id}, **options)
+            if not target:
+                raise AccountManagementError("账号不存在", 404)
+            if target.get("status") == status:
+                raise AccountManagementError("账号当前已是此状态", 409)
+            if status == "disabled" and _is_available_admin(target):
+                self._assert_another_admin_is_available(options)
+            updated = self.database.users.find_one_and_update(
+                {
+                    "_id": target["_id"],
+                    "status": target.get("status"),
+                    "role": target.get("role"),
+                    "must_change_password": target.get("must_change_password", False),
+                    "token_version": target["token_version"],
+                },
+                {
+                    "$set": {
+                        "status": status,
+                        "updatedAt": datetime.now(UTC).isoformat(),
+                    },
+                    "$inc": {"token_version": 1},
+                },
+                return_document=ReturnDocument.AFTER,
+                **options,
+            )
+            if not updated:
+                raise AccountManagementError("账号已变化，请重试", 409)
+            self.database.sessions.delete_many({"user_id": target_id}, **options)
+            detail = "账号已停用" if status == "disabled" else "账号已恢复"
+            self._append_operation(
+                current_actor,
+                "account_status_change",
+                safe_reason,
+                target_id,
+                target["username"],
+                "success",
+                detail,
+                transaction,
+            )
+            return updated
+
+        try:
+            return _account_view(self._with_transaction(update))
+        except AccountManagementError as error:
+            self._record_rejection(
+                actor,
+                "account_status_change",
+                safe_reason,
+                target_id,
+                None,
+                error,
+            )
+            raise
+
+    def change_role(self, actor: dict, target_id: str, role: str, reason: str) -> dict:
+        safe_reason = reason.strip()
+
+        def update(transaction) -> dict:
+            options = _session_options(transaction)
+            self._acquire_admin_guard(transaction)
+            current_actor = self._require_current_admin(actor["id"], transaction)
+            target = self.database.users.find_one({"id": target_id}, **options)
+            if not target:
+                raise AccountManagementError("账号不存在", 404)
+            if target.get("role") == role:
+                raise AccountManagementError("账号当前已是此角色", 409)
+            if role == "user" and _is_available_admin(target):
+                self._assert_another_admin_is_available(options)
+            updated = self.database.users.find_one_and_update(
+                {
+                    "_id": target["_id"],
+                    "role": target.get("role"),
+                    "status": target.get("status"),
+                    "must_change_password": target.get("must_change_password", False),
+                },
+                {
+                    "$set": {
+                        "role": role,
+                        "updatedAt": datetime.now(UTC).isoformat(),
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+                **options,
+            )
+            if not updated:
+                raise AccountManagementError("账号已变化，请重试", 409)
+            detail = "已授予管理员角色" if role == "admin" else "已撤销管理员角色"
+            self._append_operation(
+                current_actor,
+                "account_role_change",
+                safe_reason,
+                target_id,
+                target["username"],
+                "success",
+                detail,
+                transaction,
+            )
+            return updated
+
+        try:
+            return _account_view(self._with_transaction(update))
+        except AccountManagementError as error:
+            self._record_rejection(
+                actor,
+                "account_role_change",
+                safe_reason,
+                target_id,
+                None,
+                error,
+            )
+            raise
+
     def _acquire_admin_guard(self, transaction) -> None:
         result = self.database.account_management_guards.update_one(
             {"_id": "available-admins"},
@@ -313,6 +427,21 @@ class AccountManagementService:
         )
         if result.matched_count != 1:
             raise RuntimeError("管理员并发保护记录未初始化")
+
+    def _require_current_admin(self, actor_id: str, transaction) -> dict:
+        actor = self.database.users.find_one(
+            {"id": actor_id}, **_session_options(transaction)
+        )
+        if not actor or not _is_available_admin(actor):
+            raise AccountManagementError("管理员权限已变化，请重新登录后重试", 403)
+        return actor
+
+    def _assert_another_admin_is_available(self, options: dict) -> None:
+        available_admins = self.database.users.count_documents(
+            _AVAILABLE_ADMIN_QUERY, **options
+        )
+        if available_admins <= 1:
+            raise AccountManagementError("不能移除最后一个可用管理员", 409)
 
     def _with_transaction(self, action: Callable) -> dict:
         with self.database.client.start_session() as session:
@@ -380,5 +509,21 @@ def _account_view(user: dict) -> dict:
         "id": user["id"],
         "username": user["username"],
         "role": user["role"],
+        "status": user.get("status", "active"),
         "mustChangePassword": bool(user.get("must_change_password", False)),
     }
+
+
+_AVAILABLE_ADMIN_QUERY = {
+    "role": "admin",
+    "status": "active",
+    "must_change_password": False,
+}
+
+
+def _is_available_admin(user: dict) -> bool:
+    return (
+        user.get("role") == "admin"
+        and user.get("status") == "active"
+        and user.get("must_change_password") is False
+    )

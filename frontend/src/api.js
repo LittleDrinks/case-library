@@ -169,6 +169,14 @@ export const api = {
     `/api/admin/accounts/${encodeURIComponent(id)}/force-logout`,
     jsonOptions("POST", operation, csrfToken),
   ),
+  setManagedAccountStatus: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/status`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  setManagedAccountRole: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/role`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
   listAccountOperations: (page = 1, pageSize = 25) => request(
     `/api/admin/account-operations?page=${page}&pageSize=${pageSize}`,
   ),

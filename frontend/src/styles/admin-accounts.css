@@ -35,6 +35,8 @@
 .account-identity h2 { margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 650; }
 .account-identity p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; }
 .account-row-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.account-row-actions select { width: min(100%, 220px); min-width: 0; min-height: 38px; padding: 0 30px 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font: inherit; }
+.account-row-actions select:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
 .account-pagination { display: flex; min-height: 54px; align-items: center; justify-content: flex-end; gap: 10px; color: var(--ink-3); font-size: 13px; }
 .account-pagination button { width: 34px; height: 34px; flex-basis: 34px; }
 .account-operation-row { padding: 13px 4px; border-bottom: 1px solid var(--line); }
@@ -65,7 +67,7 @@
   .account-search input { grid-column: 1; }
   .account-row { align-items: flex-start; flex-direction: column; gap: 10px; }
   .account-row-actions { width: 100%; }
-  .account-row-actions button { flex: 1 1 140px; }
+  .account-row-actions select { width: 100%; }
   .account-operation-row time { width: 100%; margin-left: 0; }
   .account-pagination { justify-content: center; gap: 7px; }
   .account-action-buttons { width: 100%; }

@@ -3,8 +3,10 @@ import { ChevronLeft, ChevronRight, KeyRound, LoaderCircle, LogOut, RefreshCw, S
 import { computed, onMounted, reactive, ref } from "vue";
 import { api, formatApiError } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
-import { session } from "../session.js";
+import { refreshSession, session } from "../session.js";
+import { useRouter } from "vue-router";
 
+const router = useRouter();
 const activeTab = ref("accounts");
 const query = ref("");
 const searchQuery = ref("");
@@ -21,6 +23,15 @@ const actionForm = reactive({ temporaryPassword: "", reason: "" });
 const activePage = computed(() => activeTab.value === "accounts" ? accounts.value : operations.value);
 const totalPages = computed(() => Math.max(1, Math.ceil(activePage.value.total / activePage.value.pageSize)));
 
+const actionLabels = {
+  reset: { title: "重置临时密码", confirm: "确认重置", success: "已设置新的临时密码" },
+  logout: { title: "强制退出", confirm: "确认强制退出", success: "已撤销现有会话" },
+  disable: { title: "停用账号", confirm: "确认停用", success: "已停用" },
+  restore: { title: "恢复账号", confirm: "确认恢复", success: "已恢复" },
+  grantAdmin: { title: "授予管理员", confirm: "确认授予管理员", success: "已授予管理员角色" },
+  revokeAdmin: { title: "撤销管理员", confirm: "确认撤销管理员", success: "已撤销管理员角色" },
+};
+
 function requiredTextError(value, label, maxLength) {
   const text = value.trim();
   if (!text) return `${label}不能为空`;
@@ -34,7 +45,9 @@ async function loadAccounts(page = 1) {
   try {
     accounts.value = await api.listManagedAccounts(searchQuery.value, page);
   } catch (reason) {
-    error.value = formatApiError(reason, "账号列表加载失败");
+    if (!await refreshAuthorizationAfterDenial(reason)) {
+      error.value = formatApiError(reason, "账号列表加载失败");
+    }
   } finally {
     loading.value = false;
   }
@@ -46,9 +59,36 @@ async function loadOperations(page = 1) {
   try {
     operations.value = await api.listAccountOperations(page);
   } catch (reason) {
-    error.value = formatApiError(reason, "操作记录加载失败");
+    if (!await refreshAuthorizationAfterDenial(reason)) {
+      error.value = formatApiError(reason, "操作记录加载失败");
+    }
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshAuthorizationAfterDenial(reason) {
+  if (reason.status !== 401 && reason.status !== 403) return false;
+  try {
+    const current = await refreshSession();
+    if (!current) {
+      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operationTarget.value = null;
+      error.value = "账号状态已变化，当前会话已失效";
+      return true;
+    }
+    if (current.role !== "admin" || current.mustChangePassword) {
+      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operationTarget.value = null;
+      const role = current.role === "admin" ? "管理员（需先修改密码）" : "普通用户";
+      error.value = `管理访问已拒绝，当前角色：${role}`;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -94,6 +134,11 @@ async function openAccount() {
 }
 
 function beginAction(account, kind) {
+  if (!kind) {
+    cancelAction();
+    return;
+  }
+  if (!actionLabels[kind]) return;
   operationTarget.value = { account, kind };
   actionForm.temporaryPassword = "";
   actionForm.reason = "";
@@ -108,6 +153,29 @@ function cancelAction() {
   actionError.value = "";
 }
 
+async function performAction(account, kind) {
+  const operation = { reason: actionForm.reason.trim() };
+  if (kind === "reset") {
+    await api.resetManagedAccountPassword(account.id, {
+      ...operation,
+      temporaryPassword: actionForm.temporaryPassword,
+    }, session.csrfToken);
+    return `已为 ${account.username} 设置新的临时密码`;
+  }
+  if (kind === "logout") {
+    const result = await api.forceLogoutManagedAccount(account.id, operation, session.csrfToken);
+    return `已强制退出 ${account.username}，撤销 ${result.revokedSessions} 个会话`;
+  }
+  if (kind === "disable" || kind === "restore") {
+    const status = kind === "disable" ? "disabled" : "active";
+    await api.setManagedAccountStatus(account.id, { ...operation, status }, session.csrfToken);
+    return `账号 ${account.username}${actionLabels[kind].success}`;
+  }
+  const role = kind === "grantAdmin" ? "admin" : "user";
+  await api.setManagedAccountRole(account.id, { ...operation, role }, session.csrfToken);
+  return `账号 ${account.username}${actionLabels[kind].success}`;
+}
+
 async function submitAction() {
   if (!operationTarget.value || saving.value) return;
   const { account, kind } = operationTarget.value;
@@ -120,22 +188,26 @@ async function submitAction() {
   }
   saving.value = true;
   try {
-    if (kind === "reset") {
-      await api.resetManagedAccountPassword(account.id, {
-        temporaryPassword: actionForm.temporaryPassword,
-        reason: actionForm.reason.trim(),
-      }, session.csrfToken);
-      notice.value = `已为 ${account.username} 设置新的临时密码`;
-    } else {
-      const result = await api.forceLogoutManagedAccount(account.id, {
-        reason: actionForm.reason.trim(),
-      }, session.csrfToken);
-      notice.value = `已强制退出 ${account.username}，撤销 ${result.revokedSessions} 个会话`;
-    }
+    notice.value = await performAction(account, kind);
     cancelAction();
+    const current = await refreshSession();
+    if (!current) {
+      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      await router.replace({ name: "login" });
+      return;
+    }
+    if (current.role !== "admin" || current.mustChangePassword) {
+      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+      error.value = `管理访问已撤销，当前角色：${current.role === "admin" ? "管理员（需先修改密码）" : "普通用户"}`;
+      return;
+    }
     await loadAccounts(accounts.value.page);
   } catch (reason) {
-    actionError.value = formatApiError(reason, kind === "reset" ? "密码重置失败" : "强制退出失败");
+    if (!await refreshAuthorizationAfterDenial(reason)) {
+      actionError.value = formatApiError(reason, `${actionLabels[kind].title}失败`);
+    }
   } finally {
     saving.value = false;
   }
@@ -153,6 +225,8 @@ function actionLabel(action) {
     account_open: "后台开户",
     temporary_password_reset: "重置临时密码",
     force_logout: "强制退出",
+    account_status_change: "账号停用或恢复",
+    account_role_change: "管理员角色变更",
   }[action] || action;
 }
 
@@ -212,7 +286,7 @@ onMounted(() => loadAccounts());
       <section v-if="operationTarget" class="account-action" aria-labelledby="account-action-title">
         <header>
           <h2 id="account-action-title">
-            {{ operationTarget.kind === "reset" ? "重置临时密码" : "强制退出" }}：{{ operationTarget.account.username }}
+            {{ actionLabels[operationTarget.kind].title }}：{{ operationTarget.account.username }}
           </h2>
           <button type="button" class="account-icon-button" title="取消操作" aria-label="取消操作" @click="cancelAction"><X :size="17" aria-hidden="true" /></button>
         </header>
@@ -226,8 +300,9 @@ onMounted(() => loadAccounts());
             <button class="account-primary-button" type="submit" :disabled="saving">
               <LoaderCircle v-if="saving" class="spin" :size="16" aria-hidden="true" />
               <KeyRound v-else-if="operationTarget.kind === 'reset'" :size="16" aria-hidden="true" />
-              <LogOut v-else :size="16" aria-hidden="true" />
-              <span>{{ saving ? "正在处理" : "确认" }}</span>
+              <LogOut v-else-if="operationTarget.kind === 'logout'" :size="16" aria-hidden="true" />
+              <Users v-else :size="16" aria-hidden="true" />
+              <span>{{ saving ? "正在处理" : actionLabels[operationTarget.kind].confirm }}</span>
             </button>
             <button class="account-secondary-button" type="button" :disabled="saving" @click="cancelAction">取消</button>
           </div>
@@ -244,11 +319,18 @@ onMounted(() => loadAccounts());
           <article v-for="account in accounts.items" :key="account.id" class="account-row">
             <div class="account-identity">
               <h2>{{ account.username }}</h2>
-              <p>{{ account.role === "admin" ? "管理员" : "普通用户" }}<span v-if="account.mustChangePassword"> · 首次登录需改密</span></p>
+              <p>{{ account.role === "admin" ? "管理员" : "普通用户" }} · {{ account.status === "disabled" ? "已停用" : "正常" }}<span v-if="account.mustChangePassword"> · 首次登录需改密</span></p>
             </div>
             <div class="account-row-actions">
-              <button type="button" class="account-secondary-button" @click="beginAction(account, 'reset')"><KeyRound :size="15" aria-hidden="true" />重置临时密码</button>
-              <button type="button" class="account-secondary-button" @click="beginAction(account, 'logout')"><LogOut :size="15" aria-hidden="true" />强制退出</button>
+              <select :aria-label="`管理账号 ${account.username}`" :value="operationTarget?.account.id === account.id ? operationTarget.kind : ''" :disabled="saving" @change="beginAction(account, $event.target.value)">
+                <option value="">管理账号…</option>
+                <option value="reset">重置临时密码</option>
+                <option v-if="account.status === 'active'" value="logout">强制退出</option>
+                <option v-if="account.status === 'active'" value="disable">停用账号</option>
+                <option v-else value="restore">恢复账号</option>
+                <option v-if="account.role === 'user'" value="grantAdmin">授予管理员</option>
+                <option v-else value="revokeAdmin">撤销管理员</option>
+              </select>
             </div>
           </article>
         </section>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -24,7 +24,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin-accounts"])
 class ManagedAccountView(BaseModel):
     id: str
     username: str
-    role: str
+    role: Literal["admin", "user"]
+    status: Literal["active", "disabled"]
     mustChangePassword: bool
 
 
@@ -58,6 +59,20 @@ class AccountOperationResult(BaseModel):
 class AccountOperationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    reason: Reason
+
+
+class AccountStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["active", "disabled"]
+    reason: Reason
+
+
+class AccountRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["admin", "user"]
     reason: Reason
 
 
@@ -150,6 +165,44 @@ def force_logout(
     try:
         return AccountManagementService(database).force_logout(
             admin, account_id, body.reason
+        )
+    except AccountManagementError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+
+
+@router.post(
+    "/accounts/{account_id}/status",
+    response_model=ManagedAccountView,
+)
+def change_account_status(
+    account_id: str,
+    body: AccountStatusRequest,
+    database=Depends(get_database),
+    admin: dict = Depends(require_admin),
+    _csrf: dict = Depends(require_csrf),
+):
+    try:
+        return AccountManagementService(database).change_status(
+            admin, account_id, body.status, body.reason
+        )
+    except AccountManagementError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+
+
+@router.post(
+    "/accounts/{account_id}/role",
+    response_model=ManagedAccountView,
+)
+def change_account_role(
+    account_id: str,
+    body: AccountRoleRequest,
+    database=Depends(get_database),
+    admin: dict = Depends(require_admin),
+    _csrf: dict = Depends(require_csrf),
+):
+    try:
+        return AccountManagementService(database).change_role(
+            admin, account_id, body.role, body.reason
         )
     except AccountManagementError as error:
         raise HTTPException(error.status_code, error.detail) from error

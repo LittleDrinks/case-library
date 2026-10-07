@@ -342,6 +342,7 @@ def test_account_management_public_http_sessions_and_audit_persist_in_mongodb() 
         "id",
         "username",
         "role",
+        "status",
         "mustChangePassword",
     }:
         raise AssertionError("账号列表返回了额外资料")
@@ -658,8 +659,157 @@ def test_concurrent_last_available_admin_password_reset_preserves_management_acc
         if created_ids:
             database.users.delete_many({"id": {"$in": created_ids}})
             database.sessions.delete_many({"user_id": {"$in": created_ids}})
+            database.account_management_operations.delete_many(
+                {
+                    "$or": [
+                        {"actorId": {"$in": created_ids}},
+                        {"targetId": {"$in": created_ids}},
+                    ]
+                }
+            )
         for account in original_admins:
             database.users.update_one(
                 {"id": account["id"]}, {"$set": {"role": account["role"]}}
+            )
+        mongo.close()
+
+
+def test_mixed_concurrent_admin_removal_preserves_one_real_management_session() -> None:
+    mongo = MongoClient(MONGODB_URI)
+    database = mongo.get_default_database()
+    original_admins = list(
+        database.users.find(
+            {"role": "admin"},
+            {"_id": 0, "id": 1, "role": 1, "status": 1, "must_change_password": 1},
+        )
+    )
+    created_ids: list[str] = []
+    try:
+        database.users.update_many({"role": "admin"}, {"$set": {"role": "user"}})
+        managers = [_opener() for _ in range(3)]
+        ids = []
+        usernames = []
+        sessions = []
+        for manager in managers:
+            username = f"issue359-mixed-admin-{uuid.uuid4().hex}"
+            password = _password()
+            status, registered = _request(
+                manager,
+                "POST",
+                "/api/auth/register",
+                {"username": username, "password": password},
+            )
+            _expect_status(status, 201)
+            account_id = registered["id"]
+            created_ids.append(account_id)
+            database.users.update_one(
+                {"id": account_id},
+                {"$set": {"role": "admin", "campus_verified": True}},
+            )
+            sessions.append(_login(manager, username, password))
+            ids.append(account_id)
+            usernames.append(username)
+
+        start = Barrier(3)
+
+        def disable(manager, csrf: str, target_id: str):
+            start.wait()
+            return _request(
+                manager,
+                "POST",
+                f"/api/admin/accounts/{target_id}/status",
+                {"status": "disabled", "reason": "并发停用管理员 E2E"},
+                csrf,
+            )[0]
+
+        def demote(manager, csrf: str, target_id: str):
+            start.wait()
+            return _request(
+                manager,
+                "POST",
+                f"/api/admin/accounts/{target_id}/role",
+                {"role": "user", "reason": "并发降级管理员 E2E"},
+                csrf,
+            )[0]
+
+        def reset(manager, csrf: str, target_id: str):
+            start.wait()
+            return _request(
+                manager,
+                "POST",
+                f"/api/admin/accounts/{target_id}/temporary-password",
+                {
+                    "temporaryPassword": _password(),
+                    "reason": "并发重置管理员 E2E",
+                },
+                csrf,
+            )[0]
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = (
+                pool.submit(disable, managers[0], sessions[0]["csrfToken"], ids[1]),
+                pool.submit(demote, managers[1], sessions[1]["csrfToken"], ids[2]),
+                pool.submit(reset, managers[2], sessions[2]["csrfToken"], ids[0]),
+            )
+            statuses = [future.result() for future in futures]
+
+        if statuses.count(200) != 2 or any(
+            status not in (200, 401, 403, 409) for status in statuses
+        ):
+            raise AssertionError("混合并发管理员变更没有按持久化状态串行授权")
+        available = list(
+            database.users.find(
+                {"role": "admin", "status": "active", "must_change_password": False},
+                {"_id": 0, "id": 1, "campus_verified": 1},
+            )
+        )
+        if len(available) != 1 or available[0]["id"] not in ids:
+            raise AssertionError("混合并发操作没有保留唯一可用管理员")
+        if any(row.get("campus_verified") is not True for row in available):
+            raise AssertionError("角色或状态变化修改了校内资格")
+        remaining = ids.index(available[0]["id"])
+        manager = managers[remaining]
+        _expect_status(_request(manager, "GET", "/api/admin/accounts")[0], 200)
+        status, operations = _request(manager, "GET", "/api/admin/account-operations")
+        _expect_status(status, 200)
+        successful = [
+            operation
+            for operation in operations["items"]
+            if operation["targetId"] in ids and operation["result"] == "success"
+            and operation["action"] in {
+                "account_status_change",
+                "account_role_change",
+                "temporary_password_reset",
+            }
+        ]
+        if len(successful) != statuses.count(200):
+            raise AssertionError("并发成功结果没有全部写入账号操作记录")
+        reasons = {operation["reason"] for operation in successful}
+        if len(reasons) != len(successful) or any(
+            not operation["detail"] for operation in successful
+        ):
+            raise AssertionError("并发操作记录缺少理由或结果")
+    finally:
+        if created_ids:
+            database.users.delete_many({"id": {"$in": created_ids}})
+            database.sessions.delete_many({"user_id": {"$in": created_ids}})
+            database.account_management_operations.delete_many(
+                {
+                    "$or": [
+                        {"actorId": {"$in": created_ids}},
+                        {"targetId": {"$in": created_ids}},
+                    ]
+                }
+            )
+        for account in original_admins:
+            database.users.update_one(
+                {"id": account["id"]},
+                {
+                    "$set": {
+                        "role": account["role"],
+                        "status": account["status"],
+                        "must_change_password": account["must_change_password"],
+                    }
+                },
             )
         mongo.close()
