@@ -46,7 +46,7 @@ def _materials() -> list[dict]:
     return rows
 
 
-def _case(case_id: str, title: str) -> dict:
+def _case(case_id: str, title: str, campus_attachment: str | None = None) -> dict:
     version = {
         "id": f"version-{case_id}",
         "number": 1,
@@ -54,7 +54,11 @@ def _case(case_id: str, title: str) -> dict:
         "title": title,
         "summary": "依托场馆实践与专业课程建设思政课堂",
         "document": {"type": "doc", "content": []},
-        "attachments": [],
+        "attachments": ([{
+            "name": "合成校内附件.txt",
+            "accessLevel": "campus",
+            "searchText": campus_attachment,
+        }] if campus_attachment else []),
         "metadata": {"theoryPoints": ["科学家精神"]},
     }
     publication = {"publishedAt": "2026-08-14", "ownerId": "u-owner"}
@@ -82,6 +86,7 @@ def _documents() -> list[dict]:
     cases = [
         _case("spirit-case", "如何将科学家精神融入思政课堂"),
         _case("shared-id", "同名案例实体"),
+        _case("case-campus-search", "合成校内附件检索案例", "issue360campusonlymarker"),
     ]
     meta = {
         "catalogId": "catalog-meta",
@@ -201,6 +206,7 @@ def _assert_knowledge_source_search(catalog, uid: str, epoch: str) -> None:
         )
     )
     assert [item["id"] for item in sources.items] == ["source-1"]
+    assert sources.items[0]["knowledgeLevel"] == "source"
 
 
 def _assert_knowledge_section_search(catalog, uid: str, epoch: str) -> None:
@@ -214,6 +220,7 @@ def _assert_knowledge_section_search(catalog, uid: str, epoch: str) -> None:
         )
     )
     assert [item["id"] for item in sections.items] == ["section-1"]
+    assert sections.items[0]["knowledgeLevel"] == "section"
 
 
 def test_real_catalog_walks_12480_acl_results_in_global_date_order(catalog) -> None:
@@ -232,6 +239,33 @@ def test_real_catalog_redacts_denied_material_and_self_excludes_facets(catalog) 
         _request(uid, epoch, filters={"accessLevel": ("public",)})
     )
     _assert_acl_facet_counts(filtered)
+
+
+def test_real_catalog_case_attachment_search_uses_current_campus_grant(catalog) -> None:
+    catalog, uid, epoch = catalog
+    query = "issue360campusonlymarker"
+
+    ordinary = catalog.search(_request(
+        uid, epoch, q=query, kind="case", page_size=20,
+        principal=Principal("u-ordinary", "user", verified=False),
+    ))
+    unverified_admin = catalog.search(_request(
+        uid, epoch, q=query, kind="case", page_size=20,
+        principal=Principal("u-admin", "admin", verified=False),
+    ))
+    verified_admin = catalog.search(_request(
+        uid, epoch, q=query, kind="case", page_size=20,
+        principal=Principal("u-admin", "admin", verified=True),
+    ))
+    revoked_admin = catalog.search(_request(
+        uid, epoch, q=query, kind="case", page_size=20,
+        principal=Principal("u-admin", "admin", verified=False),
+    ))
+
+    assert not ordinary.items
+    assert not unverified_admin.items
+    assert [item["id"] for item in verified_admin.items] == ["case-campus-search"]
+    assert not revoked_admin.items
 
 
 def test_real_catalog_handles_natural_questions_and_knowledge_levels(catalog) -> None:

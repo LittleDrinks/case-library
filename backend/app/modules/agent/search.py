@@ -11,7 +11,7 @@ from pydantic_ai.tools import RunContext
 
 from app.modules.auth.sessions import load_current_user
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.models import SourceRef
+from app.modules.agent.models import SourceRef, merge_source_refs
 from app.modules.cases.service import CaseError
 from app.modules.search.meilisearch import SearchUnavailable
 from app.modules.search.models import FilterValue, SearchRequest, TagExpression
@@ -70,21 +70,17 @@ def _snippet(item: dict) -> str:
 def source_ref(item: dict) -> SourceRef:
     """从检索服务实际返回的条目重建来源引用，忽略模型提供的任何出处。"""
     kind = item["kind"]
+    knowledge_level = item.get("knowledgeLevel") if kind == "knowledge" else None
     return SourceRef(
         kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item), content_available=item.get("contentAvailable"),
+        knowledge_level=knowledge_level,
+        version=item.get("edition") if kind == "knowledge" else None,
     )
 
 
 def _record_hits(deps: ToolDeps, refs: list[SourceRef]) -> None:
-    for ref in refs:
-        current = next(
-            (item for item in deps.hits if item.identity() == ref.identity()), None
-        )
-        if current is None:
-            deps.hits.append(ref)
-        elif current.content_available is False and ref.content_available is not False:
-            deps.hits[deps.hits.index(current)] = ref
+    deps.hits[:] = merge_source_refs([*deps.hits, *refs])
 
 
 def _search_request(params: CorpusSearchParams) -> SearchRequest:

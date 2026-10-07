@@ -91,6 +91,51 @@ def test_applicant_can_submit_and_query_self_reported_campus_application(
     assert draft.json()["workflowStatus"] == "draft"
 
 
+@pytest.mark.parametrize(
+    "change", ["force_logout", "disable", "require_password_change"]
+)
+def test_application_rechecks_applicant_after_http_guard(
+    client: TestClient, monkeypatch, change: str,
+) -> None:
+    username = f"issue360-stale-applicant-{uuid.uuid4().hex}"
+    session, _password = _register_and_login(client, username)
+    database = client.app.state.database
+    admin = database.users.find_one({"username": "admin"})
+    original_submit = AccountManagementService.submit_campus_application
+
+    def invalidate_then_submit(service, user, applicant_name, student_number):
+        if change == "force_logout":
+            service.force_logout(admin, user["id"], "合成申请前撤销会话")
+        elif change == "disable":
+            service.change_status(admin, user["id"], "disabled", "合成申请前停用")
+        else:
+            database.users.update_one(
+                {"id": user["id"]}, {"$set": {"must_change_password": True}}
+            )
+        return original_submit(service, user, applicant_name, student_number)
+
+    monkeypatch.setattr(
+        AccountManagementService, "submit_campus_application", invalidate_then_submit
+    )
+    response = client.post(
+        "/api/auth/campus-access/applications",
+        headers={"X-CSRF-Token": session["csrfToken"]},
+        json={"applicantName": "合成过期申请人", "studentNumber": "SYN-360-STALE"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "当前账号会话已变化，请重新登录后重试"
+    assert database.campus_access_applications.count_documents({
+        "userId": session["user"]["id"],
+    }) == 0
+    rejected = database.account_management_operations.find_one({
+        "action": "campus_access_application_submit",
+        "actorId": session["user"]["id"],
+        "result": "rejected",
+    })
+    assert rejected["detail"] == response.json()["detail"]
+
+
 def test_admin_can_revoke_legacy_grant_without_an_application_record(
     client: TestClient,
 ) -> None:

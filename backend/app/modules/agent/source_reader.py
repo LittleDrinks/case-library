@@ -161,11 +161,14 @@ def _read_knowledge(database, source_id: str) -> dict:
         return _failed(UNAVAILABLE, "教材章节不存在或已下线")
     title = " · ".join(part for part in (section.get("chapter"), section.get("title")) if part)
     ref = SourceRef(kind="knowledge", id=source_id, title=title,
-                    version=source.get("edition"), location=f"knowledge:{source_id}")
+                    version=source.get("edition"), knowledge_level="section",
+                    location=f"knowledge:{source_id}")
     return _succeeded(ref, section.get("content") or "")
 
 
 def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
+    if ref.kind == "knowledge":
+        return _knowledge_ref_readable(database, ref)
     if ref.kind == "attachment":
         return _area_entry_available(database, user, case_id, ref)
     if ref.kind == "case" and ref.version_id and ref.source_case_id:
@@ -178,6 +181,8 @@ def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -
 
 def source_metadata_readable(database, user: dict | None, ref: SourceRef) -> bool:
     """只保留目录当前可见的标题，不把元数据标记当作正文权限。"""
+    if ref.kind == "knowledge" and ref.knowledge_level == "source":
+        return _knowledge_source_readable(database, ref)
     if not user or ref.kind != "material":
         return False
     material = database.materials.find_one({"id": ref.id, "status": "active"})
@@ -190,6 +195,37 @@ def source_metadata_readable(database, user: dict | None, ref: SourceRef) -> boo
     reference_count = material.get("publicReferenceCount")
     return can_read_material(material, user) or (
         isinstance(reference_count, int) and reference_count > 0
+    )
+
+
+def _knowledge_ref_readable(database, ref: SourceRef) -> bool:
+    if ref.knowledge_level == "source":
+        return _knowledge_source_readable(database, ref)
+    if ref.knowledge_level != "section":
+        return False
+    section = database.knowledge_sections.find_one({"id": ref.id})
+    source = section and database.knowledge_sources.find_one({
+        "id": section.get("sourceId"), "status": "active",
+    })
+    if not section or not source:
+        return False
+    if ref.version is not None and source.get("edition") != ref.version:
+        return False
+    section_title = section.get("title") or ""
+    display_title = " · ".join(
+        part for part in (section.get("chapter"), section_title) if part
+    )
+    return ref.title in {section_title, display_title}
+
+
+def _knowledge_source_readable(database, ref: SourceRef) -> bool:
+    source = database.knowledge_sources.find_one({
+        "id": ref.id, "status": "active",
+    })
+    return bool(
+        source
+        and source.get("title") == ref.title
+        and (ref.version is None or source.get("edition") == ref.version)
     )
 
 

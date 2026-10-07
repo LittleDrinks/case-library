@@ -14,7 +14,7 @@ from pydantic_ai.tools import RunContext, Tool
 from app.modules.agent import artifacts, writes
 from app.modules.agent.blocks import DraftBlocks
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.models import SourceRef, write_view
+from app.modules.agent.models import SourceRef, merge_source_refs, write_view
 from app.modules.agent.repository import claim_run_write_path
 from app.modules.agent.review_feedback import REVIEW_INSTRUCTIONS, read_review_feedback
 from app.modules.agent.search import CorpusSearchParams
@@ -66,13 +66,7 @@ def _known_source(deps: ToolDeps, kind: str, source_id: str) -> bool:
 
 
 def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
-    current = next(
-        (item for item in deps.evidence if item.identity() == ref.identity()), None
-    )
-    if current is None:
-        deps.evidence.append(ref)
-    elif current.content_available is False and ref.content_available is not False:
-        deps.evidence[deps.evidence.index(current)] = ref
+    deps.evidence[:] = merge_source_refs([*deps.evidence, ref])
 
 
 async def propose_revision(

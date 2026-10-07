@@ -288,6 +288,55 @@ def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> N
     assert 'docClass = "material-full"' in verified_filter
 
 
+def test_case_search_uses_current_campus_grant_and_owner_scope_for_admins() -> None:
+    unverified = FakeReader(_result(), [])
+    MeilisearchCatalog(unverified).search(
+        _anonymous_request(
+            kind="case",
+            principal=Principal("u-admin", "admin", verified=False),
+        )
+    )
+    unverified_filter = unverified.batches[0][0]["filter"]
+
+    assert 'docClass = "case-public"' in unverified_filter
+    assert 'createdBy != "u-admin"' in unverified_filter
+    assert 'docClass = "case-private"' in unverified_filter
+    assert 'createdBy = "u-admin"' in unverified_filter
+    assert 'docClass = "case-campus"' not in unverified_filter
+
+    verified = FakeReader(_result(), [])
+    MeilisearchCatalog(verified).search(
+        _anonymous_request(
+            kind="case",
+            principal=Principal("u-admin", "admin", verified=True),
+        )
+    )
+    verified_filter = verified.batches[0][0]["filter"]
+
+    assert 'docClass = "case-campus"' in verified_filter
+    assert 'createdBy != "u-admin"' in verified_filter
+    assert 'createdBy = "u-admin"' in verified_filter
+
+
+def test_knowledge_search_preserves_source_entity_level() -> None:
+    source = {
+        "catalogId": "knowledge-source-ks-1",
+        "id": "ks-1",
+        "kind": "knowledge",
+        "docClass": "knowledge-source",
+        "knowledgeLevel": "source",
+        "title": "合成教材目录",
+        "edition": "2026版",
+    }
+    reader = FakeReader(_result([source], 1), [])
+    request = _anonymous_request(kind="knowledge")
+
+    page = MeilisearchCatalog(reader).search(request)
+
+    assert page.items[0]["id"] == "ks-1"
+    assert page.items[0]["knowledgeLevel"] == "source"
+
+
 class HealthyReader:
     def __init__(
         self,
@@ -377,15 +426,19 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
         (Principal(None, "anonymous"), 'docClass = "case-public"'),
         (
             Principal("u-1", "user"),
-            '(docClass = "case-public" AND createdBy != "u-1" OR '
-            'docClass = "case-private" AND createdBy = "u-1")',
+            '(docClass = "case-private" AND createdBy = "u-1" OR '
+            'docClass = "case-public" AND createdBy != "u-1")',
         ),
         (
             Principal("u-1", "user", verified=True),
             '(docClass = "case-private" AND createdBy = "u-1" OR '
             'docClass = "case-campus" AND createdBy != "u-1")',
         ),
-        (Principal("u-admin", "admin"), 'docClass = "case-private"'),
+        (
+            Principal("u-admin", "admin"),
+            '(docClass = "case-private" AND createdBy = "u-admin" OR '
+            'docClass = "case-public" AND createdBy != "u-admin")',
+        ),
     ],
 )
 def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
@@ -396,7 +449,7 @@ def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
 
     case_filter = client.batches[0][0]["filter"]
     assert case_filter == f'kind = "case" AND {expected}'
-    assert ("createdBy" in case_filter) is (principal.role == "user")
+    assert ("createdBy" in case_filter) is (principal.user_id is not None)
 
 
 def test_count_plan_applies_business_and_tag_conditions() -> None:

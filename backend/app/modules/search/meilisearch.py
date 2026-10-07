@@ -56,6 +56,7 @@ CASE_FIELDS = (
 KNOWLEDGE_FIELDS = (
     "id",
     "kind",
+    "knowledgeLevel",
     "title",
     "summary",
     "edition",
@@ -313,17 +314,10 @@ def _denied(principal: Principal) -> str:
 def _case_access(principal: Principal) -> str:
     if principal.role == "anonymous":
         return 'docClass = "case-public"'
-    if principal.role == "admin":
-        return 'docClass = "case-private"'
     own = _and('docClass = "case-private"', f"createdBy = {_quote(principal.user_id)}")
-    if not principal.verified:
-        public = _and(
-            'docClass = "case-public"',
-            f"createdBy != {_quote(principal.user_id)}",
-        )
-        return _or(public, own)
+    level = "case-campus" if principal.verified else "case-public"
     others = _and(
-        'docClass = "case-campus"', f"createdBy != {_quote(principal.user_id)}"
+        f"docClass = {_quote(level)}", f"createdBy != {_quote(principal.user_id)}"
     )
     return _or(own, others)
 

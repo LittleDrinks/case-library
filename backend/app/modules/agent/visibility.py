@@ -15,6 +15,7 @@ from app.modules.agent.models import (
     AgentMessage,
     AgentSnapshot,
     SourceRef,
+    merge_source_refs,
 )
 from app.modules.agent.source_reader import source_metadata_readable, source_readable
 from app.modules.auth.sessions import load_current_user
@@ -91,8 +92,7 @@ def parts_projector(
                 ref = gate._validated(raw)
                 if ref is None or not gate.readable(ref):
                     continue
-                if not any(item.identity() == ref.identity() for item in dependencies):
-                    dependencies.append(ref)
+                dependencies[:] = merge_source_refs([*dependencies, ref])
         return visible_parts(gate, parts, metadata)
 
     return project

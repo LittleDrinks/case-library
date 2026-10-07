@@ -1249,3 +1249,97 @@ def test_real_http_force_logout_prevents_stale_campus_decision_transaction(actio
             assert after_user["campus_verified"] == before["user"]["campus_verified"]
     finally:
         mongo.close()
+
+
+@pytest.mark.e2e("AUTH_QUERY_MONGODB_URI")
+@pytest.mark.parametrize(
+    "change", ["force_logout", "disable", "require_password_change"]
+)
+def test_real_http_application_rechecks_applicant_after_authentication(
+    tmp_path, monkeypatch, change: str,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.core.config import Settings
+    from app.main import create_app
+    from app.modules.auth.management_service import AccountManagementService
+    from conftest import EmptySearchCatalog, MemoryBlobStore
+
+    username = f"issue360-http-stale-applicant-{uuid.uuid4().hex}"
+    password = f"Issue360-{uuid.uuid4().hex}!a"
+    database_name = f"case_library_e2e_360_{uuid.uuid4().hex}"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo[database_name]
+    secret = tmp_path / "app-secret"
+    secret.write_text("synthetic-test-secret", encoding="utf-8")
+    settings = Settings(
+        app_environment="test",
+        session_cookie_secure=False,
+        app_secret_file=str(secret),
+    )
+    api = create_app(
+        database=database,
+        settings=settings,
+        blob_store=MemoryBlobStore(),
+        search_catalog=EmptySearchCatalog(),
+    )
+
+    try:
+        with TestClient(api) as client:
+            registered = client.post(
+                "/api/auth/register", json={"username": username, "password": password}
+            )
+            assert registered.status_code == 201, registered.text
+            logged_in = client.post(
+                "/api/auth/login", json={"username": username, "password": password}
+            )
+            assert logged_in.status_code == 200, logged_in.text
+            applicant_id = logged_in.json()["user"]["id"]
+            actor = {
+                "id": f"u-360-test-admin-{uuid.uuid4().hex}",
+                "username": "synthetic-360-admin",
+                "role": "admin",
+                "status": "active",
+                "must_change_password": False,
+                "token_version": 0,
+            }
+            database.users.insert_one(actor)
+            original_submit = AccountManagementService.submit_campus_application
+
+            def change_state_before_submit(service, user, applicant_name, student_number):
+                if change == "force_logout":
+                    service.force_logout(actor, applicant_id, "合成 HTTP 申请前撤销会话")
+                elif change == "disable":
+                    service.change_status(actor, applicant_id, "disabled", "合成 HTTP 申请前停用")
+                else:
+                    database.users.update_one(
+                        {"id": applicant_id},
+                        {"$set": {"must_change_password": True}},
+                    )
+                return original_submit(service, user, applicant_name, student_number)
+
+            monkeypatch.setattr(
+                AccountManagementService,
+                "submit_campus_application",
+                change_state_before_submit,
+            )
+            response = client.post(
+                "/api/auth/campus-access/applications",
+                headers={"X-CSRF-Token": logged_in.json()["csrfToken"]},
+                json={"applicantName": "合成过期申请人", "studentNumber": "SYN-360-STALE"},
+            )
+
+            assert response.status_code == 401, response.text
+            assert response.json()["detail"] == "当前账号会话已变化，请重新登录后重试"
+            assert database.campus_access_applications.count_documents(
+                {"userId": applicant_id}
+            ) == 0
+            rejected = database.account_management_operations.find_one({
+                "action": "campus_access_application_submit",
+                "actorId": applicant_id,
+                "result": "rejected",
+            })
+            assert rejected["detail"] == response.json()["detail"]
+    finally:
+        mongo.drop_database(database_name)
+        mongo.close()

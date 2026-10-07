@@ -84,6 +84,14 @@ def _tool_names(messages) -> list[str]:
     ]
 
 
+def _has_tool_call_id(messages, call_id: str) -> bool:
+    return any(
+        getattr(part, "tool_call_id", None) == call_id
+        for message in messages
+        for part in getattr(message, "parts", [])
+    )
+
+
 def _reader_then_answer(sink=None) -> FunctionModel:
     """先读固定来源，再输出复述来源正文的回答；sink 收集观察到的模型历史。"""
 
@@ -560,6 +568,195 @@ def test_production_run_inherits_history_source_dependencies_until_revocation(
     assert HIDDEN_ANSWER in json.dumps(snapshot, ensure_ascii=False)
     assert "_sourceDependencies" not in json.dumps(snapshot, ensure_ascii=False)
     assert LEAK_MARK not in _replay(client, "c-draft-1", thread_id)
+
+
+def test_three_turn_history_keeps_body_dependency_after_metadata_reference(
+    client: TestClient,
+) -> None:
+    from io import BytesIO
+
+    from tests.test_agent_corpus_search import PagedCatalog
+
+    database = client.app.state.database
+    user_id = "u-user-demo"
+    material_id = "m-agent-history-title-then-body"
+    title = "合成三轮历史校内资料"
+    database.users.update_one(
+        {"id": user_id}, {"$set": {"campus_verified": False}}
+    )
+    database.materials.insert_one({
+        "id": material_id, "status": "active", "title": title,
+        "accessLevel": "campus", "createdBy": "u-other",
+        "publicReferenceCount": 1, "blobId": "b-agent-history-title-then-body",
+        "filename": "synthetic.txt", "mediaType": "text/plain", "size": 29,
+    })
+    client.app.state.blob_store.put(
+        "b-agent-history-title-then-body", BytesIO(b"Synthetic campus source body."),
+        29, "text/plain",
+    )
+    client.app.state.search_catalog = PagedCatalog([{
+        "id": material_id, "kind": "material", "title": title,
+        "accessLevel": "campus", "contentAvailable": False, "hasFile": True,
+    }])
+    auth = _auth(client)
+    thread_id = _thread(client, "c-draft-1")
+
+    async def title_search(messages, _info):
+        if not _has_tool_call_id(messages, "history-title-search"):
+            yield _tool_delta(
+                "search_corpus", {"query": title, "kind": "material"},
+                "history-title-search",
+            )
+            return
+        yield f"根据公开目录标题继续普通创作：{title}。"
+
+    first = _post_stream(
+        client, auth, "c-draft-1", thread_id, _stream_body("先查看目录标题"),
+        FunctionModel(stream_function=title_search),
+    )
+    assert first.status_code == 200, first.text
+    first_message = database.agent_messages.find_one({
+        "threadId": thread_id, "role": "assistant",
+    })
+    assert first_message["metadata"]["_sourceDependencies"][0]["contentAvailable"] is False
+
+    database.users.update_one(
+        {"id": user_id}, {"$set": {"campus_verified": True}}
+    )
+
+    async def read_body(messages, _info):
+        if not _has_tool_call_id(messages, "history-body-search"):
+            yield _tool_delta(
+                "search_corpus", {"query": title, "kind": "material"},
+                "history-body-search",
+            )
+            return
+        if not _has_tool_call_id(messages, "history-body-read"):
+            yield _tool_delta(
+                "read_source", {"source_type": "material", "source_id": material_id},
+                "history-body-read",
+            )
+            return
+        yield "第二轮读取并引用了合成校内正文。"
+
+    second = _post_stream(
+        client, auth, "c-draft-1", thread_id,
+        _stream_body("读取并引用正文", "history-body-message"),
+        FunctionModel(stream_function=read_body),
+    )
+    assert second.status_code == 200, second.text
+    second_message = database.agent_messages.find_one({
+        "threadId": thread_id, "role": "assistant", "runId": {"$ne": first_message["runId"]},
+    })
+    body_dependency = second_message["metadata"]["_sourceDependencies"][0]
+    assert body_dependency["id"] == material_id
+    assert "contentAvailable" not in body_dependency
+
+    async def revoke_during_third_turn(messages, _info):
+        history = _history_texts([messages])
+        assert "第二轮读取并引用了合成校内正文" in history
+        database.users.update_one(
+            {"id": user_id}, {"$set": {"campus_verified": False}}
+        )
+        yield LEAK_MARK
+
+    third = _post_stream(
+        client, auth, "c-draft-1", thread_id,
+        _stream_body("只根据历史继续复述", "history-third-message"),
+        FunctionModel(stream_function=revoke_during_third_turn),
+    )
+    assert third.status_code == 200, third.text
+    assert LEAK_MARK not in third.text
+    run = database.agent_runs.find_one(
+        {"threadId": thread_id}, sort=[("startedAt", -1)]
+    )
+    assert run["status"] == "cancelled"
+    assert database.agent_messages.count_documents({"runId": run["id"], "role": "assistant"}) == 0
+    snapshot = _snapshot(client, thread_id)
+    assert HIDDEN_ANSWER in json.dumps(snapshot, ensure_ascii=False)
+    assert title in _replay(client, "c-draft-1", thread_id)
+    assert LEAK_MARK not in _replay(client, "c-draft-1", thread_id)
+
+
+@pytest.mark.parametrize(
+    ("kind", "source_status", "answer_expected"),
+    [
+        ("knowledge", "active", True),
+        ("all", "active", True),
+        ("knowledge", "retired", False),
+    ],
+)
+def test_empty_knowledge_directory_uses_current_source_entity(
+    client: TestClient, kind: str, source_status: str, answer_expected: bool,
+) -> None:
+    from tests.test_agent_corpus_search import PagedCatalog
+
+    source_id = "ks-empty-directory-360"
+    source_title = "合成空关键词教材目录"
+    database = client.app.state.database
+    database.knowledge_sources.insert_one({
+        "id": source_id, "title": source_title, "edition": "2026版",
+        "status": source_status,
+    })
+    client.app.state.search_catalog = PagedCatalog([{
+        "id": source_id, "kind": "knowledge", "knowledgeLevel": "source",
+        "title": source_title, "edition": "2026版", "chapterCount": 2,
+        "sectionCount": 4,
+    }])
+    auth = _auth(client)
+    thread_id = _thread(client, "c-draft-1")
+
+    async def explore_directory(messages, _info):
+        if not _has_tool_call_id(messages, "empty-knowledge-directory"):
+            yield _tool_delta(
+                "search_corpus", {"query": "", "kind": kind},
+                "empty-knowledge-directory",
+            )
+            return
+        yield "目录探索后仍可继续普通创作。"
+
+    response = _post_stream(
+        client, auth, "c-draft-1", thread_id,
+        _stream_body("先探索教材目录再继续创作"),
+        FunctionModel(stream_function=explore_directory),
+    )
+    assert response.status_code == 200, response.text
+    run = database.agent_runs.find_one({"threadId": thread_id})
+    assert run["status"] == ("completed" if answer_expected else "cancelled")
+    assert ("目录探索后仍可继续普通创作" in response.text) is answer_expected
+
+
+def test_legacy_knowledge_history_without_level_fails_closed(client: TestClient) -> None:
+    from app.modules.agent.visibility import parts_projector
+
+    database = client.app.state.database
+    user = database.users.find_one({"username": "user"})
+    shared_id = "legacy-knowledge-shared-entity-id"
+    database.knowledge_sources.insert_one({
+        "id": "ks-legacy-collision-parent",
+        "title": "合成知识来源",
+        "edition": "2026",
+        "status": "active",
+    })
+    database.knowledge_sections.insert_one({
+        "id": shared_id,
+        "sourceId": "ks-legacy-collision-parent",
+        "title": "合成旧历史来源",
+        "content": LEAK_MARK,
+    })
+    project = parts_projector(database, user, "c-draft-1")
+
+    visible = project(
+        [{"type": "text", "text": LEAK_MARK}],
+        {"_sourceDependencies": [{
+            "kind": "knowledge",
+            "id": shared_id,
+            "title": "合成旧历史来源",
+            "version": "2026",
+        }]},
+    )
+
+    assert LEAK_MARK not in json.dumps(visible, ensure_ascii=False)
 
 
 def test_active_agent_run_rechecks_campus_sources_before_output(client: TestClient) -> None:

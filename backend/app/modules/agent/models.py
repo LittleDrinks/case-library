@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,7 @@ ArtifactDecision = Literal["accepted", "rejected", "superseded"]
 ArtifactKind = Literal["range", "document"]
 WriteStatus = Literal["written", "undone"]
 SourceKind = Literal["case", "knowledge", "material", "attachment"]
+KnowledgeLevel = Literal["source", "section"]
 
 # 管理员审核对话：绑定当前待审工作稿、服务端全链路只读、按管理员私人隔离。
 REVIEW_MODE = "review"
@@ -115,6 +116,7 @@ class SourceRef(BaseModel):
     title: str
     snippet: str = ""
     content_available: bool | None = Field(default=None, alias="contentAvailable")
+    knowledge_level: KnowledgeLevel | None = Field(default=None, alias="knowledgeLevel")
     version: str | None = None
     version_id: str | None = Field(default=None, alias="versionId")
     source_case_id: str | None = Field(
@@ -123,8 +125,23 @@ class SourceRef(BaseModel):
     )
     location: str | None = None
 
-    def identity(self) -> tuple[str, str, str]:
-        return (self.kind, self.id, self.version_id or self.version or "")
+    def identity(self) -> tuple[str, str, str, str | None]:
+        return (
+            self.kind, self.id, self.version_id or self.version or "",
+            self.knowledge_level,
+        )
+
+
+def merge_source_refs(refs: Iterable[SourceRef]) -> list[SourceRef]:
+    """合并同一来源的引用；实际正文依赖优先于仅目录元数据。"""
+    merged: dict[tuple[str, str, str, str | None], SourceRef] = {}
+    for ref in refs:
+        current = merged.get(ref.identity())
+        if current is None or (
+            current.content_available is False and ref.content_available is not False
+        ):
+            merged[ref.identity()] = ref
+    return list(merged.values())
 
 
 class ArtifactTarget(BaseModel):

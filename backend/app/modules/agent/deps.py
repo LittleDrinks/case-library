@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from pymongo.database import Database
 
-from app.modules.agent.models import AgentArtifact, SourceRef
+from app.modules.agent.models import AgentArtifact, SourceRef, merge_source_refs
 from app.modules.agent.source_reader import revalidate_sources
 
 
@@ -34,16 +34,7 @@ class ToolDeps:
     write_record: dict | None = None
 
     def source_dependencies(self) -> list[SourceRef]:
-        refs = [*self.hits, *self.evidence]
-        unique: dict[tuple, SourceRef] = {}
-        for ref in refs:
-            identity = ref.identity()
-            current = unique.get(identity)
-            if current is None or (
-                current.content_available is False and ref.content_available is not False
-            ):
-                unique[identity] = ref
-        return list(unique.values())
+        return merge_source_refs([*self.hits, *self.evidence])
 
     def sources_readable(self) -> bool:
         """重验本轮检索命中与已读取证据；目录条目本身不代表已读取。"""

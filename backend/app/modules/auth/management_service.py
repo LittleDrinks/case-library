@@ -130,10 +130,9 @@ class AccountManagementService:
 
         def submit(transaction) -> dict:
             options = _session_options(transaction)
-            current = self.database.users.find_one({"id": user["id"]}, **options)
-            if not current:
-                raise AccountManagementError("账号不存在", 404)
-            if current.get("campus_verified", False):
+            self._acquire_admin_guard(transaction)
+            current_user = self._require_current_applicant(user, transaction)
+            if current_user.get("campus_verified", False):
                 raise AccountManagementError("账号已有校内访问资格", 409)
             if self.database.campus_access_applications.find_one(
                 {"userId": user["id"], "status": "pending"}, **options
@@ -143,7 +142,7 @@ class AccountManagementService:
                 application, **options
             )
             self._append_operation(
-                user,
+                current_user,
                 "campus_access_application_submit",
                 "本人提交校内访问申请",
                 user["id"],
@@ -829,6 +828,21 @@ class AccountManagementService:
         ):
             raise AccountManagementError("管理员权限已变化，请重新登录后重试", 403)
         return actor
+
+    def _require_current_applicant(self, applicant: dict, transaction) -> dict:
+        current = self.database.users.find_one(
+            {"id": applicant["id"]}, **_session_options(transaction)
+        )
+        if (
+            not current
+            or current.get("status") != "active"
+            or current.get("must_change_password") is not False
+            or current.get("token_version") != applicant.get("token_version")
+        ):
+            raise AccountManagementError(
+                "当前账号会话已变化，请重新登录后重试", 401
+            )
+        return current
 
     def _assert_another_admin_is_available(self, options: dict) -> None:
         available_admins = self.database.users.count_documents(
