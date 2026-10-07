@@ -72,13 +72,19 @@ def admin_review_record(
         status = "published"
     else:
         event = database.lifecycle_events.find_one(
-            {"caseId": case["id"], "versionId": version_id, "action": {"$in": ["reject", "withdraw"]}},
+            {
+                "caseId": case["id"],
+                "versionId": version_id,
+                "action": {"$in": ["approve", "reject", "withdraw"]},
+            },
             {"action": 1},
             **({"session": session} if session is not None else {}),
         )
-        status = {"reject": "returned", "withdraw": "withdrawn"}.get(
-            (event or {}).get("action")
-        )
+        status = {
+            "approve": "published",
+            "reject": "returned",
+            "withdraw": "withdrawn",
+        }.get((event or {}).get("action"))
     if not status:
         return None, None
     version = database.case_versions.find_one(

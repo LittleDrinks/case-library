@@ -162,6 +162,9 @@ def source_readable(
     if ref.kind == "attachment":
         return _area_entry_available(database, user, case_id, ref, version_id)
     if ref.kind == "case" and ref.version_id and ref.source_case_id:
+        # 挂载引用用关系记录 ID；平台检索引用直接用真实案例 ID。
+        if ref.id != ref.source_case_id:
+            return _area_entry_available(database, user, case_id, ref, version_id)
         return source_case_content_available(
             database, ref.source_case_id, user, ref.version_id
         )

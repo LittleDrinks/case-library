@@ -46,6 +46,15 @@ async function submit(request, caseId) {
   return response.json();
 }
 
+async function lifecycle(request, caseId, auth, command, revision, extra = {}) {
+  const response = await request.post(`/api/cases/${caseId}/lifecycle`, {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { command, revision, ...extra },
+  });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
 async function selectReviewText(page, marker) {
   await page.locator(".canvas-editor p").filter({ hasText: marker }).selectText();
   await expect(page.getByRole("button", { name: "添加指导批注" })).toBeVisible();
@@ -259,4 +268,101 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   });
   await page.goto(`/#/cases/${created.id}`);
   expect((await publicConversation).status()).toBe(200);
+});
+
+test("作者重开并重投后，管理员仍可只读已发布旧版审核记录", async ({ page }) => {
+  const request = page.context().request;
+  const marker = `已发布旧审核记录 ${Date.now()}`;
+  await login(page, "user", "user123");
+  const created = await createCase(request, marker);
+  const firstSubmission = await submit(request, created.id);
+  const firstVersionId = firstSubmission.version.id;
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const reviewerAuth = await session(request);
+  let review = await request.get(`/api/cases/${created.id}/review`);
+  const started = await lifecycle(
+    request, created.id, reviewerAuth, "start", (await review.json()).revision,
+  );
+  const guidance = `v1 审核意见 ${marker}`;
+  const annotation = await request.post(
+    `/api/cases/${created.id}/annotations?versionId=${firstVersionId}`,
+    {
+      headers: { "X-CSRF-Token": reviewerAuth.csrfToken },
+      data: {
+        quote: marker,
+        section: "正文",
+        content: guidance,
+        source: "admin",
+        revision: started.case.revision,
+        from: 1,
+        to: marker.length + 1,
+      },
+    },
+  );
+  expect(annotation.status()).toBe(201);
+  review = await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  );
+  await lifecycle(
+    request,
+    created.id,
+    reviewerAuth,
+    "approve",
+    (await review.json()).revision,
+    { submittedVersionId: firstVersionId },
+  );
+
+  await logout(page);
+  await login(page, "user", "user123");
+  const ownerAuth = await session(request);
+  const ownerCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const reopened = await lifecycle(
+    request, created.id, ownerAuth, "reopen", ownerCase.revision,
+  );
+  const draftTitle = `${marker} v2 私稿`;
+  const changed = await request.patch(`/api/cases/${created.id}`, {
+    headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+    data: { title: draftTitle, revision: reopened.case.revision },
+  });
+  expect(changed.status()).toBe(200);
+  const secondSubmission = await submit(request, created.id);
+  const secondVersionId = secondSubmission.version.id;
+  expect(secondVersionId).not.toBe(firstVersionId);
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const oldReviewResponse = await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  );
+  expect(oldReviewResponse.status()).toBe(200);
+  const oldReview = await oldReviewResponse.json();
+  expect(oldReview).toMatchObject({
+    reviewVersionId: firstVersionId,
+    reviewRecordStatus: "published",
+    isCurrentReviewVersion: false,
+    availableActions: [],
+  });
+  expect(oldReview.title).toBe(marker);
+  expect(JSON.stringify(oldReview)).not.toContain(draftTitle);
+  expect((await (await request.get(`/api/cases/${created.id}/public`)).json()).title)
+    .toBe(marker);
+
+  await page.goto(`/#/admin/review/${created.id}?versionId=${firstVersionId}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  await expect(page.locator(".case-status")).toHaveText("已发布 · 历史审核");
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  await expect(page.locator(".canvas-editor")).not.toContainText(draftTitle);
+  for (const label of ["开始审核", "通过发布", "退回修改"]) {
+    await expect(page.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+  await page.getByRole("button", { name: "指导批注", exact: true }).click();
+  await expect(page.getByText(guidance, { exact: true })).toBeVisible();
+
+  const currentReview = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  expect(currentReview.submittedVersionId).toBe(secondVersionId);
+  await page.goto(`/#/admin/review/${created.id}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(draftTitle);
+  await expect(page.locator(".case-status")).toHaveText("待审 · 旧版公开中");
 });

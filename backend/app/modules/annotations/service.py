@@ -444,7 +444,15 @@ def list_annotations(
             version = find_version(database, case, version_id, True)
             if not version:
                 raise CaseError(404, "案例版本不存在")
-            query = {"caseId": case["id"], "versionId": version_id}
+            review_rows = database.annotations.find(
+                {"caseId": case["id"], "versionId": version_id}
+            ).sort("createdAt", 1)
+            frozen_rows = version.get("annotations", [])
+            rows = [
+                *(_view(row, version["sourceRevision"]) for row in frozen_rows),
+                *(_view(row, version["sourceRevision"]) for row in review_rows),
+            ]
+            return sorted(rows, key=lambda row: row.get("createdAt", ""))
         else:
             query = _list_query(case, user)
     elif version_id:

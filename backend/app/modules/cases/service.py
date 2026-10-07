@@ -224,14 +224,19 @@ def get_review_case(
     view = frozen_case_view(case, version, user)
     view["reviewVersionId"] = version["id"]
     view["reviewRecordStatus"] = status
-    view["isCurrentReviewVersion"] = bool(
+    is_current_review_version = bool(
         (status in {"pending", "reviewing"}
             and case.get("submittedVersionId") == version["id"])
-        or (status == "published" and case.get("publishedVersionId") == version["id"])
+        or (
+            status == "published"
+            and case.get("workflowStatus") == "published"
+            and case.get("publishedVersionId") == version["id"]
+        )
     )
-    if status in {"withdrawn", "returned"}:
-        view["revision"] = version["sourceRevision"]
+    view["isCurrentReviewVersion"] = is_current_review_version
+    if not is_current_review_version:
         view["availableActions"] = []
+        view["revision"] = version["sourceRevision"]
     if status == "returned":
         event = database.lifecycle_events.find_one(
             {"caseId": case_id, "versionId": version["id"], "action": "reject"}

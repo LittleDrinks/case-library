@@ -189,7 +189,7 @@ def _is_internal(case: dict, user: dict | None) -> bool:
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
-    return _is_internal(case, user) and case["publicationStatus"] != "public"
+    return _is_internal(case, user)
 
 
 def _attachment_rows(database, case: dict, user: dict | None, version_id: str | None):

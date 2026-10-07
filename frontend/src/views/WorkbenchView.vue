@@ -158,6 +158,10 @@ const statusLabel = computed(() => {
   if (reviewMode.value && caseRecord.value?.reviewRecordStatus === "returned") {
     return "已退回 · 历史投稿";
   }
+  if (reviewMode.value && !caseRecord.value?.isCurrentReviewVersion
+      && caseRecord.value?.reviewRecordStatus === "published") {
+    return "已发布 · 历史审核";
+  }
   if (publicationStatus.value === "hidden") return "已隐藏";
   const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value

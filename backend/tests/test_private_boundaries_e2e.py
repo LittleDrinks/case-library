@@ -12,11 +12,13 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from docx import Document
 from app.core.config import Settings
 from app.modules.agent.case_area import area_rows, retained_sources
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import CorpusSearchParams
 from app.modules.agent.skills import read_source, search_corpus
+from app.modules.agent.visibility import SourceGate, visible_parts
 from app.modules.attachments.storage import minio_blob_store
 from app.modules.search.client import (
     create_client,
@@ -199,6 +201,31 @@ def _wait_for_search_directory() -> None:
             assert response.status_code == 200, response.text
             assert isinstance(response.json().get("items"), list)
             return
+
+
+def _wait_for_search_item(client, query: str, kind: str, source_id: str) -> dict:
+    deadline = time.monotonic() + 45
+    while True:
+        response = client.get(
+            "/api/search", params={"q": query, "kind": kind, "pageSize": 20}
+        )
+        if response.status_code == 503:
+            if response.json().get("detail") not in {
+                "检索目录正在同步",
+                "检索暂不可用",
+            }:
+                raise AssertionError("检索目录返回了非就绪类 503")
+        else:
+            assert response.status_code == 200, response.text
+            item = next(
+                (row for row in response.json()["items"] if row["id"] == source_id),
+                None,
+            )
+            if item:
+                return item
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"检索目录未返回预期 {kind} 条目")
+        time.sleep(0.2)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -648,12 +675,14 @@ def test_admin_case_owner_can_read_own_frozen_private_annotations() -> None:
     assert f"owner-private-reply-{marker}" in str(frozen["annotations"])
 
 
-def test_admin_case_owner_lists_private_annotations_and_own_versions() -> None:
-    owner, owner_auth = _unverified_user("admin")
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_case_owner_lists_frozen_private_annotations_and_own_versions(role: str) -> None:
+    owner, owner_auth = _unverified_user(role)
     other_admin, _other_auth = _unverified_user("admin")
-    marker = f"admin-owner-list-{uuid.uuid4().hex}"
+    marker = f"{role}-owner-list-{uuid.uuid4().hex}"
     case = _create_case(owner, owner_auth, marker)
     content = f"owner-private-list-{marker}"
+    reply_content = f"owner-private-reply-{marker}"
     note = owner.post(
         f"/api/cases/{case['id']}/annotations",
         headers={"X-CSRF-Token": owner_auth["csrfToken"]},
@@ -668,6 +697,12 @@ def test_admin_case_owner_lists_private_annotations_and_own_versions() -> None:
         },
     )
     assert note.status_code == 201, note.text
+    reply = owner.post(
+        f"/api/cases/{case['id']}/annotations/{note.json()['id']}/replies",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"content": reply_content},
+    )
+    assert reply.status_code == 200, reply.text
 
     own_draft_notes = owner.get(f"/api/cases/{case['id']}/annotations")
     assert own_draft_notes.status_code == 200, own_draft_notes.text
@@ -681,57 +716,498 @@ def test_admin_case_owner_lists_private_annotations_and_own_versions() -> None:
         json={"title": f"{marker} v1", "revision": current["revision"]},
     )
     assert manual_version.status_code == 200, manual_version.text
+    version_id = manual_version.json()["id"]
+
+    current = owner.get(f"/api/cases/{case['id']}").json()
+    later_note = owner.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": f"live-only-after-version-{marker}",
+            "source": "manual",
+            "revision": current["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert later_note.status_code == 201, later_note.text
+
     own_version_notes = owner.get(
         f"/api/cases/{case['id']}/annotations",
-        params={"versionId": manual_version.json()["id"]},
+        params={"versionId": version_id},
     )
     assert own_version_notes.status_code == 200, own_version_notes.text
+    assert [row["content"] for row in own_version_notes.json()] == [content]
+    assert [row["content"] for row in own_version_notes.json()[0]["replies"]] == [
+        reply_content
+    ]
+    assert f"live-only-after-version-{marker}" not in str(own_version_notes.json())
     assert (
         other_admin.get(
             f"/api/cases/{case['id']}/annotations",
-            params={"versionId": manual_version.json()["id"]},
+            params={"versionId": version_id},
         ).status_code
         == 404
     )
 
 
-def test_admin_case_owner_reads_new_sources_after_reopening_published_case() -> None:
-    owner, owner_auth = _unverified_user("admin")
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_case_owner_reads_live_sources_after_reopening_published_case(role: str) -> None:
+    owner, owner_auth = _unverified_user(role)
     other_admin, _other_auth = _unverified_user("admin")
-    marker = f"admin-owner-reopen-source-{uuid.uuid4().hex}"
+    marker = f"{role}-owner-reopen-source-{uuid.uuid4().hex}"
     case = _create_case(owner, owner_auth, marker)
-    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
-    started = _transition(
-        owner, owner_auth, case["id"], "start", submitted["case"]["revision"]
-    )
-    _transition(
-        owner,
-        owner_auth,
-        case["id"],
-        "approve",
-        started["case"]["revision"],
-        submittedVersionId=submitted["version"]["id"],
-    )
+    publication = _published(owner, owner_auth, case["id"])
+    version_id = publication["version"]["id"]
     current = owner.get(f"/api/cases/{case['id']}").json()
     reopened = _transition(owner, owner_auth, case["id"], "reopen", current["revision"])
     assert reopened["case"]["workflowStatus"] == "draft"
-    assert reopened["case"]["publishedVersionId"] == submitted["version"]["id"]
+    assert reopened["case"]["publishedVersionId"] == version_id
 
-    attachment = _upload_private(
-        owner, owner_auth, case["id"], f"private-source-{marker}"
+    mongo_client, database = _database()
+    settings = Settings.from_environment()
+    store = minio_blob_store(settings)
+    attachment_text = f"private-attachment-{marker}"
+    attachment = _upload_private(owner, owner_auth, case["id"], attachment_text)
+    material_text = f"private-material-{marker}"
+    material_id = f"m-{uuid.uuid4().hex}"
+    blob_id = f"blob-{uuid.uuid4().hex}"
+    store.put(blob_id, io.BytesIO(material_text.encode()), len(material_text), "text/plain")
+    database.materials.insert_one(
+        {
+            "id": material_id,
+            "title": material_text,
+            "summary": "",
+            "source": "合成私人来源",
+            "sourceUrl": "",
+            "filename": "private-material.txt",
+            "mediaType": "text/plain",
+            "size": len(material_text),
+            "accessLevel": "private",
+            "status": "active",
+            "createdBy": owner_auth["user"]["id"],
+            "blobId": blob_id,
+            "publicReferenceCount": 0,
+        }
     )
-    owner_sources = owner.get(f"/api/cases/{case['id']}/sources")
-    assert owner_sources.status_code == 200, owner_sources.text
-    owner_entry = next(
-        row for row in owner_sources.json()["entries"] if row["id"] == attachment["id"]
-    )
-    assert owner_entry["title"] == attachment["name"]
-    assert owner_entry["contentAvailable"] is True
+    try:
+        current = owner.get(f"/api/cases/{case['id']}").json()
+        mounted_material = owner.post(
+            f"/api/cases/{case['id']}/materials",
+            headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+            json={"materialId": material_id, "revision": current["revision"]},
+        )
+        assert mounted_material.status_code == 201, mounted_material.text
 
-    other_sources = other_admin.get(f"/api/cases/{case['id']}/sources")
-    assert other_sources.status_code == 200, other_sources.text
-    assert attachment["name"] not in str(other_sources.json())
-    assert attachment["id"] not in {row["id"] for row in other_sources.json()["entries"]}
+        source_case = _create_case(owner, owner_auth, f"public-source-{marker}")
+        source_publication = _published(owner, owner_auth, source_case["id"])
+        current = owner.get(f"/api/cases/{case['id']}").json()
+        mounted_case_source = owner.post(
+            f"/api/cases/{case['id']}/case-sources",
+            headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+            json={
+                "sourceCaseId": source_case["id"],
+                "versionId": source_publication["version"]["id"],
+                "revision": current["revision"],
+            },
+        )
+        assert mounted_case_source.status_code == 201, mounted_case_source.text
+        source_id = mounted_case_source.json()["id"]
+        expected_ids = {attachment["id"], material_id, source_id}
+
+        owner_attachments = owner.get(f"/api/cases/{case['id']}/attachments")
+        owner_materials = owner.get(f"/api/cases/{case['id']}/materials")
+        owner_case_sources = owner.get(f"/api/cases/{case['id']}/case-sources")
+        assert owner_attachments.status_code == 200, owner_attachments.text
+        assert owner_materials.status_code == 200, owner_materials.text
+        assert owner_case_sources.status_code == 200, owner_case_sources.text
+        assert {row["id"] for row in owner_attachments.json()} == {attachment["id"]}
+        assert {row["id"] for row in owner_materials.json()} == {material_id}
+        assert {row["id"] for row in owner_case_sources.json()} == {source_id}
+        assert owner_materials.json()[0]["contentAvailable"] is True
+
+        old_attachments = owner.get(
+            f"/api/cases/{case['id']}/attachments", params={"versionId": version_id}
+        )
+        old_materials = owner.get(
+            f"/api/cases/{case['id']}/materials", params={"versionId": version_id}
+        )
+        old_case_sources = owner.get(
+            f"/api/cases/{case['id']}/case-sources", params={"versionId": version_id}
+        )
+        assert old_attachments.status_code == old_materials.status_code == 200
+        assert old_case_sources.status_code == 200
+        assert old_attachments.json() == old_materials.json() == old_case_sources.json() == []
+
+        attachment_download = owner.get(
+            f"/api/cases/{case['id']}/attachments/{attachment['id']}/content"
+        )
+        material_download = owner.get(f"/api/materials/{material_id}/content")
+        assert attachment_download.status_code == 200
+        assert attachment_download.content == attachment_text.encode()
+        assert material_download.status_code == 200
+        assert material_download.content == material_text.encode()
+
+        owner_sources = owner.get(f"/api/cases/{case['id']}/sources")
+        assert owner_sources.status_code == 200, owner_sources.text
+        assert {row["id"] for row in owner_sources.json()["entries"]} == expected_ids
+        export = owner.get(f"/api/cases/{case['id']}/export.docx")
+        assert export.status_code == 200, export.text
+        document = Document(io.BytesIO(export.content))
+        exported_text = "\n".join(row.text for row in document.paragraphs)
+        assert attachment["name"] in exported_text
+        assert material_text in exported_text
+        assert source_case["title"] in exported_text
+
+        history = owner.get(f"/api/cases/{case['id']}/history")
+        assert history.status_code == 200, history.text
+        frozen = next(row for row in history.json()["versions"] if row["id"] == version_id)
+        assert expected_ids.isdisjoint(
+            {row["id"] for row in frozen["attachments"] + frozen["materials"] + frozen["caseSources"]}
+        )
+
+        other_attachments = other_admin.get(f"/api/cases/{case['id']}/attachments")
+        other_materials = other_admin.get(f"/api/cases/{case['id']}/materials")
+        other_case_sources = other_admin.get(f"/api/cases/{case['id']}/case-sources")
+        assert other_attachments.status_code == other_materials.status_code == 200
+        assert other_case_sources.status_code == 200
+        assert other_attachments.json() == other_materials.json() == other_case_sources.json() == []
+        other_sources = other_admin.get(f"/api/cases/{case['id']}/sources")
+        assert other_sources.status_code == 200, other_sources.text
+        assert expected_ids.isdisjoint(
+            {row["id"] for row in other_sources.json()["entries"]}
+        )
+
+        owner_record = database.users.find_one({"id": owner_auth["user"]["id"]})
+        other_record = database.users.find_one({"id": _other_auth["user"]["id"]})
+        catalog = MeilisearchCatalog(
+            create_reader(
+                os.environ["MEILI_CONTRACT_URL"],
+                os.environ["MEILI_CONTRACT_KEY_FILE"],
+            )
+        )
+        state = MongoCatalogState(database)
+        with tempfile.NamedTemporaryFile(delete=False) as cursor_key:
+            cursor_key.write(uuid.uuid4().bytes)
+            secret_path = cursor_key.name
+        try:
+            owner_deps = _tool_deps(
+                database, owner_record, case["id"], None, catalog, state, store, secret_path
+            )
+            owner_context = SimpleNamespace(deps=owner_deps)
+            owner_attachment_read = asyncio.run(
+                read_source(owner_context, "attachment", attachment["id"])
+            )
+            owner_material_read = asyncio.run(
+                read_source(owner_context, "material", material_id)
+            )
+            owner_case_read = asyncio.run(read_source(owner_context, "case", source_id))
+            assert owner_attachment_read["status"] == "ok"
+            assert owner_attachment_read["content"] == attachment_text
+            assert owner_material_read["status"] == "ok"
+            assert owner_material_read["content"] == material_text
+            assert owner_case_read["status"] == "ok"
+            assert marker in owner_case_read["content"]
+            current_refs = {ref.id: ref for ref in owner_deps.sources}
+            current_gate = SourceGate(database, owner_record, case["id"])
+            assert all(current_gate.readable(current_refs[key]) for key in expected_ids)
+
+            fixed_gate = SourceGate(database, owner_record, case["id"], version_id)
+            assert not fixed_gate.readable(current_refs[attachment["id"]])
+            assert fixed_gate.readable(current_refs[material_id])
+            assert not fixed_gate.readable(current_refs[source_id])
+            fixed_deps = _tool_deps(
+                database, owner_record, case["id"], version_id, catalog, state, store,
+                secret_path,
+            )
+            fixed_context = SimpleNamespace(deps=fixed_deps)
+            assert asyncio.run(read_source(fixed_context, "material", material_id))["status"] == "unavailable"
+            assert asyncio.run(read_source(fixed_context, "case", source_id))["status"] == "unavailable"
+
+            other_deps = _tool_deps(
+                database, other_record, case["id"], None, catalog, state, store, secret_path
+            )
+            other_context = SimpleNamespace(deps=other_deps)
+            other_read = asyncio.run(
+                read_source(other_context, "attachment", attachment["id"])
+            )
+            assert other_read["status"] == "unavailable"
+            assert "content" not in other_read
+            other_gate = SourceGate(database, other_record, case["id"])
+            assert all(not other_gate.readable(current_refs[key]) for key in expected_ids)
+        finally:
+            os.unlink(secret_path)
+    finally:
+        mongo_client.close()
+
+
+def test_global_search_sources_remain_readable_in_agent_history() -> None:
+    owner, owner_auth = _unverified_user()
+    reader, reader_auth = _unverified_user()
+    marker = f"global-source-history-{uuid.uuid4().hex}"
+    parent_case = _create_case(owner, owner_auth, f"parent-{marker}")
+    source_case = _create_case(owner, owner_auth, f"public-case-{marker}")
+    publication = _published(owner, owner_auth, source_case["id"])
+
+    mongo_client, database = _database()
+    settings = Settings.from_environment()
+    store = minio_blob_store(settings)
+    material_id = f"m-{uuid.uuid4().hex}"
+    blob_id = f"blob-{uuid.uuid4().hex}"
+    material_text = f"public-material-content-{marker}"
+    store.put(blob_id, io.BytesIO(material_text.encode()), len(material_text), "text/plain")
+    database.materials.insert_one(
+        {
+            "id": material_id,
+            "title": f"public-material-{marker}",
+            "summary": "",
+            "source": "合成公开来源",
+            "sourceUrl": "",
+            "filename": "public-material.txt",
+            "mediaType": "text/plain",
+            "size": len(material_text),
+            "accessLevel": "public",
+            "status": "active",
+            "createdBy": owner_auth["user"]["id"],
+            "blobId": blob_id,
+            "publicReferenceCount": 0,
+        }
+    )
+    SearchOutbox(database).record([f"material:{material_id}"], session=None)
+    try:
+        reader_record = database.users.find_one({"id": reader_auth["user"]["id"]})
+        catalog = MeilisearchCatalog(
+            create_reader(
+                os.environ["MEILI_CONTRACT_URL"],
+                os.environ["MEILI_CONTRACT_KEY_FILE"],
+            )
+        )
+        state = MongoCatalogState(database)
+        with tempfile.NamedTemporaryFile(delete=False) as cursor_key:
+            cursor_key.write(uuid.uuid4().bytes)
+            secret_path = cursor_key.name
+        try:
+            _wait_for_search_item(
+                reader, f"public-case-{marker}", "case", source_case["id"]
+            )
+            _wait_for_search_item(
+                reader, f"public-material-{marker}", "material", material_id
+            )
+            deps = _tool_deps(
+                database, reader_record, parent_case["id"], None, catalog, state,
+                store, secret_path,
+            )
+            context = SimpleNamespace(deps=deps)
+            case_search = _search_corpus_when_ready(
+                context,
+                CorpusSearchParams(
+                    query=f"public-case-{marker}", kind="case",
+                ),
+            )
+            material_search = _search_corpus_when_ready(
+                context,
+                CorpusSearchParams(
+                    query=f"public-material-{marker}", kind="material",
+                ),
+            )
+            case_ref = next(
+                ref for ref in case_search["sources"]
+                if ref["id"] == source_case["id"]
+            )
+            material_ref = next(
+                ref for ref in material_search["sources"]
+                if ref["id"] == material_id
+            )
+            assert case_ref["versionId"] == publication["version"]["id"]
+            assert case_ref["sourceCaseId"] == source_case["id"]
+            assert material_ref["kind"] == "material"
+
+            case_read = asyncio.run(read_source(context, "case", source_case["id"]))
+            material_read = asyncio.run(read_source(context, "material", material_id))
+            assert case_read["status"] == material_read["status"] == "ok"
+            assert marker in case_read["content"]
+            assert material_read["content"] == material_text
+            for result in (case_read, material_read):
+                generated = result["usedSourceRef"]
+                assert generated.get("location")
+                gate = SourceGate(database, reader_record, parent_case["id"])
+                assert gate.readable(generated)
+                history = visible_parts(
+                    gate,
+                    [
+                        {"type": "text", "text": result["content"]},
+                        {"type": "tool-read_source", "output": result},
+                    ],
+                )
+                assert history[0]["text"] == result["content"]
+                assert history[1]["output"]["content"] == result["content"]
+        finally:
+            os.unlink(secret_path)
+    finally:
+        mongo_client.close()
+
+
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_approved_review_record_stays_version_scoped_after_reopen_and_resubmit(
+    role: str,
+) -> None:
+    owner, owner_auth = _unverified_user(role)
+    reviewer, reviewer_auth = _login("admin", "admin123")
+    marker = f"{role}-approved-history-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
+    old_version_id = submitted["version"]["id"]
+    review = reviewer.get(f"/api/cases/{case['id']}/review")
+    assert review.status_code == 200, review.text
+    started = _transition(
+        reviewer, reviewer_auth, case["id"], "start", review.json()["revision"]
+    )
+    note = reviewer.post(
+        f"/api/cases/{case['id']}/annotations?versionId={old_version_id}",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": f"approved-v1-guidance-{marker}",
+            "source": "admin",
+            "revision": started["case"]["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert note.status_code == 201, note.text
+    review = reviewer.get(
+        f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}
+    )
+    approved = _transition(
+        reviewer,
+        reviewer_auth,
+        case["id"],
+        "approve",
+        review.json()["revision"],
+        submittedVersionId=old_version_id,
+    )
+    assert approved["case"]["publishedVersionId"] == old_version_id
+
+    current = owner.get(f"/api/cases/{case['id']}").json()
+    reopened = _transition(owner, owner_auth, case["id"], "reopen", current["revision"])
+    changed = owner.patch(
+        f"/api/cases/{case['id']}",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"title": f"{marker}-private-draft", "revision": reopened["case"]["revision"]},
+    )
+    assert changed.status_code == 200, changed.text
+    reviewer_case = reviewer.get(f"/api/cases/{case['id']}")
+    assert reviewer_case.status_code == 200, reviewer_case.text
+    assert reviewer_case.json()["title"] == marker
+    assert f"{marker}-private-draft" not in reviewer_case.text
+    assert reviewer.get(f"/api/cases/{case['id']}/public").json()["title"] == marker
+    old_review_while_draft = reviewer.get(
+        f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}
+    )
+    assert old_review_while_draft.status_code == 200, old_review_while_draft.text
+    assert old_review_while_draft.json()["reviewRecordStatus"] == "published"
+    assert old_review_while_draft.json()["isCurrentReviewVersion"] is False
+    assert old_review_while_draft.json()["availableActions"] == []
+    assert f"{marker}-private-draft" not in old_review_while_draft.text
+    if role == "admin":
+        owner_review = owner.get(
+            f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}
+        )
+        assert owner_review.status_code == 200, owner_review.text
+        assert owner_review.json()["title"] == marker
+
+    resubmitted = _transition(
+        owner,
+        owner_auth,
+        case["id"],
+        "submit",
+        changed.json()["revision"],
+    )
+    new_version_id = resubmitted["version"]["id"]
+    assert new_version_id != old_version_id
+
+    old_review = reviewer.get(
+        f"/api/cases/{case['id']}/review", params={"versionId": old_version_id}
+    )
+    assert old_review.status_code == 200, old_review.text
+    assert old_review.json()["reviewRecordStatus"] == "published"
+    assert old_review.json()["reviewVersionId"] == old_version_id
+    assert old_review.json()["isCurrentReviewVersion"] is False
+    assert old_review.json()["availableActions"] == []
+    assert old_review.json()["title"] == marker
+    assert f"{marker}-private-draft" not in old_review.text
+    old_annotations = reviewer.get(
+        f"/api/cases/{case['id']}/annotations", params={"versionId": old_version_id}
+    )
+    assert old_annotations.status_code == 200, old_annotations.text
+    assert [row["content"] for row in old_annotations.json()] == [
+        f"approved-v1-guidance-{marker}"
+    ]
+
+    current_review = reviewer.get(f"/api/cases/{case['id']}/review")
+    assert current_review.status_code == 200, current_review.text
+    assert current_review.json()["submittedVersionId"] == new_version_id
+    assert current_review.json()["reviewVersionId"] == new_version_id
+    assert current_review.json()["reviewRecordStatus"] == "pending"
+    assert current_review.json()["title"] == f"{marker}-private-draft"
+    assert reviewer.get(
+        f"/api/cases/{case['id']}/review/export.docx",
+        params={"versionId": old_version_id},
+    ).status_code == 200
+
+    rejected_writes = [
+        reviewer.post(
+            f"/api/cases/{case['id']}/annotations?versionId={old_version_id}",
+            headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+            json={
+                "quote": marker,
+                "section": "正文",
+                "content": f"late-guidance-{marker}",
+                "source": "admin",
+                "revision": old_review.json()["revision"],
+                "from": 1,
+                "to": 1 + len(marker),
+            },
+        ),
+        reviewer.post(
+            f"/api/cases/{case['id']}/annotations/{note.json()['id']}/replies",
+            headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+            json={"content": f"late-reply-{marker}"},
+        ),
+        reviewer.patch(
+            f"/api/cases/{case['id']}/annotations/{note.json()['id']}/status",
+            headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+            json={"status": "resolved"},
+        ),
+        reviewer.patch(
+            f"/api/cases/{case['id']}/annotations/{note.json()['id']}",
+            headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+            json={"content": f"edited-after-approval-{marker}"},
+        ),
+        reviewer.delete(
+            f"/api/cases/{case['id']}/annotations/{note.json()['id']}",
+            headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        ),
+    ]
+    assert [response.status_code for response in rejected_writes] == [409] * 5
+    replay = reviewer.post(
+        f"/api/cases/{case['id']}/lifecycle",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={
+            "command": "approve",
+            "revision": current_review.json()["revision"],
+            "submittedVersionId": old_version_id,
+        },
+    )
+    assert replay.status_code == 409
+    new_annotations = reviewer.get(
+        f"/api/cases/{case['id']}/annotations", params={"versionId": new_version_id}
+    )
+    assert new_annotations.status_code == 200
+    assert new_annotations.json() == []
 
 
 def test_admin_case_owner_can_reply_and_resolve_returned_review_annotations() -> None:

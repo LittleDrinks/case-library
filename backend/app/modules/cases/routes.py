@@ -270,6 +270,8 @@ def _published_record(
 
 
 def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
+    if not version_id and _internal_reader(case, user):
+        return case
     if user and user.get("role") == "admin":
         selected = version_id or case.get("submittedVersionId") or case.get("publishedVersionId")
         frozen = admin_frozen_version(database, case, user, selected)
