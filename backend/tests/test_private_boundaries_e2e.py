@@ -187,7 +187,10 @@ def _wait_for_search_directory() -> None:
                 params={"q": query, "kind": "case", "pageSize": 1},
             )
             if response.status_code == 503:
-                if response.json().get("detail") != "检索服务暂不可用":
+                if response.json().get("detail") not in {
+                    "检索目录正在同步",
+                    "检索暂不可用",
+                }:
                     raise AssertionError("检索目录返回了非就绪类 503")
                 if time.monotonic() >= deadline:
                     raise AssertionError("检索目录在等待期限内未就绪")
@@ -690,6 +693,45 @@ def test_admin_case_owner_lists_private_annotations_and_own_versions() -> None:
         ).status_code
         == 404
     )
+
+
+def test_admin_case_owner_reads_new_sources_after_reopening_published_case() -> None:
+    owner, owner_auth = _unverified_user("admin")
+    other_admin, _other_auth = _unverified_user("admin")
+    marker = f"admin-owner-reopen-source-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
+    started = _transition(
+        owner, owner_auth, case["id"], "start", submitted["case"]["revision"]
+    )
+    _transition(
+        owner,
+        owner_auth,
+        case["id"],
+        "approve",
+        started["case"]["revision"],
+        submittedVersionId=submitted["version"]["id"],
+    )
+    current = owner.get(f"/api/cases/{case['id']}").json()
+    reopened = _transition(owner, owner_auth, case["id"], "reopen", current["revision"])
+    assert reopened["case"]["workflowStatus"] == "draft"
+    assert reopened["case"]["publishedVersionId"] == submitted["version"]["id"]
+
+    attachment = _upload_private(
+        owner, owner_auth, case["id"], f"private-source-{marker}"
+    )
+    owner_sources = owner.get(f"/api/cases/{case['id']}/sources")
+    assert owner_sources.status_code == 200, owner_sources.text
+    owner_entry = next(
+        row for row in owner_sources.json()["entries"] if row["id"] == attachment["id"]
+    )
+    assert owner_entry["title"] == attachment["name"]
+    assert owner_entry["contentAvailable"] is True
+
+    other_sources = other_admin.get(f"/api/cases/{case['id']}/sources")
+    assert other_sources.status_code == 200, other_sources.text
+    assert attachment["name"] not in str(other_sources.json())
+    assert attachment["id"] not in {row["id"] for row in other_sources.json()["entries"]}
 
 
 def test_admin_case_owner_can_reply_and_resolve_returned_review_annotations() -> None:

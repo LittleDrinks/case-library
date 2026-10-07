@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import mongomock
+import pytest
+from pymongo.errors import WriteConcernError
 
+from app.core import database as database_module
 from app.core.database import initialize
 
 
@@ -54,3 +57,61 @@ def test_agent_indexes_match_current_optional_artifact_fields() -> None:
         "artifactId": {"$type": "string"},
     }
     assert "schema_migrations" not in database.list_collection_names()
+
+
+def test_initialize_retries_only_replica_state_change_write_concern(
+    monkeypatch,
+) -> None:
+    database = mongomock.MongoClient()["database_retry_test"]
+    original = database_module._initialize_auth
+    calls = 0
+
+    def interrupt_once(target) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise WriteConcernError("operation interrupted", 11602)
+        original(target)
+
+    monkeypatch.setattr(database_module, "_initialize_auth", interrupt_once)
+    monkeypatch.setattr(database_module.time, "sleep", lambda _seconds: None)
+
+    initialize(database)
+
+    assert calls == 2
+
+
+def test_initialize_does_not_retry_other_write_concern_errors(monkeypatch) -> None:
+    database = mongomock.MongoClient()["database_retry_test"]
+    calls = 0
+
+    def fail(target) -> None:
+        nonlocal calls
+        calls += 1
+        raise WriteConcernError("write concern failed", 64)
+
+    monkeypatch.setattr(database_module, "_initialize_auth", fail)
+    monkeypatch.setattr(database_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(WriteConcernError, match="write concern failed"):
+        initialize(database)
+
+    assert calls == 1
+
+
+def test_initialize_bounds_replica_state_change_retries(monkeypatch) -> None:
+    database = mongomock.MongoClient()["database_retry_test"]
+    calls = 0
+
+    def keep_interrupted(_target) -> None:
+        nonlocal calls
+        calls += 1
+        raise WriteConcernError("operation interrupted", 11602)
+
+    monkeypatch.setattr(database_module, "_initialize_auth", keep_interrupted)
+    monkeypatch.setattr(database_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(WriteConcernError, match="operation interrupted"):
+        initialize(database)
+
+    assert calls == 5

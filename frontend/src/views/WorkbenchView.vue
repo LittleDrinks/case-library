@@ -176,7 +176,8 @@ const lifecycleActions = computed(() => {
     .map((command) => ({
       command,
       ...LIFECYCLE_META[command],
-      ...(command === "reopen" && reviewMode.value ? { label: "下线编辑" } : {}),
+      ...(command === "reopen" && reviewMode.value
+        ? { label: isOwner.value ? "另开新稿" : "下线编辑" } : {}),
     }));
 });
 const lastReview = computed(() => (
@@ -692,7 +693,10 @@ async function performLifecycle(command, details = {}) {
     if (!await prepareLifecycle(command)) return false;
     const body = lifecycleBody(command, details);
     const result = await api.lifecycleCase(caseId(), body, session.csrfToken);
-    if (reviewMode.value) {
+    if (reviewMode.value && command === "reopen" && isOwner.value) {
+      await router.replace({ name: "workbench", params: { id: caseId() } });
+      await loadCase();
+    } else if (reviewMode.value) {
       applyCase(await api.getReviewCase(caseId(), readerVersion.value || undefined));
     } else {
       applyCase(result.case);
