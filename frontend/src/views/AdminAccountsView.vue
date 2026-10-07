@@ -45,8 +45,12 @@ async function loadAccounts(page = 1) {
   try {
     accounts.value = await api.listManagedAccounts(searchQuery.value, page);
   } catch (reason) {
-    if (!await refreshAuthorizationAfterDenial(reason)) {
-      error.value = formatApiError(reason, "账号列表加载失败");
+    try {
+      if (!await refreshAuthorizationAfterDenial(reason)) {
+        error.value = formatApiError(reason, "账号列表加载失败");
+      }
+    } catch (refreshError) {
+      error.value = formatApiError(refreshError, "会话状态刷新失败");
     }
   } finally {
     loading.value = false;
@@ -59,8 +63,12 @@ async function loadOperations(page = 1) {
   try {
     operations.value = await api.listAccountOperations(page);
   } catch (reason) {
-    if (!await refreshAuthorizationAfterDenial(reason)) {
-      error.value = formatApiError(reason, "操作记录加载失败");
+    try {
+      if (!await refreshAuthorizationAfterDenial(reason)) {
+        error.value = formatApiError(reason, "操作记录加载失败");
+      }
+    } catch (refreshError) {
+      error.value = formatApiError(refreshError, "会话状态刷新失败");
     }
   } finally {
     loading.value = false;
@@ -69,27 +77,23 @@ async function loadOperations(page = 1) {
 
 async function refreshAuthorizationAfterDenial(reason) {
   if (reason.status !== 401 && reason.status !== 403) return false;
-  try {
-    const current = await refreshSession();
-    if (!current) {
-      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
-      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
-      operationTarget.value = null;
-      error.value = "账号状态已变化，当前会话已失效";
-      return true;
-    }
-    if (current.role !== "admin" || current.mustChangePassword) {
-      accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
-      operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
-      operationTarget.value = null;
-      const role = current.role === "admin" ? "管理员（需先修改密码）" : "普通用户";
-      error.value = `管理访问已拒绝，当前角色：${role}`;
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
+  const current = await refreshSession();
+  if (!current) {
+    accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+    operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+    operationTarget.value = null;
+    error.value = "账号状态已变化，当前会话已失效";
+    return true;
   }
+  if (current.role !== "admin" || current.mustChangePassword) {
+    accounts.value = { items: [], total: 0, page: 1, pageSize: 25 };
+    operations.value = { items: [], total: 0, page: 1, pageSize: 25 };
+    operationTarget.value = null;
+    const role = current.role === "admin" ? "管理员（需先修改密码）" : "普通用户";
+    error.value = `管理访问已拒绝，当前角色：${role}`;
+    return true;
+  }
+  return false;
 }
 
 async function search() {
@@ -205,8 +209,12 @@ async function submitAction() {
     }
     await loadAccounts(accounts.value.page);
   } catch (reason) {
-    if (!await refreshAuthorizationAfterDenial(reason)) {
-      actionError.value = formatApiError(reason, `${actionLabels[kind].title}失败`);
+    try {
+      if (!await refreshAuthorizationAfterDenial(reason)) {
+        actionError.value = formatApiError(reason, `${actionLabels[kind].title}失败`);
+      }
+    } catch (refreshError) {
+      actionError.value = formatApiError(refreshError, "会话状态刷新失败");
     }
   } finally {
     saving.value = false;
