@@ -9,9 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
-from app.modules.auth.sessions import load_current_user
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef, merge_source_refs
+from app.modules.auth.sessions import load_current_user
 from app.modules.cases.service import CaseError
 from app.modules.search.meilisearch import SearchUnavailable
 from app.modules.search.models import FilterValue, SearchRequest, TagExpression
@@ -67,15 +67,22 @@ def _snippet(item: dict) -> str:
     return text[:SNIPPET_CHARACTERS]
 
 
-def source_ref(item: dict) -> SourceRef:
+def source_ref(item: dict, database) -> SourceRef:
     """从检索服务实际返回的条目重建来源引用，忽略模型提供的任何出处。"""
     kind = item["kind"]
     knowledge_level = item.get("knowledgeLevel") if kind == "knowledge" else None
+    version = item.get("edition") if kind == "knowledge" else None
+    if kind == "knowledge" and knowledge_level == "section" and version is None:
+        section = database.knowledge_sections.find_one({"id": str(item["id"])})
+        parent = database.knowledge_sources.find_one({
+            "id": (section or {}).get("sourceId"), "status": "active",
+        }) if section else None
+        version = (parent or {}).get("edition")
     return SourceRef(
         kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item), content_available=item.get("contentAvailable"),
         knowledge_level=knowledge_level,
-        version=item.get("edition") if kind == "knowledge" else None,
+        version=version,
     )
 
 
@@ -102,7 +109,9 @@ def search_platform(deps: ToolDeps, params: CorpusSearchParams) -> CorpusResult:
         response = search_catalog(deps.database, deps.catalog, deps.catalog_state, search)
     except SearchUnavailable as error:
         raise RuntimeError("检索服务暂不可用") from error
-    return CorpusResult([source_ref(item) for item in response["items"]], response)
+    return CorpusResult([
+        source_ref(item, deps.database) for item in response["items"]
+    ], response)
 
 
 def tag_catalog(database) -> list[dict]:

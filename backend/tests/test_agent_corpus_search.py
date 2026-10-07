@@ -6,17 +6,16 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from app.modules.agent.deps import ToolDeps
+from app.modules.agent.models import SourceRef
+from app.modules.agent.search import CorpusSearchParams, search_corpus, search_platform
+from app.modules.agent.skills import read_source as read_source_tool
+from app.modules.search.meilisearch import CatalogMetadata, CatalogPage
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.tools import Tool
-
-from app.modules.agent.deps import ToolDeps
-from app.modules.agent.search import CorpusSearchParams, search_corpus, search_platform
-from app.modules.agent.skills import read_source as read_source_tool
-from app.modules.agent.models import SourceRef
-from app.modules.search.meilisearch import CatalogMetadata, CatalogPage
 from tests.test_agent_grounding import _auth, _stream_post, _tool_model
 
 
@@ -244,6 +243,90 @@ def test_read_source_tool_uses_current_campus_grant(client) -> None:
     result = asyncio.run(read_source_tool(SimpleNamespace(deps=deps), "material", "m-tool-campus"))
 
     assert result["status"] == "no_access"
+    assert "content" not in result
+
+
+@pytest.mark.parametrize("edition", [None, "2026版"])
+def test_projected_knowledge_section_hit_keeps_current_edition_in_source_gate(
+    client, edition: str | None,
+) -> None:
+    from app.modules.agent.search import source_ref
+    from app.modules.agent.visibility import SourceGate
+    from app.modules.search.meilisearch import _full_item
+    from app.modules.search.projection import project_catalog_documents
+
+    database = client.app.state.database
+    source = {
+        "id": "kn-projected-section-parent",
+        "title": "合成教材",
+        "status": "active",
+    }
+    if edition is not None:
+        source["edition"] = edition
+    section = {
+        "id": "kn-projected-section",
+        "sourceId": source["id"],
+        "chapter": "合成章节标题",
+        "title": "搜索结果显示的章节名",
+        "content": "合成章节正文",
+    }
+    database.knowledge_sources.insert_one(source)
+    database.knowledge_sections.insert_one(section)
+    [document] = project_catalog_documents("knowledge_section", section)
+    hit = _full_item(document, "搜索结果显示的章节名")
+
+    ref = source_ref(hit, database)
+
+    assert ref.title == section["title"]
+    assert ref.knowledge_level == "section"
+    assert ref.version == edition
+    user = database.users.find_one({"id": "u-user-demo"})
+    assert SourceGate(database, user, "c-draft-1").readable(ref)
+    changed_edition = "2027版" if edition is None else None
+    if changed_edition is None:
+        database.knowledge_sources.update_one(
+            {"id": source["id"]}, {"$unset": {"edition": ""}}
+        )
+    else:
+        database.knowledge_sources.update_one(
+            {"id": source["id"]}, {"$set": {"edition": changed_edition}}
+        )
+    assert not SourceGate(database, user, "c-draft-1").readable(ref)
+
+
+def test_source_directory_id_collision_cannot_read_section_body(client) -> None:
+    database = client.app.state.database
+    shared_id = "kn-directory-section-id-collision"
+    database.knowledge_sources.insert_one({
+        "id": "kn-directory-collision-parent",
+        "title": "合成教材父项",
+        "edition": "2026版",
+        "status": "active",
+    })
+    database.knowledge_sources.insert_one({
+        "id": shared_id,
+        "title": "同 ID 合成目录",
+        "edition": "2026版",
+        "status": "active",
+    })
+    database.knowledge_sections.insert_one({
+        "id": shared_id,
+        "sourceId": "kn-directory-collision-parent",
+        "chapter": "合成章节",
+        "title": "不能由目录 ID 读取的章节",
+        "content": "不可经目录 ID 读取的合成正文",
+    })
+    deps = _deps(client, PagedCatalog([]))
+    deps.hits.append(SourceRef(
+        kind="knowledge", id=shared_id, title="同 ID 合成目录",
+        knowledge_level="source", version="2026版",
+    ))
+
+    result = asyncio.run(
+        read_source_tool(SimpleNamespace(deps=deps), "knowledge", shared_id)
+    )
+
+    assert result["status"] == "unavailable"
     assert "content" not in result
 
 

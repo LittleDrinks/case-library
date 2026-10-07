@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import io
 
-from app.modules.attachments.service import AttachmentError, download_attachment
 from app.modules.agent.case_area import area_rows
-from app.modules.cases.sources import ordered_entries
 from app.modules.agent.models import SourceRef
 from app.modules.agent.prosemirror import paragraphs
+from app.modules.attachments.service import AttachmentError, download_attachment
 from app.modules.attachments.text import extract_search_text
 from app.modules.auth.sessions import load_current_user
 from app.modules.case_sources.service import source_case_content_available
+from app.modules.cases.sources import ordered_entries
 from app.modules.materials.service import can_read_material
 
 MAX_SOURCE_CHARACTERS = 6000
@@ -155,9 +155,12 @@ def _case_result(case: dict, version: dict, source_id: str | None = None) -> dic
 
 
 def _read_knowledge(database, source_id: str) -> dict:
+    source_entity = database.knowledge_sources.find_one({"id": source_id})
     section = database.knowledge_sections.find_one({"id": source_id})
+    if source_entity or not section:
+        return _failed(UNAVAILABLE, "教材章节不存在或已下线")
     source = database.knowledge_sources.find_one({"id": (section or {}).get("sourceId"), "status": "active"})
-    if not section or not source:
+    if not source:
         return _failed(UNAVAILABLE, "教材章节不存在或已下线")
     title = " · ".join(part for part in (section.get("chapter"), section.get("title")) if part)
     ref = SourceRef(kind="knowledge", id=source_id, title=title,
@@ -201,7 +204,23 @@ def source_metadata_readable(database, user: dict | None, ref: SourceRef) -> boo
 def _knowledge_ref_readable(database, ref: SourceRef) -> bool:
     if ref.knowledge_level == "source":
         return _knowledge_source_readable(database, ref)
-    if ref.knowledge_level != "section":
+    if ref.knowledge_level == "section":
+        return _knowledge_section_readable(database, ref)
+    if ref.knowledge_level is not None:
+        return False
+
+    # 旧持久化引用没有实体层级；仅在当前集合能唯一识别实体时兼容。
+    source = database.knowledge_sources.find_one({"id": ref.id})
+    section = database.knowledge_sections.find_one({"id": ref.id})
+    if source or not section or ref.location != f"knowledge:{ref.id}":
+        return False
+    return _knowledge_section_readable(database, ref, legacy=True)
+
+
+def _knowledge_section_readable(
+    database, ref: SourceRef, *, legacy: bool = False,
+) -> bool:
+    if database.knowledge_sources.find_one({"id": ref.id}):
         return False
     section = database.knowledge_sections.find_one({"id": ref.id})
     source = section and database.knowledge_sources.find_one({
@@ -209,13 +228,15 @@ def _knowledge_ref_readable(database, ref: SourceRef) -> bool:
     })
     if not section or not source:
         return False
-    if ref.version is not None and source.get("edition") != ref.version:
+    edition = source.get("edition")
+    if ref.version != edition:
         return False
     section_title = section.get("title") or ""
     display_title = " · ".join(
         part for part in (section.get("chapter"), section_title) if part
     )
-    return ref.title in {section_title, display_title}
+    allowed_titles = {display_title} if legacy else {section_title, display_title}
+    return bool(display_title and ref.title in allowed_titles)
 
 
 def _knowledge_source_readable(database, ref: SourceRef) -> bool:
@@ -225,7 +246,7 @@ def _knowledge_source_readable(database, ref: SourceRef) -> bool:
     return bool(
         source
         and source.get("title") == ref.title
-        and (ref.version is None or source.get("edition") == ref.version)
+        and source.get("edition") == ref.version
     )
 
 

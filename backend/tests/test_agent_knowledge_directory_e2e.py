@@ -5,10 +5,6 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from fastapi.testclient import TestClient
-from pymongo import MongoClient
-from pydantic_ai.models.function import FunctionModel
-
 from app.core.config import Settings
 from app.main import create_app
 from app.modules.agent import agent
@@ -17,6 +13,10 @@ from app.modules.search.client import create_reader, index_epoch, wait_task
 from app.modules.search.indexer import catalog_settings
 from app.modules.search.meilisearch import MeilisearchCatalog
 from app.modules.search.projection import project_catalog_documents
+from conftest import MemoryBlobStore
+from fastapi.testclient import TestClient
+from pydantic_ai.models.function import FunctionModel
+from pymongo import MongoClient
 from tests.test_agent_visibility import (
     _auth,
     _has_tool_call_id,
@@ -25,7 +25,6 @@ from tests.test_agent_visibility import (
     _thread,
     _tool_delta,
 )
-from conftest import MemoryBlobStore
 
 pytestmark = pytest.mark.e2e(
     "AUTH_QUERY_MONGODB_URI", "MEILI_CONTRACT_URL", "MEILI_CONTRACT_KEY_FILE"
@@ -60,6 +59,37 @@ def _last_search_sources(database, thread_id: str) -> list[dict]:
             if part.get("type") == "tool-search_corpus":
                 return part.get("output", {}).get("sources", [])
     raise AssertionError("Agent assistant history has no search_corpus result")
+
+
+def _last_tool_output(database, thread_id: str, part_type: str) -> dict:
+    messages = list(database.agent_messages.find(
+        {"threadId": thread_id, "role": "assistant"}
+    ).sort("messageSeq", -1))
+    for message in messages:
+        for part in message.get("parts", []):
+            if part.get("type") == part_type:
+                return part.get("output", {})
+    raise AssertionError(f"Agent assistant history has no {part_type} result")
+
+
+def _search_then_read_model(
+    query: str, source_id: str, search_call: str, read_call: str, answer: str,
+) -> FunctionModel:
+    async def stream(messages, _info):
+        if not _has_tool_call_id(messages, search_call):
+            yield _tool_delta(
+                "search_corpus", {"query": query, "kind": "knowledge"}, search_call,
+            )
+            return
+        if not _has_tool_call_id(messages, read_call):
+            yield _tool_delta(
+                "read_source", {"source_type": "knowledge", "source_id": source_id},
+                read_call,
+            )
+            return
+        yield answer
+
+    return FunctionModel(stream_function=stream)
 
 
 def _case_search_model(call_id: str) -> FunctionModel:
@@ -176,6 +206,60 @@ def test_real_knowledge_directory_search_rechecks_source_status(tmp_path) -> Non
                 [directory] = _last_search_sources(database, thread_id)
                 assert directory["id"] == source_id
                 assert directory["knowledgeLevel"] == "source"
+
+            section_read = _post_stream(
+                client, auth, "c-draft-1", thread_id,
+                _stream_body("读取搜索命中的当前章节", "real-section-read"),
+                _search_then_read_model(
+                    "合成有效章节", section["id"], "real-section-search",
+                    "real-section-source-read", "已读到当前章节。",
+                ),
+            )
+            assert section_read.status_code == 200, section_read.text
+            assert "已读到当前章节。" in section_read.text
+            section_sources = _last_search_sources(database, thread_id)
+            section_hit = next(item for item in section_sources if item["id"] == section["id"])
+            assert section_hit["knowledgeLevel"] == "section"
+            assert section_hit["version"] == source["edition"]
+            section_output = _last_tool_output(database, thread_id, "tool-read_source")
+            assert section_output["status"] == "ok"
+            assert section_output["usedSourceRef"]["version"] == source["edition"]
+            assert section_output["content"] == section["content"]
+
+            collision_id = "kn-360-directory-section-id-collision"
+            collision_source = {
+                "id": collision_id,
+                "title": "合成重号目录",
+                "edition": "2026版",
+                "summary": "合成目录摘要",
+                "status": "active",
+            }
+            collision_section = {
+                "id": collision_id,
+                "sourceId": source_id,
+                "chapter": "合成重号章节",
+                "title": "不能经目录 ID 读取的章节",
+                "content": "directory-id-collision-secret-body",
+            }
+            database.knowledge_sources.insert_one(collision_source)
+            database.knowledge_sections.insert_one(collision_section)
+            wait_task(meili_admin, index.add_documents([
+                *project_catalog_documents("knowledge_source", collision_source),
+                *project_catalog_documents("knowledge_section", collision_section),
+            ]))
+            collision_read = _post_stream(
+                client, auth, "c-draft-1", thread_id,
+                _stream_body("读取目录来源", "real-collision-read"),
+                _search_then_read_model(
+                    collision_source["title"], collision_id, "real-collision-search",
+                    "real-collision-source-read", "目录条目不能代替章节正文。",
+                ),
+            )
+            assert collision_read.status_code == 200, collision_read.text
+            assert "directory-id-collision-secret-body" not in collision_read.text
+            collision_output = _last_tool_output(database, thread_id, "tool-read_source")
+            assert collision_output["status"] == "unavailable"
+            assert "content" not in collision_output
 
             database.knowledge_sources.update_one(
                 {"id": source_id}, {"$set": {"status": "retired"}}

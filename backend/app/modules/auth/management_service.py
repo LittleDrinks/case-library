@@ -9,7 +9,11 @@ from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
 from app.core.ids import new_id
-from app.modules.auth.passwords import PasswordPolicyError, hash_password, require_strong_password
+from app.modules.auth.passwords import (
+    PasswordPolicyError,
+    hash_password,
+    require_strong_password,
+)
 
 _TOKEN_VERSION_UNSET = object()
 
@@ -138,6 +142,21 @@ class AccountManagementService:
                 {"userId": user["id"], "status": "pending"}, **options
             ):
                 raise AccountManagementError("已有待审核的校内访问申请", 409)
+            # 与强退、停用和改密写入同一账号文档，建立事务并发冲突点。
+            serialized = self.database.users.update_one(
+                {
+                    "_id": current_user["_id"],
+                    "status": "active",
+                    "must_change_password": False,
+                    "token_version": user.get("token_version"),
+                },
+                {"$inc": {"campus_application_revision": 1}},
+                **options,
+            )
+            if serialized.matched_count != 1:
+                raise AccountManagementError(
+                    "当前账号会话已变化，请重新登录后重试", 401
+                )
             self.database.campus_access_applications.insert_one(
                 application, **options
             )

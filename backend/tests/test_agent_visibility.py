@@ -8,28 +8,27 @@ SSE 恢复、下一轮模型历史三个输出面都不得复述来源正文；�
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-
+from app.modules.agent import agent, prosemirror
+from app.modules.agent.deps import ToolDeps
+from app.modules.agent.models import SourceRef
+from app.modules.agent.repository import AgentRepository
+from app.modules.agent.service import _reader_accessible
+from app.modules.agent.source_reader import read_source
+from app.modules.agent.visibility import (
+    HIDDEN_ANSWER,
+    HIDDEN_REVISION,
+    parts_projector,
+)
 from fastapi.testclient import TestClient
 from pydantic_ai.models.function import (
     DeltaThinkingPart,
     DeltaToolCall,
     FunctionModel,
 )
-
-from app.modules.agent import agent, prosemirror
-from app.modules.agent.visibility import (
-    HIDDEN_ANSWER,
-    HIDDEN_REVISION,
-    parts_projector,
-)
-from app.modules.agent.source_reader import read_source
-from app.modules.agent.models import SourceRef
-from app.modules.agent.deps import ToolDeps
-from app.modules.agent.service import _reader_accessible
-from app.modules.agent.repository import AgentRepository
 
 SOURCE_TEXT = "固定版本正文"
 LEAK_MARK = "科学家精神原典摘句"
@@ -738,6 +737,12 @@ def test_legacy_knowledge_history_without_level_fails_closed(client: TestClient)
         "edition": "2026",
         "status": "active",
     })
+    database.knowledge_sources.insert_one({
+        "id": shared_id,
+        "title": "合成旧历史来源",
+        "edition": "2026",
+        "status": "active",
+    })
     database.knowledge_sections.insert_one({
         "id": shared_id,
         "sourceId": "ks-legacy-collision-parent",
@@ -757,6 +762,164 @@ def test_legacy_knowledge_history_without_level_fails_closed(client: TestClient)
     )
 
     assert LEAK_MARK not in json.dumps(visible, ensure_ascii=False)
+
+
+def test_legacy_knowledge_history_resolves_a_unique_section(client: TestClient) -> None:
+    from app.modules.agent.source_reader import read_source
+    from app.modules.agent.visibility import parts_projector
+
+    database = client.app.state.database
+    user = database.users.find_one({"username": "user"})
+    source_id = "ks-legacy-unique-parent"
+    section_id = "legacy-knowledge-unique-section"
+    database.knowledge_sources.insert_one({
+        "id": source_id,
+        "title": "合成唯一旧教材",
+        "status": "active",
+    })
+    database.knowledge_sections.insert_one({
+        "id": section_id,
+        "sourceId": source_id,
+        "chapter": "合成章节",
+        "title": "合成唯一旧章节",
+        "content": LEAK_MARK,
+    })
+    read = read_source(database, None, user, "c-draft-1", "knowledge", section_id)
+    assert read["status"] == "ok"
+    legacy_ref = dict(read["usedSourceRef"])
+    assert legacy_ref.pop("knowledgeLevel") == "section"
+    assert "version" not in legacy_ref
+    project = parts_projector(database, user, "c-draft-1")
+
+    visible = project(
+        [{"type": "text", "text": LEAK_MARK}],
+        {"_sourceDependencies": [legacy_ref]},
+    )
+
+    assert LEAK_MARK in json.dumps(visible, ensure_ascii=False)
+    database.knowledge_sources.update_one(
+        {"id": source_id}, {"$set": {"edition": "2027"}}
+    )
+    stale = parts_projector(database, user, "c-draft-1")(
+        [{"type": "text", "text": LEAK_MARK}],
+        {"_sourceDependencies": [legacy_ref]},
+    )
+    assert LEAK_MARK not in json.dumps(stale, ensure_ascii=False)
+    database.knowledge_sources.update_one(
+        {"id": source_id}, {"$set": {"edition": "2026"}}
+    )
+    database.knowledge_sections.update_one(
+        {"id": section_id}, {"$set": {"title": "已替换的合成章节"}}
+    )
+    renamed = parts_projector(database, user, "c-draft-1")(
+        [{"type": "text", "text": LEAK_MARK}],
+        {"_sourceDependencies": [legacy_ref]},
+    )
+    assert LEAK_MARK not in json.dumps(renamed, ensure_ascii=False)
+
+
+def test_legacy_knowledge_directory_without_level_fails_closed(client: TestClient) -> None:
+    from app.modules.agent.visibility import parts_projector
+
+    database = client.app.state.database
+    user = database.users.find_one({"username": "user"})
+    source_id = "ks-legacy-directory-without-level"
+    database.knowledge_sources.insert_one({
+        "id": source_id,
+        "title": "合成旧目录标题",
+        "edition": "2026",
+        "status": "active",
+    })
+    visible = parts_projector(database, user, "c-draft-1")(
+        [{"type": "text", "text": LEAK_MARK}],
+        {"_sourceDependencies": [{
+            "kind": "knowledge",
+            "id": source_id,
+            "title": "合成旧目录标题",
+            "version": "2026",
+        }]},
+    )
+
+    assert LEAK_MARK not in json.dumps(visible, ensure_ascii=False)
+
+
+def test_unrecognized_legacy_knowledge_ref_fails_closed(client: TestClient) -> None:
+    from app.modules.agent.source_reader import source_readable
+
+    database = client.app.state.database
+    source_id = "legacy-knowledge-unrecognized-section"
+    database.knowledge_sources.insert_one({
+        "id": "legacy-knowledge-unrecognized-parent",
+        "title": "合成旧教材",
+        "edition": "2026",
+        "status": "active",
+    })
+    database.knowledge_sections.insert_one({
+        "id": source_id,
+        "sourceId": "legacy-knowledge-unrecognized-parent",
+        "chapter": "合成章节",
+        "title": "合成旧章节",
+        "content": LEAK_MARK,
+    })
+    ref = SourceRef(
+        kind="knowledge", id=source_id, title="合成章节 · 合成旧章节",
+        version="2026",
+    )
+
+    assert source_readable(database, None, "c-draft-1", ref) is False
+
+
+@pytest.mark.parametrize("edition", [None, "2026"])
+def test_persisted_legacy_knowledge_history_restores_while_current(
+    client: TestClient, edition: str | None,
+) -> None:
+    database = client.app.state.database
+    _auth(client)
+    source_id = "legacy-knowledge-restored-section"
+    source = {
+        "id": "legacy-knowledge-restored-parent",
+        "title": "合成旧教材",
+        "status": "active",
+    }
+    if edition is not None:
+        source["edition"] = edition
+    database.knowledge_sources.insert_one(source)
+    database.knowledge_sections.insert_one({
+        "id": source_id,
+        "sourceId": "legacy-knowledge-restored-parent",
+        "chapter": "合成章节",
+        "title": "合成旧章节",
+        "content": LEAK_MARK,
+    })
+    old_ref = {
+        "kind": "knowledge",
+        "id": source_id,
+        "title": "合成章节 · 合成旧章节",
+        "location": f"knowledge:{source_id}",
+    }
+    if edition is not None:
+        old_ref["version"] = edition
+    thread_id = _thread(client, "c-draft-1")
+    database.agent_messages.insert_one({
+        "id": "legacy-knowledge-restored-message",
+        "threadId": thread_id,
+        "runId": "legacy-knowledge-restored-run",
+        "messageSeq": 1,
+        "role": "assistant",
+        "parts": [{"type": "text", "text": f"教材内容：{LEAK_MARK}"}],
+        "metadata": {"_sourceDependencies": [old_ref]},
+        "createdAt": datetime.now(UTC),
+    })
+
+    restored = _snapshot(client, thread_id)
+    assert LEAK_MARK in json.dumps(restored, ensure_ascii=False)
+
+    database.knowledge_sources.update_one(
+        {"id": "legacy-knowledge-restored-parent"},
+        {"$set": {"status": "retired"}},
+    )
+    unavailable = _snapshot(client, thread_id)
+    assert LEAK_MARK not in json.dumps(unavailable, ensure_ascii=False)
 
 
 def test_active_agent_run_rechecks_campus_sources_before_output(client: TestClient) -> None:
@@ -837,8 +1000,13 @@ def test_review_run_rechecks_campus_sources_after_admin_access_check(
 def test_active_recovery_does_not_replay_revoked_source_chunks(client: TestClient, revoke_after_first_batch: bool) -> None:
     import asyncio
     from threading import Event
+
     from test_agent_runs_lifecycle import (
-        _asgi_scope, _login_cookie, _post_async, _spawn_disconnected_app, _stop_loop,
+        _asgi_scope,
+        _login_cookie,
+        _post_async,
+        _spawn_disconnected_app,
+        _stop_loop,
     )
 
     database = client.app.state.database

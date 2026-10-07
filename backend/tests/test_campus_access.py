@@ -3,12 +3,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.modules.auth.management_service import (
     AccountManagementError,
     AccountManagementService,
 )
+from fastapi.testclient import TestClient
 
 
 def _register_and_login(client: TestClient, username: str) -> tuple[dict, str]:
@@ -70,6 +69,7 @@ def test_applicant_can_submit_and_query_self_reported_campus_application(
     user = client.app.state.database.users.find_one({"id": session["user"]["id"]})
     assert user["campus_verified"] is False
     assert user["name"] == username
+    assert user["campus_application_revision"] == 1
     draft = client.post(
         "/api/cases",
         headers={"X-CSRF-Token": session["csrfToken"]},
@@ -121,6 +121,45 @@ def test_application_rechecks_applicant_after_http_guard(
         "/api/auth/campus-access/applications",
         headers={"X-CSRF-Token": session["csrfToken"]},
         json={"applicantName": "合成过期申请人", "studentNumber": "SYN-360-STALE"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "当前账号会话已变化，请重新登录后重试"
+    assert database.campus_access_applications.count_documents({
+        "userId": session["user"]["id"],
+    }) == 0
+    rejected = database.account_management_operations.find_one({
+        "action": "campus_access_application_submit",
+        "actorId": session["user"]["id"],
+        "result": "rejected",
+    })
+    assert rejected["detail"] == response.json()["detail"]
+
+
+def test_application_rejects_session_changed_after_current_applicant_read(
+    client: TestClient, monkeypatch,
+) -> None:
+    username = f"issue360-changing-applicant-{uuid.uuid4().hex}"
+    session, _password = _register_and_login(client, username)
+    database = client.app.state.database
+    original = AccountManagementService._require_current_applicant
+
+    def change_session_after_read(service, applicant, transaction):
+        current = original(service, applicant, transaction)
+        database.users.update_one(
+            {"id": applicant["id"]}, {"$inc": {"token_version": 1}}
+        )
+        return current
+
+    monkeypatch.setattr(
+        AccountManagementService,
+        "_require_current_applicant",
+        change_session_after_read,
+    )
+    response = client.post(
+        "/api/auth/campus-access/applications",
+        headers={"X-CSRF-Token": session["csrfToken"]},
+        json={"applicantName": "合成交错申请人", "studentNumber": "SYN-360-RACE"},
     )
 
     assert response.status_code == 401

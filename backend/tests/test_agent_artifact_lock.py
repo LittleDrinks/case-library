@@ -7,14 +7,13 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-from pydantic_ai.exceptions import ModelRetry
-
 from app.modules.agent import artifacts, prosemirror
 from app.modules.agent.models import AgentMessage, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.skills import propose_revision
 from app.modules.cases.service import CaseError
+from fastapi.testclient import TestClient
+from pydantic_ai.exceptions import ModelRetry
 
 PARAGRAPHS = ("第一段保持不变。", "第二段需要修订。")
 REPLACEMENT = "第二段已按来源修订。"
@@ -68,9 +67,8 @@ def _create_case(client: TestClient, auth: dict, document: dict | None = None) -
 
 
 def _send(client: TestClient, auth: dict, case_id: str, parts: list[dict]) -> dict:
-    from pydantic_ai.models.test import TestModel
-
     from app.modules.agent.runtime import agent
+    from pydantic_ai.models.test import TestModel
 
     thread_id = client.get(f"/api/cases/{case_id}/agent/thread").json()["id"]
     with agent.override(model=TestModel(call_tools=[], custom_output_text="好的")):
@@ -720,4 +718,47 @@ def test_accept_rechecks_knowledge_and_material_sources(client: TestClient) -> N
     database.materials.update_one({"id": "m-1"}, {"$set": {"accessLevel": "private"}})
     _assert_refused_accept(database, case, thread, artifact, auth)
     database.materials.update_one({"id": "m-1"}, {"$set": {"accessLevel": "public"}})
+    _assert_accepted(database, case, thread, artifact, auth)
+
+
+def test_accept_restores_persisted_legacy_knowledge_section_reference(
+    client: TestClient,
+) -> None:
+    from app.modules.agent.models import SourceRef
+
+    auth = _login(client)
+    database = client.app.state.database
+    auth["user"] = database.users.find_one({"id": auth["user"]["id"]})
+    database.knowledge_sources.insert_one({
+        "id": "kn-legacy-accepted-parent",
+        "status": "active",
+        "title": "合成旧教材",
+    })
+    database.knowledge_sections.insert_one({
+        "id": "kn-legacy-accepted-section",
+        "sourceId": "kn-legacy-accepted-parent",
+        "chapter": "合成章节",
+        "title": "合成旧章节",
+        "content": "旧章节合成正文",
+    })
+    legacy_ref = SourceRef(
+        kind="knowledge",
+        id="kn-legacy-accepted-section",
+        title="合成章节 · 合成旧章节",
+        location="knowledge:kn-legacy-accepted-section",
+    )
+    database, case, thread, artifact = _seed_evidence_case(
+        client, auth, [legacy_ref]
+    )
+    database.agent_artifacts.update_one(
+        {"id": artifact.id},
+        {"$unset": {
+            "sources.0.knowledgeLevel": "",
+            "sources.0.version": "",
+        }},
+    )
+    persisted = database.agent_artifacts.find_one({"id": artifact.id})
+    assert "knowledgeLevel" not in persisted["sources"][0]
+    assert "version" not in persisted["sources"][0]
+
     _assert_accepted(database, case, thread, artifact, auth)
