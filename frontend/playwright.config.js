@@ -23,7 +23,10 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   projects: [
-    { name: "generic", testIgnore: "**/agent-*.spec.js" },
+    {
+      name: "generic",
+      testIgnore: ["**/agent-*.spec.js", "**/real-ai-account-flow.spec.js"],
+    },
     {
       name: "agent",
       testMatch: [
