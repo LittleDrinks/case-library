@@ -33,9 +33,21 @@ class ToolDeps:
     wrote: bool = False
     write_record: dict | None = None
 
+    def source_dependencies(self) -> list[SourceRef]:
+        refs = [*self.hits, *self.evidence]
+        unique: dict[tuple, SourceRef] = {}
+        for ref in refs:
+            identity = ref.identity()
+            current = unique.get(identity)
+            if current is None or (
+                current.content_available is False and ref.content_available is not False
+            ):
+                unique[identity] = ref
+        return list(unique.values())
+
     def sources_readable(self) -> bool:
         """重验本轮检索命中与已读取证据；目录条目本身不代表已读取。"""
         return revalidate_sources(
             self.database, self.user, self.case_id,
-            [*self.hits, *self.evidence],
+            self.source_dependencies(),
         )

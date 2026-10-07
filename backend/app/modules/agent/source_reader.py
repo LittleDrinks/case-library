@@ -176,6 +176,23 @@ def source_readable(database, user: dict | None, case_id: str, ref: SourceRef) -
     return result.get("status") not in {NO_ACCESS, UNAVAILABLE, ERROR}
 
 
+def source_metadata_readable(database, user: dict | None, ref: SourceRef) -> bool:
+    """只保留目录当前可见的标题，不把元数据标记当作正文权限。"""
+    if not user or ref.kind != "material":
+        return False
+    material = database.materials.find_one({"id": ref.id, "status": "active"})
+    if (
+        not material
+        or material.get("title") != ref.title
+        or material.get("accessLevel") not in {"public", "campus", "private"}
+    ):
+        return False
+    reference_count = material.get("publicReferenceCount")
+    return can_read_material(material, user) or (
+        isinstance(reference_count, int) and reference_count > 0
+    )
+
+
 def _area_entry_available(database, user: dict | None, case_id: str, ref: SourceRef) -> bool:
     case = database.cases.find_one({"id": case_id}) or {"id": case_id}
     entry = next((item for item in ordered_entries(database, case, user, "")
@@ -188,4 +205,9 @@ def revalidate_sources(database, user: dict | None, case_id: str,
     current_user = load_current_user(database, user)
     if user is not None and current_user is None:
         return False
-    return all(source_readable(database, current_user, case_id, ref) for ref in refs)
+    return all(
+        source_metadata_readable(database, current_user, ref)
+        if ref.content_available is False
+        else source_readable(database, current_user, case_id, ref)
+        for ref in refs
+    )

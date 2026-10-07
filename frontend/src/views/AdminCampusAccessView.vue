@@ -241,7 +241,7 @@ onMounted(() => {
       <section class="campus-admin-legacy" aria-labelledby="campus-admin-legacy-title">
         <header><div><span>来源单独标记，不创建历史申请</span><h2 id="campus-admin-legacy-title">旧系统授权</h2></div><span>共 {{ legacyGrants.total }} 个账号</span></header>
         <div v-if="legacyLoading" class="admin-state"><LoaderCircle class="spin" :size="18" aria-hidden="true" />正在加载旧系统授权</div>
-        <div v-else-if="legacyError" class="admin-state error-state" role="alert">{{ legacyError }}<button type="button" @click="loadLegacyGrants"><RefreshCw :size="15" aria-hidden="true" />重试</button></div>
+        <div v-else-if="legacyError" class="admin-state error-state" role="alert">{{ legacyError }}<button type="button" @click="loadLegacyGrants()"><RefreshCw :size="15" aria-hidden="true" />重试</button></div>
         <p v-else-if="!legacyGrants.items.length" class="campus-access-empty">没有匹配的旧系统授权</p>
         <article v-for="grant in legacyGrants.items" :key="grant.userId" class="campus-admin-row">
           <header>

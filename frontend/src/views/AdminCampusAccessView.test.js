@@ -112,3 +112,21 @@ it("pages through legacy grants", async () => {
   expect(wrapper.get('[aria-label="上一页旧系统授权"]').attributes("disabled")).toBeUndefined();
   expect(wrapper.get('[aria-label="下一页旧系统授权"]').attributes("disabled")).toBeDefined();
 });
+
+it("retries legacy grants with the current numeric page after a load failure", async () => {
+  api.listLegacyCampusGrants
+    .mockRejectedValueOnce(new Error("合成列表暂不可用"))
+    .mockResolvedValueOnce({
+      items: [{ userId: "legacy-user-1", username: "legacy-restored", role: "user", grantSource: "legacy" }],
+      total: 1, page: 1, pageSize: 50,
+    });
+  const wrapper = mountView();
+  await flushPromises();
+
+  expect(wrapper.text()).toContain("合成列表暂不可用");
+  await wrapper.get(".campus-admin-legacy .error-state button").trigger("click");
+  await flushPromises();
+
+  expect(api.listLegacyCampusGrants).toHaveBeenLastCalledWith("", 1, 50);
+  expect(wrapper.text()).toContain("legacy-restored");
+});

@@ -337,6 +337,9 @@ def test_application_can_be_rejected_reapplied_approved_revoked_and_approved_aga
         ("reject", "disable"),
         ("revoke", "demote"),
         ("revoke", "disable"),
+        ("approve", "force_logout"),
+        ("reject", "force_logout"),
+        ("revoke", "force_logout"),
     ],
 )
 def test_campus_management_rechecks_actor_inside_transaction(
@@ -374,8 +377,10 @@ def test_campus_management_rechecks_actor_inside_transaction(
         )
     if actor_change == "demote":
         service.change_role(supervisor, actor_id, "user", "合成撤销操作者角色")
-    else:
+    elif actor_change == "disable":
         service.change_status(supervisor, actor_id, "disabled", "合成停用操作者")
+    else:
+        service.force_logout(supervisor, actor_id, "合成强退资格操作员")
 
     with pytest.raises(AccountManagementError) as error:
         if operation == "revoke":
@@ -407,6 +412,45 @@ def test_campus_management_rechecks_actor_inside_transaction(
     }[operation]
     rejected = next(
         entry for entry in application["history"] if entry["action"] == operation_name
+    )
+    assert rejected["result"] == "rejected"
+    assert rejected["detail"] == "管理员权限已变化，请重新登录后重试"
+
+
+def test_legacy_campus_revoke_rejects_a_force_logged_out_admin(client: TestClient) -> None:
+    database = client.app.state.database
+    target = database.users.find_one({"id": "u-user-demo"})
+    database.users.update_one(
+        {"id": target["id"]},
+        {"$set": {"campus_verified": True, "campus_access_grant_source": "legacy"}},
+    )
+    actor_session, _password = _register_and_login(
+        client, f"issue360-legacy-actor-{uuid.uuid4().hex}"
+    )
+    actor_id = actor_session["user"]["id"]
+    database.users.update_one({"id": actor_id}, {"$set": {"role": "admin"}})
+    stale_actor = database.users.find_one({"id": actor_id})
+    supervisor_session, _supervisor_password = _register_and_login(
+        client, f"issue360-legacy-supervisor-{uuid.uuid4().hex}"
+    )
+    supervisor_id = supervisor_session["user"]["id"]
+    database.users.update_one({"id": supervisor_id}, {"$set": {"role": "admin"}})
+    supervisor = database.users.find_one({"id": supervisor_id})
+    service = AccountManagementService(database)
+    service.force_logout(supervisor, actor_id, "合成强退旧资格操作员")
+
+    with pytest.raises(AccountManagementError) as error:
+        service.revoke_legacy_campus_access(
+            stale_actor, target["id"], "合成过期管理员撤销旧授权"
+        )
+
+    assert error.value.status_code == 403
+    current_target = database.users.find_one({"id": target["id"]})
+    assert current_target["campus_verified"] is True
+    assert current_target["campus_access_grant_source"] == "legacy"
+    rejected = database.account_management_operations.find_one(
+        {"action": "campus_access_legacy_revoke", "targetId": target["id"]},
+        sort=[("createdAt", -1)],
     )
     assert rejected["result"] == "rejected"
     assert rejected["detail"] == "管理员权限已变化，请重新登录后重试"

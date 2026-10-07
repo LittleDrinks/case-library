@@ -16,7 +16,6 @@ from app.modules.agent.deps import ToolDeps
 from app.modules.agent.search import CorpusSearchParams, search_corpus, search_platform
 from app.modules.agent.skills import read_source as read_source_tool
 from app.modules.agent.models import SourceRef
-from app.modules.agent.source_reader import read_source as read_domain_source
 from app.modules.search.meilisearch import CatalogMetadata, CatalogPage
 from tests.test_agent_grounding import _auth, _stream_post, _tool_model
 
@@ -165,25 +164,53 @@ def test_expression_plus_tag_ids_fails_explicitly(client) -> None:
     assert "同时使用" in str(excinfo.value)
 
 
-def test_restricted_hit_records_reference_without_content_leak(client) -> None:
+@pytest.mark.parametrize("access_level", ["campus", "private"])
+def test_restricted_hit_records_reference_without_content_leak(client, access_level) -> None:
     database = client.app.state.database
     database.users.update_one(
         {"id": "u-user-demo"}, {"$set": {"campus_verified": False}}
     )
     database.materials.insert_one({
         "id": "m-restricted", "status": "active", "title": "校内受限素材",
-        "accessLevel": "campus", "createdBy": "u-other",
+        "accessLevel": access_level, "createdBy": "u-other", "publicReferenceCount": 1,
     })
-    deps = _deps(client, PagedCatalog([_restricted_item()]))
+    restricted_item = {
+        **_restricted_item(),
+        "accessLevel": access_level,
+        "summary": "该摘要不属于可公开展示的目录标题",
+    }
+    deps = _deps(client, PagedCatalog([restricted_item]))
     view = _call(deps, {"kind": "material"})
 
     source = view["sources"][0]
     assert source["title"] == source["snippet"] == "校内受限素材"
+    assert source["contentAvailable"] is False
+    assert "该摘要不属于可公开展示的目录标题" not in str(source)
     assert "content" not in source and "summary" not in source
-    result = read_domain_source(
-        deps.database, None, deps.user, deps.case_id, "material", "m-restricted",
+    assert deps.hits[0].content_available is False
+    assert deps.sources_readable() is True
+    database.materials.update_one(
+        {"id": "m-restricted"}, {"$set": {"publicReferenceCount": 0}}
     )
-    assert result["status"] == "no_access"
+    assert deps.sources_readable() is False
+    body_read = asyncio.run(
+        read_source_tool(SimpleNamespace(deps=deps), "material", "m-restricted")
+    )
+    assert body_read["status"] == "no_access"
+    assert deps.evidence == []
+
+
+def test_public_http_search_keeps_items_content_availability_contract(client) -> None:
+    _auth(client)
+    client.app.state.search_catalog = PagedCatalog([_restricted_item()])
+
+    response = client.get("/api/search", params={"kind": "material"})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["id"] == "m-restricted"
+    assert item["contentAvailable"] is False
+    assert "snippet" not in item
 
 
 def test_tool_search_uses_current_campus_grant(client) -> None:

@@ -16,13 +16,14 @@ from app.modules.agent.models import (
     AgentSnapshot,
     SourceRef,
 )
-from app.modules.agent.source_reader import source_readable
+from app.modules.agent.source_reader import source_metadata_readable, source_readable
 from app.modules.auth.sessions import load_current_user
 
 HIDDEN_ANSWER = "该回答引用的来源当前不可读，相关内容已隐藏"
 HIDDEN_REVISION = "该候选引用的来源当前不可读，修订内容已隐藏"
 HIDDEN_BLOCKS = [{"type": "paragraph", "text": HIDDEN_REVISION}]
 NO_ACCESS_OUTPUT = {"status": "no_access", "detail": "来源当前不可读"}
+SOURCE_DEPENDENCIES = "_sourceDependencies"
 
 
 class SourceGate:
@@ -41,6 +42,8 @@ class SourceGate:
             return False
         if self._authenticated and self.user is None:
             return False
+        if ref.content_available is False:
+            return source_metadata_readable(self.database, self.user, ref)
         if ref.identity() not in self._readable:
             self._readable[ref.identity()] = source_readable(
                 self.database, self.user, self.case_id, ref
@@ -67,25 +70,45 @@ def visible_artifact(database, artifact: AgentArtifact, user: dict) -> AgentArti
     return _visible_artifact(SourceGate(database, user, artifact.case_id), artifact)
 
 
-def visible_parts(gate: SourceGate, parts: list[dict]) -> list[dict]:
+def visible_parts(
+    gate: SourceGate, parts: list[dict], metadata: dict | None = None,
+) -> list[dict]:
     """助手消息引用的任一来源不可读时隐藏正文文本，工具输出逐项遮蔽。"""
-    tainted = any(not gate.readable(ref) for ref in _message_refs(parts))
+    tainted = any(not gate.readable(ref) for ref in _message_refs(parts, metadata))
     return [_visible_part(gate, part, tainted) for part in parts]
 
 
-def parts_projector(database, user: dict | None, case_id: str):
+def parts_projector(
+    database, user: dict | None, case_id: str, dependencies: list[SourceRef] | None = None,
+):
     """注入恢复流与模型历史的投影函数；每次调用重建 SourceGate 逐消息复验。"""
 
-    def project(parts: list[dict]) -> list[dict]:
-        return visible_parts(SourceGate(database, user, case_id), parts)
+    def project(parts: list[dict], metadata: dict | None = None) -> list[dict]:
+        gate = SourceGate(database, user, case_id)
+        refs = _message_refs(parts, metadata)
+        if dependencies is not None:
+            for raw in refs:
+                ref = gate._validated(raw)
+                if ref is None or not gate.readable(ref):
+                    continue
+                if not any(item.identity() == ref.identity() for item in dependencies):
+                    dependencies.append(ref)
+        return visible_parts(gate, parts, metadata)
 
     return project
 
 
 def _visible_message(gate: SourceGate, message: AgentMessage) -> AgentMessage:
     if message.role != "assistant":
-        return message
-    return message.model_copy(update={"parts": visible_parts(gate, message.parts)})
+        return message.model_copy(update={"metadata": public_metadata(message.metadata)})
+    return message.model_copy(update={
+        "metadata": public_metadata(message.metadata),
+        "parts": visible_parts(gate, message.parts, message.metadata),
+    })
+
+
+def public_metadata(metadata: dict | None) -> dict:
+    return {key: value for key, value in (metadata or {}).items() if key != SOURCE_DEPENDENCIES}
 
 
 def _visible_artifact(gate: SourceGate, artifact: AgentArtifact) -> AgentArtifact:
@@ -183,8 +206,11 @@ def _search_part(gate: SourceGate, part: dict) -> dict:
     return {**part, "output": {**output, "sources": sources}}
 
 
-def _message_refs(parts: list[dict]) -> list[object]:
+def _message_refs(parts: list[dict], metadata: dict | None = None) -> list[object]:
     refs: list[object] = []
+    dependencies = (metadata or {}).get(SOURCE_DEPENDENCIES, [])
+    if isinstance(dependencies, list):
+        refs.extend(dependencies)
     for part in parts:
         refs.extend(_part_refs(part))
     return refs

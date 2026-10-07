@@ -66,8 +66,13 @@ def _known_source(deps: ToolDeps, kind: str, source_id: str) -> bool:
 
 
 def _record_evidence(deps: ToolDeps, ref: SourceRef) -> None:
-    if not any(item.identity() == ref.identity() for item in deps.evidence):
+    current = next(
+        (item for item in deps.evidence if item.identity() == ref.identity()), None
+    )
+    if current is None:
         deps.evidence.append(ref)
+    elif current.content_available is False and ref.content_available is not False:
+        deps.evidence[deps.evidence.index(current)] = ref
 
 
 async def propose_revision(
@@ -115,7 +120,7 @@ def _propose(ctx: RunContext[ToolDeps], start: int, end: int, replacement: str, 
         raise CaseError(403, "本轮来源当前不可读，不能继续复用")
     return artifacts.propose_artifact(
         ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-        start, end, replacement, reason, list(ctx.deps.evidence), ctx.deps.user,
+        start, end, replacement, reason, ctx.deps.source_dependencies(), ctx.deps.user,
         ctx.deps.annotation_id,
     )
 
@@ -150,7 +155,7 @@ def _propose_document(ctx: RunContext[ToolDeps], blocks: DraftBlocks, reason: st
     try:
         artifact = artifacts.propose_document_artifact(
             ctx.deps.database, ctx.deps.case_id, ctx.deps.thread_id, ctx.deps.run_id,
-            blocks, reason, list(ctx.deps.evidence), ctx.deps.user,
+            blocks, reason, ctx.deps.source_dependencies(), ctx.deps.user,
         )
     except CaseError as error:
         raise ModelRetry(str(error.detail)) from error

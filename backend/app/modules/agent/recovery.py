@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 
 from app.modules.agent.models import AgentThread, AgentThreadEvent
 from app.modules.agent.repository import AgentRepository
-from app.modules.agent.visibility import SourceGate
+from app.modules.agent.visibility import SourceGate, public_metadata
 
 STREAM_POLL_SECONDS = float(os.getenv("AGENT_STREAM_POLL_SECONDS", "0.1"))
 
@@ -45,8 +45,8 @@ class RunStream:
         encoded = chunk.encode(6)
         if encoded == "[DONE]":
             return
-        refs = [ref.model_dump(by_alias=True, mode="json")
-                for ref in [*self.deps.hits, *self.deps.evidence]] if self.deps else []
+        refs = [ref.model_dump(by_alias=True, mode="json", exclude_none=True)
+                for ref in self.deps.source_dependencies()] if self.deps else []
         await asyncio.to_thread(
             self.repository.database.agent_run_streams.update_one,
             {"_id": self.run.id},
@@ -93,7 +93,10 @@ def _run_terminal_chunks(repository, run, project):
     message = repository.message(run["threadId"], run["assistantMessageId"])
     if message:
         yield {"type": "data-agent-message", "transient": True, "data":
-               message.model_copy(update={"parts": project(message.parts)}).model_dump(
+               message.model_copy(update={
+                   "metadata": public_metadata(message.metadata),
+                   "parts": project(message.parts, message.metadata),
+               }).model_dump(
                    by_alias=True, mode="json")}
     if run["status"] == "failed":
         yield {"type": "error", "errorText": run.get("error") or "AI 服务暂不可用"}
@@ -121,7 +124,10 @@ def _message_chunks(
     message = repository.message(event.thread_id, str(event.payload.get("messageId")))
     if message is None or message.role != "assistant":
         return []
-    visible = message.model_copy(update={"parts": project(message.parts)})
+    visible = message.model_copy(update={
+        "metadata": public_metadata(message.metadata),
+        "parts": project(message.parts, message.metadata),
+    })
     return [{
         "type": "data-agent-message",
         "data": visible.model_dump(by_alias=True, mode="json"),

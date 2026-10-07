@@ -419,6 +419,149 @@ def test_parts_projector_reads_current_campus_grant_after_revoke(client: TestCli
     assert revoked[0]["output"] == {"status": "no_access", "detail": "来源当前不可读"}
 
 
+def test_metadata_only_search_hit_is_rechecked_against_current_directory_and_session(
+    client: TestClient,
+) -> None:
+    database = client.app.state.database
+    database.materials.insert_one({
+        "id": "m-metadata-current", "status": "active", "title": "当前公开引用标题",
+        "accessLevel": "campus", "publicReferenceCount": 1, "createdBy": "u-other",
+    })
+    database.users.update_one(
+        {"id": "u-user-demo"}, {"$set": {"campus_verified": False}}
+    )
+    user = database.users.find_one({"id": "u-user-demo"})
+    project = parts_projector(database, user, "c-draft-1")
+    parts = [
+        {"type": "tool-search_corpus", "output": {"sources": [{
+            "kind": "material", "id": "m-metadata-current", "title": "当前公开引用标题",
+            "snippet": "当前公开引用标题", "contentAvailable": False,
+        }]}},
+        {"type": "text", "text": "按目录标题完成普通创作：当前公开引用标题"},
+    ]
+
+    assert project(parts)[0]["output"]["sources"]
+    assert project(parts)[1]["text"].startswith("按目录标题")
+
+    database.materials.update_one(
+        {"id": "m-metadata-current"}, {"$set": {"publicReferenceCount": 0}}
+    )
+    hidden = project(parts)
+    assert hidden[0]["output"]["sources"] == []
+    assert hidden[1]["text"] == HIDDEN_ANSWER
+
+    database.materials.update_one(
+        {"id": "m-metadata-current"},
+        {"$set": {"publicReferenceCount": 1, "title": "目录标题已更新"}},
+    )
+    renamed = project(parts)
+    assert renamed[0]["output"]["sources"] == []
+    assert renamed[1]["text"] == HIDDEN_ANSWER
+
+    database.materials.update_one(
+        {"id": "m-metadata-current"},
+        {"$set": {"title": "当前公开引用标题", "status": "withdrawn"}},
+    )
+    offline = project(parts)
+    assert offline[0]["output"]["sources"] == []
+    assert offline[1]["text"] == HIDDEN_ANSWER
+
+    database.materials.update_one(
+        {"id": "m-metadata-current"},
+        {"$set": {
+            "status": "active", "publicReferenceCount": 1, "accessLevel": "unknown",
+        }},
+    )
+    invalid_level = project(parts)
+    assert invalid_level[0]["output"]["sources"] == []
+    assert invalid_level[1]["text"] == HIDDEN_ANSWER
+
+    database.materials.update_one(
+        {"id": "m-metadata-current"},
+        {"$set": {"accessLevel": "campus"}},
+    )
+    database.users.update_one({"id": user["id"]}, {"$set": {"status": "disabled"}})
+    disabled = project(parts)
+    assert disabled[0]["output"]["sources"] == []
+    assert disabled[1]["text"] == HIDDEN_ANSWER
+
+    database.users.update_one(
+        {"id": user["id"]},
+        {"$inc": {"token_version": 1}, "$set": {"status": "active"}},
+    )
+    expired = project(parts)
+    assert expired[0]["output"]["sources"] == []
+    assert expired[1]["text"] == HIDDEN_ANSWER
+
+
+def test_production_run_inherits_history_source_dependencies_until_revocation(
+    client: TestClient,
+) -> None:
+    from io import BytesIO
+
+    database = client.app.state.database
+    user_id = "u-user-demo"
+    material_id = "m-agent-history-campus"
+    blob_id = "b-agent-history-campus"
+    database.users.update_one({"id": user_id}, {"$set": {"campus_verified": True}})
+    database.materials.insert_one({
+        "id": material_id, "status": "active", "title": "合成历史校内资料",
+        "accessLevel": "campus", "createdBy": "u-other", "blobId": blob_id,
+        "filename": "synthetic.txt", "mediaType": "text/plain", "size": 26,
+    })
+    database.case_materials.insert_one({
+        "id": "cm-agent-history-campus", "caseId": "c-draft-1",
+        "materialId": material_id, "title": "合成历史校内资料",
+    })
+    client.app.state.blob_store.put(
+        blob_id, BytesIO(b"Synthetic campus source body."), 29, "text/plain"
+    )
+    auth = _auth(client)
+    thread_id = _thread(client, "c-draft-1")
+
+    async def read_and_answer(messages, _info):
+        if "read_source" not in _tool_names(messages):
+            yield _tool_delta(
+                "read_source", {"source_type": "material", "source_id": material_id},
+                "history-campus-read",
+            )
+            return
+        yield "第一轮已读取合成校内正文。"
+
+    first = _post_stream(
+        client, auth, "c-draft-1", thread_id, _stream_body("读取校内资料"),
+        FunctionModel(stream_function=read_and_answer),
+    )
+    assert first.status_code == 200, first.text
+    stored = database.agent_messages.find_one({"threadId": thread_id, "role": "assistant"})
+    body_dependency = stored["metadata"]["_sourceDependencies"][0]
+    assert body_dependency["id"] == material_id
+    assert "contentAvailable" not in body_dependency
+
+    async def revoke_during_second_turn(messages, _info):
+        assert "第一轮已读取合成校内正文" in _history_texts([messages])
+        database.users.update_one({"id": user_id}, {"$set": {"campus_verified": False}})
+        yield LEAK_MARK
+
+    second = _post_stream(
+        client, auth, "c-draft-1", thread_id,
+        _stream_body("继续复述上一轮", "second-campus-message"),
+        FunctionModel(stream_function=revoke_during_second_turn),
+    )
+    assert second.status_code == 200, second.text
+    assert LEAK_MARK not in second.text
+    run = database.agent_runs.find_one(
+        {"threadId": thread_id}, sort=[("startedAt", -1)]
+    )
+    assert run["status"] == "cancelled"
+    assert database.agent_messages.count_documents({"runId": run["id"], "role": "assistant"}) == 0
+    assert database.agent_artifacts.count_documents({"runId": run["id"]}) == 0
+    snapshot = _snapshot(client, thread_id)
+    assert HIDDEN_ANSWER in json.dumps(snapshot, ensure_ascii=False)
+    assert "_sourceDependencies" not in json.dumps(snapshot, ensure_ascii=False)
+    assert LEAK_MARK not in _replay(client, "c-draft-1", thread_id)
+
+
 def test_active_agent_run_rechecks_campus_sources_before_output(client: TestClient) -> None:
     database = client.app.state.database
     database.materials.insert_one({

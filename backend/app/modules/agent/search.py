@@ -61,6 +61,8 @@ class CorpusResult:
 
 
 def _snippet(item: dict) -> str:
+    if item.get("contentAvailable") is False:
+        return str(item.get("title") or "")[:SNIPPET_CHARACTERS]
     text = str(item.get("summary") or item.get("title") or "")
     return text[:SNIPPET_CHARACTERS]
 
@@ -70,14 +72,19 @@ def source_ref(item: dict) -> SourceRef:
     kind = item["kind"]
     return SourceRef(
         kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
-        snippet=_snippet(item),
+        snippet=_snippet(item), content_available=item.get("contentAvailable"),
     )
 
 
 def _record_hits(deps: ToolDeps, refs: list[SourceRef]) -> None:
     for ref in refs:
-        if not any(item.identity() == ref.identity() for item in deps.hits):
+        current = next(
+            (item for item in deps.hits if item.identity() == ref.identity()), None
+        )
+        if current is None:
             deps.hits.append(ref)
+        elif current.content_available is False and ref.content_available is not False:
+            deps.hits[deps.hits.index(current)] = ref
 
 
 def _search_request(params: CorpusSearchParams) -> SearchRequest:

@@ -872,7 +872,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
                 CorpusSearchParams(query=material_title, kind="material"),
             )
         )
-        assert pending_search["items"][0]["contentAvailable"] is False
+        assert pending_search["sources"][0]["contentAvailable"] is False
+        assert pending_search["sources"][0]["snippet"] == material_title
         assert material_summary not in json.dumps(pending_search, ensure_ascii=False)
         pending_read = asyncio.run(
             read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
@@ -890,7 +891,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
                 CorpusSearchParams(query=material_title, kind="material"),
             )
         )
-        assert approved_search["items"][0]["contentAvailable"] is True
+        assert approved_search["sources"][0]["contentAvailable"] is True
+        assert approved_search["sources"][0]["snippet"] == material_summary
         assert material_summary in json.dumps(approved_search, ensure_ascii=False)
         first_read = asyncio.run(
             read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
@@ -910,7 +912,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
                 CorpusSearchParams(query=material_title, kind="material"),
             )
         )
-        assert revoked_search["items"][0]["contentAvailable"] is False
+        assert revoked_search["sources"][0]["contentAvailable"] is False
+        assert revoked_search["sources"][0]["snippet"] == material_title
         assert material_summary not in json.dumps(revoked_search, ensure_ascii=False)
         denied_read = asyncio.run(
             read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
@@ -936,7 +939,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
                 CorpusSearchParams(query=material_title, kind="material"),
             )
         )
-        assert pending_search["items"][0]["contentAvailable"] is False
+        assert pending_search["sources"][0]["contentAvailable"] is False
+        assert pending_search["sources"][0]["snippet"] == material_title
         assert material_summary not in json.dumps(pending_search, ensure_ascii=False)
         approved_again_status, approved_again = _admin_action(
             admin, admin_session["csrfToken"], reapplication["id"], "decision",
@@ -949,7 +953,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
                 CorpusSearchParams(query=material_title, kind="material"),
             )
         )
-        assert restored_search["items"][0]["contentAvailable"] is True
+        assert restored_search["sources"][0]["contentAvailable"] is True
+        assert restored_search["sources"][0]["snippet"] == material_summary
         assert material_summary in json.dumps(restored_search, ensure_ascii=False)
         restored_read = asyncio.run(
             read_source_tool(SimpleNamespace(deps=deps), "material", material_id)
@@ -1084,5 +1089,163 @@ def test_real_http_legacy_source_migration_keeps_explicit_revocation_after_resta
         })
         assert operation["reason"] == "合成旧系统资格明确撤销"
         assert "campusApplicationId" not in operation
+    finally:
+        mongo.close()
+
+
+@pytest.mark.e2e("CASE_LIBRARY_E2E_URL", "AUTH_QUERY_MONGODB_URI")
+@pytest.mark.parametrize("action", ["approve", "reject", "revoke", "legacy_revoke"])
+def test_real_http_force_logout_prevents_stale_campus_decision_transaction(action: str) -> None:
+    from app.modules.auth.management_service import (
+        AccountManagementError,
+        AccountManagementService,
+    )
+
+    actor_username = f"issue360-stale-session-admin-{uuid.uuid4().hex}"
+    actor_password = f"Issue360-{uuid.uuid4().hex}!a"
+    target_username = f"issue360-stale-session-target-{uuid.uuid4().hex}"
+    target_password = f"Issue360-{uuid.uuid4().hex}!a"
+    student_number = f"SYN-360-{uuid.uuid4().hex[:12]}"
+    reason = f"合成过期资格操作员{action}"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo.get_default_database()
+
+    try:
+        super_admin = _opener()
+        super_session = _login(super_admin, "admin", "admin123")
+        actor_registration_status, actor_user = _request(
+            _opener(),
+            "POST",
+            "/api/auth/register",
+            {"username": actor_username, "password": actor_password},
+        )
+        assert actor_registration_status == 201
+        promoted_status, _promoted = _request(
+            super_admin,
+            "POST",
+            f"/api/admin/accounts/{actor_user['id']}/role",
+            {"role": "admin", "reason": "合成过期会话管理员初始化"},
+            super_session["csrfToken"],
+        )
+        assert promoted_status == 200
+        actor = _opener()
+        actor_session = _login(actor, actor_username, actor_password)
+        stale_actor = database.users.find_one({"id": actor_user["id"]})
+
+        if action == "legacy_revoke":
+            target_status, target = _request(
+                _opener(),
+                "POST",
+                "/api/auth/register",
+                {"username": target_username, "password": target_password},
+            )
+            assert target_status == 201
+            target_id = target["id"]
+            database.users.update_one(
+                {"id": target_id},
+                {"$set": {
+                    "campus_verified": True,
+                    "campus_access_grant_source": "legacy",
+                }},
+            )
+            http_path = f"/api/admin/campus-access-users/{target_id}/revoke-legacy"
+            http_body = {"reason": reason}
+            operation = "campus_access_legacy_revoke"
+            before = database.users.find_one({"id": target_id})
+        else:
+            target_registration_status, target = _request(
+                _opener(),
+                "POST",
+                "/api/auth/register",
+                {"username": target_username, "password": target_password},
+            )
+            assert target_registration_status == 201
+            target_id = target["id"]
+            applicant = _opener()
+            applicant_session = _login(applicant, target_username, target_password)
+            submitted_status, application = _submit(
+                applicant,
+                applicant_session["csrfToken"],
+                "合成过期会话申请人",
+                student_number,
+            )
+            assert submitted_status == 201
+            if action == "revoke":
+                approved_status, _approved = _admin_action(
+                    super_admin,
+                    super_session["csrfToken"],
+                    application["id"],
+                    "decision",
+                    {"decision": "approved", "reason": "合成过期会话撤销准备"},
+                )
+                assert approved_status == 200
+                decision = "approved"
+            else:
+                decision = "approved" if action == "approve" else "rejected"
+            http_path = (
+                f"/api/admin/campus-access-applications/{application['id']}/revoke"
+                if action == "revoke"
+                else f"/api/admin/campus-access-applications/{application['id']}/decision"
+            )
+            http_body = (
+                {"reason": reason}
+                if action == "revoke"
+                else {"decision": decision, "reason": reason}
+            )
+            operation = f"campus_access_{action}"
+            before = {
+                "application": database.campus_access_applications.find_one(
+                    {"id": application["id"]}
+                ),
+                "user": database.users.find_one({"id": target_id}),
+            }
+
+        assert stale_actor["role"] == "admin"
+        logout_status, _logged_out = _request(
+            super_admin,
+            "POST",
+            f"/api/admin/accounts/{actor_user['id']}/force-logout",
+            {"reason": "合成先撤销旧资格管理员会话"},
+            super_session["csrfToken"],
+        )
+        assert logout_status == 200
+
+        stale_http_status, _stale_response = _request(
+            actor, "POST", http_path, http_body, actor_session["csrfToken"]
+        )
+        assert stale_http_status == 401
+
+        service = AccountManagementService(database)
+        with pytest.raises(AccountManagementError) as error:
+            if action == "legacy_revoke":
+                service.revoke_legacy_campus_access(stale_actor, target_id, reason)
+            elif action == "revoke":
+                service.revoke_campus_access(stale_actor, application["id"], reason)
+            else:
+                service.decide_campus_application(
+                    stale_actor, application["id"], decision, reason
+                )
+        assert error.value.status_code == 403
+
+        operation_row = database.account_management_operations.find_one({
+            "actorId": actor_user["id"], "action": operation,
+            "targetId": target_id, "reason": reason, "result": "rejected",
+        })
+        assert operation_row
+        if action == "legacy_revoke":
+            after = database.users.find_one({"id": target_id})
+            assert after["campus_verified"] is before["campus_verified"] is True
+            assert after["campus_access_grant_source"] == "legacy"
+            assert "campus_access_revoked_at" not in after
+        else:
+            after_application = database.campus_access_applications.find_one(
+                {"id": application["id"]}
+            )
+            after_user = database.users.find_one({"id": target_id})
+            expected_status = "approved" if action == "revoke" else "pending"
+            assert after_application["status"] == expected_status
+            assert after_user["campus_verified"] is (action == "revoke")
+            assert after_application["status"] == before["application"]["status"]
+            assert after_user["campus_verified"] == before["user"]["campus_verified"]
     finally:
         mongo.close()

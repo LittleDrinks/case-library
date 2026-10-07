@@ -91,6 +91,7 @@ class RunPlan:
     annotation_id: str | None = None
     annotation: dict | None = None
     revision_context: dict | None = None
+    history_sources: list[SourceRef] = field(default_factory=list)
 
 
 def _author_case(database, case_id: str, user: dict) -> dict:
@@ -661,10 +662,14 @@ async def _send_message(case_id, thread_id, request, database, settings, user, v
 
 
 def _plan_for(repository, thread, adapter, database, user, conversation):
-    project = parts_projector(database, user, conversation.case["id"])
+    history_sources: list[SourceRef] = []
+    project = parts_projector(
+        database, user, conversation.case["id"], dependencies=history_sources
+    )
+    plan = _run_plan(repository, thread, adapter, project)
+    plan.history_sources = history_sources
     return _validate_plan(
-        database, conversation.case, _run_plan(repository, thread, adapter, project),
-        conversation.version_id, user, thread.id,
+        database, conversation.case, plan, conversation.version_id, user, thread.id,
     )
 
 
@@ -777,8 +782,11 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         store=request.app.state.blob_store, version_id=conversation.version_id,
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
-        evidence=[SourceRef.model_validate(ref)
-                  for ref in (plan.revision_context or {}).get("sources") or []],
+        evidence=[
+            *plan.history_sources,
+            *[SourceRef.model_validate(ref)
+              for ref in (plan.revision_context or {}).get("sources") or []],
+        ],
     )
 
 

@@ -21,6 +21,7 @@ from app.modules.agent.repository import (
     review_baseline_current,
     review_delivery_allowed,
 )
+from app.modules.agent.visibility import SOURCE_DEPENDENCIES, public_metadata
 from app.modules.agent.resources import READER_PROMPT, REVIEW_PROMPT, SYSTEM_PROMPT, resource_record
 from app.modules.agent.runtime import case_instructions
 from app.modules.ai.provider import open_model
@@ -213,9 +214,18 @@ def _assistant_ui(context: RunContext, result):
 
 def _assistant_message(context: RunContext, result) -> AgentMessage:
     assistant = _assistant_ui(context, result)
+    metadata = dict(assistant.metadata or {})
+    metadata.pop(SOURCE_DEPENDENCIES, None)
+    if context.deps:
+        dependencies = context.deps.source_dependencies()
+        if dependencies:
+            metadata[SOURCE_DEPENDENCIES] = [
+                ref.model_dump(by_alias=True, mode="json", exclude_none=True)
+                for ref in dependencies
+            ]
     return AgentMessage(
         id=assistant.id, thread_id=context.run.thread_id, run_id=context.run.id,
-        role="assistant", metadata=assistant.metadata, parts=_assistant_parts(assistant),
+        role="assistant", metadata=metadata, parts=_assistant_parts(assistant),
         created_at=datetime.now(UTC),
     )
 
@@ -462,7 +472,7 @@ def _release_lease(context: RunContext) -> None:
 def _projected_parts(row: AgentMessage, project) -> list[dict]:
     if row.role != "assistant":
         return row.parts
-    return project(row.parts)
+    return project(row.parts, row.metadata)
 
 
 def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None, *,
@@ -478,6 +488,6 @@ def load_history(repository: AgentRepository, thread: AgentThread, max_seq=None,
 
 def _ui_message(row: AgentMessage, project) -> dict:
     return {
-        "id": row.id, "role": row.role, "metadata": row.metadata,
+        "id": row.id, "role": row.role, "metadata": public_metadata(row.metadata),
         "parts": _projected_parts(row, project),
     }

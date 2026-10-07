@@ -114,6 +114,7 @@ class SourceRef(BaseModel):
     id: str
     title: str
     snippet: str = ""
+    content_available: bool | None = Field(default=None, alias="contentAvailable")
     version: str | None = None
     version_id: str | None = Field(default=None, alias="versionId")
     source_case_id: str | None = Field(

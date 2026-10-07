@@ -11,6 +11,8 @@ from pymongo.errors import DuplicateKeyError
 from app.core.ids import new_id
 from app.modules.auth.passwords import PasswordPolicyError, hash_password, require_strong_password
 
+_TOKEN_VERSION_UNSET = object()
+
 
 class AccountManagementError(ValueError):
     def __init__(self, detail: str, status_code: int) -> None:
@@ -249,7 +251,9 @@ class AccountManagementService:
         def revoke(transaction) -> dict:
             options = _session_options(transaction)
             self._acquire_admin_guard(transaction)
-            current_actor = self._require_current_admin(actor["id"], transaction)
+            current_actor = self._require_current_admin(
+                actor["id"], transaction, actor.get("token_version")
+            )
             user = self.database.users.find_one(
                 {
                     "id": user_id,
@@ -318,7 +322,9 @@ class AccountManagementService:
         def decide(transaction) -> dict:
             options = _session_options(transaction)
             self._acquire_admin_guard(transaction)
-            current_actor = self._require_current_admin(actor["id"], transaction)
+            current_actor = self._require_current_admin(
+                actor["id"], transaction, actor.get("token_version")
+            )
             application = self.database.campus_access_applications.find_one(
                 {"id": application_id}, **options
             )
@@ -394,7 +400,9 @@ class AccountManagementService:
         def revoke(transaction) -> dict:
             options = _session_options(transaction)
             self._acquire_admin_guard(transaction)
-            current_actor = self._require_current_admin(actor["id"], transaction)
+            current_actor = self._require_current_admin(
+                actor["id"], transaction, actor.get("token_version")
+            )
             application = self.database.campus_access_applications.find_one(
                 {"id": application_id}, **options
             )
@@ -804,11 +812,21 @@ class AccountManagementService:
         if result.matched_count != 1:
             raise RuntimeError("管理员并发保护记录未初始化")
 
-    def _require_current_admin(self, actor_id: str, transaction) -> dict:
+    def _require_current_admin(
+        self, actor_id: str, transaction,
+        expected_token_version: object = _TOKEN_VERSION_UNSET,
+    ) -> dict:
         actor = self.database.users.find_one(
             {"id": actor_id}, **_session_options(transaction)
         )
-        if not actor or not _is_available_admin(actor):
+        if (
+            not actor
+            or not _is_available_admin(actor)
+            or (
+                expected_token_version is not _TOKEN_VERSION_UNSET
+                and actor.get("token_version") != expected_token_version
+            )
+        ):
             raise AccountManagementError("管理员权限已变化，请重新登录后重试", 403)
         return actor
 
