@@ -299,7 +299,7 @@ def _own_private(principal: Principal) -> str:
     )
 
 
-def _restricted_metadata_access(principal: Principal) -> str:
+def _restricted_material_filter(principal: Principal) -> str:
     if principal.verified:
         return NEVER
     return 'accessLevel = "campus"'
@@ -359,15 +359,15 @@ def _restricted_business(request: CatalogRequest, skipped: str = "") -> str:
 def _restricted_branch(request: CatalogRequest, skipped: str = "") -> str:
     if request.kind not in {"all", "material"}:
         return NEVER
-    metadata_access = _restricted_metadata_access(request.principal)
-    if metadata_access == NEVER:
+    material_filter = _restricted_material_filter(request.principal)
+    if material_filter == NEVER:
         return NEVER
     business = _restricted_business(request, skipped)
     if business == NEVER:
         return NEVER
     return _and(
         'kind = "material"',
-        metadata_access,
+        material_filter,
         'docClass = "material-restricted"',
         "publicReferenceCount > 0",
         business,
@@ -430,11 +430,11 @@ def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
 def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
     business = _restricted_business(request)
     denied = NEVER
-    metadata_access = _restricted_metadata_access(request.principal)
-    if business != NEVER and metadata_access != NEVER:
+    material_filter = _restricted_material_filter(request.principal)
+    if business != NEVER and material_filter != NEVER:
         denied = _and(
             'docClass = "material-restricted"',
-            metadata_access,
+            material_filter,
             "publicReferenceCount > 0",
             business,
             _excluded(request, "material"),

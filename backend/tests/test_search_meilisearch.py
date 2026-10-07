@@ -263,8 +263,12 @@ def test_restricted_title_hits_are_disjoint_redacted_and_unified() -> None:
     assert client.batches[0][0]["limit"] == 2
 
 
-def test_restricted_metadata_never_includes_other_private_materials() -> None:
-    from app.modules.search.meilisearch import _restricted_branch
+def test_restricted_material_metadata_and_counts_never_include_private_access() -> None:
+    from app.modules.search.meilisearch import (
+        NEVER,
+        _restricted_branch,
+        _restricted_count_plan,
+    )
 
     anonymous = _restricted_request()
     unverified = replace(
@@ -276,11 +280,23 @@ def test_restricted_metadata_never_includes_other_private_materials() -> None:
         principal=Principal("u-1", "user", verified=True),
     )
 
-    assert 'accessLevel = "campus"' in _restricted_branch(anonymous)
-    assert 'accessLevel = "campus"' in _restricted_branch(unverified)
-    assert "private" not in _restricted_branch(anonymous)
-    assert "private" not in _restricted_branch(unverified)
-    assert _restricted_branch(verified) == 'catalogId = "__no_matching_document__"'
+    anonymous_filter = _restricted_branch(anonymous)
+    unverified_filter = _restricted_branch(unverified)
+    verified_filter = _restricted_branch(verified)
+    unverified_count_filter = _restricted_count_plan(unverified, "idx").payload[
+        "filter"
+    ]
+    verified_count_filter = _restricted_count_plan(verified, "idx").payload[
+        "filter"
+    ]
+
+    assert 'accessLevel = "campus"' in anonymous_filter
+    assert 'accessLevel = "campus"' in unverified_filter
+    assert "private" not in anonymous_filter
+    assert "private" not in unverified_filter
+    assert "private" not in unverified_count_filter
+    assert verified_filter == NEVER
+    assert verified_count_filter == NEVER
 
 
 def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> None:

@@ -15,6 +15,7 @@ const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  reviewRecordStatus: { type: String, default: "" },
   conversationVersionId: { type: String, default: null },
   feedback: { type: Object, default: null },
   historical: { type: Boolean, default: false },
@@ -170,7 +171,12 @@ defineExpose({ expandPanel });
       :case-record="caseRecord"
       :user="user"
       :version-id="versionId"
-      :read-only="historical || (review && !['reviewing', 'withdrawn'].includes(caseRecord.reviewRecordStatus))"
+      :review="review"
+      :historical="historical"
+      :review-record-status="reviewRecordStatus"
+      :read-only="review
+        ? !['reviewing', 'withdrawn'].includes(caseRecord.reviewRecordStatus)
+        : readOnly"
       :annotation-refresh-token="annotationRefreshToken"
       @annotations="emit('annotations', $event)"
       @select-annotation="emit('select-annotation', $event)"

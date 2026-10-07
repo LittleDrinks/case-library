@@ -228,6 +228,52 @@ def _wait_for_search_item(client, query: str, kind: str, source_id: str) -> dict
         time.sleep(0.2)
 
 
+def _search_material(client, query: str, method: str) -> httpx.Response:
+    params = {"q": query, "kind": "material", "pageSize": 20}
+    if method == "GET":
+        return client.get("/api/search", params=params)
+    return client.post("/api/search", json=params)
+
+
+def _assert_hidden_private_material_search(
+    response: httpx.Response, material_id: str
+) -> None:
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert all(row["id"] != material_id for row in body["items"])
+    assert body["total"] == 0
+    assert body["counts"]["material"] == 0
+
+
+def _assert_referenced_private_material_http_acl(
+    author: httpx.Client,
+    admin: httpx.Client,
+    other: httpx.Client,
+    query: str,
+    material_id: str,
+    database,
+) -> None:
+    assert database.materials.find_one({"id": material_id})[
+        "publicReferenceCount"
+    ] == 1
+    _wait_for_search_item(author, query, "material", material_id)
+    for method in ("GET", "POST"):
+        owner_response = _search_material(author, query, method)
+        assert owner_response.status_code == 200, owner_response.text
+        owner_body = owner_response.json()
+        assert [row["id"] for row in owner_body["items"]] == [material_id]
+        assert owner_body["total"] == 1
+        assert owner_body["counts"]["material"] == 1
+        for reader in (admin, other):
+            _assert_hidden_private_material_search(
+                _search_material(reader, query, method), material_id
+            )
+        with httpx.Client(base_url=BASE_URL) as anonymous:
+            _assert_hidden_private_material_search(
+                _search_material(anonymous, query, method), material_id
+            )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def search_directory_ready() -> None:
     _wait_for_search_directory()
@@ -1488,11 +1534,7 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
     assert anonymous_search.status_code == 200
     assert anonymous_search.json()["items"] == []
     campus_name = campus_attachment["name"]
-    owner_campus_search = author.get(
-        "/api/search", params={"q": campus_name, "kind": "case", "pageSize": 20}
-    )
-    assert owner_campus_search.status_code == 200
-    assert any(item["id"] == case["id"] for item in owner_campus_search.json()["items"])
+    _wait_for_search_item(author, campus_name, "case", case["id"])
     for reader in (admin, other):
         denied_search = reader.get(
             "/api/search", params={"q": campus_name, "kind": "case", "pageSize": 20}
@@ -1586,8 +1628,22 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
             admin_context,
             CorpusSearchParams(query=material_text, kind="material"),
         )
+        other_material_search = _search_corpus_when_ready(
+            other_context,
+            CorpusSearchParams(query=material_text, kind="material"),
+        )
+        _assert_referenced_private_material_http_acl(
+            author, admin, other, material_text, material_id, database
+        )
         assert [row["id"] for row in owner_material_search["sources"]] == [material_id]
+        assert owner_material_search["total"] == 1
+        assert owner_material_search["counts"]["material"] == 1
         assert admin_material_search["sources"] == []
+        assert admin_material_search["total"] == 0
+        assert admin_material_search["counts"]["material"] == 0
+        assert other_material_search["sources"] == []
+        assert other_material_search["total"] == 0
+        assert other_material_search["counts"]["material"] == 0
         owner_material = asyncio.run(read_source(owner_context, "material", material_id))
         admin_material = asyncio.run(read_source(admin_context, "material", material_id))
         assert owner_material["status"] == "ok" and owner_material["content"] == material_text
