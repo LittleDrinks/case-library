@@ -747,7 +747,9 @@ async function openVersionTab(version) {
 }
 
 function openReviewVersion(version) {
-  void openVersionTab(version).then(() => selectHeaderTool("comments"));
+  const panel = version.reviewRecordStatus === "withdrawn"
+    || version.review?.status === "withdrawn" ? "comments" : "feedback";
+  void openVersionTab(version).then(() => selectHeaderTool(panel));
 }
 
 function closeVersionTab(id) {
@@ -759,6 +761,12 @@ function closeVersionTab(id) {
 function selectTab(id) {
   if (id !== activeTabId.value) clearWritingContext();
   activeTabId.value = id;
+  const selected = openVersionTabs.value.find((version) => version.id === id);
+  if (selected?.review) {
+    const panel = selected.reviewRecordStatus === "withdrawn"
+      || selected.review.status === "withdrawn" ? "comments" : "feedback";
+    selectHeaderTool(panel);
+  }
 }
 
 function refreshVersionHistory() {
@@ -1024,6 +1032,7 @@ onBeforeUnmount(() => {
                 :editable="editable"
                 :annotatable="annotatable"
                 :annotations="annotations"
+                :pending-anchor="annotationSelection"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"

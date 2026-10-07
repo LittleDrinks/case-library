@@ -232,11 +232,16 @@ it("does not expose a writable AI thread on a historical version", () => {
   expect(wrapper.text()).toContain("恢复此版本");
 });
 
-it("keeps review chat private to review mode without an annotation entry", () => {
-  const wrapper = render({ review: true, user: { id: "admin-1" }, active: "ai" });
+it("keeps review chat private and exposes the guidance annotation entry", () => {
+  const wrapper = render({
+    review: true,
+    user: { id: "admin-1" },
+    active: "ai",
+    caseRecord: { id: "case-1", ownerId: "user-1", reviewRecordStatus: "reviewing" },
+  });
   const panel = wrapper.findComponent({ name: "AgentChatPanel" });
   expect(panel.props("review")).toBe(true);
-  expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);
+  expect(wrapper.find('[aria-label="指导批注"]').exists()).toBe(true);
 });
 
 it("exposes the fourth history entry and forwards manual version creation", () => {

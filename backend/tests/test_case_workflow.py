@@ -206,7 +206,7 @@ def test_stale_revision_is_rejected_with_current_revision(client: TestClient) ->
 
 
 def test_admin_cannot_edit_an_authors_working_version(client: TestClient) -> None:
-    owner = _relogin(client, "user")
+    _relogin(client, "user")
     current = client.get("/api/cases/c-draft-1").json()
     auth = login(client).json()
     assert client.get("/api/cases/c-draft-1").status_code == 404

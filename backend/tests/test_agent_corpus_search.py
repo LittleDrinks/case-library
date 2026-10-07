@@ -47,6 +47,24 @@ def _case_item(item_id: str) -> dict:
     return {"id": item_id, "kind": "case", "title": f"案例{item_id}", "score": 10}
 
 
+def _seed_public_cases(database, count: int) -> list[dict]:
+    items = [_case_item(f"c-{index}") for index in range(count)]
+    for item in items:
+        version_id = f"v-{item['id']}"
+        database.cases.insert_one({
+            "id": item["id"], "ownerId": "u-other", "workflowStatus": "published",
+            "publicationStatus": "public", "publishedVersionId": version_id,
+        })
+        database.case_versions.insert_one({
+            "id": version_id, "caseId": item["id"], "kind": "submission",
+            "number": 1, "sourceRevision": 1, "title": item["title"], "summary": "",
+            "document": {"type": "doc", "content": []}, "metadata": {},
+        })
+        item["versionId"] = version_id
+        item["versionNumber"] = 1
+    return items
+
+
 def _restricted_item() -> dict:
     return {
         "id": "m-restricted", "kind": "material", "title": "校内受限素材",
@@ -111,7 +129,7 @@ def test_empty_arguments_discover_catalog_and_scale(client) -> None:
 
 
 def test_pagination_serves_disjoint_pages_with_cursor(client) -> None:
-    catalog = PagedCatalog([_case_item(f"c-{index}") for index in range(8)])
+    catalog = PagedCatalog(_seed_public_cases(client.app.state.database, 8))
     deps = _deps(client, catalog)
     first = _call(deps, {"query": "案例"})
     second = _call(deps, {"query": "案例", "cursor": first["nextCursor"]})
@@ -171,9 +189,7 @@ def test_restricted_hit_records_reference_without_content_leak(client) -> None:
     deps = _deps(client, PagedCatalog([_restricted_item()]))
     view = _call(deps, {"kind": "material"})
 
-    source = view["sources"][0]
-    assert source["title"] == source["snippet"] == "校内受限素材"
-    assert "content" not in source and "summary" not in source
+    assert view["sources"] == []
     result = read_domain_source(
         deps.database, None, deps.user, deps.case_id, "material", "m-restricted",
     )

@@ -120,7 +120,10 @@ const state = vi.hoisted(() => ({
   user: { id: "user-1", role: "user" },
 }));
 
-vi.mock("vue-router", () => ({ useRoute: () => state.route }));
+vi.mock("vue-router", () => ({
+  useRoute: () => state.route,
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+}));
 vi.mock("../session.js", () => ({
   session: { user: state.user, csrfToken: "csrf-token" },
 }));
@@ -143,11 +146,14 @@ vi.mock("../api.js", () => ({
 const paragraph = { type: "paragraph", content: [{ type: "text", text: "正文" }] };
 
 function caseFixture(overrides = {}) {
+  const workflowStatus = overrides.workflowStatus || "draft";
   return {
     id: "case-1", title: "示例案例", summary: "", revision: 3, ownerId: "user-1",
-    workflowStatus: "draft", publicationStatus: "none",
+    workflowStatus, publicationStatus: "none",
     document: { type: "doc", content: [paragraph] },
     availableActions: ["submit", "snapshot", "rollback"],
+    reviewRecordStatus: ({ pending: "pending", reviewing: "reviewing", published: "published" })[workflowStatus],
+    isCurrentReviewVersion: true,
     ...overrides,
   };
 }
@@ -278,7 +284,7 @@ test("审核工作台读取当前冻结投稿并将版本传给资料区", async
   const wrapper = render();
   await flushPromises();
 
-  expect(api.getReviewCase).toHaveBeenCalledWith("case-1");
+  expect(api.getReviewCase).toHaveBeenCalledWith("case-1", undefined);
   expect(api.getCase).not.toHaveBeenCalled();
   expect(api.listSources).toHaveBeenCalledWith("case-1", "cv-submitted-1");
   expect(wrapper.findComponent({ name: "AssistantRail" }).props("versionId"))
@@ -350,6 +356,7 @@ test("重投后历史意见按所选版本显示，不混入新版本", async ()
   expect(wrapper.find(".version-review").exists()).toBe(false);
   await wrapper.get('button[aria-label="v1 · 首次提交"]').trigger("click");
   expect(rail.props("feedback")).toEqual(review);
+  expect(rail.props("active")).toBe("feedback");
 });
 
 test("提交校验失败展示服务端消息", async () => {
@@ -943,7 +950,7 @@ test("工作台移除批注入口，展开 AI 侧栏可讨论正文选区", asyn
   await rail.get('[aria-label="收起侧栏"]').trigger("click");
   expect(rail.classes()).toContain("collapsed");
   expect(wrapper.find('[aria-label="批注"]').exists()).toBe(false);
-  expect(canvas.props("annotatable")).toBe(false);
+  expect(canvas.props("annotatable")).toBe(true);
   expect(canvas.props("annotations")).toEqual([]);
   canvas.vm.editor.commands.setTextSelection({ from: 1, to: 3 });
   await flushPromises();

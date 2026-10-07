@@ -471,7 +471,7 @@ def test_non_author_cannot_decide_artifact(client: TestClient, tracer_case) -> N
         f"/artifacts/{artifact['id']}/decision",
         headers=_csrf(admin), json=body,
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert client.app.state.database.cases.find_one({"id": case_id})["revision"] == 1
 
 

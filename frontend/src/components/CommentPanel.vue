@@ -52,11 +52,10 @@ async function loadAnnotations() {
   try {
     const loaded = props.user
       ? await api.listAnnotations(props.caseRecord.id, props.versionId || undefined) : [];
-    const next = !props.versionId && props.caseRecord.workflowStatus === "draft"
+    if (generation !== loadGeneration) return;
+    annotations.value = !props.versionId && props.caseRecord.workflowStatus === "draft"
       && props.user?.id === props.caseRecord.ownerId
       ? loaded.filter((row) => row.versionId == null) : loaded;
-    if (generation !== loadGeneration) return;
-    annotations.value = next;
     announce();
   } catch (caught) {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";

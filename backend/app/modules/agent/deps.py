@@ -22,6 +22,7 @@ class ToolDeps:
     annotation_id: str | None = None
     store: object = None
     version_id: str | None = None
+    review: bool = False
     sources: list[SourceRef] = field(default_factory=list)
     selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)

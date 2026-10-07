@@ -218,8 +218,10 @@ def test_http_search_limits_private_attachment_to_its_case_author(case_search) -
     assert _search(case_search, "私密附件海棠词", "u-admin") == []
 
 
-def test_http_search_exposes_attachment_names_as_public_metadata(case_search) -> None:
-    _assert_case(_search(case_search, "私密名称玉兰词"))
+def test_http_search_does_not_expose_private_attachment_names(case_search) -> None:
+    assert _search(case_search, "私密名称玉兰词") == []
+    assert _search(case_search, "私密名称玉兰词", "u-other") == []
+    _assert_case(_search(case_search, "私密名称玉兰词", "u-owner"))
     assert _search(case_search, "私密附件海棠词") == []
 
 

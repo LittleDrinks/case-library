@@ -8,7 +8,7 @@ from app.modules.case_sources.service import (
     source_case_content_available,
     source_case_url,
 )
-from app.modules.materials.service import material_content_available
+from app.modules.materials.service import campus_verified, material_content_available
 
 
 def is_internal(record: dict, user: dict | None) -> bool:
@@ -113,7 +113,7 @@ def _attachment_readable(database, row: dict, user: dict | None, record: dict) -
     if level == "public":
         return True
     if level == "campus":
-        return bool(user)
+        return campus_verified(user)
     case = record if "ownerId" in record else database.cases.find_one({"id": record["caseId"]})
     return bool(user and case.get("ownerId") == user["id"])
 

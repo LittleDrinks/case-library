@@ -58,7 +58,7 @@ def test_search_summary_uses_production_agent_and_vercel_stream(client: TestClie
     payload = _body(
         "如何教学",
         query="如何教学",
-        items=[{"kind": "case", "id": "c-draft-1", "title": "案例"}],
+        search={"q": "如何教学"},
     )
     with _agent().override(model=_model("检索摘要")):
         response = client.post(

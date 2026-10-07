@@ -134,7 +134,7 @@ def test_cross_case_and_cross_user_threads_are_not_enumerable(client: TestClient
     assert client.get(other).status_code == 404
     assert client.patch(other, headers=_csrf(auth), json={"title": "x"}).status_code == 404
     _login(client, "admin", "admin123")
-    assert client.get(THREADS_PATH).status_code == 403
+    assert client.get(THREADS_PATH).status_code == 404
     assert client.get(f"{THREADS_PATH}/{created['id']}").status_code == 403
 
 

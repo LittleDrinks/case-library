@@ -139,7 +139,7 @@ def test_manual_annotation_permissions_leave_no_ghost_row(client: TestClient) ->
     admin = login(client, "admin", "admin123")
     denied = post_annotation(client, admin, case, annotation_payload("仅作者可以批注"))
     assert denied.status_code == 403
-    assert client.get(annotation_path(case["id"])).json() == []
+    assert client.get(annotation_path(case["id"])).status_code == 404
 
     owner = login(client, "user", "user123")
     created = create_manual(client, owner, case, "仅作者可以批注")

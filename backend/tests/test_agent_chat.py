@@ -466,7 +466,7 @@ def test_agent_route_rejects_cross_user_case_access(client: TestClient) -> None:
 
     response = client.get(THREAD_PATH)
 
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 def test_agent_route_rechecks_case_editability(client: TestClient) -> None:

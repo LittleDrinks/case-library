@@ -33,7 +33,7 @@ const sourceRows = [
   },
 ];
 
-async function setup(props = {}, store) {
+async function setup(props = {}, store, initialFolder = "sources") {
   store ||= createConversationSources();
   api.listSources.mockResolvedValue({ entries: sourceRows });
   const wrapper = mount(AttachmentPanel, {
@@ -47,7 +47,8 @@ async function setup(props = {}, store) {
     global: { stubs: { RouterLink: true }, provide: { [CONVERSATION_SOURCES_KEY]: store } },
   });
   await flushPromises();
-  await wrapper.findAll(".folder-tabs button")[2].trigger("click");
+  const folderIndex = { files: 0, materials: 1, sources: 2 }[initialFolder];
+  await wrapper.findAll(".folder-tabs button")[folderIndex].trigger("click");
   return wrapper;
 }
 
@@ -70,6 +71,18 @@ test("无权限来源条目保留但隐藏链接并提示按权限开放", async
   expect(items[1].text()).toContain("内容按权限开放");
   expect(wrapper.find("[aria-label='打开来源受限案例乙']").exists()).toBe(false);
   expect(wrapper.get("[aria-label='移除来源受限案例乙']").exists()).toBe(true);
+});
+
+test("管理员角色本身不显示校内附件下载入口", async () => {
+  api.listAttachments.mockResolvedValue([
+    { id: "campus-1", name: "campus.txt", accessLevel: "campus", size: 12 },
+  ]);
+  const wrapper = await setup({
+    user: { id: "admin-1", role: "admin", campusVerified: false, csrfToken: "csrf" },
+  }, undefined, "files");
+
+  expect(wrapper.find("[aria-label='下载campus.txt']").exists()).toBe(false);
+  expect(wrapper.text()).toContain("仅已验证校内身份可下载");
 });
 
 test("显式移除来源调用删除接口", async () => {

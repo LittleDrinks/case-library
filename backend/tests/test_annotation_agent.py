@@ -268,8 +268,7 @@ def test_admin_cannot_read_or_reply_private_discussion(client: TestClient) -> No
     admin = login(client, "admin", "admin123")
     csrf = _csrf(admin)
     listed = client.get(f"/api/cases/{case['id']}/annotations", headers=csrf)
-    assert listed.status_code == 200
-    assert listed.json() == [], {"annotations": listed.json()}
+    assert listed.status_code == 404
     replied = client.post(
         f"/api/cases/{case['id']}/annotations/{annotation['id']}/replies",
         headers=csrf, json={"content": "审核者插入私人讨论"},

@@ -113,7 +113,7 @@ function removeSource(row) {
 function canDownload(row) {
   if (row.accessLevel === "public") return true;
   if (row.accessLevel === "campus") {
-    return Boolean(props.user?.campusVerified || props.user?.role === "admin");
+    return Boolean(props.user?.campusVerified);
   }
   return Boolean(props.user && props.user.id === props.caseRecord.ownerId);
 }

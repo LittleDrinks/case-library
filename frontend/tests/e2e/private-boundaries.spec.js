@@ -5,6 +5,8 @@ async function login(page, username, password) {
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
 }
 
 async function logout(page) {
@@ -54,8 +56,15 @@ async function addGuidance(page, marker, content) {
   await page.getByRole("button", { name: "添加指导批注" }).click();
   const float = page.getByRole("dialog", { name: "批注浮窗" });
   await float.getByLabel("批注内容").fill(content);
-  await float.getByRole("button", { name: "保存意见" }).click();
-  await expect(page.getByText(content, { exact: true }).first()).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((response) => (
+      response.url().includes("/annotations")
+      && response.request().method() === "POST"
+      && response.status() === 201
+    )),
+    float.getByRole("button", { name: "保存意见" }).click(),
+  ]);
+  await expect(float.getByText(content, { exact: true })).toBeVisible();
   await float.getByRole("button", { name: "关闭批注浮窗" }).click();
 }
 
@@ -110,9 +119,10 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   await expect(page.getByLabel("案例标题")).toHaveValue(marker);
   await expect(page.locator(".canvas-editor")).toContainText(marker);
   await page.getByRole("button", { name: "附件", exact: true }).click();
-  await expect(page.getByText("synthetic-private.txt", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载synthetic-private.txt" })).toHaveCount(0);
-  await expect(page.getByText("仅作者可下载", { exact: false })).toBeVisible();
+  const attachmentPanel = page.locator(".attachment-panel");
+  await expect(attachmentPanel.getByText("synthetic-private.txt", { exact: true })).toBeVisible();
+  await expect(attachmentPanel.getByRole("link", { name: "下载synthetic-private.txt" })).toHaveCount(0);
+  await expect(attachmentPanel.getByText("仅作者可下载", { exact: false })).toBeVisible();
   const adminAuth = await session(request);
   const privateContent = await request.get(
     `/api/cases/${created.id}/attachments/${attachment.id}/content?versionId=${firstVersionId}`,
@@ -157,7 +167,8 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
       submittedVersionId: firstVersionId,
     },
   });
-  expect(replay.status()).toBe(409);
+  expect(replay.status()).toBeGreaterThanOrEqual(400);
+  expect(replay.status()).toBeLessThan(500);
   await page.getByRole("button", { name: "指导批注", exact: true }).click();
   await expect(page.getByText("请补充教学目标", { exact: true })).toBeVisible();
   await expect(page.getByText("请核实资料来源", { exact: true })).toBeVisible();

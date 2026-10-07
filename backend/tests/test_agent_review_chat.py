@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from app.modules.agent.runtime import agent
+from app.modules.agent.recovery import events_stream
+from app.modules.agent.routes import Conversation, _event_access_check, _repository
 from tests.skill_packages import SKILL_ID
 from tests.test_agent_skill_run import (
     _upload_and_publish,
@@ -81,6 +86,55 @@ def test_review_thread_binds_draft_and_isolates_identities(client: TestClient) -
     _login(client, AUTHOR)
     assert client.get(THREAD_PATH, params={"mode": "review"}).status_code == 403
     assert client.get(f"{THREADS_PATH}/{mine['id']}").status_code == 404
+
+
+@pytest.mark.parametrize("action", ["withdraw", "reject"])
+def test_active_review_events_stop_after_submission_leaves_review(
+    client: TestClient, action: str
+) -> None:
+    from tests.test_case_workflow import _transition_json, login
+
+    started = _start_review(client)
+    admin = _login(client, ADMIN)
+    thread_data = _review_thread(client, admin)
+    database = client.app.state.database
+    repository = _repository(database)
+    thread = repository.thread_by_id(thread_data["id"])
+    conversation = Conversation(
+        case=database.cases.find_one({"id": CASE}),
+        version_id=thread.version_id,
+        reader=True,
+        review=True,
+    )
+    access_check = _event_access_check(database, admin["user"], conversation, thread)
+
+    async def consume_events():
+        return [
+            event
+            async for event in events_stream(
+                repository, thread, thread.event_seq, access_check, project=lambda parts: parts
+            )
+        ]
+
+    assert access_check()
+    assert asyncio.run(consume_events())
+    if action == "withdraw":
+        owner = login(client, "user", "user123").json()
+        _transition_json(
+            client, CASE, owner["csrfToken"], "withdraw", started
+        )
+    else:
+        _transition_json(
+            client,
+            CASE,
+            admin["csrfToken"],
+            "reject",
+            started,
+            submittedVersionId=started["submittedVersionId"],
+            reasonTypes=["内容需要补充或修改"],
+        )
+    assert not access_check()
+    assert asyncio.run(consume_events()) == []
 
 
 def test_demoted_admin_cannot_restore_review_thread(client: TestClient) -> None:

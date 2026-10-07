@@ -56,7 +56,7 @@ def admin_frozen_version(
 
 
 def admin_review_record(
-    database, case: dict, user: dict | None, version_id: str | None
+    database, case: dict, user: dict | None, version_id: str | None, session=None
 ) -> tuple[dict | None, str | None]:
     if not user or user.get("role") != "admin" or not version_id:
         return None, None
@@ -74,6 +74,7 @@ def admin_review_record(
         event = database.lifecycle_events.find_one(
             {"caseId": case["id"], "versionId": version_id, "action": {"$in": ["reject", "withdraw"]}},
             {"action": 1},
+            **({"session": session} if session is not None else {}),
         )
         status = {"reject": "returned", "withdraw": "withdrawn"}.get(
             (event or {}).get("action")
@@ -81,7 +82,8 @@ def admin_review_record(
     if not status:
         return None, None
     version = database.case_versions.find_one(
-        {"id": version_id, "caseId": case["id"], "kind": "submission"}
+        {"id": version_id, "caseId": case["id"], "kind": "submission"},
+        **({"session": session} if session is not None else {}),
     )
     return (version, status) if version else (None, None)
 

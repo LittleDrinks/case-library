@@ -69,10 +69,28 @@ def _review_version(
 ) -> tuple[dict, str]:
     from app.modules.cases.published import admin_review_record
 
-    version, status = admin_review_record(database, case, {"role": "admin"}, version_id)
+    if version_id is None and case.get("workflowStatus") == "reviewing":
+        version_id = case.get("submittedVersionId")
+    version, status = admin_review_record(
+        database, case, {"role": "admin"}, version_id, session=session
+    )
     if not version or status not in {"reviewing", "withdrawn"}:
         raise CaseError(409, "仅审核中或已撤回的投稿版本可添加指导批注")
     return version, status
+
+
+def _require_review_annotation_writable(
+    database, case: dict, annotation: dict, user: dict, session=None
+) -> None:
+    if user.get("role") != "admin" or not annotation.get("versionId"):
+        return
+    from app.modules.cases.published import admin_review_record
+
+    version, status = admin_review_record(
+        database, case, user, annotation["versionId"], session=session
+    )
+    if not version or status not in {"reviewing", "withdrawn"}:
+        raise CaseError(409, "审核已结束，不能修改审核批注")
 
 
 def _utf16_size(value: str) -> int:
@@ -426,7 +444,15 @@ def list_annotations(
     if user["role"] == "admin":
         query["source"] = {"$in": ["admin", "ai"]}
     rows = database.annotations.find(query).sort("createdAt", 1)
-    return [_view(row, row.get("revision", case["revision"])) for row in rows]
+    return [
+        _view(
+            row,
+            row.get("revision", case["revision"])
+            if row.get("versionId")
+            else case["revision"],
+        )
+        for row in rows
+    ]
 
 
 def _list_query(case: dict, user: dict) -> dict:
@@ -454,47 +480,80 @@ def _require_editor(annotation: dict, user: dict) -> None:
 
 
 def update_annotation(database: Database, case_id: str, annotation_id: str, content: str, user: dict) -> dict:
-    _case(database, case_id, user)
-    annotation = _get_annotation(database, case_id, annotation_id)
-    _require_editor(annotation, user)
-    updated = database.annotations.find_one_and_update(
-        {"id": annotation_id, "caseId": case_id, "createdBy": user["id"], "status": "pending"},
-        {"$set": {"content": content, "updatedAt": _now()}},
-        return_document=ReturnDocument.AFTER,
-    )
-    if not updated:
-        raise CaseError(409, "批注状态已变化")
-    return _view(updated, _case(database, case_id, user)["revision"])
+    def update(session):
+        case = _case(database, case_id, user, session)
+        annotation = _get_annotation(database, case_id, annotation_id, session)
+        _require_review_annotation_writable(database, case, annotation, user, session)
+        _require_editor(annotation, user)
+        if user.get("role") == "admin" and annotation.get("versionId"):
+            _touch_case(database, case, session)
+        updated = database.annotations.find_one_and_update(
+            {"id": annotation_id, "caseId": case_id, "createdBy": user["id"], "status": "pending"},
+            {"$set": {"content": content, "updatedAt": _now()}},
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        if not updated:
+            raise CaseError(409, "批注状态已变化")
+        return updated
+
+    updated = _transaction(database, update)
+    current_case = _case(database, case_id, user)
+    revision = updated.get("revision", current_case["revision"])
+    if updated.get("versionId") is None:
+        revision = current_case["revision"]
+    return _view(updated, revision)
 
 def delete_annotation(database: Database, case_id: str, annotation_id: str, user: dict) -> None:
-    _case(database, case_id, user)
-    annotation = _get_annotation(database, case_id, annotation_id)
-    _require_editor(annotation, user)
-    deleted = database.annotations.delete_one(
-        {"id": annotation_id, "caseId": case_id, "createdBy": user["id"], "status": "pending"}
-    )
-    if deleted.deleted_count != 1:
-        raise CaseError(409, "批注状态已变化")
+    def delete(session):
+        case = _case(database, case_id, user, session)
+        annotation = _get_annotation(database, case_id, annotation_id, session)
+        _require_review_annotation_writable(database, case, annotation, user, session)
+        _require_editor(annotation, user)
+        if user.get("role") == "admin" and annotation.get("versionId"):
+            _touch_case(database, case, session)
+        deleted = database.annotations.delete_one(
+            {"id": annotation_id, "caseId": case_id, "createdBy": user["id"], "status": "pending"},
+            session=session,
+        )
+        if deleted.deleted_count != 1:
+            raise CaseError(409, "批注状态已变化")
+
+    _transaction(database, delete)
 
 
 def add_reply(
     database: Database, case_id: str, annotation_id: str, content: str, user: dict
 ) -> dict:
-    case = _case(database, case_id, user)
-    annotation = _get_annotation(database, case_id, annotation_id)
-    _require_reply_actor(case, annotation, user)
-    reply = {
-        "id": f"ar-{secrets.token_hex(8)}",
-        "content": content,
-        "createdBy": user["id"],
-        "createdAt": _now(),
-    }
-    updated = database.annotations.find_one_and_update(
-        {"id": annotation_id, "caseId": case_id},
-        {"$push": {"replies": reply}},
-        return_document=ReturnDocument.AFTER,
-    )
-    return _view(updated, _case(database, case_id, user)["revision"])
+    def reply(session):
+        case = _case(database, case_id, user, session)
+        annotation = _get_annotation(database, case_id, annotation_id, session)
+        _require_review_annotation_writable(database, case, annotation, user, session)
+        _require_reply_actor(case, annotation, user)
+        if user.get("role") == "admin" and annotation.get("versionId"):
+            _touch_case(database, case, session)
+        created = {
+            "id": f"ar-{secrets.token_hex(8)}",
+            "content": content,
+            "createdBy": user["id"],
+            "createdAt": _now(),
+        }
+        updated = database.annotations.find_one_and_update(
+            {"id": annotation_id, "caseId": case_id},
+            {"$push": {"replies": created}},
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        if not updated:
+            raise CaseError(409, "批注状态已变化")
+        return updated
+
+    updated = _transaction(database, reply)
+    current_case = _case(database, case_id, user)
+    revision = updated.get("revision", current_case["revision"])
+    if updated.get("versionId") is None:
+        revision = current_case["revision"]
+    return _view(updated, revision)
 
 def _require_reply_actor(case: dict, annotation: dict, user: dict) -> None:
     """私人批注（版本未绑定）只有作者能回复；审核批注允许作者与管理员讨论。"""
@@ -532,7 +591,10 @@ def _change_status(database, case_id, annotation_id, status, user, session,
                    append_artifact_event):
     case = _case(database, case_id, user, session)
     annotation = _get_annotation(database, case_id, annotation_id, session)
+    _require_review_annotation_writable(database, case, annotation, user, session)
     _require_status_actor(case, annotation, user, status)
+    if user.get("role") == "admin" and annotation.get("versionId"):
+        _touch_case(database, case, session)
     expected = "pending" if status == "resolved" else "resolved"
     update = {"$set": {"status": status}}
     if status == "resolved":

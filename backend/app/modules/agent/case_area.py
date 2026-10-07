@@ -75,7 +75,9 @@ def _catalog_record(database, case_id: str, user: dict | None, version_id: str |
         internal = bool(user and case.get("ownerId") == user.get("id"))
         version = find_version(database, case, version_id, internal)
     return {"id": version_id, "caseId": case_id, "document": version.get("document", {}),
-            **rows}
+            "attachments": rows["attachment"],
+            "materials": rows["material"],
+            "caseSources": rows["case"]}
 
 
 def _ref(kind: str, row: dict, case_id: str) -> SourceRef:

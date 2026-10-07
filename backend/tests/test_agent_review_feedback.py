@@ -68,8 +68,9 @@ def test_review_agent_reads_feedback_without_write_tools(client):
             json={"id": "feedback", "trigger": "submit-message", "messages": [
                 {"id": "feedback-message", "role": "user", "parts": [{"type": "text", "text": "查看上轮意见"}]},
             ]},
-        )
+    )
     assert response.status_code == 200
+    assert outputs[0]["status"] == "ok", outputs
     assert outputs[0]["versionId"] == versions[-1]["id"]
     assert client.app.state.database.agent_runs.find_one({})["status"] == "completed"
 
@@ -81,7 +82,9 @@ def test_review_feedback_is_private_and_reports_absence(client):
     with pytest.raises(CaseError) as error:
         get_review_feedback(database, "c-draft-1", {"id": "other", "role": "user"})
     assert error.value.status_code == 403
-    context = SimpleNamespace(deps=SimpleNamespace(version_id="published-version"))
+    context = SimpleNamespace(
+        deps=SimpleNamespace(version_id="published-version", review=False)
+    )
     assert asyncio.run(read_review_feedback(context))["status"] == "no_access"
 
 

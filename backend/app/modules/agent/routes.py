@@ -53,6 +53,7 @@ from app.modules.auth.dependencies import require_csrf, require_user
 from app.modules.cases.service import CaseError
 from app.modules.cases.published import (
     admin_frozen_version,
+    admin_review_record,
     published_view,
     version_readable,
     version_readable_by_id,
@@ -789,6 +790,7 @@ def _run_deps(request, database, settings, user, conversation, thread, run, refs
         run_id=run.id, user=user, catalog=request.app.state.search_catalog,
         catalog_state=request.app.state.catalog_state, secret_path=settings.app_secret_file,
         store=request.app.state.blob_store, version_id=conversation.version_id,
+        review=conversation.review,
         annotation_id=plan.annotation_id, sources=refs, selected=plan.selected,
         selections=plan.selections,
         evidence=[SourceRef.model_validate(ref)
@@ -982,14 +984,16 @@ def _event_access_check(database, user, conversation: Conversation, thread: Agen
     if not conversation.version_id:
         return None
     if conversation.review:
-        return lambda: bool(
-            admin_frozen_version(
-                database,
-                database.cases.find_one({"id": thread.case_id}) or {},
-                user,
-                thread.version_id,
+        def review_is_active() -> bool:
+            case = database.cases.find_one({"id": thread.case_id})
+            if not case:
+                return False
+            _version, status = admin_review_record(
+                database, case, user, thread.version_id
             )
-        )
+            return status in {"pending", "reviewing"}
+
+        return review_is_active
     return lambda: version_readable_by_id(database, thread.case_id, thread.version_id)
 
 

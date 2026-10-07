@@ -14,7 +14,7 @@ import pytest
 from pymongo import MongoClient
 
 from app.core.config import Settings
-from app.modules.agent.case_area import retained_sources
+from app.modules.agent.case_area import area_rows, retained_sources
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.skills import read_source, search_corpus
 from app.modules.agent.search import CorpusSearchParams
@@ -45,6 +45,32 @@ def _login(username: str, password: str) -> tuple[httpx.Client, dict]:
     return client, response.json()
 
 
+def _unverified_user(role: str = "user") -> tuple[httpx.Client, dict]:
+    username = f"private-boundary-{uuid.uuid4().hex}"
+    password = f"Issue358-{uuid.uuid4().hex}!a"
+    registered = httpx.post(
+        f"{BASE_URL}/api/auth/register",
+        json={"username": username, "password": password},
+    )
+    assert registered.status_code == 201
+    client, auth = _login(username, password)
+    if role == "admin":
+        mongo_client, database = _database()
+        try:
+            database.users.update_one(
+                {"id": auth["user"]["id"]},
+                {"$set": {"role": "admin", "campus_verified": False}},
+            )
+        finally:
+            mongo_client.close()
+        session = client.get("/api/auth/session")
+        assert session.status_code == 200
+        assert session.json()["user"]["role"] == "admin"
+        assert session.json()["user"]["campusVerified"] is False
+        auth["user"] = session.json()["user"]
+    return client, auth
+
+
 def _create_case(client: httpx.Client, auth: dict, title: str) -> dict:
     document = {
         "type": "doc",
@@ -60,14 +86,15 @@ def _create_case(client: httpx.Client, auth: dict, title: str) -> dict:
 
 
 def _upload_private(
-    client: httpx.Client, auth: dict, case_id: str, content: str
+    client: httpx.Client, auth: dict, case_id: str, content: str,
+    access_level: str = "private",
 ) -> dict:
     case = client.get(f"/api/cases/{case_id}").json()
     response = client.post(
         f"/api/cases/{case_id}/attachments",
         headers={"X-CSRF-Token": auth["csrfToken"]},
-        data={"accessLevel": "private", "revision": case["revision"]},
-        files={"file": ("private-synthetic.txt", content.encode(), "text/plain")},
+        data={"accessLevel": access_level, "revision": case["revision"]},
+        files={"file": (f"{content}.txt", content.encode(), "text/plain")},
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -242,7 +269,7 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
         started = _transition(
             admin, admin_auth, case_id, "start", submitted["case"]["revision"]
         )
-        returned = _transition(
+        _transition(
             admin,
             admin_auth,
             case_id,
@@ -251,6 +278,9 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
             submittedVersionId=frozen_id,
             reasonTypes=["内容需要补充或修改"],
         )
+        assert admin.get(
+            f"/api/cases/{case_id}/agent/threads/{thread['id']}"
+        ).status_code in {403, 409}
         author_case = author.get(f"/api/cases/{case_id}").json()
         changed = author.patch(
             f"/api/cases/{case_id}",
@@ -267,6 +297,9 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
         )
         assert resubmitted["version"]["title"] == f"{marker}-edited"
         assert resubmitted["version"]["id"] != frozen_id
+        assert admin.get(
+            f"/api/cases/{case_id}/agent/threads/{thread['id']}"
+        ).status_code in {403, 409}
         current_review = admin.get(f"/api/cases/{case_id}/review").json()
         assert current_review["submittedVersionId"] == resubmitted["version"]["id"]
         assert current_review["title"] == f"{marker}-edited"
@@ -299,11 +332,20 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
     marker = f"withdrawn-review-{uuid.uuid4().hex}"
     case = _create_case(author, author_auth, marker)
     case_id = case["id"]
+    frozen_attachment = _upload_private(
+        author, author_auth, case_id, f"frozen-attachment-{marker}"
+    )
+    case = author.get(f"/api/cases/{case_id}").json()
     submitted = _transition(author, author_auth, case_id, "submit", case["revision"])
     version_id = submitted["version"]["id"]
     started = _transition(
         admin, admin_auth, case_id, "start", submitted["case"]["revision"]
     )
+    review_thread = admin.get(
+        f"/api/cases/{case_id}/agent/thread", params={"mode": "review"}
+    )
+    assert review_thread.status_code == 200
+    review_thread_id = review_thread.json()["id"]
 
     def add_guidance(content: str, revision: int) -> dict:
         response = admin.post(
@@ -327,15 +369,41 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
     withdrawn = _transition(
         author, author_auth, case_id, "withdraw", started["case"]["revision"]
     )
+    assert admin.get(
+        f"/api/cases/{case_id}/agent/threads/{review_thread_id}"
+    ).status_code in {403, 409}
     changed = author.patch(
         f"/api/cases/{case_id}",
         headers={"X-CSRF-Token": author_auth["csrfToken"]},
         json={"title": f"{marker}-private-edit", "revision": withdrawn["case"]["revision"]},
     )
     assert changed.status_code == 200
+    live_attachment = _upload_private(
+        author, author_auth, case_id, f"live-attachment-{marker}"
+    )
 
     assert admin.get(f"/api/cases/{case_id}").status_code == 404
     assert admin.get(f"/api/cases/{case_id}/review").status_code == 404
+    frozen_attachments = admin.get(
+        f"/api/cases/{case_id}/attachments", params={"versionId": version_id}
+    )
+    assert frozen_attachments.status_code == 200
+    assert [row["id"] for row in frozen_attachments.json()] == [frozen_attachment["id"]]
+    assert admin.get(
+        f"/api/cases/{case_id}/attachments/{frozen_attachment['id']}/content",
+        params={"versionId": version_id},
+    ).status_code == 403
+    assert admin.get(
+        f"/api/cases/{case_id}/attachments/{live_attachment['id']}/content",
+        params={"versionId": version_id},
+    ).status_code == 404
+    assert admin.get(
+        f"/api/cases/{case_id}/review/export.docx", params={"versionId": version_id}
+    ).status_code == 200
+    source_rows = admin.get(
+        f"/api/cases/{case_id}/sources", params={"versionId": version_id}
+    ).json()["entries"]
+    assert len(source_rows) == 1 and source_rows[0]["contentAvailable"] is False
     frozen = admin.get(
         f"/api/cases/{case_id}/review", params={"versionId": version_id}
     )
@@ -370,12 +438,23 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
     assert {row["id"] for row in author_rows.json()} == {first["id"], second["id"], third["id"]}
 
     resubmitted = _transition(
-        author, author_auth, case_id, "submit", changed.json()["revision"]
+        author,
+        author_auth,
+        case_id,
+        "submit",
+        author.get(f"/api/cases/{case_id}").json()["revision"],
     )
     assert resubmitted["version"]["id"] != version_id
     current_review = admin.get(f"/api/cases/{case_id}/review").json()
     assert current_review["submittedVersionId"] == resubmitted["version"]["id"]
     assert current_review["title"] == f"{marker}-private-edit"
+    assert {
+        row["id"]
+        for row in admin.get(
+            f"/api/cases/{case_id}/attachments",
+            params={"versionId": resubmitted['version']['id']},
+        ).json()
+    } == {frozen_attachment["id"], live_attachment["id"]}
     old_review = admin.get(
         f"/api/cases/{case_id}/review", params={"versionId": version_id}
     )
@@ -394,8 +473,8 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
 
 def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> None:
     author, author_auth = _login("user", "user123")
-    admin, admin_auth = _login("admin", "admin123")
-    other, _other_auth = _login("10000001", "Demo-10000001-2026!")
+    admin, admin_auth = _unverified_user("admin")
+    other, other_auth = _unverified_user()
     marker = f"private-search-{uuid.uuid4().hex}"
     material_text = f"private-material-{uuid.uuid4().hex}"
     mongo_client, database = _database()
@@ -423,8 +502,13 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
     )
     case = _create_case(author, author_auth, f"case-{uuid.uuid4().hex}")
     attachment = _upload_private(author, author_auth, case["id"], marker)
+    campus_attachment = _upload_private(
+        author, author_auth, case["id"], f"campus-{uuid.uuid4().hex}", "campus"
+    )
     publication = _published(author, author_auth, case["id"], material_id)
     version_id = publication["version"]["id"]
+    frozen = database.case_versions.find_one({"id": version_id, "caseId": case["id"]})
+    assert any(row["id"] == attachment["id"] for row in frozen["attachments"])
 
     material_access = author.get(f"/api/materials/{material_id}/content")
     assert material_access.status_code == 200 and material_access.content == material_text.encode()
@@ -438,6 +522,32 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
     assert admin.get(
         f"/api/cases/{case['id']}/materials", params={"versionId": version_id}
     ).json()[0]["contentAvailable"] is False
+    assert not other_auth["user"].get("campusVerified")
+    other_sources = other.get(
+        f"/api/cases/{case['id']}/sources", params={"versionId": version_id}
+    )
+    assert other_sources.status_code == 200
+    other_campus = next(
+        row for row in other_sources.json()["entries"]
+        if row["id"] == campus_attachment["id"]
+    )
+    assert other_campus["contentAvailable"] is False
+    assert other.get(
+        f"/api/cases/{case['id']}/attachments/{campus_attachment['id']}/content",
+        params={"versionId": version_id},
+    ).status_code == 403
+    admin_sources = admin.get(
+        f"/api/cases/{case['id']}/sources", params={"versionId": version_id}
+    )
+    admin_campus = next(
+        row for row in admin_sources.json()["entries"]
+        if row["id"] == campus_attachment["id"]
+    )
+    assert admin_campus["contentAvailable"] is False
+    assert admin.get(
+        f"/api/cases/{case['id']}/attachments/{campus_attachment['id']}/content",
+        params={"versionId": version_id},
+    ).status_code == 403
 
     deadline = time.monotonic() + 45
     owner_items = []
@@ -465,11 +575,27 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
     )
     assert anonymous_search.status_code == 200
     assert anonymous_search.json()["items"] == []
+    campus_name = campus_attachment["name"]
+    owner_campus_search = author.get(
+        "/api/search", params={"q": campus_name, "kind": "case", "pageSize": 20}
+    )
+    assert owner_campus_search.status_code == 200
+    assert any(item["id"] == case["id"] for item in owner_campus_search.json()["items"])
+    for reader in (admin, other):
+        denied_search = reader.get(
+            "/api/search", params={"q": campus_name, "kind": "case", "pageSize": 20}
+        )
+        assert denied_search.status_code == 200
+        assert denied_search.json()["items"] == []
+    assert httpx.get(
+        f"{BASE_URL}/api/search",
+        params={"q": campus_name, "kind": "case", "pageSize": 20},
+    ).json()["items"] == []
 
     try:
         owner_record = database.users.find_one({"id": author_auth["user"]["id"]})
         admin_record = database.users.find_one({"id": admin_auth["user"]["id"]})
-        other_record = database.users.find_one({"id": _other_auth["user"]["id"]})
+        other_record = database.users.find_one({"id": other_auth["user"]["id"]})
         catalog = MeilisearchCatalog(
             create_reader(
                 os.environ["MEILI_CONTRACT_URL"],
@@ -495,6 +621,12 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
             database, other_record, case["id"], version_id, catalog, state, store,
             secret_path,
         )
+        owner_rows = area_rows(database, case["id"], version_id, owner_record)
+        assert any(row["id"] == attachment["id"] for row in owner_rows["attachment"])
+        assert any(
+            ref.kind == "attachment" and ref.id == attachment["id"]
+            for ref in owner_deps.sources
+        ), [ref.model_dump(by_alias=True) for ref in owner_deps.sources]
         owner_context = SimpleNamespace(deps=owner_deps)
         admin_context = SimpleNamespace(deps=admin_deps)
         other_context = SimpleNamespace(deps=other_deps)
@@ -514,9 +646,20 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
         owner_read = asyncio.run(read_source(owner_context, "attachment", attachment["id"]))
         admin_read = asyncio.run(read_source(admin_context, "attachment", attachment["id"]))
         other_read = asyncio.run(read_source(other_context, "attachment", attachment["id"]))
-        assert owner_read["status"] == "ok" and owner_read["content"] == marker
+        assert owner_read["status"] == "ok" and owner_read["content"] == marker, owner_read
         assert admin_read["status"] == "no_access"
         assert other_read["status"] == "no_access"
+        admin_campus_search = asyncio.run(
+            search_corpus(
+                admin_context,
+                CorpusSearchParams(query=campus_attachment["name"], kind="case"),
+            )
+        )
+        assert admin_campus_search["sources"] == []
+        admin_campus_read = asyncio.run(
+            read_source(admin_context, "attachment", campus_attachment["id"])
+        )
+        assert admin_campus_read["status"] == "no_access"
         owner_material_search = asyncio.run(
             search_corpus(
                 owner_context,

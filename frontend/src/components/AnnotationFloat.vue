@@ -110,10 +110,9 @@ async function saveDraft({ askAi = false } = {}) {
       error.value = "正文尚未保存，批注未提交。";
       return;
     }
-    const created = await api.createAnnotation(
-      props.caseRecord.id, payload(), props.user.csrfToken,
-      adminReview.value ? props.versionId : undefined,
-    );
+    const args = [props.caseRecord.id, payload(), props.user.csrfToken];
+    if (adminReview.value) args.push(props.versionId);
+    const created = await api.createAnnotation(...args);
     content.value = "";
     emit("saved", created);
     if (askAi) emit("ask-ai", created);
