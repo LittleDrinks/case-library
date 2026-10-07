@@ -122,6 +122,8 @@ def test_openapi_declares_strict_search_response_for_both_verbs(client) -> None:
     item_schema = schema["components"]["schemas"]["SearchItem"]
     assert item_schema["additionalProperties"] is False
     assert set(item_schema["required"]) == {"id", "kind", "title", "score"}
+    knowledge_level_schema = item_schema["properties"]["knowledgeLevel"]
+    assert knowledge_level_schema["anyOf"][0]["enum"] == ["source", "section"]
     counts = schema["components"]["schemas"]["CountSummary"]["properties"]
     assert set(counts) == {"all", "case", "knowledge", "material"}
 
@@ -193,6 +195,25 @@ def test_post_response_echoes_nested_tag_condition(client: TestClient) -> None:
     assert payload["tagCondition"]["op"] == "or"
     assert payload["tagCondition"]["children"][1]["tagId"] == TAG_B
     assert payload["items"][0]["typeName"] == "人物传记类"
+
+
+def test_search_http_responses_preserve_knowledge_level(client: TestClient) -> None:
+    catalog = _use(client)
+    catalog.items = [{
+        "id": "knowledge-section-1",
+        "kind": "knowledge",
+        "knowledgeLevel": "section",
+        "title": "合成章节",
+        "score": 1,
+    }]
+
+    get_response = client.get("/api/search", params={"kind": "knowledge"})
+    post_response = client.post("/api/search", json={"kind": "knowledge"})
+
+    assert get_response.status_code == 200
+    assert post_response.status_code == 200
+    assert get_response.json()["items"][0]["knowledgeLevel"] == "section"
+    assert post_response.json()["items"][0]["knowledgeLevel"] == "section"
 
 
 def test_following_page_omits_metadata_but_keeps_contract(client: TestClient) -> None:

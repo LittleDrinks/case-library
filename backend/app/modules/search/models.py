@@ -114,6 +114,7 @@ class SearchItem(BaseModel):
     kind: Literal["case", "knowledge", "material"]
     title: str
     score: int
+    knowledgeLevel: Literal["source", "section"] | None = None
     summary: str | None = None
     publishedAt: str | None = None
     versionId: str | None = None
