@@ -123,6 +123,9 @@ watch(readerVersion, () => {
   }
 });
 const reviewMode = computed(() => route.name === "case-review");
+const conversationVersionId = computed(() => (
+  reviewMode.value || readerMode.value ? readerVersion.value : ""
+));
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
 const isOwner = computed(() => caseRecord.value?.ownerId === session.user?.id);
@@ -1073,6 +1076,7 @@ onBeforeUnmount(() => {
           ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
+          :conversation-version-id="conversationVersionId"
           :feedback="reviewFeedback"
           :version-id="readerVersion"
           :sources="sources"

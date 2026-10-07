@@ -15,6 +15,7 @@ const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  conversationVersionId: { type: String, default: null },
   feedback: { type: Object, default: null },
   historical: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
@@ -51,6 +52,9 @@ const tabs = computed(() => [
   ...(props.feedback ? [{ id: "feedback", label: "审核意见", icon: MessageSquare }] : []),
 ]);
 const panelCollapsed = ref(false);
+const agentVersionId = computed(() => (
+  props.conversationVersionId ?? (props.review ? props.versionId : "")
+));
 
 function select(tab) {
   if (window.matchMedia?.("(max-width: 800px)").matches) {
@@ -120,10 +124,11 @@ defineExpose({ expandPanel });
     <AgentChatPanel
       v-if="!historical && (!review || ['pending', 'reviewing'].includes(caseRecord.reviewRecordStatus)) && (!readOnly || user)"
       v-show="active === 'ai'"
-      :key="versionId || (review ? 'review' : 'draft')"
+      :key="agentVersionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
       :version-id="versionId"
+      :conversation-version-id="agentVersionId"
       :read-only="readOnly"
       :review="review"
       :writing-context="writingContext"

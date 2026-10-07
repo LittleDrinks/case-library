@@ -251,4 +251,12 @@ test("作者私稿只在作者入口可读，管理员按冻结投稿审核", as
   await expect(page.locator(`article[aria-label="已发布：${marker} 修改稿"]`)).toBeVisible();
   await expect(page.locator(`article[aria-label="已发布：${marker}"]`)).toHaveCount(0);
   await expect(page.locator(`article[aria-label="已撤回：${marker}"]`)).toBeVisible();
+  const publicConversation = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/cases/${created.id}/agent/thread`
+      && url.searchParams.get("versionId") === currentVersionId
+      && !url.searchParams.has("mode");
+  });
+  await page.goto(`/#/cases/${created.id}`);
+  expect((await publicConversation).status()).toBe(200);
 });

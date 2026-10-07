@@ -177,6 +177,32 @@ def _search_corpus_when_ready(context, params):
             time.sleep(0.2)
 
 
+def _wait_for_search_directory() -> None:
+    deadline = time.monotonic() + 45
+    query = f"private-boundary-ready-{uuid.uuid4().hex}"
+    with httpx.Client(base_url=BASE_URL, timeout=3) as client:
+        while True:
+            response = client.get(
+                "/api/search",
+                params={"q": query, "kind": "case", "pageSize": 1},
+            )
+            if response.status_code == 503:
+                if response.json().get("detail") != "检索服务暂不可用":
+                    raise AssertionError("检索目录返回了非就绪类 503")
+                if time.monotonic() >= deadline:
+                    raise AssertionError("检索目录在等待期限内未就绪")
+                time.sleep(0.2)
+                continue
+            assert response.status_code == 200, response.text
+            assert isinstance(response.json().get("items"), list)
+            return
+
+
+@pytest.fixture(scope="session", autouse=True)
+def search_directory_ready() -> None:
+    _wait_for_search_directory()
+
+
 def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
     author, author_auth = _login("user", "user123")
     admin, admin_auth = _login("admin", "admin123")
@@ -561,7 +587,7 @@ def test_withdrawn_submission_remains_version_scoped_and_cannot_be_approved() ->
 
 def test_submitted_version_without_annotations_cannot_be_deleted_after_withdrawal() -> None:
     author, author_auth = _unverified_user()
-    admin, admin_auth = _unverified_user("admin")
+    admin, _admin_auth = _unverified_user("admin")
     marker = f"frozen-record-{uuid.uuid4().hex}"
     case = _create_case(author, author_auth, marker)
     submitted = _transition(author, author_auth, case["id"], "submit", case["revision"])
@@ -617,6 +643,192 @@ def test_admin_case_owner_can_read_own_frozen_private_annotations() -> None:
     )
     assert f"owner-private-note-{marker}" in str(frozen["annotations"])
     assert f"owner-private-reply-{marker}" in str(frozen["annotations"])
+
+
+def test_admin_case_owner_lists_private_annotations_and_own_versions() -> None:
+    owner, owner_auth = _unverified_user("admin")
+    other_admin, _other_auth = _unverified_user("admin")
+    marker = f"admin-owner-list-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    content = f"owner-private-list-{marker}"
+    note = owner.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": content,
+            "source": "manual",
+            "revision": case["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert note.status_code == 201, note.text
+
+    own_draft_notes = owner.get(f"/api/cases/{case['id']}/annotations")
+    assert own_draft_notes.status_code == 200, own_draft_notes.text
+    assert content in str(own_draft_notes.json())
+    assert other_admin.get(f"/api/cases/{case['id']}/annotations").status_code == 404
+
+    current = owner.get(f"/api/cases/{case['id']}").json()
+    manual_version = owner.post(
+        f"/api/cases/{case['id']}/versions",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"title": f"{marker} v1", "revision": current["revision"]},
+    )
+    assert manual_version.status_code == 200, manual_version.text
+    own_version_notes = owner.get(
+        f"/api/cases/{case['id']}/annotations",
+        params={"versionId": manual_version.json()["id"]},
+    )
+    assert own_version_notes.status_code == 200, own_version_notes.text
+    assert (
+        other_admin.get(
+            f"/api/cases/{case['id']}/annotations",
+            params={"versionId": manual_version.json()["id"]},
+        ).status_code
+        == 404
+    )
+
+
+def test_admin_case_owner_can_reply_and_resolve_returned_review_annotations() -> None:
+    owner, owner_auth = _unverified_user("admin")
+    reviewer, reviewer_auth = _unverified_user("admin")
+    marker = f"admin-owner-returned-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
+    version_id = submitted["version"]["id"]
+    review = reviewer.get(f"/api/cases/{case['id']}/review").json()
+    started = _transition(
+        reviewer, reviewer_auth, case["id"], "start", review["revision"]
+    )
+    note = reviewer.post(
+        f"/api/cases/{case['id']}/annotations?versionId={version_id}",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": f"review-guidance-{marker}",
+            "source": "admin",
+            "revision": started["case"]["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert note.status_code == 201, note.text
+    annotation_id = note.json()["id"]
+    _transition(
+        reviewer,
+        reviewer_auth,
+        case["id"],
+        "reject",
+        started["case"]["revision"],
+        submittedVersionId=version_id,
+        reasonTypes=["内容需要补充或修改"],
+    )
+
+    reviewer_reply = reviewer.post(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/replies",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={"content": f"other-admin-reply-{marker}"},
+    )
+    assert reviewer_reply.status_code == 409
+    reviewer_resolve = reviewer.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/status",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={"status": "resolved"},
+    )
+    assert reviewer_resolve.status_code == 409
+    reviewer_edit = reviewer.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={"content": f"other-admin-edit-{marker}"},
+    )
+    assert reviewer_edit.status_code == 409
+
+    owner_reply = owner.post(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/replies",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"content": f"owner-returned-reply-{marker}"},
+    )
+    assert owner_reply.status_code == 200, owner_reply.text
+    owner_resolve = owner.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/status",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"status": "resolved"},
+    )
+    assert owner_resolve.status_code == 200, owner_resolve.text
+    assert f"owner-returned-reply-{marker}" in str(owner_resolve.json()["replies"])
+
+    owner_reopen = owner.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/status",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"status": "pending"},
+    )
+    assert owner_reopen.status_code == 409
+    owner_edit = owner.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"content": f"owner-edit-review-opinion-{marker}"},
+    )
+    assert owner_edit.status_code == 409
+    owner_delete = owner.delete(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+    )
+    assert owner_delete.status_code == 409
+
+
+def test_regular_case_owner_can_reply_and_resolve_returned_review_annotations() -> None:
+    owner, owner_auth = _unverified_user()
+    reviewer, reviewer_auth = _unverified_user("admin")
+    marker = f"user-owner-returned-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
+    version_id = submitted["version"]["id"]
+    review = reviewer.get(f"/api/cases/{case['id']}/review").json()
+    started = _transition(
+        reviewer, reviewer_auth, case["id"], "start", review["revision"]
+    )
+    note = reviewer.post(
+        f"/api/cases/{case['id']}/annotations?versionId={version_id}",
+        headers={"X-CSRF-Token": reviewer_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": f"review-guidance-{marker}",
+            "source": "admin",
+            "revision": started["case"]["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert note.status_code == 201, note.text
+    _transition(
+        reviewer,
+        reviewer_auth,
+        case["id"],
+        "reject",
+        started["case"]["revision"],
+        submittedVersionId=version_id,
+        reasonTypes=["内容需要补充或修改"],
+    )
+
+    annotation_id = note.json()["id"]
+    reply = owner.post(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/replies",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"content": f"user-returned-reply-{marker}"},
+    )
+    assert reply.status_code == 200, reply.text
+    resolved = owner.patch(
+        f"/api/cases/{case['id']}/annotations/{annotation_id}/status",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"status": "resolved"},
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert f"user-returned-reply-{marker}" in str(resolved.json()["replies"])
 
 
 def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> None:
@@ -776,10 +988,9 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
         state = MongoCatalogState(database)
         settings = Settings.from_environment()
         store = minio_blob_store(settings)
-        cursor_key = tempfile.NamedTemporaryFile(delete=False)
-        cursor_key.write(uuid.uuid4().bytes)
-        cursor_key.close()
-        secret_path = cursor_key.name
+        with tempfile.NamedTemporaryFile(delete=False) as cursor_key:
+            cursor_key.write(uuid.uuid4().bytes)
+            secret_path = cursor_key.name
         owner_deps = _tool_deps(
             database, owner_record, case["id"], version_id, catalog, state, store,
             secret_path,
