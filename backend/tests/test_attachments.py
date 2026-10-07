@@ -231,11 +231,20 @@ def test_admin_can_read_but_cannot_mutate_an_author_draft(client: TestClient) ->
     author = _login(client, "user", "user123")
     author_headers = {"X-CSRF-Token": author["csrfToken"]}
     created = _upload_attachment(client, author_headers, "review.txt", b"review")
+    revision = _revision(client)
     admin = _login(client, "admin", "admin123")
     headers = {"X-CSRF-Token": admin["csrfToken"]}
 
-    _assert_admin_can_read(client, created["id"])
-    assert _delete_attachment(client, headers, created["id"]).status_code == 403
+    assert client.get("/api/cases/c-draft-1/attachments").status_code == 404
+    assert client.get(
+        f"/api/cases/c-draft-1/attachments/{created['id']}/content"
+    ).status_code == 404
+    deleted = client.delete(
+        f"/api/cases/c-draft-1/attachments/{created['id']}",
+        headers=headers,
+        params={"revision": revision},
+    )
+    assert deleted.status_code == 403
 
 
 @pytest.mark.parametrize(

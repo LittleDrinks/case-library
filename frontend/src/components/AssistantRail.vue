@@ -1,11 +1,12 @@
 <script setup>
 import {
   ChevronDown, ChevronUp, History, MessageSquare, Paperclip,
-  PanelRightClose, PanelRightOpen, Sparkles,
+  MessageSquareText, PanelRightClose, PanelRightOpen, Sparkles,
 } from "@lucide/vue";
 import { computed, ref } from "vue";
 import AgentChatPanel from "./AgentChatPanel.vue";
 import AttachmentPanel from "./AttachmentPanel.vue";
+import CommentPanel from "./CommentPanel.vue";
 import PublicSourceList from "./PublicSourceList.vue";
 import VersionPanel from "./VersionPanel.vue";
 import ReviewFeedback from "./ReviewFeedback.vue";
@@ -14,6 +15,7 @@ const props = defineProps({
   active: { type: String, required: true },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
+  conversationVersionId: { type: String, default: null },
   feedback: { type: Object, default: null },
   historical: { type: Boolean, default: false },
   versionId: { type: String, default: "" },
@@ -43,10 +45,16 @@ const emit = defineEmits(["prompt-inserted", "select-annotation",
 const tabs = computed(() => [
   { id: "ai", label: "AI", icon: Sparkles },
   { id: "history", label: "历史版本", icon: History },
+  ...((props.user && (props.review || props.caseRecord.ownerId === props.user.id))
+    ? [{ id: "comments", label: "指导批注", icon: MessageSquareText }]
+    : []),
   { id: "files", label: "附件", icon: Paperclip },
   ...(props.feedback ? [{ id: "feedback", label: "审核意见", icon: MessageSquare }] : []),
 ]);
 const panelCollapsed = ref(false);
+const agentVersionId = computed(() => (
+  props.conversationVersionId ?? (props.review ? props.versionId : "")
+));
 
 function select(tab) {
   if (window.matchMedia?.("(max-width: 800px)").matches) {
@@ -109,13 +117,18 @@ defineExpose({ expandPanel });
     <div v-if="historical && active === 'ai'" class="assistant-panel panel-empty">
       <span>历史版本只读，请先恢复此版本后使用 AI</span>
     </div>
+    <div
+      v-if="review && ['withdrawn', 'returned'].includes(caseRecord.reviewRecordStatus) && active === 'ai'"
+      class="assistant-panel panel-empty"
+    >此投稿记录通过指导批注交流</div>
     <AgentChatPanel
-      v-if="!historical && (!readOnly || user)"
+      v-if="!historical && (!review || ['pending', 'reviewing'].includes(caseRecord.reviewRecordStatus)) && (!readOnly || user)"
       v-show="active === 'ai'"
-      :key="versionId || (review ? 'review' : 'draft')"
+      :key="agentVersionId || (review ? 'review' : 'draft')"
       :open="open"
       :case-record="caseRecord"
       :version-id="versionId"
+      :conversation-version-id="agentVersionId"
       :read-only="readOnly"
       :review="review"
       :writing-context="writingContext"
@@ -131,7 +144,7 @@ defineExpose({ expandPanel });
     <div v-if="!historical && readOnly && !user && active === 'ai'" class="panel-empty">
       <RouterLink :to="{ name: 'login' }">登录后讨论本案例</RouterLink>
     </div>
-    <div v-if="readOnly && active === 'files'" class="assistant-panel panel-scroll">
+    <div v-if="readOnly && !review && active === 'files'" class="assistant-panel panel-scroll">
       <PublicSourceList
         :sources="sources"
         :loading="sourcesLoading"
@@ -140,16 +153,31 @@ defineExpose({ expandPanel });
       />
     </div>
     <AttachmentPanel
-      v-if="!readOnly && active === 'files'"
+      v-if="(!readOnly || review) && active === 'files'"
       :case-record="caseRecord"
+      :version-id="versionId"
       :user="user"
-      :editable="editable"
+      :editable="editable && !review"
       :before-mutation="beforeAttachmentMutation"
       @case-refreshed="emit('case-refreshed', $event)"
       @mutation-state="emit('mutation-state', $event)"
       @insert-citation="emit('insert-citation', $event)"
     />
     <ReviewFeedback v-if="active === 'feedback' && feedback" :review="feedback" />
+    <CommentPanel
+      v-if="active === 'comments' && user"
+      :key="`${caseRecord.id}:${versionId}`"
+      :case-record="caseRecord"
+      :user="user"
+      :version-id="versionId"
+      :read-only="historical || (review && !['reviewing', 'withdrawn'].includes(caseRecord.reviewRecordStatus))"
+      :annotation-refresh-token="annotationRefreshToken"
+      @annotations="emit('annotations', $event)"
+      @select-annotation="emit('select-annotation', $event)"
+      @ask-ai="emit('ask-ai', $event)"
+      @case-revised="emit('case-revised', $event)"
+      @clear-writing-context="emit('clear-writing-context')"
+    />
     <VersionPanel
       v-if="active === 'history'"
       :case-record="caseRecord"

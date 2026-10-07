@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Mapping, Union
 
 from app.modules.search.models import TagExpression, TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 Kind = Literal["all", "case", "knowledge", "material"]
 Role = Literal["anonymous", "user", "admin"]
@@ -286,8 +287,6 @@ def _mount_clause(request: CatalogRequest, kind: str) -> str:
 
 
 def _allowed(principal: Principal) -> str:
-    if principal.role == "admin":
-        return "" if principal.verified else 'accessLevel IN ["public", "private"]'
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
     levels = '["public", "campus"]' if principal.verified else '["public"]'
@@ -300,15 +299,10 @@ def _own_private(principal: Principal) -> str:
     )
 
 
-def _denied(principal: Principal) -> str:
-    if principal.role == "admin":
-        return NEVER if principal.verified else 'accessLevel = "campus"'
-    if principal.role == "anonymous":
-        return 'accessLevel IN ["campus", "private"]'
-    denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
-    if not principal.verified:
-        denied = _or('accessLevel = "campus"', denied)
-    return denied
+def _restricted_metadata_access(principal: Principal) -> str:
+    if principal.verified:
+        return NEVER
+    return 'accessLevel = "campus"'
 
 
 def _case_access(principal: Principal) -> str:
@@ -365,12 +359,15 @@ def _restricted_business(request: CatalogRequest, skipped: str = "") -> str:
 def _restricted_branch(request: CatalogRequest, skipped: str = "") -> str:
     if request.kind not in {"all", "material"}:
         return NEVER
+    metadata_access = _restricted_metadata_access(request.principal)
+    if metadata_access == NEVER:
+        return NEVER
     business = _restricted_business(request, skipped)
     if business == NEVER:
         return NEVER
     return _and(
         'kind = "material"',
-        _denied(request.principal),
+        metadata_access,
         'docClass = "material-restricted"',
         "publicReferenceCount > 0",
         business,
@@ -433,10 +430,11 @@ def _full_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
 def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
     business = _restricted_business(request)
     denied = NEVER
-    if business != NEVER:
+    metadata_access = _restricted_metadata_access(request.principal)
+    if business != NEVER and metadata_access != NEVER:
         denied = _and(
             'docClass = "material-restricted"',
-            _denied(request.principal),
+            metadata_access,
             "publicReferenceCount > 0",
             business,
             _excluded(request, "material"),
@@ -654,6 +652,7 @@ class MeilisearchCatalog:
             status = self._reader.health(index_uid)
             valid = status.generation == expected_generation
             valid = valid and status.index_epoch == expected_epoch
+            valid = valid and status.projection_version == PROJECTION_VERSION
             if not status.available or status.primary_key != "catalogId" or not valid:
                 raise ValueError("invalid stable catalog")
         except Exception as error:

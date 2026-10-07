@@ -150,7 +150,7 @@ def _start_review(client: TestClient) -> dict:
 
     with TestClient(client.app) as admin_client:
         auth = login(admin_client).json()
-        case = admin_client.get(f"/api/cases/{PENDING_CASE}").json()
+        case = admin_client.get(f"/api/cases/{PENDING_CASE}/review").json()
         result = _transition_json(admin_client, PENDING_CASE, auth["csrfToken"],
                                   "start", case)
     assert result["case"]["workflowStatus"] == "reviewing"

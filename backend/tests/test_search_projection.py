@@ -187,14 +187,23 @@ def test_case_projection_keeps_attachment_content_in_its_acl_layer() -> None:
         CASE_PUBLICATION,
     )
     assert "正文白鹭词" in public["searchableText"]
-    assert all(
-        row["searchableText"].count("附件") == 3 for row in (public, campus, private)
-    )
     assert "公开雪松内容" in public["searchableText"]
     assert "校内山茶内容" not in public["searchableText"]
     assert "校内山茶内容" in campus["searchableText"]
     assert "私密海棠内容" not in campus["searchableText"]
     assert "私密海棠内容" in private["searchableText"]
+
+
+def test_case_projection_keeps_attachment_names_in_their_acl_layer() -> None:
+    public, campus, private = project_catalog_documents(
+        "case", CASE_VERSION, CASE_PUBLICATION
+    )
+
+    assert "公开附件雪松.txt" in public["searchableText"]
+    assert "校内附件山茶.txt" not in public["searchableText"]
+    assert "校内附件山茶.txt" in campus["searchableText"]
+    assert "私密附件海棠.txt" not in campus["searchableText"]
+    assert "私密附件海棠.txt" in private["searchableText"]
 
 
 def test_case_projection_keeps_native_tag_ids_and_skips_free_tags() -> None:

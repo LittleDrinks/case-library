@@ -21,6 +21,7 @@ const props = defineProps({
   caseRecord: { type: Object, required: true },
   open: { type: Boolean, default: true },
   versionId: { type: String, default: "" },
+  conversationVersionId: { type: String, default: "" },
   readOnly: { type: Boolean, default: false },
   review: { type: Boolean, default: false },
   writingContext: { type: Object, default: null },
@@ -38,7 +39,7 @@ const {
   skills, catalog, reloadCatalog,
 } = useAgentChat(
   props.caseRecord.id,
-  props.versionId,
+  props.conversationVersionId,
   props.review ? "review" : "",
 );
 const configured = computed(() => Boolean(settings.value?.configured));

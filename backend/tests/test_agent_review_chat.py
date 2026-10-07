@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from app.modules.agent.runtime import agent
+from app.modules.agent.recovery import events_stream
+from app.modules.agent.routes import Conversation, _event_access_check, _repository
 from tests.skill_packages import SKILL_ID
 from tests.test_agent_skill_run import (
     _upload_and_publish,
@@ -41,7 +46,7 @@ def _start_review(client: TestClient, case_id: str = CASE) -> dict:
 
     with TestClient(client.app) as admin_client:
         auth = login(admin_client).json()
-        case = admin_client.get(f"/api/cases/{case_id}").json()
+        case = admin_client.get(f"/api/cases/{case_id}/review").json()
         result = _transition_json(
             admin_client, case_id, auth["csrfToken"], "start", case
         )
@@ -74,13 +79,63 @@ def test_review_thread_binds_draft_and_isolates_identities(client: TestClient) -
     admin = _login(client, ADMIN)
     mine = _review_thread(client, admin)
 
-    assert mine["versionId"] is None and mine["caseId"] == CASE
+    assert mine["versionId"] == "cv-seed-c-pending-1-v1" and mine["caseId"] == CASE
     assert _review_thread(client, admin)["id"] == mine["id"]
     listed = client.get(THREADS_PATH, params={"mode": "review"}).json()
     assert [item["id"] for item in listed] == [mine["id"]]
     _login(client, AUTHOR)
     assert client.get(THREAD_PATH, params={"mode": "review"}).status_code == 403
     assert client.get(f"{THREADS_PATH}/{mine['id']}").status_code == 404
+
+
+@pytest.mark.parametrize("action", ["withdraw", "reject"])
+def test_active_review_events_stop_after_submission_leaves_review(
+    client: TestClient, action: str
+) -> None:
+    from tests.test_case_workflow import _transition_json, login
+
+    started = _start_review(client)
+    admin = _login(client, ADMIN)
+    thread_data = _review_thread(client, admin)
+    database = client.app.state.database
+    repository = _repository(database)
+    thread = repository.thread_by_id(thread_data["id"])
+    conversation = Conversation(
+        case=database.cases.find_one({"id": CASE}),
+        version_id=thread.version_id,
+        reader=True,
+        review=True,
+    )
+    current_admin = database.users.find_one({"id": admin["user"]["id"]})
+    access_check = _event_access_check(database, current_admin, conversation, thread)
+
+    async def consume_events():
+        return [
+            event
+            async for event in events_stream(
+                repository, thread, thread.event_seq, access_check, project=lambda parts: parts
+            )
+        ]
+
+    assert access_check()
+    assert asyncio.run(consume_events())
+    if action == "withdraw":
+        owner = login(client, "user", "user123").json()
+        _transition_json(
+            client, CASE, owner["csrfToken"], "withdraw", started
+        )
+    else:
+        _transition_json(
+            client,
+            CASE,
+            admin["csrfToken"],
+            "reject",
+            started,
+            submittedVersionId=started["submittedVersionId"],
+            reasonTypes=["内容需要补充或修改"],
+        )
+    assert not access_check()
+    assert asyncio.run(consume_events()) == []
 
 
 def test_demoted_admin_cannot_restore_review_thread(client: TestClient) -> None:
@@ -149,10 +204,18 @@ def test_review_instructions_come_from_pending_draft(client: TestClient) -> None
     _start_review(client)
     admin = _login(client, ADMIN)
     thread = _review_thread(client, admin)
+    client.app.state.database.cases.update_one(
+        {"id": CASE}, {"$set": {"title": "投稿后私稿标题", "document": {
+            "type": "doc", "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": "投稿后私稿内容"},
+            ]}],
+        }}}
+    )
     with agent.override(model=FunctionModel(stream_function=_capture)):
         assert _send(client, admin, thread["id"], "这篇待审稿讲什么").status_code == 200
     instructions = seen[0]
     assert "案例审核讨论助手" in instructions and DRAFT_TEXT in instructions
+    assert "投稿后私稿内容" not in instructions
     assert "协助案例作者修订和撰写正文" not in instructions
 
 
@@ -206,7 +269,13 @@ def test_review_run_loads_published_skill_and_stays_read_only(client: TestClient
 
 
 def _tagged_review_case(client: TestClient, fields: dict) -> None:
-    client.app.state.database.cases.update_one({"id": CASE}, {"$set": fields})
+    database = client.app.state.database
+    database.cases.update_one({"id": CASE}, {"$set": fields})
+    case = database.cases.find_one({"id": CASE})
+    database.case_versions.update_one(
+        {"id": case["submittedVersionId"]},
+        {"$set": {f"metadata.{key}": value for key, value in fields.items()}},
+    )
 
 
 def test_review_instructions_resolve_case_tag_names_by_group(client: TestClient) -> None:
@@ -265,10 +334,15 @@ def test_review_context_lists_custom_groups_over_legacy_fields(client: TestClien
 
 def test_review_context_states_missing_tags_instead_of_guessing(client: TestClient) -> None:
     """无任何标签时审核上下文明示不足，不退回旧课程/受众字段推断课堂适用性。"""
-    client.app.state.database.cases.update_one(
-        {"id": CASE},
-        {"$unset": {"tagIds": "", "course": "", "audience": "", "typeName": "",
-                    "purpose": "", "theoryPoints": "", "stageText": ""}},
+    database = client.app.state.database
+    case = database.cases.find_one({"id": CASE})
+    fields = ("tagIds", "course", "audience", "typeName", "purpose", "theoryPoints", "stageText")
+    database.cases.update_one(
+        {"id": CASE}, {"$unset": {field: "" for field in fields}},
+    )
+    database.case_versions.update_one(
+        {"id": case["submittedVersionId"]},
+        {"$unset": {f"metadata.{field}": "" for field in fields}},
     )
     _start_review(client)
     seen: list[str] = []

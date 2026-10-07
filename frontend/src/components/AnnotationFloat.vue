@@ -8,6 +8,7 @@ const props = defineProps({
   user: { type: Object, default: null },
   draft: { type: Object, default: null },
   thread: { type: Object, default: null },
+  versionId: { type: String, default: "" },
   // 保存前门禁：先 flush autosave，再由 Workbench 校验 Decoration 映射锚点；拒绝时返回 falsy。
   beforeSave: { type: Function, default: async () => true },
 });
@@ -20,10 +21,14 @@ watch(saving, (busy) => emit("mutation-state", busy), { flush: "sync" });
 onBeforeUnmount(() => emit("mutation-state", false));
 
 const isDraft = computed(() => Boolean(props.draft));
+const adminReview = computed(() => Boolean(
+  props.user?.role === "admin"
+    && ["reviewing", "withdrawn"].includes(props.caseRecord.reviewRecordStatus),
+));
 const canCompose = computed(() => Boolean(
   props.user && (
     (props.user.id === props.caseRecord.ownerId && props.caseRecord.workflowStatus === "draft")
-    || (props.user.role === "admin" && props.caseRecord.workflowStatus === "reviewing")
+    || adminReview.value
   ),
 ));
 const canAskDraftAi = computed(() => Boolean(
@@ -80,7 +85,7 @@ function payload() {
     section: props.draft.section,
     revision: props.draft.revision,
     content: content.value.trim(),
-    source: props.caseRecord.workflowStatus === "reviewing" ? "admin" : "manual",
+    source: adminReview.value ? "admin" : "manual",
   };
 }
 
@@ -105,9 +110,9 @@ async function saveDraft({ askAi = false } = {}) {
       error.value = "正文尚未保存，批注未提交。";
       return;
     }
-    const created = await api.createAnnotation(
-      props.caseRecord.id, payload(), props.user.csrfToken,
-    );
+    const args = [props.caseRecord.id, payload(), props.user.csrfToken];
+    if (adminReview.value) args.push(props.versionId);
+    const created = await api.createAnnotation(...args);
     content.value = "";
     emit("saved", created);
     if (askAi) emit("ask-ai", created);

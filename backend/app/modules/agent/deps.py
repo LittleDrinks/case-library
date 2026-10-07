@@ -23,6 +23,7 @@ class ToolDeps:
     annotation_id: str | None = None
     store: object = None
     version_id: str | None = None
+    review: bool = False
     sources: list[SourceRef] = field(default_factory=list)
     selected: list[dict] = field(default_factory=list)
     selections: list[dict] = field(default_factory=list)
@@ -40,5 +41,5 @@ class ToolDeps:
         """重验本轮检索命中与已读取证据；目录条目本身不代表已读取。"""
         return revalidate_sources(
             self.database, self.user, self.case_id,
-            self.source_dependencies(),
+            self.source_dependencies(), self.version_id,
         )

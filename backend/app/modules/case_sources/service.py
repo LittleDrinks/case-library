@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
 
 STORAGE_FIELDS = (
@@ -50,14 +50,12 @@ def source_case_url(origin: str, source_case_id: str, version_id: str) -> str:
 
 def source_case_content_available(
     database: Database, source_case_id: str, user: dict | None,
-    version_id: str | None = None, internal: bool = False,
+    version_id: str | None = None,
 ) -> bool:
     source = database.cases.find_one({"id": source_case_id})
     if not source:
         return False
-    source_internal = internal and bool(
-        user and (user["role"] == "admin" or user["id"] == source["ownerId"])
-    )
+    source_internal = bool(user and user.get("id") == source.get("ownerId"))
     if version_id:
         version = find_version(database, source, version_id, source_internal)
         return bool(version and version_readable(
@@ -67,7 +65,7 @@ def source_case_content_available(
 
 
 def source_view(
-    database, row: dict, user: dict | None, origin: str, internal: bool = False
+    database, row: dict, user: dict | None, origin: str
 ) -> dict:
     source = _source_case_info(database, row["sourceCaseId"])
     return {
@@ -80,7 +78,7 @@ def source_view(
         "sourceUrl": source_case_url(origin, row["sourceCaseId"], row["versionId"]),
         "publishedAt": source.get("publishedAt"),
         "contentAvailable": source_case_content_available(
-            database, row["sourceCaseId"], user, row["versionId"], internal
+            database, row["sourceCaseId"], user, row["versionId"]
         ),
         "createdAt": row["createdAt"],
     }
@@ -169,29 +167,33 @@ def list_case_sources(
     database: Database, case_id: str, user: dict | None, version_id: str | None, origin: str
 ) -> list[dict]:
     case = _case(database, case_id)
-    _require_source_reader(case, user)
+    _require_source_reader(database, case, user, version_id)
     internal = _internal_reader(case, user)
-    rows = _source_rows(database, case, internal, version_id)
-    return [source_view(database, row, user, origin, internal) for row in rows]
+    rows = _source_rows(database, case, user, internal, version_id)
+    return [source_view(database, row, user, origin) for row in rows]
 
 
-def _require_source_reader(case: dict, user: dict | None) -> None:
+def _require_source_reader(database, case: dict, user: dict | None, version_id: str | None) -> None:
     allowed = case["publicationStatus"] == "public" or bool(
-        user and (user["role"] == "admin" or user["id"] == case["ownerId"])
+        user and user["id"] == case["ownerId"]
     )
+    allowed = allowed or bool(admin_frozen_version(database, case, user, version_id))
     if not allowed:
         raise CaseError(404, "案例不存在")
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
+    return bool(user and user["id"] == case["ownerId"])
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
-    return _is_internal(case, user) and case["publicationStatus"] != "public"
+    return _is_internal(case, user)
 
 
-def _source_rows(database, case: dict, internal: bool, version_id: str | None):
+def _source_rows(database, case: dict, user, internal: bool, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("caseSources", [])
     if not version_id and internal:
         return list(database.case_sources.find({"caseId": case["id"]}).sort("id", 1))
     return _version_rows(database, case, version_id or case.get("publishedVersionId"), internal)

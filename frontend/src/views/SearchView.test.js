@@ -153,6 +153,8 @@ test("摘要修订仅随已应用的成功响应推进", async () => {
   const wrapper = render();
   await flushPromises();
   expect(revisionOf(wrapper)).toBe(1);
+  expect(wrapper.findComponent(SearchAIAnswerStub).props("snapshot").search)
+    .toEqual({ q: "游标目录", kind: "material", pageSize: 20 });
   const nextFilters = { type: [], audience: [], authority: ["original"], materialType: [], tags: [], time: "" };
   wrapper.findComponent(SearchFilters).vm.$emit("update:filters", nextFilters);
   await flushPromises();
@@ -160,6 +162,8 @@ test("摘要修订仅随已应用的成功响应推进", async () => {
   await wrapper.get("[aria-label='下一页']").trigger("click");
   await flushPromises();
   expect(revisionOf(wrapper)).toBe(2);
+  expect(wrapper.findComponent(SearchAIAnswerStub).props("snapshot").search)
+    .toEqual({ q: "游标目录", kind: "material", pageSize: 20, cursor: "next-token", authority: ["original"] });
   expect(wrapper.get(".ai-answer-stub").attributes("data-query")).toBe("游标目录");
 });
 

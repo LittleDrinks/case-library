@@ -92,7 +92,6 @@ def test_admin_scope_lists_all_cases_for_admin_only(client: TestClient) -> None:
         "c-05",
         "c-08",
         "c-11",
-        "c-draft-1",
         "c-pending-1",
     }
     assert all("document" not in row and "ownerId" in row for row in rows.json())

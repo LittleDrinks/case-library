@@ -142,11 +142,13 @@ def _delete(client, csrf: str, case_id: str, attachment_id: str) -> None:
     assert response.status_code == 204
 
 
-def _assert_admin_cannot_delete(admin, csrf: str, case_id: str, row: dict) -> None:
+def _assert_admin_cannot_delete(
+    admin, csrf: str, case_id: str, row: dict, revision: int
+) -> None:
     response = admin.delete(
         f"/api/cases/{case_id}/attachments/{row['id']}",
         headers={"X-CSRF-Token": csrf},
-        params={"revision": _revision(admin, case_id)},
+        params={"revision": revision},
     )
     assert response.status_code == 403
 
@@ -157,7 +159,7 @@ def _assert_published_permissions(case_id: str, rows: list[dict], admin) -> None
     _assert_downloads(anonymous, case_id, rows, [200, 403, 403])
     blocked, _csrf = _login("10000001", "Demo-10000001-2026!")
     _assert_downloads(blocked, case_id, rows, [403, 403, 403])
-    _assert_downloads(admin, case_id, rows, [200, 200, 200])
+    _assert_downloads(admin, case_id, rows, [200, 200, 403])
 
 
 def _assert_published_attachment_snapshots(
@@ -220,8 +222,10 @@ def test_real_minio_attachment_permissions() -> None:
         _upload(author, author_csrf, case["id"], level)
         for level in ("public", "campus", "private")
     ]
-    assert admin.get(f"/api/cases/{case['id']}/attachments").status_code == 200
-    _assert_admin_cannot_delete(admin, admin_csrf, case["id"], rows[0])
+    assert admin.get(f"/api/cases/{case['id']}/attachments").status_code == 404
+    _assert_admin_cannot_delete(
+        admin, admin_csrf, case["id"], rows[0], _revision(author, case["id"])
+    )
     _publish(author, author_csrf, admin, admin_csrf, case)
     _assert_published_permissions(case["id"], rows, admin)
     _assert_campus_permissions(author, admin, admin_csrf)

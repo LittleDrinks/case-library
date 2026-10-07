@@ -14,6 +14,7 @@ class CatalogHealth:
     primary_key: str | None
     generation: str | None
     index_epoch: str | None
+    projection_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +76,7 @@ class MeilisearchReader:
             index.get("primaryKey"),
             meta.get("generation"),
             index.get("updatedAt"),
+            meta.get("projectionVersion"),
         )
 
     def search(self, index_uid: str, queries: list[dict]) -> SearchSnapshot:

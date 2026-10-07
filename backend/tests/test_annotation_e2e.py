@@ -148,6 +148,17 @@ def test_real_review_annotation_thread_survives_rejection() -> None:
     admin, admin_csrf = login("admin", "admin123")
     annotation = annotate_and_reject(admin, admin_csrf, submitted)
     case_id = submitted["case"]["id"]
+    root = f"/api/cases/{case_id}/annotations/{annotation['id']}"
+    status, _updated = request(
+        admin, "PATCH", root, {"content": "退回后不应改写的审核意见。"}, admin_csrf
+    )
+    assert status == 409
+    status, _reply = request(
+        admin, "POST", f"{root}/replies", {"content": "退回后不应追加的回复。"}, admin_csrf
+    )
+    assert status == 409
+    status, _deleted = request(admin, "DELETE", root, csrf=admin_csrf)
+    assert status == 409
     status, rows = request(owner, "GET", f"/api/cases/{case_id}/annotations")
     assert status == 200 and rows == [annotation]
     resolve_as_owner(owner, owner_csrf, case_id, annotation)

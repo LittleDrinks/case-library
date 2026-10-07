@@ -26,7 +26,7 @@ async def read_review_feedback(
 
     仅作者和管理员的工作台可读；不修改正文，不生成引用来源。
     """
-    if ctx.deps.version_id is not None:
+    if ctx.deps.version_id is not None and not ctx.deps.review:
         return {"status": "no_access", "detail": "公开阅读对话不提供内部审核意见"}
     try:
         return get_review_feedback(

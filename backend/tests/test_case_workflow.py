@@ -206,8 +206,10 @@ def test_stale_revision_is_rejected_with_current_revision(client: TestClient) ->
 
 
 def test_admin_cannot_edit_an_authors_working_version(client: TestClient) -> None:
-    auth = login(client).json()
+    _relogin(client, "user")
     current = client.get("/api/cases/c-draft-1").json()
+    auth = login(client).json()
+    assert client.get("/api/cases/c-draft-1").status_code == 404
     response = client.patch(
         "/api/cases/c-draft-1",
         headers={"X-CSRF-Token": auth["csrfToken"]},
@@ -215,6 +217,54 @@ def test_admin_cannot_edit_an_authors_working_version(client: TestClient) -> Non
     )
 
     assert response.status_code == 403
+
+
+def test_admin_cannot_read_or_enumerate_an_unsubmitted_private_case(
+    client: TestClient,
+) -> None:
+    owner = _relogin(client, "user")
+    csrf = owner["csrfToken"]
+    created = client.post(
+        "/api/cases",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "title": "私人未投稿案例",
+            "document": paragraph_document("仅作者可读的工作稿正文"),
+        },
+    ).json()
+
+    login(client, "admin")
+
+    assert client.get(f"/api/cases/{created['id']}").status_code == 404
+    admin_cases = client.get("/api/cases?scope=admin").json()
+    assert created["id"] not in {case["id"] for case in admin_cases}
+    assert client.get(f"/api/cases/{created['id']}/history").status_code == 403
+
+
+def test_review_reads_only_the_active_frozen_submission(client: TestClient) -> None:
+    admin, created, submitted, started = _review_round(client)
+
+    assert client.get(f"/api/cases/{created['id']}").status_code == 404
+    review = client.get(f"/api/cases/{created['id']}/review")
+    assert review.status_code == 200
+    assert review.json()["document"] == submitted["version"]["document"]
+    assert review.json()["submittedVersionId"] == submitted["version"]["id"]
+
+    _transition_json(
+        client,
+        created["id"],
+        admin["csrfToken"],
+        "reject",
+        started["case"],
+        submittedVersionId=submitted["version"]["id"],
+        reasonTypes=["内容需要补充或修改"],
+    )
+    owner = _relogin(client, "user")
+    draft = client.get(f"/api/cases/{created['id']}").json()
+    _save_content(client, owner, draft, "退回后作者私稿", "退回后私稿标题")
+    login(client)
+    assert client.get(f"/api/cases/{created['id']}/review").status_code == 404
+    assert client.get(f"/api/cases/{created['id']}").status_code == 404
 
 
 def test_case_creation_requires_csrf(client: TestClient) -> None:
@@ -628,7 +678,7 @@ def test_return_requires_at_least_one_fixed_reason(client: TestClient) -> None:
             **extra,
         )
         assert response.status_code == 422
-    assert client.get(f"/api/cases/{case['id']}").json()["workflowStatus"] == "reviewing"
+    assert client.get(f"/api/cases/{case['id']}/review").json()["workflowStatus"] == "reviewing"
 
 
 def test_only_admin_can_return_a_review(client: TestClient) -> None:

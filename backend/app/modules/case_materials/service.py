@@ -3,7 +3,7 @@ from __future__ import annotations
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
 from app.modules.materials.service import can_read_material
 from app.modules.search.outbox import SearchOutbox
@@ -31,10 +31,11 @@ def _case(database: Database, case_id: str) -> dict:
     return case
 
 
-def _require_reader(case: dict, user: dict | None) -> None:
+def _require_reader(database, case: dict, user: dict | None, version_id: str | None) -> None:
     allowed = case["publicationStatus"] == "public" or bool(
-        user and (user["role"] == "admin" or user["id"] == case["ownerId"])
+        user and user["id"] == case["ownerId"]
     )
+    allowed = allowed or bool(admin_frozen_version(database, case, user, version_id))
     if not allowed:
         raise CaseError(404, "案例不存在")
 
@@ -58,6 +59,25 @@ def _restricted_view(row: dict) -> dict:
     }
 
 
+def project_material_rows(
+    database: Database, rows: list[dict], user: dict | None
+) -> list[dict]:
+    projected = []
+    for row in rows:
+        material = database.materials.find_one(
+            {"id": row.get("materialId") or row["id"]}
+        )
+        if (
+            material
+            and material.get("status") == "active"
+            and can_read_material(material, user)
+        ):
+            projected.append(material_view(row))
+        else:
+            projected.append(_restricted_view(row))
+    return projected
+
+
 def snapshot_materials(database: Database, case_id: str, session) -> list[dict]:
     rows = database.case_materials.find({"caseId": case_id}, session=session).sort(
         "id", 1
@@ -69,27 +89,23 @@ def list_case_materials(
     database: Database, case_id: str, user: dict | None, version_id: str | None
 ) -> list[dict]:
     case = _case(database, case_id)
-    _require_reader(case, user)
+    _require_reader(database, case, user, version_id)
     rows = _material_rows(database, case, user, version_id)
-    if _internal_reader(case, user):
-        return [material_view(row) for row in rows]
-    return [
-        material_view(row)
-        if can_read_material(_material_row(database, row), user)
-        else _restricted_view(row)
-        for row in rows
-    ]
+    return project_material_rows(database, rows, user)
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or user["id"] == case["ownerId"]))
+    return bool(user and user["id"] == case["ownerId"])
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
-    return _is_internal(case, user) and case["publicationStatus"] != "public"
+    return _is_internal(case, user)
 
 
 def _material_rows(database, case: dict, user: dict | None, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("materials", [])
     internal = _internal_reader(case, user)
     if not version_id and internal:
         return snapshot_materials(database, case["id"], None)
@@ -108,13 +124,6 @@ def _version_materials(database, case: dict, version_id: str | None, internal: b
 
 def _mounted(case_id: str, material: dict) -> dict:
     return {**material_view(material), "caseId": case_id, "materialId": material["id"]}
-
-
-def _material_row(database, row: dict) -> dict:
-    if "createdBy" in row:
-        return row
-    live = database.materials.find_one({"id": row.get("materialId") or row["id"]})
-    return {**row, **(live or {})}
 
 
 def _insert(database, case_id, material, revision, user, session) -> dict:

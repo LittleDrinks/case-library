@@ -16,7 +16,7 @@ from app.modules.search.meilisearch import (
     Principal,
     SearchUnavailable,
 )
-from app.modules.search.projection import project_catalog_documents
+from app.modules.search.projection import PROJECTION_VERSION, project_catalog_documents
 
 pytestmark = pytest.mark.e2e("MEILI_CONTRACT_URL", "MEILI_CONTRACT_KEY_FILE")
 
@@ -92,6 +92,7 @@ def _documents() -> list[dict]:
         "catalogId": "catalog-meta",
         "docClass": "catalog-meta",
         "generation": "contract-generation",
+        "projectionVersion": PROJECTION_VERSION,
     }
     return [meta, *_materials(), *cases, *_knowledge()]
 

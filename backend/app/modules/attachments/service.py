@@ -10,9 +10,9 @@ from pymongo.database import Database
 from app.modules.attachments.models import AccessLevel
 from app.modules.attachments.storage import BlobStore
 from app.modules.attachments.text import extract_search_text
-from app.modules.materials.service import campus_verified
-from app.modules.cases.published import find_version, version_readable
+from app.modules.cases.published import admin_frozen_version, find_version, version_readable
 from app.modules.cases.service import CaseError, advance_revision, run_transaction
+from app.modules.materials.service import campus_verified
 
 MAX_ATTACHMENT_BYTES = 128 * 1024 * 1024
 SNAPSHOT_FIELDS = (
@@ -52,10 +52,11 @@ def _require_author_draft(case: dict, user: dict) -> None:
         raise AttachmentError(409, "案例当前不可编辑")
 
 
-def _require_reader(case: dict, user: dict | None) -> None:
+def _require_reader(database, case: dict, user: dict | None, version_id: str | None = None) -> None:
     is_reader = case["publicationStatus"] == "public" or bool(
-        user and (user["role"] == "admin" or case["ownerId"] == user["id"])
+        user and case["ownerId"] == user["id"]
     )
+    is_reader = is_reader or bool(admin_frozen_version(database, case, user, version_id))
     if not is_reader:
         raise AttachmentError(404, "案例不存在")
 
@@ -178,20 +179,23 @@ def list_attachments(
     database: Database, case_id: str, user: dict | None, version_id: str | None
 ) -> list[dict]:
     case = _case(database, case_id)
-    _require_reader(case, user)
+    _require_reader(database, case, user, version_id)
     rows = _attachment_rows(database, case, user, version_id)
     return [attachment_view(row) for row in rows]
 
 
 def _is_internal(case: dict, user: dict | None) -> bool:
-    return bool(user and (user["role"] == "admin" or case["ownerId"] == user["id"]))
+    return bool(user and case["ownerId"] == user["id"])
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
-    return _is_internal(case, user) and case["publicationStatus"] != "public"
+    return _is_internal(case, user)
 
 
 def _attachment_rows(database, case: dict, user: dict | None, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("attachments", [])
     internal = _internal_reader(case, user)
     if not version_id and internal:
         return list(
@@ -218,7 +222,7 @@ def download_attachment(
     version_id: str | None,
 ) -> tuple[dict, object]:
     case = _case(database, case_id)
-    _require_reader(case, user)
+    _require_reader(database, case, user, version_id)
     rows = _download_rows(database, case, user, version_id)
     attachment = next((row for row in rows if row["id"] == attachment_id), None)
     if not attachment:
@@ -228,20 +232,19 @@ def download_attachment(
 
 
 def _download_rows(database, case: dict, user: dict | None, version_id: str | None):
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen.get("attachments", [])
     if version_id and _is_internal(case, user):
         return _version_rows(database, case, version_id, True)
     return _attachment_rows(database, case, user, version_id)
 
 
 def _require_content_access(case: dict, attachment: dict, user: dict | None) -> None:
-    owner = bool(user and case["ownerId"] == user["id"])
-    if attachment["accessLevel"] == "public":
+    internal = bool(user and case["ownerId"] == user["id"])
+    if internal or attachment["accessLevel"] == "public":
         return
-    if attachment["accessLevel"] == "campus" and (owner or campus_verified(user)):
-        return
-    if attachment["accessLevel"] != "campus" and user and (
-        user["role"] == "admin" or owner
-    ):
+    if attachment["accessLevel"] == "campus" and campus_verified(user):
         return
     raise AttachmentError(403, "无权读取该附件")
 

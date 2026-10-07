@@ -9,17 +9,20 @@ const loading = ref(true);
 const error = ref("");
 const reviewCases = computed(() => cases.value.filter(needsReview));
 const publishedCases = computed(() => cases.value.filter(isPublished));
+const submissionHistory = computed(() => cases.value.filter((item) => (
+  ["withdrawn", "returned"].includes(item.reviewRecordStatus)
+)));
 
 function needsReview(item) {
-  return ["pending", "reviewing"].includes(item.workflowStatus);
+  return ["pending", "reviewing"].includes(item.reviewRecordStatus);
 }
 
 function isPublished(item) {
-  return item.workflowStatus === "published";
+  return item.reviewRecordStatus === "published";
 }
 
 function reviewLabel(item) {
-  return item.workflowStatus === "pending" ? "待开始" : "审核中";
+  return item.reviewRecordStatus === "pending" ? "待开始" : "审核中";
 }
 
 function dateLabel(value) {
@@ -61,9 +64,9 @@ onMounted(loadCases);
           <header><div><span>案例管理</span><h2 id="review-queue-title">案例审核</h2></div><b>{{ reviewCases.length }}</b></header>
           <p v-if="!reviewCases.length" class="admin-empty">暂无待审核案例</p>
           <article v-for="item in reviewCases" :key="item.id" :aria-label="`待审核：${item.title}`">
-            <span :data-status="item.workflowStatus">{{ reviewLabel(item) }}</span>
+            <span :data-status="item.reviewRecordStatus">{{ reviewLabel(item) }}</span>
             <div><h3>{{ item.title }}</h3><p>{{ item.author || "作者待补充" }} · 提交更新 {{ dateLabel(item.updatedAt) }}</p></div>
-            <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">审核</RouterLink>
+            <RouterLink :to="{ name: 'case-review', params: { id: item.id }, query: { versionId: item.reviewVersionId } }">审核</RouterLink>
           </article>
         </section>
         <section class="admin-queue" aria-labelledby="publication-title">
@@ -72,7 +75,20 @@ onMounted(loadCases);
           <article v-for="item in publishedCases" :key="item.id" :aria-label="`已发布：${item.title}`">
             <FileStack :size="18" aria-hidden="true" />
             <div><h3>{{ item.title }}</h3><p>{{ item.publicationStatus === "public" ? "公开中" : "已隐藏" }} · {{ dateLabel(item.publishedAt) }}</p></div>
-            <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">发布管理</RouterLink>
+            <RouterLink :to="{ name: 'case-review', params: { id: item.id }, query: { versionId: item.reviewVersionId } }">发布管理</RouterLink>
+          </article>
+        </section>
+        <section class="admin-queue" aria-labelledby="submission-history-title">
+          <header><div><span>历史投稿</span><h2 id="submission-history-title">投稿记录</h2></div><b>{{ submissionHistory.length }}</b></header>
+          <p v-if="!submissionHistory.length" class="admin-empty">暂无已结束的投稿记录</p>
+          <article
+            v-for="item in submissionHistory"
+            :key="`${item.id}:${item.reviewVersionId}`"
+            :aria-label="`${item.reviewRecordStatus === 'withdrawn' ? '已撤回' : '已退回'}：${item.title}`"
+          >
+            <span :data-status="item.reviewRecordStatus">{{ item.reviewRecordStatus === "withdrawn" ? "作者已撤回" : "已退回" }}</span>
+            <div><h3>{{ item.title }}</h3><p>{{ item.author || "作者待补充" }} · 投稿 v{{ item.versionNumber }}</p></div>
+            <RouterLink :to="{ name: 'case-review', params: { id: item.id }, query: { versionId: item.reviewVersionId } }">查看记录</RouterLink>
           </article>
         </section>
       </template>

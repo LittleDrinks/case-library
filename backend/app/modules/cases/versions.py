@@ -259,7 +259,11 @@ def _check_delete_version(database, case, version_id: str, user: dict, session) 
     if database.annotations.find_one(
         {"caseId": case["id"], "versionId": version_id}, {"_id": 1}, session=session
     ) or database.lifecycle_events.find_one(
-        {"caseId": case["id"], "action": "approve", "versionId": version_id},
+        {
+            "caseId": case["id"],
+            "action": {"$in": ["approve", "submit"]},
+            "versionId": version_id,
+        },
         {"_id": 1}, session=session,
     ):
         raise CaseError(409, "仍被审核或公开记录引用的版本不可删除")

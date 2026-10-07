@@ -30,11 +30,14 @@ SOURCE_DEPENDENCIES = "_sourceDependencies"
 class SourceGate:
     """同一读取轮内按来源身份缓存可读性，保证各输出面投影口径一致。"""
 
-    def __init__(self, database, user: dict | None, case_id: str) -> None:
+    def __init__(
+        self, database, user: dict | None, case_id: str, version_id: str | None = None,
+    ) -> None:
         self.database = database
         self._authenticated = user is not None
         self.user = load_current_user(database, user)
         self.case_id = case_id
+        self.version_id = version_id
         self._readable: dict[tuple, bool] = {}
 
     def readable(self, raw: object) -> bool:
@@ -47,7 +50,7 @@ class SourceGate:
             return source_metadata_readable(self.database, self.user, ref)
         if ref.identity() not in self._readable:
             self._readable[ref.identity()] = source_readable(
-                self.database, self.user, self.case_id, ref
+                self.database, self.user, self.case_id, ref, self.version_id
             )
         return self._readable[ref.identity()]
 
@@ -60,8 +63,10 @@ class SourceGate:
             return None
 
 
-def visible_snapshot(database, snapshot: AgentSnapshot, user: dict) -> AgentSnapshot:
-    gate = SourceGate(database, user, snapshot.case_id)
+def visible_snapshot(
+    database, snapshot: AgentSnapshot, user: dict, version_id: str | None = None,
+) -> AgentSnapshot:
+    gate = SourceGate(database, user, snapshot.case_id, version_id)
     messages = [_visible_message(gate, message) for message in snapshot.messages]
     artifacts = [_visible_artifact(gate, artifact) for artifact in snapshot.artifacts]
     return snapshot.model_copy(update={"messages": messages, "artifacts": artifacts})
@@ -80,12 +85,13 @@ def visible_parts(
 
 
 def parts_projector(
-    database, user: dict | None, case_id: str, dependencies: list[SourceRef] | None = None,
+    database, user: dict | None, case_id: str, version_id: str | None = None,
+    dependencies: list[SourceRef] | None = None,
 ):
     """注入恢复流与模型历史的投影函数；每次调用重建 SourceGate 逐消息复验。"""
 
     def project(parts: list[dict], metadata: dict | None = None) -> list[dict]:
-        gate = SourceGate(database, user, case_id)
+        gate = SourceGate(database, user, case_id, version_id)
         refs = _message_refs(parts, metadata)
         if dependencies is not None:
             for raw in refs:

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
+from app.modules.search.projection import PROJECTION_VERSION
 from conftest import EmptySearchCatalog, ReadyCatalogState
 
 DEMO_ACCOUNT_IDS = (
@@ -37,6 +38,7 @@ def _catalog_generation() -> dict:
         "generation": "test-generation",
         "indexUid": "catalog-generation-test",
         "indexEpoch": "test-epoch",
+        "projectionVersion": PROJECTION_VERSION,
         "retiredIndexUids": [],
     }
 

@@ -37,7 +37,7 @@ it("版本时间线按新到旧列出投稿版本并可打开只读 Tab", async 
   const labels = wrapper.findAll(".version-timeline b").map((node) => node.text());
   expect(labels).toEqual(["AI版本 v3 · AI草稿", "v2 · 修改后重投", "v1 · 首次提交"]);
   await wrapper.get('button[aria-label="查看历史版本 v1 · 首次提交"]').trigger("click");
-  expect(wrapper.emitted("open-version")).toEqual([[versions[2]]]);
+  expect(wrapper.emitted("open-version")[0][0]).toMatchObject(versions[2]);
 });
 
 it("opens review feedback with its matching submission version", async () => {
@@ -47,7 +47,10 @@ it("opens review feedback with its matching submission version", async () => {
   await flushPromises();
   expect(wrapper.findAll(".version-review-status")).toHaveLength(1);
   await wrapper.get('[aria-label="查看 v1 审核意见"]').trigger("click");
-  expect(wrapper.emitted("open-review")).toEqual([[reviewed]]);
+  expect(wrapper.emitted("open-review")[0][0]).toMatchObject({
+    ...reviewed,
+    reviewRecordStatus: "returned",
+  });
 });
 
 it("时间线不展示内部快照，并保留普通保存不建版本说明", async () => {

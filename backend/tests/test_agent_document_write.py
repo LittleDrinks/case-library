@@ -908,7 +908,7 @@ def test_undo_api_rejects_non_author(client: TestClient) -> None:
         f"/writes/{write['id']}/undo",
         headers=_csrf(_admin(client)),
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert database.cases.find_one({"id": case["id"]})["revision"] == 2
 
 

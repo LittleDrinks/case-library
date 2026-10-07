@@ -8,6 +8,7 @@ from pydantic_ai.models.test import TestModel
 from app.modules.agent import prosemirror
 from app.modules.agent.models import AgentRun
 from app.modules.agent.repository import AgentRepository
+from app.modules.agent.routes import Conversation, _event_access_check
 
 
 THREADS_PATH = "/api/cases/c-draft-1/agent/threads"
@@ -134,7 +135,7 @@ def test_cross_case_and_cross_user_threads_are_not_enumerable(client: TestClient
     assert client.get(other).status_code == 404
     assert client.patch(other, headers=_csrf(auth), json={"title": "x"}).status_code == 404
     _login(client, "admin", "admin123")
-    assert client.get(THREADS_PATH).status_code == 403
+    assert client.get(THREADS_PATH).status_code == 404
     assert client.get(f"{THREADS_PATH}/{created['id']}").status_code == 403
 
 
@@ -184,6 +185,24 @@ def test_list_marks_thread_with_active_run_as_running(client: TestClient) -> Non
     summaries = {t["id"]: t for t in client.get(THREADS_PATH).json()}
 
     assert summaries[thread.id]["running"] is True
+
+
+def test_draft_event_access_stops_after_session_version_changes(client: TestClient) -> None:
+    auth = _login(client)
+    database = client.app.state.database
+    repository = AgentRepository(database)
+    thread = repository.default_thread("c-draft-1", auth["user"]["id"])
+    current_user = database.users.find_one({"id": auth["user"]["id"]})
+    conversation = Conversation(
+        database.cases.find_one({"id": "c-draft-1"}), None, reader=False
+    )
+    access_check = _event_access_check(database, current_user, conversation, thread)
+
+    assert access_check()
+    database.users.update_one(
+        {"id": auth["user"]["id"]}, {"$inc": {"token_version": 1}}
+    )
+    assert not access_check()
 
 
 def _insert_artifact(database, thread_id: str, artifact_id: str) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event, Lock
 
 import pytest
@@ -14,6 +15,7 @@ from app.modules.search.meilisearch import (
     SearchUnavailable,
 )
 from app.modules.search.models import TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 
 class FakeReader:
@@ -253,12 +255,32 @@ def test_restricted_title_hits_are_disjoint_redacted_and_unified() -> None:
         'kind = "material" AND docClass = "material-full" AND accessLevel = "public"'
     ) in page_filter
     assert (
-        'kind = "material" AND accessLevel IN ["campus", "private"] '
+        'kind = "material" AND accessLevel = "campus" '
         'AND docClass = "material-restricted" AND publicReferenceCount > 0'
     ) in page_filter
     assert client.calls == [None]
     assert client.batches[0][0]["offset"] == 1
     assert client.batches[0][0]["limit"] == 2
+
+
+def test_restricted_metadata_never_includes_other_private_materials() -> None:
+    from app.modules.search.meilisearch import _restricted_branch
+
+    anonymous = _restricted_request()
+    unverified = replace(
+        anonymous,
+        principal=Principal("u-1", "user", verified=False),
+    )
+    verified = replace(
+        anonymous,
+        principal=Principal("u-1", "user", verified=True),
+    )
+
+    assert 'accessLevel = "campus"' in _restricted_branch(anonymous)
+    assert 'accessLevel = "campus"' in _restricted_branch(unverified)
+    assert "private" not in _restricted_branch(anonymous)
+    assert "private" not in _restricted_branch(unverified)
+    assert _restricted_branch(verified) == 'catalogId = "__no_matching_document__"'
 
 
 def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> None:
@@ -271,9 +293,12 @@ def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> N
     )
     unverified_filter = unverified_reader.batches[0][0]["filter"]
 
-    assert 'accessLevel IN ["public", "private"]' in unverified_filter
-    assert 'accessLevel = "campus"' in unverified_filter
-    assert 'docClass = "material-restricted"' in unverified_filter
+    assert 'accessLevel IN ["public"]' in unverified_filter
+    assert 'accessLevel = "private" AND createdBy = "u-admin"' in unverified_filter
+    assert (
+        'kind = "material" AND accessLevel = "campus" '
+        'AND docClass = "material-restricted"'
+    ) in unverified_filter
 
     verified_reader = FakeReader(_result(), [])
     MeilisearchCatalog(verified_reader).search(
@@ -284,8 +309,10 @@ def test_admin_search_keeps_campus_materials_behind_explicit_verification() -> N
     )
     verified_filter = verified_reader.batches[0][0]["filter"]
 
-    assert 'accessLevel IN ["public", "private"]' not in verified_filter
+    assert 'accessLevel IN ["public", "campus"]' in verified_filter
+    assert 'accessLevel = "private" AND createdBy = "u-admin"' in verified_filter
     assert 'docClass = "material-full"' in verified_filter
+    assert 'docClass = "material-restricted"' not in verified_filter
 
 
 def test_case_search_uses_current_campus_grant_and_owner_scope_for_admins() -> None:
@@ -344,9 +371,11 @@ class HealthyReader:
         primary_key="catalogId",
         generation="current-generation",
         epoch="epoch",
+        projection_version=PROJECTION_VERSION,
     ) -> None:
         self.status, self.primary_key = status, primary_key
         self.generation, self.epoch = generation, epoch
+        self.projection_version = projection_version
 
     def health(self, uid: str) -> CatalogHealth:
         assert uid == "catalog"
@@ -355,6 +384,7 @@ class HealthyReader:
             self.primary_key,
             self.generation,
             self.epoch,
+            self.projection_version,
         )
 
 
@@ -363,6 +393,13 @@ def test_health_requires_available_server_and_stable_catalog_primary_key() -> No
     for reader in (HealthyReader("unavailable"), HealthyReader(primary_key="id")):
         with pytest.raises(SearchUnavailable, match="检索暂不可用"):
             MeilisearchCatalog(reader).health("catalog", "current-generation", "epoch")
+
+
+def test_health_rejects_an_old_projection_version() -> None:
+    with pytest.raises(SearchUnavailable, match="检索暂不可用"):
+        MeilisearchCatalog(
+            HealthyReader(projection_version=PROJECTION_VERSION - 1)
+        ).health("catalog", "current-generation", "epoch")
 
 
 def test_health_requires_the_expected_catalog_generation() -> None:
@@ -438,6 +475,11 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
             Principal("u-admin", "admin"),
             '(docClass = "case-private" AND createdBy = "u-admin" OR '
             'docClass = "case-public" AND createdBy != "u-admin")',
+        ),
+        (
+            Principal("u-admin", "admin", verified=True),
+            '(docClass = "case-private" AND createdBy = "u-admin" OR '
+            'docClass = "case-campus" AND createdBy != "u-admin")',
         ),
     ],
 )

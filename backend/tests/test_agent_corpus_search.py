@@ -47,6 +47,24 @@ def _case_item(item_id: str) -> dict:
     return {"id": item_id, "kind": "case", "title": f"案例{item_id}", "score": 10}
 
 
+def _seed_public_cases(database, count: int) -> list[dict]:
+    items = [_case_item(f"c-{index}") for index in range(count)]
+    for item in items:
+        version_id = f"v-{item['id']}"
+        database.cases.insert_one({
+            "id": item["id"], "ownerId": "u-other", "workflowStatus": "published",
+            "publicationStatus": "public", "publishedVersionId": version_id,
+        })
+        database.case_versions.insert_one({
+            "id": version_id, "caseId": item["id"], "kind": "submission",
+            "number": 1, "sourceRevision": 1, "title": item["title"], "summary": "",
+            "document": {"type": "doc", "content": []}, "metadata": {},
+        })
+        item["versionId"] = version_id
+        item["versionNumber"] = 1
+    return items
+
+
 def _restricted_item() -> dict:
     return {
         "id": "m-restricted", "kind": "material", "title": "校内受限素材",
@@ -112,7 +130,7 @@ def test_empty_arguments_discover_catalog_and_scale(client) -> None:
 
 
 def test_pagination_serves_disjoint_pages_with_cursor(client) -> None:
-    catalog = PagedCatalog([_case_item(f"c-{index}") for index in range(8)])
+    catalog = PagedCatalog(_seed_public_cases(client.app.state.database, 8))
     deps = _deps(client, catalog)
     first = _call(deps, {"query": "案例"})
     second = _call(deps, {"query": "案例", "cursor": first["nextCursor"]})
@@ -181,17 +199,25 @@ def test_restricted_hit_records_reference_without_content_leak(client, access_le
     deps = _deps(client, PagedCatalog([restricted_item]))
     view = _call(deps, {"kind": "material"})
 
-    source = view["sources"][0]
-    assert source["title"] == source["snippet"] == "校内受限素材"
-    assert source["contentAvailable"] is False
-    assert "该摘要不属于可公开展示的目录标题" not in str(source)
-    assert "content" not in source and "summary" not in source
-    assert deps.hits[0].content_available is False
-    assert deps.sources_readable() is True
-    database.materials.update_one(
-        {"id": "m-restricted"}, {"$set": {"publicReferenceCount": 0}}
-    )
-    assert deps.sources_readable() is False
+    if access_level == "campus":
+        source = view["sources"][0]
+        assert source["title"] == source["snippet"] == "校内受限素材"
+        assert source["contentAvailable"] is False
+        assert "该摘要不属于可公开展示的目录标题" not in str(source)
+        assert "content" not in source and "summary" not in source
+        assert deps.hits[0].content_available is False
+        assert deps.sources_readable() is True
+        database.materials.update_one(
+            {"id": "m-restricted"}, {"$set": {"publicReferenceCount": 0}}
+        )
+        assert deps.sources_readable() is False
+    else:
+        assert view["sources"] == []
+        deps.hits.append(SourceRef(
+            kind="material", id="m-restricted", title="校内受限素材",
+            content_available=False,
+        ))
+        assert deps.sources_readable() is False
     body_read = asyncio.run(
         read_source_tool(SimpleNamespace(deps=deps), "material", "m-restricted")
     )
@@ -292,6 +318,81 @@ def test_projected_knowledge_section_hit_keeps_current_edition_in_source_gate(
             {"id": source["id"]}, {"$set": {"edition": changed_edition}}
         )
     assert not SourceGate(database, user, "c-draft-1").readable(ref)
+
+
+def test_legacy_persisted_knowledge_ref_revalidates_with_nullable_edition(client) -> None:
+    from app.modules.agent.source_reader import revalidate_sources
+    from app.modules.agent.visibility import HIDDEN_ANSWER, parts_projector
+
+    database = client.app.state.database
+    source = {
+        "id": "kn-legacy-parent",
+        "title": "合成旧教材",
+        "status": "active",
+    }
+    section = {
+        "id": "kn-legacy-section",
+        "sourceId": source["id"],
+        "chapter": "第一章",
+        "title": "旧章节标题",
+        "content": "合成旧章节正文",
+    }
+    database.knowledge_sources.insert_one(source)
+    database.knowledge_sections.insert_one(section)
+    user = database.users.find_one({"id": "u-user-demo"})
+    raw_ref = {
+        "kind": "knowledge",
+        "id": section["id"],
+        "title": "第一章 · 旧章节标题",
+        "location": f"knowledge:{section['id']}",
+    }
+    ref = SourceRef.model_validate(raw_ref)
+    parts = [{"type": "text", "text": "历史复述了旧教材内容"}]
+    project = parts_projector(database, user, "c-draft-1")
+
+    assert ref.knowledge_level is None and ref.version is None
+    assert revalidate_sources(database, user, "c-draft-1", [ref])
+    assert project(parts, {"_sourceDependencies": [raw_ref]}) == parts
+
+    database.knowledge_sources.update_one(
+        {"id": source["id"]}, {"$set": {"status": "inactive"}}
+    )
+
+    assert not revalidate_sources(database, user, "c-draft-1", [ref])
+    assert project(parts, {"_sourceDependencies": [raw_ref]}) == [
+        {"type": "text", "text": HIDDEN_ANSWER}
+    ]
+
+
+def test_agent_search_rejects_a_stale_knowledge_section_hit(client) -> None:
+    database = client.app.state.database
+    database.knowledge_sources.insert_one({
+        "id": "kn-stale-search-parent",
+        "title": "已下线合成教材",
+        "status": "inactive",
+    })
+    database.knowledge_sections.insert_one({
+        "id": "kn-stale-search-section",
+        "sourceId": "kn-stale-search-parent",
+        "chapter": "第一章",
+        "title": "索引中的旧章节标题",
+        "content": "不应进入模型的旧章节正文",
+    })
+    hit = {
+        "id": "kn-stale-search-section",
+        "kind": "knowledge",
+        "title": "索引中的旧章节标题",
+        "knowledgeLevel": "section",
+        "edition": None,
+        "score": 1,
+    }
+    deps = _deps(client, PagedCatalog([hit]))
+
+    result = search_platform(
+        deps, CorpusSearchParams(query="旧章节", kind="knowledge")
+    )
+
+    assert result.sources == []
 
 
 def test_source_directory_id_collision_cannot_read_section_body(client) -> None:

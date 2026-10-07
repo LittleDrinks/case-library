@@ -211,15 +211,17 @@ def test_http_search_limits_campus_attachment_to_signed_in_users(case_search) ->
     _assert_case(_search(case_search, "校内附件山茶词", "u-other"))
 
 
-def test_http_search_limits_private_attachment_to_owner_and_admin(case_search) -> None:
+def test_http_search_limits_private_attachment_to_its_case_author(case_search) -> None:
     assert _search(case_search, "私密附件海棠词") == []
     assert _search(case_search, "私密附件海棠词", "u-other") == []
     _assert_case(_search(case_search, "私密附件海棠词", "u-owner"))
-    _assert_case(_search(case_search, "私密附件海棠词", "u-admin"))
+    assert _search(case_search, "私密附件海棠词", "u-admin") == []
 
 
-def test_http_search_exposes_attachment_names_as_public_metadata(case_search) -> None:
-    _assert_case(_search(case_search, "私密名称玉兰词"))
+def test_http_search_does_not_expose_private_attachment_names(case_search) -> None:
+    assert _search(case_search, "私密名称玉兰词") == []
+    assert _search(case_search, "私密名称玉兰词", "u-other") == []
+    _assert_case(_search(case_search, "私密名称玉兰词", "u-owner"))
     assert _search(case_search, "私密附件海棠词") == []
 
 

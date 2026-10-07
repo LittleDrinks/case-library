@@ -109,19 +109,20 @@ function routeQuery(overrides = {}) {
   };
 }
 
-function applyResult(term, result) {
+function applyResult(term, result, searchRequest) {
   payload.value = mergeMetadata(result);
   submitted.value = term;
   page.value = result.page;
-  applySummarySnapshot(term);
+  applySummarySnapshot(term, searchRequest);
 }
 
-function applySummarySnapshot(term) {
+function applySummarySnapshot(term, searchRequest) {
   const visible = payload.value.items.slice(0, 15);
   if (!term || !visible.length) { summarySnapshot.value = null; return; }
   summaryRevision += 1;
   summarySnapshot.value = Object.freeze({
     revision: summaryRevision, query: term,
+    search: Object.freeze({ ...searchRequest }),
     items: Object.freeze(visible.map((item) => Object.freeze({ ...item }))),
   });
 }
@@ -130,12 +131,17 @@ async function requestSearch(term, kind, activeCursor, searchFilters) {
   const current = ++searchGeneration;
   loading.value = true;
   error.value = "";
+  const searchRequest = {
+    q: term, kind, pageSize: 20,
+    ...(activeCursor ? { cursor: activeCursor } : {}),
+    ...filterQuery(searchFilters, kind),
+  };
   try {
     const result = await searchWithSyncRetry(
       () => api.search(term, kind, activeCursor, 20, filterQuery(searchFilters, kind)),
       () => current === searchGeneration,
     );
-    if (current === searchGeneration) applyResult(term, result);
+    if (current === searchGeneration) applyResult(term, result, searchRequest);
   } catch (caught) {
     if (current === searchGeneration) error.value = caught.message || "检索失败";
   } finally {

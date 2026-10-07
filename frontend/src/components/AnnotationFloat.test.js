@@ -192,9 +192,13 @@ it("审核中管理员可填写并保存审核批注，source 为 admin", async 
   api.createAnnotation.mockResolvedValue({
     ...annotation, source: "admin", versionId: "cv-1", createdBy: "admin-1",
   });
-  const reviewing = { ...caseRecord, workflowStatus: "reviewing", ownerId: "user-1" };
+  const reviewing = {
+    ...caseRecord, workflowStatus: "reviewing", reviewRecordStatus: "reviewing", ownerId: "user-1",
+  };
   const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
-  const wrapper = mountFloat({ caseRecord: reviewing, user: admin, draft: selection });
+  const wrapper = mountFloat({
+    caseRecord: reviewing, user: admin, draft: selection, versionId: "cv-1",
+  });
   expect(wrapper.get('[aria-label="批注内容"]').attributes("disabled")).toBeUndefined();
   expect(wrapper.findAll("button").map((button) => button.text())).not.toContain("询问AI");
   await wrapper.get('[aria-label="批注内容"]').setValue("请明确评价标准");
@@ -203,7 +207,7 @@ it("审核中管理员可填写并保存审核批注，source 为 admin", async 
   await flushPromises();
   expect(api.createAnnotation).toHaveBeenCalledWith("case-1", expect.objectContaining({
     content: "请明确评价标准", source: "admin",
-  }), "csrf");
+  }), "csrf", "cv-1");
   expect(wrapper.emitted("saved")[0][0]).toMatchObject({ id: "annotation-1" });
 });
 

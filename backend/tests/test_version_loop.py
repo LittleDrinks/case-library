@@ -246,13 +246,11 @@ def _assert_admin_cannot_read_private_snapshot(client, case, version):
     listed = client.get(
         f"/api/cases/{case['id']}/annotations", headers={"X-CSRF-Token": admin["csrfToken"]},
     )
-    assert listed.status_code == 200 and listed.json() == []
+    assert listed.status_code == 404
     admin_history = client.get(
         f"/api/cases/{case['id']}/history", headers={"X-CSRF-Token": admin["csrfToken"]},
     )
-    assert admin_history.status_code == 200
-    admin_version = next(row for row in admin_history.json()["versions"] if row["id"] == version["id"])
-    assert admin_version["annotations"] == []
+    assert admin_history.status_code == 403
     return admin
 
 
