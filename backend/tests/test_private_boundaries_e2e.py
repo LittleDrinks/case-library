@@ -12,19 +12,23 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from pymongo import MongoClient
-
 from app.core.config import Settings
 from app.modules.agent.case_area import area_rows, retained_sources
 from app.modules.agent.deps import ToolDeps
-from app.modules.agent.skills import read_source, search_corpus
 from app.modules.agent.search import CorpusSearchParams
+from app.modules.agent.skills import read_source, search_corpus
 from app.modules.attachments.storage import minio_blob_store
-from app.modules.search.client import create_client, create_reader, index_epoch, wait_task
+from app.modules.search.client import (
+    create_client,
+    create_reader,
+    index_epoch,
+    wait_task,
+)
 from app.modules.search.indexer import CatalogRebuilder
 from app.modules.search.meilisearch import MeilisearchCatalog
 from app.modules.search.outbox import SearchOutbox
 from app.modules.search.state import MongoCatalogState
+from pymongo import MongoClient
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
 pytestmark = pytest.mark.e2e(
@@ -577,6 +581,42 @@ def test_submitted_version_without_annotations_cannot_be_deleted_after_withdrawa
     assert historical.status_code == 200, historical.text
     assert historical.json()["title"] == marker
     assert admin.get(f"/api/cases/{case['id']}/history").json()["versions"][0]["id"] == version_id
+
+
+def test_admin_case_owner_can_read_own_frozen_private_annotations() -> None:
+    owner, owner_auth = _unverified_user("admin")
+    marker = f"admin-owner-private-{uuid.uuid4().hex}"
+    case = _create_case(owner, owner_auth, marker)
+    note = owner.post(
+        f"/api/cases/{case['id']}/annotations",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={
+            "quote": marker,
+            "section": "正文",
+            "content": f"owner-private-note-{marker}",
+            "source": "manual",
+            "revision": case["revision"],
+            "from": 1,
+            "to": 1 + len(marker),
+        },
+    )
+    assert note.status_code == 201, note.text
+    reply = owner.post(
+        f"/api/cases/{case['id']}/annotations/{note.json()['id']}/replies",
+        headers={"X-CSRF-Token": owner_auth["csrfToken"]},
+        json={"content": f"owner-private-reply-{marker}"},
+    )
+    assert reply.status_code == 200, reply.text
+
+    submitted = _transition(owner, owner_auth, case["id"], "submit", case["revision"])
+    history = owner.get(f"/api/cases/{case['id']}/history")
+    assert history.status_code == 200, history.text
+    frozen = next(
+        row for row in history.json()["versions"]
+        if row["id"] == submitted["version"]["id"]
+    )
+    assert f"owner-private-note-{marker}" in str(frozen["annotations"])
+    assert f"owner-private-reply-{marker}" in str(frozen["annotations"])
 
 
 def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> None:

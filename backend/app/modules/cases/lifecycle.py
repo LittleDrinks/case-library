@@ -7,6 +7,7 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 
 from app.modules.attachments.service import attachment_view, snapshot_attachments
+from app.modules.case_materials.service import project_material_rows, snapshot_materials
 from app.modules.case_sources.service import (
     snapshot_case_sources,
     source_case_content_available,
@@ -19,15 +20,14 @@ from app.modules.cases.service import (
     frozen_case_view,
     internal_case_view,
 )
-from app.modules.cases.submission_check import submission_issues
 from app.modules.cases.snapshots import overwrite_draft
-from app.modules.case_materials.service import project_material_rows, snapshot_materials
-from app.modules.search.outbox import SearchOutbox
+from app.modules.cases.submission_check import submission_issues
 from app.modules.cases.versions import (
     FORMAL_VERSION_KINDS,
     next_version_number,
     snapshot_annotations,
 )
+from app.modules.search.outbox import SearchOutbox
 
 
 def _now() -> str:
@@ -171,7 +171,7 @@ def _version_view(database, record: dict, case: dict, user: dict) -> dict:
         }
         for row in record.get("caseSources", [])
     ]
-    if user.get("role") == "admin" or case["ownerId"] != user["id"]:
+    if case["ownerId"] != user["id"]:
         cleaned["annotations"] = []
     return cleaned
 
