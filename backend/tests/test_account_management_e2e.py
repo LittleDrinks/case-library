@@ -37,7 +37,12 @@ def _request(opener, method: str, path: str, body=None, csrf: str = ""):
             return response.status, json.loads(content) if content else None
     except HTTPError as error:
         content = error.read()
-        return error.code, json.loads(content) if content else None
+        if not content:
+            return error.code, None
+        try:
+            return error.code, json.loads(content)
+        except json.JSONDecodeError:
+            return error.code, None
 
 
 def _expect_status(actual: int, expected: int) -> None:
@@ -392,6 +397,126 @@ def test_account_management_public_http_sessions_and_audit_persist_in_mongodb() 
     )
 
 
+def test_failed_audit_insert_rolls_back_status_session_and_result() -> None:
+    mongo = MongoClient(MONGODB_URI)
+    database = mongo.get_default_database()
+    collection_name = "account_management_operations"
+    account_id = None
+    validator_installed = False
+    collection_options = {}
+    try:
+        admin, admin_session = _admin_session()
+        account_id, username, temporary_password = _created_account(
+            admin, admin_session["csrfToken"]
+        )
+        target = _opener()
+        _login(target, username, temporary_password)
+        marker = f"合成审计写入失败验收 {uuid.uuid4().hex}"
+        collection_options = next(
+            database.list_collections(filter={"name": collection_name})
+        ).get("options", {})
+        account_projection = {
+            "_id": 0,
+            "status": 1,
+            "role": 1,
+            "must_change_password": 1,
+            "token_version": 1,
+            "password_hash": 1,
+        }
+        original_state = database.users.find_one({"id": account_id}, account_projection)
+        original_sessions = database.sessions.count_documents({"user_id": account_id})
+        original_status_operations = (
+            database.account_management_operations.count_documents(
+                {"targetId": account_id, "action": "account_status_change"}
+            )
+        )
+        try:
+            database.command(
+                "collMod",
+                collection_name,
+                validator={
+                    "$or": [
+                        {"reason": {"$ne": marker}},
+                        {"auditFailureProbe": {"$exists": True}},
+                    ]
+                },
+                validationLevel="strict",
+                validationAction="error",
+            )
+            validator_installed = True
+            status, failure = _request(
+                admin,
+                "POST",
+                f"/api/admin/accounts/{account_id}/status",
+                {"status": "disabled", "reason": marker},
+                admin_session["csrfToken"],
+            )
+        finally:
+            if validator_installed:
+                database.command(
+                    "collMod",
+                    collection_name,
+                    validator=collection_options.get("validator", {}),
+                    validationLevel=collection_options.get("validationLevel", "strict"),
+                    validationAction=collection_options.get(
+                        "validationAction", "error"
+                    ),
+                )
+                validator_installed = False
+
+        _expect_status(status, 500)
+        _expect_redacted(failure, (temporary_password,), "审计失败响应包含临时密码")
+        unchanged_state = database.users.find_one(
+            {"id": account_id}, account_projection
+        )
+        if unchanged_state != original_state:
+            raise AssertionError("审计写入失败后账号状态未回滚")
+        if (
+            database.sessions.count_documents({"user_id": account_id})
+            != original_sessions
+        ):
+            raise AssertionError("审计写入失败后账号会话被撤销")
+        _expect_status(_request(target, "GET", "/api/auth/session")[0], 200)
+        status, login_payload = _request(
+            _opener(),
+            "POST",
+            "/api/auth/login",
+            {"username": username, "password": temporary_password},
+        )
+        _expect_status(status, 200)
+        _expect_redacted(login_payload, (temporary_password,), "登录响应包含临时密码")
+        status, operations = _request(admin, "GET", "/api/admin/account-operations")
+        _expect_status(status, 200)
+        if any(
+            operation["targetId"] == account_id
+            and operation["action"] == "account_status_change"
+            and operation["reason"] == marker
+            for operation in operations["items"]
+        ):
+            raise AssertionError("审计写入失败后仍保存了账号状态操作")
+        if (
+            database.account_management_operations.count_documents(
+                {"targetId": account_id, "action": "account_status_change"}
+            )
+            != original_status_operations
+        ):
+            raise AssertionError("审计写入失败后操作记录数量发生变化")
+    finally:
+        if validator_installed:
+            database.command(
+                "collMod",
+                collection_name,
+                validator=collection_options.get("validator", {}),
+                validationLevel=collection_options.get("validationLevel", "strict"),
+                validationAction=collection_options.get("validationAction", "error"),
+            )
+        if account_id:
+            database.users.delete_one({"id": account_id})
+            database.sessions.delete_many({"user_id": account_id})
+            database.account_management_operations.delete_many({"targetId": account_id})
+        mongo.close()
+
+
 def test_public_http_rejects_invalid_account_fields_without_mutation() -> None:
     admin, admin_session = _admin_session()
     csrf = admin_session["csrfToken"]
@@ -595,6 +720,24 @@ def test_concurrent_last_available_admin_password_reset_preserves_management_acc
             ids.append(account_id)
             usernames.append(username)
 
+        original_states = {
+            account_id: database.users.find_one(
+                {"id": account_id},
+                {
+                    "_id": 0,
+                    "password_hash": 1,
+                    "role": 1,
+                    "status": 1,
+                    "must_change_password": 1,
+                    "token_version": 1,
+                },
+            )
+            for account_id in ids
+        }
+        original_session_counts = {
+            account_id: database.sessions.count_documents({"user_id": account_id})
+            for account_id in ids
+        }
         start = Barrier(2)
 
         def reset(manager, csrf: str, target_id: str, password: str):
@@ -616,10 +759,37 @@ def test_concurrent_last_available_admin_password_reset_preserves_management_acc
                     reset, manager_b, sessions[1]["csrfToken"], ids[0], _password()
                 ),
             )
-            statuses = sorted(future.result() for future in futures)
+            statuses = [future.result() for future in futures]
 
-        if statuses != [200, 409]:
-            raise AssertionError("并发临时密码操作未保护最后一个可用管理员")
+        if statuses.count(200) != 1 or any(
+            status not in (200, 401, 403) for status in statuses
+        ):
+            raise AssertionError(
+                f"并发临时密码操作未基于当前管理员状态授权：{statuses}"
+            )
+        losing_index = statuses.index(
+            next(status for status in statuses if status != 200)
+        )
+        losing_target_id = ids[1] if losing_index == 0 else ids[0]
+        losing_actor_id = ids[0] if losing_index == 0 else ids[1]
+        unchanged_target = database.users.find_one(
+            {"id": losing_target_id},
+            {
+                "_id": 0,
+                "password_hash": 1,
+                "role": 1,
+                "status": 1,
+                "must_change_password": 1,
+                "token_version": 1,
+            },
+        )
+        if unchanged_target != original_states[losing_target_id]:
+            raise AssertionError("并发拒绝改动了目标账号")
+        if (
+            database.sessions.count_documents({"user_id": losing_target_id})
+            != original_session_counts[losing_target_id]
+        ):
+            raise AssertionError("并发拒绝撤销了目标账号会话")
         available_admins = database.users.count_documents(
             {"role": "admin", "status": "active", "must_change_password": False}
         )
@@ -629,6 +799,8 @@ def test_concurrent_last_available_admin_password_reset_preserves_management_acc
             {"role": "admin", "status": "active", "must_change_password": False},
             {"_id": 0, "id": 1},
         )["id"]
+        if remaining_id != losing_target_id:
+            raise AssertionError("并发密码重置未保留仍可授权的管理员")
         remaining_manager = manager_a if remaining_id == ids[0] else manager_b
         status, _ = _request(remaining_manager, "GET", "/api/admin/accounts")
         _expect_status(status, 200)
@@ -636,25 +808,47 @@ def test_concurrent_last_available_admin_password_reset_preserves_management_acc
             remaining_manager, "GET", "/api/admin/account-operations"
         )
         _expect_status(status, 200)
-        rejected = next(
-            (
-                operation
-                for operation in operations["items"]
-                if operation["action"] == "temporary_password_reset"
-                and operation["result"] == "rejected"
-                and operation["targetId"] in ids
-            ),
-            None,
-        )
-        if not rejected:
-            raise AssertionError("最后管理员拒绝结果未写入操作记录")
-        target_index = ids.index(rejected["targetId"])
-        if (
-            rejected["targetUsername"] != usernames[target_index]
-            or rejected["reason"] != "并发最后管理员 E2E"
-            or not rejected["detail"]
-        ):
-            raise AssertionError("最后管理员拒绝记录没有正确标识操作对象")
+        account_operations = [
+            operation
+            for operation in operations["items"]
+            if operation["action"] == "temporary_password_reset"
+            and operation["targetId"] in ids
+        ]
+        successful = [
+            operation
+            for operation in account_operations
+            if operation["result"] == "success"
+        ]
+        if len(successful) != 1:
+            raise AssertionError("并发重置的成功结果没有与账号事务一致")
+        successful_target_id = ids[1] if successful[0]["targetId"] == ids[0] else ids[0]
+        if successful[0]["actorId"] != successful_target_id:
+            raise AssertionError("临时密码成功记录的操作者不正确")
+        rejected = [
+            operation
+            for operation in account_operations
+            if operation["result"] == "rejected"
+        ]
+        if statuses[losing_index] == 403:
+            rejected_target = next(
+                (
+                    operation
+                    for operation in rejected
+                    if operation["targetId"] == losing_target_id
+                ),
+                None,
+            )
+            if (
+                not rejected_target
+                or rejected_target["actorId"] != losing_actor_id
+                or rejected_target["targetUsername"]
+                != usernames[ids.index(losing_target_id)]
+                or rejected_target["reason"] != "并发最后管理员 E2E"
+                or not rejected_target["detail"]
+            ):
+                raise AssertionError("并发授权拒绝未记录操作者、对象、理由和结果")
+        elif rejected:
+            raise AssertionError("会话已失效的请求不应进入管理操作记录")
     finally:
         if created_ids:
             database.users.delete_many({"id": {"$in": created_ids}})
@@ -710,6 +904,25 @@ def test_mixed_concurrent_admin_removal_preserves_one_real_management_session() 
             ids.append(account_id)
             usernames.append(username)
 
+        original_states = {
+            account_id: database.users.find_one(
+                {"id": account_id},
+                {
+                    "_id": 0,
+                    "password_hash": 1,
+                    "role": 1,
+                    "status": 1,
+                    "must_change_password": 1,
+                    "token_version": 1,
+                },
+            )
+            for account_id in ids
+        }
+        original_session_counts = {
+            account_id: database.sessions.count_documents({"user_id": account_id})
+            for account_id in ids
+        }
+
         start = Barrier(3)
 
         def disable(manager, csrf: str, target_id: str):
@@ -753,6 +966,48 @@ def test_mixed_concurrent_admin_removal_preserves_one_real_management_session() 
             )
             statuses = [future.result() for future in futures]
 
+        actions = (
+            (ids[1], "disable"),
+            (ids[2], "demote"),
+            (ids[0], "reset"),
+        )
+        for status, (target_id, action) in zip(statuses, actions, strict=True):
+            state = database.users.find_one(
+                {"id": target_id},
+                {
+                    "_id": 0,
+                    "password_hash": 1,
+                    "role": 1,
+                    "status": 1,
+                    "must_change_password": 1,
+                    "token_version": 1,
+                },
+            )
+            session_count = database.sessions.count_documents({"user_id": target_id})
+            original = original_states[target_id]
+            if status != 200:
+                if state != original:
+                    raise AssertionError("并发拒绝改动了目标账号")
+                if session_count != original_session_counts[target_id]:
+                    raise AssertionError("并发拒绝撤销了目标账号会话")
+            elif action == "disable":
+                if state["status"] != "disabled" or session_count != 0:
+                    raise AssertionError("并发停用没有提交状态并撤销会话")
+            elif action == "demote":
+                if (
+                    state["role"] != "user"
+                    or session_count != original_session_counts[target_id]
+                ):
+                    raise AssertionError("并发降级没有即时变更角色或意外撤销会话")
+            elif action == "reset":
+                if (
+                    state["password_hash"] == original["password_hash"]
+                    or state["must_change_password"] is not True
+                    or state["token_version"] != original["token_version"] + 1
+                    or session_count != 0
+                ):
+                    raise AssertionError("并发密码重置没有提交密码版本并撤销会话")
+
         if statuses.count(200) != 2 or any(
             status not in (200, 401, 403, 409) for status in statuses
         ):
@@ -775,8 +1030,10 @@ def test_mixed_concurrent_admin_removal_preserves_one_real_management_session() 
         successful = [
             operation
             for operation in operations["items"]
-            if operation["targetId"] in ids and operation["result"] == "success"
-            and operation["action"] in {
+            if operation["targetId"] in ids
+            and operation["result"] == "success"
+            and operation["action"]
+            in {
                 "account_status_change",
                 "account_role_change",
                 "temporary_password_reset",

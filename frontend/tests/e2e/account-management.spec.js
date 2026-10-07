@@ -13,6 +13,7 @@ async function signIn(page, username, password) {
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).not.toHaveURL(/#\/login(?:\?|$)/);
 }
 
 async function setTemporaryPassword(page, username, password, reason) {
@@ -23,10 +24,10 @@ async function setTemporaryPassword(page, username, password, reason) {
   await form.getByRole("button", { name: "确认重置" }).click();
 }
 
-async function forceLogout(page, username) {
+async function forceLogout(page, username, reason) {
   await beginAccountAction(page, username, "logout");
   const form = page.locator(".account-action-form");
-  await form.getByLabel("操作理由").fill("合成浏览器强制退出验收");
+  await form.getByLabel("操作理由").fill(reason);
   await form.getByRole("button", { name: "确认强制退出" }).click();
 }
 
@@ -75,6 +76,7 @@ test("管理员可通过页面开户、恢复密码、撤销会话并查阅持�
   const changedPassword = `Issue357-Changed-${randomUUID()}!a`;
   const resetPassword = `Issue357-Reset-${randomUUID()}!a`;
   const recoveredPassword = `Issue357-Recovered-${randomUUID()}!a`;
+  const forceLogoutReason = `合成浏览器强制退出验收 ${first.username}`;
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "admin", adminPassword);
   await page.goto("/#/admin/accounts");
@@ -136,16 +138,16 @@ test("管理员可通过页面开户、恢复密码、撤销会话并查阅持�
   const forceSession = await browser.newPage();
   await signIn(forceSession, first.username, recoveredPassword);
   await expect(forceSession).toHaveURL(/#\/$/);
-  await forceLogout(page, first.username);
+  await forceLogout(page, first.username, forceLogoutReason);
   await expect(page.getByRole("status")).toContainText("撤销 2 个会话");
   expect((await firstUser.request.get("/api/auth/session")).status()).toBe(401);
   expect((await forceSession.request.get("/api/auth/session")).status()).toBe(401);
 
   await page.getByRole("tab", { name: "操作记录" }).click();
-  await expect(page.getByText("合成浏览器强制退出验收")).toBeVisible();
+  await expect(page.getByText(`理由：${forceLogoutReason}`)).toBeVisible();
   await page.reload();
   await page.getByRole("tab", { name: "操作记录" }).click();
-  await expect(page.getByText("合成浏览器强制退出验收")).toBeVisible();
+  await expect(page.getByText(`理由：${forceLogoutReason}`)).toBeVisible();
   await expect(page.locator(".account-operation-row").filter({ hasText: first.username }).filter({ hasText: "后台开户" })).toBeVisible();
   const operationText = await page.locator(".account-operation-list").innerText();
   for (const secret of [first.temporaryPassword, changedPassword, resetPassword, recoveredPassword]) {
@@ -272,12 +274,19 @@ test("后台停用恢复和角色操作保留作者版本引用并更新现有�
   const password = `Issue359-Changed-${randomUUID()}!a`;
   const title = `停用恢复保留内容 ${randomUUID()}`;
   const sourceTitle = `停用恢复引用来源 ${randomUUID()}`;
+  const operationReasons = {
+    open: `合成停用恢复开户验收 ${account.username}`,
+    disable: `合成停用保留验收 ${account.username}`,
+    restore: `合成恢复保留验收 ${account.username}`,
+    grant: `合成授予角色验收 ${account.username}`,
+    revoke: `合成撤销角色验收 ${account.username}`,
+  };
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "admin", "admin123");
   await page.goto("/#/admin/accounts");
   await page.getByLabel("用户名", { exact: true }).fill(account.username);
   await page.getByLabel("临时密码", { exact: true }).fill(account.temporaryPassword);
-  await page.locator(".account-open-form").getByLabel("操作理由").fill("合成停用恢复开户验收");
+  await page.locator(".account-open-form").getByLabel("操作理由").fill(operationReasons.open);
   await page.locator(".account-open-form").getByRole("button", { name: "开户" }).click();
   await expect(page.getByRole("status")).toContainText(account.username);
 
@@ -326,7 +335,7 @@ test("后台停用恢复和角色操作保留作者版本引用并更新现有�
 
   await page.getByLabel("搜索用户名").fill(account.username);
   await page.getByRole("button", { name: "搜索账号" }).click();
-  await submitAccountAction(page, account.username, "disable", "合成停用保留验收");
+  await submitAccountAction(page, account.username, "disable", operationReasons.disable);
   await expect(page.getByRole("status")).toContainText("已停用");
   expect((await authorRequest.get("/api/auth/session")).status()).toBe(401);
   expect((await authorRequest.get("/api/cases?scope=mine")).status()).toBe(401);
@@ -335,7 +344,7 @@ test("后台停用恢复和角色操作保留作者版本引用并更新现有�
   });
   expect(blocked.status()).toBe(401);
 
-  await submitAccountAction(page, account.username, "restore", "合成恢复保留验收");
+  await submitAccountAction(page, account.username, "restore", operationReasons.restore);
   await expect(page.getByRole("status")).toContainText("已恢复");
   expect((await authorRequest.get("/api/auth/session")).status()).toBe(401);
   const recovered = await browser.newPage();
@@ -358,26 +367,22 @@ test("后台停用恢复和角色操作保留作者版本引用并更新现有�
 
   await page.getByLabel(`管理账号 ${account.username}`).selectOption("grantAdmin");
   const grantForm = page.locator(".account-action-form");
-  await grantForm.getByLabel("操作理由").fill("合成授予角色验收");
+  await grantForm.getByLabel("操作理由").fill(operationReasons.grant);
   await grantForm.getByRole("button", { name: "授予管理员" }).click();
-  expect((await (await recoveredRequest.get("/api/auth/session")).json()).user.role).toBe("admin");
+  const grantedSession = await (await recoveredRequest.get("/api/auth/session")).json();
+  expect(grantedSession.user).toMatchObject({ role: "admin", campusVerified: false });
   await recovered.reload();
   await recovered.goto("/#/admin/accounts");
   await expect(recovered.getByRole("heading", { name: "账号管理" })).toBeVisible();
 
-  await submitAccountAction(page, account.username, "revokeAdmin", "合成撤销角色验收");
+  await submitAccountAction(page, account.username, "revokeAdmin", operationReasons.revoke);
   await recovered.getByRole("button", { name: "刷新账号" }).click();
   await expect(recovered.getByRole("alert")).toContainText("当前角色：普通用户");
   expect((await (await recoveredRequest.get("/api/auth/session")).json()).user.role).toBe("user");
   expect((await recoveredRequest.get("/api/admin/accounts")).status()).toBe(403);
 
   await page.getByRole("tab", { name: "操作记录" }).click();
-  for (const reason of [
-    "合成停用保留验收",
-    "合成恢复保留验收",
-    "合成授予角色验收",
-    "合成撤销角色验收",
-  ]) {
+  for (const reason of Object.values(operationReasons)) {
     await expect(page.locator(".account-operation-list")).toContainText(reason);
   }
   const operationText = await page.locator(".account-operation-list").innerText();
