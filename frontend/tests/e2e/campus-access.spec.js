@@ -88,11 +88,24 @@ test("本人可查看申请历史，管理员决定与撤销后必须重新人�
   await adminPage.getByLabel("申请状态").selectOption("pending");
   await adminPage.getByRole("button", { name: "查询" }).click();
   const thirdRow = adminPage.locator(".campus-admin-row").filter({ hasText: account.username });
+  const staleAdminContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL });
+  const staleAdminPage = await staleAdminContext.newPage();
+  await signIn(staleAdminPage, "admin", "admin123");
+  await staleAdminPage.goto("/#/admin/campus-access");
+  await staleAdminPage.getByLabel("搜索申请人").fill(account.username);
+  await staleAdminPage.getByLabel("申请状态").selectOption("pending");
+  await staleAdminPage.getByRole("button", { name: "查询" }).click();
+  const staleThirdRow = staleAdminPage.locator(".campus-admin-row").filter({ hasText: account.username });
+
   await thirdRow.getByRole("button", { name: "批准" }).click();
   await setReasonAndConfirm(adminPage, "合成资料再次通过人工核验", "确认批准");
+  await staleThirdRow.getByRole("button", { name: "拒绝" }).click();
+  await setReasonAndConfirm(staleAdminPage, "合成过期拒绝尝试", "确认拒绝");
+  await expect(staleAdminPage.getByRole("alert")).toContainText("申请已处理，不能重复决定");
   await page.reload();
   await expect(page.getByRole("heading", { name: "已获校内访问资格" })).toBeVisible();
   await expect(page.getByText("合成资格需要重新核验")).toBeVisible();
 
+  await staleAdminContext.close();
   await adminContext.close();
 });
