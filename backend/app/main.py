@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -68,6 +69,17 @@ def _skill_error(_request: Request, error: SkillError | SkillPackageError) -> JS
     return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
 
 
+def _request_validation_error(
+    _request: Request, error: RequestValidationError
+) -> JSONResponse:
+    safe_fields = ("loc", "msg", "type")
+    details = [
+        {field: item[field] for field in safe_fields if field in item}
+        for item in error.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
+
+
 def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api = FastAPI(title="Case Library API", lifespan=lifespan)
     api.state.database = database
@@ -83,6 +95,7 @@ def _build_app(database, settings, lifespan, catalog, catalog_state) -> FastAPI:
     api.add_exception_handler(SearchUnavailable, _search_error)
     api.add_exception_handler(SkillError, _skill_error)
     api.add_exception_handler(SkillPackageError, _skill_error)
+    api.add_exception_handler(RequestValidationError, _request_validation_error)
     api.include_router(router)
     return api
 

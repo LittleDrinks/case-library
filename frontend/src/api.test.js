@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api } from "./api.js";
+import { api, ApiError, formatApiError } from "./api.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -29,6 +29,29 @@ it("does not expose the retired token-stream client helpers", () => {
   expect(api.chat).toBeUndefined();
 });
 
+it("formats field validation errors without exposing submitted values", () => {
+  const error = new ApiError({ status: 422 }, {
+    detail: [
+      {
+        type: "string_too_short",
+        loc: ["body", "username"],
+        input: "   ",
+      },
+      {
+        type: "string_too_long",
+        loc: ["body", "reason"],
+        ctx: { max_length: 500 },
+        input: "synthetic overlong reason",
+      },
+    ],
+  });
+
+  expect(error.message).toBe("用户名不能为空；操作理由不能超过 500 个字符");
+  expect(formatApiError(error, "操作失败")).toBe("用户名不能为空；操作理由不能超过 500 个字符");
+  expect(JSON.stringify(error.validationErrors)).not.toContain("input");
+  expect(JSON.stringify(error.validationErrors)).not.toContain("synthetic overlong reason");
+});
+
 it("posts artifact decisions to the thread-scoped endpoint", async () => {
   const fetch = vi.fn().mockResolvedValue(new Response(
     JSON.stringify({ artifact: { status: "accepted" }, case: null }),
@@ -42,6 +65,31 @@ it("posts artifact decisions to the thread-scoped endpoint", async () => {
   expect(url).toBe("/api/cases/case-1/agent/thread/thread-9/artifacts/artifact-3/decision");
   expect(JSON.parse(options.body)).toEqual({ decision: "accepted" });
   expect(new Headers(options.headers).get("X-CSRF-Token")).toBe("csrf");
+});
+
+it("posts account status and role changes with their reason and CSRF token", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}", {
+    status: 200, headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetch);
+
+  await api.setManagedAccountStatus("user/1", {
+    status: "disabled", reason: "合成停用理由",
+  }, "csrf-status");
+  await api.setManagedAccountRole("user/1", {
+    role: "admin", reason: "合成授予理由",
+  }, "csrf-role");
+
+  expect(fetch.mock.calls[0][0]).toBe("/api/admin/accounts/user%2F1/status");
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+    status: "disabled", reason: "合成停用理由",
+  });
+  expect(new Headers(fetch.mock.calls[0][1].headers).get("X-CSRF-Token")).toBe("csrf-status");
+  expect(fetch.mock.calls[1][0]).toBe("/api/admin/accounts/user%2F1/role");
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    role: "admin", reason: "合成授予理由",
+  });
+  expect(new Headers(fetch.mock.calls[1][1].headers).get("X-CSRF-Token")).toBe("csrf-role");
 });
 
 it("serializes multi-select search facets as repeated query parameters", async () => {

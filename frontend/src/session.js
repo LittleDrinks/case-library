@@ -25,6 +25,18 @@ export async function restoreSession() {
   return restoration;
 }
 
+export async function refreshSession() {
+  try {
+    assignSession(await api.session());
+    session.ready = true;
+  } catch (error) {
+    if (error.status !== 401) throw error;
+    clearSession();
+    session.ready = true;
+  }
+  return session.user;
+}
+
 async function restoreFromServer() {
   try {
     assignSession(await api.session());

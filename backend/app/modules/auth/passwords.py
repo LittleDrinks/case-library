@@ -4,6 +4,7 @@ import bcrypt
 
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 128
+MAX_PASSWORD_BYTES = 72
 
 
 class PasswordPolicyError(ValueError):
@@ -15,6 +16,8 @@ def require_strong_password(password: str, label: str = "密码") -> None:
         raise PasswordPolicyError(f"{label}至少 {MIN_PASSWORD_LENGTH} 个字符")
     if len(password) > MAX_PASSWORD_LENGTH:
         raise PasswordPolicyError(f"{label}不能超过 {MAX_PASSWORD_LENGTH} 个字符")
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise PasswordPolicyError(f"{label}不能超过 {MAX_PASSWORD_BYTES} 字节")
 
 
 def hash_password(password: str) -> str:

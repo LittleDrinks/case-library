@@ -73,6 +73,7 @@ test("长文标签面板外部关闭保留正文光标，工具栏格式与标�
   const tagTrigger = page.getByRole("button", { name: "设置标签" });
   await tagTrigger.click();
   const popover = page.locator(".case-tag-popover");
+  await expect(popover).toBeVisible();
   await page.getByLabel("案例标题").focus();
   await page.keyboard.press("Escape");
   await expect(popover).toBeHidden();

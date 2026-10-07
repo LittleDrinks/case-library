@@ -1,10 +1,60 @@
 export class ApiError extends Error {
   constructor(response, payload) {
-    super(payload?.detail || `请求失败 (${response.status})`);
+    const detail = payload?.detail;
+    const validationErrors = Array.isArray(detail)
+      ? detail.map(issue => ({
+        type: typeof issue?.type === "string" ? issue.type : "",
+        location: Array.isArray(issue?.loc)
+          ? issue.loc.filter(part => typeof part === "string").slice(1)
+          : [],
+        maxLength: Number.isSafeInteger(issue?.ctx?.max_length) ? issue.ctx.max_length : null,
+      }))
+      : [];
+    super(
+      typeof detail === "string"
+        ? detail
+        : formatValidationErrors(validationErrors) || `请求失败 (${response.status})`,
+    );
     this.name = "ApiError";
     this.status = response.status;
     this.currentRevision = payload?.currentRevision;
+    this.validationErrors = validationErrors;
   }
+}
+
+const validationFieldLabels = {
+  username: "用户名",
+  temporaryPassword: "临时密码",
+  reason: "操作理由",
+  currentPassword: "当前密码",
+  newPassword: "新密码",
+};
+
+function validationMessage(issue) {
+  const field = issue.location.at(-1);
+  const label = validationFieldLabels[field];
+  if (!label) return "请求字段格式不正确";
+  if (issue.type === "missing" || issue.type === "string_too_short") {
+    return `${label}不能为空`;
+  }
+  if (issue.type === "string_too_long") {
+    return issue.maxLength === null
+      ? `${label}长度超过限制`
+      : `${label}不能超过 ${issue.maxLength} 个字符`;
+  }
+  return `${label}格式不正确`;
+}
+
+function formatValidationErrors(issues) {
+  return [...new Set(issues.map(validationMessage))].join("；");
+}
+
+export function formatApiError(error, fallback) {
+  if (error?.validationErrors?.length) {
+    return formatValidationErrors(error.validationErrors);
+  }
+  const message = typeof error?.message === "string" ? error.message.trim() : "";
+  return message && message !== "[object Object]" ? message : fallback;
 }
 
 async function readPayload(response) {
@@ -95,6 +145,7 @@ function searchPath(query, kind, cursor, pageSize, filters = {}) {
 }
 
 export const api = {
+  register: (credentials) => request("/api/auth/register", jsonOptions("POST", credentials)),
   login: (credentials) => request("/api/auth/login", jsonOptions("POST", credentials)),
   session: () => request("/api/auth/session"),
   changePassword: (passwords, csrfToken) => request(
@@ -104,6 +155,31 @@ export const api = {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
   }),
+  listManagedAccounts: (query, page = 1, pageSize = 25) => request(
+    `/api/admin/accounts?q=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}`,
+  ),
+  openManagedAccount: (account, csrfToken) => request(
+    "/api/admin/accounts", jsonOptions("POST", account, csrfToken),
+  ),
+  resetManagedAccountPassword: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/temporary-password`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  forceLogoutManagedAccount: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/force-logout`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  setManagedAccountStatus: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/status`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  setManagedAccountRole: (id, operation, csrfToken) => request(
+    `/api/admin/accounts/${encodeURIComponent(id)}/role`,
+    jsonOptions("POST", operation, csrfToken),
+  ),
+  listAccountOperations: (page = 1, pageSize = 25) => request(
+    `/api/admin/account-operations?page=${page}&pageSize=${pageSize}`,
+  ),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
   listDrafts: (q, page = 1, pageSize = 20) => request(
     `/api/cases/drafts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`,

@@ -1,12 +1,16 @@
 <script setup>
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowRight, LoaderCircle } from "@lucide/vue";
+import { RouterLink } from "vue-router";
+import CredentialForm from "../components/CredentialForm.vue";
 import { login } from "../session.js";
 
 const route = useRoute();
 const router = useRouter();
-const username = ref("");
+const registeredUsername = typeof route.query.registered === "string"
+  ? route.query.registered
+  : "";
+const username = ref(registeredUsername);
 const password = ref("");
 const error = ref("");
 const submitting = ref(false);
@@ -26,7 +30,7 @@ async function submit() {
   error.value = "";
   submitting.value = true;
   try {
-    const user = await login({ username: username.value, password: password.value });
+    const user = await login({ username: username.value.trim(), password: password.value });
     const target = user.mustChangePassword ? "/change-password" : destination();
     await router.replace(target);
   } catch (reason) {
@@ -45,22 +49,18 @@ async function submit() {
         <h1 id="login-title">“强国有我”思政案例库</h1>
         <p>账号登录</p>
       </div>
-      <form class="login-form" @submit.prevent="submit">
-        <label>
-          <span>用户名</span>
-          <input v-model.trim="username" name="username" autocomplete="username" autofocus required />
-        </label>
-        <label>
-          <span>密码</span>
-          <input v-model="password" name="password" type="password" autocomplete="current-password" required />
-        </label>
-        <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-        <button class="login-submit" type="submit" :disabled="submitting">
-          <LoaderCircle v-if="submitting" :size="17" class="spin" aria-hidden="true" />
-          <span>{{ submitting ? "登录中" : "登录" }}</span>
-          <ArrowRight v-if="!submitting" :size="17" aria-hidden="true" />
-        </button>
-      </form>
+      <p v-if="registeredUsername" class="form-success" role="status">账号创建成功，请登录</p>
+      <CredentialForm
+        v-model:username="username"
+        v-model:password="password"
+        :error="error"
+        :submitting="submitting"
+        password-autocomplete="current-password"
+        submit-label="登录"
+        submitting-label="登录中"
+        @submit="submit"
+      />
+      <RouterLink class="login-register-link" to="/register">创建账号</RouterLink>
     </section>
   </main>
 </template>

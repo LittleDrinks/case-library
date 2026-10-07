@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
 from app.core.config import Settings
 
@@ -25,6 +26,23 @@ def _initialize_auth(database: Database) -> None:
     database.sessions.create_index([("token_hash", ASCENDING)], unique=True)
     database.sessions.create_index("expires_at", expireAfterSeconds=0)
     database.ai_usage.create_index("expiresAt", expireAfterSeconds=0)
+    database.account_management_operations.create_index(
+        [("id", ASCENDING)], unique=True
+    )
+    database.account_management_operations.create_index(
+        [("createdAt", DESCENDING), ("_id", DESCENDING)]
+    )
+    try:
+        database.account_management_guards.update_one(
+            {"_id": "available-admins"},
+            {"$setOnInsert": {"revision": 0}},
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        if not database.account_management_guards.find_one(
+            {"_id": "available-admins"}, {"_id": 1}
+        ):
+            raise
 
 
 def _initialize_cases(database: Database) -> None:

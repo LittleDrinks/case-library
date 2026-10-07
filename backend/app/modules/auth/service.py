@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from pymongo import ReturnDocument
 from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
+from app.core.ids import new_id
 from app.modules.auth.passwords import (
     PasswordPolicyError,
     hash_password,
@@ -13,11 +15,46 @@ from app.modules.auth.passwords import (
 )
 
 
-class PasswordChangeError(ValueError):
+class AuthServiceError(ValueError):
     def __init__(self, detail: str, status_code: int) -> None:
         super().__init__(detail)
         self.detail = detail
         self.status_code = status_code
+
+
+class PasswordChangeError(AuthServiceError):
+    pass
+
+
+class RegistrationError(AuthServiceError):
+    pass
+
+
+def register_user(database: Database, username: str, password: str) -> dict:
+    try:
+        require_strong_password(password)
+    except PasswordPolicyError as error:
+        raise RegistrationError(str(error), 422) from error
+
+    now = datetime.now(UTC).isoformat()
+    user = {
+        "id": new_id("u"),
+        "username": username,
+        "name": username,
+        "password_hash": hash_password(password),
+        "role": "user",
+        "status": "active",
+        "must_change_password": False,
+        "campus_verified": False,
+        "token_version": 0,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    try:
+        database.users.insert_one(user)
+    except DuplicateKeyError as error:
+        raise RegistrationError("用户名已存在", 409) from error
+    return user
 
 
 def authenticate(database: Database, username: str, password: str) -> dict | None:

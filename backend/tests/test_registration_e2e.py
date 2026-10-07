@@ -1,0 +1,262 @@
+from __future__ import annotations
+
+import json
+import os
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from http.cookiejar import CookieJar
+from threading import Barrier
+from urllib.error import HTTPError
+from urllib.request import HTTPCookieProcessor, Request, build_opener
+
+import pytest
+from pymongo import MongoClient
+
+BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
+MONGODB_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
+pytestmark = pytest.mark.e2e("CASE_LIBRARY_E2E_URL", "AUTH_QUERY_MONGODB_URI")
+
+
+def _request(opener, method: str, path: str, body=None, csrf: str = ""):
+    payload = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"}
+    if csrf:
+        headers["X-CSRF-Token"] = csrf
+    request = Request(f"{BASE_URL}{path}", payload, headers, method=method)
+    try:
+        with opener.open(request) as response:
+            content = response.read()
+            return response.status, json.loads(content) if content else None
+    except HTTPError as error:
+        content = error.read()
+        return error.code, json.loads(content) if content else None
+
+
+def _password() -> str:
+    return f"Issue356-{uuid.uuid4().hex}!a"
+
+
+def _register(username: str, password: str):
+    return _request(
+        build_opener(),
+        "POST",
+        "/api/auth/register",
+        {"username": username, "password": password},
+    )
+
+
+def _safe_validation_feedback(status: int, response, secrets: list[str]) -> bool:
+    if status != 422 or not isinstance(response, dict):
+        return False
+    details = response.get("detail")
+    if not isinstance(details, list) or not details:
+        return False
+    safe_fields = {"loc", "msg", "type"}
+    if any(
+        not isinstance(item, dict) or set(item) != safe_fields for item in details
+    ):
+        return False
+    serialized = json.dumps(response)
+    return all(secret not in serialized for secret in secrets)
+
+
+def test_registered_user_can_save_and_submit_a_private_case() -> None:
+    username = f"issue356-{uuid.uuid4().hex}"
+    password = _password()
+    status, registered = _register(username, password)
+
+    assert status == 201
+    assert registered["username"] == username
+    assert registered["role"] == "user"
+    assert registered["campusVerified"] is False
+    if password in json.dumps(registered):
+        raise AssertionError("registration response contains the submitted password")
+    assert "password_hash" not in registered
+
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    status, login = _request(
+        opener,
+        "POST",
+        "/api/auth/login",
+        {"username": username, "password": password},
+    )
+    assert status == 200
+    owner_id = login["user"]["id"]
+    assert login["user"]["role"] == "user"
+    assert login["user"]["campusVerified"] is False
+
+    status, session = _request(opener, "GET", "/api/auth/session")
+    assert status == 200
+    assert session["user"]["id"] == owner_id
+
+    status, draft = _request(
+        opener,
+        "POST",
+        "/api/cases",
+        {
+            "title": f"Issue 356 draft {uuid.uuid4().hex}",
+            "document": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "合成投稿正文"}],
+                    }
+                ],
+            },
+        },
+        login["csrfToken"],
+    )
+    assert status == 200
+    assert draft["ownerId"] == owner_id
+    assert draft["workflowStatus"] == "draft"
+    assert draft["publicationStatus"] == "none"
+
+    status, persisted = _request(opener, "GET", f"/api/cases/{draft['id']}")
+    assert status == 200
+    assert persisted["ownerId"] == owner_id
+    submitted_status, submitted = _request(
+        opener,
+        "POST",
+        f"/api/cases/{draft['id']}/lifecycle",
+        {"command": "submit", "revision": persisted["revision"]},
+        login["csrfToken"],
+    )
+    assert submitted_status == 200
+    assert submitted["case"]["ownerId"] == owner_id
+    assert submitted["case"]["workflowStatus"] == "pending"
+    assert submitted["case"]["publicationStatus"] == "none"
+
+
+def test_registration_validation_omitting_username_does_not_echo_password() -> None:
+    password = _password()
+
+    status, response = _request(
+        build_opener(), "POST", "/api/auth/register", {"password": password}
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_registration_validation_rejects_129_character_password_safely() -> None:
+    password = "x" * 129
+
+    status, response = _request(
+        build_opener(),
+        "POST",
+        "/api/auth/register",
+        {"username": f"issue356-long-{uuid.uuid4().hex}", "password": password},
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_login_validation_omitting_username_does_not_echo_password() -> None:
+    password = _password()
+
+    status, response = _request(
+        build_opener(), "POST", "/api/auth/login", {"password": password}
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_password_change_validation_does_not_echo_whole_request_object() -> None:
+    username = f"issue356-change-{uuid.uuid4().hex}"
+    password = _password()
+    register_status, _registered = _register(username, password)
+    assert register_status == 201
+
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    login_status, login = _request(
+        opener,
+        "POST",
+        "/api/auth/login",
+        {"username": username, "password": password},
+    )
+    assert login_status == 200
+
+    status, response = _request(
+        opener,
+        "POST",
+        "/api/auth/change-password",
+        {"currentPassword": password},
+        login["csrfToken"],
+    )
+
+    assert status == 422
+    if not _safe_validation_feedback(status, response, [password]):
+        raise AssertionError("validation response was not safely redacted")
+
+
+def test_registration_reports_duplicate_and_invalid_credentials() -> None:
+    username = f"issue356-{uuid.uuid4().hex}"
+    password = _password()
+
+    status, _registered = _register(username, password)
+    assert status == 201
+
+    duplicate_status, duplicate = _register(username, password)
+    assert duplicate_status == 409
+    assert duplicate == {"detail": "用户名已存在"}
+
+    weak_status, weak = _register(f"issue356-{uuid.uuid4().hex}", "short")
+    assert weak_status == 422
+    assert weak == {"detail": "密码至少 12 个字符"}
+
+    blank_status, blank = _register("", password)
+    assert blank_status == 422
+    assert blank["detail"]
+    assert any("at least 1 character" in item["msg"] for item in blank["detail"])
+
+    oversized_status, oversized = _register(
+        f"issue356-long-{uuid.uuid4().hex}", "é" * 37
+    )
+    assert oversized_status == 422
+    assert oversized == {"detail": "密码不能超过 72 字节"}
+
+    boundary_status, _boundary = _register(
+        f"issue356-boundary-{uuid.uuid4().hex}", "é" * 36
+    )
+    assert boundary_status == 201
+
+    extra_status, _extra = _request(
+        build_opener(),
+        "POST",
+        "/api/auth/register",
+        {
+            "username": f"issue356-extra-{uuid.uuid4().hex}",
+            "password": password,
+            "name": "不接受的额外字段",
+        },
+    )
+    assert extra_status == 422
+
+
+def test_concurrent_registration_keeps_one_username_in_real_mongodb() -> None:
+    username = f"issue356-race-{uuid.uuid4().hex}"
+    password = _password()
+    gate = Barrier(2)
+
+    def attempt():
+        gate.wait()
+        return _register(username, password)[0]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = sorted(pool.map(lambda _index: attempt(), range(2)))
+
+    assert statuses == [201, 409]
+    mongo = MongoClient(MONGODB_URI)
+    try:
+        count = mongo.get_default_database().users.count_documents(
+            {"username": username}
+        )
+    finally:
+        mongo.close()
+    assert count == 1
