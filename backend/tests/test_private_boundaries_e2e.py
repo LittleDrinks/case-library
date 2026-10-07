@@ -278,6 +278,41 @@ def test_real_http_mongo_minio_and_review_history_boundaries() -> None:
             submittedVersionId=frozen_id,
             reasonTypes=["内容需要补充或修改"],
         )
+        returned_review = admin.get(
+            f"/api/cases/{case_id}/review", params={"versionId": frozen_id}
+        )
+        assert returned_review.status_code == 200
+        returned_record = returned_review.json()
+        assert returned_record["title"] == marker
+        assert returned_record["reviewRecordStatus"] == "returned"
+        assert returned_record["isCurrentReviewVersion"] is False
+        assert returned_record["availableActions"] == []
+        assert returned_record["reviewFeedback"]["action"] == "reject"
+        assert returned_record["reviewFeedback"]["reasonTypes"] == ["内容需要补充或修改"]
+        frozen_annotation = admin.post(
+            f"/api/cases/{case_id}/annotations?versionId={frozen_id}",
+            headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+            json={
+                "quote": marker,
+                "section": "正文",
+                "content": "退回后不应新增指导批注",
+                "source": "admin",
+                "revision": returned_record["revision"],
+                "from": 1,
+                "to": 1 + len(marker),
+            },
+        )
+        assert frozen_annotation.status_code == 409
+        approve_replay = admin.post(
+            f"/api/cases/{case_id}/lifecycle",
+            headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+            json={
+                "command": "approve",
+                "revision": returned_record["revision"],
+                "submittedVersionId": frozen_id,
+            },
+        )
+        assert approve_replay.status_code == 409
         assert admin.get(
             f"/api/cases/{case_id}/agent/threads/{thread['id']}"
         ).status_code in {403, 409}
