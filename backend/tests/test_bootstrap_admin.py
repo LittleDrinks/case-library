@@ -32,6 +32,7 @@ def test_bootstrap_admin_reads_password_from_stdin(database) -> None:
 
     assert status == 0
     assert user["role"] == "admin"
+    assert user["campus_verified"] is False
     assert user["status"] == "active"
     assert user["must_change_password"] is False
     assert verify_password(STRONG_PASSWORD, user["password_hash"])

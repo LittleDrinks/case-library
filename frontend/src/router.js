@@ -5,6 +5,8 @@ import AISettingsView from "./views/AISettingsView.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
 import AdminAccountsView from "./views/AdminAccountsView.vue";
+import AdminCampusAccessView from "./views/AdminCampusAccessView.vue";
+import CampusAccessView from "./views/CampusAccessView.vue";
 import AdminSkillsView from "./views/AdminSkillsView.vue";
 import AdminTagCatalogView from "./views/AdminTagCatalogView.vue";
 import HomeView from "./views/HomeView.vue";
@@ -46,6 +48,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: "/campus-access",
+    name: "campus-access",
+    component: CampusAccessView,
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/change-password",
     name: "password-change",
     component: ChangePasswordView,
@@ -74,6 +82,12 @@ const routes = [
     path: "/admin/accounts",
     name: "admin-accounts",
     component: AdminAccountsView,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: "/admin/campus-access",
+    name: "admin-campus-access",
+    component: AdminCampusAccessView,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {

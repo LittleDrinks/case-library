@@ -87,6 +87,264 @@ class AccountManagementService:
         )
         return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
+    def campus_access_status(self, user: dict) -> dict:
+        applications = list(
+            self.database.campus_access_applications.find({"userId": user["id"]})
+            .sort([("submittedAt", -1), ("_id", -1)])
+        )
+        views = [_campus_application_view(self.database, row) for row in applications]
+        return {
+            "campusVerified": bool(user.get("campus_verified", False)),
+            "currentStatus": views[0]["status"] if views else "not_applied",
+            "applications": views,
+        }
+
+    def submit_campus_application(
+        self, user: dict, applicant_name: str, student_number: str
+    ) -> dict:
+        safe_name = applicant_name.strip()
+        safe_number = student_number.strip()
+        now = datetime.now(UTC).isoformat()
+        application = {
+            "id": new_id("ca"),
+            "userId": user["id"],
+            "username": user["username"],
+            "applicantName": safe_name,
+            "studentNumber": safe_number,
+            "identitySource": "self_reported",
+            "status": "pending",
+            "submittedAt": now,
+        }
+
+        def submit(transaction) -> dict:
+            options = _session_options(transaction)
+            current = self.database.users.find_one({"id": user["id"]}, **options)
+            if not current:
+                raise AccountManagementError("账号不存在", 404)
+            if current.get("campus_verified", False):
+                raise AccountManagementError("账号已有校内访问资格", 409)
+            if self.database.campus_access_applications.find_one(
+                {"userId": user["id"], "status": "pending"}, **options
+            ):
+                raise AccountManagementError("已有待审核的校内访问申请", 409)
+            self.database.campus_access_applications.insert_one(
+                application, **options
+            )
+            self._append_operation(
+                user,
+                "campus_access_application_submit",
+                "本人提交校内访问申请",
+                user["id"],
+                user["username"],
+                "success",
+                "校内访问申请已提交",
+                transaction,
+                campus_application_id=application["id"],
+            )
+            return application
+
+        try:
+            created = self._with_transaction(submit)
+        except AccountManagementError as error:
+            self._record_rejection(
+                user,
+                "campus_access_application_submit",
+                "本人提交校内访问申请",
+                user["id"],
+                user["username"],
+                error,
+            )
+            raise
+        except DuplicateKeyError as error:
+            failure = AccountManagementError("已有待审核的校内访问申请", 409)
+            self._record_rejection(
+                user,
+                "campus_access_application_submit",
+                "本人提交校内访问申请",
+                user["id"],
+                user["username"],
+                failure,
+            )
+            raise failure from error
+        return _campus_application_view(self.database, created)
+
+    def list_campus_access_applications(
+        self, query: str, status: str | None, page: int, page_size: int
+    ) -> dict:
+        criteria: dict = {}
+        if status:
+            criteria["status"] = status
+        if query:
+            expression = {"$regex": re.escape(query), "$options": "i"}
+            criteria["$or"] = [
+                {"username": expression},
+                {"applicantName": expression},
+                {"studentNumber": expression},
+            ]
+        total = self.database.campus_access_applications.count_documents(criteria)
+        applications = list(
+            self.database.campus_access_applications.find(criteria)
+            .sort([("submittedAt", -1), ("_id", -1)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return {
+            "items": [
+                _campus_application_view(self.database, row, include_account=True)
+                for row in applications
+            ],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+        }
+
+    def decide_campus_application(
+        self, actor: dict, application_id: str, decision: str, reason: str
+    ) -> dict:
+        action = "campus_access_approve" if decision == "approved" else "campus_access_reject"
+        detail = "校内访问资格已批准" if decision == "approved" else "校内访问申请已拒绝"
+
+        def decide(transaction) -> dict:
+            options = _session_options(transaction)
+            application = self.database.campus_access_applications.find_one(
+                {"id": application_id}, **options
+            )
+            if not application:
+                raise AccountManagementError("校内访问申请不存在", 404)
+            if application["status"] != "pending":
+                raise AccountManagementError("申请已处理，不能重复决定", 409)
+            user = self.database.users.find_one(
+                {"id": application["userId"], "status": "active"}, **options
+            )
+            if not user:
+                raise AccountManagementError("申请人账号当前不可用", 409)
+            updated = self.database.campus_access_applications.find_one_and_update(
+                {"_id": application["_id"], "status": "pending"},
+                {"$set": {"status": decision, "updatedAt": datetime.now(UTC).isoformat()}},
+                return_document=ReturnDocument.AFTER,
+                **options,
+            )
+            if not updated:
+                raise AccountManagementError("申请已处理，不能重复决定", 409)
+            if decision == "approved":
+                self.database.users.update_one(
+                    {"_id": user["_id"]},
+                    {
+                        "$set": {"campus_verified": True},
+                        "$unset": {"campus_access_revoked_at": ""},
+                    },
+                    **options,
+                )
+            self._append_operation(
+                actor,
+                action,
+                reason,
+                user["id"],
+                user["username"],
+                "success",
+                detail,
+                transaction,
+                campus_application_id=application_id,
+            )
+            return updated
+
+        try:
+            updated = self._with_transaction(decide)
+        except AccountManagementError as error:
+            application = self.database.campus_access_applications.find_one(
+                {"id": application_id}
+            )
+            user = (
+                self.database.users.find_one({"id": application["userId"]})
+                if application
+                else None
+            )
+            self._record_rejection(
+                actor,
+                action,
+                reason,
+                user["id"] if user else None,
+                user["username"] if user else None,
+                error,
+                campus_application_id=application_id,
+            )
+            raise
+        return _campus_application_view(self.database, updated, include_account=True)
+
+    def revoke_campus_access(
+        self, actor: dict, application_id: str, reason: str
+    ) -> dict:
+        def revoke(transaction) -> dict:
+            options = _session_options(transaction)
+            application = self.database.campus_access_applications.find_one(
+                {"id": application_id}, **options
+            )
+            if not application:
+                raise AccountManagementError("校内访问申请不存在", 404)
+            if application["status"] != "approved":
+                raise AccountManagementError("只有当前已批准的申请可以撤销", 409)
+            user = self.database.users.find_one(
+                {"id": application["userId"]}, **options
+            )
+            if not user or not user.get("campus_verified", False):
+                raise AccountManagementError("账号当前没有校内访问资格", 409)
+            now = datetime.now(UTC).isoformat()
+            updated = self.database.campus_access_applications.find_one_and_update(
+                {"_id": application["_id"], "status": "approved"},
+                {"$set": {"status": "revoked", "updatedAt": now}},
+                return_document=ReturnDocument.AFTER,
+                **options,
+            )
+            if not updated:
+                raise AccountManagementError("申请已变化，不能重复撤销", 409)
+            changed = self.database.users.update_one(
+                {"_id": user["_id"], "campus_verified": True},
+                {
+                    "$set": {
+                        "campus_verified": False,
+                        "campus_access_revoked_at": now,
+                    }
+                },
+                **options,
+            )
+            if changed.matched_count != 1:
+                raise AccountManagementError("账号资格已变化，不能重复撤销", 409)
+            self._append_operation(
+                actor,
+                "campus_access_revoke",
+                reason,
+                user["id"],
+                user["username"],
+                "success",
+                "校内访问资格已撤销",
+                transaction,
+                campus_application_id=application_id,
+            )
+            return updated
+
+        try:
+            updated = self._with_transaction(revoke)
+        except AccountManagementError as error:
+            application = self.database.campus_access_applications.find_one(
+                {"id": application_id}
+            )
+            user = (
+                self.database.users.find_one({"id": application["userId"]})
+                if application
+                else None
+            )
+            self._record_rejection(
+                actor,
+                "campus_access_revoke",
+                reason,
+                user["id"] if user else None,
+                user["username"] if user else None,
+                error,
+                campus_application_id=application_id,
+            )
+            raise
+        return _campus_application_view(self.database, updated, include_account=True)
+
     def open_account(
         self, actor: dict, username: str, temporary_password: str, reason: str
     ) -> dict:
@@ -326,6 +584,7 @@ class AccountManagementService:
         target_id: str | None,
         target_username: str | None,
         error: AccountManagementError,
+        campus_application_id: str | None = None,
     ) -> None:
         if target_id and not target_username:
             target = self.database.users.find_one(
@@ -341,6 +600,7 @@ class AccountManagementService:
             "rejected",
             error.detail,
             None,
+            campus_application_id=campus_application_id,
         )
 
     def _append_operation(
@@ -353,6 +613,7 @@ class AccountManagementService:
         result: str,
         detail: str,
         transaction,
+        campus_application_id: str | None = None,
     ) -> None:
         operation = {
             "id": new_id("op"),
@@ -366,6 +627,8 @@ class AccountManagementService:
             "result": result,
             "detail": detail,
         }
+        if campus_application_id:
+            operation["campusApplicationId"] = campus_application_id
         self.database.account_management_operations.insert_one(
             operation, **_session_options(transaction)
         )
@@ -382,3 +645,36 @@ def _account_view(user: dict) -> dict:
         "role": user["role"],
         "mustChangePassword": bool(user.get("must_change_password", False)),
     }
+
+
+def _campus_application_view(
+    database: Database, application: dict, *, include_account: bool = False
+) -> dict:
+    history = list(
+        database.account_management_operations.find(
+            {"campusApplicationId": application["id"]},
+            {
+                "_id": 0,
+                "id": 1,
+                "actorUsername": 1,
+                "action": 1,
+                "createdAt": 1,
+                "reason": 1,
+                "result": 1,
+                "detail": 1,
+            },
+        ).sort([("createdAt", ASCENDING), ("_id", ASCENDING)])
+    )
+    result = {
+        "id": application["id"],
+        "applicantName": application["applicantName"],
+        "studentNumber": application["studentNumber"],
+        "identitySource": application["identitySource"],
+        "status": application["status"],
+        "submittedAt": application["submittedAt"],
+        "history": history,
+    }
+    if include_account:
+        result["userId"] = application["userId"]
+        result["username"] = application["username"]
+    return result
