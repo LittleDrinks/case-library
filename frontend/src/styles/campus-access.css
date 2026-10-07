@@ -1,0 +1,92 @@
+.campus-access-main { max-width: 1000px; }
+.campus-access-current { display: flex; align-items: center; gap: 14px; margin-top: 24px; padding: 16px 18px; border-left: 4px solid var(--amber); background: #fff; }
+.campus-access-current[data-status="approved"] { border-left-color: var(--green); }
+.campus-access-current[data-status="revoked"], .campus-access-current[data-status="rejected"] { border-left-color: var(--red); }
+.campus-access-mark { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border-radius: 50%; background: var(--amber-soft); color: var(--amber); }
+.campus-access-current[data-status="approved"] .campus-access-mark { background: var(--green-soft); color: var(--green); }
+.campus-access-current[data-status="revoked"] .campus-access-mark, .campus-access-current[data-status="rejected"] .campus-access-mark { background: var(--brand-soft); color: var(--red); }
+.campus-access-current p { margin: 0; color: var(--ink-3); font-size: 12px; }
+.campus-access-current h2 { margin: 2px 0 0; font-size: 16px; font-weight: 650; }
+.campus-access-current span { display: block; margin-top: 4px; color: var(--ink-3); font-size: 13px; }
+.campus-access-application { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.campus-access-application > header { display: flex; align-items: center; gap: 8px; color: var(--brand); }
+.campus-access-application h2, .campus-access-history h2 { margin: 0; color: var(--ink); font-size: 17px; font-weight: 650; }
+.campus-access-application > p { margin: 7px 0 14px; color: var(--ink-3); font-size: 13px; }
+.campus-access-application form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; align-items: end; gap: 12px; }
+.campus-access-application label, .campus-admin-filters label { display: grid; min-width: 0; gap: 5px; color: var(--ink-2); font-size: 13px; }
+.campus-access-application input, .campus-admin-filters input, .campus-admin-filters select, .campus-admin-action textarea { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); font: inherit; }
+.campus-access-application input:focus, .campus-admin-filters input:focus, .campus-admin-filters select:focus, .campus-admin-action textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+.campus-access-application button, .campus-admin-filters > button, .campus-admin-confirm, .campus-admin-cancel, .campus-admin-row footer button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); font: inherit; cursor: pointer; white-space: nowrap; }
+.campus-access-application button, .campus-admin-confirm { border-color: var(--brand); background: var(--brand); color: #fff; }
+.campus-access-application button:disabled, .campus-admin-filters button:disabled, .campus-admin-confirm:disabled, .campus-admin-cancel:disabled { opacity: .55; cursor: not-allowed; }
+.campus-access-notice, .campus-access-error { margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid var(--green); background: var(--green-soft); color: var(--green); }
+.campus-access-error { border-left-color: var(--red); background: var(--brand-soft); color: var(--red); }
+.campus-access-history { margin-top: 30px; border-top: 1px solid var(--line); }
+.campus-access-history > header { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 10px; }
+.campus-access-history > header button, .campus-admin-icon-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink-2); cursor: pointer; }
+.campus-access-history > header button:hover, .campus-admin-icon-button:hover { border-color: var(--brand); color: var(--brand); }
+.campus-access-empty { margin: 0; padding: 22px 0; border-top: 1px solid var(--line); color: var(--ink-3); }
+.campus-application-history-row { padding: 14px 4px 16px; border-top: 1px solid var(--line); }
+.campus-history-summary, .campus-history-summary > div { display: flex; align-items: center; gap: 10px; }
+.campus-history-summary { justify-content: space-between; }
+.campus-history-summary strong { font-size: 14px; }
+.campus-history-summary span, .campus-admin-source { color: var(--ink-3); font-size: 12px; }
+.campus-history-summary time, .campus-admin-row-state time { color: var(--ink-3); font-size: 12px; }
+.campus-application-history-row dl { display: flex; flex-wrap: wrap; gap: 12px 30px; margin: 10px 0 0; }
+.campus-application-history-row dl div { display: flex; gap: 7px; min-width: 0; }
+.campus-application-history-row dt { color: var(--ink-3); font-size: 12px; }
+.campus-application-history-row dd { margin: 0; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13px; }
+.campus-application-events { display: grid; gap: 8px; margin: 12px 0 0; padding: 0 0 0 18px; color: var(--ink-2); font-size: 13px; }
+.campus-application-events li { padding-left: 2px; }
+.campus-application-events li > span { font-weight: 600; }
+.campus-application-events time { margin-left: 8px; color: var(--ink-3); font-size: 12px; }
+.campus-application-events p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+
+.campus-admin-main { max-width: 1120px; }
+.campus-admin-heading { min-height: 80px; }
+.campus-admin-filters { display: grid; grid-template-columns: minmax(180px, 1fr) 190px auto 40px; align-items: end; gap: 10px; margin: 20px 0 14px; }
+.campus-admin-filters > button { min-width: 84px; border-color: var(--brand); color: var(--brand); }
+.campus-admin-filters .campus-admin-refresh { min-width: 40px; padding: 0; }
+.campus-admin-action { margin: 14px 0 20px; padding: 14px; border: 1px solid var(--brand); border-radius: 6px; background: #fff; }
+.campus-admin-action > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.campus-admin-action h2 { margin: 3px 0 0; font-size: 16px; }
+.campus-admin-action header span { color: var(--ink-3); font-size: 12px; }
+.campus-admin-action > p { margin: 10px 0; color: var(--ink-2); font-size: 13px; }
+.campus-admin-action form > label { display: block; margin-bottom: 5px; color: var(--ink-2); font-size: 13px; }
+.campus-admin-action textarea { min-height: 76px; resize: vertical; }
+.campus-admin-action footer { display: flex; gap: 8px; margin-top: 10px; }
+.campus-admin-cancel { min-width: 72px; }
+.campus-admin-results { border-top: 1px solid var(--line); }
+.campus-admin-row { padding: 16px 4px; border-bottom: 1px solid var(--line); }
+.campus-admin-row > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.campus-admin-applicant { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
+.campus-admin-applicant span { color: var(--ink-3); font-size: 12px; }
+.campus-admin-applicant strong { overflow-wrap: anywhere; font-size: 15px; }
+.campus-admin-applicant code { overflow-wrap: anywhere; color: var(--ink-2); font: 13px/1.5 ui-monospace, monospace; }
+.campus-admin-row-state { display: flex; align-items: center; gap: 12px; }
+.campus-admin-row-state > span { padding: 3px 8px; border-radius: 4px; background: var(--amber-soft); color: var(--amber); font-size: 12px; }
+.campus-admin-row-state > span[data-status="approved"] { background: var(--green-soft); color: var(--green); }
+.campus-admin-row-state > span[data-status="rejected"], .campus-admin-row-state > span[data-status="revoked"] { background: var(--brand-soft); color: var(--red); }
+.campus-admin-source { margin: 7px 0 0; }
+.campus-admin-row footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.campus-admin-row footer button { min-height: 34px; padding: 0 10px; }
+.campus-admin-row footer .campus-admin-approve { border-color: var(--green); color: var(--green); }
+.campus-admin-row footer .campus-admin-reject { border-color: var(--red); color: var(--red); }
+
+@media (max-width: 720px) {
+  .campus-access-main, .campus-admin-main { padding-right: 14px; padding-left: 14px; }
+  .campus-access-application form { grid-template-columns: minmax(0, 1fr); }
+  .campus-access-application button { justify-self: start; }
+  .campus-history-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .campus-admin-heading { min-height: 120px; }
+  .campus-admin-heading nav { width: 100%; }
+  .campus-admin-heading nav a { flex: 1; justify-content: center; }
+  .campus-admin-filters { grid-template-columns: minmax(0, 1fr) 40px; }
+  .campus-admin-filters label:first-child { grid-column: 1 / -1; }
+  .campus-admin-filters label:nth-child(2) { grid-column: 1; }
+  .campus-admin-filters > button[type="submit"] { grid-column: 1; grid-row: 3; justify-self: start; }
+  .campus-admin-filters .campus-admin-refresh { grid-column: 2; grid-row: 3; }
+  .campus-admin-row > header { flex-direction: column; }
+  .campus-admin-row-state { width: 100%; justify-content: space-between; }
+  .campus-application-events time { display: block; margin: 3px 0 0; }
+}

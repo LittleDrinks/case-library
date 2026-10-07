@@ -180,6 +180,23 @@ export const api = {
   listAccountOperations: (page = 1, pageSize = 25) => request(
     `/api/admin/account-operations?page=${page}&pageSize=${pageSize}`,
   ),
+  campusAccessStatus: () => request("/api/auth/campus-access"),
+  submitCampusAccessApplication: (application, csrfToken) => request(
+    "/api/auth/campus-access/applications",
+    jsonOptions("POST", application, csrfToken),
+  ),
+  listCampusAccessApplications: (query, status = "pending", page = 1, pageSize = 50) => {
+    const params = new URLSearchParams({ q: query, status, page: String(page), pageSize: String(pageSize) });
+    return request(`/api/admin/campus-access-applications?${params}`);
+  },
+  decideCampusAccessApplication: (id, decision, reason, csrfToken) => request(
+    `/api/admin/campus-access-applications/${encodeURIComponent(id)}/decision`,
+    jsonOptions("POST", { decision, reason }, csrfToken),
+  ),
+  revokeCampusAccessApplication: (id, reason, csrfToken) => request(
+    `/api/admin/campus-access-applications/${encodeURIComponent(id)}/revoke`,
+    jsonOptions("POST", { reason }, csrfToken),
+  ),
   listCases: (scope) => request(`/api/cases${scope ? `?scope=${scope}` : ""}`),
   listDrafts: (q, page = 1, pageSize = 20) => request(
     `/api/cases/drafts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`,

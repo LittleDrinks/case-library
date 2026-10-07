@@ -56,7 +56,42 @@ def test_demo_accounts_match_the_approved_roster() -> None:
     assert set(by_username) == {"admin", "user", "10000001", "10000002", "10000003"}
     assert by_username["10000001"]["name"] == "小杨"
     assert by_username["10000002"]["role"] == "admin"
+    assert all(
+        not account["campus_verified"]
+        for account in by_username.values()
+        if account["role"] == "admin"
+    )
     assert by_username["10000003"]["status"] == "disabled"
+
+
+def test_auth_initialization_removes_legacy_admin_role_grants_only() -> None:
+    database = mongomock.MongoClient()["legacy_admin_campus_access"]
+    database.client.admin.command = lambda _name: {"ok": 1}
+    initialize(database)
+    database.users.insert_many(
+        [
+            {
+                "id": "u-legacy-admin",
+                "username": "legacy-admin",
+                "role": "admin",
+                "campus_verified": True,
+            },
+            {
+                "id": "u-approved-admin",
+                "username": "approved-admin",
+                "role": "admin",
+                "campus_verified": True,
+            },
+        ]
+    )
+    database.campus_access_applications.insert_one(
+        {"id": "ca-approved-admin", "userId": "u-approved-admin", "status": "approved"}
+    )
+
+    initialize(database)
+
+    assert database.users.find_one({"id": "u-legacy-admin"})["campus_verified"] is False
+    assert database.users.find_one({"id": "u-approved-admin"})["campus_verified"] is True
 
 
 def test_disabled_demo_account_cannot_authenticate() -> None:

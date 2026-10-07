@@ -32,6 +32,23 @@ def _initialize_auth(database: Database) -> None:
     database.account_management_operations.create_index(
         [("createdAt", DESCENDING), ("_id", DESCENDING)]
     )
+    database.account_management_operations.create_index(
+        [("campusApplicationId", ASCENDING)]
+    )
+    database.campus_access_applications.create_index([("id", ASCENDING)], unique=True)
+    database.campus_access_applications.create_index(
+        [("userId", ASCENDING), ("submittedAt", DESCENDING)]
+    )
+    database.campus_access_applications.create_index(
+        [("userId", ASCENDING), ("status", ASCENDING)]
+    )
+    database.campus_access_applications.create_index(
+        [("userId", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"status": "pending"},
+        name="one_pending_campus_application_per_user",
+    )
+    _remove_legacy_admin_campus_grants(database)
     try:
         database.account_management_guards.update_one(
             {"_id": "available-admins"},
@@ -43,6 +60,24 @@ def _initialize_auth(database: Database) -> None:
             {"_id": "available-admins"}, {"_id": 1}
         ):
             raise
+
+
+def _remove_legacy_admin_campus_grants(database: Database) -> None:
+    legacy_admins = database.users.find(
+        {"role": "admin", "campus_verified": True}, {"_id": 1, "id": 1}
+    )
+    for user in legacy_admins:
+        latest_application = database.campus_access_applications.find_one(
+            {"userId": user["id"]},
+            {"_id": 0, "status": 1},
+            sort=[("submittedAt", DESCENDING), ("_id", DESCENDING)],
+        )
+        if latest_application and latest_application["status"] == "approved":
+            continue
+        database.users.update_one(
+            {"_id": user["_id"], "role": "admin", "campus_verified": True},
+            {"$set": {"campus_verified": False}},
+        )
 
 
 def _initialize_cases(database: Database) -> None:

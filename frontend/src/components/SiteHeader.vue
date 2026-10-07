@@ -1,5 +1,5 @@
 <script setup>
-import { Bot, House, LibraryBig, LogIn, LogOut, Search, Settings } from "@lucide/vue";
+import { Bot, GraduationCap, House, LibraryBig, LogIn, LogOut, Search, Settings } from "@lucide/vue";
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { logout, session } from "../session.js";
@@ -27,6 +27,7 @@ async function leave() {
     <nav class="site-nav" aria-label="主导航">
       <RouterLink to="/" aria-label="首页"><House :size="16" aria-hidden="true" /><span>首页</span></RouterLink>
       <RouterLink v-if="session.user" to="/my-cases" aria-label="我的案例"><LibraryBig :size="16" aria-hidden="true" /><span>我的案例</span></RouterLink>
+      <RouterLink v-if="session.user" to="/campus-access" aria-label="校内访问申请"><GraduationCap :size="16" aria-hidden="true" /><span>校内访问</span></RouterLink>
       <RouterLink to="/search" aria-label="资源检索"><Search :size="16" aria-hidden="true" /><span>资源检索</span></RouterLink>
       <RouterLink v-if="session.user?.role === 'admin'" to="/admin" :class="{ 'admin-active': adminActive }" aria-label="管理后台"><Settings :size="16" aria-hidden="true" /><span>管理后台</span></RouterLink>
     </nav>

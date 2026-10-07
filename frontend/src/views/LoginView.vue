@@ -19,7 +19,8 @@ function destination() {
   const target = String(route.query.redirect || "");
   const allowed = [
     "/my-cases", "/search", "/materials", "/ai-settings", "/workbench/",
-    "/admin", "/admin/review/", "/admin/material-imports", "/admin/ai-settings",
+    "/admin", "/admin/accounts", "/admin/campus-access", "/admin/review/",
+    "/admin/material-imports", "/admin/ai-settings", "/campus-access",
   ];
   return allowed.some((prefix) => target.startsWith(prefix))
     ? target
