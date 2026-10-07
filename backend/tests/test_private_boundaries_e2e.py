@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import tempfile
 import time
@@ -43,6 +44,14 @@ def _login(username: str, password: str) -> tuple[httpx.Client, dict]:
     )
     assert response.status_code == 200
     return client, response.json()
+
+
+def _streamed_text(response: httpx.Response) -> str:
+    return "".join(
+        json.loads(line[6:]).get("delta", "")
+        for line in response.text.splitlines()
+        if line.startswith("data: {") and '"type":"text-delta"' in line
+    )
 
 
 def _unverified_user(role: str = "user") -> tuple[httpx.Client, dict]:
@@ -714,20 +723,44 @@ def test_real_meilisearch_and_production_agent_source_tools_enforce_acl() -> Non
         assert owner_material["status"] == "ok" and owner_material["content"] == material_text
         assert admin_material["status"] == "no_access"
 
-        stale = author.post(
+        stale_result_marker = f"forged-stale-private-search-item-{uuid.uuid4().hex}"
+        provider_config = admin.put(
+            "/api/ai/settings",
+            headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+            json={
+                "mode": "custom",
+                "baseUrl": "http://ai-provider:8080/v1",
+                "apiKey": "e2e-api-key",
+                "model": "e2e-model-a",
+            },
+        )
+        assert provider_config.status_code == 200, provider_config.text
+        stale = admin.post(
             "/api/search/summary",
-            headers={"X-CSRF-Token": author_auth["csrfToken"]},
+            headers={"X-CSRF-Token": admin_auth["csrfToken"]},
             json={
                 "id": "stale-summary",
                 "trigger": "submit-message",
                 "messages": [
-                    {"id": "stale-message", "role": "user", "parts": [{"type": "text", "text": marker}]}
+                    {
+                        "id": "stale-message",
+                        "role": "user",
+                        "parts": [{"type": "text", "text": campus_name}],
+                    }
                 ],
-                "query": marker,
-                "items": [{"id": case["id"], "kind": "case", "title": marker}],
+                "query": campus_name,
+                "search": {"q": campus_name, "kind": "case"},
+                "items": [{
+                    "id": "private-draft",
+                    "kind": "case",
+                    "title": stale_result_marker,
+                    "score": 100,
+                }],
             },
         )
-        assert stale.status_code == 422
+        assert stale.status_code == 200, stale.text
+        assert _streamed_text(stale) == "隔离模型回答：已依据当前可见资源完成分析。"
+        assert "STALE_PRIVATE_SEARCH_RESULT_REACHED_PROVIDER" not in stale.text
     finally:
         if "secret_path" in locals():
             os.unlink(secret_path)
