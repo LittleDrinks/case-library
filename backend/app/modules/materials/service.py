@@ -171,7 +171,7 @@ def _clean(record: dict) -> dict:
 
 def campus_verified(user: dict | None) -> bool:
     """校内内容需要已确认的机构身份，登录本身不构成验证。"""
-    return bool(user and (user.get("campus_verified") or user.get("role") == "admin"))
+    return bool(user and user.get("campus_verified"))
 
 
 def can_read_material(material: dict, user: dict | None) -> bool:

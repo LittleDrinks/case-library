@@ -157,7 +157,7 @@ def test_principal_key_separates_verification_states() -> None:
     unverified = principal_key(user)
     user["campus_verified"] = True
     assert principal_key(user) != unverified
-    assert principal_key({"role": "admin", "id": "u-1"}).endswith(":verified")
+    assert principal_key({"role": "admin", "id": "u-1"}).endswith(":basic")
     assert principal_key(None) == "anonymous"
 
 
