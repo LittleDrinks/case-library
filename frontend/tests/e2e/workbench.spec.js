@@ -410,11 +410,19 @@ test("强制改密页可以退出并切换账号", async ({ page }) => {
   await login(page);
 });
 
-test("名单账号首登必须改密并重新登录后才能进入工作台", async ({ page }) => {
+test("名单账号首登必须改密并重新登录后才能进入工作台", async ({ page, browser }) => {
   const initial = "Demo-10000001-2026!";
   const replacement = `Roster-Changed-${Date.now()}!`;
   await signIn(page, "10000001", initial);
   await expect(page).toHaveURL(/#\/change-password$/);
+  const oldSessionContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  const oldSessionPage = await oldSessionContext.newPage();
+  await signIn(oldSessionPage, "10000001", initial);
+  await expect(oldSessionPage).toHaveURL(/#\/change-password$/);
+  await expect.poll(async () => (
+    await oldSessionContext.request.get("/api/auth/session").then(response => response.status())
+  )).toBe(200);
+
   await page.goto("/#/workbench/c-draft-1");
   await expect(page).toHaveURL(/#\/change-password$/);
   await page.getByLabel("当前密码").fill(initial);
@@ -426,6 +434,10 @@ test("名单账号首登必须改密并重新登录后才能进入工作台", as
   await expect.poll(async () => page.evaluate(async () => (
     await fetch("/api/auth/session").then(response => response.status)
   ))).toBe(401);
+  await expect.poll(async () => (
+    await oldSessionContext.request.get("/api/auth/session").then(response => response.status())
+  )).toBe(401);
+  await oldSessionContext.close();
 
   const rejectedOldPassword = await page.context().request.post("/api/auth/login", {
     data: { username: "10000001", password: initial },
