@@ -57,8 +57,10 @@ def _post_parts(client: TestClient, auth: dict, case_id: str, parts: list[dict],
 
 
 def test_read_source_returns_fixed_version_and_location(client: TestClient) -> None:
-    _seed_source(client.app.state.database)
-    result = read_source(client.app.state.database, None, {"id": "u-user-demo", "role": "user"},
+    database = client.app.state.database
+    _seed_source(database)
+    user = database.users.find_one({"id": "u-user-demo"})
+    result = read_source(database, None, user,
                          "c-draft-1", "case", "src-22")
     assert result["status"] == "ok"
     assert result["usedSourceRef"]["versionId"] == "v-source-22"
@@ -66,8 +68,10 @@ def test_read_source_returns_fixed_version_and_location(client: TestClient) -> N
 
 
 def test_read_source_rechecks_source_publication(client: TestClient) -> None:
-    _seed_source(client.app.state.database, "private")
-    result = read_source(client.app.state.database, None, {"id": "u-user-demo", "role": "user"},
+    database = client.app.state.database
+    _seed_source(database, "private")
+    user = database.users.find_one({"id": "u-user-demo"})
+    result = read_source(database, None, user,
                          "c-draft-1", "case", "src-22")
     assert result == {"status": "no_access", "detail": "来源案例内容当前不可读"}
 
@@ -260,7 +264,7 @@ def _evidence_artifact(database, user: dict):
 def test_accept_rechecks_evidence_permissions(client: TestClient) -> None:
     database = client.app.state.database
     _seed_source(database)
-    user = {"id": "u-user-demo", "role": "user"}
+    user = database.users.find_one({"id": "u-user-demo"})
     thread, artifact = _evidence_artifact(database, user)
     database.agent_runs.update_one({"id": artifact.run_id}, {"$set": {"status": "completed"}})
     database.cases.update_one({"id": "c-source-22"}, {"$set": {"publicationStatus": "private"}})

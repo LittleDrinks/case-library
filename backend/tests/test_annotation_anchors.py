@@ -20,7 +20,11 @@ def login(client: TestClient) -> dict:
         "/api/auth/login", json={"username": "user", "password": "user123"}
     )
     assert response.status_code == 200
-    return response.json()
+    auth = response.json()
+    auth["user"] = client.app.state.database.users.find_one(
+        {"id": auth["user"]["id"]}
+    )
+    return auth
 
 
 def document(*paragraphs: str) -> dict:

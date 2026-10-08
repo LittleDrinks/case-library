@@ -46,7 +46,7 @@ def _materials() -> list[dict]:
     return rows
 
 
-def _case(case_id: str, title: str, campus_attachment: str | None = None) -> dict:
+def _case(case_id: str, title: str, campus_attachment: str | None = None) -> list[dict]:
     version = {
         "id": f"version-{case_id}",
         "number": 1,
@@ -62,7 +62,7 @@ def _case(case_id: str, title: str, campus_attachment: str | None = None) -> dic
         "metadata": {"theoryPoints": ["科学家精神"]},
     }
     publication = {"publishedAt": "2026-08-14", "ownerId": "u-owner"}
-    return project_catalog_documents("case", version, publication)[0]
+    return project_catalog_documents("case", version, publication)
 
 
 def _knowledge() -> list[dict]:
@@ -94,7 +94,12 @@ def _documents() -> list[dict]:
         "generation": "contract-generation",
         "projectionVersion": PROJECTION_VERSION,
     }
-    return [meta, *_materials(), *cases, *_knowledge()]
+    return [
+        meta,
+        *_materials(),
+        *(document for case_documents in cases for document in case_documents),
+        *_knowledge(),
+    ]
 
 
 def _load(client, uid: str) -> None:
@@ -147,11 +152,19 @@ def _request(uid: str, epoch: str, **changes) -> CatalogRequest:
     return CatalogRequest(**{**values, **changes})
 
 
-def _walk_material_ids(catalog, uid: str, epoch: str) -> list[str]:
+def _walk_material_ids(
+    catalog, uid: str, epoch: str, principal: Principal | None = None,
+) -> list[str]:
     ids, offset = [], 0
     while True:
         page = catalog.search(
-            _request(uid, epoch, offset=offset, include_metadata=offset == 0)
+            _request(
+                uid,
+                epoch,
+                offset=offset,
+                include_metadata=offset == 0,
+                **({"principal": principal} if principal else {}),
+            )
         )
         ids.extend(item["id"] for item in page.items)
         if not page.has_next:
@@ -175,8 +188,8 @@ def _level_counts(page) -> dict[str, int]:
     return {row["value"]: row["count"] for row in page.metadata.facets["accessLevel"]}
 
 
-def _assert_acl_facet_counts(page) -> None:
-    assert page.metadata.total == 4_160
+def _assert_acl_facet_counts(page, *, total: int) -> None:
+    assert page.metadata.total == total
     assert _level_counts(page) == {
         "public": 4_160,
         "campus": 4_160,
@@ -226,20 +239,42 @@ def _assert_knowledge_section_search(catalog, uid: str, epoch: str) -> None:
 
 def test_real_catalog_walks_12480_acl_results_in_global_date_order(catalog) -> None:
     catalog, uid, epoch = catalog
-    ids = _walk_material_ids(catalog, uid, epoch)
-    assert (len(ids), len(set(ids))) == (12_480, 12_480)
-    assert ids[:3] == ["shared-id", "m-00001", "m-00002"]
+    anonymous_ids = _walk_material_ids(catalog, uid, epoch)
+    expected_anonymous = [
+        "shared-id" if index == 0 else f"m-{index:05}"
+        for index in range(12_480)
+        if index % 3 != 2
+    ]
+    assert anonymous_ids == expected_anonymous
+    assert len(anonymous_ids) == 8_320
+
+    owner_ids = _walk_material_ids(
+        catalog, uid, epoch, Principal("u-owner", "user", verified=False),
+    )
+    expected_owner = [
+        "shared-id" if index == 0 else f"m-{index:05}"
+        for index in range(12_480)
+    ]
+    assert owner_ids == expected_owner
+    assert (len(owner_ids), len(set(owner_ids))) == (12_480, 12_480)
 
 
 def test_real_catalog_redacts_denied_material_and_self_excludes_facets(catalog) -> None:
     catalog, uid, epoch = catalog
-    page = catalog.search(_request(uid, epoch, page_size=3))
+    anonymous = catalog.search(_request(uid, epoch, page_size=3))
+    assert _level_counts(anonymous) == {"campus": 4_160, "public": 4_160}
+    assert "private" not in _level_counts(anonymous)
+
+    owner = Principal("u-owner", "user", verified=False)
+    page = catalog.search(_request(uid, epoch, page_size=3, principal=owner))
     assert page.items[0]["contentAvailable"] is True
     assert page.items[1] == _redacted_material()
     filtered = catalog.search(
-        _request(uid, epoch, filters={"accessLevel": ("public",)})
+        _request(
+            uid, epoch, filters={"accessLevel": ("public",)}, principal=owner,
+        )
     )
-    _assert_acl_facet_counts(filtered)
+    _assert_acl_facet_counts(filtered, total=4_160)
 
 
 def test_real_catalog_case_attachment_search_uses_current_campus_grant(catalog) -> None:

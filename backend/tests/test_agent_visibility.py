@@ -682,7 +682,7 @@ def test_three_turn_history_keeps_body_dependency_after_metadata_reference(
     [
         ("knowledge", "active", True),
         ("all", "active", True),
-        ("knowledge", "retired", False),
+        ("knowledge", "retired", True),
     ],
 )
 def test_empty_knowledge_directory_uses_current_source_entity(
@@ -723,6 +723,26 @@ def test_empty_knowledge_directory_uses_current_source_entity(
     run = database.agent_runs.find_one({"threadId": thread_id})
     assert run["status"] == ("completed" if answer_expected else "cancelled")
     assert ("目录探索后仍可继续普通创作" in response.text) is answer_expected
+    if source_status == "retired":
+        assistant = database.agent_messages.find_one(
+            {"threadId": thread_id, "role": "assistant"}
+        )
+        search_outputs = [
+            part["output"]
+            for part in assistant["parts"]
+            if part.get("type") == "tool-search_corpus"
+        ]
+        assert search_outputs
+        assert all(
+            row.get("id") != source_id and row.get("title") != source_title
+            for output in search_outputs
+            for row in output.get("sources", [])
+        )
+        assert all(
+            ref.get("id") != source_id and ref.get("title") != source_title
+            for message in database.agent_messages.find({"threadId": thread_id})
+            for ref in message.get("metadata", {}).get("_sourceDependencies", [])
+        )
 
 
 def test_legacy_knowledge_history_without_level_fails_closed(client: TestClient) -> None:

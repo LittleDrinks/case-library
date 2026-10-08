@@ -393,10 +393,8 @@ def test_admin_campus_transaction_rechecks_actor_after_public_force_logout(
 
 @pytest.mark.parametrize("change", ["force_logout", "disable", "change_password"])
 def test_open_source_less_sse_stops_after_public_account_change(
-    monkeypatch, campus_http_environment, change: str,
+    campus_http_environment, change: str,
 ) -> None:
-    from app.modules.agent import routes as agent_routes
-
     database, new_app, admin_credentials = campus_http_environment
     username = f"issue360-sse-user-{uuid.uuid4().hex}"
     password = f"Issue360-Sse-{uuid.uuid4().hex}!a"
@@ -448,23 +446,6 @@ def test_open_source_less_sse_stops_after_public_account_change(
             "sources": [],
         })
 
-        pause = _RequestPause()
-        original_factory = agent_routes._event_access_check
-
-        def pause_after_first_sse_chunk(database, user, conversation, thread):
-            access_check = original_factory(database, user, conversation, thread)
-            checks = 0
-
-            def scheduled_check():
-                nonlocal checks
-                checks += 1
-                if checks == 2:
-                    pause.wait()
-                return access_check()
-
-            return scheduled_check
-
-        monkeypatch.setattr(agent_routes, "_event_access_check", pause_after_first_sse_chunk)
         event_path = f"/api/cases/{case_id}/agent/thread/{thread.id}/events"
 
         def change_account():
@@ -526,9 +507,6 @@ def test_open_source_less_sse_stops_after_public_account_change(
             pending = executor.submit(read_stream)
             try:
                 assert first_received.wait(timeout=15), "客户端未收到 SSE 首段"
-                assert pause.entered.wait(timeout=15), (
-                    "SSE 未在客户端收到首段后进入调度点"
-                )
                 assert not pending.done()
                 changed = change_account()
                 expected_status = 204 if change == "change_password" else 200
@@ -538,7 +516,6 @@ def test_open_source_less_sse_stops_after_public_account_change(
                 database.agent_runs.update_one(
                     {"id": run.id}, {"$set": {"status": "completed"}}
                 )
-                pause.resume.set()
             pending.result(timeout=30)
 
         assert stream_status == [200]

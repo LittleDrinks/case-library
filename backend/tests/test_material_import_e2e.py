@@ -8,7 +8,7 @@ import pytest
 from minio import Minio
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
-RAR_FIXTURE = Path("/app/fixtures/学习资料md.rar")
+RAR_FIXTURE = Path(__file__).parent / "fixtures" / "material-import-synthetic.rar"
 pytestmark = pytest.mark.e2e(
     "CASE_LIBRARY_E2E_URL",
     "OBJECT_STORE_ENDPOINT",
@@ -119,6 +119,9 @@ def test_real_rar_import_is_durable_and_idempotent() -> None:
     assert first.json()["itemCount"] == 69
     assert len(first.json()["items"]) == 69
     assert {item["status"] for item in first.json()["items"]} == {"candidate"}
+    assert {item["filename"] for item in first.json()["items"]} == {
+        f"synthetic-{number:02d}.md" for number in range(1, 70)
+    }
     assert _object_count() == 69
 
     second = _import_rar(admin, csrf)

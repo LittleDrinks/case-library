@@ -57,6 +57,16 @@ clear_e2e_bucket() {
   compose --profile e2e run --rm --no-deps backend-e2e python tests/clear_e2e_bucket.py
 }
 
+seed_campus_legacy_fixture() {
+  compose --profile e2e run --rm --no-deps backend-e2e \
+    python tests/seed_legacy_campus_browser.py seed
+}
+
+cleanup_campus_legacy_fixture() {
+  compose --profile e2e run --rm --no-deps backend-e2e \
+    python tests/seed_legacy_campus_browser.py cleanup
+}
+
 verify_test_database_absent() {
   validate_test_database "$database"
   query="print(db.getMongo().getDBNames().includes('$database'))"
@@ -157,6 +167,7 @@ run_browser_suite() {
   esac
   compose --profile e2e up -d --wait $services
   clear_e2e_bucket
+  seed_campus_legacy_fixture
   test "$suite" = agent || run_browser_tests
   if test "$suite" != generic && test -z "$browser_spec"; then
     run_agent_browser_tests
@@ -170,6 +181,7 @@ cleanup() {
   cleanup_status=0
   stop_e2e_runtime || cleanup_status=1
   clear_e2e_bucket || cleanup_status=1
+  cleanup_campus_legacy_fixture || cleanup_status=1
   drop_and_verify_database || cleanup_status=1
   remove_e2e_services || cleanup_status=1
   remove_e2e_volume || cleanup_status=1

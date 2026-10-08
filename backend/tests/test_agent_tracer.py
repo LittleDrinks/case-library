@@ -191,6 +191,7 @@ def _artifact(database, thread_id: str) -> dict:
 HIT = {
     "id": "c-42", "kind": "case", "title": "科学家精神融入课堂",
     "summary": "以科学家精神为主题的教学案例，含教学目标与评价量规。",
+    "versionNumber": 1, "versionId": "hit-v1", "contentAvailable": True,
 }
 PARAGRAPHS = ("第一段保持不变。", "第二段：教学目标需要更明确的评价依据。")
 # Native Tiptap/ProseMirror positions for the second paragraph: 11..30.
@@ -256,9 +257,10 @@ def _assert_pending_artifact(client: TestClient, case: dict) -> dict:
     assert artifact["target"]["quote"] == PARAGRAPHS[1]
     assert artifact["replacement"] == REPLACEMENT
     assert artifact["sources"] == [{
-        "kind": "case", "id": HIT["id"], "title": HIT["title"], "snippet": "",
-        "version": "v1", "versionId": "hit-v1", "sourceCaseId": HIT["id"],
-        "location": "case:c-42@hit-v1",
+        "kind": "case", "id": HIT["id"], "title": HIT["title"],
+        "snippet": HIT["summary"], "contentAvailable": True,
+        "knowledgeLevel": None, "version": "v1", "versionId": "hit-v1",
+        "sourceCaseId": HIT["id"], "location": None,
     }]
     current = database.cases.find_one({"id": case["id"]}, {"_id": 0})
     assert current["revision"] == 1 and current["document"] == _document(*PARAGRAPHS)

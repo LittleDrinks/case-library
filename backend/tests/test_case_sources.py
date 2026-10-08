@@ -376,15 +376,35 @@ def test_admin_role_alone_does_not_expose_campus_attachment_in_source_list(
     database.users.update_one(
         {"id": auth["user"]["id"]}, {"$set": {"campus_verified": False}}
     )
+    case_id = "c-campus-role-check"
+    version_id = "v-campus-role-check"
+    database.cases.insert_one({
+        "id": case_id,
+        "title": "合成公开案例",
+        "ownerId": "u-user-demo",
+        "workflowStatus": "published",
+        "publicationStatus": "public",
+        "publishedVersionId": version_id,
+    })
     database.attachments.insert_one({
-        "id": "att-campus-role-check", "caseId": "c-draft-1",
+        "id": "att-campus-role-check", "caseId": case_id,
         "name": "合成校内附件.txt", "mediaType": "text/plain", "size": 1,
         "accessLevel": "campus", "blobId": "synthetic-campus-role-check",
         "searchText": "合成校内附件内容", "createdAt": "2026-10-07T00:00:00Z",
     })
+    database.case_versions.insert_one({
+        "id": version_id, "caseId": case_id, "number": 1,
+        "title": "合成公开案例", "document": {"type": "doc", "content": []},
+        "attachments": [{
+            "id": "att-campus-role-check", "caseId": case_id,
+            "name": "合成校内附件.txt", "mediaType": "text/plain", "size": 1,
+            "accessLevel": "campus", "blobId": "synthetic-campus-role-check",
+            "searchText": "合成校内附件内容", "createdAt": "2026-10-07T00:00:00Z",
+        }],
+    })
 
     response = client.get(
-        "/api/cases/c-draft-1/sources", headers=headers(auth)
+        f"/api/cases/{case_id}/sources", headers=headers(auth)
     )
 
     assert response.status_code == 200

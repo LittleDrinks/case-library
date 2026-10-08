@@ -20,6 +20,7 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from app.modules.agent import artifacts, blocks, writes
+from app.modules.agent.deps import ToolDeps
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.routes import _capabilities
 from app.modules.agent.skills import (
@@ -44,7 +45,11 @@ def _login(client: TestClient) -> dict:
         "/api/auth/login", json={"username": "user", "password": "user123"}
     )
     assert response.status_code == 200
-    return response.json()
+    auth = response.json()
+    auth["user"] = client.app.state.database.users.find_one(
+        {"id": auth["user"]["id"]}
+    )
+    return auth
 
 
 def _admin(client: TestClient) -> dict:
@@ -531,11 +536,11 @@ def test_document_generation_has_no_candidate_card(client: TestClient) -> None:
 # ---- 工具层：真实成功才宣称写入 ----
 
 
-def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> SimpleNamespace:
-    return SimpleNamespace(
+def _deps(database, case: dict, run, user: dict, wrote: bool = False) -> ToolDeps:
+    return ToolDeps(
         database=database, case_id=case["id"], thread_id=run.thread_id,
-        run_id=run.id, user=user, proposed_artifacts=[], wrote=wrote, evidence=[],
-        annotation_id=None,
+        run_id=run.id, user=user, catalog=None, catalog_state=None,
+        secret_path="", wrote=wrote,
     )
 
 

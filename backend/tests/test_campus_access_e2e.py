@@ -16,6 +16,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 import pytest
 from pymongo import MongoClient
+from app.modules.auth.passwords import hash_password
 
 BASE_URL = os.environ.get("CASE_LIBRARY_E2E_URL")
 MONGODB_URI = os.environ.get("AUTH_QUERY_MONGODB_URI")
@@ -676,7 +677,7 @@ def test_real_http_history_snapshot_and_sse_recheck_revoked_campus_access() -> N
     "MEILI_CONTRACT_URL",
     "MEILI_CONTRACT_KEY_FILE",
 )
-def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
+def test_real_http_campus_revoke_rechecks_next_tool_and_review_output(tmp_path) -> None:
     import meilisearch
     from app.modules.agent.deps import ToolDeps
     from app.modules.agent.models import SourceRef
@@ -729,6 +730,8 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
     catalog = None
     catalog_state = None
     blob_written = False
+    secret = tmp_path / "app-secret"
+    secret.write_text("issue360-e2e-app-secret", encoding="utf-8")
 
     def tool_deps(user: dict, source: SourceRef, case_id: str, thread_id: str, run_id: str):
         return ToolDeps(
@@ -739,7 +742,7 @@ def test_real_http_campus_revoke_rechecks_next_tool_and_review_output() -> None:
             user=user,
             catalog=catalog,
             catalog_state=catalog_state,
-            secret_path="",
+            secret_path=str(secret),
             store=store,
             hits=[source],
         )
@@ -1342,4 +1345,52 @@ def test_real_http_application_rechecks_applicant_after_authentication(
             assert rejected["detail"] == response.json()["detail"]
     finally:
         mongo.drop_database(database_name)
+        mongo.close()
+
+
+def test_real_http_seed_legacy_campus_grants_for_browser_pagination() -> None:
+    prefix = "issue360-legacy-browser"
+    mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    database = mongo.get_default_database()
+    database.users.delete_many({"username": {"$regex": f"^{prefix}-"}})
+    password_hash = hash_password(f"unused-synthetic-{uuid.uuid4().hex}!a")
+    now = datetime.now(UTC).isoformat()
+    rows = [
+        {
+            "id": f"u-{prefix}-{number:03d}",
+            "username": f"{prefix}-{number:03d}",
+            "name": f"{prefix}-{number:03d}",
+            "password_hash": password_hash,
+            "role": "user",
+            "status": "active",
+            "must_change_password": False,
+            "campus_verified": True,
+            "campus_access_grant_source": "legacy",
+            "token_version": 0,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        for number in range(1, 52)
+    ]
+    try:
+        database.users.insert_many(rows)
+        admin = _opener()
+        _login(admin, "admin", "admin123")
+        first_status, first = _request(
+            admin,
+            "GET",
+            f"/api/admin/campus-access-legacy-grants?q={prefix}&page=1&pageSize=50",
+        )
+        second_status, second = _request(
+            admin,
+            "GET",
+            f"/api/admin/campus-access-legacy-grants?q={prefix}&page=2&pageSize=50",
+        )
+        assert first_status == second_status == 200
+        assert first["total"] == second["total"] == 51
+        assert len(first["items"]) == 50
+        assert [item["username"] for item in second["items"]] == [
+            f"{prefix}-051"
+        ]
+    finally:
         mongo.close()

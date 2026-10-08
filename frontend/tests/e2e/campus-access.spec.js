@@ -109,3 +109,62 @@ test("本人可查看申请历史，管理员决定与撤销后必须重新人�
   await staleAdminContext.close();
   await adminContext.close();
 });
+
+test("旧系统授权分页、列表失败重试与撤销使用当前服务端状态", async ({ page }) => {
+  const prefix = "issue360-legacy-browser";
+  let failFirstFilteredRequest = true;
+
+  await signIn(page, "admin", "admin123");
+  await page.goto("/#/admin/campus-access");
+  await page.route("**/api/admin/campus-access-legacy-grants?*", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (failFirstFilteredRequest && requestUrl.searchParams.get("q") === prefix) {
+      failFirstFilteredRequest = false;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "合成旧授权列表暂时不可用" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByLabel("搜索申请人").fill(prefix);
+  await page.getByRole("button", { name: "查询", exact: true }).click();
+  const legacy = page.locator(".campus-admin-legacy");
+  await expect(legacy.getByRole("alert")).toContainText("合成旧授权列表暂时不可用");
+  await legacy.getByRole("button", { name: "重试" }).click();
+  await expect(legacy).toContainText("共 51 个账号");
+  await expect(legacy.getByText("第 1 / 2 页")).toBeVisible();
+
+  await legacy.getByRole("button", { name: "下一页旧系统授权" }).click();
+  await expect(legacy.getByText("第 2 / 2 页")).toBeVisible();
+  const targetUsername = `${prefix}-051`;
+  const target = legacy.locator(".campus-admin-row").filter({ hasText: targetUsername });
+  await expect(target).toContainText("旧系统授权");
+  await target.getByRole("button", { name: "撤销资格" }).click();
+
+  const action = page.locator(".campus-admin-action");
+  await expect(action).toContainText("无历史申请或自填身份资料");
+  await action.getByLabel("操作理由").fill("合成浏览器确认旧授权撤销");
+  await action.getByRole("button", { name: "确认撤销" }).click();
+  await expect(page.getByRole("status")).toContainText(`${targetUsername} 的旧系统校内资格`);
+  await expect(legacy).toContainText("共 50 个账号");
+  await expect(legacy.getByText("第 1 / 1 页")).toBeVisible();
+
+  const current = await page.request.get(
+    `/api/admin/campus-access-legacy-grants?q=${encodeURIComponent(targetUsername)}`,
+  );
+  expect(current.status()).toBe(200);
+  expect((await current.json()).items).toEqual([]);
+
+  const operations = await page.request.get("/api/admin/account-operations?page=1&pageSize=100");
+  expect(operations.status()).toBe(200);
+  expect((await operations.json()).items).toContainEqual(expect.objectContaining({
+    action: "campus_access_legacy_revoke",
+    targetId: expect.stringMatching(/^u-issue360-legacy-browser-051$/),
+    reason: "合成浏览器确认旧授权撤销",
+    result: "success",
+  }));
+});

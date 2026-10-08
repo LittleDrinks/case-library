@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.modules.materials.service import campus_verified
 
 
-def test_admin_role_does_not_grant_campus_material_access() -> None:
+def test_campus_verified_uses_explicit_account_flag() -> None:
     assert campus_verified({"role": "admin", "campus_verified": False}) is False
     assert campus_verified({"role": "admin", "campus_verified": True}) is True
 

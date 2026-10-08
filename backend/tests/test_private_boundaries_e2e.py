@@ -165,7 +165,7 @@ def _published(
 
 def _database():
     client = MongoClient(os.environ["AUTH_QUERY_MONGODB_URI"])
-    return client, client["case_library_e2e"]
+    return client, client.get_default_database()
 
 
 def _search_corpus_when_ready(context, params):

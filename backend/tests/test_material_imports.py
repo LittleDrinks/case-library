@@ -126,7 +126,7 @@ def test_reimport_marks_exact_content_as_duplicate(client: TestClient) -> None:
 
 def test_real_rar_creates_one_candidate_item_per_entry(client: TestClient) -> None:
     auth = login(client, "admin", "admin123")
-    fixture = Path("/app/fixtures/学习资料md.rar")
+    fixture = Path(__file__).parent / "fixtures" / "material-import-synthetic.rar"
     with fixture.open("rb") as archive:
         response = submit_import(
             client,
@@ -143,6 +143,9 @@ def test_real_rar_creates_one_candidate_item_per_entry(client: TestClient) -> No
     assert len(job["items"]) == 69
     assert all(item["status"] == "candidate" for item in job["items"])
     assert all(item["filename"] != fixture.name for item in job["items"])
+    assert {item["filename"] for item in job["items"]} == {
+        f"synthetic-{number:02d}.md" for number in range(1, 70)
+    }
 
 
 def test_invalid_known_signature_only_fails_that_item(client: TestClient) -> None:

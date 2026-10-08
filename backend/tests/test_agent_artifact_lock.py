@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from app.modules.agent import artifacts, prosemirror
+from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import AgentMessage, ArtifactTarget, SourceRef
 from app.modules.agent.repository import AgentRepository
 from app.modules.agent.skills import propose_revision
@@ -45,7 +46,11 @@ def _login(client: TestClient) -> dict:
         "/api/auth/login", json={"username": "user", "password": "user123"}
     )
     assert response.status_code == 200
-    return response.json()
+    auth = response.json()
+    auth["user"] = client.app.state.database.users.find_one(
+        {"id": auth["user"]["id"]}
+    )
+    return auth
 
 
 def _csrf(auth: dict) -> dict:
@@ -234,7 +239,7 @@ def _propose(database, case: dict, run, target: ArtifactTarget = SECOND,
 
 def _owner(database, case: dict) -> dict:
     row = database.cases.find_one({"id": case["id"]}, {"ownerId": 1})
-    return {"id": row["ownerId"], "role": "user"}
+    return database.users.find_one({"id": row["ownerId"]})
 
 
 def _publish(database, repository, run, artifact=None, revisions=None) -> None:
@@ -294,10 +299,10 @@ def test_multiple_suggestions_can_be_proposed_in_one_run(client: TestClient) -> 
     auth = _login(client)
     case = _create_case(client, auth)
     database, _repository, thread, run = _locked_run(client, auth, case, None)
-    deps = SimpleNamespace(
-        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
-        user=auth["user"], evidence=[], annotation_id=None, proposed_artifacts=[],
-        revision_path_claimed=False,
+    deps = ToolDeps(
+        database=database, case_id=case["id"], thread_id=thread.id,
+        run_id=run.id, user=auth["user"], catalog=None, catalog_state=None,
+        secret_path="",
     )
     ctx = SimpleNamespace(deps=deps)
     asyncio.run(propose_revision(ctx, FIRST.from_pos, FIRST.to_pos, "第一段修订。", "完善表达"))
@@ -309,10 +314,10 @@ def test_overlapping_suggestions_are_rejected_in_one_run(client: TestClient) -> 
     auth = _login(client)
     case = _create_case(client, auth)
     database, _repository, thread, run = _locked_run(client, auth, case, None)
-    deps = SimpleNamespace(
-        database=database, case_id=case["id"], thread_id=thread.id, run_id=run.id,
-        user=auth["user"], evidence=[], annotation_id=None, proposed_artifacts=[],
-        revision_path_claimed=False,
+    deps = ToolDeps(
+        database=database, case_id=case["id"], thread_id=thread.id,
+        run_id=run.id, user=auth["user"], catalog=None, catalog_state=None,
+        secret_path="",
     )
     ctx = SimpleNamespace(deps=deps)
     asyncio.run(propose_revision(ctx, FIRST.from_pos, FIRST.to_pos, "第一段修改。", "重写表达"))
@@ -640,13 +645,21 @@ def _seed_case_source(database) -> None:
 
 
 CASE_SOURCE = SourceRef(kind="case", id="c-src", title="来源案例 v1")
-KNOWLEDGE_SOURCE = SourceRef(kind="knowledge", id="ks-1", title="教材章节")
+KNOWLEDGE_SOURCE = SourceRef(
+    kind="knowledge", id="ks-1", title="科技伦理 · 人工智能治理",
+    location="knowledge:ks-1",
+)
 MATERIAL_SOURCE = SourceRef(kind="material", id="m-1", title="公开素材")
 
 
 def _seed_knowledge(database) -> None:
-    database.knowledge_sections.insert_one({"id": "ks-1", "sourceId": "kn-1"})
-    database.knowledge_sources.insert_one({"id": "kn-1", "status": "active"})
+    database.knowledge_sections.insert_one({
+        "id": "ks-1", "sourceId": "kn-1", "chapter": "科技伦理",
+        "title": "人工智能治理", "content": "合成章节正文",
+    })
+    database.knowledge_sources.insert_one({
+        "id": "kn-1", "status": "active", "title": "合成教材",
+    })
 
 
 def _seed_material(database) -> None:
