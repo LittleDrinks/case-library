@@ -8,6 +8,11 @@ import { api } from "../api.js";
 const props = defineProps({
   caseRecord: { type: Object, required: true },
   user: { type: Object, default: null },
+  versionId: { type: String, default: "" },
+  review: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false },
+  reviewRecordStatus: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
   annotationRefreshToken: { type: Number, default: 0 },
 });
 const emit = defineEmits([
@@ -48,9 +53,13 @@ async function loadAnnotations() {
   loading.value = true;
   error.value = "";
   try {
-    const next = props.user ? await api.listAnnotations(props.caseRecord.id) : [];
+    const loaded = props.user
+      ? await api.listAnnotations(props.caseRecord.id, props.versionId || undefined) : [];
     if (generation !== loadGeneration) return;
-    annotations.value = next;
+    annotations.value = !props.versionId && props.caseRecord.workflowStatus === "draft"
+      && props.user?.id === props.caseRecord.ownerId
+      ? loaded.filter((row) => row.versionId == null)
+      : loaded;
     announce();
   } catch (caught) {
     if (generation === loadGeneration) error.value = caught.message || "批注加载失败";
@@ -59,12 +68,35 @@ async function loadAnnotations() {
   }
 }
 
+function annotationReadOnly(annotation) {
+  if (annotation.versionId == null) {
+    return props.review || props.historical || Boolean(props.versionId) || props.readOnly;
+  }
+  if (props.review) return props.readOnly;
+  return isAdminOwner()
+    && !["reviewing", "withdrawn", "returned"].includes(props.reviewRecordStatus);
+}
+
+function isAdminOwner() {
+  return props.user?.role === "admin"
+    && props.user?.id === props.caseRecord.ownerId;
+}
+
+function adminOwnerReturnedFeedback(annotation) {
+  return Boolean(
+    annotation.versionId && isAdminOwner() && props.reviewRecordStatus === "returned",
+  );
+}
+
 function canEdit(annotation) {
-  return annotation.createdBy === props.user?.id && annotation.status === "pending";
+  return !annotationReadOnly(annotation) && !adminOwnerReturnedFeedback(annotation)
+    && annotation.createdBy === props.user?.id && annotation.status === "pending";
 }
 
 function canDiscuss(annotation) {
-  if (annotation.status !== "pending" || (annotation.anchorState || "active") !== "active") return false;
+  if (annotationReadOnly(annotation) || annotation.status !== "pending"
+      || (annotation.anchorState || "active") !== "active"
+      || adminOwnerReturnedFeedback(annotation)) return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -72,7 +104,7 @@ function canDiscuss(annotation) {
 }
 
 function canReply(annotation) {
-  if ((annotation.anchorState || "active") !== "active") return false;
+  if (annotationReadOnly(annotation) || (annotation.anchorState || "active") !== "active") return false;
   if (annotation.versionId != null) {
     return props.user?.id === props.caseRecord.ownerId || props.user?.role === "admin";
   }
@@ -116,6 +148,7 @@ function askAi(annotation) {
 }
 
 function beginEdit(annotation) {
+  if (!canEdit(annotation)) return;
   editingId.value = annotation.id;
   editingContent.value = annotation.content;
   error.value = "";
@@ -128,7 +161,7 @@ function cancelEdit() {
 
 async function saveEdit(annotation) {
   const value = editingContent.value.trim();
-  if (!value || saving.value) return;
+  if (!canEdit(annotation) || !value || saving.value) return;
   saving.value = true;
   error.value = "";
   try {
@@ -176,7 +209,7 @@ async function reply(annotation) {
 }
 
 async function setStatus(annotation, status) {
-  if (saving.value) return;
+  if (annotationReadOnly(annotation) || saving.value) return;
   invalidateAnnotationLoads();
   saving.value = true;
   error.value = "";
@@ -213,7 +246,7 @@ async function merge(annotation) {
   }
 }
 
-watch(() => props.caseRecord.id, loadAnnotations, { immediate: true });
+watch(() => [props.caseRecord.id, props.versionId], loadAnnotations, { immediate: true });
 watch(() => props.annotationRefreshToken, loadAnnotations);
 </script>
 
@@ -249,7 +282,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
             <p v-else-if="annotation.anchorState === 'changed'" class="comment-anchor-state">原文已变动，旧修订不可合并</p>
           </template>
           <textarea
-            v-if="editingId === annotation.id"
+            v-if="editingId === annotation.id && canEdit(annotation)"
             v-model="editingContent"
             class="comment-edit-input"
             aria-label="编辑批注"
@@ -268,7 +301,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
               </li>
             </ol>
           </div>
-          <div v-if="editingId === annotation.id" class="comment-owner-actions">
+          <div v-if="editingId === annotation.id && canEdit(annotation)" class="comment-owner-actions">
             <button type="button" :disabled="saving || !editingContent.trim()" @click="saveEdit(annotation)"><Check :size="14" />保存批注</button>
             <button type="button" :disabled="saving" @click="cancelEdit"><X :size="14" />取消</button>
           </div>
@@ -288,7 +321,7 @@ watch(() => props.annotationRefreshToken, loadAnnotations);
           </div>
             <button v-if="canReply(annotation)" class="comment-reply-toggle" type="button" :aria-expanded="replyingId === annotation.id" @click="replyingId = replyingId === annotation.id ? '' : annotation.id"><CornerUpLeft :size="14" />回复</button>
           <button
-            v-if="annotation.status === 'pending' && user?.id === caseRecord.ownerId"
+            v-if="!annotationReadOnly(annotation) && annotation.status === 'pending' && user?.id === caseRecord.ownerId"
             class="comment-status-action"
             type="button"
             :disabled="saving"

@@ -87,7 +87,11 @@ async function generate() {
   if (!loaded.configured) { override.value = "unconfigured"; return; }
   chat.value = newChat();
   override.value = "streaming";
-  try { await chat.value.sendMessage({ text: props.snapshot.query }, { body: { query: props.snapshot.query, items: contextItems.value } }); }
+  try {
+    await chat.value.sendMessage({ text: props.snapshot.query }, {
+      body: { query: props.snapshot.query, search: props.snapshot.search },
+    });
+  }
   catch { /* Chat exposes the transport error through its state. */ }
 }
 

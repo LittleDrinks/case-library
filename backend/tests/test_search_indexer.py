@@ -17,6 +17,7 @@ from app.modules.search.meilisearch import (
 )
 from app.modules.search.models import SearchQuery
 from app.modules.search.outbox import SearchOutbox
+from app.modules.search.projection import PROJECTION_VERSION
 from app.modules.search.service import CatalogSearch, search_catalog
 from app.modules.search.worker import CatalogConsumer, WorkerHeartbeat
 from conftest import ReadyCatalogState
@@ -292,6 +293,7 @@ def _set_catalog(
         "generation": generation,
         "indexUid": uid,
         "indexEpoch": client.epochs[uid],
+        "projectionVersion": PROJECTION_VERSION,
         "retiredIndexUids": [],
     }
     db.search_catalog_generation.replace_one({"_id": "catalog"}, marker, upsert=True)
@@ -493,6 +495,7 @@ def _old_catalog_marker() -> dict:
         "generation": "old-generation",
         "indexUid": "catalog-old",
         "indexEpoch": "epoch-0",
+        "projectionVersion": PROJECTION_VERSION,
         "retiredIndexUids": [],
     }
 
@@ -559,8 +562,12 @@ def test_rebuild_publishes_one_generation_to_mongo_and_catalog() -> None:
 
     marker = db.search_catalog_generation.find_one({"_id": "catalog"})
     document = client.documents[marker["indexUid"]]["catalog-meta"]
-    assert set(marker) == {"_id", "generation", "indexUid", "indexEpoch", "retiredIndexUids"}
+    assert set(marker) == {
+        "_id", "generation", "indexUid", "indexEpoch",
+        "projectionVersion", "retiredIndexUids",
+    }
     assert marker["generation"] == document["generation"]
+    assert marker["projectionVersion"] == document["projectionVersion"]
     assert marker["indexUid"] == "catalog-build"
     assert marker["generation"]
     assert marker["indexEpoch"] == client.get_raw_index("catalog-build")["updatedAt"]

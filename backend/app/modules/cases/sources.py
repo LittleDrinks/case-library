@@ -8,13 +8,13 @@ from app.modules.case_sources.service import (
     source_case_content_available,
     source_case_url,
 )
-from app.modules.materials.service import material_content_available
+from app.modules.materials.service import campus_verified, material_content_available
 
 
 def is_internal(record: dict, user: dict | None) -> bool:
     return bool(
         user and record.get("ownerId")
-        and (user["role"] == "admin" or record["ownerId"] == user["id"])
+        and record["ownerId"] == user["id"]
     )
 
 
@@ -94,7 +94,7 @@ def _content_available(
 ) -> bool:
     if source_type == "case":
         return source_case_content_available(
-            database, row["sourceCaseId"], user, row["versionId"], internal
+            database, row["sourceCaseId"], user, row["versionId"]
         )
     if source_type == "material":
         return material_content_available(_material_row(database, row), user)
@@ -109,13 +109,19 @@ def _material_row(database: Database, row: dict) -> dict:
 
 
 def _attachment_readable(database, row: dict, user: dict | None, record: dict) -> bool:
+    case = (
+        record
+        if "ownerId" in record
+        else database.cases.find_one({"id": record["caseId"]})
+    )
+    if user and case and case.get("ownerId") == user["id"]:
+        return True
     level = row.get("accessLevel", "public")
     if level == "public":
         return True
     if level == "campus":
-        return bool(user)
-    case = record if "ownerId" in record else database.cases.find_one({"id": record["caseId"]})
-    return bool(user and (user["role"] == "admin" or case.get("ownerId") == user["id"]))
+        return campus_verified(user)
+    return False
 
 
 def _entry_url(

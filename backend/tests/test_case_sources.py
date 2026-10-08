@@ -23,7 +23,10 @@ def headers(auth: dict) -> dict:
 
 
 def revision(client: TestClient, case_id: str = "c-draft-1") -> int:
-    return client.get(f"/api/cases/{case_id}").json()["revision"]
+    response = client.get(f"/api/cases/{case_id}")
+    if response.status_code == 404:
+        response = client.get(f"/api/cases/{case_id}/review")
+    return response.json()["revision"]
 
 
 def other_client(client: TestClient) -> TestClient:
@@ -203,7 +206,7 @@ def _assert_published_source_access(client: TestClient, attachment_id: str) -> N
         "/api/cases/c-draft-1/sources", headers=headers(admin_auth)
     ).json()["entries"]
     assert next(row for row in entries if row["sourceType"] == "case")["contentAvailable"] is False
-    assert next(row for row in entries if row["sourceType"] == "attachment")["contentAvailable"] is True
+    assert next(row for row in entries if row["sourceType"] == "attachment")["contentAvailable"] is False
     denied = reader.get(f"/api/cases/c-draft-1/attachments/{attachment_id}/content")
     assert denied.status_code == 403
 
@@ -211,8 +214,11 @@ def _assert_published_source_access(client: TestClient, attachment_id: str) -> N
 def _assert_public_snapshot_rejected(client: TestClient, auth: dict, snapshot: str) -> None:
     _submit_and_approve(client, auth, "c-draft-1")
     admin, _ = _admin_session(client)
-    for public_reader in (other_client(client), client, admin):
+    for public_reader in (other_client(client), admin):
         _assert_version_rejected(public_reader, "c-draft-1", snapshot)
+    assert client.get(
+        "/api/cases/c-draft-1/public", params={"versionId": snapshot}
+    ).status_code == 404
 
 
 def _assert_public_version_delete_rejected(client, auth, reader, version_id: str) -> None:
@@ -267,7 +273,7 @@ def test_removal_requires_owner_and_editable_draft(client: TestClient) -> None:
     stranger_auth = login(stranger, "admin", "admin123")
     url = f"/api/cases/c-draft-1/case-sources/{source_id}"
     blocked = stranger.delete(
-        url, params={"revision": revision(stranger)}, headers=headers(stranger_auth),
+        url, params={"revision": revision(client)}, headers=headers(stranger_auth),
     )
     assert blocked.status_code == 403
     removed = client.delete(
@@ -395,6 +401,13 @@ def test_private_material_source_entry_is_locked_for_public_reader(
     )
     assert entry["contentAvailable"] is False
     assert reader.get(entry["url"]).status_code == 404
+    admin, admin_auth = _admin_session(client)
+    admin_entries = admin.get(
+        "/api/cases/c-draft-1/sources", headers=headers(admin_auth)
+    ).json()["entries"]
+    private_entry = next(row for row in admin_entries if row["sourceType"] == "material")
+    assert private_entry["contentAvailable"] is False
+    assert admin.get(private_entry["url"]).status_code == 404
 
 
 def test_offline_source_case_keeps_entry_but_locks_content(client: TestClient) -> None:
@@ -407,18 +420,19 @@ def test_offline_source_case_keeps_entry_but_locks_content(client: TestClient) -
     admin, admin_auth = _admin_session(client)
     admin_sources = admin.get(
         "/api/cases/c-draft-1/case-sources", headers=headers(admin_auth)
-    ).json()
-    assert admin_sources[0]["contentAvailable"] is True
+    )
+    assert admin_sources.status_code == 404
 
 
 def test_published_sources_visible_but_unauthorized_links_locked(
     client: TestClient,
 ) -> None:
     auth = login(client)
-    mount_source(client, auth, "c-02")
+    source_case_id = _published_source(client, auth, "作者自己的已发布来源")
+    mount_source(client, auth, source_case_id)
     private = upload_attachment(client, auth, "private")
     _submit_and_approve(client, auth, "c-draft-1")
-    _admin_command(client, "c-02", "hide")
+    _admin_command(client, source_case_id, "hide")
     _assert_published_source_access(client, private["id"])
 
 
@@ -525,9 +539,11 @@ def test_owner_keeps_private_attachment_history_after_publication(client: TestCl
     params = {"versionId": snapshot}
     assert client.get(url, params=params).content == b"attach"
     admin, _ = _admin_session(client)
-    assert admin.get(url, params=params).content == b"attach"
+    assert admin.get(url, params=params).status_code == 404
     assert other_client(client).get(url, params=params).status_code == 404
-    _assert_version_rejected(client, "c-draft-1", snapshot)
+    assert client.get(
+        "/api/cases/c-draft-1/sources", params=params
+    ).status_code == 200
 
 
 def test_public_pinned_read_rejects_unapproved_and_offline(client: TestClient) -> None:

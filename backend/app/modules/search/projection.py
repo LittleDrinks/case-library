@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+PROJECTION_VERSION = 2
+
 CASE_FIELDS = (
     "typeId",
     "typeName",
@@ -75,29 +77,33 @@ def _case_fields(version: dict, publication: dict) -> dict:
     }
 
 
-def _attachment_names(version: dict) -> str:
-    return _text([attachment["name"] for attachment in version["attachments"]])
+def _readable_attachments(version: dict, level: str) -> list[dict]:
+    allowed = CASE_LEVELS[: CASE_LEVELS.index(level) + 1]
+    return [
+        attachment
+        for attachment in version["attachments"]
+        if attachment["accessLevel"] in allowed
+    ]
+
+
+def _attachment_names(version: dict, level: str) -> str:
+    return _text([attachment["name"] for attachment in _readable_attachments(version, level)])
 
 
 def _attachment_text(version: dict, level: str) -> str:
-    allowed = CASE_LEVELS[: CASE_LEVELS.index(level) + 1]
     return _text(
-        [
-            attachment["searchText"]
-            for attachment in version["attachments"]
-            if attachment["accessLevel"] in allowed
-        ]
+        [attachment["searchText"] for attachment in _readable_attachments(version, level)]
     )
 
 
-def _case_searchable(fields: dict, version: dict) -> str:
+def _case_searchable(fields: dict, version: dict, level: str) -> str:
     return _text(
         fields["title"],
         fields["summary"],
         fields["course"],
         fields["author"],
         _document_text(version["document"]),
-        _attachment_names(version),
+        _attachment_names(version, level),
     )
 
 
@@ -107,13 +113,15 @@ def case_catalog_ids(case_id: str) -> list[str]:
 
 def _case_documents(version: dict, publication: dict) -> list[dict]:
     fields = _case_fields(version, publication)
-    base = _case_searchable(fields, version)
     return [
         {
             **fields,
             "catalogId": catalog_id,
             "docClass": f"case-{level}",
-            "searchableText": _text(base, _attachment_text(version, level)),
+            "searchableText": _text(
+                _case_searchable(fields, version, level),
+                _attachment_text(version, level),
+            ),
         }
         for level, catalog_id in zip(
             CASE_LEVELS, case_catalog_ids(version["caseId"]), strict=True

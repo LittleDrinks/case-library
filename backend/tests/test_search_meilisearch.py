@@ -14,6 +14,7 @@ from app.modules.search.meilisearch import (
     SearchUnavailable,
 )
 from app.modules.search.models import TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 
 class FakeReader:
@@ -253,12 +254,42 @@ def test_restricted_title_hits_are_disjoint_redacted_and_unified() -> None:
         'kind = "material" AND docClass = "material-full" AND accessLevel = "public"'
     ) in page_filter
     assert (
-        'kind = "material" AND accessLevel IN ["campus", "private"] '
+        'kind = "material" AND accessLevel = "campus" '
         'AND docClass = "material-restricted" AND publicReferenceCount > 0'
     ) in page_filter
     assert client.calls == [None]
     assert client.batches[0][0]["offset"] == 1
     assert client.batches[0][0]["limit"] == 2
+
+
+def test_restricted_material_metadata_never_includes_private_access() -> None:
+    from app.modules.search.meilisearch import (
+        NEVER,
+        _restricted_branch,
+        _restricted_count_plan,
+    )
+
+    unverified = _anonymous_request(
+        principal=Principal("u-other", "user"), kind="material"
+    )
+    filter_value = _restricted_branch(unverified)
+    assert 'accessLevel = "campus"' in filter_value
+    assert "private" not in filter_value
+    assert "private" not in _restricted_count_plan(unverified, "idx").payload[
+        "filter"
+    ]
+
+    verified = _anonymous_request(
+        principal=Principal("u-verified", "admin", True), kind="material"
+    )
+    verified_filter = _restricted_branch(verified)
+    verified_count_filter = _restricted_count_plan(verified, "idx").payload[
+        "filter"
+    ]
+    assert NEVER in verified_filter
+    assert NEVER in verified_count_filter
+    assert "private" not in verified_filter
+    assert "private" not in verified_count_filter
 
 
 class HealthyReader:
@@ -268,9 +299,11 @@ class HealthyReader:
         primary_key="catalogId",
         generation="current-generation",
         epoch="epoch",
+        projection_version=PROJECTION_VERSION,
     ) -> None:
         self.status, self.primary_key = status, primary_key
         self.generation, self.epoch = generation, epoch
+        self.projection_version = projection_version
 
     def health(self, uid: str) -> CatalogHealth:
         assert uid == "catalog"
@@ -279,6 +312,7 @@ class HealthyReader:
             self.primary_key,
             self.generation,
             self.epoch,
+            self.projection_version,
         )
 
 
@@ -287,6 +321,13 @@ def test_health_requires_available_server_and_stable_catalog_primary_key() -> No
     for reader in (HealthyReader("unavailable"), HealthyReader(primary_key="id")):
         with pytest.raises(SearchUnavailable, match="检索暂不可用"):
             MeilisearchCatalog(reader).health("catalog", "current-generation", "epoch")
+
+
+def test_health_rejects_an_old_projection_version() -> None:
+    with pytest.raises(SearchUnavailable, match="检索暂不可用"):
+        MeilisearchCatalog(
+            HealthyReader(projection_version=PROJECTION_VERSION - 1)
+        ).health("catalog", "current-generation", "epoch")
 
 
 def test_health_requires_the_expected_catalog_generation() -> None:
@@ -358,7 +399,11 @@ def test_search_rejects_a_stable_but_unconfirmed_index_epoch() -> None:
             '(docClass = "case-private" AND createdBy = "u-1" OR '
             'docClass = "case-campus" AND createdBy != "u-1")',
         ),
-        (Principal("u-admin", "admin"), 'docClass = "case-private"'),
+        (
+            Principal("u-admin", "admin", verified=True),
+            '(docClass = "case-private" AND createdBy = "u-admin" OR '
+            'docClass = "case-campus" AND createdBy != "u-admin")',
+        ),
     ],
 )
 def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
@@ -369,7 +414,7 @@ def test_case_query_uses_one_acl_document_per_case(principal, expected) -> None:
 
     case_filter = client.batches[0][0]["filter"]
     assert case_filter == f'kind = "case" AND {expected}'
-    assert ("createdBy" in case_filter) is (principal.role == "user")
+    assert ("createdBy" in case_filter) is (principal.role != "anonymous")
 
 
 def test_count_plan_applies_business_and_tag_conditions() -> None:

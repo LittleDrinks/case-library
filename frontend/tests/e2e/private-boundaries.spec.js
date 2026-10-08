@@ -1,0 +1,790 @@
+import { expect, test } from "@playwright/test";
+
+async function login(page, username, password) {
+  await page.goto("/#/login");
+  await page.getByLabel("用户名").fill(username);
+  await page.getByLabel("密码").fill(password);
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
+}
+
+async function logout(page) {
+  await page.goto("/#/");
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await expect(page).toHaveURL(/#\/login$/);
+}
+
+async function session(request) {
+  return (await request.get("/api/auth/session")).json();
+}
+
+async function createCase(request, title) {
+  const auth = await session(request);
+  const response = await request.post("/api/cases", {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: {
+      title,
+      document: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: title }] }],
+      },
+    },
+  });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
+async function submit(request, caseId) {
+  const auth = await session(request);
+  const current = await (await request.get(`/api/cases/${caseId}`)).json();
+  const response = await request.post(`/api/cases/${caseId}/lifecycle`, {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { command: "submit", revision: current.revision },
+  });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
+async function lifecycle(request, caseId, auth, command, revision, extra = {}) {
+  const response = await request.post(`/api/cases/${caseId}/lifecycle`, {
+    headers: { "X-CSRF-Token": auth.csrfToken },
+    data: { command, revision, ...extra },
+  });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
+async function selectReviewText(page, marker) {
+  await page.locator(".canvas-editor p").filter({ hasText: marker }).selectText();
+  await expect(page.getByRole("button", { name: "添加指导批注" })).toBeVisible();
+}
+
+async function addGuidance(page, marker, content) {
+  await selectReviewText(page, marker);
+  await page.getByRole("button", { name: "添加指导批注" }).click();
+  const float = page.getByRole("dialog", { name: "批注浮窗" });
+  await float.getByLabel("批注内容").fill(content);
+  await Promise.all([
+    page.waitForResponse((response) => (
+      response.url().includes("/annotations")
+      && response.request().method() === "POST"
+      && response.status() === 201
+    )),
+    float.getByRole("button", { name: "保存意见" }).click(),
+  ]);
+  await expect(float.getByText(content, { exact: true })).toBeVisible();
+  await float.getByRole("button", { name: "关闭批注浮窗" }).click();
+}
+
+async function openCommentPanel(page) {
+  const tab = page.getByRole("button", { name: "指导批注", exact: true });
+  if (await tab.getAttribute("aria-pressed") !== "true") await tab.click();
+  const expand = page.getByRole("button", { name: "展开侧栏", exact: true });
+  if (await expand.count()) await expand.click();
+  const panel = page.locator(".comment-panel");
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+for (const reviewState of ["reviewing", "withdrawn", "returned"]) {
+  test(`管理员作者在${reviewState}审核记录中只能查看私人批注快照`, async ({ page }) => {
+    const request = page.context().request;
+    const marker = `冻结私人批注 ${reviewState} ${Date.now()}`;
+    const privateText = `原始私批注 ${marker}`;
+    const privateReply = `原始私批注回复 ${marker}`;
+    const changedText = `当前私批注修改 ${marker}`;
+    const guidance = `正式审核意见 ${marker}`;
+    await login(page, "admin", "admin123");
+    const created = await createCase(request, marker);
+    const ownerAuth = await session(request);
+    const privateResponse = await request.post(
+      `/api/cases/${created.id}/annotations`,
+      {
+        headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+        data: {
+          quote: marker,
+          section: "正文",
+          content: privateText,
+          source: "manual",
+          revision: created.revision,
+          from: 1,
+          to: marker.length + 1,
+        },
+      },
+    );
+    expect(privateResponse.status()).toBe(201);
+    const privateAnnotation = await privateResponse.json();
+    const replyResponse = await request.post(
+      `/api/cases/${created.id}/annotations/${privateAnnotation.id}/replies`,
+      {
+        headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+        data: { content: privateReply },
+      },
+    );
+    expect(replyResponse.status()).toBe(200);
+
+    const submitted = await submit(request, created.id);
+    const versionId = submitted.version.id;
+    const pending = await (await request.get(`/api/cases/${created.id}/review`)).json();
+    await lifecycle(request, created.id, ownerAuth, "start", pending.revision);
+
+    const reviewThread = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith(`/api/cases/${created.id}/agent/thread`)
+        && url.searchParams.get("versionId") === versionId
+        && url.searchParams.get("mode") === "review";
+    });
+    await page.goto(`/#/admin/review/${created.id}?versionId=${versionId}`);
+    expect((await reviewThread).status()).toBe(200);
+    await page.getByRole("button", { name: "指导批注", exact: true }).click();
+    await addGuidance(page, marker, guidance);
+
+    if (reviewState === "withdrawn") {
+      await page.goto(`/#/workbench/${created.id}`);
+      await page.getByRole("button", { name: "撤回提交", exact: true }).click();
+      await expect(page.locator(".case-status")).toHaveText("草稿");
+    } else if (reviewState === "returned") {
+      const reviewing = await (await request.get(
+        `/api/cases/${created.id}/review?versionId=${versionId}`,
+      )).json();
+      await lifecycle(request, created.id, ownerAuth, "reject", reviewing.revision, {
+        submittedVersionId: versionId,
+        reasonTypes: ["内容需要补充或修改"],
+      });
+      const returned = await (await request.get(
+        `/api/cases/${created.id}/review?versionId=${versionId}`,
+      )).json();
+      expect(returned).toMatchObject({
+        reviewVersionId: versionId,
+        reviewRecordStatus: "returned",
+        availableActions: [],
+      });
+      const reloadedReview = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === `/api/cases/${created.id}/review`
+          && url.searchParams.get("versionId") === versionId
+          && response.request().method() === "GET";
+      });
+      await page.reload();
+      expect((await reloadedReview).status()).toBe(200);
+    }
+
+    const frozenBefore = await (await request.get(
+      `/api/cases/${created.id}/annotations?versionId=${versionId}`,
+    )).json();
+    const frozenPrivate = frozenBefore.find(({ id }) => id === privateAnnotation.id);
+    expect(frozenPrivate).toMatchObject({ content: privateText });
+    expect(frozenPrivate.replies.map(({ content }) => content)).toEqual([privateReply]);
+
+    const nonGetCaseRequests = [];
+    page.on("request", (browserRequest) => {
+      const url = new URL(browserRequest.url());
+      if (url.pathname.startsWith(`/api/cases/${created.id}/annotations`)
+          && browserRequest.method() !== "GET") {
+        nonGetCaseRequests.push({ method: browserRequest.method(), path: url.pathname });
+      }
+    });
+
+    const openFrozenReview = async () => {
+      await page.goto(`/#/admin/review/${created.id}?versionId=${versionId}`);
+      const expectedStatus = {
+        reviewing: "审核中",
+        withdrawn: "该版本已被作者撤回",
+        returned: "已退回 · 历史投稿",
+      }[reviewState];
+      await expect(page.locator(".case-status")).toHaveText(expectedStatus);
+      await expect(page.locator(".canvas-editor")).toContainText(marker);
+      const panel = await openCommentPanel(page);
+      const privateCard = panel.locator(
+        `.comment-card[data-annotation-id="${privateAnnotation.id}"]`,
+      );
+      await expect(privateCard.getByText(privateText, { exact: true })).toBeVisible();
+      await expect(privateCard.getByText(privateReply, { exact: true })).toBeVisible();
+      for (const label of [
+        "编辑批注", "删除批注", "回复", "标记解决", "让 AI 修订", "合并并关闭",
+      ]) {
+        await expect(privateCard.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+      }
+      const formalCard = panel.locator(".comment-card").filter({ hasText: guidance });
+      await expect(formalCard.getByText(guidance, { exact: true })).toBeVisible();
+      if (["reviewing", "withdrawn"].includes(reviewState)) {
+        await expect(formalCard.getByRole("button", { name: "编辑批注", exact: true }))
+          .toBeVisible();
+        await expect(formalCard.getByRole("button", { name: "回复", exact: true }))
+          .toBeVisible();
+      }
+      return privateCard;
+    };
+
+    await openFrozenReview();
+    expect(nonGetCaseRequests).toEqual([]);
+
+    if (reviewState !== "reviewing") {
+      await page.goto(`/#/workbench/${created.id}`);
+      const currentPanel = await openCommentPanel(page);
+      const currentCard = currentPanel.locator(
+        `.comment-card[data-annotation-id="${privateAnnotation.id}"]`,
+      );
+      await expect(currentCard.getByRole("button", { name: "编辑批注", exact: true }))
+        .toBeVisible();
+      await currentCard.getByRole("button", { name: "编辑批注", exact: true }).click();
+      await currentCard.getByLabel("编辑批注").fill(changedText);
+      await Promise.all([
+        page.waitForResponse((response) => (
+          response.url().includes(`/annotations/${privateAnnotation.id}`)
+          && response.request().method() === "PATCH"
+          && response.status() === 200
+        )),
+        currentCard.getByRole("button", { name: "保存批注", exact: true }).click(),
+      ]);
+      await expect(currentCard.getByText(changedText, { exact: true })).toBeVisible();
+      const currentAfter = await (await request.get(
+        `/api/cases/${created.id}/annotations`,
+      )).json();
+      expect(currentAfter.find(({ id }) => id === privateAnnotation.id).content).toBe(changedText);
+
+      await openFrozenReview();
+      expect(nonGetCaseRequests.filter(({ method }) => method !== "PATCH")).toEqual([]);
+      expect(nonGetCaseRequests.filter(({ method }) => method === "PATCH")).toHaveLength(1);
+    }
+
+    const frozenAfter = await (await request.get(
+      `/api/cases/${created.id}/annotations?versionId=${versionId}`,
+    )).json();
+    const frozenPrivateAfter = frozenAfter.find(({ id }) => id === privateAnnotation.id);
+    expect(frozenPrivateAfter.content).toBe(privateText);
+    expect(frozenPrivateAfter.replies.map(({ content }) => content)).toEqual([privateReply]);
+    expect(frozenAfter.find(({ content }) => content === guidance)).toBeTruthy();
+  });
+}
+
+test("作者私稿只在作者入口可读，管理员按冻结投稿审核", async ({ page }) => {
+  const request = page.context().request;
+  const marker = `私人边界 ${Date.now()}`;
+  await login(page, "user", "user123");
+  const created = await createCase(request, marker);
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  for (const path of [
+    `/api/cases/${created.id}`,
+    `/api/cases/${created.id}/history`,
+    `/api/cases/${created.id}/attachments`,
+    `/api/cases/${created.id}/export.docx`,
+    `/api/cases/${created.id}/agent/thread`,
+  ]) {
+    expect((await request.get(path)).status()).toBeGreaterThanOrEqual(400);
+  }
+  await page.goto(`/#/admin/review/${created.id}`);
+  await expect(page.locator(".error-state")).toBeVisible();
+
+  await logout(page);
+  await login(page, "user", "user123");
+  const attachmentAuth = await session(request);
+  const ownerCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const attachmentResponse = await request.post(`/api/cases/${created.id}/attachments`, {
+    headers: { "X-CSRF-Token": attachmentAuth.csrfToken },
+    multipart: {
+      accessLevel: "private",
+      revision: String(ownerCase.revision),
+      file: { name: "synthetic-private.txt", mimeType: "text/plain", buffer: Buffer.from(`secret ${marker}`) },
+    },
+  });
+  expect(attachmentResponse.status()).toBe(201);
+  const attachment = await attachmentResponse.json();
+  const currentCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const publicAttachmentResponse = await request.post(`/api/cases/${created.id}/attachments`, {
+    headers: { "X-CSRF-Token": attachmentAuth.csrfToken },
+    multipart: {
+      accessLevel: "public",
+      revision: String(currentCase.revision),
+      file: { name: "synthetic-public.txt", mimeType: "text/plain", buffer: Buffer.from(`public ${marker}`) },
+    },
+  });
+  expect(publicAttachmentResponse.status()).toBe(201);
+  const publicAttachment = await publicAttachmentResponse.json();
+
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.getByRole("button", { name: "提交审核", exact: true }).click();
+  await expect(page.locator(".case-status")).toHaveText("待审");
+  const submittedCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const firstVersionId = submittedCase.submittedVersionId;
+  expect(firstVersionId).toBeTruthy();
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const reviewAgentResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.endsWith(`/api/cases/${created.id}/agent/thread`)
+      && url.searchParams.get("versionId") === firstVersionId
+      && url.searchParams.get("mode") === "review";
+  });
+  await page.goto(`/#/admin/review/${created.id}`);
+  expect((await reviewAgentResponse).status()).toBe(200);
+  await page.getByRole("button", { name: "开始审核", exact: true }).click();
+  await expect(page.locator(".case-status")).toHaveText("审核中");
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  await page.getByRole("button", { name: "附件", exact: true }).click();
+  const attachmentPanel = page.locator(".attachment-panel");
+  await expect(attachmentPanel.getByText("synthetic-private.txt", { exact: true })).toBeVisible();
+  const publicDownload = attachmentPanel.getByRole("link", { name: "下载synthetic-public.txt" });
+  await expect(publicDownload).toBeVisible();
+  const publicDownloadUrl = new URL(await publicDownload.getAttribute("href"), page.url());
+  expect(publicDownloadUrl.searchParams.get("versionId")).toBe(firstVersionId);
+  const publicDownloadResponse = await request.get(publicDownloadUrl.toString());
+  expect(publicDownloadResponse.status()).toBe(200);
+  expect(await publicDownloadResponse.body()).toEqual(Buffer.from(`public ${marker}`));
+  await expect(attachmentPanel.getByRole("link", { name: "下载synthetic-private.txt" })).toHaveCount(0);
+  await expect(attachmentPanel.getByText("仅作者可下载", { exact: false })).toBeVisible();
+  const adminAuth = await session(request);
+  const privateContent = await request.get(
+    `/api/cases/${created.id}/attachments/${attachment.id}/content?versionId=${firstVersionId}`,
+  );
+  expect(privateContent.status()).toBe(403);
+  await page.getByRole("button", { name: "指导批注", exact: true }).click();
+  await addGuidance(page, marker, "请补充教学目标");
+  await addGuidance(page, marker, "请核实资料来源");
+
+  await logout(page);
+  await login(page, "user", "user123");
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.getByRole("button", { name: "撤回提交", exact: true }).click();
+  await expect(page.locator(".case-status")).toHaveText("草稿");
+  await page.getByLabel("案例标题").fill(`${marker} 修改稿`);
+  await expect(page.locator(".save-state")).toHaveText("已保存", { timeout: 10000 });
+  const savedDraft = await (await request.get(`/api/cases/${created.id}`)).json();
+  expect(savedDraft.title).toBe(`${marker} 修改稿`);
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  await page.goto("/#/admin");
+  const withdrawnRow = page.locator(`article[aria-label="已撤回：${marker}"]`);
+  await expect(withdrawnRow).toBeVisible();
+  await withdrawnRow.getByRole("link", { name: "查看记录" }).click();
+  await expect(page).toHaveURL(new RegExp(`versionId=${firstVersionId}`));
+  await expect(page.getByText("该版本已被作者撤回").first()).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  await expect(page.locator(".canvas-editor")).not.toContainText(`${marker} 修改稿`);
+  await expect(page.getByRole("button", { name: "通过发布", exact: true })).toHaveCount(0);
+  expect((await request.get(`/api/cases/${created.id}`)).status()).toBe(404);
+  expect((await request.get(`/api/cases/${created.id}/review`)).status()).toBe(404);
+  const frozen = await (await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  )).json();
+  expect(frozen.reviewRecordStatus).toBe("withdrawn");
+  const replay = await request.post(`/api/cases/${created.id}/lifecycle`, {
+    headers: { "X-CSRF-Token": adminAuth.csrfToken },
+    data: {
+      command: "approve",
+      revision: frozen.revision,
+      submittedVersionId: firstVersionId,
+    },
+  });
+  expect(replay.status()).toBeGreaterThanOrEqual(400);
+  expect(replay.status()).toBeLessThan(500);
+  await page.getByRole("button", { name: "指导批注", exact: true }).click();
+  await expect(page.getByText("请补充教学目标", { exact: true })).toBeVisible();
+  await expect(page.getByText("请核实资料来源", { exact: true })).toBeVisible();
+  await addGuidance(page, marker, "撤回后继续补充这一点");
+
+  await logout(page);
+  await login(page, "user", "user123");
+  await page.goto(`/#/workbench/${created.id}`);
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await page.getByRole("button", { name: "查看 v1 指导批注" }).click();
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  await expect(page.getByText("请补充教学目标", { exact: true })).toBeVisible();
+  await expect(page.getByText("请核实资料来源", { exact: true })).toBeVisible();
+  await expect(page.getByText("撤回后继续补充这一点", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "返回当前教师稿", exact: true }).click();
+  await page.getByRole("button", { name: "提交审核", exact: true }).click();
+  await expect(page.locator(".case-status")).toHaveText("待审");
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  await page.goto("/#/admin");
+  const pendingRow = page.locator(`article[aria-label="待审核：${marker} 修改稿"]`);
+  await expect(pendingRow).toBeVisible();
+  await expect(page.locator(`article[aria-label="已撤回：${marker}"]`)).toBeVisible();
+  await pendingRow.getByRole("link", { name: "审核" }).click();
+  await expect(page.getByLabel("案例标题")).toHaveValue(`${marker} 修改稿`);
+  expect((await request.get(`/api/cases/${created.id}/review`)).status()).toBe(200);
+  const currentVersionId = (await (await request.get(`/api/cases/${created.id}/review`)).json()).submittedVersionId;
+  expect(currentVersionId).not.toBe(firstVersionId);
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await page.getByRole("button", { name: "查看 v1 指导批注" }).click();
+  await expect(page.getByText("该版本已被作者撤回").first()).toBeVisible();
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  expect((await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  )).status()).toBe(200);
+
+  const currentAdminAuth = await session(request);
+  const currentReview = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  const startCurrent = await request.post(`/api/cases/${created.id}/lifecycle`, {
+    headers: { "X-CSRF-Token": currentAdminAuth.csrfToken },
+    data: { command: "start", revision: currentReview.revision },
+  });
+  expect(startCurrent.status()).toBe(200);
+  const approveCurrent = await request.post(`/api/cases/${created.id}/lifecycle`, {
+    headers: { "X-CSRF-Token": currentAdminAuth.csrfToken },
+    data: {
+      command: "approve",
+      revision: (await startCurrent.json()).case.revision,
+      submittedVersionId: currentVersionId,
+    },
+  });
+  expect(approveCurrent.status()).toBe(200);
+  await page.goto("/#/admin");
+  await expect(page.locator(`article[aria-label="已发布：${marker} 修改稿"]`)).toBeVisible();
+  await expect(page.locator(`article[aria-label="已发布：${marker}"]`)).toHaveCount(0);
+  await expect(page.locator(`article[aria-label="已撤回：${marker}"]`)).toBeVisible();
+  const publicConversation = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === `/api/cases/${created.id}/agent/thread`
+      && url.searchParams.get("versionId") === currentVersionId
+      && !url.searchParams.has("mode");
+  });
+  await page.goto(`/#/cases/${created.id}`);
+  expect((await publicConversation).status()).toBe(200);
+});
+
+test("作者重开并重投后，管理员仍可只读已发布旧版审核记录", async ({ page }) => {
+  const request = page.context().request;
+  const marker = `已发布旧审核记录 ${Date.now()}`;
+  await login(page, "user", "user123");
+  const created = await createCase(request, marker);
+  const firstSubmission = await submit(request, created.id);
+  const firstVersionId = firstSubmission.version.id;
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const reviewerAuth = await session(request);
+  let review = await request.get(`/api/cases/${created.id}/review`);
+  const started = await lifecycle(
+    request, created.id, reviewerAuth, "start", (await review.json()).revision,
+  );
+  const guidance = `v1 审核意见 ${marker}`;
+  const annotation = await request.post(
+    `/api/cases/${created.id}/annotations?versionId=${firstVersionId}`,
+    {
+      headers: { "X-CSRF-Token": reviewerAuth.csrfToken },
+      data: {
+        quote: marker,
+        section: "正文",
+        content: guidance,
+        source: "admin",
+        revision: started.case.revision,
+        from: 1,
+        to: marker.length + 1,
+      },
+    },
+  );
+  expect(annotation.status()).toBe(201);
+  review = await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  );
+  await lifecycle(
+    request,
+    created.id,
+    reviewerAuth,
+    "approve",
+    (await review.json()).revision,
+    { submittedVersionId: firstVersionId },
+  );
+
+  await logout(page);
+  await login(page, "user", "user123");
+  await page.goto(`/#/workbench/${created.id}`);
+  const publishedOwnerPanel = await openCommentPanel(page);
+  await expect(publishedOwnerPanel.getByText(guidance, { exact: true })).toBeVisible();
+  await expect(publishedOwnerPanel.getByRole("button", { name: "回复", exact: true })).toBeVisible();
+  await expect(publishedOwnerPanel.getByRole("button", { name: "标记解决", exact: true })).toBeVisible();
+  const ownerAuth = await session(request);
+  const ownerCase = await (await request.get(`/api/cases/${created.id}`)).json();
+  const reopened = await lifecycle(
+    request, created.id, ownerAuth, "reopen", ownerCase.revision,
+  );
+  const draftTitle = `${marker} v2 私稿`;
+  const changed = await request.patch(`/api/cases/${created.id}`, {
+    headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+    data: { title: draftTitle, revision: reopened.case.revision },
+  });
+  expect(changed.status()).toBe(200);
+  const secondSubmission = await submit(request, created.id);
+  const secondVersionId = secondSubmission.version.id;
+  expect(secondVersionId).not.toBe(firstVersionId);
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const oldReviewResponse = await request.get(
+    `/api/cases/${created.id}/review?versionId=${firstVersionId}`,
+  );
+  expect(oldReviewResponse.status()).toBe(200);
+  const oldReview = await oldReviewResponse.json();
+  expect(oldReview).toMatchObject({
+    reviewVersionId: firstVersionId,
+    reviewRecordStatus: "published",
+    isCurrentReviewVersion: false,
+    availableActions: [],
+  });
+  expect(oldReview.title).toBe(marker);
+  expect(JSON.stringify(oldReview)).not.toContain(draftTitle);
+  expect((await (await request.get(`/api/cases/${created.id}/public`)).json()).title)
+    .toBe(marker);
+
+  await page.goto(`/#/admin/review/${created.id}?versionId=${firstVersionId}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  await expect(page.locator(".case-status")).toHaveText("已发布 · 历史审核");
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  await expect(page.locator(".canvas-editor")).not.toContainText(draftTitle);
+  for (const label of ["开始审核", "通过发布", "退回修改"]) {
+    await expect(page.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+  const oldReviewPanel = await openCommentPanel(page);
+  await expect(oldReviewPanel.getByText(guidance, { exact: true })).toBeVisible();
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决", "让 AI 修订", "合并并关闭"]) {
+    await expect(oldReviewPanel.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+
+  const currentReview = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  expect(currentReview.submittedVersionId).toBe(secondVersionId);
+  await page.goto(`/#/admin/review/${created.id}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(draftTitle);
+  await expect(page.locator(".case-status")).toHaveText("待审 · 旧版公开中");
+});
+
+test("作者手动历史版本显示冻结私批注并禁用修改", async ({ page }) => {
+  const request = page.context().request;
+  const marker = `手动历史批注 ${Date.now()}`;
+  const annotationText = `冻结私批注 ${marker}`;
+  const replyText = `冻结回复 ${marker}`;
+  const liveText = `当前私批注 ${marker}`;
+  await login(page, "user", "user123");
+  const created = await createCase(request, marker);
+  const ownerAuth = await session(request);
+  const annotationResponse = await request.post(
+    `/api/cases/${created.id}/annotations`,
+    {
+      headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+      data: {
+        quote: marker,
+        section: "正文",
+        content: annotationText,
+        source: "manual",
+        revision: created.revision,
+        from: 1,
+        to: marker.length + 1,
+      },
+    },
+  );
+  expect(annotationResponse.status()).toBe(201);
+  const annotation = await annotationResponse.json();
+  const replyResponse = await request.post(
+    `/api/cases/${created.id}/annotations/${annotation.id}/replies`,
+    {
+      headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+      data: { content: replyText },
+    },
+  );
+  expect(replyResponse.status()).toBe(200);
+  const current = await (await request.get(`/api/cases/${created.id}`)).json();
+  const versionResponse = await request.post(`/api/cases/${created.id}/versions`, {
+    headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+    data: { title: `${marker} v1`, revision: current.revision },
+  });
+  expect(versionResponse.status()).toBe(200);
+  const version = await versionResponse.json();
+
+  const liveEdit = await request.patch(
+    `/api/cases/${created.id}/annotations/${annotation.id}`,
+    {
+      headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+      data: { content: liveText },
+    },
+  );
+  expect(liveEdit.status()).toBe(200);
+
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  let commentPanel = await openCommentPanel(page);
+  const liveCard = commentPanel.locator(".comment-card").filter({ hasText: liveText });
+  await expect(liveCard.getByRole("button", { name: "编辑批注", exact: true })).toBeVisible();
+  await expect(liveCard.getByRole("button", { name: "回复", exact: true })).toBeVisible();
+  await expect(liveCard.getByRole("button", { name: "标记解决", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await page.getByRole("button", { name: /查看历史版本/ }).click();
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  commentPanel = await openCommentPanel(page);
+  await expect(commentPanel.getByText(annotationText, { exact: true })).toBeVisible();
+  await expect(commentPanel.getByText(replyText, { exact: true })).toBeVisible();
+  await expect(commentPanel.getByText(liveText, { exact: true })).toHaveCount(0);
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决"]) {
+    await expect(commentPanel.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+
+  const frozenAnnotations = await (await request.get(
+    `/api/cases/${created.id}/annotations?versionId=${version.id}`,
+  )).json();
+  const liveAnnotations = await (await request.get(
+    `/api/cases/${created.id}/annotations`,
+  )).json();
+  expect(frozenAnnotations[0].content).toBe(annotationText);
+  expect(frozenAnnotations[0].replies[0].content).toBe(replyText);
+  expect(liveAnnotations.find(({ id }) => id === annotation.id).content).toBe(liveText);
+
+  await page.getByRole("button", { name: "返回当前教师稿", exact: true }).click();
+  commentPanel = await openCommentPanel(page);
+  await expect(commentPanel.getByText(liveText, { exact: true })).toBeVisible();
+  await expect(commentPanel.getByRole("button", { name: "编辑批注", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "提交审核", exact: true }).click();
+  await expect(page.locator(".case-status")).toHaveText("待审");
+  commentPanel = await openCommentPanel(page);
+  const pendingPrivateCard = commentPanel.locator(".comment-card").filter({ hasText: liveText });
+  await expect(pendingPrivateCard.getByText(replyText, { exact: true })).toBeVisible();
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决"]) {
+    await expect(pendingPrivateCard.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+  const afterPending = await (await request.get(`/api/cases/${created.id}/annotations`)).json();
+  expect(afterPending.find(({ id }) => id === annotation.id).content).toBe(liveText);
+});
+
+for (const author of [
+  { role: "user", password: "user123" },
+  { role: "admin", password: "admin123" },
+]) {
+  test(`${author.role} 作者审核中与退回后可讨论正式意见，管理员已退回记录只读`, async ({ page }) => {
+  const request = page.context().request;
+  const marker = `审核反馈讨论 ${Date.now()}`;
+  const privateNote = `冻结私批注 ${marker}`;
+  const guidance = `正式审核意见 ${marker}`;
+  const reviewingReply = `审核中作者回复 ${marker}`;
+  const returnedReply = `退回后作者回复 ${marker}`;
+  await login(page, author.role, author.password);
+  const created = await createCase(request, marker);
+  const ownerAuth = await session(request);
+  const privateAnnotationResponse = await request.post(
+    `/api/cases/${created.id}/annotations`,
+    {
+      headers: { "X-CSRF-Token": ownerAuth.csrfToken },
+      data: {
+        quote: marker,
+        section: "正文",
+        content: privateNote,
+        source: "manual",
+        revision: created.revision,
+        from: 1,
+        to: marker.length + 1,
+      },
+    },
+  );
+  expect(privateAnnotationResponse.status()).toBe(201);
+  const privateAnnotation = await privateAnnotationResponse.json();
+  const submitted = await submit(request, created.id);
+  const versionId = submitted.version.id;
+
+  if (author.role === "user") {
+    await logout(page);
+    await login(page, "admin", "admin123");
+  }
+  const reviewerAuth = await session(request);
+  const pending = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  await lifecycle(request, created.id, reviewerAuth, "start", pending.revision);
+  await page.goto(`/#/admin/review/${created.id}`);
+  await addGuidance(page, marker, guidance);
+  const guidanceRows = await (await request.get(
+    `/api/cases/${created.id}/annotations?versionId=${versionId}`,
+  )).json();
+  const annotationId = guidanceRows.find(({ content }) => content === guidance).id;
+
+  if (author.role === "user") {
+    await logout(page);
+    await login(page, "user", "user123");
+  }
+  await page.goto(`/#/workbench/${created.id}`);
+  await expect(page.locator(".case-status")).toHaveText("审核中");
+  await expect(page.getByLabel("案例标题")).toHaveValue(marker);
+  const reviewingPanel = await openCommentPanel(page);
+  const reviewingCard = reviewingPanel.locator(`.comment-card[data-annotation-id="${annotationId}"]`);
+  await expect(reviewingCard.getByText(guidance, { exact: true })).toBeVisible();
+  await expect(reviewingCard.getByRole("button", { name: "回复", exact: true })).toBeVisible();
+  await expect(reviewingCard.getByRole("button", { name: "标记解决", exact: true })).toBeVisible();
+  if (author.role === "admin") {
+    await reviewingCard.getByRole("button", { name: "编辑批注", exact: true }).click();
+    await reviewingCard.getByLabel("编辑批注").fill(`${guidance} 已编辑`);
+    await reviewingCard.getByRole("button", { name: "保存批注", exact: true }).click();
+    await expect(reviewingCard.getByText(`${guidance} 已编辑`, { exact: true })).toBeVisible();
+  } else {
+    await expect(reviewingCard.getByRole("button", { name: "编辑批注", exact: true })).toHaveCount(0);
+  }
+  await reviewingCard.getByRole("button", { name: "回复", exact: true }).click();
+  await reviewingCard.getByLabel("回复批注").fill(reviewingReply);
+  await reviewingCard.locator(".comment-thread-actions")
+    .getByRole("button", { name: "回复", exact: true }).click();
+  await expect(reviewingCard.getByText(reviewingReply, { exact: true })).toBeVisible();
+
+  await logout(page);
+  await login(page, "admin", "admin123");
+  const returnedReviewerAuth = await session(request);
+  const review = await (await request.get(`/api/cases/${created.id}/review`)).json();
+  const rejected = await lifecycle(request, created.id, returnedReviewerAuth, "reject", review.revision, {
+    submittedVersionId: versionId,
+    reasonTypes: ["内容需要补充或修改"],
+  });
+  expect(rejected.case.workflowStatus).toBe("draft");
+  await page.goto(`/#/admin/review/${created.id}?versionId=${versionId}`);
+  await expect(page.locator(".case-status")).toHaveText("已退回 · 历史投稿");
+  const returnedAdminPanel = await openCommentPanel(page);
+  const returnedAdminCard = returnedAdminPanel.locator(`.comment-card[data-annotation-id="${annotationId}"]`);
+  await expect(returnedAdminCard.getByText(reviewingReply, { exact: true })).toBeVisible();
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决"]) {
+    await expect(returnedAdminCard.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+
+  if (author.role === "user") {
+    await logout(page);
+    await login(page, "user", "user123");
+  }
+  await page.goto(`/#/workbench/${created.id}`);
+  const currentDraftPanel = await openCommentPanel(page);
+  await expect(currentDraftPanel.getByText(privateNote, { exact: true })).toBeVisible();
+  await expect(currentDraftPanel.getByText(guidance, { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await page.getByRole("button", { name: /查看 v1/ }).click();
+  await expect(page.locator(".canvas-editor")).toContainText(marker);
+  const returnedOwnerPanel = await openCommentPanel(page);
+  const returnedPrivateCard = returnedOwnerPanel.locator(
+    `.comment-card[data-annotation-id="${privateAnnotation.id}"]`,
+  );
+  await expect(returnedPrivateCard.getByText(privateNote, { exact: true })).toBeVisible();
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决"]) {
+    await expect(returnedPrivateCard.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  }
+  const returnedOwnerCard = returnedOwnerPanel.locator(`.comment-card[data-annotation-id="${annotationId}"]`);
+  await expect(returnedOwnerCard.getByText(reviewingReply, { exact: true })).toBeVisible();
+  await expect(returnedOwnerCard.getByRole("button", { name: "编辑批注", exact: true })).toHaveCount(0);
+  await expect(returnedOwnerCard.getByRole("button", { name: "删除批注", exact: true })).toHaveCount(0);
+  await expect(returnedOwnerCard.getByRole("button", { name: "让 AI 修订", exact: true })).toHaveCount(0);
+  await expect(returnedOwnerCard.getByRole("button", { name: "合并并关闭", exact: true })).toHaveCount(0);
+  await expect(returnedOwnerCard.getByRole("button", { name: "回复", exact: true })).toBeVisible();
+  await expect(returnedOwnerCard.getByRole("button", { name: "标记解决", exact: true })).toBeVisible();
+  await returnedOwnerCard.getByRole("button", { name: "回复", exact: true }).click();
+  await returnedOwnerCard.getByLabel("回复批注").fill(returnedReply);
+  await returnedOwnerCard.locator(".comment-thread-actions")
+    .getByRole("button", { name: "回复", exact: true }).click();
+  await expect(returnedOwnerCard.getByText(returnedReply, { exact: true })).toBeVisible();
+  await returnedOwnerCard.getByRole("button", { name: "标记解决", exact: true }).click();
+  await expect(returnedOwnerCard).toHaveCount(0);
+  const finalAnnotations = await (await request.get(
+    `/api/cases/${created.id}/annotations?versionId=${versionId}`,
+  )).json();
+  const finalAnnotation = finalAnnotations.find(({ id }) => id === annotationId);
+  expect(finalAnnotation.status).toBe("resolved");
+  expect(finalAnnotation.replies.map(({ content }) => content))
+    .toEqual([reviewingReply, returnedReply]);
+  });
+}

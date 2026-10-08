@@ -149,6 +149,77 @@ it("审核批注列表允许作者和管理员讨论，但私人批注不泄露�
   expect(privatePanel.find('[aria-label="回复批注"]').exists()).toBe(false);
 });
 
+it("审核入口只读展示私人快照但保留正式反馈操作", async () => {
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  const privateSnapshot = {
+    ...annotation,
+    createdBy: admin.id,
+    versionId: null,
+    replies: [{ id: "private-reply", content: "冻结回复" }],
+    revisions: [{ id: "private-revision", replacement: "候选修订", status: "pending" }],
+  };
+  const reviewFeedback = {
+    ...annotation,
+    id: "review-feedback",
+    createdBy: admin.id,
+    source: "admin",
+    versionId: "cv-1",
+  };
+  api.listAnnotations.mockResolvedValue([privateSnapshot, reviewFeedback]);
+  const wrapper = await mountPanel({
+    caseRecord: { ...caseRecord, ownerId: admin.id },
+    user: admin,
+    versionId: "cv-1",
+    review: true,
+    reviewRecordStatus: "withdrawn",
+    readOnly: false,
+  });
+
+  const privateCard = wrapper.get(`[data-annotation-id="${privateSnapshot.id}"]`);
+  expect(privateCard.text()).toContain("原始批注");
+  expect(privateCard.text()).toContain("冻结回复");
+  expect(privateCard.text()).toContain("候选修订");
+  for (const label of ["编辑批注", "删除批注", "回复", "标记解决", "让 AI 修订", "合并并关闭"]) {
+    expect(privateCard.find(`[aria-label="${label}"]`).exists()).toBe(false);
+    expect(privateCard.findAll("button").some((button) => button.text().includes(label))).toBe(false);
+  }
+
+  const feedbackCard = wrapper.get(`[data-annotation-id="${reviewFeedback.id}"]`);
+  expect(feedbackCard.find('[aria-label="编辑批注"]').exists()).toBe(true);
+  expect(feedbackCard.find(".comment-reply-toggle").exists()).toBe(true);
+});
+
+it("当前私批注进入冻结审核上下文后隐藏旧编辑表单", async () => {
+  const admin = { id: "admin-1", role: "admin", csrfToken: "csrf" };
+  const currentPrivate = { ...annotation, createdBy: admin.id };
+  api.listAnnotations.mockResolvedValue([currentPrivate]);
+  const wrapper = await mountPanel({
+    caseRecord: { ...caseRecord, ownerId: admin.id },
+    user: admin,
+  });
+
+  await wrapper.get('[aria-label="编辑批注"]').trigger("click");
+  await wrapper.get('[aria-label="编辑批注"]').setValue("准备保存的当前私批注");
+  expect(wrapper.get('[aria-label="编辑批注"]').element.tagName).toBe("TEXTAREA");
+  const staleSaveButton = wrapper.findAll("button")
+    .find((button) => button.text().includes("保存批注"));
+
+  await wrapper.setProps({
+    caseRecord: { ...caseRecord, ownerId: admin.id, workflowStatus: "reviewing" },
+    versionId: "cv-1",
+    review: true,
+    reviewRecordStatus: "reviewing",
+    readOnly: false,
+  });
+  await flushPromises();
+
+  expect(wrapper.find('[aria-label="编辑批注"]').exists()).toBe(false);
+  expect(wrapper.find('[aria-label="保存批注"]').exists()).toBe(false);
+  await staleSaveButton.trigger("click");
+  await flushPromises();
+  expect(api.updateAnnotation).not.toHaveBeenCalled();
+});
+
 it("已解决历史的陈旧锚点不显示待处理警告", async () => {
   api.listAnnotations.mockResolvedValue([{ ...resolvedDiscussion, anchorState: "changed" }]);
   const wrapper = await mountPanel();
@@ -191,13 +262,23 @@ it("默认列表隐藏已解决批注并从正文标记事件剔除且不提供�
   expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation]);
 });
 
-it("草稿继续显示前轮审核批注及正文标记", async () => {
+it("当前私稿不混入固定投稿版本的历史批注", async () => {
   const review = { ...annotation, id: "review-note", source: "admin", versionId: "cv-1", content: "前轮审核意见" };
   api.listAnnotations.mockResolvedValue([annotation, review]);
   const wrapper = await mountPanel();
-  expect(wrapper.findAll(".comment-card")).toHaveLength(2);
+  expect(wrapper.findAll(".comment-card")).toHaveLength(1);
+  expect(wrapper.text()).not.toContain("前轮审核意见");
+  expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation]);
+});
+
+it("打开固定投稿版本时展示该版本的审核批注", async () => {
+  const review = { ...annotation, id: "review-note", source: "admin", versionId: "cv-1", content: "前轮审核意见" };
+  api.listAnnotations.mockResolvedValue([review]);
+  const wrapper = await mountPanel({ versionId: "cv-1" });
+  expect(api.listAnnotations).toHaveBeenCalledWith(caseRecord.id, "cv-1");
+  expect(wrapper.findAll(".comment-card")).toHaveLength(1);
   expect(wrapper.text()).toContain("前轮审核意见");
-  expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([annotation, review]);
+  expect(wrapper.emitted("annotations").at(-1)[0]).toEqual([review]);
 });
 
 it("直接关闭后从默认列表与正文标记移除", async () => {

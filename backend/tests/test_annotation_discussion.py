@@ -323,7 +323,7 @@ def test_private_annotation_all_public_entries_are_isolated(client: TestClient) 
     annotation = create_annotation(client, author, case, "目标正文")
     _ensure_second_teacher(client)
     _assert_private_annotation_denied(
-        client, case, annotation, login(client, "admin", "admin123"), 200
+        client, case, annotation, login(client, "admin", "admin123"), 404
     )
     _assert_private_annotation_denied(
         client, case, annotation, login(client, "second", "second-pass"), 403

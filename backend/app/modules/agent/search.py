@@ -11,7 +11,9 @@ from pydantic_ai.tools import RunContext
 
 from app.modules.agent.deps import ToolDeps
 from app.modules.agent.models import SourceRef
+from app.modules.case_sources.service import source_case_content_available
 from app.modules.cases.service import CaseError
+from app.modules.materials.service import can_read_material
 from app.modules.search.meilisearch import SearchUnavailable
 from app.modules.search.models import FilterValue, SearchRequest, TagExpression
 from app.modules.search.service import CatalogSearch, search_catalog
@@ -70,7 +72,23 @@ def source_ref(item: dict) -> SourceRef:
     return SourceRef(
         kind=kind, id=str(item["id"]), title=str(item.get("title") or ""),
         snippet=_snippet(item),
+        version=f"v{item['versionNumber']}" if kind == "case" and item.get("versionNumber") else None,
+        version_id=item.get("versionId") if kind == "case" else None,
+        source_case_id=str(item["id"]) if kind == "case" and item.get("versionId") else None,
     )
+
+
+def _search_item_readable(database, user: dict, item: dict) -> bool:
+    if item.get("kind") == "material":
+        material = database.materials.find_one(
+            {"id": item.get("id"), "status": "active"}
+        )
+        return bool(material and can_read_material(material, user))
+    if item.get("kind") == "case":
+        return source_case_content_available(
+            database, item.get("id"), user, item.get("versionId")
+        )
+    return True
 
 
 def _record_hits(deps: ToolDeps, refs: list[SourceRef]) -> None:
@@ -95,7 +113,11 @@ def search_platform(deps: ToolDeps, params: CorpusSearchParams) -> CorpusResult:
         response = search_catalog(deps.database, deps.catalog, deps.catalog_state, search)
     except SearchUnavailable as error:
         raise RuntimeError("检索服务暂不可用") from error
-    return CorpusResult([source_ref(item) for item in response["items"]], response)
+    readable = [
+        item for item in response["items"]
+        if _search_item_readable(deps.database, deps.user, item)
+    ]
+    return CorpusResult([source_ref(item) for item in readable], response)
 
 
 def tag_catalog(database) -> list[dict]:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
+
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.database import Database
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, WriteConcernError
 
 from app.core.config import Settings
 
@@ -276,6 +278,18 @@ def _initialize_agent(database: Database) -> None:
 
 
 def initialize(database: Database) -> None:
+    # 副本集选举会中断不可重试的索引写入，初始化索引和守卫 upsert 可幂等重跑。
+    for attempt in range(5):
+        try:
+            _initialize_once(database)
+            return
+        except WriteConcernError as error:
+            if error.code != 11602 or attempt == 4:
+                raise
+            time.sleep(min(2**attempt, 8))
+
+
+def _initialize_once(database: Database) -> None:
     database.client.admin.command("ping")
     _initialize_auth(database)
     _initialize_cases(database)

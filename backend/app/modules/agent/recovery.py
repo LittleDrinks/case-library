@@ -56,7 +56,7 @@ class RunStream:
 
 
 async def run_stream(repository, run_id, case_id, user, access_check, project,
-                     expected_owner=None):
+                     expected_owner=None, version_id=None):
     index = 0
     while True:
         if access_check and not access_check():
@@ -70,7 +70,7 @@ async def run_stream(repository, run_id, case_id, user, access_check, project,
         row = repository.database.agent_run_streams.find_one(
             {"_id": run_id}, {"chunks": {"$slice": [index, 200]}, "sources": 1},
         ) or {}
-        gate = SourceGate(repository.database, user, case_id)
+        gate = SourceGate(repository.database, user, case_id, version_id)
         readable = all(gate.readable(ref) for ref in row.get("sources", []))
         chunks = row.get("chunks", [])
         if readable:
@@ -101,9 +101,15 @@ def _run_terminal_chunks(repository, run, project):
         yield TERMINAL_CHUNKS[f"run.{run['status']}"]
 
 
-def live_response(repository, run_id, case_id, user, access_check, project, expected_owner=None):
+def live_response(
+    repository, run_id, case_id, user, access_check, project,
+    expected_owner=None, version_id=None,
+):
     return StreamingResponse(
-        run_stream(repository, run_id, case_id, user, access_check, project, expected_owner),
+        run_stream(
+            repository, run_id, case_id, user, access_check, project,
+            expected_owner, version_id,
+        ),
         media_type="text/event-stream", headers=sse_headers(),
     )
 

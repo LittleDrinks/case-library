@@ -393,7 +393,7 @@ def _complete(context: RunContext) -> None:
         _terminal(context, context.repository.fail_run)
         return
     artifacts = context.deps.proposed_artifacts if context.deps else []
-    reader = context.reader and bool(context.case.get("versionId"))
+    reader = context.reader and not context.review and bool(context.case.get("versionId"))
     if not context.repository.complete_run(
         context.run.id, _assistant_message(context, context.result), context.worker_id,
         resources=_run_resources(_assistant_parts_of(context), context.bounds,

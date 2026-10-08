@@ -53,7 +53,19 @@ async function loadHistory() {
   error.value = "";
   try {
     const history = await api.caseHistory(props.caseRecord.id);
-    versions.value = history.versions;
+    const statuses = new Map(history.events
+      .filter((event) => ["reject", "withdraw"].includes(event.action))
+      .map((event) => [event.versionId, event.action === "withdraw" ? "withdrawn" : "returned"]));
+    versions.value = history.versions.map((version) => {
+      const reviewRecordStatus = statuses.get(version.id) || (version.review ? "returned" : "");
+      return {
+        ...version,
+        reviewRecordStatus,
+        review: version.review || (reviewRecordStatus === "withdrawn"
+          ? { status: "withdrawn", versionNumber: version.number }
+          : null),
+      };
+    });
   } catch (caught) {
     error.value = caught.message || "版本历史加载失败";
   } finally {
@@ -116,7 +128,7 @@ onMounted(loadHistory);
           <div class="version-meta">
             <small>{{ time(version.createdAt) }}</small>
             <b>{{ versionLabel(version) }}</b>
-            <button v-if="version.review" class="version-review-status" type="button" :aria-label="`查看 v${version.number} 审核意见`" @click="emit('open-review', version)">已退回 · 查看意见</button>
+            <button v-if="version.review" class="version-review-status" type="button" :aria-label="`查看 v${version.number} ${version.reviewRecordStatus === 'withdrawn' ? '指导批注' : '审核意见'}`" @click="emit('open-review', version)">{{ version.reviewRecordStatus === "withdrawn" ? "已撤回 · 查看指导" : "已退回 · 查看意见" }}</button>
           </div>
           <div class="version-actions">
           <button type="button" :aria-label="`查看历史版本 ${versionLabel(version)}`" @click="emit('open-version', version)">

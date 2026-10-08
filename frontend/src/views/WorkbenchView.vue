@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from "vue";
 import { AlertTriangle, ArrowLeft, Check, Copy, LoaderCircle, MessageSquare, PanelLeft, RefreshCw, X } from "@lucide/vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AssistantRail from "../components/AssistantRail.vue";
 import AddSourceToCase from "../components/AddSourceToCase.vue";
+import AnnotationFloat from "../components/AnnotationFloat.vue";
 import CanvasEditor from "../components/CanvasEditor.vue";
 import CaseTagPicker from "../components/CaseTagPicker.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
@@ -22,6 +23,7 @@ import { versionLabel, versionPaperLabel } from "../lib/version.js";
 import { session } from "../session.js";
 
 const route = useRoute();
+const router = useRouter();
 const readerMode = computed(() => route.name === "case-public");
 const activeCaseId = String(route.params.id);
 // 案例级「用于对话」上下文归 provider 所有：按读者版本清理，
@@ -29,7 +31,18 @@ const activeCaseId = String(route.params.id);
 const conversationSources = createConversationSources();
 provide(CONVERSATION_SOURCES_KEY, conversationSources);
 const caseRecord = ref(null);
-const readerVersion = computed(() => readerMode.value ? caseRecord.value?.publishedVersionId || "" : "");
+const readerVersion = computed(() => {
+  if (route.name === "case-review") {
+    return String(route.query?.versionId || caseRecord.value?.reviewVersionId
+      || caseRecord.value?.submittedVersionId || caseRecord.value?.publishedVersionId || "");
+  }
+  if (readerMode.value) return caseRecord.value?.publishedVersionId || "";
+  if (activeVersion.value) return activeVersion.value.id;
+  if (["pending", "reviewing"].includes(caseRecord.value?.workflowStatus)) {
+    return caseRecord.value?.submittedVersionId || "";
+  }
+  return "";
+});
 const title = ref("");
 const titleInput = ref(null);
 const document = ref(normalizeDocument());
@@ -102,8 +115,17 @@ const historicalVersion = computed(() => Boolean(activeVersion.value));
 const assistantReadOnly = computed(() => readerMode.value || historicalVersion.value
   || reviewMode.value || workflowStatus.value !== "draft");
 const outline = computed(() => documentOutline(activeDocument.value));
-watch(readerVersion, () => conversationSources.clear());
+watch(readerVersion, () => {
+  conversationSources.clear();
+  if (caseRecord.value) {
+    void loadAnnotations();
+    void loadSources();
+  }
+});
 const reviewMode = computed(() => route.name === "case-review");
+const conversationVersionId = computed(() => (
+  reviewMode.value || readerMode.value ? readerVersion.value : ""
+));
 const workflowStatus = computed(() => caseRecord.value?.workflowStatus);
 const publicationStatus = computed(() => caseRecord.value?.publicationStatus);
 const isOwner = computed(() => caseRecord.value?.ownerId === session.user?.id);
@@ -123,12 +145,23 @@ const editable = computed(() => (
 const annotatable = computed(() => Boolean(
   !readerMode.value && session.user && onDraftTab.value && (
     (isOwner.value && workflowStatus.value === "draft" && !reviewMode.value)
-    || (reviewMode.value && workflowStatus.value === "reviewing" && session.user.role === "admin")
+    || (reviewMode.value && session.user.role === "admin"
+      && ["reviewing", "withdrawn"].includes(caseRecord.value?.reviewRecordStatus))
   ),
 ));
 const headerBusyAction = computed(() => busyAction.value || (contentMutationBusy.value ? "content" : ""));
 const statusLabel = computed(() => {
   if (readerMode.value) return `发布版本 v${caseRecord.value?.versionNumber || 1} · 只读`;
+  if (reviewMode.value && caseRecord.value?.reviewRecordStatus === "withdrawn") {
+    return "该版本已被作者撤回";
+  }
+  if (reviewMode.value && caseRecord.value?.reviewRecordStatus === "returned") {
+    return "已退回 · 历史投稿";
+  }
+  if (reviewMode.value && !caseRecord.value?.isCurrentReviewVersion
+      && caseRecord.value?.reviewRecordStatus === "published") {
+    return "已发布 · 历史审核";
+  }
   if (publicationStatus.value === "hidden") return "已隐藏";
   const base = ({ draft: "草稿", pending: "待审", reviewing: "审核中", published: "已发布" })[
     workflowStatus.value
@@ -139,7 +172,7 @@ const statusLabel = computed(() => {
   return base;
 });
 const lifecycleActions = computed(() => {
-  if (readerMode.value) return [];
+  if (readerMode.value || (reviewMode.value && !caseRecord.value?.isCurrentReviewVersion)) return [];
   const area = reviewMode.value ? "review" : "author";
   return (caseRecord.value?.availableActions || [])
     .filter((command) => LIFECYCLE_META[command]?.area === area
@@ -147,14 +180,26 @@ const lifecycleActions = computed(() => {
     .map((command) => ({
       command,
       ...LIFECYCLE_META[command],
-      ...(command === "reopen" && reviewMode.value ? { label: "下线编辑" } : {}),
+      ...(command === "reopen" && reviewMode.value
+        ? { label: isOwner.value ? "另开新稿" : "下线编辑" } : {}),
     }));
 });
 const lastReview = computed(() => (
   workflowStatus.value === "draft" ? caseRecord.value?.lastReview : null
 ));
+const annotationReviewStatus = computed(() => {
+  if (reviewMode.value) return caseRecord.value?.reviewRecordStatus || "";
+  const selected = activeVersion.value;
+  if (selected?.reviewRecordStatus) return selected.reviewRecordStatus;
+  if (selected?.review?.status) return selected.review.status;
+  if (selected?.id === caseRecord.value?.publishedVersionId) return "published";
+  if (selected?.id === caseRecord.value?.submittedVersionId) return workflowStatus.value || "";
+  if (lastReview.value?.action === "reject") return "returned";
+  return workflowStatus.value || "";
+});
 const reviewFeedback = computed(() => (
-  activeVersion.value ? activeVersion.value.review : lastReview.value
+  caseRecord.value?.reviewFeedback
+    || (activeVersion.value ? activeVersion.value.review : lastReview.value)
 ));
 const LIFECYCLE_META = {
   submit: { label: "提交审核", primary: true, area: "author" },
@@ -276,9 +321,11 @@ async function loadAnnotations() {
     return;
   }
   try {
-    const rows = await api.listAnnotations(caseId());
+    const rows = await api.listAnnotations(caseId(), readerVersion.value || undefined);
     if (generation !== annotationLoadGeneration) return;
-    applyAnnotations(rows.filter(({ status }) => status !== "resolved"));
+    const visible = !readerVersion.value && isOwner.value && workflowStatus.value === "draft"
+      ? rows.filter((row) => row.versionId == null) : rows;
+    applyAnnotations(visible.filter(({ status }) => status !== "resolved"));
   }
   catch { /* 保留当前批注标记，等待下一次刷新 */ }
 }
@@ -395,9 +442,14 @@ function recoverCrashDraft(value) {
 
 async function fetchCase() {
   const versionId = String(route.query?.versionId || "");
+  if (reviewMode.value) return api.getReviewCase(caseId(), versionId || undefined);
   return readerMode.value
     ? api.getPublicCase(caseId(), versionId || undefined) : api.getCase(caseId());
 }
+
+watch(() => route.query?.versionId, (next, previous) => {
+  if (reviewMode.value && next !== previous && caseRecord.value) void loadCase();
+});
 
 async function loadCase() {
   const initial = !caseRecord.value;
@@ -655,7 +707,14 @@ async function performLifecycle(command, details = {}) {
     if (!await prepareLifecycle(command)) return false;
     const body = lifecycleBody(command, details);
     const result = await api.lifecycleCase(caseId(), body, session.csrfToken);
-    applyCase(result.case);
+    if (reviewMode.value && command === "reopen" && isOwner.value) {
+      await router.replace({ name: "workbench", params: { id: caseId() } });
+      await loadCase();
+    } else if (reviewMode.value) {
+      applyCase(await api.getReviewCase(caseId(), readerVersion.value || undefined));
+    } else {
+      applyCase(result.case);
+    }
     return true;
   } catch (error) {
     showActionNotice(error.message || "操作失败");
@@ -690,7 +749,15 @@ async function prepareContentMutation() {
   return revision.value;
 }
 
-function openVersionTab(version) {
+async function openVersionTab(version) {
+  if (reviewMode.value) {
+    await router.replace({
+      name: "case-review",
+      params: { id: caseId() },
+      query: { ...route.query, versionId: version.id },
+    });
+    return;
+  }
   clearWritingContext();
   if (!openVersionTabs.value.some((tab) => tab.id === version.id)) {
     openVersionTabs.value = [...openVersionTabs.value, version];
@@ -701,8 +768,9 @@ function openVersionTab(version) {
 }
 
 function openReviewVersion(version) {
-  openVersionTab(version);
-  selectHeaderTool("feedback");
+  const panel = version.reviewRecordStatus === "withdrawn"
+    || version.review?.status === "withdrawn" ? "comments" : "feedback";
+  void openVersionTab(version).then(() => selectHeaderTool(panel));
 }
 
 function closeVersionTab(id) {
@@ -714,6 +782,12 @@ function closeVersionTab(id) {
 function selectTab(id) {
   if (id !== activeTabId.value) clearWritingContext();
   activeTabId.value = id;
+  const selected = openVersionTabs.value.find((version) => version.id === id);
+  if (selected?.review) {
+    const panel = selected.reviewRecordStatus === "withdrawn"
+      || selected.review.status === "withdrawn" ? "comments" : "feedback";
+    selectHeaderTool(panel);
+  }
 }
 
 function refreshVersionHistory() {
@@ -799,15 +873,15 @@ async function performOverwrite() {
 
 function startDownload() {
   const link = window.document.createElement("a");
-  const area = readerMode.value ? "/public" : "";
-  const version = readerMode.value && readerVersion.value
+  const area = reviewMode.value ? "/review" : readerMode.value ? "/public" : "";
+  const version = (readerMode.value || reviewMode.value) && readerVersion.value
     ? `?versionId=${encodeURIComponent(readerVersion.value)}` : "";
   link.href = `/api/cases/${encodeURIComponent(caseId())}${area}/export.docx${version}`;
   link.click();
 }
 
 async function exportCase() {
-  if (readerMode.value) { startDownload(); return; }
+  if (readerMode.value || reviewMode.value) { startDownload(); return; }
   clearActionNotice();
   if (!await flushAutosave()) {
     showActionNotice("正文尚未保存，未生成导出文件。");
@@ -943,6 +1017,9 @@ onBeforeUnmount(() => {
             @close="closeVersionTab"
           />
           <template v-if="onDraftTab">
+            <p v-if="reviewMode && caseRecord.reviewRecordStatus === 'withdrawn'" class="withdrawn-review-notice" role="status">
+              该版本已被作者撤回
+            </p>
             <div v-if="editable && submissionTodo.length" class="submission-todo" role="status">
               <b>投稿待办</b><ul><li v-for="item in submissionTodo" :key="item">{{ item }}</li></ul>
             </div>
@@ -974,22 +1051,29 @@ onBeforeUnmount(() => {
                 :document="document"
                 :revision="revision"
                 :editable="editable"
-                :annotatable="false"
-                :annotations="[]"
+                :annotatable="annotatable"
+                :annotations="annotations"
+                :pending-anchor="annotationSelection"
                 :sources="sources"
                 @change="changeDocument"
                 @selection="annotationSelection = $event"
                 @writing-context="updateWritingContext"
                 @ask-ai="selectHeaderTool('ai')"
               />
+              <button
+                v-if="annotatable && annotationSelection"
+                type="button"
+                class="add-guidance-annotation"
+                @click="openDraftFloat"
+              ><MessageSquare :size="15" aria-hidden="true" />{{ reviewMode ? "添加指导批注" : "添加批注" }}</button>
             </article>
           </template>
           <article v-else-if="activeVersion" class="document-paper version-paper">
             <header class="version-paper-head">
               <h2>{{ caseRecord.title }}</h2>
-              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读 · 可复制，恢复后可在当前教师稿继续编辑</p>
+              <p>{{ versionPaperLabel(activeVersion) }} v{{ activeVersion.number }} · 只读</p>
               <div class="version-paper-actions">
-                <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />返回当前教师稿</button>
+                <button type="button" class="version-return" @click="selectTab('draft')"><ArrowLeft :size="14" aria-hidden="true" />{{ reviewMode ? "返回当前投稿" : "返回当前教师稿" }}</button>
                 <button type="button" class="version-copy" @click="copyVersion"><Copy :size="14" aria-hidden="true" />复制正文</button>
                 <button v-if="reviewFeedback" type="button" class="version-review" @click="selectHeaderTool('feedback')"><MessageSquare :size="14" aria-hidden="true" />审核意见</button>
                 <button v-if="overwriteAllowed" type="button" class="version-restore" @click="requestOverwrite"><RefreshCw :size="14" aria-hidden="true" />恢复此版本</button>
@@ -1001,7 +1085,7 @@ onBeforeUnmount(() => {
               :document="activeVersion.document"
               :editable="false"
               :annotatable="false"
-              :annotations="[]"
+              :annotations="annotations"
               :sources="[]"
             />
           </article>
@@ -1010,6 +1094,7 @@ onBeforeUnmount(() => {
           ref="assistantRail"
           :active="activeTool"
           :review="reviewMode"
+          :conversation-version-id="conversationVersionId"
           :feedback="reviewFeedback"
           :version-id="readerVersion"
           :sources="sources"
@@ -1018,6 +1103,7 @@ onBeforeUnmount(() => {
           :open="drawerOpen"
           :case-record="caseRecord"
           :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+          :review-record-status="annotationReviewStatus"
           :historical="historicalVersion"
           :read-only="assistantReadOnly"
           :editable="editable"
@@ -1049,6 +1135,22 @@ onBeforeUnmount(() => {
           @version-deleted="closeVersionTab"
         />
       </div>
+      <AnnotationFloat
+        v-if="(floatDraft || floatThread) && caseRecord"
+        :case-record="caseRecord"
+        :user="session.user ? { ...session.user, csrfToken: session.csrfToken } : null"
+        :draft="floatDraft"
+        :thread="floatThread"
+        :version-id="readerVersion"
+        :before-save="prepareFloatSave"
+        @close="closeAnnotationFloat"
+        @saved="floatSaved"
+        @replied="floatReplied"
+        @resolved="floatResolved"
+        @case-revised="floatRevised"
+        @ask-ai="askFloatAi"
+        @mutation-state="contentMutationBusy = $event"
+      />
     </template>
   </div>
 </template>

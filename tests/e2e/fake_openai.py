@@ -36,7 +36,12 @@ def _pieces(payload: dict) -> tuple[list[str], float]:
     prompt = json.dumps(payload, ensure_ascii=False)
     slow = "慢速测试" in prompt
     cancel = "取消测试" in prompt
-    return list(ANSWER), 1.0 if cancel else 0.12 if slow else 0.005
+    answer = (
+        "STALE_PRIVATE_SEARCH_RESULT_REACHED_PROVIDER"
+        if "forged-stale-private-search-item-" in prompt
+        else ANSWER
+    )
+    return list(answer), 1.0 if cancel else 0.12 if slow else 0.005
 
 
 def _interrupted(payload: dict) -> bool:

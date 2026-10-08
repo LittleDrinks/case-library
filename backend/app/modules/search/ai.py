@@ -29,7 +29,7 @@ async def build_adapter(request: Request, agent) -> VercelAIAdapter:
 def parse_summary_request(adapter: VercelAIAdapter) -> SearchSummaryRequest:
     raw = adapter.run_input.model_dump()
     try:
-        values = {key: raw.get(key) for key in ("query", "items")}
+        values = {key: raw.get(key) for key in ("query", "search")}
         return SearchSummaryRequest.model_validate(values)
     except ValidationError as error:
         raise HTTPException(status_code=422, detail="检索摘要请求无效") from error
@@ -48,10 +48,10 @@ def latest_query(adapter: VercelAIAdapter) -> str:
     return query
 
 
-def summary_instructions(body: SearchSummaryRequest) -> str:
-    items = json.dumps(body.items, ensure_ascii=False, separators=(",", ":"))
+def summary_instructions(body: SearchSummaryRequest, items: list[dict]) -> str:
+    selected = json.dumps(items[:15], ensure_ascii=False, separators=(",", ":"))
     prompt = PROMPT_PATH.read_text(encoding="utf-8").strip()
-    return f"{prompt}\n\n用户问题：{body.query}\n当前可见结果：\n{items}"
+    return f"{prompt}\n\n用户问题：{body.query}\n当前可见结果：\n{selected}"
 
 
 @asynccontextmanager

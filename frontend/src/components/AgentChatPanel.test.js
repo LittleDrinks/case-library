@@ -411,6 +411,20 @@ it("passes the reader version and readonly flag to the source picker", async () 
   expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(false);
 });
 
+it("keeps the author conversation unversioned while reading a submitted version", async () => {
+  const wrapper = mountPanel({
+    versionId: "v-submitted-1",
+    conversationVersionId: "",
+    readOnly: true,
+  });
+  await flushPromises();
+
+  expect(api.agentThread).toHaveBeenCalledWith("case-1");
+  expect(api.agentThread.mock.calls).not.toContainEqual([
+    "case-1", null, "v-submitted-1", "",
+  ]);
+});
+
 const artifactSnapshot = () => ({
   ...structuredClone(snapshot),
   artifacts: [{
@@ -506,7 +520,7 @@ it("keeps conversation context across panel remounts so tab switches never wipe 
 it("reader discussion binds its version, sends the selection and does not send an edit Skill", async () => {
   const fetch = vi.fn().mockResolvedValue(answerResponse());
   vi.stubGlobal("fetch", fetch);
-  const wrapper = mountPanel({ versionId: "version-2", readOnly: true,
+  const wrapper = mountPanel({ versionId: "version-2", conversationVersionId: "version-2", readOnly: true,
     writingContext: { from: 9, to: 13, quote: "案例原文", sameBlock: true },
   });
   await flushPromises();
@@ -522,14 +536,33 @@ it("reader discussion binds its version, sends the selection and does not send a
   ]);
 });
 
-it("review discussion allows Skill selection while preserving review mode and read-only composer", async () => {
-  const wrapper = mountPanel({ review: true });
+it("review discussion binds its frozen version and sends Skill context in read-only mode", async () => {
+  const fetch = vi.fn().mockResolvedValue(answerResponse());
+  vi.stubGlobal("fetch", fetch);
+  const wrapper = mountPanel({
+    review: true,
+    versionId: "version-2",
+    conversationVersionId: "version-2",
+  });
   await flushPromises();
-  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "", "review");
+  expect(api.agentThread).toHaveBeenCalledWith("case-1", null, "version-2", "review");
   expect(wrapper.findComponent({ name: "AgentComposer" }).props("readOnly")).toBe(true);
   expect(wrapper.find('[data-testid="skill-picker-toggle"]').exists()).toBe(true);
   expect(api.listSkills).toHaveBeenCalled();
   expect(wrapper.findComponent({ name: "AgentComposer" }).props("review")).toBe(true);
+
+  const popover = await openSkillPopover(wrapper);
+  expect(popover.textContent).toContain("思政案例生成（v1）");
+  popover.querySelector('[data-testid="skill-option"]').click();
+  await wrapper.get('[aria-label="向 AI 提问"]').setValue("按审核规则核查");
+  await wrapper.get('[aria-label="发送"]').trigger("click");
+  await flushPromises();
+
+  const parts = JSON.parse(fetch.mock.calls[0][1].body).messages.at(-1).parts;
+  expect(parts).toEqual([
+    { type: "text", text: "按审核规则核查" },
+    { type: "data-skill", data: { skillId: "skill-pub" } },
+  ]);
 });
 
 it("inserts a published skill into the pending message and sends it once", async () => {

@@ -6,7 +6,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.core.dependencies import get_database, get_settings
-from app.modules.auth.dependencies import optional_user, require_csrf, require_user
+from app.modules.auth.dependencies import optional_user, require_admin, require_csrf, require_user
 from app.modules.cases.lifecycle import execute_lifecycle, get_history
 from app.modules.cases.models import (
     CaseCreate,
@@ -14,10 +14,16 @@ from app.modules.cases.models import (
     LifecycleCommand,
     ManualVersionCreate,
 )
-from app.modules.cases.published import PublishedCaseReader, find_version, version_readable
+from app.modules.cases.published import (
+    PublishedCaseReader,
+    admin_frozen_version,
+    find_version,
+    version_readable,
+)
 from app.modules.cases.service import (
     CaseError,
     create_case,
+    get_review_case,
     get_case,
     get_public_case,
     list_cases,
@@ -70,6 +76,16 @@ def detail(
     return get_case(database, case_id, user)
 
 
+@router.get("/{case_id}/review")
+def review_detail(
+    case_id: str,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    user: dict = Depends(require_admin),
+):
+    return get_review_case(database, case_id, user, version_id)
+
+
 @router.get("/{case_id}/public")
 def public_detail(
     case_id: str,
@@ -79,7 +95,7 @@ def public_detail(
 ):
     if not version_id:
         return get_public_case(database, case_id)
-    case = _reader_case(database, case_id, user)
+    case = _reader_case(database, case_id, user, version_id)
     return PublishedCaseReader(database).read_public_version(case, version_id)
 
 
@@ -92,7 +108,7 @@ def sources(
     settings=Depends(get_settings),
     user: dict | None = Depends(optional_user),
 ):
-    case = _reader_case(database, case_id, user)
+    case = _reader_case(database, case_id, user, version_id)
     record = _sources_record(database, case, version_id or None, user)
     entries = ordered_entries(database, record, user, _origin(request, settings))
     return {"entries": entries}
@@ -123,6 +139,24 @@ def export_docx(
     record = _internal_record(database, case, user) or _published_record(
         database, case_id
     )[1]
+    entries = ordered_entries(database, record, user, _origin(request, settings))
+    return _docx_response(record, entries, case_id, _origin(request, settings))
+
+
+@router.get("/{case_id}/review/export.docx")
+def export_review_docx(
+    case_id: str,
+    request: Request,
+    version_id: Annotated[str | None, Query(alias="versionId")] = None,
+    database=Depends(get_database),
+    settings=Depends(get_settings),
+    user: dict = Depends(require_admin),
+):
+    case = _reader_case(database, case_id, user, version_id)
+    version_id = version_id or case.get("submittedVersionId") or case.get("publishedVersionId")
+    record = admin_frozen_version(database, case, user, version_id)
+    if not record:
+        raise CaseError(404, "投稿不存在")
     entries = ordered_entries(database, record, user, _origin(request, settings))
     return _docx_response(record, entries, case_id, _origin(request, settings))
 
@@ -201,12 +235,14 @@ def delete_version(
     return delete_history_version(database, case_id, version_id, user)
 
 
-def _reader_case(database, case_id: str, user: dict | None) -> dict:
+def _reader_case(database, case_id: str, user: dict | None, version_id: str | None = None) -> dict:
     case = database.cases.find_one({"id": case_id})
-    internal = bool(
-        user and (user["role"] == "admin" or (case or {}).get("ownerId") == user["id"])
-    )
-    if not case or (case["publicationStatus"] != "public" and not internal):
+    if not case:
+        raise CaseError(404, "案例不存在")
+    internal = bool(user and case.get("ownerId") == user["id"])
+    frozen_id = version_id or case.get("submittedVersionId") or case.get("publishedVersionId")
+    frozen = admin_frozen_version(database, case, user, frozen_id)
+    if case["publicationStatus"] != "public" and not internal and not frozen:
         raise CaseError(404, "案例不存在")
     return case
 
@@ -217,9 +253,7 @@ def _internal_record(database, case: dict, user: dict | None) -> dict | None:
 
 
 def _internal_reader(case: dict, user: dict | None) -> bool:
-    return bool(
-        user and (user["role"] == "admin" or case["ownerId"] == user["id"])
-    ) and case["publicationStatus"] != "public"
+    return bool(user and case["ownerId"] == user["id"])
 
 
 def _published_record(
@@ -236,6 +270,13 @@ def _published_record(
 
 
 def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
+    if not version_id and _internal_reader(case, user):
+        return case
+    if user and user.get("role") == "admin":
+        selected = version_id or case.get("submittedVersionId") or case.get("publishedVersionId")
+        frozen = admin_frozen_version(database, case, user, selected)
+        if frozen:
+            return frozen
     if version_id:
         return _version_record(database, case, version_id, user)
     return _internal_record(database, case, user) or _published_record(
@@ -244,6 +285,9 @@ def _sources_record(database, case: dict, version_id: str | None, user) -> dict:
 
 
 def _version_record(database, case: dict, version_id: str, user) -> dict:
+    frozen = admin_frozen_version(database, case, user, version_id)
+    if frozen:
+        return frozen
     internal = _internal_reader(case, user)
     found = find_version(database, case, version_id, internal)
     if not found or not version_readable(database, case, version_id, found, internal):

@@ -3,6 +3,12 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
+from app.modules.materials.service import campus_verified
+
+
+def test_admin_role_does_not_grant_campus_material_access() -> None:
+    assert campus_verified({"role": "admin", "campus_verified": False}) is False
+    assert campus_verified({"role": "admin", "campus_verified": True}) is True
 
 
 def _login(client: TestClient, username: str, password: str) -> dict:
@@ -89,7 +95,7 @@ def test_private_material_is_hidden_from_other_users(client: TestClient) -> None
     assert response.status_code == 404
 
 
-def test_private_material_is_available_to_creator_and_admin(client: TestClient) -> None:
+def test_private_material_is_available_only_to_its_creator(client: TestClient) -> None:
     content = b"creator-private"
     material_id, admin = _approved_material(client, "creator.txt", content, "private")
     database = client.app.state.database
@@ -97,7 +103,10 @@ def test_private_material_is_available_to_creator_and_admin(client: TestClient) 
         {"id": material_id}, {"$set": {"createdBy": "u-user-demo"}}
     )
 
-    assert client.get(f"/api/materials/{material_id}/content").content == content
+    assert client.get(f"/api/materials/{material_id}/content").status_code == 404
+    _logout(client, admin)
+    admin = _login(client, "admin", "admin123")
+    assert client.get(f"/api/materials/{material_id}/content").status_code == 404
     _logout(client, admin)
     _login(client, "user", "user123")
     assert client.get(f"/api/materials/{material_id}/content").content == content

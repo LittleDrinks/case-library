@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Mapping, Union
 
 from app.modules.search.models import TagExpression, TagLeaf
+from app.modules.search.projection import PROJECTION_VERSION
 
 Kind = Literal["all", "case", "knowledge", "material"]
 Role = Literal["anonymous", "user", "admin"]
@@ -285,8 +286,6 @@ def _mount_clause(request: CatalogRequest, kind: str) -> str:
 
 
 def _allowed(principal: Principal) -> str:
-    if principal.role == "admin":
-        return ""
     if principal.role == "anonymous":
         return 'accessLevel = "public"'
     levels = '["public", "campus"]' if principal.verified else '["public"]'
@@ -299,22 +298,15 @@ def _own_private(principal: Principal) -> str:
     )
 
 
-def _denied(principal: Principal) -> str:
-    if principal.role == "admin":
+def _restricted_material_filter(principal: Principal) -> str:
+    if principal.verified:
         return NEVER
-    if principal.role == "anonymous":
-        return 'accessLevel IN ["campus", "private"]'
-    denied = _and('accessLevel = "private"', f"createdBy != {_quote(principal.user_id)}")
-    if not principal.verified:
-        denied = _or('accessLevel = "campus"', denied)
-    return denied
+    return 'accessLevel = "campus"'
 
 
 def _case_access(principal: Principal) -> str:
     if principal.role == "anonymous":
         return 'docClass = "case-public"'
-    if principal.role == "admin":
-        return 'docClass = "case-private"'
     own = _and('docClass = "case-private"', f"createdBy = {_quote(principal.user_id)}")
     if not principal.verified:
         public = _and(
@@ -376,7 +368,7 @@ def _restricted_branch(request: CatalogRequest, skipped: str = "") -> str:
         return NEVER
     return _and(
         'kind = "material"',
-        _denied(request.principal),
+        _restricted_material_filter(request.principal),
         'docClass = "material-restricted"',
         "publicReferenceCount > 0",
         business,
@@ -442,7 +434,7 @@ def _restricted_count_plan(request: CatalogRequest, index_uid: str) -> _Plan:
     if business != NEVER:
         denied = _and(
             'docClass = "material-restricted"',
-            _denied(request.principal),
+            _restricted_material_filter(request.principal),
             "publicReferenceCount > 0",
             business,
             _excluded(request, "material"),
@@ -660,6 +652,7 @@ class MeilisearchCatalog:
             status = self._reader.health(index_uid)
             valid = status.generation == expected_generation
             valid = valid and status.index_epoch == expected_epoch
+            valid = valid and status.projection_version == PROJECTION_VERSION
             if not status.available or status.primary_key != "catalogId" or not valid:
                 raise ValueError("invalid stable catalog")
         except Exception as error:

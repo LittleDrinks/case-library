@@ -48,6 +48,52 @@ def find_version(database: Database, case: dict, version_id: str, internal: bool
     return database.case_snapshots.find_one(query)
 
 
+def admin_frozen_version(
+    database, case: dict, user: dict | None, version_id: str | None
+) -> dict | None:
+    record, _status = admin_review_record(database, case, user, version_id)
+    return record
+
+
+def admin_review_record(
+    database, case: dict, user: dict | None, version_id: str | None, session=None
+) -> tuple[dict | None, str | None]:
+    if not user or user.get("role") != "admin" or not version_id:
+        return None, None
+    if (
+        case.get("workflowStatus") in {"pending", "reviewing"}
+        and case.get("submittedVersionId") == version_id
+    ):
+        status = case["workflowStatus"]
+    elif (
+        case.get("workflowStatus") == "published"
+        and case.get("publishedVersionId") == version_id
+    ):
+        status = "published"
+    else:
+        event = database.lifecycle_events.find_one(
+            {
+                "caseId": case["id"],
+                "versionId": version_id,
+                "action": {"$in": ["approve", "reject", "withdraw"]},
+            },
+            {"action": 1},
+            **({"session": session} if session is not None else {}),
+        )
+        status = {
+            "approve": "published",
+            "reject": "returned",
+            "withdraw": "withdrawn",
+        }.get((event or {}).get("action"))
+    if not status:
+        return None, None
+    version = database.case_versions.find_one(
+        {"id": version_id, "caseId": case["id"], "kind": "submission"},
+        **({"session": session} if session is not None else {}),
+    )
+    return (version, status) if version else (None, None)
+
+
 def version_readable(
     database: Database, case: dict, version_id: str, version: dict | None,
     internal: bool, session=None,

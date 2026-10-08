@@ -145,6 +145,18 @@ def _submit_status(task) -> int:
     return _transition_status(opener, csrf, case["id"], "submit", case["revision"])
 
 
+def _save_status(task) -> int:
+    (opener, csrf), case = task
+    status, _body = request(
+        opener,
+        "PATCH",
+        f"/api/cases/{case['id']}",
+        {"title": "并发保存的新标题", "revision": case["revision"]},
+        csrf,
+    )
+    return status
+
+
 def _concurrent_submit_statuses(case: dict, sessions: list[tuple]) -> list[int]:
     tasks = [(session, case) for session in sessions]
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -307,6 +319,36 @@ def test_concurrent_submit_returns_one_conflict_instead_of_server_error() -> Non
     assert statuses == [200, 409]
     history = request(first, "GET", f"/api/cases/{case['id']}/history")[1]
     assert len(history["versions"]) == len(history["events"]) == 1
+
+
+def test_concurrent_save_and_submit_freeze_the_committed_revision() -> None:
+    owner, csrf = login("user", "user123")
+    second_session = login("user", "user123")
+    case = create_case(owner, csrf, f"save-submit-race-{uuid.uuid4().hex}")
+    sessions = [(owner, csrf), second_session]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        save = pool.submit(_save_status, (sessions[0], case))
+        submit = pool.submit(_submit_status, (sessions[1], case))
+        statuses = sorted([save.result(), submit.result()])
+
+    assert statuses == [200, 409]
+    current = request(owner, "GET", f"/api/cases/{case['id']}")[1]
+    if current["workflowStatus"] == "draft":
+        submitted = submit_case(owner, csrf, current)
+    else:
+        submitted = {
+            "version": request(owner, "GET", f"/api/cases/{case['id']}/history")[1][
+                "versions"
+            ][0]
+        }
+    persisted = request(
+        owner,
+        "GET",
+        f"/api/cases/{case['id']}/history",
+    )[1]["versions"][0]
+    assert persisted["id"] == submitted["version"]["id"]
+    assert persisted["title"] == current["title"]
+    assert submitted["version"]["title"] == persisted["title"]
 
 
 def test_non_owner_cannot_probe_case_revision_through_lifecycle() -> None:
