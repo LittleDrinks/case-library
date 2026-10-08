@@ -23,6 +23,7 @@ services:
       - ./frontend/playwright.real-ai.config.js:/app/playwright.real-ai.config.js:ro
       - ./frontend/tests/e2e/real-ai-account-flow.spec.js:/app/tests/e2e/real-ai-account-flow.spec.js:ro
       - ./frontend/tests/e2e/real-ai-safe-reporter.js:/app/tests/e2e/real-ai-safe-reporter.js:ro
+      - ./frontend/tests/e2e/agent-panel.js:/app/tests/e2e/agent-panel.js:ro
       - type: bind
         source: ${REAL_AI_ARTIFACTS_DIR:?Provided by the runner}
         target: /app/test-results

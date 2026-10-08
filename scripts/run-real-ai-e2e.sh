@@ -317,10 +317,12 @@ unset provider_base_url
 test_spec_source="$(realpath "$project_dir/frontend/tests/e2e/real-ai-account-flow.spec.js")"
 test_config_source="$(realpath "$project_dir/frontend/playwright.real-ai.config.js")"
 test_reporter_source="$(realpath "$project_dir/frontend/tests/e2e/real-ai-safe-reporter.js")"
+test_panel_source="$(realpath "$project_dir/frontend/tests/e2e/agent-panel.js")"
 cleanup_script_source="$(realpath "$project_dir/scripts/clear_real_ai_e2e.py")"
 require_runtime_mount e2e "$test_spec_source" "/app/tests/e2e/real-ai-account-flow.spec.js" \
   && require_runtime_mount e2e "$test_config_source" "/app/playwright.real-ai.config.js" \
   && require_runtime_mount e2e "$test_reporter_source" "/app/tests/e2e/real-ai-safe-reporter.js" \
+  && require_runtime_mount e2e "$test_panel_source" "/app/tests/e2e/agent-panel.js" \
   && require_runtime_writable_mount e2e "$artifacts_dir" "/app/test-results" \
   && require_runtime_mount backendTest "$cleanup_script_source" "/app/scripts/clear_real_ai_e2e.py" \
   || fail "real AI E2E failed: mounted test source does not match this runner" 4
@@ -331,6 +333,7 @@ host_test_source_hash="$(python3 "$project_dir/scripts/hash_real_ai_tree.py" \
   "$project_dir" frontend/playwright.real-ai.config.js \
   frontend/tests/e2e/real-ai-account-flow.spec.js \
   frontend/tests/e2e/real-ai-safe-reporter.js \
+  frontend/tests/e2e/agent-panel.js \
   scripts/clear_real_ai_e2e.py 2>/dev/null)" \
   || fail "real AI E2E failed: test source hash is unavailable" 4
 test "$host_app_source_hash" = "$app_source_hash" \
