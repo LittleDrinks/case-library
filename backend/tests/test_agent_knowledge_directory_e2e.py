@@ -170,22 +170,25 @@ def _three_turn_title_model(title: str) -> FunctionModel:
 
 
 def _three_turn_range_model(title: str, material_id: str, range_target: dict,
-                            body_marker: str) -> FunctionModel:
+                            body_marker: str, call_prefix: str = "three-turn-body") -> FunctionModel:
     async def stream(messages, _info):
-        if not _has_tool_call_id(messages, "three-turn-body-search"):
+        search_call = f"{call_prefix}-search"
+        read_call = f"{call_prefix}-read"
+        artifact_call = f"{call_prefix}-artifact"
+        if not _has_tool_call_id(messages, search_call):
             yield _tool_delta(
                 "search_corpus", {"query": title, "kind": "material"},
-                "three-turn-body-search",
+                search_call,
             )
             return
-        if not _has_tool_call_id(messages, "three-turn-body-read"):
+        if not _has_tool_call_id(messages, read_call):
             yield _tool_delta(
                 "read_source",
                 {"source_type": "material", "source_id": material_id},
-                "three-turn-body-read",
+                read_call,
             )
             return
-        if not _has_tool_call_id(messages, "three-turn-range-artifact"):
+        if not _has_tool_call_id(messages, artifact_call):
             yield _tool_delta(
                 "propose_revision",
                 {
@@ -194,7 +197,7 @@ def _three_turn_range_model(title: str, material_id: str, range_target: dict,
                     "replacement": "撤销后不得应用的范围修订",
                     "reason": "合成范围候选理由",
                 },
-                "three-turn-range-artifact",
+                artifact_call,
             )
             return
         yield f"第二轮实际读取正文：{body_marker}。"
@@ -202,22 +205,171 @@ def _three_turn_range_model(title: str, material_id: str, range_target: dict,
     return FunctionModel(stream_function=stream)
 
 
-def _three_turn_document_model(title: str, material_id: str) -> FunctionModel:
+def _pause_next_completion(monkeypatch):
+    from app.modules.agent.repository import AgentRepository
+
+    entered = Event()
+    resume = Event()
+    paused_run_ids = []
+    complete_run = AgentRepository.complete_run
+
+    def pause_before_transaction(repository, run_id, *args, **kwargs):
+        if not paused_run_ids:
+            paused_run_ids.append(run_id)
+            entered.set()
+            if not resume.wait(30):
+                raise TimeoutError("完成事务测试未收到恢复信号")
+        return complete_run(repository, run_id, *args, **kwargs)
+
+    monkeypatch.setattr(AgentRepository, "complete_run", pause_before_transaction)
+    return entered, resume, paused_run_ids
+
+
+def _pause_before_source_completion_fence(monkeypatch):
+    from app.modules.agent.repository import AgentRepository
+
+    entered = Event()
+    resume = Event()
+    attempts = []
+    source_completion_allowed = AgentRepository._source_completion_allowed
+
+    def pause_before_fence(repository, run, *args, **kwargs):
+        attempts.append(run.id)
+        if len(attempts) == 1:
+            entered.set()
+            if not resume.wait(30):
+                raise TimeoutError("完成事务围栏测试未收到恢复信号")
+        return source_completion_allowed(repository, run, *args, **kwargs)
+
+    monkeypatch.setattr(
+        AgentRepository, "_source_completion_allowed", pause_before_fence
+    )
+    return entered, resume, attempts
+
+
+def _assert_completion_rechecks_revocation(
+    applicant, admin, database, auth, admin_auth, case_id, thread_id,
+    material_id, title, range_target, body_marker, monkeypatch, *,
+    pause_inside_transaction=False, propose_document=False,
+) -> None:
+    application = applicant.post(
+        "/api/auth/campus-access/applications",
+        headers={"X-CSRF-Token": auth["csrfToken"]},
+        json={
+            "applicantName": "合成完成边界申请人",
+            "studentNumber": f"SYN-360-COMPLETE-{uuid.uuid4().hex[:10]}",
+        },
+    )
+    assert application.status_code == 201, application.text
+    approved = admin.post(
+        f"/api/admin/campus-access-applications/{application.json()['id']}/decision",
+        headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+        json={"decision": "approved", "reason": "合成完成边界人工批准"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    if propose_document:
+        created = applicant.post(
+            "/api/cases",
+            headers={"X-CSRF-Token": auth["csrfToken"]},
+            json={
+                "title": "合成完成事务围栏空稿",
+                "document": {"type": "doc", "content": []},
+            },
+        )
+        assert created.status_code == 200, created.text
+        case_id = created.json()["id"]
+        thread = applicant.get(f"/api/cases/{case_id}/agent/thread")
+        assert thread.status_code == 200, thread.text
+        thread_id = thread.json()["id"]
+
+    case_before = database.cases.find_one({"id": case_id})
+    ai_versions_before = database.case_versions.count_documents(
+        {"caseId": case_id, "kind": "ai"}
+    )
+    writes_before = database.agent_writes.count_documents({"caseId": case_id})
+    artifacts_before = database.agent_artifacts.count_documents({"caseId": case_id})
+    if pause_inside_transaction:
+        entered, resume, run_ids = _pause_before_source_completion_fence(monkeypatch)
+    else:
+        entered, resume, run_ids = _pause_next_completion(monkeypatch)
+    body = _stream_body("读取校内资料并生成正文候选", f"completion-race-{uuid.uuid4().hex}")
+    call_prefix = f"completion-race-{uuid.uuid4().hex}"
+    model = (
+        _three_turn_document_model(title, material_id, call_prefix=call_prefix)
+        if propose_document
+        else _three_turn_range_model(
+            title, material_id, range_target, body_marker,
+            call_prefix=call_prefix,
+        )
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(
+            _post_stream, applicant, auth, case_id, thread_id, body, model,
+        )
+        try:
+            assert entered.wait(30), "生产 Run 未到达完成事务边界"
+            if pause_inside_transaction:
+                assert database.agent_runs.find_one({"id": run_ids[0]})[
+                    "status"
+                ] == "active"
+            revoked = admin.post(
+                f"/api/admin/campus-access-applications/{application.json()['id']}/revoke",
+                headers={"X-CSRF-Token": admin_auth["csrfToken"]},
+                json={"reason": "合成完成前撤销资格"},
+            )
+            assert revoked.status_code == 200, revoked.text
+            assert revoked.json()["status"] == "revoked"
+            assert database.users.find_one({"id": auth["user"]["id"]})[
+                "campus_verified"
+            ] is False
+        finally:
+            resume.set()
+        response = pending.result(timeout=60)
+
+    assert response.status_code == 200, response.text
+    assert run_ids
+    assert len(set(run_ids)) == 1
+    run_id = run_ids[0]
+    if pause_inside_transaction:
+        assert len(run_ids) >= 2, "Mongo 完成事务没有在账号围栏冲突后重试"
+    run = database.agent_runs.find_one({"id": run_id})
+    assert run["status"] == "cancelled"
+    assert database.agent_messages.count_documents({
+        "runId": run_id, "role": "assistant",
+    }) == 0
+    assert database.agent_artifacts.count_documents({"runId": run_id}) == 0
+    assert database.agent_artifacts.count_documents({"caseId": case_id}) == artifacts_before
+    assert database.case_versions.count_documents(
+        {"caseId": case_id, "kind": "ai"}
+    ) == ai_versions_before
+    assert database.agent_writes.count_documents({"caseId": case_id}) == writes_before
+    assert database.cases.find_one({"id": case_id})["revision"] == case_before["revision"]
+    assert database.cases.find_one({"id": case_id})["document"] == case_before["document"]
+
+
+def _three_turn_document_model(
+    title: str, material_id: str, call_prefix: str = "three-turn-document",
+) -> FunctionModel:
     async def stream(messages, _info):
-        if not _has_tool_call_id(messages, "three-turn-document-search"):
+        search_call = f"{call_prefix}-search"
+        read_call = f"{call_prefix}-read"
+        artifact_call = f"{call_prefix}-artifact"
+        if not _has_tool_call_id(messages, search_call):
             yield _tool_delta(
                 "search_corpus", {"query": title, "kind": "material"},
-                "three-turn-document-search",
+                search_call,
             )
             return
-        if not _has_tool_call_id(messages, "three-turn-document-read"):
+        if not _has_tool_call_id(messages, read_call):
             yield _tool_delta(
                 "read_source",
                 {"source_type": "material", "source_id": material_id},
-                "three-turn-document-read",
+                read_call,
             )
             return
-        if not _has_tool_call_id(messages, "three-turn-document-artifact"):
+        if not _has_tool_call_id(messages, artifact_call):
             yield _tool_delta(
                 "propose_document",
                 {
@@ -227,7 +379,7 @@ def _three_turn_document_model(title: str, material_id: str) -> FunctionModel:
                     }],
                     "reason": "合成整篇候选理由",
                 },
-                "three-turn-document-artifact",
+                artifact_call,
             )
             return
         yield "已创建整篇候选。"
@@ -704,7 +856,7 @@ def test_real_case_search_http_and_agent_use_current_campus_grant(tmp_path) -> N
     "OBJECT_STORE_SECRET_KEY_FILE",
 )
 def test_real_three_turn_run_revocation_rechecks_meili_minio_and_http_history(
-    tmp_path,
+    tmp_path, monkeypatch,
 ) -> None:
     from tests.test_search_meilisearch_e2e import _meili_client
 
@@ -1143,6 +1295,16 @@ def test_real_three_turn_run_revocation_rechecks_meili_minio_and_http_history(
             assert database.agent_messages.count_documents({
                 "runId": third_run["id"], "role": "assistant",
             }) == 0
+
+            _assert_completion_rechecks_revocation(
+                applicant, admin, database, auth, admin_auth, case_id, thread_id,
+                material_id, title, range_target, body_marker, monkeypatch,
+            )
+            _assert_completion_rechecks_revocation(
+                applicant, admin, database, auth, admin_auth, case_id, thread_id,
+                material_id, title, range_target, body_marker, monkeypatch,
+                pause_inside_transaction=True, propose_document=True,
+            )
 
     finally:
         if blob_written:

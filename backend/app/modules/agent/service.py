@@ -413,6 +413,15 @@ def _complete(context: RunContext) -> None:
         review_case_id=context.case["id"] if context.review else None,
         artifacts=artifacts,
         write_record=context.deps.write_record if context.deps else None,
+        access_user_id=context.deps.user.get("id") if context.deps else None,
+        access_token_version=(
+            context.deps.user.get("token_version") if context.deps else None
+        ),
+        source_case_id=context.case["id"] if context.deps else None,
+        source_version_id=context.deps.version_id if context.deps else None,
+        source_dependencies=(
+            context.deps.source_dependencies() if context.deps else None
+        ),
     ):
         context.lost = True
 

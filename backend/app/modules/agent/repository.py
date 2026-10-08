@@ -15,6 +15,7 @@ from app.modules.agent.models import (
     AgentMessage,
     AgentRun,
     AgentSnapshot,
+    SourceRef,
     AgentThread,
     AgentThreadEvent,
     ArtifactTarget,
@@ -25,6 +26,7 @@ from app.modules.agent.models import (
 from app.modules.cases.lifecycle import WITHDRAWABLE_STATES as REVIEWABLE_STATES
 from app.modules.cases.published import version_readable
 from app.modules.cases.versions import create_ai_version, create_ai_version_from_write
+from app.modules.agent.source_reader import revalidate_sources
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 RUN_OWNER_LEASE_SECONDS = 15
@@ -437,14 +439,19 @@ class AgentRepository:
         review_case_id: str | None = None,
         artifacts: list[AgentArtifact] | None = None,
         write_record: dict | None = None,
+        access_user_id: str | None = None,
+        access_token_version: int | None = None,
+        source_case_id: str | None = None,
+        source_version_id: str | None = None,
+        source_dependencies: list[SourceRef] | None = None,
     ) -> bool:
         return self._complete_tx(run_id, owner_id, lambda: _transaction(
             self.database,
             lambda session: self._complete_run(
                 run_id, assistant, session, owner_id, resources,
-                reader_case_id, reader_version_id, review_case_id,
-                artifacts,
-                write_record,
+                reader_case_id, reader_version_id, review_case_id, artifacts,
+                write_record, access_user_id, access_token_version,
+                source_case_id, source_version_id, source_dependencies,
             ),
         ))
 
@@ -459,7 +466,9 @@ class AgentRepository:
     def _complete_run(self, run_id: str, assistant: AgentMessage, session, owner_id=None,
                       resources=None, reader_case_id=None, reader_version_id=None,
                       review_case_id=None, artifacts=None,
-                      write_record=None) -> bool:
+                      write_record=None, access_user_id=None,
+                      access_token_version=None, source_case_id=None,
+                      source_version_id=None, source_dependencies=None) -> bool:
         run = _run_view(
             self.database.agent_runs.find_one(_active_query(run_id, owner_id), session=session)
         )
@@ -467,6 +476,8 @@ class AgentRepository:
             return False
         if not self._delivery_fences_pass(
             run, reader_case_id, reader_version_id, review_case_id, session,
+            access_user_id, access_token_version, source_case_id,
+            source_version_id, source_dependencies,
         ):
             return self._finish_transaction(
                 run_id, "cancelled", {"error": "运行已取消"}, session, owner_id
@@ -475,9 +486,20 @@ class AgentRepository:
             run, assistant, session, owner_id, resources, artifacts, write_record
         )
 
-    def _delivery_fences_pass(self, run, reader_case_id, reader_version_id,
-                              review_case_id, session) -> bool:
+    def _delivery_fences_pass(
+        self, run, reader_case_id, reader_version_id, review_case_id, session,
+        access_user_id, access_token_version, source_case_id, source_version_id,
+        source_dependencies,
+    ) -> bool:
         """读者可见性与审核围栏（写冲突 + 基线）任一失守即拒绝完成。"""
+        if (
+            (access_user_id is not None or source_dependencies)
+            and not self._source_completion_allowed(
+                run, access_user_id, access_token_version, source_case_id,
+                source_version_id, source_dependencies, session,
+            )
+        ):
+            return False
         if reader_case_id and not self._reader_completion_allowed(
             reader_case_id, reader_version_id, run.id, session
         ):
@@ -493,6 +515,33 @@ class AgentRepository:
         return (
             review_delivery_allowed(self.database, case_id, user_id, session)
             and review_baseline_current(self.database, run_id, session)
+        )
+
+    def _source_completion_allowed(
+        self, run, user_id, token_version, case_id, version_id,
+        dependencies, session,
+    ) -> bool:
+        if not user_id:
+            return False
+        # 与停用、强退和校内资格变更写同一账号文档，建立完成事务围栏。
+        user = self.database.users.find_one_and_update(
+            {
+                "id": user_id,
+                "status": "active",
+                "token_version": token_version,
+            },
+            {"$set": {"_agentSourceCompletionFence": run.id}},
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        if not user:
+            return False
+        if not dependencies:
+            return True
+        if not case_id:
+            return False
+        return revalidate_sources(
+            self.database, user, case_id, dependencies, version_id
         )
 
     def _complete_records(
