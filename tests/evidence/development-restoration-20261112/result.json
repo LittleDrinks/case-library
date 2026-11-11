@@ -1,0 +1,88 @@
+{
+  "date": "2026-11-12",
+  "scope": "Git-backed development restoration and remote container verification",
+  "sourceCommit": "7011920",
+  "tools": {
+    "dockerEngine": "29.1.3",
+    "compose": "2.40.3",
+    "buildx": "0.30.1",
+    "gitLfs": "3.4.1"
+  },
+  "checks": [
+    {
+      "command": "make config",
+      "status": "passed"
+    },
+    {
+      "command": "make up",
+      "status": "passed",
+      "evidence": "frontend HTTP 200, API ready, MongoDB/MinIO/Meilisearch/application healthy"
+    },
+    {
+      "command": "make test",
+      "sourceCommit": "4b8dc02",
+      "status": "passed",
+      "backendPassed": 763,
+      "frontendPassed": 491
+    },
+    {
+      "command": "make e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js",
+      "sourceCommit": "6b7e0ea",
+      "status": "failed",
+      "passed": 8,
+      "failed": 1,
+      "reason": "platform dynamics heading lost its complete accessible name",
+      "screenshot": "homepage-before.png"
+    },
+    {
+      "command": "make e2e-spec SPEC=frontend/tests/e2e/homepage.spec.js",
+      "sourceCommit": "7011920",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "check": "remote Git restoration",
+      "sourceCommit": "6b7e0ea",
+      "status": "passed",
+      "trackedFilesCompared": 676,
+      "mismatches": 0,
+      "penpotSha256": "8a03988e0c1dad8fc97827d6d9f831838c56ad968288512091681003112a66f4"
+    },
+    {
+      "check": "all local branch heads match GitHub",
+      "status": "passed",
+      "branches": 24
+    },
+    {
+      "check": "admin and teacher HTTP login with cookie session persistence",
+      "status": "passed"
+    },
+    {
+      "check": "official Penpot MCP request from remote client",
+      "status": "blocked",
+      "reason": "No connected Penpot instance; browser connection and latest export/import remain unverified"
+    }
+  ],
+  "network": {
+    "dockerHubDirect": "TLS timeout",
+    "dockerDaemon": "proxy configured from host environment, DaoCloud Docker Hub mirror enabled",
+    "playwright": "official image cache transferred with digest verified",
+    "playwrightDigest": "sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
+  },
+  "excluded": [
+    "credentials",
+    "browser login state",
+    "dependency caches",
+    "build output",
+    "runtime logs"
+  ],
+  "pending": [
+    "historical scratch evidence selection",
+    "backup and restore of pre-existing local data volumes",
+    "latest online Penpot export and import verification",
+    "real AI provider configuration and smoke test"
+  ],
+  "issue": "https://github.com/LittleDrinks/case-library/issues/364",
+  "pullRequest": "https://github.com/LittleDrinks/case-library/pull/365"
+}
