@@ -231,6 +231,27 @@ def download_attachment(
     return attachment, store.open(attachment["blobId"])
 
 
+def attachment_content_readable(
+    database: Database,
+    case_id: str,
+    attachment_id: str,
+    user: dict | None,
+    version_id: str | None,
+    blob_id: str,
+) -> bool:
+    try:
+        case = _case(database, case_id)
+        _require_reader(database, case, user, version_id)
+        rows = _download_rows(database, case, user, version_id)
+        attachment = next((row for row in rows if row["id"] == attachment_id), None)
+        if not attachment or attachment.get("blobId") != blob_id:
+            return False
+        _require_content_access(case, attachment, user)
+    except AttachmentError:
+        return False
+    return True
+
+
 def _download_rows(database, case: dict, user: dict | None, version_id: str | None):
     frozen = admin_frozen_version(database, case, user, version_id)
     if frozen:

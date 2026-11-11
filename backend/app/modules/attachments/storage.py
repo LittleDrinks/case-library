@@ -23,6 +23,23 @@ class BlobStore(Protocol):
     def remove(self, blob_id: str) -> None: ...
 
 
+def access_checked_chunks(chunks, can_read):
+    iterator = iter(chunks)
+    finished = object()
+    try:
+        while can_read():
+            chunk = next(iterator, finished)
+            if chunk is finished:
+                return
+            if not can_read():
+                return
+            yield chunk
+    finally:
+        close = getattr(iterator, "close", None)
+        if close:
+            close()
+
+
 class MinioBlobStore:
     def __init__(self, client: Minio, bucket: str):
         self.client = client

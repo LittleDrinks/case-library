@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.core.dependencies import get_blob_store, get_database
+from app.modules.attachments.storage import access_checked_chunks
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
+from app.modules.auth.sessions import load_current_user
 from app.modules.materials.models import (
     AccessLevel,
     CandidateDecision,
@@ -24,6 +26,7 @@ from app.modules.materials.service import (
     get_material_detail,
     list_candidates,
     material_filename,
+    material_content_available,
 )
 
 router = APIRouter(prefix="/api/admin/material-imports", tags=["materials"])
@@ -103,9 +106,21 @@ def content(
     material, chunks = download_material(database, store, material_id, user)
     if chunks is None:
         return RedirectResponse(material["sourceUrl"])
+
+    def can_read_current_material() -> bool:
+        current_user = load_current_user(database, user)
+        current_material = database.materials.find_one(
+            {"id": material_id, "status": "active"}
+        )
+        return bool(
+            current_material
+            and current_material.get("blobId") == material.get("blobId")
+            and material_content_available(current_material, current_user)
+        )
+
     filename = quote(material_filename(material), safe="")
     return StreamingResponse(
-        chunks,
+        access_checked_chunks(chunks, can_read_current_material),
         media_type=material["mediaType"],
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )

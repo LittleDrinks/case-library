@@ -9,12 +9,15 @@ from fastapi.responses import StreamingResponse
 from app.core.dependencies import get_blob_store, get_database
 from app.modules.attachments.models import AccessLevel, AttachmentView
 from app.modules.attachments.service import (
+    attachment_content_readable,
     create_attachment,
     delete_attachment,
     download_attachment,
     list_attachments,
 )
+from app.modules.attachments.storage import access_checked_chunks
 from app.modules.auth.dependencies import optional_user, require_csrf, require_user
+from app.modules.auth.sessions import load_current_user
 
 router = APIRouter(prefix="/api/cases/{case_id}/attachments", tags=["attachments"])
 
@@ -57,9 +60,21 @@ def content(
     attachment, chunks = download_attachment(
         database, store, case_id, attachment_id, user, version_id
     )
+
+    def can_read_current_attachment() -> bool:
+        current_user = load_current_user(database, user)
+        return attachment_content_readable(
+            database,
+            case_id,
+            attachment_id,
+            current_user,
+            version_id,
+            attachment["blobId"],
+        )
+
     disposition = f"attachment; filename*=UTF-8''{quote(attachment['name'])}"
     return StreamingResponse(
-        chunks,
+        access_checked_chunks(chunks, can_read_current_attachment),
         media_type=attachment["mediaType"],
         headers={"Content-Disposition": disposition},
     )

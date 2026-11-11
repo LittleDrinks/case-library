@@ -148,6 +148,7 @@ class CatalogRequest:
     excluded_keys: tuple[CatalogKey, ...] = ()
     tag_condition: Union[TagExpression, TagLeaf, None] = None
     include_metadata: bool = True
+    candidate_keys: tuple[CatalogKey, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_request_target(self)
@@ -161,6 +162,8 @@ def _validate_request_target(request: CatalogRequest) -> None:
     target = (request.generation, request.index_uid, request.index_epoch)
     if not all(value.strip() for value in target):
         raise ValueError("catalog target is required")
+    if len(request.candidate_keys) > 15:
+        raise ValueError("too many catalog candidate keys")
 
 
 def _validate_request_page(request: CatalogRequest) -> None:
@@ -235,6 +238,15 @@ def _in(field: str, values: tuple[str, ...]) -> str:
 def _excluded(request: CatalogRequest, kind: str) -> str:
     ids = tuple(key.id for key in request.excluded_keys if key.kind == kind)
     return f"id NOT IN [{', '.join(_quote(value) for value in ids)}]" if ids else ""
+
+
+def _candidate_clause(request: CatalogRequest, kind: str) -> str:
+    clauses = [
+        _and(f"kind = {_quote(key.kind)}", f"id = {_quote(key.id)}")
+        for key in request.candidate_keys
+        if key.kind == kind
+    ]
+    return _or(*clauses) if clauses else (NEVER if request.candidate_keys else "")
 
 
 def _cutoff(period: str) -> str:
@@ -331,7 +343,12 @@ def _full_branch(request: CatalogRequest, kind: str, skipped: str = "") -> str:
     if kind == "material":
         level = 'docClass = "material-full"'
     return _and(
-        f"kind = {_quote(kind)}", level, access, business, _excluded(request, kind)
+        f"kind = {_quote(kind)}",
+        level,
+        access,
+        business,
+        _candidate_clause(request, kind),
+        _excluded(request, kind),
     )
 
 
@@ -371,6 +388,7 @@ def _restricted_branch(request: CatalogRequest, skipped: str = "") -> str:
         'docClass = "material-restricted"',
         "publicReferenceCount > 0",
         business,
+        _candidate_clause(request, "material"),
         _excluded(request, "material"),
     )
 

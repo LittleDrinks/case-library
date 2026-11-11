@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.modules.cases.service import CaseError
 from app.modules.materials.service import campus_verified
 from app.modules.search.cursor import CursorState, decode_cursor, encode_cursor, scope_key
 from app.modules.search.meilisearch import (
+    CatalogKey,
     CatalogRequest,
     MountedFilter,
     Principal,
@@ -34,6 +35,8 @@ class _CatalogSearchPlan:
     filters: dict
     mounted_filter: MountedFilter | None
     scope: str
+    candidate_keys: tuple[CatalogKey, ...] = ()
+    include_metadata: bool | None = None
 
     def catalog_request(self, revoked) -> CatalogRequest:
         query = self.search.query
@@ -50,7 +53,12 @@ class _CatalogSearchPlan:
             mounted_filter=self.mounted_filter,
             excluded_keys=revoked,
             tag_condition=query.condition(),
-            include_metadata=self.cursor.page == 1,
+            candidate_keys=self.candidate_keys,
+            include_metadata=(
+                self.cursor.page == 1
+                if self.include_metadata is None
+                else self.include_metadata
+            ),
         )
 
     def cursor_token(self, enabled: bool, page: int, offset: int) -> str | None:
@@ -105,7 +113,7 @@ def _stable_search(state, catalog, plan: _CatalogSearchPlan, before: CatalogSnap
         if after.target != before.target:
             break
         if before.same_version(after):
-            return page
+            return page, after
         before = after
     raise SearchUnavailable("检索目录正在同步")
 
@@ -207,5 +215,44 @@ def _cursor_response(page, plan: _CatalogSearchPlan) -> dict:
 def search_catalog(database, catalog, catalog_state, search: CatalogSearch) -> dict:
     before = catalog_state.read()
     plan = _resolve_search(database, search, before.target)
-    page = _stable_search(catalog_state, catalog, plan, before)
+    page, _snapshot = _stable_search(catalog_state, catalog, plan, before)
     return _response(plan, page)
+
+
+def search_catalog_with_public_scope(
+    database, catalog, catalog_state, search: CatalogSearch,
+) -> tuple[dict, list[dict] | None]:
+    """检查当前结果身份在 basic 权限下是否仍匹配原查询。"""
+    before = catalog_state.read()
+    plan = _resolve_search(database, search, before.target)
+    page, stable_snapshot = _stable_search(
+        catalog_state, catalog, plan, before
+    )
+    results = _response(plan, page)
+    if not search.user or not campus_verified(search.user):
+        return results, None
+
+    public_user = {**search.user, "campus_verified": False}
+    public_search = CatalogSearch(
+        search.query.model_copy(update={"cursor": None}),
+        public_user,
+        search.secret_path,
+    )
+    public_plan = _resolve_search(database, public_search, before.target)
+    candidates = tuple(
+        CatalogKey(item["kind"], item["id"])
+        for item in results["items"][:15]
+        if item["kind"] in {"case", "material"}
+    )
+    public_plan = replace(
+        public_plan,
+        cursor=CursorState(1, 0),
+        candidate_keys=candidates,
+        include_metadata=False,
+    )
+    public_page, public_snapshot = _stable_search(
+        catalog_state, catalog, public_plan, stable_snapshot
+    )
+    if not stable_snapshot.same_version(public_snapshot):
+        raise SearchUnavailable("检索目录正在同步")
+    return results, public_page.items

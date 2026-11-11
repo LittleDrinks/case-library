@@ -88,7 +88,9 @@ def test_search_summary_requeries_instead_of_using_client_items(client, monkeypa
                 False,
             )
 
-    def capture_summary(_adapter, _selection, _settings, instructions, _lease):
+    def capture_summary(
+        _adapter, _selection, _settings, instructions, _lease, **_kwargs
+    ):
         instructions_seen.append(instructions)
 
         async def empty_stream():

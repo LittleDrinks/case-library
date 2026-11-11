@@ -4,6 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import anyio
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
@@ -63,11 +64,33 @@ async def _selected_model(selection, settings):
         yield model
 
 
-async def stream_summary(adapter, selection, settings, instructions, lease):
+async def stream_summary(
+    adapter, selection, settings, instructions, lease, access_check=None,
+):
     try:
         async with _selected_model(selection, settings) as model:
-            async for chunk in adapter.run_stream(model=model, instructions=instructions):
-                yield chunk
+            iterator = adapter.run_stream(
+                model=model, instructions=instructions
+            ).__aiter__()
+            try:
+                while True:
+                    if access_check and not await anyio.to_thread.run_sync(
+                        access_check
+                    ):
+                        return
+                    try:
+                        chunk = await iterator.__anext__()
+                    except StopAsyncIteration:
+                        return
+                    if access_check and not await anyio.to_thread.run_sync(
+                        access_check
+                    ):
+                        return
+                    yield chunk
+            finally:
+                close = getattr(iterator, "aclose", None)
+                if close:
+                    await close()
     finally:
         if lease:
             lease.release()
