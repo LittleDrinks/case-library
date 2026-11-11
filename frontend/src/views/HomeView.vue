@@ -111,7 +111,7 @@ onMounted(loadCases);
       </div>
       <template v-else>
         <section class="home-week" aria-label="平台动态" data-reveal>
-          <h2>近 7 天</h2>
+          <h2 aria-label="平台动态：近 7 天">近 7 天</h2>
           <ul>
             <li><span>新增案例</span><b>{{ newCasesThisWeek }}</b></li>
             <li><span>新增素材</span><b>{{ newMaterialsThisWeek }}</b></li>
