@@ -1,0 +1,21 @@
+{
+  "realPdf": {
+    "width": 830,
+    "height": 1145,
+    "nonblank": true,
+    "pages": 364
+  },
+  "pdfPagination": true,
+  "markdownHasHeadingsAndTable": true,
+  "rename": true,
+  "editMarkdown": true,
+  "editedMarkdownDownload": true,
+  "markdownCompanionImage": true,
+  "newTab": true,
+  "multiFileUpload": true,
+  "reorder": true,
+  "removeAndUndo": true,
+  "managementHiddenInReading": true,
+  "mobileNoOverflow": true,
+  "errors": []
+}

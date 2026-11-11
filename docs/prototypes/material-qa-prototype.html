@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>下一轮体验清单</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f7f5f1;--ink:#292522;--muted:#8d8378;--line:#e7e0d6;--red:#b91d27;--green:#26734e}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 -apple-system,"Microsoft YaHei",sans-serif}button,a,textarea{font:inherit}button,a{cursor:pointer}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid var(--red);outline-offset:3px}header{background:#fff;border-bottom:1px solid var(--line);padding:20px max(24px,calc((100vw - 1240px)/2));display:flex;justify-content:space-between;gap:24px;align-items:center}header strong{font-size:18px}header a{font-size:13px;color:var(--muted);text-decoration:none}main{max-width:1240px;margin:40px auto;padding:0 24px}h1{margin:0 0 8px;font-size:30px;font-weight:600}.lead{margin:0 0 30px;color:var(--muted);font-size:13px}.layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:28px}.steps{display:flex;flex-direction:column;gap:4px}.step{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:1px solid transparent;border-radius:7px;background:none;padding:12px;color:var(--ink)}.step:hover{background:#fff}.step.active{background:#fff;border-color:var(--line)}.number{font-size:12px;color:var(--muted);width:22px}.step span:nth-child(2){flex:1}.step small{font-size:11px;color:var(--muted);white-space:nowrap}.step.passed small{color:var(--green)}.step.adjust small{color:var(--red)}.panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:32px 38px;min-width:0}.eyebrow{font-size:12px;color:var(--muted)}h2{margin:10px 0 20px;font-size:26px;font-weight:600}.task{font-size:17px;margin:0 0 22px}.expect{border-top:1px solid var(--line);padding-top:20px;margin-top:24px}.expect h3{font-size:13px;color:var(--muted);font-weight:500;margin:0 0 10px}.expect ul{padding-left:20px;margin:0}.expect li{margin:7px 0}.launch{display:inline-block;background:var(--red);color:#fff;padding:10px 18px;border-radius:5px;text-decoration:none}.pending{font-size:13px;color:var(--muted)}.question{margin:25px 0 12px;font-size:16px}textarea{display:block;width:100%;min-height:82px;resize:vertical;border:1px solid var(--line);border-radius:5px;padding:12px;background:#fff;line-height:1.6}.feedback{display:flex;gap:10px;margin-top:14px}.feedback button{border:1px solid var(--line);border-radius:5px;background:#fff;padding:8px 18px}.feedback button.selected{border-color:var(--red);color:var(--red)}button:disabled{opacity:.5;cursor:default}.foot{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:22px;margin-top:28px;gap:14px}.foot button{background:none;border:0;color:var(--red);padding:6px}.foot span{font-size:12px;color:var(--muted)}.disclaimer{font-size:12px;color:var(--muted);margin-top:24px}@media(max-width:800px){main{margin:24px auto}.layout{display:block}.steps{flex-direction:row;overflow:auto;margin-bottom:20px}.step{flex-shrink:0;width:auto}.step small{display:none}.panel{padding:24px}.task{font-size:16px}h1{font-size:25px}h2{font-size:23px}}
+</style>
+</head>
+<body>
+<header><strong>下一轮体验清单</strong><a href="archive/next-step-prototype-v4.html" target="_blank" rel="noopener noreferrer">上一版原型 ↗</a></header>
+<main><h1>一次确认一个场景</h1><p class="lead">先体验，再记录通过或需要调整的地方。待制作的场景暂不能验收。</p><div class="layout"><nav class="steps" aria-label="体验清单" id="steps"></nav><section class="panel" id="panel"></section></div><p class="disclaimer">这是独立的原型验收页。资料修改和本页反馈只保留在本次打开期间；刷新会重置。索引、AI、账号与版本功能尚未接入。</p></main>
+<script>
+const checklist=[
+ {title:'打开资料',url:'next-step-prototype.html',task:'点击《马克思主义基本原理》，打开资料。',expect:['资料在约 80% 屏幕大小的浮窗里打开。','默认显示主文件 PDF，右侧列出包内文件。','右上角可以关闭，或在新标签页继续阅读。'],question:'第一眼能否找到正文和文件？窗口大小、阅读区域哪里需要调整？'},
+ {title:'切换包内文件',url:'next-step-prototype.html?open=book23',task:'在右侧依次打开阅读提纲和封面，再切回 PDF。',expect:['PDF 保留纸张和翻页；Markdown 是连续正文；图片直接预览。','切换文件不改变主文件，也不要求设置 AI 用途。','新标签页打开的是当前正在看的文件。'],question:'这三种内容放在一个素材包里，切换是否自然？'},
+ {title:'管理文件与主文件',url:'next-step-prototype.html?open=book23',task:'进入“管理”，将阅读提纲设为主文件；完成后关闭浮窗，再打开资料。',expect:['阅读时只出现一个“管理”入口；编辑操作收在文件菜单里。','只允许一个主文件，再次打开时默认显示它。','可添加多份文件、重命名、调整顺序、移除并撤销。','不出现 human／agent、原文／解读等逐文件设置开关。'],question:'主文件的设置入口够清楚吗？还缺哪一个文件管理动作？'},
+ {title:'选入当前案例',url:'next-step-prototype.html?case=draft',task:'从案例资料区点击“选择资料”，打开素材，再点击“加入当前案例”。',expect:['加入的是整条素材，不需要勾选章节或文件。','成功后立即回到案例资料区，只有一条素材记录。','点击这条记录，可以继续阅读包内所有文件。'],question:'从案例出发选材再返回，是否符合你实际创作的顺序？'},
+ {title:'全包索引与处理状态',task:'待制作：上传 PDF、Markdown、图片，观察每份文件的处理结果。',expect:['包内所有文件都进入处理流程，无需额外勾选。','主文件只决定默认阅读，不决定索引范围。','显示处理中、可用或失败，失败可重试；原件仍可阅读。','新增或修改文件后重新处理；不会把尚未处理的文件显示为 AI 已可读。'],question:'处理结果放在哪里最合适：文件名下，还是只在管理中查看？'},
+ {title:'AI 阅读与来源',task:'待制作：让 AI 同时使用原件正文和包内的解读文件回答。',expect:['包内处理成功的文件均可检索和被 AI 使用。','回答能指出依据哪个文件，必要时定位页码或段落。','能看出引的是原件还是解读，重复内容不冒充多份独立证据。','待处理、失败或无权限的内容不会被冒充为已读。'],question:'来源卡片是否足以让你核对答案，而不增加过多操作？'},
+ {title:'素材更新与旧引用',task:'待制作：更新已有素材包，再分别查看草稿和已发布案例。',expect:['草稿提示有新版，作者主动选择是否更新。','投稿和发布的版本保持原有引用，不被后台更新覆盖。','移除文件时能看出引用影响，避免旧案例突然缺失资料。'],question:'提示与更新动作放在案例资料区，是否足够？'},
+ {title:'注册与本地登录',task:'待制作：注册新账号，登录后开始创作和投稿。',expect:['注册只要求用户名和密码。','登录后可创作、使用 AI、投稿，公开发布仍需管理员审核。','尚无校内权限时仍能使用公开内容。'],question:'首次进入平台需要哪些入口，哪些可以省掉？'},
+ {title:'校内权限申请与审批',task:'待制作：申请校内资料权限，再由管理员批准或拒绝。',expect:['申请时必填姓名、学工号，其他资料选填。','一次批准获得全部校内资料权限，用户能看到结果。','撤销后，检索、阅读、下载和 AI 都停止提供校内资料。'],question:'用户申请页和管理员待办列表，是否能完成一次审批？'},
+ {title:'密码恢复与账号管理',task:'待制作：管理员设置临时密码，用户首次登录修改；再体验停用与恢复。',expect:['临时密码登录后必须先修改密码；旧会话失效。','停用立即停止访问，原有内容和作者归属保留。','管理员能查看操作记录，不能误停用或降级最后一个管理员。','管理身份不自动开放他人私人草稿、资料和 AI 对话。'],question:'后台操作与用户提示是否清楚？哪些操作需要再次确认？'}
+];
+const answers=checklist.map(()=>({status:'pending',note:''}));answers[0]={status:'passed',note:'用户已确认打开与阅读体验；翻页、下载图标需细化，已在原型中换成 SVG，待查看调整效果。'};let current=0;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function render(){
+ const item=checklist[current],answer=answers[current];
+ document.querySelector('#steps').innerHTML=checklist.map((s,i)=>'<button class="step '+(i===current?'active ':'')+answers[i].status+'" data-step="'+i+'" '+(i===current?'aria-current="step"':'')+'><span class="number">'+String(i+1).padStart(2,'0')+'</span><span>'+s.title+'</span><small>'+(answers[i].status==='passed'?'已通过':answers[i].status==='adjust'?'需调整':s.url?'可体验':'待制作')+'</small></button>').join('');
+ document.querySelector('#panel').innerHTML='<div class="eyebrow">第 '+(current+1)+' 项 / 共 '+checklist.length+' 项 · '+(item.url?'可体验':'待制作')+'</div><h2>'+item.title+'</h2><p class="task">'+item.task+'</p>'+(item.url?'<a class="launch" href="'+item.url+'" target="_blank" rel="noopener noreferrer">打开这一项原型 ↗</a>':'<p class="pending">当前仅列出验收目标，尚无对应原型。</p>')+'<div class="expect"><h3>检查点</h3><ul>'+item.expect.map(x=>'<li>'+x+'</li>').join('')+'</ul></div><p class="question">'+item.question+'</p><textarea aria-label="体验反馈" placeholder="记录不顺手的地方、想删的按钮，或想保留的体验。">'+esc(answer.note)+'</textarea><div class="feedback"><button data-result="passed" '+(!item.url?'disabled':'')+' class="'+(answer.status==='passed'?'selected':'')+'">通过</button><button data-result="adjust" class="'+(answer.status==='adjust'?'selected':'')+'">需要调整</button></div><div class="foot"><button id="previous" '+(!current?'disabled':'')+'>← 上一项</button><span>'+answers.filter(x=>x.status==='passed').length+' / '+checklist.length+' 已通过</span><button id="next" '+(current===checklist.length-1?'disabled':'')+'>下一项 →</button></div>';
+ document.querySelectorAll('[data-step]').forEach(el=>el.onclick=()=>{current=Number(el.dataset.step);render();});
+ document.querySelector('textarea').oninput=e=>answer.note=e.target.value;
+ document.querySelectorAll('[data-result]').forEach(el=>el.onclick=()=>{answer.status=el.dataset.result;render();});
+ document.querySelector('#previous').onclick=()=>{if(current){current--;render();}};
+ document.querySelector('#next').onclick=()=>{if(current<checklist.length-1){current++;render();}};
+}
+render();
+</script>
+</body>
+</html>

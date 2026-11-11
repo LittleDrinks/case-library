@@ -1,0 +1,47 @@
+[
+  {
+    "id": "cover",
+    "title": "封面",
+    "page": 1
+  },
+  {
+    "id": "intro",
+    "title": "导论",
+    "page": 10
+  },
+  {
+    "id": "chapter1",
+    "title": "第一章 · 世界的物质性及发展规律",
+    "page": 34
+  },
+  {
+    "id": "chapter2",
+    "title": "第二章 · 实践与认识及其发展规律",
+    "page": 78
+  },
+  {
+    "id": "chapter3",
+    "title": "第三章 · 人类社会及其发展规律",
+    "page": 132
+  },
+  {
+    "id": "chapter4",
+    "title": "第四章 · 资本主义的本质及规律",
+    "page": 191
+  },
+  {
+    "id": "chapter5",
+    "title": "第五章 · 资本主义的发展及其趋势",
+    "page": 245
+  },
+  {
+    "id": "chapter6",
+    "title": "第六章 · 社会主义的发展及其规律",
+    "page": 287
+  },
+  {
+    "id": "chapter7",
+    "title": "第七章 · 共产主义崇高理想及其最终实现",
+    "page": 332
+  }
+]

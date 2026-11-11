@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>资料库</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f7f5f1;--paper:#fff;--ink:#292522;--muted:#8d8378;--line:#e7e0d6;--red:#b91d27;--red-soft:#faeeee;--green:#26734e;--amber:#a1742c;--serif:"Noto Serif SC","Songti SC","STSong",serif;--sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 var(--sans)}button,input,select{font:inherit}button,a,select{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--red);outline-offset:3px}button{color:inherit}a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:var(--serif);font-weight:600}
+.site{height:66px;display:flex;align-items:center;padding:0 42px;background:#fff;border-bottom:1px solid var(--line);gap:38px}.brand{font:600 20px var(--serif);white-space:nowrap}.nav{display:flex;gap:26px;height:100%;align-items:center}.nav a{height:100%;display:flex;align-items:center;color:#655d55}.nav a.active{color:var(--red);border-bottom:2px solid var(--red)}.page{width:min(1420px,100%);margin:auto;padding:38px 40px 60px}.crumb,.back{font-size:13px;color:var(--muted);display:block}.crumb{margin-bottom:12px}.heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:30px}.heading h1{font-size:32px}.search{height:46px;width:360px;display:flex;align-items:center;gap:9px;border:1px solid #d8cfc5;border-radius:6px;background:#fff;padding:0 14px}.search span{font-size:20px;color:var(--muted)}.search input{border:0;outline:0;width:100%;background:none}.section-label{font-size:13px;color:var(--muted);margin-bottom:12px}.collection{background:#fff;border:1px solid var(--line);border-radius:9px;overflow:hidden}.collection-head{padding:24px 28px;border-bottom:1px solid var(--line)}.collection-head h2{font-size:23px}.row{display:grid;grid-template-columns:minmax(0,1.7fr) 1fr 1fr auto;align-items:center;gap:24px;padding:24px 28px;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.row:hover{background:#fcfaf7}.edition,.file-heading{display:flex;gap:14px;align-items:center}.file-icon{position:relative;display:grid;place-items:center;width:38px;height:48px;flex-shrink:0;border:1px solid var(--line);border-radius:3px;background:#fffdfa;color:var(--red);font-size:10px}.file-icon:after{content:"";position:absolute;right:-1px;top:-1px;border-top:9px solid #e9e1d8;border-left:9px solid transparent}.title{border:0;background:none;text-align:left;padding:0;font-weight:600;font-size:16px}.title:hover,.link{color:var(--red)}.sub,.value small{display:block;font-size:12px;color:var(--muted);margin-top:4px}.status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--green)}.status i{width:6px;height:6px;border-radius:50%;background:var(--green)}.status.pending{color:var(--amber)}.status.pending i{background:var(--amber)}.link{border:0;background:none;padding:6px 0;font-size:13px;white-space:nowrap}.pick-toggle{display:flex;gap:7px;align-items:center;font-size:13px;white-space:nowrap}input[type=checkbox]{accent-color:var(--red)}
+.drawer-mask{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:#29252250;backdrop-filter:blur(2px)}.drawer{width:80vw;height:80dvh;display:flex;flex-direction:column;overflow:hidden;background:#fff;border-radius:12px;box-shadow:0 24px 80px #29252235}.drawer-header{display:flex;align-items:center;gap:18px;padding:22px 30px;border-bottom:1px solid var(--line);flex-shrink:0}.drawer-title{flex:1;font:600 24px/1.4 var(--serif)}.drawer-title small{display:block;font:13px/1.7 var(--sans);color:var(--muted);margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center}.drawer-open-page,.drawer-close{display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0}.drawer-open-page:hover,.drawer-close:hover{background:var(--red-soft);color:var(--red)}.drawer-open-page svg{width:18px;height:18px}.drawer-close{font-size:24px}.drawer-body{min-height:0;flex:1;overflow:hidden}.detail-view{height:100%;display:flex;flex-direction:column;min-height:0}.detail-grid{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 280px;background:#fff;overflow:hidden}.reader{display:flex;flex-direction:column;min-width:0;min-height:0;background:#eeeae4}.reader-head{padding:13px 24px;background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;align-items:center;font-size:13px}.reader-head .file-heading{min-width:0;gap:9px}.reader-head .file-heading strong{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reader-head select{max-width:210px;border:0;background:#f8f6f2;border-radius:4px;padding:6px 9px;font-size:12px}.paper-wrap{padding:30px;overflow:auto;flex:1;min-height:0;scrollbar-width:thin}.paper{width:min(680px,100%);min-height:780px;background:#fff;margin:auto;padding:48px 64px;box-shadow:0 2px 8px #4031230b}.paper .running-title{font:12px var(--sans);color:var(--muted);padding-bottom:14px;border-bottom:1px solid var(--line)}.paper h2{font-size:25px;margin:34px 0 27px;line-height:1.6}.paper h3{font-size:18px;margin:24px 0 14px}.paper p{font:17px/2 var(--serif);margin:14px 0;text-align:justify;text-indent:2em}.paper .page-number{text-align:center;color:var(--muted);font:12px var(--sans);margin-top:48px}.side-info{border-left:1px solid var(--line);padding:26px 24px;overflow:auto}.side-info h3{font:600 14px var(--sans);margin-bottom:18px}.facts{margin:0 0 25px;font-size:13px}.facts div{display:flex;justify-content:space-between;gap:12px;margin:0 0 13px}.facts dt{color:var(--muted)}.facts dd{margin:0;text-align:right}.file-list{border-top:1px solid var(--line);padding-top:24px}.file-choice{width:100%;border:1px solid transparent;display:flex;gap:12px;align-items:center;background:none;text-align:left;padding:12px 10px;border-radius:6px;margin:4px 0}.file-choice:hover{background:#f8f6f2}.file-choice.active{border-color:#ead2d1;background:#fcf4f3}.file-choice .file-icon{width:29px;height:37px;font-size:8px}.file-choice strong{display:block;font-size:13px;font-weight:500}.file-choice small{display:block;font-size:11px;color:var(--muted);margin-top:2px}.selection{border-top:1px solid var(--line);margin-top:24px;padding-top:24px}.chapter{display:flex;gap:8px;align-items:flex-start;font-size:12px;margin:14px 0}.chapter small{display:block;color:var(--muted);font-size:11px}.empty-reader{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:28px}.primary-bar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 24px;background:#fff;border-top:1px solid var(--line);flex-shrink:0}.primary-bar p{font-size:13px;color:var(--muted)}.primary{border:0;border-radius:5px;padding:11px 20px;background:var(--red);color:#fff;font-size:14px}.primary:disabled{background:#d5cec4;cursor:default}.detail-top{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:20px 0 25px}.detail-top h1{font-size:30px}.detail-top p{font-size:13px;color:var(--muted);margin-top:6px}.page>.detail-view{height:calc(100dvh - 250px);min-height:570px;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.case-card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:30px}.case-card .back{margin-bottom:24px}.case-card h1{font-size:28px}.tag{font-size:12px;color:var(--muted)}.case-content{display:grid;grid-template-columns:1fr 300px;gap:42px;margin-top:35px}.case-content article{font:17px/2 var(--serif)}.case-content article h2{font-size:22px;margin-top:24px}.case-content article p{margin:16px 0}.case-resources{border-left:1px solid var(--line);padding-left:24px}.case-resources h3{font-size:18px;margin-bottom:20px}.source-card{border:1px solid var(--line);border-radius:6px;padding:16px}.source-card strong{font-size:14px}.source-card p,.ai-note{font-size:12px;color:var(--muted);margin-top:12px}.ok{font-size:12px;color:var(--green)}
+@media(max-width:1000px){.drawer{width:94vw;height:90dvh}.detail-grid{grid-template-columns:minmax(0,1fr) 240px}.reader-head{padding:12px 14px}.reader-head select{max-width:150px}.paper{padding:38px}.side-info{padding:22px 18px}.row{grid-template-columns:1.5fr 1fr 1fr}.row>.link{display:none}}
+@media(max-width:650px){.site{padding:0 16px;gap:20px}.brand{font-size:16px}.nav{gap:14px;font-size:12px}.page{padding:24px 14px}.heading{flex-wrap:wrap}.search{width:100%}.heading h1{font-size:28px}.row{display:block;padding:18px}.row .value{margin:10px 0 0 52px}.drawer{width:100vw;height:100dvh;border-radius:0}.drawer-header{padding:16px}.drawer-title{font-size:21px}.detail-grid{display:flex;flex-direction:column}.side-info{order:-1;border-left:0;border-bottom:1px solid var(--line);padding:8px 12px;overflow:visible}.side-info>.facts{display:none}.file-list{padding:0;border:0;display:flex;gap:4px}.file-list h3{display:none}.file-choice{margin:0;padding:8px;flex:1;gap:6px}.file-choice .file-icon{display:none}.file-choice small{font-size:10px}.reader{flex:1}.reader-head{flex-wrap:wrap;padding:9px 12px;gap:7px}.reader-head .file-heading{font-size:11px}.reader-head select{max-width:170px;font-size:11px}.paper-wrap{padding:14px}.paper{padding:28px 24px;min-height:650px}.paper h2{font-size:22px}.paper p{font-size:15px}.selection{margin:8px 0 0;padding:8px 0 0;display:flex;gap:12px}.selection h3{display:none}.chapter{margin:0}.chapter small{display:none}.primary-bar{padding:12px;gap:10px}.primary-bar p{font-size:11px}.primary{font-size:12px;padding:10px 14px}.detail-top{margin-top:16px}.detail-top h1{font-size:24px}.page>.detail-view{height:76dvh;min-height:0}.case-content{display:block}.case-resources{border-left:0;padding:24px 0 0;margin-top:24px;border-top:1px solid var(--line)}}
+.reader-tools{display:flex;align-items:center;gap:12px;flex-shrink:0}.pdf-controls{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:12px;color:var(--muted)}.pdf-controls button,.download-file{display:grid;place-items:center;width:27px;height:28px;border:1px solid var(--line);background:#fff;border-radius:4px;font-size:20px;color:var(--ink)}.pdf-controls button:disabled{opacity:.35;cursor:default}.pdf-controls input{width:44px;padding:3px;border:1px solid var(--line);border-radius:4px;text-align:center;appearance:textfield;-moz-appearance:textfield;font-size:12px}.pdf-controls input::-webkit-inner-spin-button{appearance:none}.reader-head select{max-width:165px}.pdf-scroll{position:relative;flex:1;min-height:0;overflow:auto;padding:28px 32px;scrollbar-width:thin}.pdf-sheet{width:fit-content;margin:auto;line-height:0;background:white;box-shadow:0 3px 18px #29252220}.pdf-sheet canvas{display:block}.preview-loading{text-align:center;color:var(--muted);font-size:13px;padding:22px}.markdown-scroll{flex:1;min-height:0;overflow:auto;background:#fff}.markdown-body{width:min(810px,100%);padding:34px 46px 70px;margin:auto;font-size:16px;line-height:1.85;overflow-wrap:anywhere}.markdown-body h1,.markdown-body h2,.markdown-body h3{font-family:var(--sans);font-weight:650}.markdown-body h1{font-size:28px;margin:0 0 28px;border-bottom:1px solid var(--line);padding-bottom:16px}.markdown-body h2{font-size:21px;margin:30px 0 14px}.markdown-body h3{font-size:17px;margin:24px 0 12px}.markdown-body p,.markdown-body ul,.markdown-body ol{margin:13px 0}.markdown-body li{margin:5px 0}.markdown-body a{color:var(--red)}.markdown-body blockquote{border-left:3px solid #d1b7ae;background:#fbf8f5;margin:24px 0;padding:8px 20px;color:#75695f}.markdown-body table{border-collapse:collapse;width:100%;font-size:14px;margin:20px 0}.markdown-body th,.markdown-body td{border:1px solid var(--line);padding:9px 13px;text-align:left}.markdown-body th{background:#f7f5f1}.markdown-body img{max-width:100%;max-height:520px;display:block;margin:20px auto}.image-scroll{flex:1;min-height:0;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:24px}.image-scroll img{max-width:100%;max-height:100%;object-fit:contain}.file-list{padding-top:22px}.package-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.package-heading h3{margin:0}.package-heading h3 span{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}.text-action{border:0;background:none;color:var(--red);font-size:12px;padding:4px;cursor:pointer}.package-file{position:relative;display:flex;align-items:center;margin:4px 0;min-width:0}.package-file>.file-choice{flex:1;min-width:0;width:auto;margin:0}.file-choice{padding:12px 8px;gap:9px}.file-choice>span:last-child{min-width:0;flex:1}.file-choice strong{font-size:12px;overflow-wrap:anywhere;line-height:1.65}.file-choice small{font-size:10px;line-height:1.6}.file-menu{flex-shrink:0;position:relative}.file-menu summary{list-style:none;cursor:pointer;padding:7px;font-size:20px}.file-menu summary::-webkit-details-marker{display:none}.file-menu>div{position:absolute;top:100%;right:0;z-index:5;width:150px;padding:5px;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 25px #29252220}.file-menu button{display:block;width:100%;padding:7px 9px;background:none;border:0;text-align:left;font-size:12px}.file-menu button:hover{background:#f8f6f2}.file-menu button:disabled{opacity:.4;cursor:default}.file-menu .danger{color:var(--red)}.add-files{width:100%;margin-top:12px;border:1px dashed #d5c8bc;border-radius:6px;background:#fff;padding:9px;font-size:12px;color:#75665a}.rename-form{display:flex;min-width:0;flex:1;gap:4px}.rename-form input{width:100%;min-width:0;border:1px solid var(--line);padding:5px;font-size:12px}.rename-form button{border:0;background:var(--red);color:white;font-size:11px;padding:4px}.file-properties{border-top:1px solid var(--line);margin-top:20px;padding-top:16px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.file-properties label{color:var(--muted)}.file-properties select{padding:5px;border:1px solid var(--line);border-radius:4px;background:white;font-size:12px}.undo-file{margin-top:8px}.markdown-editor{flex:1;min-height:0;padding:20px;background:#fff;display:flex}.markdown-editor textarea{width:100%;resize:none;padding:18px;border:1px solid var(--line);font:14px/1.7 monospace;color:var(--ink)}.no-files{padding:35px;text-align:center;color:var(--muted)}
+@media(max-width:1200px){.reader-head{flex-wrap:wrap}.reader-tools{gap:7px}.reader-head .file-heading{max-width:100%}.reader-head .file-heading strong{font-size:12px}}
+@media(max-width:650px){.reader-tools{width:100%;justify-content:space-between;gap:5px}.reader-head select{max-width:135px}.pdf-scroll{padding:12px}.markdown-body{padding:24px 20px 40px;font-size:15px}.markdown-body h1{font-size:24px}.markdown-body table{font-size:12px}.markdown-body th,.markdown-body td{padding:6px}.side-info{max-height:210px;overflow:auto}.file-list{display:block}.package-heading{margin-bottom:4px}.package-heading h3{display:block}.package-file{display:inline-flex;width:32%;vertical-align:top}.package-file>.file-choice{width:100%}.file-choice strong{font-size:11px;line-height:1.45}.file-choice small{font-size:10px}.file-menu summary{padding:3px}.file-menu>div{width:132px}.selection{display:block}.chapter{display:inline-flex;margin:5px}.file-properties{margin-top:8px;padding-top:8px}.side-info:has(.add-files){max-height:300px}.reader-head .file-heading{width:100%}}
+</style>
+</head>
+<body>
+<header class="site"><a class="brand" href="next-step-prototype-v5.html">“强国有我”思政案例库</a><nav class="nav"><a class="active" href="next-step-prototype-v5.html">资料库</a><a href="#case" id="case-nav">我的案例</a></nav></header>
+<main class="page" id="app"></main>
+<div id="overlay-root"></div>
+<script src="../assets/vendor/markdown-it.min.js"></script>
+<script>const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const base='../assets/material-package/';
+const chapters=[
+  {
+    "id": "cover",
+    "title": "封面",
+    "page": 1
+  },
+  {
+    "id": "intro",
+    "title": "导论",
+    "page": 10
+  },
+  {
+    "id": "chapter1",
+    "title": "第一章 · 世界的物质性及发展规律",
+    "page": 34
+  },
+  {
+    "id": "chapter2",
+    "title": "第二章 · 实践与认识及其发展规律",
+    "page": 78
+  },
+  {
+    "id": "chapter3",
+    "title": "第三章 · 人类社会及其发展规律",
+    "page": 132
+  },
+  {
+    "id": "chapter4",
+    "title": "第四章 · 资本主义的本质及规律",
+    "page": 191
+  },
+  {
+    "id": "chapter5",
+    "title": "第五章 · 资本主义的发展及其趋势",
+    "page": 245
+  },
+  {
+    "id": "chapter6",
+    "title": "第六章 · 社会主义的发展及其规律",
+    "page": 287
+  },
+  {
+    "id": "chapter7",
+    "title": "第七章 · 共产主义崇高理想及其最终实现",
+    "page": 332
+  }
+];
+const material={id:'book23',title:'马克思主义基本原理',edition:'2023 年版',source:'安徽艺术学院',sourceURL:'https://www.ahua.edu.cn/marx/2023/0524/c844a24933/page.htm',mainFile:'original',files:[
+ {id:'original',name:'马克思主义基本原理（2023年版）.pdf',type:'PDF',role:'原件',bytes:14912172,url:base+'marxism-2023.pdf'},
+ {id:'notes',name:'导论阅读提纲.md',type:'MD',role:'整理／解读',url:base+'reading-outline.md'},
+ {id:'cover',name:'封面.png',type:'PNG',role:'配图',url:base+'cover.png'}
+]};
+const params=new URLSearchParams(location.search);
+let state={screen:params.has('detail')?'detail':params.has('case')?'case':'library',modal:params.has('open'),reader:params.get('file')||material.mainFile,page:Number(params.get('page')||10),query:'',selectMode:params.get('select')==='case',done:false,manage:params.get('manage')==='1',rename:null,editingText:false,undo:null};
+const books=[material];
+const externalIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7M21 3 10 14"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg>';
+const pdfLibPromise=import('./../assets/vendor/pdf.mjs').then(lib=>{lib.GlobalWorkerOptions.workerSrc='./../assets/vendor/pdf.worker.mjs';return lib;});
+const pdfCache=new Map();let drawEpoch=0;
+function set(patch){state={...state,...patch};render();}
+function fileIcon(type='PDF'){return '<span class="file-icon">'+esc(type)+'</span>';}
+function activeFile(){return material.files.find(x=>x.id===state.reader)||material.files[0];}
+function sizeLabel(f){return f.bytes?f.bytes>=1048576?(f.bytes/1048576).toFixed(1)+' MB':(f.bytes/1024).toFixed(1)+' KB':'';}
+function detailURL(){return 'next-step-prototype-v5.html?detail=book23&file='+encodeURIComponent(activeFile()?.id||'original')+'&page='+state.page+(state.selectMode?'&select=case':'');}
+function library(){
+ const visible=!state.query||(material.title+material.edition+material.files.map(f=>f.name).join(' ')).includes(state.query);
+ return '<div class="crumb">'+(state.selectMode?'我的案例 / 一次社区实践如何转化为课堂问题 / 选择资料':'资源检索')+'</div><div class="heading"><h1>资料库</h1><label class="search"><span>⌕</span><input id="q" value="'+esc(state.query)+'" placeholder="搜索资料或文件" aria-label="搜索资料"></label></div><section class="collection">'+(visible?'<div class="row"><div class="edition">'+fileIcon()+'<div><button class="title" data-open="book23">'+material.title+'</button><div class="sub">'+material.source+' · '+material.files.length+' 个文件</div></div></div><div class="value">'+material.edition+'<small>教材</small></div><div class="value">校内<small>364 页</small></div><button class="link" data-open="book23">查看资料 →</button></div>':'<p class="no-files">未找到资料</p>')+'</section>';
+}
+function fileMenu(f,index){
+ return '<details class="file-menu"><summary aria-label="'+esc(f.name)+'的操作">⋯</summary><div><button data-rename="'+f.id+'">重命名</button><button data-main="'+f.id+'" '+(material.mainFile===f.id?'disabled':'')+'>设为主文件</button><button data-move="'+f.id+'" data-step="-1" '+(!index?'disabled':'')+'>上移</button><button data-move="'+f.id+'" data-step="1" '+(index===material.files.length-1?'disabled':'')+'>下移</button><button class="danger" data-remove="'+f.id+'">从素材包移除</button></div></details>';
+}
+function fileRow(f,index){
+ const name=state.rename===f.id?'<form class="rename-form" data-rename-form="'+f.id+'"><input aria-label="文件名" value="'+esc(f.name)+'" required><button type="submit">保存</button></form>':'<button class="file-choice '+(state.reader===f.id?'active':'')+'" data-reader="'+f.id+'">'+fileIcon(f.type)+'<span><strong>'+esc(f.name)+'</strong><small>'+[material.mainFile===f.id?'主文件':'',sizeLabel(f)].filter(Boolean).join(' · ')+'</small></span></button>';
+ return '<div class="package-file">'+name+(state.manage?fileMenu(f,index):'')+'</div>';
+}
+function preview(){
+ const f=activeFile();
+ if(!f)return '<div class="empty-reader">素材包暂无文件</div>';
+ if(f.type==='PDF')return '<div class="pdf-scroll" id="preview-scroll"><div class="pdf-sheet"><canvas id="pdf-canvas" aria-label="PDF 页面"></canvas></div><p class="preview-loading" id="load-state">正在打开 PDF…</p></div>';
+ if(f.type==='MD')return state.editingText?'<div class="markdown-editor"><textarea id="markdown-editor" aria-label="Markdown 内容"></textarea></div>':'<div class="markdown-scroll" id="preview-scroll"><article class="markdown-body" id="markdown-body"></article></div>';
+ if(['PNG','JPG','JPEG','WEBP','GIF','SVG'].includes(f.type))return '<div class="image-scroll"><img src="'+esc(f.url)+'" alt="'+esc(f.name)+'"></div>';
+ return '<div class="empty-reader">此格式暂不支持预览<a class="link" href="'+esc(f.url)+'" download="'+esc(f.name)+'">下载文件</a></div>';
+}
+function detailMarkup(){
+ const f=activeFile();
+ const pdfControls=f?.type==='PDF'?'<div class="pdf-controls"><button id="page-prev" aria-label="上一页" '+(state.page<=1?'disabled':'')+'>‹</button><input id="page-number" aria-label="PDF 页码" type="number" min="1" value="'+state.page+'"><span id="page-total">/ 364</span><button id="page-next" aria-label="下一页">›</button></div>':'';
+ const edit=state.manage&&f?.type==='MD'?'<button class="text-action" id="edit-markdown">'+(state.editingText?'保存内容':'编辑内容')+'</button>':'';
+ const toc=f?.id==='original'?'<select id="chapter-nav" aria-label="目录">'+chapters.map(x=>'<option value="'+x.page+'" '+(state.page>=x.page&&state.page<(chapters[chapters.indexOf(x)+1]?.page||365)?'selected':'')+'>'+x.title+'</option>').join('')+'</select>':'';
+ const download=f?'<a class="download-file" href="'+esc(f.url)+'" download="'+esc(f.name)+'" aria-label="下载当前文件" title="下载当前文件">↓</a>':'';
+ return '<div class="detail-view"><div class="detail-grid"><section class="reader"><div class="reader-head"><div class="file-heading"><strong>'+esc(f?.name||'未选择文件')+'</strong></div><div class="reader-tools">'+pdfControls+toc+edit+download+'</div></div>'+preview()+'</section><aside class="side-info"><dl class="facts"><div><dt>版次</dt><dd>'+material.edition+'</dd></div><div><dt>来源</dt><dd><a href="'+material.sourceURL+'" target="_blank" rel="noopener noreferrer">'+material.source+'</a></dd></div><div><dt>访问范围</dt><dd>校内</dd></div></dl><div class="file-list"><div class="package-heading"><h3>素材包 <span>'+material.files.length+'</span></h3><button class="text-action" id="manage-package">'+(state.manage?'完成':'管理')+'</button></div>'+material.files.map(fileRow).join('')+(state.manage?'<input type="file" multiple hidden id="upload-files"><button class="add-files" id="add-files">＋ 添加文件</button>'+(state.undo?'<button class="text-action undo-file" id="undo-file">撤销移除</button>':''):'')+'</div></aside></div>'+(state.selectMode?'<div class="primary-bar"><p>当前案例：一次社区实践如何转化为课堂问题</p><button class="primary" id="add" '+(!material.files.length||state.done?'disabled':'')+'>'+(state.done?'已加入当前案例':'加入当前案例')+'</button></div>':'')+'</div>';
+}
+function detailPage(){return '<a class="back" href="next-step-prototype-v5.html" data-back>← 返回资料库</a><div class="detail-top"><div><h1>'+material.title+'</h1><p>教材 · '+material.edition+'</p></div></div>'+detailMarkup();}
+function casePage(){return '<div class="case-card"><a class="back" href="next-step-prototype-v5.html" data-back>← 返回资料库</a><span class="tag">我的案例 · 草稿</span><h1>一次社区实践如何转化为课堂问题</h1><div class="case-content"><article><h2>教学情境</h2><p>教师组织学生走进社区，记录观察与访谈，围绕实践、认识与公共责任展开讨论。</p></article><aside class="case-resources"><h3>资料区</h3>'+(state.done?'<div class="source-card"><button class="title" data-case-material>'+material.title+'</button><p>'+material.edition+' · '+material.files.length+' 个文件</p></div>':'')+'<button class="link" id="choose-material">＋ 选择资料</button></aside></div></div>';}
+function modal(){return '<div class="drawer-mask" data-backdrop><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-header"><h2 class="drawer-title" id="drawer-title">'+material.title+'<small>教材 · '+material.edition+'</small></h2><div class="drawer-actions"><a class="drawer-open-page" href="'+detailURL()+'" target="_blank" rel="noopener noreferrer" aria-label="新标签页打开资料详情" title="新标签页打开资料详情">'+externalIcon+'</a><button class="drawer-close" id="close-drawer" aria-label="关闭资料详情">×</button></div></header><div class="drawer-body">'+detailMarkup()+'</div></section></div>';}
+async function markdownText(f){if(f.content!==undefined)return f.content;const response=await fetch(f.url);if(!response.ok)throw Error('文件读取失败');f.content=await response.text();return f.content;}
+async function drawActive(){
+ const epoch=++drawEpoch;const f=activeFile();if(!f)return;
+ try{
+  if(f.type==='PDF'){
+   const lib=await pdfLibPromise;if(epoch!==drawEpoch)return;
+   if(!pdfCache.has(f.url))pdfCache.set(f.url,lib.getDocument({url:f.url,isEvalSupported:false,useSystemFonts:true}).promise);
+   const doc=await pdfCache.get(f.url);if(epoch!==drawEpoch)return;
+   state.page=Math.max(1,Math.min(doc.numPages,state.page));
+   const total=$('#page-total');if(total)total.textContent='/ '+doc.numPages;
+   const input=$('#page-number');if(input){input.value=state.page;input.max=doc.numPages;}
+   const next=$('#page-next');if(next)next.disabled=state.page>=doc.numPages;
+   const page=await doc.getPage(state.page);if(epoch!==drawEpoch)return;
+   const canvas=$('#pdf-canvas');if(!canvas)return;
+   const area=$('.pdf-scroll');const width=Math.min(830,Math.max(240,area.clientWidth-(innerWidth<650?24:64)));
+   const viewport=page.getViewport({scale:width/page.getViewport({scale:1}).width});
+   const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(viewport.width*ratio);canvas.height=Math.round(viewport.height*ratio);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';
+   await page.render({canvasContext:canvas.getContext('2d'),viewport,transform:ratio===1?null:[ratio,0,0,ratio,0,0]}).promise;
+   if(epoch===drawEpoch)$('#load-state')?.remove();
+  }else if(f.type==='MD'){
+   const text=await markdownText(f);if(epoch!==drawEpoch)return;
+   if(state.editingText){$('#markdown-editor').value=text;return;}
+   const article=$('#markdown-body');if(!article)return;
+   article.innerHTML=window.markdownit({html:false,linkify:true}).render(text);
+   article.querySelectorAll('img').forEach(img=>{const path=img.getAttribute('src');const companion=material.files.find(x=>x.name===path||x.name===decodeURIComponent(path)||x.url.endsWith('/'+path));img.src=companion?.url||new URL(path,new URL(base,location.href)).href;});
+   article.querySelectorAll('a').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer';});
+  }
+ }catch(error){if(epoch===drawEpoch){const target=$('#load-state')||$('#markdown-body');if(target)target.textContent='无法读取文件：'+error.message;}console.error(error);}
+}
+function render(){const root=$('#app'),overlay=$('#overlay-root');const hadModal=!!overlay.querySelector('.drawer');root.innerHTML=state.screen==='library'?library():state.screen==='detail'?detailPage():casePage();overlay.innerHTML=state.modal?modal():'';root.inert=state.modal;$('.site').inert=state.modal;document.body.style.overflow=state.modal?'hidden':'';bind();if(state.modal&&!state.rename)$('#close-drawer')?.focus();else if(hadModal&&state.screen==='library')$('[data-open]')?.focus();if(state.rename)$('[data-rename-form] input')?.focus();if(state.modal||state.screen==='detail')drawActive();else ++drawEpoch;}
+function bind(){
+ $('#chapter-nav')?.addEventListener('change',e=>set({page:Number(e.target.value)}));
+ $('#page-prev')?.addEventListener('click',()=>set({page:Math.max(1,state.page-1)}));
+ $('#page-next')?.addEventListener('click',()=>set({page:state.page+1}));
+ $('#page-number')?.addEventListener('change',e=>set({page:Number(e.target.value)||1}));
+ const q=$('#q');if(q){q.addEventListener('input',e=>set({query:e.target.value}));if(!state.modal){q.focus();q.setSelectionRange(q.value.length,q.value.length);}}
+ document.querySelectorAll('[data-open]').forEach(el=>el.onclick=()=>set({screen:'library',modal:true,reader:material.mainFile,page:10,manage:false,editingText:false}));
+ document.querySelectorAll('[data-reader]').forEach(el=>el.onclick=()=>set({reader:el.dataset.reader,editingText:false,rename:null}));
+ $('#add')?.addEventListener('click',()=>set({screen:'case',modal:false,done:true,manage:false}));
+ $('#choose-material')?.addEventListener('click',()=>set({screen:'library',modal:false,selectMode:true,query:''}));
+ $('[data-case-material]')?.addEventListener('click',()=>set({modal:true,selectMode:false,reader:material.mainFile,page:10,manage:false,editingText:false}));
+ $('#close-drawer')?.addEventListener('click',()=>set({modal:false,manage:false,editingText:false}));
+ $('[data-backdrop]')?.addEventListener('click',e=>{if(e.target.matches('[data-backdrop]'))set({modal:false});});
+ document.querySelectorAll('[data-back]').forEach(el=>el.onclick=e=>{e.preventDefault();history.replaceState({},'','next-step-prototype-v5.html');set({screen:'library',modal:false});});
+ $('#manage-package')?.addEventListener('click',()=>set({manage:!state.manage,rename:null,editingText:false}));
+ $('#add-files')?.addEventListener('click',()=>$('#upload-files').click());
+ $('#upload-files')?.addEventListener('change',async e=>{const added=[];for(const file of e.target.files){const extension=file.name.split('.').pop().toUpperCase();const type=['MD','MARKDOWN','TXT'].includes(extension)?'MD':extension;const item={id:'upload-'+crypto.randomUUID(),name:file.name,type,role:type==='MD'?'整理／解读':['PNG','JPG','JPEG','SVG'].includes(type)?'配图':'附件',bytes:file.size,url:URL.createObjectURL(file)};if(type==='MD')item.content=await file.text();material.files.push(item);added.push(item);}if(added.length)set({reader:added[0].id,editingText:false});});
+ document.querySelectorAll('[data-rename]').forEach(el=>el.onclick=()=>set({rename:el.dataset.rename}));
+ $('[data-rename-form]')?.addEventListener('submit',e=>{e.preventDefault();const value=e.target.querySelector('input').value.trim();const f=material.files.find(x=>x.id===e.target.dataset.renameForm);if(value&&f){f.name=value;set({rename:null});}});
+ document.querySelectorAll('[data-main]').forEach(el=>el.onclick=()=>{material.mainFile=el.dataset.main;render();});
+ document.querySelectorAll('[data-move]').forEach(el=>el.onclick=()=>{const index=material.files.findIndex(x=>x.id===el.dataset.move),target=index+Number(el.dataset.step);if(target>=0&&target<material.files.length){[material.files[index],material.files[target]]=[material.files[target],material.files[index]];render();}});
+ document.querySelectorAll('[data-remove]').forEach(el=>el.onclick=()=>{const index=material.files.findIndex(x=>x.id===el.dataset.remove);if(index<0)return;const mainFile=material.mainFile;const [file]=material.files.splice(index,1);if(material.mainFile===file.id)material.mainFile=material.files[0]?.id;if(state.reader===file.id)state.reader=material.files[0]?.id;set({undo:{file,index,mainFile},editingText:false});});
+ $('#undo-file')?.addEventListener('click',()=>{material.files.splice(state.undo.index,0,state.undo.file);material.mainFile=state.undo.mainFile;set({reader:state.undo.file.id,undo:null});});
+ $('#edit-markdown')?.addEventListener('click',()=>{if(state.editingText){const f=activeFile();f.content=$('#markdown-editor').value;const blob=new Blob([f.content],{type:'text/markdown;charset=utf-8'});f.url=URL.createObjectURL(blob);f.bytes=blob.size;}set({editingText:!state.editingText});});
+}
+document.addEventListener('keydown',e=>{if(!state.modal)return;if(e.key==='Escape'){set({modal:false});return;}if(e.key==='Tab'){const controls=[...$('.drawer').querySelectorAll('button:not(:disabled),a[href],input:not(:disabled):not([hidden]),select,textarea,summary')].filter(el=>el.getClientRects().length);const first=controls[0],last=controls[controls.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
+$('#case-nav').onclick=e=>{e.preventDefault();set({screen:'case',modal:false,manage:false});};
+let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.modal||state.screen==='detail')drawActive();},150);});
+render();
+</script>
+</body>
+</html>

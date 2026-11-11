@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>资料库</title>
+<style>
+:root{--bg:#f7f5f1;--paper:#fffefa;--ink:#292522;--muted:#8d8378;--line:#e7e0d6;--red:#b91d27;--red-soft:#faeeee;--green:#26734e;--amber:#a1742c;--serif:"Noto Serif SC","Songti SC","STSong",serif;--sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 var(--sans)}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--red);outline-offset:3px}a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:var(--serif);font-weight:600}.site{height:62px;display:flex;align-items:center;padding:0 42px;background:#fff;border-bottom:1px solid var(--line);gap:38px}.brand{font:600 19px var(--serif);white-space:nowrap}.nav{display:flex;gap:26px;height:100%;align-items:center}.nav a{height:100%;display:flex;align-items:center;color:#655d55;font-size:13px}.nav a.active{color:var(--red);border-bottom:2px solid var(--red)}.proto{margin-left:auto;color:var(--muted);font-size:11px}.page{width:min(1200px,100%);margin:auto;padding:42px 28px 70px}.crumb{font-size:12px;color:var(--muted);margin-bottom:8px}.heading{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:30px}.heading h1{font-size:32px}.heading p{color:var(--muted);font-size:13px;margin-top:6px}.search{height:44px;width:340px;display:flex;align-items:center;gap:9px;border:1px solid #d8cfc5;border-radius:6px;background:#fff;padding:0 13px}.search span{font-size:20px;color:var(--muted)}.search input{border:0;outline:0;width:100%;background:none;color:var(--ink)}.section-label{font-size:12px;color:var(--muted);letter-spacing:.04em;margin-bottom:10px}.collection{background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 3px 14px #392c1c0b;overflow:hidden}.collection-head{padding:23px 26px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.collection-head h2{font-size:21px}.collection-head p{font-size:12px;color:var(--muted);margin-top:4px}.collection-head .tag{color:var(--red);font-size:11px}.row{display:grid;grid-template-columns:minmax(0,1.7fr) 1fr 1fr auto;align-items:center;gap:20px;padding:20px 26px;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.row:hover{background:#fcfaf7}.edition{display:flex;gap:13px;align-items:center}.file-icon{position:relative;display:grid;place-items:center;width:38px;height:48px;flex-shrink:0;border:1px solid var(--line);border-radius:3px;background:#fffdfa;color:var(--red);font-size:9px}.file-icon:after{content:"";position:absolute;right:-1px;top:-1px;border-top:9px solid #e9e1d8;border-left:9px solid transparent}.title{border:0;background:none;text-align:left;padding:0;font-weight:600;font-size:15px;color:var(--ink)}.title:hover{color:var(--red)}.sub{font-size:12px;color:var(--muted);margin-top:3px}.value{font-size:13px}.value small{display:block;font-size:11px;color:var(--muted);margin-top:2px}.status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--green)}.status i{width:6px;height:6px;border-radius:50%;background:var(--green)}.status.pending{color:var(--amber)}.status.pending i{background:var(--amber)}.link{border:0;background:none;color:var(--red);padding:6px 0;font-size:12px;white-space:nowrap}.hint{margin-top:18px;color:var(--muted);font-size:12px}.detail{padding:0}.detail-top{display:flex;align-items:start;justify-content:space-between;gap:22px;margin-bottom:22px}.back{color:var(--muted);font-size:12px}.detail-top h1{font-size:28px;margin-top:12px}.detail-top p{color:var(--muted);font-size:12px;margin-top:5px}.detail-top .tag{display:inline-block;color:var(--red);font-size:12px}.detail-grid{display:grid;grid-template-columns:205px minmax(0,1fr) 225px;min-height:650px;border:1px solid var(--line);border-radius:9px;background:#fff;overflow:hidden;box-shadow:0 3px 14px #392c1c0b}.chapters{padding:22px 12px;background:#fcfbf8;border-right:1px solid var(--line)}.chapters h3{font-size:14px;margin:0 10px 13px}.chapter{width:100%;border:0;background:none;text-align:left;padding:12px 10px;border-radius:5px;color:var(--ink);display:flex;gap:10px;align-items:flex-start}.chapter:hover{background:#f7f0ee}.chapter.active{background:var(--red-soft);color:var(--red)}.chapter input{margin-top:5px;accent-color:var(--red)}.chapter strong{display:block;font:500 13px/1.5 var(--sans)}.chapter small{display:block;color:var(--muted);font-size:10px;margin-top:3px}.chapter-note{border-top:1px solid var(--line);margin:16px 10px 0;padding-top:13px;color:var(--muted);font-size:11px}.reader{display:flex;flex-direction:column;min-width:0;background:#f2efe9}.reader-head{display:flex;align-items:center;justify-content:space-between;padding:13px 22px;background:#fff;border-bottom:1px solid var(--line)}.reader-tabs{display:flex;gap:18px}.reader-tabs button{border:0;background:none;color:var(--muted);padding:4px 0;font-size:12px}.reader-tabs button.active{color:var(--red);font-weight:600;border-bottom:2px solid var(--red)}.reader-note{font-size:11px;color:var(--green)}.paper-wrap{padding:28px;overflow:auto;flex:1}.paper{width:min(590px,100%);min-height:530px;margin:auto;background:#fff;padding:48px 56px;box-shadow:0 4px 20px #4031230c}.paper .edition{text-align:center;display:block;font-size:11px;color:var(--muted);letter-spacing:.08em;border-bottom:1px solid var(--line);padding-bottom:18px}.paper h2{text-align:center;font-size:23px;margin:37px 0 26px}.paper p{font:16px/2 var(--serif);margin:18px 0}.paper .source{font:11px/1.8 var(--sans);color:var(--muted);margin-top:40px}.paper .page{text-align:center;color:var(--muted);font:11px var(--sans);padding:0;margin-top:38px}.side-info{border-left:1px solid var(--line);padding:24px}.side-info h3{font-size:17px;margin-bottom:16px}.facts{font-size:12px}.facts div{display:flex;justify-content:space-between;gap:15px;padding:9px 0;border-bottom:1px solid #f0ebe5}.facts dt{color:var(--muted)}.facts dd{margin:0;text-align:right}.state{margin-top:22px;padding:14px;background:#faf8f3;border-radius:5px}.state strong{font-size:12px;display:block;margin-bottom:5px}.state p{font-size:11px;color:var(--muted);line-height:1.7}.side-info .small-link{display:block;color:var(--red);font-size:12px;margin-top:18px}.primary-bar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 22px;border:1px solid var(--line);border-radius:7px;background:#fff;margin-top:20px;box-shadow:0 5px 20px #392c1c12}.primary-bar p{font-size:12px;color:var(--muted)}.primary{border:0;border-radius:5px;padding:10px 19px;background:var(--red);color:#fff;font-size:13px}.primary.done{background:var(--green)}.case-card{border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 3px 14px #392c1c0b;padding:28px}.case-card .back{display:block;margin-bottom:24px}.case-card h1{font-size:27px}.case-card>p{color:var(--muted);font-size:13px;margin-top:6px}.case-content{display:grid;grid-template-columns:1fr 320px;gap:42px;margin-top:35px}.case-content article{font-family:var(--serif);font-size:16px;line-height:2}.case-content article h2{font-size:22px;margin-bottom:17px}.case-content article p{margin:15px 0}.case-resources{border-left:1px solid var(--line);padding-left:25px}.case-resources h3{font-size:17px;margin-bottom:14px}.source-card{padding:15px;border:1px solid var(--line);border-radius:6px}.source-card strong{font-size:13px}.source-card p{font-size:11px;color:var(--muted);margin-top:5px}.source-card .ok{display:inline-block;margin-top:11px;color:var(--green);font-size:11px}.ai-note{margin-top:22px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.hidden{display:none}@media(max-width:950px){.row{grid-template-columns:minmax(0,1.5fr) 1fr 1fr}.row .link{display:none}.detail-grid{grid-template-columns:180px minmax(0,1fr)}.side-info{display:none}.paper{padding:38px 42px}.case-content{grid-template-columns:1fr 270px}}@media(max-width:650px){.site{padding:0 16px;gap:18px}.brand{font-size:16px}.nav{gap:15px}.nav a{font-size:11px}.proto{display:none}.page{padding:24px 14px 50px}.heading{display:block;margin-bottom:20px}.heading h1{font-size:27px}.search{width:100%;margin-top:17px}.collection-head{padding:18px}.row{display:block;padding:17px 18px}.row .value{margin:10px 0 0 51px}.row .status{margin:10px 0 0 51px}.detail-top h1{font-size:24px}.detail-grid{display:block;min-height:0}.chapters{display:flex;overflow:auto;padding:10px;border-right:0;border-bottom:1px solid var(--line)}.chapters h3,.chapter-note{display:none}.chapter{min-width:155px}.reader{min-height:535px}.reader-head{padding:11px 14px}.reader-note{display:none}.paper-wrap{padding:14px}.paper{padding:30px 22px;min-height:450px}.paper h2{font-size:20px;margin:25px 0 18px}.paper p{font-size:14px}.primary-bar{align-items:flex-start;flex-direction:column;padding:13px 15px}.primary{width:100%}.case-card{padding:20px}.case-content{display:block}.case-resources{border-left:0;border-top:1px solid var(--line);padding:22px 0 0;margin-top:25px}}
+
+.drawer-mask{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(41,37,34,.28);backdrop-filter:blur(1px)}
+.drawer{width:80vw;height:80dvh;display:flex;flex-direction:column;overflow:hidden;background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 80px rgba(41,37,34,.24)}
+.drawer-header{display:flex;align-items:center;gap:18px;padding:17px 22px;background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.drawer-title{flex:1;font:600 18px/1.4 var(--serif)}
+.drawer-title small{font:12px var(--sans);color:var(--muted);margin-left:8px}
+.drawer-actions{display:flex;align-items:center;gap:8px}
+.drawer-open-page,.drawer-close{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);padding:0}
+.drawer-open-page:hover,.drawer-close:hover{color:var(--red);border-color:#dba8ac;background:var(--red-soft)}
+.drawer-open-page svg{width:17px;height:17px}
+.drawer-close{font-size:22px;line-height:1}
+.drawer-body{min-height:0;flex:1;overflow:auto;padding:18px 22px 22px;background:var(--bg)}
+.drawer-body .detail-view{height:100%;display:flex;flex-direction:column}
+.drawer-body .detail-grid{min-height:0;flex:1;border-radius:7px;box-shadow:none}
+.drawer-body .primary-bar{margin:12px 0 0;flex-shrink:0}
+.drawer-body .reader{min-height:0}
+.drawer-body .chapters,.drawer-body .side-info{overflow:auto}
+.empty-reader{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:28px}
+@media(max-width:950px){.drawer{width:94vw;height:88dvh;min-width:0}.drawer-body .detail-grid{grid-template-columns:180px minmax(0,1fr)}}
+@media(max-width:650px){.drawer-mask{padding:0}.drawer{width:100vw;height:100dvh;border-radius:0}.drawer-header{padding:13px 15px}.drawer-title{font-size:16px}.drawer-body{padding:10px}.drawer-body .primary-bar{margin-top:10px}.drawer-body .detail-grid{overflow:auto}}
+</style>
+</head>
+<body>
+<header class="site"><a class="brand" href="next-step-prototype.html">“强国有我”思政案例库</a><nav class="nav"><a class="active" href="next-step-prototype.html">资料库</a><a href="#case" id="case-nav">我的案例</a></nav></header>
+<main class="page" id="app"></main>
+<div id="overlay-root"></div>
+<script>
+const chapters=[
+  {id:'one',title:'第一章 · 世界的物质性',pages:'第 18–45 页',body:'讨论物质、意识以及两者之间的关系。教学讨论可以从具体情境出发，结合原文理解概念，再形成适合课堂使用的问题。',state:'confirmed'},
+  {id:'two',title:'第二章 · 实践与认识',pages:'第 46–72 页',body:'从实践活动出发，讨论认识的发展与检验。实践活动为认识提供对象和条件，认识又指导新的实践。',state:'pending'},
+  {id:'three',title:'第三章 · 社会发展',pages:'第 73–108 页',body:'',state:'missing'},
+  {id:'four',title:'第四章 · 价值与选择',pages:'第 109–136 页',body:'',state:'missing'}
+];
+const books=[
+  {id:'book23',edition:'2023 年版',source:'教学团队提供',size:'28.4 MB',coverage:'第 1–2 章 / 共 4 章',state:'部分正文已确认'},
+  {id:'book21',edition:'2021 年版',source:'教学团队提供',size:'22.8 MB',coverage:'整本原件',state:'正文待处理'}
+];
+const params=new URLSearchParams(location.search);
+const detailBook=params.get('detail');
+let state={screen:detailBook?'detail':'library',modal:false,book:detailBook||'book23',chapter:params.get('chapter')||'one',reader:'original',picked:['one'],done:false,query:''};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const externalIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7M21 3 10 14"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg>';
+function set(patch){state={...state,...patch};render();}
+function fileIcon(label='PDF'){return '<span class="file-icon">'+label+'</span>';}
+function statusLabel(c){return c.state==='confirmed'?'AI 可用':c.state==='pending'?'待核对':'未收录';}
+function detailURL(b){return 'next-step-prototype.html?detail='+encodeURIComponent(b.id)+'&chapter='+encodeURIComponent(state.chapter);}
+function library(){
+  const visible=books.filter(b=>!state.query||('马克思主义原理'+b.edition).includes(state.query));
+  return '<div class="crumb">资源检索</div><div class="heading"><div><h1>资料库</h1></div><label class="search"><span>⌕</span><input id="q" value="'+esc(state.query)+'" placeholder="搜索资料名称或版次" aria-label="搜索资料"></label></div><div class="section-label">合集 · 2 个版次</div><section class="collection"><div class="collection-head"><div><h2>马克思主义原理</h2></div></div>'+visible.map(b=>'<div class="row"><div class="edition">'+fileIcon()+'<div><button class="title" data-open="'+b.id+'">马克思主义原理</button><div class="sub">'+b.source+' · '+b.size+'</div></div></div><div class="value">'+b.edition+'<small>教材</small></div><div class="value"><span class="status '+(b.state==='正文待处理'?'pending':'')+'"><i></i>'+b.state+'</span><small>'+b.coverage+'</small></div><button class="link" data-open="'+b.id+'">查看资料 →</button></div>').join('')+'</section>';
+}
+function paperBody(b,c){
+  const confirmed=c.state==='confirmed';
+  if(state.reader==='text'&&!confirmed){
+    return '<div class="empty-reader"><span class="status pending"><i></i>'+statusLabel(c)+'</span><h2>原文正文</h2><button class="link" data-reader="original">查看原件</button></div>';
+  }
+  const type=state.reader==='ocr'?'OCR':'PDF';
+  const label=state.reader==='text'?'原文正文':state.reader==='ocr'?'OCR PDF':'原件';
+  const text=c.body||'本章尚未收录。';
+  return '<div class="paper-wrap"><article class="paper">'+fileIcon(type)+'<div class="edition">马克思主义原理 · '+b.edition+' · '+label+'</div><h2>'+esc(c.title)+'</h2><p>'+esc(text)+'</p><p class="source">'+label+' · '+c.pages+'</p><div class="page">'+c.pages+'</div></article></div>';
+}
+function detailMarkup(){
+  const b=books.find(x=>x.id===state.book)||books[0];
+  const c=chapters.find(x=>x.id===state.chapter)||chapters[0];
+  const confirmed=c.state==='confirmed';
+  return '<div class="detail-view"><div class="detail-grid"><aside class="chapters"><h3>章节</h3>'+chapters.map(x=>'<label class="chapter '+(x.id===state.chapter?'active':'')+'"><input type="checkbox" data-pick="'+x.id+'" '+(state.picked.includes(x.id)?'checked':'')+' '+(x.state==='missing'?'disabled':'')+'><span><strong>'+x.title+'</strong><small>'+x.pages+' · '+statusLabel(x)+'</small></span></label>').join('')+'</aside><section class="reader"><div class="reader-head"><div class="reader-tabs"><button class="'+(state.reader==='original'?'active':'')+'" data-reader="original">原件</button><button class="'+(state.reader==='ocr'?'active':'')+'" data-reader="ocr">OCR PDF</button><button class="'+(state.reader==='text'?'active':'')+'" data-reader="text">原文正文</button></div><span class="reader-note">'+(confirmed?'正文已确认 · AI 可用':c.state==='pending'?'原件可读 · 正文待核对':'原件可读 · 尚未收录正文')+'</span></div>'+paperBody(b,c)+'</section><aside class="side-info"><h3>资料信息</h3><dl class="facts"><div><dt>版次</dt><dd>'+b.edition+'</dd></div><div><dt>来源</dt><dd>'+b.source+'</dd></div><div><dt>范围</dt><dd>'+b.coverage+'</dd></div><div><dt>访问</dt><dd>校内</dd></div></dl><div class="state"><strong>正文状态</strong><p>'+(confirmed?'已确认 · AI 可用':c.state==='pending'?'待核对':'未收录')+'</p></div></aside></div><div class="primary-bar"><p>已选 '+state.picked.length+' 个章节 · '+b.edition+'</p><button class="primary '+(state.done?'done':'')+'" id="add">'+(state.done?'已加入当前案例':'加入当前案例')+'</button></div></div>';
+}
+function detailPage(){
+  const b=books.find(x=>x.id===state.book)||books[0];
+  return '<div class="detail-top"><div><a class="back" href="next-step-prototype.html" data-back>← 返回资料库</a><div class="tag" style="margin-top:15px">教材 · '+b.edition+'</div><h1>马克思主义原理</h1><p>'+b.source+' · '+b.size+' · 当前收录 '+b.coverage+'</p></div><div>'+fileIcon()+'</div></div>'+detailMarkup();
+}
+function casePage(){
+  const selected=chapters.filter(c=>state.picked.includes(c.id)),usable=selected.filter(c=>c.state==='confirmed');
+  return '<div class="case-card"><a class="back" href="next-step-prototype.html" data-back>← 返回资料库</a><span class="tag">我的案例 · 草稿</span><h1>一次社区实践如何转化为课堂问题</h1><div class="case-content"><article><h2>教学情境</h2><p>教师组织学生走进社区，记录观察与访谈，围绕实践、认识与公共责任展开讨论。</p><h2>讨论与思考</h2><p>请结合调查记录与选用资料，解释认识怎样在实践中形成、检验和发展。</p></article><aside class="case-resources"><h3>资料区</h3><div class="source-card">'+fileIcon()+'<strong>马克思主义原理 · 2023 年版</strong><p>'+selected.map(c=>c.title.split(' · ')[0]).join('、')+'</p><span class="ok">已加入</span></div><p class="ai-note">AI 可用：'+(usable.length?usable.map(c=>c.title.split(' · ')[0]).join('、'):'暂无')+'</p></aside></div></div>';
+}
+function modal(){
+  const b=books.find(x=>x.id===state.book)||books[0];
+  return '<div class="drawer-mask" data-backdrop><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-header"><h2 class="drawer-title" id="drawer-title">马克思主义原理 <small>'+b.edition+'</small></h2><div class="drawer-actions"><a class="drawer-open-page" href="'+detailURL(b)+'" target="_blank" rel="noopener noreferrer" aria-label="新标签页打开资料详情" title="新标签页打开资料详情">'+externalIcon+'</a><button class="drawer-close" id="close-drawer" aria-label="关闭资料详情">×</button></div></header><div class="drawer-body">'+detailMarkup()+'</div></section></div>';
+}
+function render(){
+  const root=$('#app');
+  const overlay=$('#overlay-root');
+  const hadModal=!!overlay.querySelector('.drawer');
+  root.innerHTML=state.screen==='library'?library():state.screen==='detail'?detailPage():casePage();
+  overlay.innerHTML=state.modal?modal():'';
+  root.inert=state.modal;
+  $('.site').inert=state.modal;
+  document.body.style.overflow=state.modal?'hidden':'';
+  bind();
+  if(state.modal)$('#close-drawer')?.focus();
+  else if(hadModal&&state.screen==='library')document.querySelector('[data-open="'+state.book+'"]')?.focus();
+}
+function bind(){
+  const q=$('#q');
+  if(q){q.addEventListener('input',e=>set({query:e.target.value}));if(!state.modal){q.focus();q.setSelectionRange(q.value.length,q.value.length);}}
+  document.querySelectorAll('[data-open]').forEach(e=>e.onclick=()=>set({screen:'library',modal:true,book:e.dataset.open,reader:'original'}));
+  document.querySelectorAll('[data-pick]').forEach(e=>e.onchange=()=>set({picked:e.checked?[...new Set([...state.picked,e.dataset.pick])]:state.picked.filter(x=>x!==e.dataset.pick),chapter:e.dataset.pick}));
+  document.querySelectorAll('[data-reader]').forEach(e=>e.onclick=()=>set({reader:e.dataset.reader}));
+  $('#add')?.addEventListener('click',()=>{if(!state.done)set({screen:'case',modal:false,done:true});});
+  $('#close-drawer')?.addEventListener('click',()=>set({modal:false}));
+  document.querySelector('[data-backdrop]')?.addEventListener('click',e=>{if(e.target.matches('[data-backdrop]'))set({modal:false});});
+  document.querySelectorAll('[data-back]').forEach(e=>e.onclick=event=>{event.preventDefault();history.replaceState({},'', 'next-step-prototype.html');set({screen:'library',modal:false});});
+}
+document.addEventListener('keydown',e=>{
+  if(!state.modal)return;
+  if(e.key==='Escape'){set({modal:false});return;}
+  if(e.key==='Tab'){
+    const controls=[...document.querySelector('.drawer').querySelectorAll('button:not(:disabled),a[href],input:not(:disabled)')].filter(x=>x.getClientRects().length);
+    const first=controls[0],last=controls[controls.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
+  }
+});
+$('#case-nav').onclick=e=>{e.preventDefault();if(state.done)set({screen:'case'});};
+render();
+</script>
+</body>
+</html>
