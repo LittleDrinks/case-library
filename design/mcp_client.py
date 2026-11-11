@@ -13,8 +13,10 @@ class McpClient:
         result = subprocess.run(
             ["node", str(self.script), *arguments],
             env={**os.environ, "PENPOT_JSON_RESPONSE": "1"},
-            capture_output=True, text=True, timeout=240, check=True,
+            capture_output=True, text=True, timeout=240, check=False,
         )
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
         return json.loads(result.stdout)
 
     def call_tool(self, name, arguments=None):
