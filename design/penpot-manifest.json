@@ -1,0 +1,21 @@
+{
+  "type": "penpot/export-files",
+  "version": 1,
+  "generatedBy": "penpot/2.18.4-RC5",
+  "referer": "penpot",
+  "files": [
+    {
+      "id": "0f3fb038-01f9-8046-8008-ca062850d4f5",
+      "name": "思政教学案例库 · 产品设计",
+      "features": [
+        "fdata/path-data",
+        "design-tokens/v1",
+        "variants/v1",
+        "layout/grid",
+        "components/v2",
+        "fdata/shape-data-type"
+      ]
+    }
+  ],
+  "relations": []
+}

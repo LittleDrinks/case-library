@@ -14,6 +14,7 @@ skills-lock.json
 .omp/
 .pi/
 .scratch/
+/docs/
 docs/agents/
 files/case-attachments/
 
