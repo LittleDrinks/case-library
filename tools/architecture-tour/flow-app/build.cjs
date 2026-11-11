@@ -1,0 +1,3 @@
+const esbuild=require('esbuild');
+const fs=require('fs');
+(async()=>{await esbuild.build({entryPoints:['App.jsx'],bundle:true,minify:true,format:'iife',outfile:'dist/app.js',loader:{'.woff': 'dataurl','.woff2':'dataurl'},define:{'process.env.NODE_ENV':'"production"'},legalComments:'inline'});const js=fs.readFileSync('dist/app.js','utf8').replace(/<\/script/gi,'<\\/script'),css=fs.readFileSync('dist/app.css','utf8');const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>案例库 · 架构</title><style>${css}</style></head><body><div id="root"></div><script>${js}</script></body></html>`;fs.writeFileSync('../code-map.html',html);console.log('Built standalone code-map.html',html.length)})();

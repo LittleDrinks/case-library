@@ -1,0 +1,1530 @@
+{
+  "children": [
+    {
+      "id": "agent",
+      "x": 45,
+      "y": 105,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "ai",
+      "x": 1125,
+      "y": 158,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "annotations",
+      "x": 591,
+      "y": 122,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "attachments",
+      "x": 861,
+      "y": 336,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "auth",
+      "x": 1383,
+      "y": 282,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "case-materials",
+      "x": 45,
+      "y": 480,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "case-sources",
+      "x": 591,
+      "y": 325,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "cases",
+      "x": 321,
+      "y": 227,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "documents",
+      "x": 591,
+      "y": 218,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "knowledge",
+      "x": 45,
+      "y": 208,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "materials",
+      "x": 591,
+      "y": 427,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "search",
+      "x": 861,
+      "y": 240,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "skills",
+      "x": 591,
+      "y": 523,
+      "width": 210,
+      "height": 64
+    },
+    {
+      "id": "tags",
+      "x": 1125,
+      "y": 56,
+      "width": 210,
+      "height": 64
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-0-agent-ai",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "ai"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 690.0,
+              "y": 137
+            },
+            {
+              "x": 690.0,
+              "y": 190
+            }
+          ],
+          "endPoint": {
+            "x": 1125,
+            "y": 190
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-1-agent-annotations",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "annotations"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 137
+            },
+            {
+              "x": 423.0,
+              "y": 154
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 154
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-2-agent-attachments",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "attachments"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 558.0,
+              "y": 137
+            },
+            {
+              "x": 558.0,
+              "y": 368
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 368
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-3-agent-auth",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 819.0,
+              "y": 137
+            },
+            {
+              "x": 819.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-4-agent-case-sources",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "case-sources"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 137
+            },
+            {
+              "x": 423.0,
+              "y": 357
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 357
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-5-agent-cases",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 288.0,
+              "y": 137
+            },
+            {
+              "x": 288.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-6-agent-materials",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "materials"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 137
+            },
+            {
+              "x": 423.0,
+              "y": 459
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 459
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-7-agent-search",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "search"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 558.0,
+              "y": 137
+            },
+            {
+              "x": 558.0,
+              "y": 272
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 272
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-8-agent-skills",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "skills"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 137
+            },
+            {
+              "x": 423.0,
+              "y": 555
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 555
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-9-agent-tags",
+      "sources": [
+        "agent"
+      ],
+      "targets": [
+        "tags"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 137
+          },
+          "bendPoints": [
+            {
+              "x": 690.0,
+              "y": 137
+            },
+            {
+              "x": 690.0,
+              "y": 88
+            }
+          ],
+          "endPoint": {
+            "x": 1125,
+            "y": 88
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-10-ai-auth",
+      "sources": [
+        "ai"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1335,
+            "y": 190
+          },
+          "bendPoints": [
+            {
+              "x": 1359.0,
+              "y": 190
+            },
+            {
+              "x": 1359.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-11-annotations-agent",
+      "sources": [
+        "annotations"
+      ],
+      "targets": [
+        "agent"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 154
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 154
+            },
+            {
+              "x": 423.0,
+              "y": 137
+            }
+          ],
+          "endPoint": {
+            "x": 45,
+            "y": 137
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-12-annotations-auth",
+      "sources": [
+        "annotations"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 154
+          },
+          "bendPoints": [
+            {
+              "x": 1092.0,
+              "y": 154
+            },
+            {
+              "x": 1092.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-13-annotations-cases",
+      "sources": [
+        "annotations"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 154
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 154
+            },
+            {
+              "x": 561.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-14-attachments-auth",
+      "sources": [
+        "attachments"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 368
+          },
+          "bendPoints": [
+            {
+              "x": 1227.0,
+              "y": 368
+            },
+            {
+              "x": 1227.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-15-attachments-cases",
+      "sources": [
+        "attachments"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 368
+          },
+          "bendPoints": [
+            {
+              "x": 696.0,
+              "y": 368
+            },
+            {
+              "x": 696.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-16-case-materials-auth",
+      "sources": [
+        "case-materials"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 512
+          },
+          "bendPoints": [
+            {
+              "x": 819.0,
+              "y": 512
+            },
+            {
+              "x": 819.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-17-case-materials-cases",
+      "sources": [
+        "case-materials"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 512
+          },
+          "bendPoints": [
+            {
+              "x": 288.0,
+              "y": 512
+            },
+            {
+              "x": 288.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-18-case-materials-materials",
+      "sources": [
+        "case-materials"
+      ],
+      "targets": [
+        "materials"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 512
+          },
+          "bendPoints": [
+            {
+              "x": 423.0,
+              "y": 512
+            },
+            {
+              "x": 423.0,
+              "y": 459
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 459
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-19-case-materials-search",
+      "sources": [
+        "case-materials"
+      ],
+      "targets": [
+        "search"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 512
+          },
+          "bendPoints": [
+            {
+              "x": 558.0,
+              "y": 512
+            },
+            {
+              "x": 558.0,
+              "y": 272
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 272
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-20-case-sources-auth",
+      "sources": [
+        "case-sources"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 357
+          },
+          "bendPoints": [
+            {
+              "x": 1092.0,
+              "y": 357
+            },
+            {
+              "x": 1092.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-21-case-sources-cases",
+      "sources": [
+        "case-sources"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 357
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 357
+            },
+            {
+              "x": 561.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-22-cases-annotations",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "annotations"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 259
+            },
+            {
+              "x": 561.0,
+              "y": 154
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 154
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-23-cases-attachments",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "attachments"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 696.0,
+              "y": 259
+            },
+            {
+              "x": 696.0,
+              "y": 368
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 368
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-24-cases-auth",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 957.0,
+              "y": 259
+            },
+            {
+              "x": 957.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-25-cases-case-materials",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "case-materials"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 288.0,
+              "y": 259
+            },
+            {
+              "x": 288.0,
+              "y": 512
+            }
+          ],
+          "endPoint": {
+            "x": 45,
+            "y": 512
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-26-cases-case-sources",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "case-sources"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 259
+            },
+            {
+              "x": 561.0,
+              "y": 357
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 357
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-27-cases-documents",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "documents"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 259
+            },
+            {
+              "x": 561.0,
+              "y": 250
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 250
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-28-cases-materials",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "materials"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 259
+            },
+            {
+              "x": 561.0,
+              "y": 459
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 459
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-29-cases-search",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "search"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 696.0,
+              "y": 259
+            },
+            {
+              "x": 696.0,
+              "y": 272
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 272
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-30-cases-tags",
+      "sources": [
+        "cases"
+      ],
+      "targets": [
+        "tags"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 531,
+            "y": 259
+          },
+          "bendPoints": [
+            {
+              "x": 828.0,
+              "y": 259
+            },
+            {
+              "x": 828.0,
+              "y": 88
+            }
+          ],
+          "endPoint": {
+            "x": 1125,
+            "y": 88
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-31-documents-cases",
+      "sources": [
+        "documents"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 250
+          },
+          "bendPoints": [
+            {
+              "x": 561.0,
+              "y": 250
+            },
+            {
+              "x": 561.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-32-knowledge-cases",
+      "sources": [
+        "knowledge"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 255,
+            "y": 240
+          },
+          "bendPoints": [
+            {
+              "x": 288.0,
+              "y": 240
+            },
+            {
+              "x": 288.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-33-materials-attachments",
+      "sources": [
+        "materials"
+      ],
+      "targets": [
+        "attachments"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 459
+          },
+          "bendPoints": [
+            {
+              "x": 831.0,
+              "y": 459
+            },
+            {
+              "x": 831.0,
+              "y": 368
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 368
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-34-materials-auth",
+      "sources": [
+        "materials"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 459
+          },
+          "bendPoints": [
+            {
+              "x": 1092.0,
+              "y": 459
+            },
+            {
+              "x": 1092.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-35-materials-search",
+      "sources": [
+        "materials"
+      ],
+      "targets": [
+        "search"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 459
+          },
+          "bendPoints": [
+            {
+              "x": 831.0,
+              "y": 459
+            },
+            {
+              "x": 831.0,
+              "y": 272
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 272
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-36-search-agent",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "agent"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 558.0,
+              "y": 272
+            },
+            {
+              "x": 558.0,
+              "y": 137
+            }
+          ],
+          "endPoint": {
+            "x": 45,
+            "y": 137
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-37-search-ai",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "ai"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 1098.0,
+              "y": 272
+            },
+            {
+              "x": 1098.0,
+              "y": 190
+            }
+          ],
+          "endPoint": {
+            "x": 1125,
+            "y": 190
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-38-search-auth",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 1227.0,
+              "y": 272
+            },
+            {
+              "x": 1227.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-39-search-cases",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 696.0,
+              "y": 272
+            },
+            {
+              "x": 696.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-40-search-materials",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "materials"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 831.0,
+              "y": 272
+            },
+            {
+              "x": 831.0,
+              "y": 459
+            }
+          ],
+          "endPoint": {
+            "x": 591,
+            "y": 459
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-41-search-tags",
+      "sources": [
+        "search"
+      ],
+      "targets": [
+        "tags"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1071,
+            "y": 272
+          },
+          "bendPoints": [
+            {
+              "x": 1098.0,
+              "y": 272
+            },
+            {
+              "x": 1098.0,
+              "y": 88
+            }
+          ],
+          "endPoint": {
+            "x": 1125,
+            "y": 88
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-42-skills-attachments",
+      "sources": [
+        "skills"
+      ],
+      "targets": [
+        "attachments"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 555
+          },
+          "bendPoints": [
+            {
+              "x": 831.0,
+              "y": 555
+            },
+            {
+              "x": 831.0,
+              "y": 368
+            }
+          ],
+          "endPoint": {
+            "x": 861,
+            "y": 368
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-43-skills-auth",
+      "sources": [
+        "skills"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 801,
+            "y": 555
+          },
+          "bendPoints": [
+            {
+              "x": 1092.0,
+              "y": 555
+            },
+            {
+              "x": 1092.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-44-tags-auth",
+      "sources": [
+        "tags"
+      ],
+      "targets": [
+        "auth"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1335,
+            "y": 88
+          },
+          "bendPoints": [
+            {
+              "x": 1359.0,
+              "y": 88
+            },
+            {
+              "x": 1359.0,
+              "y": 314
+            }
+          ],
+          "endPoint": {
+            "x": 1383,
+            "y": 314
+          }
+        }
+      ]
+    },
+    {
+      "id": "e-45-tags-cases",
+      "sources": [
+        "tags"
+      ],
+      "targets": [
+        "cases"
+      ],
+      "sections": [
+        {
+          "startPoint": {
+            "x": 1335,
+            "y": 88
+          },
+          "bendPoints": [
+            {
+              "x": 828.0,
+              "y": 88
+            },
+            {
+              "x": 828.0,
+              "y": 259
+            }
+          ],
+          "endPoint": {
+            "x": 321,
+            "y": 259
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2803 @@
+{
+  "revision": "7afc5bb9e182b1c61827d6024670002a42937fc6",
+  "base": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/",
+  "modules": [
+    {
+      "id": "agent",
+      "sub": "agent",
+      "label": "AI 会话与工具",
+      "path": "backend/app/modules/agent",
+      "summary": "组织 AI 对话、来源、工具和稿件操作",
+      "detail": "组织 AI 对话、来源、工具和稿件操作",
+      "files": [
+        {
+          "path": "backend/app/modules/agent/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "name": "artifacts.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py"
+        },
+        {
+          "path": "backend/app/modules/agent/blocks.py",
+          "name": "blocks.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/blocks.py"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "name": "case_area.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py"
+        },
+        {
+          "path": "backend/app/modules/agent/deps.py",
+          "name": "deps.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/deps.py"
+        },
+        {
+          "path": "backend/app/modules/agent/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/models.py"
+        },
+        {
+          "path": "backend/app/modules/agent/prosemirror.py",
+          "name": "prosemirror.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/prosemirror.py"
+        },
+        {
+          "path": "backend/app/modules/agent/recovery.py",
+          "name": "recovery.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/recovery.py"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "name": "repository.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py"
+        },
+        {
+          "path": "backend/app/modules/agent/resources.py",
+          "name": "resources.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/resources.py"
+        },
+        {
+          "path": "backend/app/modules/agent/review_feedback.py",
+          "name": "review_feedback.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/review_feedback.py"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py"
+        },
+        {
+          "path": "backend/app/modules/agent/runtime.py",
+          "name": "runtime.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/runtime.py"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "name": "search.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py"
+        },
+        {
+          "path": "backend/app/modules/agent/skills.py",
+          "name": "skills.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/skills.py"
+        },
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "name": "source_reader.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py"
+        },
+        {
+          "path": "backend/app/modules/agent/streaming.py",
+          "name": "streaming.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/streaming.py"
+        },
+        {
+          "path": "backend/app/modules/agent/supervisor.py",
+          "name": "supervisor.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/supervisor.py"
+        },
+        {
+          "path": "backend/app/modules/agent/visibility.py",
+          "name": "visibility.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/visibility.py"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "name": "writes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "sub": "ai",
+      "label": "模型配置与配额",
+      "path": "backend/app/modules/ai",
+      "summary": "管理模型配置、配额与模型请求",
+      "detail": "管理模型配置、配额与模型请求",
+      "files": [
+        {
+          "path": "backend/app/modules/ai/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/ai/crypto.py",
+          "name": "crypto.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/crypto.py"
+        },
+        {
+          "path": "backend/app/modules/ai/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/models.py"
+        },
+        {
+          "path": "backend/app/modules/ai/provider.py",
+          "name": "provider.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/provider.py"
+        },
+        {
+          "path": "backend/app/modules/ai/quota.py",
+          "name": "quota.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/quota.py"
+        },
+        {
+          "path": "backend/app/modules/ai/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/routes.py"
+        },
+        {
+          "path": "backend/app/modules/ai/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/service.py"
+        },
+        {
+          "path": "backend/app/modules/ai/thinking.py",
+          "name": "thinking.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/thinking.py"
+        },
+        {
+          "path": "backend/app/modules/ai/transport.py",
+          "name": "transport.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/transport.py"
+        }
+      ]
+    },
+    {
+      "id": "annotations",
+      "sub": "annotations",
+      "label": "批注与反馈",
+      "path": "backend/app/modules/annotations",
+      "summary": "把批注与回复绑定到正文版本",
+      "detail": "把批注与回复绑定到正文版本",
+      "files": [
+        {
+          "path": "backend/app/modules/annotations/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/annotations/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/models.py"
+        },
+        {
+          "path": "backend/app/modules/annotations/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/routes.py"
+        },
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py"
+        }
+      ]
+    },
+    {
+      "id": "attachments",
+      "sub": "attachments",
+      "label": "案例附件",
+      "path": "backend/app/modules/attachments",
+      "summary": "维护案例上传文件和文件字节",
+      "detail": "维护案例上传文件和文件字节",
+      "files": [
+        {
+          "path": "backend/app/modules/attachments/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/attachments/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/models.py"
+        },
+        {
+          "path": "backend/app/modules/attachments/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/routes.py"
+        },
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py"
+        },
+        {
+          "path": "backend/app/modules/attachments/storage.py",
+          "name": "storage.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/storage.py"
+        },
+        {
+          "path": "backend/app/modules/attachments/text.py",
+          "name": "text.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/text.py"
+        }
+      ]
+    },
+    {
+      "id": "auth",
+      "sub": "auth",
+      "label": "账号与会话",
+      "path": "backend/app/modules/auth",
+      "summary": "保存身份、密码与登录会话",
+      "detail": "保存身份、密码与登录会话",
+      "files": [
+        {
+          "path": "backend/app/modules/auth/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/auth/admin_bootstrap.py",
+          "name": "admin_bootstrap.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/admin_bootstrap.py"
+        },
+        {
+          "path": "backend/app/modules/auth/dependencies.py",
+          "name": "dependencies.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/dependencies.py"
+        },
+        {
+          "path": "backend/app/modules/auth/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/models.py"
+        },
+        {
+          "path": "backend/app/modules/auth/passwords.py",
+          "name": "passwords.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/passwords.py"
+        },
+        {
+          "path": "backend/app/modules/auth/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/routes.py"
+        },
+        {
+          "path": "backend/app/modules/auth/seed.py",
+          "name": "seed.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/seed.py"
+        },
+        {
+          "path": "backend/app/modules/auth/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/service.py"
+        },
+        {
+          "path": "backend/app/modules/auth/sessions.py",
+          "name": "sessions.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/auth/sessions.py"
+        }
+      ]
+    },
+    {
+      "id": "case-materials",
+      "sub": "case-materials",
+      "label": "素材引用",
+      "path": "backend/app/modules/case_materials",
+      "summary": "把素材关联到一个案例",
+      "detail": "把素材关联到一个案例",
+      "files": [
+        {
+          "path": "backend/app/modules/case_materials/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/case_materials/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/models.py"
+        },
+        {
+          "path": "backend/app/modules/case_materials/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/routes.py"
+        },
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py"
+        }
+      ]
+    },
+    {
+      "id": "case-sources",
+      "sub": "case-sources",
+      "label": "案例引用",
+      "path": "backend/app/modules/case_sources",
+      "summary": "引用另一篇案例的固定版本",
+      "detail": "引用另一篇案例的固定版本",
+      "files": [
+        {
+          "path": "backend/app/modules/case_sources/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/case_sources/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/models.py"
+        },
+        {
+          "path": "backend/app/modules/case_sources/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/routes.py"
+        },
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py"
+        }
+      ]
+    },
+    {
+      "id": "cases",
+      "sub": "cases",
+      "label": "案例与版本",
+      "path": "backend/app/modules/cases",
+      "summary": "管理私稿、版本、投稿与发布状态",
+      "detail": "管理私稿、版本、投稿与发布状态",
+      "files": [
+        {
+          "path": "backend/app/modules/cases/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/cases/actions.py",
+          "name": "actions.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/actions.py"
+        },
+        {
+          "path": "backend/app/modules/cases/citations.py",
+          "name": "citations.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/citations.py"
+        },
+        {
+          "path": "backend/app/modules/cases/document_schema.py",
+          "name": "document_schema.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/document_schema.py"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "name": "lifecycle.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py"
+        },
+        {
+          "path": "backend/app/modules/cases/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/models.py"
+        },
+        {
+          "path": "backend/app/modules/cases/published.py",
+          "name": "published.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/published.py"
+        },
+        {
+          "path": "backend/app/modules/cases/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/routes.py"
+        },
+        {
+          "path": "backend/app/modules/cases/seed.py",
+          "name": "seed.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/seed.py"
+        },
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py"
+        },
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "name": "snapshots.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py"
+        },
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "name": "sources.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py"
+        },
+        {
+          "path": "backend/app/modules/cases/submission_check.py",
+          "name": "submission_check.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/submission_check.py"
+        },
+        {
+          "path": "backend/app/modules/cases/template.py",
+          "name": "template.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/template.py"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "name": "versions.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py"
+        }
+      ]
+    },
+    {
+      "id": "documents",
+      "sub": "documents",
+      "label": "Word 文档导出",
+      "path": "backend/app/modules/documents",
+      "summary": "把案例和来源信息渲染成 Word",
+      "detail": "把案例和来源信息渲染成 Word",
+      "files": [
+        {
+          "path": "backend/app/modules/documents/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/documents/fonts.py",
+          "name": "fonts.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/fonts.py"
+        },
+        {
+          "path": "backend/app/modules/documents/references.py",
+          "name": "references.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/references.py"
+        },
+        {
+          "path": "backend/app/modules/documents/render.py",
+          "name": "render.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/render.py"
+        },
+        {
+          "path": "backend/app/modules/documents/styles.py",
+          "name": "styles.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/styles.py"
+        }
+      ]
+    },
+    {
+      "id": "knowledge",
+      "sub": "knowledge",
+      "label": "知识目录",
+      "path": "backend/app/modules/knowledge",
+      "summary": "提供知识目录与章节",
+      "detail": "提供知识目录与章节",
+      "files": [
+        {
+          "path": "backend/app/modules/knowledge/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/knowledge/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/routes.py"
+        },
+        {
+          "path": "backend/app/modules/knowledge/seed.py",
+          "name": "seed.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/seed.py"
+        },
+        {
+          "path": "backend/app/modules/knowledge/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/service.py"
+        }
+      ]
+    },
+    {
+      "id": "materials",
+      "sub": "materials",
+      "label": "素材与导入",
+      "path": "backend/app/modules/materials",
+      "summary": "接收、整理和授权素材",
+      "detail": "接收、整理和授权素材",
+      "files": [
+        {
+          "path": "backend/app/modules/materials/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/materials/archive.py",
+          "name": "archive.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/archive.py"
+        },
+        {
+          "path": "backend/app/modules/materials/errors.py",
+          "name": "errors.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/errors.py"
+        },
+        {
+          "path": "backend/app/modules/materials/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/models.py"
+        },
+        {
+          "path": "backend/app/modules/materials/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/routes.py"
+        },
+        {
+          "path": "backend/app/modules/materials/seed.py",
+          "name": "seed.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/seed.py"
+        },
+        {
+          "path": "backend/app/modules/materials/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/service.py"
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "sub": "search",
+      "label": "检索与摘要",
+      "path": "backend/app/modules/search",
+      "summary": "检索案例、素材与知识并生成摘要",
+      "detail": "检索案例、素材与知识并生成摘要",
+      "files": [
+        {
+          "path": "backend/app/modules/search/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/search/ai.py",
+          "name": "ai.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai.py"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "name": "ai_routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py"
+        },
+        {
+          "path": "backend/app/modules/search/client.py",
+          "name": "client.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/client.py"
+        },
+        {
+          "path": "backend/app/modules/search/cursor.py",
+          "name": "cursor.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/cursor.py"
+        },
+        {
+          "path": "backend/app/modules/search/indexer.py",
+          "name": "indexer.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/indexer.py"
+        },
+        {
+          "path": "backend/app/modules/search/meilisearch.py",
+          "name": "meilisearch.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/meilisearch.py"
+        },
+        {
+          "path": "backend/app/modules/search/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/models.py"
+        },
+        {
+          "path": "backend/app/modules/search/outbox.py",
+          "name": "outbox.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/outbox.py"
+        },
+        {
+          "path": "backend/app/modules/search/projection.py",
+          "name": "projection.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/projection.py"
+        },
+        {
+          "path": "backend/app/modules/search/rebuild.py",
+          "name": "rebuild.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/rebuild.py"
+        },
+        {
+          "path": "backend/app/modules/search/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/routes.py"
+        },
+        {
+          "path": "backend/app/modules/search/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py"
+        },
+        {
+          "path": "backend/app/modules/search/state.py",
+          "name": "state.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/state.py"
+        },
+        {
+          "path": "backend/app/modules/search/worker.py",
+          "name": "worker.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/worker.py"
+        }
+      ]
+    },
+    {
+      "id": "skills",
+      "sub": "skills",
+      "label": "Skill 资源",
+      "path": "backend/app/modules/skills",
+      "summary": "安装与发布 AI Skill 资源",
+      "detail": "安装与发布 AI Skill 资源",
+      "files": [
+        {
+          "path": "backend/app/modules/skills/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/skills/parse.py",
+          "name": "parse.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/parse.py"
+        },
+        {
+          "path": "backend/app/modules/skills/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/routes.py"
+        },
+        {
+          "path": "backend/app/modules/skills/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/service.py"
+        }
+      ]
+    },
+    {
+      "id": "tags",
+      "sub": "tags",
+      "label": "标签体系",
+      "path": "backend/app/modules/tags",
+      "summary": "维护标签目录并校验案例标签",
+      "detail": "维护标签目录并校验案例标签",
+      "files": [
+        {
+          "path": "backend/app/modules/tags/__init__.py",
+          "name": "__init__.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/__init__.py"
+        },
+        {
+          "path": "backend/app/modules/tags/models.py",
+          "name": "models.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/models.py"
+        },
+        {
+          "path": "backend/app/modules/tags/routes.py",
+          "name": "routes.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/routes.py"
+        },
+        {
+          "path": "backend/app/modules/tags/seed.py",
+          "name": "seed.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/seed.py"
+        },
+        {
+          "path": "backend/app/modules/tags/service.py",
+          "name": "service.py",
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/service.py"
+        }
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "id": "imp-agent-ai",
+      "a": "agent",
+      "b": "ai",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 50,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L50",
+          "code": "app.modules.ai.quota"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 51,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L51",
+          "code": "app.modules.ai.service"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 26,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L26",
+          "code": "app.modules.ai.provider"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 27,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L27",
+          "code": "app.modules.ai.quota"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-annotations",
+      "a": "agent",
+      "b": "annotations",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 77,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L77",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 97,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L97",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 169,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L169",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 208,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L208",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 218,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L218",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 209,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L209",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 293,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L293",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 567,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L567",
+          "code": "app.modules.annotations.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-attachments",
+      "a": "agent",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L7",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 12,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L12",
+          "code": "app.modules.attachments.text"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-auth",
+      "a": "agent",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 52,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L52",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-case_sources",
+      "a": "agent",
+      "b": "case-sources",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L13",
+          "code": "app.modules.case_sources.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-cases",
+      "a": "agent",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 19,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L19",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 20,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L20",
+          "code": "app.modules.cases.snapshots"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 53,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L53",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 54,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L54",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 59,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L59",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 60,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L60",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/skills.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/skills.py#L23",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L9",
+          "code": "app.modules.cases.sources"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 28,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L28",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L14",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 31,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L31",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 255,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L255",
+          "code": "app.modules.cases.snapshots"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 269,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L269",
+          "code": "app.modules.cases.versions"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 280,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L280",
+          "code": "app.modules.cases.versions"
+        },
+        {
+          "path": "backend/app/modules/agent/prosemirror.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/prosemirror.py#L11",
+          "code": "app.modules.cases.document_schema"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L8",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L9",
+          "code": "app.modules.cases.sources"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L10",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/review_feedback.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/review_feedback.py#L7",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/review_feedback.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/review_feedback.py#L8",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/blocks.py",
+          "line": 22,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/blocks.py#L22",
+          "code": "app.modules.cases.document_schema"
+        },
+        {
+          "path": "backend/app/modules/agent/blocks.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/blocks.py#L23",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 25,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L25",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 26,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L26",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 27,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L27",
+          "code": "app.modules.cases.versions"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-materials",
+      "a": "agent",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L14",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-search",
+      "a": "agent",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 15,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L15",
+          "code": "app.modules.search.meilisearch"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 16,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L16",
+          "code": "app.modules.search.models"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L17",
+          "code": "app.modules.search.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-skills",
+      "a": "agent",
+      "b": "skills",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 61,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L61",
+          "code": "app.modules.skills.service"
+        },
+        {
+          "path": "backend/app/modules/agent/skills.py",
+          "line": 24,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/skills.py#L24",
+          "code": "app.modules.skills.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-tags",
+      "a": "agent",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/runtime.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/runtime.py#L10",
+          "code": "app.modules.tags.service"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L18",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-ai-auth",
+      "a": "ai",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/ai/routes.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/routes.py#L23",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-agent",
+      "a": "annotations",
+      "b": "agent",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/routes.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/routes.py#L6",
+          "code": "app.modules.agent.repository"
+        },
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L10",
+          "code": "app.modules.agent"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-auth",
+      "a": "annotations",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/routes.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/routes.py#L23",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-cases",
+      "a": "annotations",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L11",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 725,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L725",
+          "code": "app.modules.cases.snapshots"
+        }
+      ]
+    },
+    {
+      "id": "imp-attachments-auth",
+      "a": "attachments",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/attachments/routes.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/routes.py#L17",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-attachments-cases",
+      "a": "attachments",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L13",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L14",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 266,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L266",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-auth",
+      "a": "case-materials",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-cases",
+      "a": "case-materials",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L6",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L7",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 162,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L162",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-materials",
+      "a": "case-materials",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L8",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-search",
+      "a": "case-materials",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L9",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_sources-auth",
+      "a": "case-sources",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_sources/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_sources-cases",
+      "a": "case-sources",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L9",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L10",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 210,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L210",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-annotations",
+      "a": "cases",
+      "b": "annotations",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 292,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L292",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 301,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L301",
+          "code": "app.modules.annotations.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-attachments",
+      "a": "cases",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 47,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L47",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L9",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L9",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L9",
+          "code": "app.modules.attachments.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-auth",
+      "a": "cases",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/routes.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/routes.py#L9",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-case_materials",
+      "a": "cases",
+      "b": "case-materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L10",
+          "code": "app.modules.case_materials.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 20,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L20",
+          "code": "app.modules.case_materials.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L10",
+          "code": "app.modules.case_materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-case_sources",
+      "a": "cases",
+      "b": "case-sources",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L7",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L11",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L10",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L11",
+          "code": "app.modules.case_sources.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-documents",
+      "a": "cases",
+      "b": "documents",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/routes.py",
+          "line": 29,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/routes.py#L29",
+          "code": "app.modules.documents"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-materials",
+      "a": "cases",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L11",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-search",
+      "a": "cases",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 21,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L21",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-tags",
+      "a": "cases",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 329,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L329",
+          "code": "app.modules.tags.service"
+        },
+        {
+          "path": "backend/app/modules/cases/submission_check.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/submission_check.py#L11",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-documents-cases",
+      "a": "documents",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/documents/render.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/render.py#L17",
+          "code": "app.modules.cases.document_schema"
+        }
+      ]
+    },
+    {
+      "id": "imp-knowledge-cases",
+      "a": "knowledge",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/knowledge/service.py",
+          "line": 5,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/service.py#L5",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-attachments",
+      "a": "materials",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/service.py#L13",
+          "code": "app.modules.attachments.storage"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-auth",
+      "a": "materials",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/routes.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/routes.py#L10",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-search",
+      "a": "materials",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/service.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/service.py#L18",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-agent",
+      "a": "search",
+      "b": "agent",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/ai.py",
+          "line": 12,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai.py#L12",
+          "code": "app.modules.agent.streaming"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-ai",
+      "a": "search",
+      "b": "ai",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/ai.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai.py#L13",
+          "code": "app.modules.ai.provider"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L7",
+          "code": "app.modules.ai.quota"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L8",
+          "code": "app.modules.ai.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-auth",
+      "a": "search",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/routes.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/routes.py#L14",
+          "code": "app.modules.auth.dependencies"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L9",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-cases",
+      "a": "search",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 5,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L5",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/search/cursor.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/cursor.py#L10",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-materials",
+      "a": "search",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L6",
+          "code": "app.modules.materials.service"
+        },
+        {
+          "path": "backend/app/modules/search/cursor.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/cursor.py#L11",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-tags",
+      "a": "search",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L17",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-skills-attachments",
+      "a": "skills",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/skills/routes.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/routes.py#L11",
+          "code": "app.modules.attachments.storage"
+        },
+        {
+          "path": "backend/app/modules/skills/service.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/service.py#L18",
+          "code": "app.modules.attachments.storage"
+        }
+      ]
+    },
+    {
+      "id": "imp-skills-auth",
+      "a": "skills",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/skills/routes.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/routes.py#L10",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-tags-auth",
+      "a": "tags",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/tags/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-tags-cases",
+      "a": "tags",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/tags/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/service.py#L13",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "imp-agent-ai",
+      "a": "agent",
+      "b": "ai",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 50,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L50",
+          "code": "app.modules.ai.quota"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 51,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L51",
+          "code": "app.modules.ai.service"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 26,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L26",
+          "code": "app.modules.ai.provider"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 27,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L27",
+          "code": "app.modules.ai.quota"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-annotations",
+      "a": "agent",
+      "b": "annotations",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 77,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L77",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 97,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L97",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 169,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L169",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 208,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L208",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 218,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L218",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 209,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L209",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 293,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L293",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 567,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L567",
+          "code": "app.modules.annotations.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-attachments",
+      "a": "agent",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L7",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 12,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L12",
+          "code": "app.modules.attachments.text"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-auth",
+      "a": "agent",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 52,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L52",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-case_sources",
+      "a": "agent",
+      "b": "case-sources",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L13",
+          "code": "app.modules.case_sources.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-cases",
+      "a": "agent",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 19,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L19",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/writes.py",
+          "line": 20,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/writes.py#L20",
+          "code": "app.modules.cases.snapshots"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 53,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L53",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 54,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L54",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 59,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L59",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 60,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L60",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/skills.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/skills.py#L23",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L9",
+          "code": "app.modules.cases.sources"
+        },
+        {
+          "path": "backend/app/modules/agent/service.py",
+          "line": 28,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/service.py#L28",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L14",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 31,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L31",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 255,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L255",
+          "code": "app.modules.cases.snapshots"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 269,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L269",
+          "code": "app.modules.cases.versions"
+        },
+        {
+          "path": "backend/app/modules/agent/artifacts.py",
+          "line": 280,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/artifacts.py#L280",
+          "code": "app.modules.cases.versions"
+        },
+        {
+          "path": "backend/app/modules/agent/prosemirror.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/prosemirror.py#L11",
+          "code": "app.modules.cases.document_schema"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L8",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L9",
+          "code": "app.modules.cases.sources"
+        },
+        {
+          "path": "backend/app/modules/agent/case_area.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/case_area.py#L10",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/review_feedback.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/review_feedback.py#L7",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/review_feedback.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/review_feedback.py#L8",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/blocks.py",
+          "line": 22,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/blocks.py#L22",
+          "code": "app.modules.cases.document_schema"
+        },
+        {
+          "path": "backend/app/modules/agent/blocks.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/blocks.py#L23",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 25,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L25",
+          "code": "app.modules.cases.lifecycle"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 26,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L26",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/agent/repository.py",
+          "line": 27,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/repository.py#L27",
+          "code": "app.modules.cases.versions"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-materials",
+      "a": "agent",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/source_reader.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/source_reader.py#L14",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-search",
+      "a": "agent",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 15,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L15",
+          "code": "app.modules.search.meilisearch"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 16,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L16",
+          "code": "app.modules.search.models"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L17",
+          "code": "app.modules.search.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-skills",
+      "a": "agent",
+      "b": "skills",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/routes.py",
+          "line": 61,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/routes.py#L61",
+          "code": "app.modules.skills.service"
+        },
+        {
+          "path": "backend/app/modules/agent/skills.py",
+          "line": 24,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/skills.py#L24",
+          "code": "app.modules.skills.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-agent-tags",
+      "a": "agent",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/agent/runtime.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/runtime.py#L10",
+          "code": "app.modules.tags.service"
+        },
+        {
+          "path": "backend/app/modules/agent/search.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/agent/search.py#L18",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-ai-auth",
+      "a": "ai",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/ai/routes.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/ai/routes.py#L23",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-agent",
+      "a": "annotations",
+      "b": "agent",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/routes.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/routes.py#L6",
+          "code": "app.modules.agent.repository"
+        },
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L10",
+          "code": "app.modules.agent"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-auth",
+      "a": "annotations",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/routes.py",
+          "line": 23,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/routes.py#L23",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-annotations-cases",
+      "a": "annotations",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L11",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/annotations/service.py",
+          "line": 725,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/annotations/service.py#L725",
+          "code": "app.modules.cases.snapshots"
+        }
+      ]
+    },
+    {
+      "id": "imp-attachments-auth",
+      "a": "attachments",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/attachments/routes.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/routes.py#L17",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-attachments-cases",
+      "a": "attachments",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L13",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L14",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/attachments/service.py",
+          "line": 266,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/attachments/service.py#L266",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-auth",
+      "a": "case-materials",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-cases",
+      "a": "case-materials",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L6",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L7",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 162,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L162",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-materials",
+      "a": "case-materials",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L8",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_materials-search",
+      "a": "case-materials",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_materials/service.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_materials/service.py#L9",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_sources-auth",
+      "a": "case-sources",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_sources/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-case_sources-cases",
+      "a": "case-sources",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L9",
+          "code": "app.modules.cases.published"
+        },
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L10",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/case_sources/service.py",
+          "line": 210,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/case_sources/service.py#L210",
+          "code": "app.modules.cases.citations"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-annotations",
+      "a": "cases",
+      "b": "annotations",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 292,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L292",
+          "code": "app.modules.annotations.service"
+        },
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 301,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L301",
+          "code": "app.modules.annotations.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-attachments",
+      "a": "cases",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 47,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L47",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L9",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L9",
+          "code": "app.modules.attachments.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L9",
+          "code": "app.modules.attachments.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-auth",
+      "a": "cases",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/routes.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/routes.py#L9",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-case_materials",
+      "a": "cases",
+      "b": "case-materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L10",
+          "code": "app.modules.case_materials.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 20,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L20",
+          "code": "app.modules.case_materials.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L10",
+          "code": "app.modules.case_materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-case_sources",
+      "a": "cases",
+      "b": "case-sources",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L7",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/snapshots.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/snapshots.py#L11",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L10",
+          "code": "app.modules.case_sources.service"
+        },
+        {
+          "path": "backend/app/modules/cases/versions.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/versions.py#L11",
+          "code": "app.modules.case_sources.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-documents",
+      "a": "cases",
+      "b": "documents",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/routes.py",
+          "line": 29,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/routes.py#L29",
+          "code": "app.modules.documents"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-materials",
+      "a": "cases",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/sources.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/sources.py#L11",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-search",
+      "a": "cases",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/lifecycle.py",
+          "line": 21,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/lifecycle.py#L21",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-cases-tags",
+      "a": "cases",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/cases/service.py",
+          "line": 329,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/service.py#L329",
+          "code": "app.modules.tags.service"
+        },
+        {
+          "path": "backend/app/modules/cases/submission_check.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/cases/submission_check.py#L11",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-documents-cases",
+      "a": "documents",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/documents/render.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/documents/render.py#L17",
+          "code": "app.modules.cases.document_schema"
+        }
+      ]
+    },
+    {
+      "id": "imp-knowledge-cases",
+      "a": "knowledge",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/knowledge/service.py",
+          "line": 5,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/knowledge/service.py#L5",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-attachments",
+      "a": "materials",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/service.py#L13",
+          "code": "app.modules.attachments.storage"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-auth",
+      "a": "materials",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/routes.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/routes.py#L10",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-materials-search",
+      "a": "materials",
+      "b": "search",
+      "evidence": [
+        {
+          "path": "backend/app/modules/materials/service.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/materials/service.py#L18",
+          "code": "app.modules.search.outbox"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-agent",
+      "a": "search",
+      "b": "agent",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/ai.py",
+          "line": 12,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai.py#L12",
+          "code": "app.modules.agent.streaming"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-ai",
+      "a": "search",
+      "b": "ai",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/ai.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai.py#L13",
+          "code": "app.modules.ai.provider"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 7,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L7",
+          "code": "app.modules.ai.quota"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L8",
+          "code": "app.modules.ai.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-auth",
+      "a": "search",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/routes.py",
+          "line": 14,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/routes.py#L14",
+          "code": "app.modules.auth.dependencies"
+        },
+        {
+          "path": "backend/app/modules/search/ai_routes.py",
+          "line": 9,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/ai_routes.py#L9",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-cases",
+      "a": "search",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 5,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L5",
+          "code": "app.modules.cases.service"
+        },
+        {
+          "path": "backend/app/modules/search/cursor.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/cursor.py#L10",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-materials",
+      "a": "search",
+      "b": "materials",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 6,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L6",
+          "code": "app.modules.materials.service"
+        },
+        {
+          "path": "backend/app/modules/search/cursor.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/cursor.py#L11",
+          "code": "app.modules.materials.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-search-tags",
+      "a": "search",
+      "b": "tags",
+      "evidence": [
+        {
+          "path": "backend/app/modules/search/service.py",
+          "line": 17,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/search/service.py#L17",
+          "code": "app.modules.tags.service"
+        }
+      ]
+    },
+    {
+      "id": "imp-skills-attachments",
+      "a": "skills",
+      "b": "attachments",
+      "evidence": [
+        {
+          "path": "backend/app/modules/skills/routes.py",
+          "line": 11,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/routes.py#L11",
+          "code": "app.modules.attachments.storage"
+        },
+        {
+          "path": "backend/app/modules/skills/service.py",
+          "line": 18,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/service.py#L18",
+          "code": "app.modules.attachments.storage"
+        }
+      ]
+    },
+    {
+      "id": "imp-skills-auth",
+      "a": "skills",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/skills/routes.py",
+          "line": 10,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/skills/routes.py#L10",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-tags-auth",
+      "a": "tags",
+      "b": "auth",
+      "evidence": [
+        {
+          "path": "backend/app/modules/tags/routes.py",
+          "line": 8,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/routes.py#L8",
+          "code": "app.modules.auth.dependencies"
+        }
+      ]
+    },
+    {
+      "id": "imp-tags-cases",
+      "a": "tags",
+      "b": "cases",
+      "evidence": [
+        {
+          "path": "backend/app/modules/tags/service.py",
+          "line": 13,
+          "url": "https://github.com/LittleDrinks/case-library/blob/7afc5bb9e182b1c61827d6024670002a42937fc6/backend/app/modules/tags/service.py#L13",
+          "code": "app.modules.cases.service"
+        }
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "id": "browse",
+      "title": "查找资料",
+      "edges": [
+        "imp-agent-search",
+        "imp-search-materials"
+      ],
+      "increment": false
+    },
+    {
+      "id": "write",
+      "title": "写作与版本",
+      "edges": [
+        "imp-cases-annotations",
+        "imp-cases-materials"
+      ],
+      "increment": false
+    },
+    {
+      "id": "review",
+      "title": "投稿审核",
+      "edges": [
+        "imp-cases-annotations",
+        "imp-annotations-cases"
+      ],
+      "increment": false
+    },
+    {
+      "id": "sources",
+      "title": "引用资料",
+      "edges": [
+        "imp-cases-case_materials",
+        "imp-cases-case_sources"
+      ],
+      "increment": false
+    },
+    {
+      "id": "assist",
+      "title": "AI 创作",
+      "edges": [
+        "imp-agent-ai",
+        "imp-agent-search"
+      ],
+      "increment": false
+    },
+    {
+      "id": "import",
+      "title": "资料导入",
+      "edges": [
+        "imp-materials-attachments",
+        "imp-materials-search"
+      ],
+      "increment": false
+    },
+    {
+      "id": "export",
+      "title": "Word 导出",
+      "edges": [
+        "imp-cases-documents"
+      ],
+      "increment": false
+    },
+    {
+      "id": "login",
+      "title": "登录",
+      "edges": [],
+      "increment": false
+    },
+    {
+      "id": "accounts",
+      "title": "账号管理",
+      "edges": [],
+      "increment": true
+    },
+    {
+      "id": "campus",
+      "title": "校内授权",
+      "edges": [],
+      "increment": true
+    }
+  ],
+  "delta": {
+    "agent": true,
+    "attachments": true,
+    "auth": true,
+    "materials": true,
+    "search": true
+  },
+  "frontend": [
+    {
+      "id": "views",
+      "label": "views/",
+      "sub": "views/",
+      "files": []
+    },
+    {
+      "id": "components",
+      "label": "components/",
+      "sub": "components/",
+      "files": []
+    },
+    {
+      "id": "composables",
+      "label": "composables/",
+      "sub": "composables/",
+      "files": []
+    },
+    {
+      "id": "lib",
+      "label": "lib/",
+      "sub": "lib/",
+      "files": []
+    },
+    {
+      "id": "styles",
+      "label": "styles/",
+      "sub": "styles/",
+      "files": []
+    },
+    {
+      "id": "router.js",
+      "label": "router.js",
+      "sub": "router.js",
+      "files": []
+    },
+    {
+      "id": "api.js",
+      "label": "api.js",
+      "sub": "api.js",
+      "files": []
+    },
+    {
+      "id": "session.js",
+      "label": "session.js",
+      "sub": "session.js",
+      "files": []
+    }
+  ],
+  "statuses": [],
+  "runtime": []
+}

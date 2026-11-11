@@ -1,0 +1,1 @@
+{"type":"commonjs","scripts":{"build":"node build.cjs"},"dependencies":{"@fontsource/inter":"^5.2.6","@xyflow/react":"^12.8.6","esbuild":"^0.25.10","elkjs":"^0.10.0","lucide-react":"^0.468.0","react":"^19.1.1","react-dom":"^19.1.1"}}

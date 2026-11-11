@@ -1,66 +1,35 @@
 import json
+import os
+import subprocess
 import sys
-import urllib.request
+from pathlib import Path
 
 
 class McpClient:
-    def __init__(self, url="http://localhost:4401/mcp"):
-        self.url = url
-        self.session_id = None
-        self.next_id = 0
-        result = self.request("initialize", {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": {"name": "case-library-design", "version": "1.0"},
-        })
-        self.protocol = result["protocolVersion"]
-        self.notify("notifications/initialized")
+    def __init__(self):
+        self.script = Path(__file__).resolve().parents[1] / "tools/penpot/mcp.cjs"
 
-    def request(self, method, params):
-        self.next_id += 1
-        request_id = self.next_id
-        payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-        response = self.send(payload)
-        if "error" in response:
-            raise RuntimeError(response["error"])
-        return response["result"]
-
-    def notify(self, method):
-        self.send({"jsonrpc": "2.0", "method": method})
-
-    def send(self, payload):
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
-        request = urllib.request.Request(
-            self.url, data=json.dumps(payload).encode(), headers=headers, method="POST",
+    def invoke(self, *arguments):
+        result = subprocess.run(
+            ["node", str(self.script), *arguments],
+            env={**os.environ, "PENPOT_JSON_RESPONSE": "1"},
+            capture_output=True, text=True, timeout=240, check=True,
         )
-        with urllib.request.urlopen(request, timeout=120) as response:
-            self.session_id = response.headers.get("mcp-session-id", self.session_id)
-            body = response.read().decode()
-        if not body:
-            return {}
-        for line in body.splitlines():
-            if line.startswith("data:"):
-                return json.loads(line.removeprefix("data:").strip())
-        return json.loads(body)
+        return json.loads(result.stdout)
 
     def call_tool(self, name, arguments=None):
-        return self.request("tools/call", {"name": name, "arguments": arguments or {}})
+        return self.invoke("tool", name, json.dumps(arguments or {}, ensure_ascii=False))
 
 
 def main():
     client = McpClient()
     if len(sys.argv) > 1 and sys.argv[1] == "list":
-        result = client.request("tools/list", {})
+        result = client.invoke("list")
     elif len(sys.argv) > 1:
         arguments = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         result = client.call_tool(sys.argv[1], arguments)
     else:
-        raise SystemExit("用法：mcp_client.py list 或 mcp_client.py <tool> '<arguments>'")
+        raise SystemExit("用法：mcp_client.py list 或 mcp_client.py <tool> '<JSON参数>'")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
