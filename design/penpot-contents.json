@@ -1,8 +1,216 @@
 {
   "pages": [
     {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
+      "name": "浏览 · 首页与搜索",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca8595c8eb99": {
+          "id": "f2ca496a-9568-80b4-8008-ca8595c8eb99",
+          "name": "01 · 首页与检索",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca81a90b0a14"
+        }
+      },
+      "index": 0
+    },
+    {
+      "id": "a7a3ef6a-3913-80f4-8008-cd3927fd475c",
+      "name": "01 · 改版试验",
+      "pluginData": {
+        "plugin/96dfa740-005d-8020-8007-55ede24a2bae": {
+          "design-experiment": "true"
+        }
+      },
+      "index": 1
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8b97c81",
+      "name": "浏览 · 搜索筛选",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca85cb7ef9f4": {
+          "id": "f2ca496a-9568-80b4-8008-ca85cb7ef9f4",
+          "name": "02 · 检索筛选",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca821724f384"
+        }
+      },
+      "index": 2
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8be18ad",
+      "name": "浏览 · 素材与知识",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca864442e58e": {
+          "id": "f2ca496a-9568-80b4-8008-ca864442e58e",
+          "name": "03 · 素材与知识",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca8263bedae4"
+        }
+      },
+      "index": 3
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8c299d0",
+      "name": "浏览 · 案例阅读",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca86b6edd288": {
+          "id": "f2ca496a-9568-80b4-8008-ca86b6edd288",
+          "name": "04 · 案例阅读",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca8313d98d2a"
+        }
+      },
+      "index": 4
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8c753ea",
+      "name": "创作 · 工作台面板",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca86e04c00c8": {
+          "id": "f2ca496a-9568-80b4-8008-ca86e04c00c8",
+          "name": "05 · 工作台面板",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca81291d0e15"
+        }
+      },
+      "index": 5
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8cc0b5b",
+      "name": "创作 · 对话与 Skill",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca870a2b03ef": {
+          "id": "f2ca496a-9568-80b4-8008-ca870a2b03ef",
+          "name": "06 · 对话与 Skill",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca8340db9f6e"
+        }
+      },
+      "index": 6
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8d0a98b",
+      "name": "创作 · 历史版本",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca873009a004": {
+          "id": "f2ca496a-9568-80b4-8008-ca873009a004",
+          "name": "07 · 历史版本操作",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca839123b9ae"
+        }
+      },
+      "index": 7
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8d56b4a",
+      "name": "创作 · 案例编辑",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca8758f56242": {
+          "id": "f2ca496a-9568-80b4-8008-ca8758f56242",
+          "name": "08 · 案例编辑",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca83cbe4a0e9"
+        }
+      },
+      "index": 8
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8d9afaa",
+      "name": "创作 · 素材选取",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca876b190a2c": {
+          "id": "f2ca496a-9568-80b4-8008-ca876b190a2c",
+          "name": "09 · 素材选取",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca8429ee2a66"
+        }
+      },
+      "index": 9
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8de7ba2",
+      "name": "管理 · 概览与详情",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca8784b33ca6": {
+          "id": "f2ca496a-9568-80b4-8008-ca8784b33ca6",
+          "name": "10 · 管理概览与详情",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca845f259bed"
+        }
+      },
+      "index": 10
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8e35d0f",
+      "name": "管理 · 案例审核",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca879fc5b619": {
+          "id": "f2ca496a-9568-80b4-8008-ca879fc5b619",
+          "name": "11 · 案例审核",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca84982194e0"
+        }
+      },
+      "index": 11
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8e7de9e",
+      "name": "管理 · 素材与标签",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca87b664ecd2": {
+          "id": "f2ca496a-9568-80b4-8008-ca87b664ecd2",
+          "name": "12 · 素材与标签管理",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca84d36708dd"
+        },
+        "bed25c46-f36d-80e8-8008-cd3fe9984857": {
+          "id": "bed25c46-f36d-80e8-8008-cd3fe9984857",
+          "name": "Flow 1",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca84ddec2812"
+        },
+        "bed25c46-f36d-80e8-8008-cd3fea6c860f": {
+          "id": "bed25c46-f36d-80e8-8008-cd3fea6c860f",
+          "name": "Flow 2",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca84f09faf6c"
+        }
+      },
+      "index": 12
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8eca0cc",
+      "name": "管理 · 平台配置",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca87c76afcf7": {
+          "id": "f2ca496a-9568-80b4-8008-ca87c76afcf7",
+          "name": "13 · 平台配置",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca85087a1417"
+        },
+        "bed25c46-f36d-80e8-8008-cd3ffa4384f1": {
+          "id": "bed25c46-f36d-80e8-8008-cd3ffa4384f1",
+          "name": "Flow 1",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca85164810ee"
+        },
+        "bed25c46-f36d-80e8-8008-cd3ffaff4217": {
+          "id": "bed25c46-f36d-80e8-8008-cd3ffaff4217",
+          "name": "Flow 2",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca8524676aaa"
+        }
+      },
+      "index": 13
+    },
+    {
+      "id": "f2ca496a-9568-80b4-8008-ca80f8f11a89",
+      "name": "账号 · 登录与设置",
+      "flows": {
+        "f2ca496a-9568-80b4-8008-ca87da69e6c7": {
+          "id": "f2ca496a-9568-80b4-8008-ca87da69e6c7",
+          "name": "14 · 账号与设置",
+          "startingFrame": "f2ca496a-9568-80b4-8008-ca852f5e5b0c"
+        }
+      },
+      "index": 14
+    },
+    {
+      "id": "0f2bd9ba-cbc5-80f1-8008-ca20de766091",
+      "name": "组件 · 样式与控件",
+      "index": 15
+    },
+    {
+      "id": "0f3fb038-01f9-8046-8008-ca062850d4f6",
+      "name": "归档 · 首次工作台",
+      "index": 16
+    },
+    {
       "id": "5efb8ca5-50b1-8025-8008-ca98a9181d80",
-      "name": "00 · 从这里开始",
+      "name": "归档 · 全量交互原型",
       "pluginData": {
         "plugin/96dfa740-005d-8020-8007-55ede24a2bae": {
           "continuous-preview": "true"
@@ -35,214 +243,6 @@
           "startingFrame": "5efb8ca5-50b1-8025-8008-ca992372fbb4"
         }
       },
-      "index": 0
-    },
-    {
-      "id": "a7a3ef6a-3913-80f4-8008-cd3927fd475c",
-      "name": "01 · 改版试验",
-      "pluginData": {
-        "plugin/96dfa740-005d-8020-8007-55ede24a2bae": {
-          "design-experiment": "true"
-        }
-      },
-      "index": 1
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
-      "name": "浏览 · 首页与搜索",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca8595c8eb99": {
-          "id": "f2ca496a-9568-80b4-8008-ca8595c8eb99",
-          "name": "01 · 首页与检索",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca81a90b0a14"
-        }
-      },
-      "index": 2
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8b97c81",
-      "name": "浏览 · 搜索筛选",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca85cb7ef9f4": {
-          "id": "f2ca496a-9568-80b4-8008-ca85cb7ef9f4",
-          "name": "02 · 检索筛选",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca821724f384"
-        }
-      },
-      "index": 3
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8be18ad",
-      "name": "浏览 · 素材与知识",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca864442e58e": {
-          "id": "f2ca496a-9568-80b4-8008-ca864442e58e",
-          "name": "03 · 素材与知识",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca8263bedae4"
-        }
-      },
-      "index": 4
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8c299d0",
-      "name": "浏览 · 案例阅读",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca86b6edd288": {
-          "id": "f2ca496a-9568-80b4-8008-ca86b6edd288",
-          "name": "04 · 案例阅读",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca8313d98d2a"
-        }
-      },
-      "index": 5
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8c753ea",
-      "name": "创作 · 工作台面板",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca86e04c00c8": {
-          "id": "f2ca496a-9568-80b4-8008-ca86e04c00c8",
-          "name": "05 · 工作台面板",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca81291d0e15"
-        }
-      },
-      "index": 6
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8cc0b5b",
-      "name": "创作 · 对话与 Skill",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca870a2b03ef": {
-          "id": "f2ca496a-9568-80b4-8008-ca870a2b03ef",
-          "name": "06 · 对话与 Skill",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca8340db9f6e"
-        }
-      },
-      "index": 7
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8d0a98b",
-      "name": "创作 · 历史版本",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca873009a004": {
-          "id": "f2ca496a-9568-80b4-8008-ca873009a004",
-          "name": "07 · 历史版本操作",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca839123b9ae"
-        }
-      },
-      "index": 8
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8d56b4a",
-      "name": "创作 · 案例编辑",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca8758f56242": {
-          "id": "f2ca496a-9568-80b4-8008-ca8758f56242",
-          "name": "08 · 案例编辑",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca83cbe4a0e9"
-        }
-      },
-      "index": 9
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8d9afaa",
-      "name": "创作 · 素材选取",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca876b190a2c": {
-          "id": "f2ca496a-9568-80b4-8008-ca876b190a2c",
-          "name": "09 · 素材选取",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca8429ee2a66"
-        }
-      },
-      "index": 10
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8de7ba2",
-      "name": "管理 · 概览与详情",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca8784b33ca6": {
-          "id": "f2ca496a-9568-80b4-8008-ca8784b33ca6",
-          "name": "10 · 管理概览与详情",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca845f259bed"
-        }
-      },
-      "index": 11
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8e35d0f",
-      "name": "管理 · 案例审核",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca879fc5b619": {
-          "id": "f2ca496a-9568-80b4-8008-ca879fc5b619",
-          "name": "11 · 案例审核",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca84982194e0"
-        }
-      },
-      "index": 12
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8e7de9e",
-      "name": "管理 · 素材与标签",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca87b664ecd2": {
-          "id": "f2ca496a-9568-80b4-8008-ca87b664ecd2",
-          "name": "12 · 素材与标签管理",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca84d36708dd"
-        },
-        "bed25c46-f36d-80e8-8008-cd3fe9984857": {
-          "id": "bed25c46-f36d-80e8-8008-cd3fe9984857",
-          "name": "Flow 1",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca84ddec2812"
-        },
-        "bed25c46-f36d-80e8-8008-cd3fea6c860f": {
-          "id": "bed25c46-f36d-80e8-8008-cd3fea6c860f",
-          "name": "Flow 2",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca84f09faf6c"
-        }
-      },
-      "index": 13
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8eca0cc",
-      "name": "管理 · 平台配置",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca87c76afcf7": {
-          "id": "f2ca496a-9568-80b4-8008-ca87c76afcf7",
-          "name": "13 · 平台配置",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca85087a1417"
-        },
-        "bed25c46-f36d-80e8-8008-cd3ffa4384f1": {
-          "id": "bed25c46-f36d-80e8-8008-cd3ffa4384f1",
-          "name": "Flow 1",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca85164810ee"
-        },
-        "bed25c46-f36d-80e8-8008-cd3ffaff4217": {
-          "id": "bed25c46-f36d-80e8-8008-cd3ffaff4217",
-          "name": "Flow 2",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca8524676aaa"
-        }
-      },
-      "index": 14
-    },
-    {
-      "id": "f2ca496a-9568-80b4-8008-ca80f8f11a89",
-      "name": "账号 · 登录与设置",
-      "flows": {
-        "f2ca496a-9568-80b4-8008-ca87da69e6c7": {
-          "id": "f2ca496a-9568-80b4-8008-ca87da69e6c7",
-          "name": "14 · 账号与设置",
-          "startingFrame": "f2ca496a-9568-80b4-8008-ca852f5e5b0c"
-        }
-      },
-      "index": 15
-    },
-    {
-      "id": "0f2bd9ba-cbc5-80f1-8008-ca20de766091",
-      "name": "组件 · 样式与控件",
-      "index": 16
-    },
-    {
-      "id": "0f3fb038-01f9-8046-8008-ca062850d4f6",
-      "name": "归档 · 首次工作台",
       "index": 17
     }
   ],

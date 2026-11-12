@@ -1,6 +1,6 @@
 # Penpot 工具
 
-设计在官方托管 Penpot 中编辑，代理通过官方 HTTPS MCP 连接。浏览器中登录后，在目标设计文件选择 File → MCP Server → Connect，并保持标签页活跃。
+设计使用[服务器上的 Penpot](../../deploy/penpot/README.md)，代理通过该实例的官方 MCP 连接；客户端也兼容官方托管实例。浏览器中登录后，在目标设计文件选择 File → MCP Server → Connect，并保持标签页活跃。自部署的 MCP 2.19.1 同样需要浏览器插件在线。
 
 ```sh
 npm ci --prefix tools/penpot

@@ -1,5 +1,6 @@
 # 密钥与本地配置
 .env
+AGENTS.md
 agents.md
 MEMORY.md
 memory.md
@@ -52,3 +53,4 @@ tools/architecture-tour/flow-app/dist/
 tools/architecture-tour/probe.png
 tools/architecture-tour/recovered.png
 tools/penpot/last-export.*
+deploy/penpot/.local/

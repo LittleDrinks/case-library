@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "source": {
     "repository": "https://github.com/LittleDrinks/case-library",
-    "penpotFileId": "0f3fb038-01f9-8046-8008-ca062850d4f5",
-    "penpotTeamId": "0f3fb038-01f9-8046-8008-ca05d9e961a1",
+    "penpotFileId": "0993bf61-0172-809e-8008-ef7716037760",
+    "penpotTeamId": "8e83165e-84ef-8007-8008-ef7430b6623a",
     "designIssue": 349,
     "existingComponentCount": 184,
     "sharedComponents": ["Site Header", "Admin Navigation", "Search Field"],
-    "generatedBy": "penpot/2.18.4-RC5",
+    "generatedBy": "penpot/2.19.1",
     "campusImage": {
       "file": "design/assets/shu-campus-lake-source.webp",
       "url": "https://www.shu.edu.cn/2022banner/2026/20261011-3.jpg",
@@ -16,9 +16,8 @@
     }
   },
   "existingPages": [
-    "00 · 从这里开始",
-    "01 · 改版试验",
     "浏览 · 首页与搜索",
+    "01 · 改版试验",
     "浏览 · 搜索筛选",
     "浏览 · 素材与知识",
     "浏览 · 案例阅读",
@@ -33,7 +32,8 @@
     "管理 · 平台配置",
     "账号 · 登录与设置",
     "组件 · 样式与控件",
-    "归档 · 首次工作台"
+    "归档 · 首次工作台",
+    "归档 · 全量交互原型"
   ],
   "flows": [
     {
