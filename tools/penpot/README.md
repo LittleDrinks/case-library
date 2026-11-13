@@ -12,6 +12,16 @@ MCP 地址通过 `PENPOT_MCP_URL` 环境变量提供，也可以通过 `PENPOT_M
 
 `check` 只读取当前文件和页面；`execute` 与 `tool` 可修改设计，运行前检查代码和目标文件。
 
+## 连续预览原型
+
+打开设计中的「归档 · 全量交互原型」，选择「01 · 首页与检索 / 01 · 首页」画板后启动预览。该页面保留原生画板跳转，点击首页案例卡片会在当前标签页进入案例阅读。
+
+Penpot 2.19.1 的原生跳转要求目标画板在同一个 Page；「打开网址」固定新开标签页，没有当前标签页选项。按模块拆分的页面中，跨 Page 交互使用了网址，因此不能用这些入口验收连续流程。迁移域名和文件 ID 只修正链接目标，不改变打开方式。
+
+完整原型与模块页面中的画板是分别保存的，编辑后需核对两处是否一致。组织需要连续演示的画板时，应保留在同一个 Page，通过画板命名和 Flow 入口区分流程。交互验收同时检查目标内容和浏览器标签页数量。
+
+依据：[交互目标验证](https://github.com/penpot/penpot/blob/2.19.1/frontend/src/app/plugins/shape.cljs#L83)、[预览器打开网址的实现](https://github.com/penpot/penpot/blob/2.19.1/frontend/src/app/main/ui/viewer/shapes.cljs#L135)。
+
 ## 更换原型链接的站点
 
 修改本机 `deploy/penpot/.env` 中的 `PENPOT_PUBLIC_URI`，或者通过同名环境变量覆盖。部署配置只控制服务地址；设计里已经保存的原型链接需单独迁移：
