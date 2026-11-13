@@ -88,6 +88,8 @@ make up
 
 开发默认复用一个活动 checkout。阶段结束时提交并 push WIP，通过关联 Issue 和草稿 PR 保留进度；切换任务前确认工作区与远端提交。
 
+研究、备份及暂存的阶段实现使用 `archive/<日期>/<原分支名>` 标签归档，[归档清单](tests/evidence/branch-cleanup-20261113/archive.json)记录原提交与继续工作时的注意事项。需要恢复时先运行 `git fetch origin --tags`，再执行 `git switch -c wip/<任务名> <归档标签>`。归档只改变代码保存方式，未完成的验收与集成仍按对应 Issue 继续。
+
 Node 与 Python 的开发版本由 `frontend/package.json` 和 Dockerfile 确定。容器方式运行测试时，宿主机无需重装应用依赖。主机上的 Docker daemon、镜像构建进程与交互 shell 分别配置网络访问；需要代理或镜像站时，使用所在环境的配置并单独保管，不将带凭据的地址提交到 Git。
 
 Penpot 使用方式见 [Penpot 工具](tools/penpot/README.md)。演示数据可重新生成；若要保留既有账号、案例与附件，需要另行备份和恢复 MongoDB、对象存储数据，Git 提交不包含运行数据库。
