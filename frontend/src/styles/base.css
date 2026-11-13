@@ -124,3 +124,11 @@ a { color: inherit; }
   .login-page { place-items: start center; padding: 64px 18px 18px; background: #fff; }
   .login-panel { padding: 0; border: 0; box-shadow: none; }
 }
+
+.page-enter-active { transition: opacity 220ms ease-out; }
+.page-leave-active { transition: opacity 140ms ease-in; }
+.page-enter-from, .page-leave-to { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active, .page-leave-active { transition: none; }
+}

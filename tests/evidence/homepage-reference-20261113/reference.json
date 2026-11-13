@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-13",
+  "scope": "首页桌面视觉参考",
+  "reference": "reference.png",
+  "layout": [
+    "校园湖景大图",
+    "大图内搜索框与资源统计",
+    "近 7 天动态横栏",
+    "下方推荐案例与推荐素材双栏"
+  ],
+  "implementationSource": {
+    "branch": "wip/home-design-migration-20261111",
+    "commit": "aa71f042ef81fb8b9265697401f9983d8b213a40",
+    "paths": [
+      "frontend/public/shu-campus-lake.webp",
+      "frontend/src/App.vue",
+      "frontend/src/components/HomeCaseItem.vue",
+      "frontend/src/composables/useHomeMotion.js",
+      "frontend/src/styles/base.css",
+      "frontend/src/styles/home.css",
+      "frontend/src/views/HomeView.vue"
+    ]
+  },
+  "verification": {
+    "frontendAndBackendEqualToSource": true,
+    "visualAcceptance": "桌面整体方向已确认，逐项尺寸和交互验收待完成",
+    "fullE2eAfterBranchReorganization": "未重跑；保留最近一次 CI 的已知失败"
+  },
+  "knownFailures": {
+    "sourceRun": "https://github.com/LittleDrinks/case-library/actions/runs/43374052175",
+    "oldHomepageVisualAssertions": 3,
+    "workbenchHistoryInteractions": 4
+  },
+  "pending": [
+    "将首页参考同步到 Penpot 的实现目标画板",
+    "根据桌面参考明确响应式行为",
+    "核对视觉测试断言与确认后的设计",
+    "调查历史版本交互测试失败"
+  ]
+}
