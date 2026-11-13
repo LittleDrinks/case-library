@@ -1,0 +1,154 @@
+{
+  "date": "2026-11-13",
+  "scope": [
+    "管理后台工具移到左侧，统一标题与列表样式",
+    "高级筛选独立样式、16px 面板留白、标签换行与复选框间距",
+    "同步 Penpot 演示和模块编辑稿"
+  ],
+  "web": {
+    "checks": [
+      {
+        "page": "admin",
+        "width": 1920,
+        "overflow": false,
+        "sidebarPosition": "left"
+      },
+      {
+        "page": "filters",
+        "width": 1920,
+        "padding": "16px",
+        "overflow": false,
+        "groupShadow": "none",
+        "selectAndClear": true
+      },
+      {
+        "page": "admin",
+        "width": 1024,
+        "overflow": false,
+        "sidebarPosition": "left"
+      },
+      {
+        "page": "filters",
+        "width": 1024,
+        "padding": "16px",
+        "overflow": false,
+        "groupShadow": "none",
+        "selectAndClear": true
+      },
+      {
+        "page": "admin",
+        "width": 390,
+        "overflow": false,
+        "sidebarPosition": "above"
+      },
+      {
+        "page": "filters",
+        "width": 390,
+        "padding": "16px",
+        "overflow": false,
+        "groupShadow": "none",
+        "selectAndClear": true
+      },
+      {
+        "navigation": "素材入库",
+        "target": "#/admin/material-imports"
+      },
+      {
+        "navigation": "Skill 管理",
+        "target": "#/admin/skills"
+      },
+      {
+        "navigation": "标签目录",
+        "target": "#/admin/tag-catalog"
+      },
+      {
+        "navigation": "平台 AI",
+        "target": "#/admin/ai-settings"
+      }
+    ],
+    "errors": []
+  },
+  "prototype": {
+    "passed": 10,
+    "results": [
+      {
+        "name": "截图中的案例检索 → 案例阅读",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "统一检索 → 案例阅读",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "演示入口 → 管理员后台",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "管理员后台 → 素材管理",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "演示入口 → 教师创作",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "后台 → Skill 管理",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "后台 → 标签目录",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "后台 → 平台 AI",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "高级筛选 → 选中标签",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "选中标签 → 取消选择",
+        "passed": true,
+        "addedTabs": 0
+      }
+    ]
+  },
+  "tests": {
+    "SearchFilters": {
+      "passed": 6
+    },
+    "adminVisualE2E": {
+      "passed": 1,
+      "viewports": [
+        1600,
+        390
+      ]
+    },
+    "frontendBuild": "passed",
+    "complexity": "passed",
+    "diffCheck": "passed"
+  },
+  "design": {
+    "boards": 57,
+    "nativeInteractions": 282,
+    "missingDestinations": 0,
+    "components": 184,
+    "componentIdsPreserved": true,
+    "tokensPreserved": true,
+    "updatedBoards": 8
+  },
+  "notRun": [
+    "全量 E2E",
+    "人工视觉验收"
+  ]
+}

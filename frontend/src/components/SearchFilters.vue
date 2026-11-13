@@ -65,7 +65,7 @@ function clear() {
                     @click="applyMode(mode.value)">{{ mode.label }}</button>
           </div>
           <p v-if="!catalogGroups.length" class="filter-state">没有匹配的标签</p>
-          <div v-for="group in catalogGroups" :key="group.id" class="tag-group">
+          <div v-for="group in catalogGroups" :key="group.id" class="filter-tag-group">
             <b>{{ group.name }}</b>
             <label v-for="tag in group.tags" :key="tag.id">
               <input type="checkbox" :checked="selected(filters, 'tagCatalog', tag.id)" @change="change('tagCatalog', tag.id, $event)" />

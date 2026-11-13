@@ -163,17 +163,20 @@ async function openAdminDashboard(page) {
 async function expectDesktopAdminDashboard(page) {
   await openAdminDashboard(page);
   await expectDesktopHeader(page);
-  await expectStyles(page.locator(".admin-heading"), { flexDirection: "row" });
-  await expectStyles(page.locator(".admin-queue").first(), {
-    backgroundColor: DEMO.card, borderTopWidth: "2px",
-  });
+  const sidebar = await boxOf(page.getByRole("navigation", { name: "管理工具" }));
+  const content = await boxOf(page.locator(".admin-content"));
+  expect(sidebar.x + sidebar.width).toBeLessThan(content.x);
+  await expect(page.getByRole("link", { name: "管理概览", exact: true })).toHaveAttribute("aria-current", "page");
+  await expectNoOverflow(page, 1600);
 }
 
 async function expectMobileAdminDashboard(page) {
   await openAdminDashboard(page);
   await expectMobileHeader(page);
-  await expectStyles(page.locator(".admin-heading"), { flexDirection: "column" });
-  await expectStyles(page.getByRole("navigation", { name: "管理工具" }), { width: "362px" });
+  const sidebar = await boxOf(page.getByRole("navigation", { name: "管理工具" }));
+  const content = await boxOf(page.locator(".admin-content"));
+  expect(sidebar.y + sidebar.height).toBeLessThan(content.y);
+  await expect(page.getByRole("navigation", { name: "管理工具" }).getByRole("link")).toHaveCount(5);
   await expectNoOverflow(page, 390);
 }
 

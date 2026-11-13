@@ -1,5 +1,5 @@
 <script setup>
-import { Bot, FileStack, LoaderCircle, PackageOpen, Puzzle, RefreshCw, Tags } from "@lucide/vue";
+import { Bot, FileStack, LayoutDashboard, LoaderCircle, PackageOpen, Puzzle, RefreshCw, Tags } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
 import SiteHeader from "../components/SiteHeader.vue";
@@ -40,40 +40,44 @@ onMounted(loadCases);
 <template>
   <div class="admin-page">
     <SiteHeader />
-    <main id="main-content" class="admin-main">
-      <header class="admin-heading">
-        <div><span>平台管理</span><h1>管理后台</h1></div>
+    <main id="main-content" class="admin-main admin-dashboard">
+      <aside class="admin-sidebar">
+        <span class="admin-sidebar-label">平台管理</span>
         <nav aria-label="管理工具">
-          <RouterLink :to="{ name: 'material-imports' }"><PackageOpen :size="16" />素材入库</RouterLink>
-          <RouterLink :to="{ name: 'admin-skills' }"><Puzzle :size="16" />Skill 管理</RouterLink>
-          <RouterLink :to="{ name: 'admin-tag-catalog' }"><Tags :size="16" />标签目录</RouterLink>
-          <RouterLink :to="{ name: 'admin-ai-settings' }"><Bot :size="16" />平台 AI</RouterLink>
+          <RouterLink :to="{ name: 'admin-dashboard' }" exact-active-class="is-active"><LayoutDashboard :size="18" />管理概览</RouterLink>
+          <RouterLink :to="{ name: 'material-imports' }"><PackageOpen :size="18" />素材入库</RouterLink>
+          <RouterLink :to="{ name: 'admin-skills' }"><Puzzle :size="18" />Skill 管理</RouterLink>
+          <RouterLink :to="{ name: 'admin-tag-catalog' }"><Tags :size="18" />标签目录</RouterLink>
+          <RouterLink :to="{ name: 'admin-ai-settings' }"><Bot :size="18" />平台 AI</RouterLink>
         </nav>
-      </header>
-      <div v-if="loading" class="admin-state"><LoaderCircle class="spin" :size="20" />正在加载管理队列</div>
-      <div v-else-if="error" class="admin-state error-state" role="alert">
-        {{ error }}<button type="button" @click="loadCases"><RefreshCw :size="15" />重试</button>
+      </aside>
+      <div class="admin-content">
+        <header class="admin-heading"><h1>管理后台</h1></header>
+        <div v-if="loading" class="admin-state"><LoaderCircle class="spin" :size="20" />正在加载管理队列</div>
+        <div v-else-if="error" class="admin-state error-state" role="alert">
+          {{ error }}<button type="button" @click="loadCases"><RefreshCw :size="15" />重试</button>
+        </div>
+        <template v-else>
+          <section class="admin-queue" aria-labelledby="review-queue-title">
+            <header><h2 id="review-queue-title">案例审核</h2><b>{{ reviewCases.length }}</b></header>
+            <p v-if="!reviewCases.length" class="admin-empty">暂无待审核案例</p>
+            <article v-for="item in reviewCases" :key="item.id" :aria-label="`待审核：${item.title}`">
+              <span :data-status="item.workflowStatus">{{ reviewLabel(item) }}</span>
+              <div><h3>{{ item.title }}</h3><p>{{ item.author || "作者待补充" }} · 提交更新 {{ dateLabel(item.updatedAt) }}</p></div>
+              <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">审核</RouterLink>
+            </article>
+          </section>
+          <section class="admin-queue" aria-labelledby="publication-title">
+            <header><h2 id="publication-title">发布管理</h2><b>{{ publishedCases.length }}</b></header>
+            <p v-if="!publishedCases.length" class="admin-empty">暂无已发布案例</p>
+            <article v-for="item in publishedCases" :key="item.id" :aria-label="`已发布：${item.title}`">
+              <FileStack :size="18" aria-hidden="true" />
+              <div><h3>{{ item.title }}</h3><p>{{ item.publicationStatus === "public" ? "公开中" : "已隐藏" }} · {{ dateLabel(item.publishedAt) }}</p></div>
+              <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">发布管理</RouterLink>
+            </article>
+          </section>
+        </template>
       </div>
-      <template v-else>
-        <section class="admin-queue" aria-labelledby="review-queue-title">
-          <header><div><span>案例管理</span><h2 id="review-queue-title">案例审核</h2></div><b>{{ reviewCases.length }}</b></header>
-          <p v-if="!reviewCases.length" class="admin-empty">暂无待审核案例</p>
-          <article v-for="item in reviewCases" :key="item.id" :aria-label="`待审核：${item.title}`">
-            <span :data-status="item.workflowStatus">{{ reviewLabel(item) }}</span>
-            <div><h3>{{ item.title }}</h3><p>{{ item.author || "作者待补充" }} · 提交更新 {{ dateLabel(item.updatedAt) }}</p></div>
-            <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">审核</RouterLink>
-          </article>
-        </section>
-        <section class="admin-queue" aria-labelledby="publication-title">
-          <header><div><span>公开内容</span><h2 id="publication-title">发布管理</h2></div><b>{{ publishedCases.length }}</b></header>
-          <p v-if="!publishedCases.length" class="admin-empty">暂无已发布案例</p>
-          <article v-for="item in publishedCases" :key="item.id" :aria-label="`已发布：${item.title}`">
-            <FileStack :size="18" aria-hidden="true" />
-            <div><h3>{{ item.title }}</h3><p>{{ item.publicationStatus === "public" ? "公开中" : "已隐藏" }} · {{ dateLabel(item.publishedAt) }}</p></div>
-            <RouterLink :to="{ name: 'case-review', params: { id: item.id } }">发布管理</RouterLink>
-          </article>
-        </section>
-      </template>
     </main>
   </div>
 </template>
