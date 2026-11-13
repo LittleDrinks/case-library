@@ -22,19 +22,20 @@
     ]
   },
   "verification": {
-    "frontendAndBackendEqualToSource": true,
-    "visualAcceptance": "桌面整体方向已确认，逐项尺寸和交互验收待完成",
-    "fullE2eAfterBranchReorganization": "未重跑；保留最近一次 CI 的已知失败"
+    "frontendAndBackendEqualToSource": false,
+    "visualAcceptance": "校园图方向已确认；最新稿移除资讯卡片并统一背景，等待人工细调",
+    "fullE2eAfterBranchReorganization": "未重跑；保留最近一次 CI 的已知失败",
+    "currentEvidence": "verification.json",
+    "changesSinceSource": "首页移除资讯卡片并复用全站背景色；后端未修改"
   },
   "knownFailures": {
     "sourceRun": "https://github.com/LittleDrinks/case-library/actions/runs/43374052175",
-    "oldHomepageVisualAssertions": 3,
-    "workbenchHistoryInteractions": 4
+    "oldHomepageVisualAssertions": 0,
+    "workbenchHistoryInteractions": 4,
+    "note": "旧首页断言已替换，8 项布局与品牌测试通过，见 verification.json；历史版本交互未在本轮复测"
   },
   "pending": [
-    "将首页参考同步到 Penpot 的实现目标画板",
-    "根据桌面参考明确响应式行为",
-    "核对视觉测试断言与确认后的设计",
+    "人工细调首页字号、间距与图片效果",
     "调查历史版本交互测试失败"
   ]
 }

@@ -1,6 +1,6 @@
 .home-page {
   min-height: 100vh;
-  background: #f4f6f8;
+  background: var(--bg);
   color: #202b3c;
 }
 .home-page h1, .home-page h2, .home-page h3 { font-family: var(--sans); }
@@ -143,12 +143,6 @@
 .home-material-copy { display: grid; min-width: 0; gap: 5px; }
 .home-material-copy b { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.55; transition: color .18s; }
 .home-material-copy > span { color: #818a95; font-size: 11px; }
-.home-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
-.home-card { border: 1px solid #dfe4e9; border-radius: 9px; background: #fff; }
-.home-card-padded { padding: 18px 20px; }
-.home-section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.home-section-title h2 { margin: 0; font-size: 15px; font-weight: 650; }
-.dynamic-empty { margin: 0; color: #818a95; font-size: 12px; }
 [data-reveal] { opacity: 0; transform: translateY(18px); transition: opacity 480ms ease-out, transform 480ms ease-out; }
 [data-reveal].is-revealed { opacity: 1; transform: translateY(0); }
 
@@ -178,7 +172,6 @@
   .home-card-title h2 { font-size: 18px; }
   .home-case-item { padding: 18px 2px; }
   .home-case-item h3 { font-size: 16px; }
-  .home-info-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

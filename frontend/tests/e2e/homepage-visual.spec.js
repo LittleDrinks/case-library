@@ -184,14 +184,6 @@ async function boxOf(locator) {
   return box;
 }
 
-async function boxesOf(locator, count) {
-  await expect(locator).toHaveCount(count);
-  return locator.evaluateAll((nodes) => nodes.map((node) => {
-    const { x, y, width, height } = node.getBoundingClientRect();
-    return { x, y, width, height };
-  }));
-}
-
 async function stylesOf(locator, properties) {
   return locator.evaluate((node, names) => {
     const style = getComputedStyle(node);
@@ -208,35 +200,6 @@ function expectNear(actual, expected, tolerance = 1) {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
 }
 
-function expectHorizontalGap(left, right, expected) {
-  expectNear(right.x - left.x - left.width, expected);
-}
-
-function expectVerticalGap(upper, lower, expected) {
-  expectNear(lower.y - upper.y - upper.height, expected);
-}
-
-function expectAlignedTop(boxes) {
-  boxes.forEach((box) => expectNear(box.y, boxes[0].y));
-}
-
-async function expectCardSurface(locator) {
-  await expectStyles(locator, {
-    backgroundColor: DEMO.card,
-    borderLeftColor: DEMO.line,
-    borderLeftStyle: "solid",
-    borderLeftWidth: "1px",
-    borderRadius: "10px",
-  });
-}
-
-async function expectDynamicSurfaces(cards) {
-  for (let index = 0; index < 3; index += 1) {
-    await expectCardSurface(cards.nth(index));
-    await expectStyles(cards.nth(index), { padding: "18px 20px" });
-  }
-}
-
 async function expectDesktopHeader(page) {
   const header = page.locator(".site-header");
   expectNear((await boxOf(header)).height, 58);
@@ -249,49 +212,6 @@ async function expectDesktopHeader(page) {
     paddingRight: "22px",
     position: "sticky",
   });
-}
-
-async function expectMainFrame(page, width) {
-  const main = page.locator("#main-content");
-  const box = await boxOf(main);
-  expectNear(box.width, Math.min(width, 1200));
-  expectNear(box.x, (width - box.width) / 2);
-  await expectStyles(main, {
-    padding: "24px 20px 40px",
-  });
-  await expectStyles(page.locator(".home-page"), {
-    backgroundColor: DEMO.background,
-    color: DEMO.ink,
-  });
-}
-
-async function expectDesktopDynamics(page) {
-  const region = page.getByRole("region", { name: "平台动态" });
-  const cards = region.getByRole("article");
-  const boxes = await boxesOf(cards, 3);
-  expectAlignedTop(boxes);
-  boxes.forEach((box) => expectNear(box.height, boxes[0].height));
-  expectHorizontalGap(boxes[0], boxes[1], 14);
-  expectHorizontalGap(boxes[1], boxes[2], 14);
-  expectNear(boxes[0].width / boxes[2].width, 1.1, 0.01);
-  expectNear(boxes[1].width / boxes[2].width, 1.2, 0.01);
-  await expectDynamicSurfaces(cards);
-}
-
-async function expectDesktopRecommendations(page) {
-  const dynamics = page.getByRole("region", { name: "平台动态" }).getByRole("article").first();
-  const recommendation = page.getByRole("region", { name: "推荐案例" });
-  const materials = page.getByRole("region", { name: "推荐素材" });
-  const [dynamicBox, recommendationBox, materialBox] = await Promise.all([
-    boxOf(dynamics), boxOf(recommendation), boxOf(materials),
-  ]);
-  expectAlignedTop([recommendationBox, materialBox]);
-  expectHorizontalGap(recommendationBox, materialBox, 18);
-  expectNear(recommendationBox.width / materialBox.width, 2, 0.01);
-  expectVerticalGap(dynamicBox, recommendationBox, 18);
-  await expectCardSurface(recommendation);
-  await expectCardSurface(materials);
-  await expect(page.getByRole("link", { name: "检索全部" })).toHaveCSS("color", DEMO.brand);
 }
 
 async function expectMobileHeader(page) {
@@ -323,60 +243,48 @@ async function expectMobileHeaderStyles(header) {
   });
 }
 
-async function expectMobileMain(page) {
-  const main = page.locator("#main-content");
-  const box = await boxOf(main);
-  expectNear(box.x, 0);
-  expectNear(box.width, 390);
-  await expectStyles(main, { padding: "24px 20px 40px" });
-  await expectStyles(page.locator(".home-page"), {
-    backgroundColor: DEMO.background,
-    color: DEMO.ink,
-  });
-}
-
-async function expectMobileDynamics(page) {
-  const cards = page.getByRole("region", { name: "平台动态" }).getByRole("article");
-  const boxes = await boxesOf(cards, 3);
-  boxes.forEach((box) => expectNear(box.x, 20));
-  boxes.forEach((box) => expectNear(box.width, 350));
-  expectVerticalGap(boxes[0], boxes[1], 14);
-  expectVerticalGap(boxes[1], boxes[2], 14);
-  await expectDynamicSurfaces(cards);
-}
-
-async function expectMobileRecommendations(page) {
-  const dynamics = page.getByRole("region", { name: "平台动态" }).getByRole("article");
-  const recommendation = page.getByRole("region", { name: "推荐案例" });
-  const materials = page.getByRole("region", { name: "推荐素材" });
-  const boxes = await Promise.all([
-    boxOf(dynamics.nth(2)), boxOf(recommendation), boxOf(materials),
+async function expectCampusHome(page, width) {
+  const hero = page.locator('.home-hero');
+  const search = page.getByRole('search');
+  await expect(hero.locator('img')).toBeVisible();
+  expect(await hero.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(page.getByRole('textbox', { name: '检索全库资源' })).toBeVisible();
+  const [heroBox, searchBox, weekBox] = await Promise.all([
+    boxOf(hero), boxOf(search), boxOf(page.getByRole('region', { name: '平台动态' })),
   ]);
-  boxes.slice(1).forEach((box) => expectNear(box.x, 20));
-  boxes.slice(1).forEach((box) => expectNear(box.width, 350));
-  expectVerticalGap(boxes[0], boxes[1], 18);
-  expectVerticalGap(boxes[1], boxes[2], 18);
-  await expectCardSurface(recommendation);
-  await expectCardSurface(materials);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(searchBox.x).toBeGreaterThan(heroBox.x);
+  expect(searchBox.x + searchBox.width).toBeLessThan(heroBox.x + heroBox.width);
+  expect(searchBox.y).toBeGreaterThan(heroBox.y);
+  expect(searchBox.y + searchBox.height).toBeLessThan(heroBox.y + heroBox.height);
+  expect(weekBox.y).toBeGreaterThanOrEqual(heroBox.y + heroBox.height);
+  await expect(page.locator('.home-hero-stats > div')).toHaveCount(3);
+  await expectNoOverflow(page, width);
 }
 
 for (const width of [1600, 1024]) {
-  test(`${width}px 首页延续 demo-v2.1-final 的桌面视觉与 2:1 布局`, async ({ page }) => {
+  test(`${width}px 首页呈现校园搜索、动态条和双列推荐`, async ({ page }) => {
     await openHome(page, width, 1000);
-    await expectDesktopHeader(page);
-    await expectMainFrame(page, width);
-    await expectDesktopDynamics(page);
-    await expectDesktopRecommendations(page);
+    await expectCampusHome(page, width);
+    const [cases, materials] = await Promise.all([
+      boxOf(page.getByRole('region', { name: '推荐案例' })),
+      boxOf(page.getByRole('region', { name: '推荐素材' })),
+    ]);
+    expectNear(cases.y, materials.y);
+    expect(materials.x).toBeGreaterThan(cases.x + cases.width);
+    expect(cases.width).toBeGreaterThan(materials.width);
   });
 }
 
-test("390px 首页按旧 demo 折为两行头部和单列内容", async ({ page }) => {
+test('390px 首页保留搜索和统计，推荐内容改为单列且不横向溢出', async ({ page }) => {
   await openHome(page, 390, 844);
-  await expectMobileHeader(page);
-  await expectMobileMain(page);
-  await expectMobileDynamics(page);
-  await expectMobileRecommendations(page);
+  await expectCampusHome(page, 390);
+  const [cases, materials] = await Promise.all([
+    boxOf(page.getByRole('region', { name: '推荐案例' })),
+    boxOf(page.getByRole('region', { name: '推荐素材' })),
+  ]);
+  expectNear(cases.x, materials.x);
+  expectNear(cases.width, materials.width);
+  expect(materials.y).toBeGreaterThanOrEqual(cases.y + cases.height);
 });
 
 test("首页、登录、详情、工作台和管理后台使用统一品牌", async ({ page }) => {

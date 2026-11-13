@@ -155,17 +155,6 @@ onMounted(loadCases);
             <p v-else class="home-empty">暂无推荐</p>
           </section>
         </div>
-
-        <section class="home-info-grid" aria-label="平台信息">
-          <article class="home-card home-card-padded" data-reveal>
-            <header class="home-section-title"><h2>时政要闻</h2></header>
-            <p class="dynamic-empty">暂时没有可展示的新闻</p>
-          </article>
-          <article class="home-card home-card-padded" data-reveal>
-            <header class="home-section-title"><h2>平台公告</h2></header>
-            <p class="dynamic-empty">暂无公告</p>
-          </article>
-        </section>
       </template>
     </main>
   </div>
