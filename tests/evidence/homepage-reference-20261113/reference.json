@@ -26,7 +26,8 @@
     "visualAcceptance": "校园图方向已确认；最新稿移除资讯卡片并统一背景，等待人工细调",
     "fullE2eAfterBranchReorganization": "未重跑；保留最近一次 CI 的已知失败",
     "currentEvidence": "verification.json",
-    "changesSinceSource": "首页移除资讯卡片并复用全站背景色；后端未修改"
+    "changesSinceSource": "首页移除资讯卡片并复用全站背景色；后端未修改",
+    "prototypeNavigationEvidence": "../penpot-navigation-20261113/verification.json"
   },
   "knownFailures": {
     "sourceRun": "https://github.com/LittleDrinks/case-library/actions/runs/43374052175",
