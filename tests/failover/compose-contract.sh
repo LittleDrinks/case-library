@@ -101,7 +101,7 @@ echo "$app_config" | grep -q 'published: "8001"'
 echo "$frontend_config" | grep -q 'host_ip: 127.0.0.1'
 echo "$frontend_config" | grep -q 'published: "8080"'
 echo "$frontend_config" | grep -q 'edge:'
-echo "$minio_config" | grep -q 'dockerfile: deploy/minio.Dockerfile'
+echo "$minio_config" | grep -q 'dockerfile: infra/minio.Dockerfile'
 echo "$minio_config" | grep -q '/minio/health/live'
 echo "$minio_config" | grep -q 'source: minio_data'
 echo "$minio_config" | grep -q 'target: /data'
@@ -118,7 +118,7 @@ echo "$app_config" | grep -q 'source: meili_master_key'
 echo "$app_config" | grep -B2 -A2 'search-init:' | grep -q 'service_completed_successfully'
 echo "$app_config" | grep -B2 -A2 'search-worker:' | grep -q 'service_started'
 echo "$meili_config" | grep -q 'image: case-library-v2-meilisearch'
-echo "$meili_config" | grep -q 'dockerfile: deploy/meilisearch.Dockerfile'
+echo "$meili_config" | grep -q 'dockerfile: infra/meilisearch.Dockerfile'
 echo "$meili_config" | grep -q 'source: meili_data'
 echo "$meili_config" | grep -q 'target: /meili_data'
 echo "$meili_config" | grep -q 'source: meili_master_key'
@@ -227,7 +227,7 @@ echo "$config_commands" | grep -qx 'docker compose config --quiet'
 echo "$config_commands" | grep -qx 'make config-contract'
 contract_commands="$(make -n config-contract)"
 echo "$contract_commands" | grep -q -- '--env-file .env.example config --quiet'
-grep -Eq 'client_max_body_size[[:space:]]+129m;' deploy/nginx.conf
+grep -Eq 'client_max_body_size[[:space:]]+129m;' infra/nginx.conf
 grep -q -- '--excludeCollection=sessions' scripts/backup-bundle-tool.sh
 grep -q -- '--excludeCollection=ai_usage' scripts/backup-bundle-tool.sh
 grep -q -- '--excludeCollection=search_outbox' scripts/backup-bundle-tool.sh
@@ -248,4 +248,4 @@ grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-load.sh
 grep -Fq 'docker volume rm "$load_meili_volume"' scripts/run-load.sh
 grep -Fq 'docker compose --project-name "$compose_project"' scripts/run-e2e.sh
 grep -Fq 'docker volume rm "$e2e_meili_volume"' scripts/run-e2e.sh
-grep -Fq 'getmeili/meilisearch:v1.45.1' deploy/meilisearch.Dockerfile
+grep -Fq 'getmeili/meilisearch:v1.45.1' infra/meilisearch.Dockerfile

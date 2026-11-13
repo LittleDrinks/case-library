@@ -8,7 +8,7 @@ before=""
 
 test "$project" != "$default_project"
 export COMPOSE_PROJECT_NAME="$project"
-export COMPOSE_FILE="$project_dir/docker-compose.yml:$project_dir/deploy/failover.compose.yml"
+export COMPOSE_FILE="$project_dir/docker-compose.yml:$project_dir/infra/failover.compose.yml"
 export COMPOSE_ENV_FILES="$project_dir/.env.example"
 export COMPOSE_DISABLE_ENV_FILE=1
 export MONGODB_DB_NAME=case_library_failover

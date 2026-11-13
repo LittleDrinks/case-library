@@ -27,3 +27,4 @@ files/*
 design
 tools
 AGENTS.md
+/deploy/

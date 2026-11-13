@@ -18,9 +18,9 @@ project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 mkdir -p "$output_dir"
-cp "$project_dir/deploy/release/compose.yaml" "$temporary/compose.yaml"
-cp "$project_dir/deploy/release/.env.example" "$temporary/.env.example"
-cp "$project_dir/deploy/release/update.sh" "$temporary/update.sh"
+cp "$project_dir/infra/release/compose.yaml" "$temporary/compose.yaml"
+cp "$project_dir/infra/release/.env.example" "$temporary/.env.example"
+cp "$project_dir/infra/release/update.sh" "$temporary/update.sh"
 chmod 755 "$temporary/update.sh"
 printf '%s\n' \
   "CASE_LIBRARY_RELEASE_VERSION=$version" \

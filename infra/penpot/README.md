@@ -10,6 +10,13 @@
 
 ## 启停与首次安装
 
+可复用配置位于 `infra/penpot`；本机部署、凭据与备份放在 Git 忽略的 `deploy/penpot`。首次部署先在仓库根目录复制模板，已有部署无需重复复制：
+
+```sh
+mkdir -p deploy/penpot
+cp infra/penpot/compose.yaml infra/penpot/backup.sh infra/penpot/.env.example deploy/penpot/
+```
+
 以下命令在 `deploy/penpot` 目录运行：
 
 ```sh
@@ -30,7 +37,7 @@ docker compose --env-file .env -f compose.yaml exec penpot-backend python3 manag
 curl -o /dev/null -sS -w '%{http_code}\n' http://127.0.0.1:9001/api/main/methods/get-profile
 ```
 
-在项目列表点击“导入文件”，选择 `design/case-library.penpot`。仓库快照含 18 个页面和 184 个组件；`design/board-index.json` 中后续增加的 57 个画板没有包含在该快照中。
+在项目列表点击“导入文件”，选择 `design/case-library.penpot`。仓库快照含 18 个页面和 184 个组件。导入另一实例后文件 ID 会改变；使用 [Penpot 链接迁移命令](../../tools/penpot/README.md#更换原型链接的站点) 更新原型中的站点和原文件 ID。
 
 ## MCP
 

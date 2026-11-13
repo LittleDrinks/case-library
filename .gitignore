@@ -53,4 +53,4 @@ tools/architecture-tour/flow-app/dist/
 tools/architecture-tour/probe.png
 tools/architecture-tour/recovered.png
 tools/penpot/last-export.*
-deploy/penpot/.local/
+/deploy/
