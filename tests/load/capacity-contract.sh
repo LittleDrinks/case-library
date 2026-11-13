@@ -42,7 +42,7 @@ grep -q 'BACKEND_URL' tests/load/catalog-gate.js
 grep -q 'BACKEND_URL: http://app:8001' docker-compose.yml
 grep -Fq 'http_reqs{operation:${operation}}' tests/load/catalog-gate.js
 grep -Fq '"X-Load-Probe": "catalog-gate"' tests/load/catalog-gate.js
-grep -Fq 'load_marker=$http_x_load_probe' deploy/nginx.conf
+grep -Fq 'load_marker=$http_x_load_probe' infra/nginx.conf
 test "$(grep -Fc 'load_marker=catalog-gate' tests/load/upstream-balance.sh)" -eq 2
 
 bootstrap_command='compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=true load-search-init python -m app.cli.bootstrap'

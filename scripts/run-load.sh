@@ -184,7 +184,7 @@ drop_test_database "$database"
 verify_load_cleanup
 if [ "${SKIP_BUILD:-false}" != "true" ]; then
   compose build load-app load-frontend load-meilisearch
-  docker build -f deploy/k6.Dockerfile -t case-library-v2-load:latest .
+  docker build -f infra/k6.Dockerfile -t case-library-v2-load:latest .
 fi
 compose --profile load up -d --wait load-meilisearch
 compose --profile load run --rm --no-deps --env ENABLE_DEMO_SEED=true load-search-init python -m app.cli.bootstrap

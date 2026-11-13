@@ -1,0 +1,7 @@
+{
+  "name": "case-library-local-penpot-tools",
+  "private": true,
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-13",
+  "penpotVersion": "2.19.1",
+  "passed": [
+    "Compose configuration validation",
+    "HTTP frontend and profile API return 200",
+    "Password login through browser",
+    "Native .penpot import completed successfully",
+    "Editor opened imported design",
+    "MCP read current file and version",
+    "Saved page rename and page order",
+    "Exported design contains 18 pages and 184 component records",
+    "PostgreSQL dump and asset archive created and contents readable",
+    "Services restarted after backup; profile API and MCP respond",
+    "AGENTS.md retained locally and ignored by Git"
+  ],
+  "design": {
+    "pages": 18,
+    "libraryEntries": 183,
+    "componentCount": 184,
+    "variants": [
+      {
+        "name": "状态变体",
+        "path": "AI 页签",
+        "values": [
+          {
+            "状态": "默认"
+          },
+          {
+            "状态": "选中"
+          }
+        ]
+      }
+    ],
+    "tokenSets": [
+      {
+        "name": "case-library",
+        "count": 23
+      },
+      {
+        "name": "desktop-1920",
+        "count": 10
+      }
+    ],
+    "firstPage": "浏览 · 首页与搜索",
+    "lastPage": "归档 · 全量交互原型"
+  },
+  "automationIssue": {
+    "symptom": "Playwright file input timed out through an attached CDP session",
+    "workaroundVerified": "Import completed with a directly controlled browser session"
+  },
+  "notVerified": [
+    "Full backup restore drill",
+    "Manual review by the designer",
+    "Recovery of the 57 later boards absent from the stored export"
+  ],
+  "screenshots": [
+    "editor.png",
+    "import-complete.png"
+  ]
+}

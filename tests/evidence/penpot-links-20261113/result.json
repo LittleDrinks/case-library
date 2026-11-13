@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-13",
+  "links": {
+    "beforeOldCloudUrls": 158,
+    "updated": 158,
+    "afterOldCloudUrls": 0,
+    "allTargetsExist": true,
+    "browserClick": {
+      "source": "http://localhost:9001/?screen=viewer&team-id=8e83165e-84ef-8007-8008-ef7430b6623a&file-id=0993bf61-0172-809e-8008-ef7716037760&page-id=f2ca496a-9568-80b4-8008-ca80f8b3a04d&frame-id=f2ca496a-9568-80b4-8008-ca81a90b0a14&section=interactions&zoom=fit&index=4",
+      "destination": "http://localhost:9001/?screen=viewer&file-id=0993bf61-0172-809e-8008-ef7716037760&page-id=f2ca496a-9568-80b4-8008-ca80f8c299d0&frame-id=f2ca496a-9568-80b4-8008-ca8313d98d2a&section=interactions&zoom=fit&index=2",
+      "passed": true,
+      "renderedTitle": "钱伟长图书馆——科学家精神的大思政课堂",
+      "renderedTitleVerified": true
+    }
+  },
+  "design": {
+    "pages": 18,
+    "components": 184,
+    "tokensUnchanged": true,
+    "obsoleteFilesRemoved": 81
+  },
+  "passed": [
+    "5 URL migration regression tests",
+    "Native MCP migration and second scan",
+    "Actual prototype card click opened local reading board",
+    "Export contains 158 local links and no old cloud URL",
+    "Compose contract",
+    "Release packaging contract",
+    "E2E runner contract",
+    "Load runner contract",
+    "Local Penpot Compose validation"
+  ],
+  "notRun": [
+    "Full application E2E suite",
+    "Production deployment",
+    "Full image rebuild"
+  ]
+}

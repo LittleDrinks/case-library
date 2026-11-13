@@ -1,0 +1,123 @@
+# 依据 Penpot 2.19.1 官方 docker/images/docker-compose.yaml。
+# 入口仅绑定回环地址，使用 SSH 或 VS Code 端口转发访问。
+name: case-library-penpot
+
+x-flags: &penpot-flags
+  PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp disable-registration disable-telemetry disable-onboarding
+
+x-public-uri: &penpot-public-uri
+  PENPOT_PUBLIC_URI: ${PENPOT_PUBLIC_URI:-http://localhost:9001}
+
+x-secret: &penpot-secret
+  PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?Set PENPOT_SECRET_KEY in deploy/penpot/.env}
+
+x-database: &penpot-database
+  PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+  PENPOT_DATABASE_USERNAME: penpot
+  PENPOT_DATABASE_PASSWORD: ${PENPOT_DATABASE_PASSWORD:?Set PENPOT_DATABASE_PASSWORD in deploy/penpot/.env}
+
+services:
+  penpot-frontend:
+    image: penpotapp/frontend:${PENPOT_VERSION:?Set PENPOT_VERSION}
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${PENPOT_PORT:-9001}:8080
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      - penpot-backend
+      - penpot-admin-console
+      - penpot-mcp
+      - penpot-exporter
+    environment:
+      <<: [*penpot-flags, *penpot-public-uri]
+      PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+
+  penpot-backend:
+    image: penpotapp/backend:${PENPOT_VERSION:?Set PENPOT_VERSION}
+    restart: unless-stopped
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
+    environment:
+      <<: [*penpot-flags, *penpot-public-uri, *penpot-secret, *penpot-database]
+      PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+      PENPOT_OBJECTS_STORAGE_BACKEND: fs
+      PENPOT_OBJECTS_STORAGE_FS_DIRECTORY: /opt/data/assets
+      PENPOT_TELEMETRY_ENABLED: "false"
+      PENPOT_SMTP_DEFAULT_FROM: no-reply@penpot.local
+      PENPOT_SMTP_DEFAULT_REPLY_TO: no-reply@penpot.local
+      PENPOT_SMTP_HOST: penpot-mailpit
+      PENPOT_SMTP_PORT: 1025
+      PENPOT_SMTP_TLS: "false"
+      PENPOT_SMTP_SSL: "false"
+
+  penpot-admin-console:
+    image: penpotapp/admin-console:${PENPOT_VERSION:?Set PENPOT_VERSION}
+    restart: unless-stopped
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+    environment:
+      <<: [*penpot-public-uri, *penpot-secret, *penpot-database]
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+
+  penpot-mcp:
+    image: penpotapp/mcp:${PENPOT_VERSION:?Set PENPOT_VERSION}
+    restart: unless-stopped
+
+  penpot-exporter:
+    image: penpotapp/exporter:${PENPOT_VERSION:?Set PENPOT_VERSION}
+    restart: unless-stopped
+    depends_on:
+      penpot-valkey:
+        condition: service_healthy
+    environment:
+      <<: [*penpot-flags, *penpot-public-uri, *penpot-secret]
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+  penpot-postgres:
+    image: postgres:15.19
+    restart: unless-stopped
+    stop_signal: SIGINT
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U penpot]
+      interval: 2s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: ${PENPOT_DATABASE_PASSWORD:?Set PENPOT_DATABASE_PASSWORD}
+
+  penpot-valkey:
+    image: valkey/valkey:8.1.11
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, valkey-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    environment:
+      VALKEY_EXTRA_FLAGS: --maxmemory 128mb --maxmemory-policy volatile-lfu
+
+  penpot-mailpit:
+    image: axllent/mailpit:v1.33.1
+    restart: unless-stopped
+    expose:
+      - "1025"
+
+volumes:
+  penpot_postgres_v15:
+  penpot_assets:

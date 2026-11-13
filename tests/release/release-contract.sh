@@ -2,7 +2,7 @@
 set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-release_dir="$project_dir/deploy/release"
+release_dir="$project_dir/infra/release"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 

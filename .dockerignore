@@ -22,3 +22,9 @@ files/*
 !files/seed/
 !files/seed/book/
 !files/seed/book/zrbjf-2025.md
+.codex
+.scratch
+design
+tools
+AGENTS.md
+/deploy/
