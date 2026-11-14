@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import { restoreSession, session } from "./session.js";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
 import AISettingsView from "./views/AISettingsView.vue";
+import AdminLayout from "./components/AdminLayout.vue";
 import AdminAISettingsView from "./views/AdminAISettingsView.vue";
 import AdminDashboardView from "./views/AdminDashboardView.vue";
 import AdminSkillsView from "./views/AdminSkillsView.vue";
@@ -63,39 +64,16 @@ const routes = [
   { path: "/cases/:id", name: "case-public", component: WorkbenchView },
   {
     path: "/admin",
-    name: "admin-dashboard",
-    component: AdminDashboardView,
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: "/admin/review/:id",
-    name: "case-review",
-    component: WorkbenchView,
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: "/admin/material-imports",
-    name: "material-imports",
-    component: MaterialImportView,
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: "/admin/tag-catalog",
-    name: "admin-tag-catalog",
-    component: AdminTagCatalogView,
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: "/admin/ai-settings",
-    name: "admin-ai-settings",
-    component: AdminAISettingsView,
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: "/admin/skills",
-    name: "admin-skills",
-    component: AdminSkillsView,
-    meta: { requiresAuth: true, requiresAdmin: true },
+    component: AdminLayout,
+    meta: { requiresAuth: true, requiresAdmin: true, adminLayout: true },
+    children: [
+      { path: "", name: "admin-dashboard", component: AdminDashboardView },
+      { path: "review/:id", name: "case-review", component: WorkbenchView },
+      { path: "material-imports", name: "material-imports", component: MaterialImportView },
+      { path: "tag-catalog", name: "admin-tag-catalog", component: AdminTagCatalogView },
+      { path: "ai-settings", name: "admin-ai-settings", component: AdminAISettingsView },
+      { path: "skills", name: "admin-skills", component: AdminSkillsView },
+    ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];

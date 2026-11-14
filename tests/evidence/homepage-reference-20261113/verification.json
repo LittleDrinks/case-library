@@ -1,0 +1,147 @@
+{
+  "date": "2026-11-13",
+  "branch": "wip/ui-home",
+  "scope": [
+    "校园大图与图内搜索",
+    "资源统计与近 7 天动态",
+    "推荐案例与推荐素材",
+    "删除时政要闻和平台公告",
+    "首页复用全站背景色 #F6F4EF"
+  ],
+  "penpot": {
+    "components": 184,
+    "existingComponentIdsPreserved": true,
+    "tokensUnchanged": true,
+    "homeboards": [
+      {
+        "pageId": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
+        "boardId": "f2ca496a-9568-80b4-8008-ca81a90b0a14",
+        "editableTexts": 60,
+        "regions": 13,
+        "height": 1458,
+        "background": "#f6f4ef",
+        "nativeInteractions": 7
+      },
+      {
+        "pageId": "5efb8ca5-50b1-8025-8008-ca98a9181d80",
+        "boardId": "5efb8ca5-50b1-8025-8008-ca98ab9bda1e",
+        "editableTexts": 60,
+        "regions": 13,
+        "height": 1458,
+        "background": "#f6f4ef",
+        "nativeInteractions": 10
+      }
+    ]
+  },
+  "prototypeNavigation": [
+    {
+      "href": "#/search",
+      "source": "5efb8ca5-50b1-8025-8008-ca98ab9bda1e",
+      "destination": "5efb8ca5-50b1-8025-8008-ca98ac193c64",
+      "addedTabs": 0,
+      "passed": true
+    },
+    {
+      "href": "#/cases/c-02",
+      "source": "5efb8ca5-50b1-8025-8008-ca98ab9bda1e",
+      "destination": "5efb8ca5-50b1-8025-8008-ca98c09253bc",
+      "addedTabs": 0,
+      "passed": true
+    },
+    {
+      "href": "#/materials/m-qwllib",
+      "source": "5efb8ca5-50b1-8025-8008-ca98ab9bda1e",
+      "destination": "5efb8ca5-50b1-8025-8008-ca98bb33bf62",
+      "addedTabs": 0,
+      "passed": true
+    },
+    {
+      "href": "#/login",
+      "source": "5efb8ca5-50b1-8025-8008-ca98ab9bda1e",
+      "destination": "5efb8ca5-50b1-8025-8008-ca9943beb5ea",
+      "addedTabs": 0,
+      "passed": true
+    }
+  ],
+  "liveApplication": {
+    "responsive": [
+      {
+        "viewport": 1920,
+        "horizontalOverflow": false,
+        "background": "rgb(246, 244, 239)",
+        "removedInfoCards": true
+      },
+      {
+        "viewport": 1024,
+        "horizontalOverflow": false,
+        "background": "rgb(246, 244, 239)",
+        "removedInfoCards": true
+      },
+      {
+        "viewport": 390,
+        "horizontalOverflow": false,
+        "background": "rgb(246, 244, 239)",
+        "removedInfoCards": true
+      }
+    ],
+    "search": true,
+    "caseNavigation": true,
+    "addedTabs": 0,
+    "pageErrors": []
+  },
+  "checks": [
+    {
+      "command": "make config",
+      "result": "passed"
+    },
+    {
+      "command": "make e2e-spec SPEC=homepage-visual.spec.js",
+      "stats": {
+        "startTime": "2026-11-13T07:49:04.615Z",
+        "duration": 14041.104000000001,
+        "expected": 8,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "note": "校园版布局测试通过；之后删除资讯卡片并统一背景，最终布局另经三种宽度的真实浏览器检查"
+    },
+    {
+      "command": "make e2e-spec SPEC=homepage.spec.js",
+      "stats": {
+        "startTime": "2026-11-13T08:09:59.885Z",
+        "duration": 17794.279,
+        "expected": 9,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "note": "包含最后一次背景与栏目调整"
+    },
+    {
+      "command": "npm run check:complexity",
+      "result": "passed"
+    },
+    {
+      "command": "docker compose build frontend",
+      "result": "passed"
+    }
+  ],
+  "screenshots": {
+    "penpot": "penpot-home.png",
+    "desktop": "web-desktop.png",
+    "mobile": "web-mobile.png"
+  },
+  "notRun": [
+    "完整应用 E2E",
+    "人工细调验收"
+  ],
+  "knownUnresolved": {
+    "sourceRun": "https://github.com/LittleDrinks/case-library/actions/runs/43374052175",
+    "workbenchHistoryInteractions": 4
+  },
+  "reviewNotes": [
+    "模块首页与完整原型分别保存，后续编辑需同步两处",
+    "连续流程使用“原型 · 完整流程”；本轮实际点击验证搜索、钱伟长图书馆案例及素材、登录入口"
+  ]
+}

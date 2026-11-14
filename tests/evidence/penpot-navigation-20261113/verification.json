@@ -1,0 +1,109 @@
+{
+  "date": "2026-11-13",
+  "cause": "默认首页检索模块仍使用跨 Page 打开网址；完整原型与管理员入口位于另一 Page，造成两个演示入口。",
+  "before": {
+    "addedTabs": 1,
+    "passed": false
+  },
+  "after": {
+    "passed": 5,
+    "results": [
+      {
+        "name": "截图中的案例检索 → 案例阅读",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "统一检索 → 案例阅读",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "演示入口 → 管理员后台",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "管理员后台 → 素材管理",
+        "passed": true,
+        "addedTabs": 0
+      },
+      {
+        "name": "演示入口 → 教师创作",
+        "passed": true,
+        "addedTabs": 0
+      }
+    ]
+  },
+  "design": {
+    "pageId": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
+    "pageName": "00 · 演示入口与完整流程",
+    "boards": 57,
+    "nativeInteractions": 282,
+    "internalUrlActions": 0,
+    "missingDestinations": 0,
+    "flows": [
+      {
+        "name": "Flow 1",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f519bd"
+      },
+      {
+        "name": "Flow 6",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f518f0"
+      },
+      {
+        "name": "04 · 案例审核",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f8f218"
+      },
+      {
+        "name": "Flow 7",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f51a14"
+      },
+      {
+        "name": "00 · 选择演示入口",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f9c5da"
+      },
+      {
+        "name": "Flow 5",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f9c573"
+      },
+      {
+        "name": "Flow 4",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f56422"
+      },
+      {
+        "name": "03 · 管理员演示",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f87238"
+      },
+      {
+        "name": "Flow 2",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f4d53e"
+      },
+      {
+        "name": "01 · 浏览与搜索",
+        "boardId": "f2ca496a-9568-80b4-8008-ca81a90b0a14"
+      },
+      {
+        "name": "02 · 教师创作",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f59605"
+      },
+      {
+        "name": "Flow 3",
+        "boardId": "3a82236a-4086-80c2-8008-f04b65f563ed"
+      }
+    ],
+    "components": 184,
+    "componentIdsPreserved": true,
+    "tokensUnchanged": true,
+    "duplicatePrototypePageRemoved": true
+  },
+  "regression": "check-navigation.cjs",
+  "screenshots": [
+    "entry.png",
+    "admin-viewer.png"
+  ],
+  "notRun": [
+    "应用 E2E：本轮只修改 Penpot 设计与使用说明",
+    "人工体验验收"
+  ]
+}

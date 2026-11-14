@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-13",
+  "sourceBranch": "wip/home-design-migration-20261111",
+  "sourceCommit": "aa71f042ef81fb8b9265697401f9983d8b213a40",
+  "activeBranch": "wip/ui-home",
+  "foundationCommit": "d51380413cac517c6467c94c68b0937cc3c2973a",
+  "removedRemoteBranches": [
+    {
+      "branch": "afk/317-run-status",
+      "commit": "f784e2d9514895f420c6d45303e7e363ec3118da",
+      "retainedIn": "main",
+      "retainedCommit": "7afc5bb9e182b1c61827d6024670002a42937fc6"
+    },
+    {
+      "branch": "afk/318-tag-interaction",
+      "commit": "46faf7e0e5bce63517282653b2621441b0861828",
+      "retainedIn": "main",
+      "retainedCommit": "7afc5bb9e182b1c61827d6024670002a42937fc6"
+    },
+    {
+      "branch": "afk/327-ai-workbench",
+      "commit": "fc139b2e936602303c123d197682c48b8ef73e3c",
+      "retainedIn": "main",
+      "retainedCommit": "7afc5bb9e182b1c61827d6024670002a42937fc6"
+    },
+    {
+      "branch": "fix/m1-final-feedback",
+      "commit": "7afc5bb9e182b1c61827d6024670002a42937fc6",
+      "retainedIn": "main",
+      "retainedCommit": "7afc5bb9e182b1c61827d6024670002a42937fc6"
+    },
+    {
+      "branch": "review/issue-356",
+      "commit": "7afc5bb9e182b1c61827d6024670002a42937fc6",
+      "retainedIn": "main",
+      "retainedCommit": "7afc5bb9e182b1c61827d6024670002a42937fc6"
+    },
+    {
+      "branch": "review/issue-352",
+      "commit": "fb4c8b483e3ac6bd2dd523068d613b7b7c5c732a",
+      "retainedIn": "prototype/issue-352-materials",
+      "retainedCommit": "a4285412bea20906a5f594b51fa582e5fe8bb2e7"
+    },
+    {
+      "branch": "review/issue-357",
+      "commit": "816a26547063dc87f998d02d764c288aeb756c39",
+      "retainedIn": "feat/issue-355-local-accounts",
+      "retainedCommit": "2fcf4fbf8a568326d2fbf645f2886cfe7e57a4ca"
+    },
+    {
+      "branch": "review/issue-358",
+      "commit": "71839871270e762de997a438e0cb28fee82ac36b",
+      "retainedIn": "feat/issue-355-local-accounts",
+      "retainedCommit": "2fcf4fbf8a568326d2fbf645f2886cfe7e57a4ca"
+    },
+    {
+      "branch": "review/issue-359",
+      "commit": "75e2e38807829e780fdd32f912b09e526d71999e",
+      "retainedIn": "feat/issue-355-local-accounts",
+      "retainedCommit": "2fcf4fbf8a568326d2fbf645f2886cfe7e57a4ca"
+    }
+  ],
+  "removedLocalBranch": {
+    "name": "research/penpot-selfhost-20261113",
+    "commit": "7afc5bb9e182b1c61827d6024670002a42937fc6",
+    "retainedIn": "main"
+  },
+  "retainedRemoteBranches": {
+    "backup/issue-360-campus-access-pre-359": "f85fa1e35e5ea73b331f9e17c044828340cbbd4a",
+    "backup/stash-main-20261111": "771944266ef49c4b94da4e7ba4f775cb39f82211",
+    "feat/issue-355-local-accounts": "2fcf4fbf8a568326d2fbf645f2886cfe7e57a4ca",
+    "feat/issue-356-registration": "816a26547063dc87f998d02d764c288aeb756c39",
+    "feat/issue-357-account-management": "71839871270e762de997a438e0cb28fee82ac36b",
+    "feat/issue-358-private-boundaries": "7aa002b1e2c45b9a095e6741941e9377c7b1983a",
+    "feat/issue-359-status-roles": "75e2e38807829e780fdd32f912b09e526d71999e",
+    "feat/issue-360-campus-access": "c030a3bdf331e54c481f44c4be13fb69a8a86201",
+    "feat/issue-361-integration": "b34574bf322fd00627612c4537dbb9126db6eae6",
+    "main": "7afc5bb9e182b1c61827d6024670002a42937fc6",
+    "prototype/309-ckeditor-replica": "d7a464f83ec7ecb7059ae70119d3a12a649bff2d",
+    "prototype/issue-352-materials": "a4285412bea20906a5f594b51fa582e5fe8bb2e7",
+    "research/file-storage-20260930": "c6b3a296751d391377d0aa07bf76e1a12f366d68",
+    "research/knowledge-and-case-resources-20261001": "ee74c96682e65c91ecdd6255f773150ebc1b5f1e",
+    "research/user-identity-20260930": "1eefe89d7d19ec67c97eab8052cec9f51d6b6a97",
+    "wip/home-design-migration-20261111": "aa71f042ef81fb8b9265697401f9983d8b213a40"
+  },
+  "verification": {
+    "allRemovedCommitsReachableFromRetainedBranches": true,
+    "retainedRemoteBranchesUnchanged": true,
+    "remoteDeletionAtomicWithExpectedTips": true,
+    "frontendAndBackendEqualToSource": true,
+    "makeConfig": "passed",
+    "penpotLinkTests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "fullApplicationE2e": "not rerun; existing failures recorded in homepage reference evidence",
+    "agentRulesAndLocalDeploymentPreserved": true
+  }
+}

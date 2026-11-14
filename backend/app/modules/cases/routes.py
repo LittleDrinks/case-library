@@ -21,6 +21,7 @@ from app.modules.cases.service import (
     get_case,
     get_public_case,
     list_cases,
+    admin_case_page,
     list_drafts,
     update_case,
 )
@@ -59,6 +60,18 @@ def drafts(
     user: dict = Depends(require_user),
 ):
     return list_drafts(database, user, q, page, page_size)
+
+
+@router.get("/admin/queue")
+def admin_queue(
+    queue: Literal["review", "published"] = "review",
+    q: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, alias="pageSize", ge=1, le=50),
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+):
+    return admin_case_page(database, user, queue, q, page, page_size)
 
 
 @router.get("/{case_id}")

@@ -14,7 +14,6 @@ skills-lock.json
 .omp/
 .pi/
 .scratch/
-docs/agents/
 files/case-attachments/
 
 # Python
@@ -48,3 +47,10 @@ pyrightconfig.json.tmp
 .venv*/
 frontend/.node_modules-old/
 frontend/jsconfig.json
+
+# 可重建的工具输出
+tools/architecture-tour/flow-app/dist/
+tools/architecture-tour/probe.png
+tools/architecture-tour/recovered.png
+tools/penpot/last-export.*
+/deploy/

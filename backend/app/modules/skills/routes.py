@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, UploadFile
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query, UploadFile
 from fastapi.param_functions import File
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +15,7 @@ from app.modules.skills.parse import MAX_PACKAGE_BYTES
 from app.modules.skills.service import (
     SkillError,
     admin_list,
+    admin_version_page,
     delete_version,
     publish_version,
     unpublish_version,
@@ -65,6 +68,19 @@ def list_skills(
 ) -> list:
     _require_admin(user)
     return admin_list(database)
+
+
+@admin_router.get("/versions")
+def list_versions(
+    q: str = Query(default="", max_length=200),
+    status: Literal["all", "published", "unpublished"] = "all",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, alias="pageSize", ge=1, le=50),
+    database=Depends(get_database),
+    user: dict = Depends(require_user),
+) -> dict:
+    _require_admin(user)
+    return admin_version_page(database, q, status, page, page_size)
 
 
 @admin_router.post("/{skill_id}/publish")

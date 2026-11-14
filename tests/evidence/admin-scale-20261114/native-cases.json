@@ -1,0 +1,142 @@
+{
+  "fileId": "0993bf61-0172-809e-8008-ef7716037760",
+  "pageId": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
+  "cases": [
+    {
+      "name": "overview → materials",
+      "start": "3a82236a-4086-80c2-8008-f04b65f87238",
+      "shapeId": "3a82236a-4086-80c2-8008-f04b65f8729f",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9343b"
+    },
+    {
+      "name": "materials → skills",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9343b",
+      "shapeId": "377af98c-f671-80d1-8008-f13ce202ffdc",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9a4e6"
+    },
+    {
+      "name": "skills → tags",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9a4e6",
+      "shapeId": "377af98c-f671-80d1-8008-f13b9aa303a7",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f93495"
+    },
+    {
+      "name": "tags → monitor",
+      "start": "3a82236a-4086-80c2-8008-f04b65f93495",
+      "shapeId": "377af98c-f671-80d1-8008-f13c52af02c2",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9a5ce"
+    },
+    {
+      "name": "review → monitor",
+      "start": "3a82236a-4086-80c2-8008-f04b65f888b2",
+      "shapeId": "377af98c-f671-80d1-8008-f13bbfe0ecc2",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9a5ce"
+    },
+    {
+      "name": "monitor → connections",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9a5ce",
+      "shapeId": "71c506e6-9bbd-807b-8008-f13904d4dd3f",
+      "destination": "16a2d9c9-04cb-8083-8008-f1380c1cd72e"
+    },
+    {
+      "name": "connections → edit",
+      "start": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+      "shapeId": "71c506e6-9bbd-807b-8008-f139676e0aad",
+      "destination": "16a2d9c9-04cb-8083-8008-f1380d6c9824"
+    },
+    {
+      "name": "edit → connections",
+      "start": "16a2d9c9-04cb-8083-8008-f1380d6c9824",
+      "shapeId": "71c506e6-9bbd-807b-8008-f139882016f4",
+      "destination": "16a2d9c9-04cb-8083-8008-f1380c1cd72e"
+    },
+    {
+      "name": "connections → discovered",
+      "start": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+      "shapeId": "71c506e6-9bbd-807b-8008-f13966b3145d",
+      "destination": "16a2d9c9-04cb-8083-8008-f138114233e2"
+    },
+    {
+      "name": "discovered → defaults",
+      "start": "16a2d9c9-04cb-8083-8008-f138114233e2",
+      "shapeId": "377af98c-f671-80d1-8008-f13a16560fbc",
+      "destination": "16a2d9c9-04cb-8083-8008-f13816767baa"
+    },
+    {
+      "name": "connections → probe",
+      "start": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+      "shapeId": "71c506e6-9bbd-807b-8008-f1396632a080",
+      "destination": "16a2d9c9-04cb-8083-8008-f13813e0d130"
+    },
+    {
+      "name": "connections → error",
+      "start": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+      "shapeId": "71c506e6-9bbd-807b-8008-f13966f2cec0",
+      "destination": "16a2d9c9-04cb-8083-8008-f1381528c003"
+    },
+    {
+      "name": "monitor → week",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9a5ce",
+      "shapeId": "71c506e6-9bbd-807b-8008-f139049c69f2",
+      "destination": "16a2d9c9-04cb-8083-8008-f1380a8fadda"
+    },
+    {
+      "name": "week → ranking",
+      "start": "16a2d9c9-04cb-8083-8008-f1380a8fadda",
+      "shapeId": "71c506e6-9bbd-807b-8008-f1393b561cfe",
+      "destination": "16a2d9c9-04cb-8083-8008-f138191735b7"
+    },
+    {
+      "name": "defaults → saved",
+      "start": "16a2d9c9-04cb-8083-8008-f13816767baa",
+      "shapeId": "377af98c-f671-80d1-8008-f13a89b2fe15",
+      "destination": "16a2d9c9-04cb-8083-8008-f13817c6a06b"
+    },
+    {
+      "name": "skills → skills2",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9a4e6",
+      "shapeId": "377af98c-f671-80d1-8008-f13dae9552fd",
+      "destination": "377af98c-f671-80d1-8008-f13dad4a217a"
+    },
+    {
+      "name": "skills2 → skills",
+      "start": "377af98c-f671-80d1-8008-f13dad4a217a",
+      "shapeId": "377af98c-f671-80d1-8008-f13daf22dbb8",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9a4e6"
+    },
+    {
+      "name": "materials → materials2",
+      "start": "3a82236a-4086-80c2-8008-f04b65f9343b",
+      "shapeId": "377af98c-f671-80d1-8008-f13db1a02598",
+      "destination": "377af98c-f671-80d1-8008-f13dafb68bbc"
+    },
+    {
+      "name": "materials2 → materials",
+      "start": "377af98c-f671-80d1-8008-f13dafb68bbc",
+      "shapeId": "377af98c-f671-80d1-8008-f13db231be6c",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f9343b"
+    }
+  ],
+  "boards": {
+    "overview": "3a82236a-4086-80c2-8008-f04b65f87238",
+    "materials": "3a82236a-4086-80c2-8008-f04b65f9343b",
+    "skills": "3a82236a-4086-80c2-8008-f04b65f9a4e6",
+    "tags": "3a82236a-4086-80c2-8008-f04b65f93495",
+    "review": "3a82236a-4086-80c2-8008-f04b65f888b2",
+    "monitor": "3a82236a-4086-80c2-8008-f04b65f9a5ce",
+    "week": "16a2d9c9-04cb-8083-8008-f1380a8fadda",
+    "connections": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+    "edit": "16a2d9c9-04cb-8083-8008-f1380d6c9824",
+    "replace": "16a2d9c9-04cb-8083-8008-f1380ebd13cd",
+    "models": "16a2d9c9-04cb-8083-8008-f13810070a9e",
+    "discovered": "16a2d9c9-04cb-8083-8008-f138114233e2",
+    "manual": "16a2d9c9-04cb-8083-8008-f138129c1f6e",
+    "probe": "16a2d9c9-04cb-8083-8008-f13813e0d130",
+    "error": "16a2d9c9-04cb-8083-8008-f1381528c003",
+    "defaults": "16a2d9c9-04cb-8083-8008-f13816767baa",
+    "saved": "16a2d9c9-04cb-8083-8008-f13817c6a06b",
+    "ranking": "16a2d9c9-04cb-8083-8008-f138191735b7",
+    "materials2": "377af98c-f671-80d1-8008-f13dafb68bbc",
+    "skills2": "377af98c-f671-80d1-8008-f13dad4a217a"
+  }
+}

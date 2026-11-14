@@ -100,7 +100,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: deploy/mongo-init.Dockerfile
+          file: infra/mongo-init.Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.images.outputs.mongo_init }}:${{ needs.validate-tag.outputs.version }}
@@ -114,7 +114,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: deploy/meilisearch.Dockerfile
+          file: infra/meilisearch.Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.images.outputs.meilisearch }}:${{ needs.validate-tag.outputs.version }}
@@ -128,7 +128,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: deploy/minio.Dockerfile
+          file: infra/minio.Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.images.outputs.minio }}:${{ needs.validate-tag.outputs.version }}

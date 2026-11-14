@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "source": "http://localhost:9001/?screen=viewer&team-id=8e83165e-84ef-8007-8008-ef7430b6623a&file-id=0993bf61-0172-809e-8008-ef7716037760&page-id=5efb8ca5-50b1-8025-8008-ca98a9181d80&frame-id=5efb8ca5-50b1-8025-8008-ca98ab9bda1e&section=interactions&zoom=fit",
+  "destination": "http://localhost:9001/?screen=viewer&team-id=8e83165e-84ef-8007-8008-ef7430b6623a&file-id=0993bf61-0172-809e-8008-ef7716037760&page-id=5efb8ca5-50b1-8025-8008-ca98a9181d80&frame-id=5efb8ca5-50b1-8025-8008-ca98ab9bda1e&section=interactions&zoom=fit&index=43",
+  "addedTabs": 0,
+  "title": "钱伟长图书馆——科学家精神的大思政课堂",
+  "scope": "Existing complete prototype only; grouped pages still use open-url for cross-page links.",
+  "groupedPageReproduction": {
+    "passed": false,
+    "expectedTabs": 2,
+    "actualTabs": 3,
+    "assertion": "点击案例卡片不应新增浏览器标签页"
+  },
+  "completePrototype": {
+    "nativeNavigationCount": 276,
+    "changesMade": false
+  },
+  "reference": "https://github.com/penpot/penpot/blob/2.19.1/frontend/src/app/main/ui/viewer/shapes.cljs#L135"
+}

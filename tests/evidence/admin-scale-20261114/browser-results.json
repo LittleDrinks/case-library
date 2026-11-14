@@ -1,0 +1,49 @@
+{
+  "result": "passed",
+  "checks": [
+    {
+      "route": "material-imports",
+      "sidebarPersistent": true,
+      "mobileOverflow": false
+    },
+    {
+      "route": "skills",
+      "sidebarPersistent": true,
+      "mobileOverflow": false
+    },
+    {
+      "route": "tag-catalog",
+      "sidebarPersistent": true,
+      "mobileOverflow": false
+    },
+    {
+      "route": "ai-settings",
+      "sidebarPersistent": true,
+      "mobileOverflow": false
+    },
+    {
+      "route": "overview",
+      "sidebarPersistent": true,
+      "mobileOverflow": false
+    },
+    {
+      "route": "review",
+      "sidebarVisible": true
+    },
+    {
+      "route": "skills",
+      "lastPage": 500,
+      "total": 10000
+    },
+    {
+      "route": "material-imports",
+      "lastPage": 500,
+      "total": 10000
+    },
+    {
+      "route": "overview",
+      "lastPage": 500,
+      "total": 10000
+    }
+  ]
+}

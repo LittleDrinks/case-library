@@ -48,9 +48,9 @@ test("管理员待审核列表按服务端分页", async () => {
   const wrapper = render();
   await flushPromises();
   expect(wrapper.text()).toContain("第 1 页，共 2 页");
-  await wrapper.get("nav[aria-label='待审核素材分页'] button:last-child").trigger("click");
+  await wrapper.get("nav[aria-label='待审核素材分页'] .btn-next").trigger("click");
   await flushPromises();
-  expect(api.listMaterialCandidates).toHaveBeenLastCalledWith("candidate", 2, 20);
+  expect(api.listMaterialCandidates).toHaveBeenLastCalledWith("candidate", 2, 20, "");
   expect(wrapper.text()).toContain("第 2 页，共 2 页");
 });
 

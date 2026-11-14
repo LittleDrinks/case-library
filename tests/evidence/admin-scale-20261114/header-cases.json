@@ -1,0 +1,18 @@
+{
+  "fileId": "0993bf61-0172-809e-8008-ef7716037760",
+  "pageId": "f2ca496a-9568-80b4-8008-ca80f8b3a04d",
+  "cases": [
+    {
+      "name": "connections 顶部管理入口",
+      "start": "16a2d9c9-04cb-8083-8008-f1380c1cd72e",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f87238",
+      "shapeId": "377af98c-f671-80d1-8008-f14618b9dac3"
+    },
+    {
+      "name": "defaults 顶部管理入口",
+      "start": "16a2d9c9-04cb-8083-8008-f13816767baa",
+      "destination": "3a82236a-4086-80c2-8008-f04b65f87238",
+      "shapeId": "377af98c-f671-80d1-8008-f1461a06e2c0"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import UTC, datetime
 from pathlib import PurePath, PurePosixPath
@@ -238,8 +239,10 @@ def get_import(database: Database, job_id: str) -> dict | None:
     return {**_clean(job), "items": [_clean(row) for row in rows]}
 
 
-def list_candidates(database: Database, status: str, page: int, page_size: int) -> dict:
+def list_candidates(database: Database, status: str, page: int, page_size: int, keyword: str = "") -> dict:
     query = {"status": status}
+    if keyword.strip():
+        query["filename"] = {"$regex": re.escape(keyword.strip()), "$options": "i"}
     offset = (page - 1) * page_size
     rows = database.material_candidates.find(query).sort(
         [

@@ -6,7 +6,7 @@ import { ElPopconfirm } from "element-plus";
 
 vi.mock("../api.js", () => ({
   api: {
-    listAdminSkills: vi.fn(), uploadSkillPackage: vi.fn(), publishSkillVersion: vi.fn(), deleteSkillVersion: vi.fn(), unpublishSkillVersion: vi.fn(),
+    listAdminSkillVersions: vi.fn(), uploadSkillPackage: vi.fn(), publishSkillVersion: vi.fn(), deleteSkillVersion: vi.fn(), unpublishSkillVersion: vi.fn(),
   },
 }));
 vi.mock("../session.js", () => ({
@@ -53,7 +53,7 @@ function confirmAction(wrapper, prefix) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.listAdminSkills.mockResolvedValue(structuredClone(skillList));
+  api.listAdminSkillVersions.mockResolvedValue({ items: structuredClone(skillList), total: 2, page: 1, pageSize: 20 });
 });
 
 it("lists skills with versions and marks the published one", async () => {
@@ -73,7 +73,7 @@ it("deletes a non-current version only after confirmation and reloads the list",
   await wrapper.get('[data-testid="skill-delete-ver-2"]').trigger("click");
   expect(api.deleteSkillVersion).not.toHaveBeenCalled();
   api.deleteSkillVersion.mockResolvedValue(undefined);
-  api.listAdminSkills.mockResolvedValue([{ ...skillList[0], versions: [skillList[0].versions[0]] }]);
+  api.listAdminSkillVersions.mockResolvedValue({ items: [{ ...skillList[0], versions: [skillList[0].versions[0]] }], total: 1 });
   confirmAction(wrapper, "删除 ");
   await flushPromises();
   expect(api.deleteSkillVersion).toHaveBeenCalledWith("skill-1", "ver-2", "csrf");
@@ -96,7 +96,7 @@ it("unpublishes the current version and then exposes its delete action", async (
   await wrapper.get('[data-testid="skill-unpublish-ver-1"]').trigger("click");
   expect(api.unpublishSkillVersion).not.toHaveBeenCalled();
   api.unpublishSkillVersion.mockResolvedValue({});
-  api.listAdminSkills.mockResolvedValue([{ ...skillList[0], publishedVersionId: null }]);
+  api.listAdminSkillVersions.mockResolvedValue({ items: [{ ...skillList[0], publishedVersionId: null }], total: 2 });
   confirmAction(wrapper, "取消发布 ");
   await flushPromises();
   expect(api.unpublishSkillVersion).toHaveBeenCalledWith("skill-1", "ver-1", "csrf");
@@ -113,11 +113,11 @@ it("publishes an unpublished version through the publish command", async () => {
   await flushPromises();
 
   expect(api.publishSkillVersion).toHaveBeenCalledWith("skill-1", "ver-2", "csrf");
-  expect(api.listAdminSkills).toHaveBeenCalledTimes(2);
+  expect(api.listAdminSkillVersions).toHaveBeenCalledTimes(2);
 });
 
 it("shows the empty state when no skill has been uploaded", async () => {
-  api.listAdminSkills.mockResolvedValue([]);
+  api.listAdminSkillVersions.mockResolvedValue({ items: [], total: 0 });
   const wrapper = mountView();
   await flushPromises();
 
@@ -125,7 +125,7 @@ it("shows the empty state when no skill has been uploaded", async () => {
 });
 
 it("shows the load failure and retries on demand", async () => {
-  api.listAdminSkills.mockRejectedValueOnce(new Error("网络错误"));
+  api.listAdminSkillVersions.mockRejectedValueOnce(new Error("网络错误"));
   const wrapper = mountView();
   await flushPromises();
 

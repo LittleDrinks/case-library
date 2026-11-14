@@ -56,7 +56,7 @@ test "$build_line" -lt "$mongo_wait_line" || {
   exit 1
 }
 test ! -e "$project_dir/scripts/ci-images.sh"
-if grep -Fq 'docker build -f deploy/e2e.Dockerfile' "$runner"; then
+if grep -Fq 'docker build -f infra/e2e.Dockerfile' "$runner"; then
   echo "Playwright image must be built once via compose service e2e" >&2
   exit 1
 fi
@@ -173,8 +173,8 @@ for test_file in "$project_dir"/backend/tests/*_e2e.py; do
     exit 1
   fi
 done
-grep -q 'mcr.microsoft.com/playwright:v1.62.1-noble' "$project_dir/deploy/e2e.Dockerfile"
-if grep -q 'playwright install' "$project_dir/deploy/e2e.Dockerfile"; then
+grep -q 'mcr.microsoft.com/playwright:v1.62.1-noble' "$project_dir/infra/e2e.Dockerfile"
+if grep -q 'playwright install' "$project_dir/infra/e2e.Dockerfile"; then
   echo "E2E image must use the Playwright base image without reinstalling browsers" >&2
   exit 1
 fi

@@ -163,6 +163,8 @@ export const api = {
     "/api/admin/ai/settings", jsonOptions("PUT", settings, csrfToken),
   ),
   listAdminSkills: () => request("/api/admin/skills"),
+  listAdminSkillVersions: (params) => request(`/api/admin/skills/versions?${new URLSearchParams(params)}`),
+  listAdminCases: (queue, params) => request(`/api/cases/admin/queue?${new URLSearchParams({ ...params, queue })}`),
   uploadSkillPackage: (file, csrfToken) => request("/api/admin/skills/packages", {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
@@ -281,8 +283,8 @@ export const api = {
       body: materialImportForm(files, accessLevel),
     },
   ),
-  listMaterialCandidates: (status = "candidate", page = 1, pageSize = 20) => request(
-    `/api/admin/material-candidates?status=${encodeURIComponent(status)}&page=${page}&pageSize=${pageSize}`,
+  listMaterialCandidates: (status = "candidate", page = 1, pageSize = 20, q = "") => request(
+    `/api/admin/material-candidates?status=${encodeURIComponent(status)}&page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(q)}`,
   ),
   decideMaterialCandidate: (id, decision, csrfToken) => request(
     `/api/admin/material-candidates/${encodeURIComponent(id)}/decision`,

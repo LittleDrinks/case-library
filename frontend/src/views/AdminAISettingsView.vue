@@ -1,7 +1,6 @@
 <script setup>
 import { LoaderCircle, ShieldCheck } from "@lucide/vue";
 import { onMounted, ref } from "vue";
-import SiteHeader from "../components/SiteHeader.vue";
 import { api } from "../api.js";
 import { session } from "../session.js";
 
@@ -41,25 +40,19 @@ onMounted(loadSettings);
 </script>
 
 <template>
-  <div class="settings-page">
-    <SiteHeader />
-    <main id="main-content" class="settings-main">
-      <header class="settings-heading">
-        <div><span>管理后台</span><h1>平台兜底模型</h1></div>
-        <RouterLink :to="{ name: 'ai-settings' }">返回个人设置</RouterLink>
-      </header>
+  <section class="settings-main admin-section">
+      <header class="settings-heading"><h1>平台 AI</h1></header>
       <div v-if="loading" class="settings-state"><LoaderCircle class="spin" :size="20" />正在加载设置</div>
       <form v-else class="settings-form" @submit.prevent="saveSettings">
         <section class="settings-section">
-          <header><ShieldCheck :size="18" /><div><h2>兜底模型</h2><p>账号使用自动模式时调用此模型。可选项由服务器部署配置提供。</p></div></header>
-          <label><span>兜底模型</span><select v-model="fallbackModel" :disabled="!availableModels.length"><option value="">使用环境默认模型</option><option v-for="item in availableModels" :key="item" :value="item">{{ item }}</option></select></label>
+          <header><ShieldCheck :size="18" /><div><h2>主模型</h2><p>账号使用自动模式时调用此模型。可选项由服务器部署配置提供。</p></div></header>
+          <label><span>主模型</span><select v-model="fallbackModel" :disabled="!availableModels.length"><option value="">使用环境默认模型</option><option v-for="item in availableModels" :key="item" :value="item">{{ item }}</option></select></label>
           <p v-if="!availableModels.length" class="settings-hint">服务器尚未配置可用模型列表。</p>
-          <p class="settings-hint">服务状态：{{ configured ? "可用" : "尚未完整配置" }}</p>
+          <p class="settings-hint">配置状态：{{ configured ? "配置完整（尚未测试调用）" : "尚未完整配置" }}</p>
         </section>
         <p v-if="error" class="settings-message error" role="alert">{{ error }}</p>
         <p v-if="notice" class="settings-message success" role="status">{{ notice }}</p>
         <footer><button class="primary-button" type="submit" :disabled="saving"><LoaderCircle v-if="saving" class="spin" :size="16" />{{ saving ? "正在保存" : "保存平台设置" }}</button></footer>
       </form>
-    </main>
-  </div>
+  </section>
 </template>

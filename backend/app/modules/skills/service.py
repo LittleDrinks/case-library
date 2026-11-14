@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -361,3 +362,27 @@ def catalog_view(skill: dict, version: dict) -> dict:
         "id": skill["id"], "versionId": version["id"], "version": version["version"],
         "name": version["name"], "description": version["description"],
     }
+
+
+def admin_version_page(database, query, status, page, page_size):
+    pipeline = [
+        {"$match": {"deletedAt": {"$exists": False}}},
+        {"$lookup": {"from": "skills", "localField": "skillId", "foreignField": "id", "as": "skill"}},
+        {"$unwind": "$skill"},
+    ]
+    if query.strip():
+        pipeline.append({"$match": {"skill.name": {"$regex": re.escape(query.strip()), "$options": "i"}}})
+    if status != "all":
+        operator = "$eq" if status == "published" else "$ne"
+        pipeline.append({"$match": {"$expr": {operator: ["$id", {"$ifNull": ["$skill.publishedVersionId", None]}]}}})
+    pipeline.append({"$facet": {
+        "count": [{"$count": "total"}],
+        "items": [{"$sort": {"createdAt": -1, "id": -1}},
+                  {"$skip": (page - 1) * page_size}, {"$limit": page_size},
+                  {"$project": {"files": 0, "body": 0}}],
+    }})
+    result = next(database.skill_versions.aggregate(pipeline))
+    items = [{**skill_view(row["skill"]), "versions": [version_view(row)]}
+             for row in result["items"]]
+    total = result["count"][0]["total"] if result["count"] else 0
+    return {"items": items, "total": total, "page": page, "pageSize": page_size}

@@ -59,7 +59,7 @@ it("标签展示当前结果计数且零计数仍可选", async () => {
   expect(view.text()).toContain("纲要5");
   expect(view.text()).toContain("科学家精神0");
 
-  await view.findAll(".tag-group input[type='checkbox']")[2].setValue(true);
+  await view.findAll(".filter-tag-group input[type='checkbox']")[2].setValue(true);
 
   expect(emittedFilters(view).tagIds).toEqual(["tag-3"]);
 });

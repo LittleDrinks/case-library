@@ -97,7 +97,7 @@ services:
   mongo-init:
     build:
       context: .
-      dockerfile: deploy/mongo-init.Dockerfile
+      dockerfile: infra/mongo-init.Dockerfile
     depends_on:
       mongo1:
         condition: service_healthy
@@ -112,7 +112,7 @@ services:
   minio:
     build:
       context: .
-      dockerfile: deploy/minio.Dockerfile
+      dockerfile: infra/minio.Dockerfile
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
@@ -143,7 +143,7 @@ services:
     image: case-library-v2-meilisearch
     build:
       context: .
-      dockerfile: deploy/meilisearch.Dockerfile
+      dockerfile: infra/meilisearch.Dockerfile
     command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
     depends_on:
       production-config-check:
@@ -296,6 +296,26 @@ services:
       start_period: 10s
     restart: "no"
 
+  frontend-dev:
+    profiles: ["dev"]
+    image: case-library-v2-frontend-dev
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+      target: dependencies
+    init: true
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    environment:
+      VITE_API_PROXY: http://app:8001
+    ports:
+      - "127.0.0.1:${FRONTEND_DEV_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_modules:/app/node_modules
+    networks:
+      - edge
+    restart: unless-stopped
+
   backend-test:
     profiles: ["test"]
     build:
@@ -319,7 +339,7 @@ services:
     image: case-library-v2-e2e
     build:
       context: .
-      dockerfile: deploy/e2e.Dockerfile
+      dockerfile: infra/e2e.Dockerfile
     environment:
       PLAYWRIGHT_BASE_URL: http://frontend
     depends_on:
@@ -333,7 +353,7 @@ services:
     profiles: ["e2e"]
     build:
       context: .
-      dockerfile: deploy/fake-openai.Dockerfile
+      dockerfile: infra/fake-openai.Dockerfile
     networks:
       e2e_test:
         aliases: ["ai-provider"]
@@ -382,7 +402,7 @@ services:
     image: case-library-v2-e2e-meilisearch
     build:
       context: .
-      dockerfile: deploy/meilisearch.Dockerfile
+      dockerfile: infra/meilisearch.Dockerfile
     command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
     secrets:
       - meili_master_key
@@ -781,7 +801,7 @@ services:
     image: case-library-v2-load
     build:
       context: .
-      dockerfile: deploy/k6.Dockerfile
+      dockerfile: infra/k6.Dockerfile
     environment:
       BASE_URL: http://frontend
       BACKEND_URL: http://app:8001
@@ -827,7 +847,7 @@ services:
     image: case-library-v2-load-meilisearch
     build:
       context: .
-      dockerfile: deploy/meilisearch.Dockerfile
+      dockerfile: infra/meilisearch.Dockerfile
     command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
     secrets:
       - meili_master_key
@@ -970,7 +990,7 @@ services:
     image: case-library-v2-backup-tools
     build:
       context: .
-      dockerfile: deploy/backup-tools.Dockerfile
+      dockerfile: infra/backup-tools.Dockerfile
     environment:
       MONGODB_ADMIN_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&retryWrites=true&w=majority
       MONGODB_DB_NAME: case_library_v3
@@ -990,7 +1010,7 @@ services:
     image: case-library-v2-backup-tools
     build:
       context: .
-      dockerfile: deploy/backup-tools.Dockerfile
+      dockerfile: infra/backup-tools.Dockerfile
     environment:
       OBJECT_STORE_ENDPOINT: minio:9000
       OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-case-library}
@@ -1024,6 +1044,7 @@ services:
       - restore_test
 
 volumes:
+  frontend_dev_modules:
   mongo1_data:
   mongo2_data:
   mongo3_data:

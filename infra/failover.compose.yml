@@ -28,7 +28,7 @@ services:
     image: case-library-v2-failover-meilisearch
     build:
       context: .
-      dockerfile: deploy/meilisearch.Dockerfile
+      dockerfile: infra/meilisearch.Dockerfile
     command: ["--db-path", "/meili_data", "--env", "production", "--http-addr", "0.0.0.0:7700"]
     secrets:
       - meili_master_key

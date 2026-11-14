@@ -1,4 +1,6 @@
 <script setup>
+import { ArrowUpRight } from "@lucide/vue";
+
 defineProps({
   caseRecord: { type: Object, required: true },
 });
@@ -13,15 +15,19 @@ function dateLabel(value) {
     class="home-case-item"
     :to="{ name: 'case-public', params: { id: caseRecord.id } }"
   >
-    <span class="home-case-title-row">
-      <h3>{{ caseRecord.title }}</h3>
-      <span class="home-tag green">已发布</span>
+    <span class="home-case-tags">
+      <span>
+        <span class="home-tag primary">{{ caseRecord.typeName || "教学案例" }}</span>
+        <span class="home-tag">{{ caseRecord.stageText || "全部学段" }}</span>
+      </span>
+      <ArrowUpRight class="home-case-arrow" :size="18" aria-hidden="true" />
     </span>
+    <h3>{{ caseRecord.title }}</h3>
+    <p v-if="caseRecord.summary">{{ caseRecord.summary }}</p>
     <span class="home-case-meta">
-      <span class="home-tag primary">{{ caseRecord.typeName || "教学案例" }}</span>
-      <span class="home-tag">{{ caseRecord.stageText || "全部学段" }}</span>
+      <span v-if="caseRecord.course">{{ caseRecord.course }}</span>
       <span>更新 {{ dateLabel(caseRecord.updatedAt) }}</span>
-      <span v-if="caseRecord.likes">赞 {{ caseRecord.likes }}</span>
+      <span v-if="caseRecord.likes">{{ caseRecord.likes }} 人推荐</span>
     </span>
   </RouterLink>
 </template>

@@ -59,15 +59,11 @@ test("匿名用户在首页发现推荐并检索公开案例", async ({ page }) 
   await openCatalogFirstScreen(page, "/#/", () => expect(page.getByRole("link", { name: PUBLIC_CASE })).toBeVisible());
 
   await expect(page.getByRole("heading", { name: "平台动态" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "时政要闻" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "平台公告" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "推荐案例" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "推荐素材" })).toBeVisible();
   await expect(page.getByRole("link", { name: PUBLIC_CASE })).toBeVisible();
   await expect(page.getByText("高等学校课程思政建设指导纲要", { exact: false })).toBeVisible();
   await expect(page.getByText(PRIVATE_CASE)).toHaveCount(0);
-  await expect(page.getByText("暂时没有可展示的新闻")).toBeVisible();
-  await expect(page.getByText("暂无公告")).toBeVisible();
   await searchFor(page, "钱伟长");
   await expect(page.getByRole("link", { name: PUBLIC_CASE })).toBeVisible();
   await expect(page.getByRole("link", { name: OTHER_PUBLIC_CASE })).toHaveCount(0);

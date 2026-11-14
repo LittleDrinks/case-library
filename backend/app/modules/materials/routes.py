@@ -70,12 +70,13 @@ def show(
 )
 def candidates(
     status: Literal["candidate", "approved", "rejected"] = "candidate",
+    q: str = Query(default="", max_length=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, alias="pageSize", ge=1, le=50),
     database=Depends(get_database),
     _user: dict = Depends(_admin),
 ):
-    return list_candidates(database, status, page, page_size)
+    return list_candidates(database, status, page, page_size, q)
 
 
 @candidate_router.post(

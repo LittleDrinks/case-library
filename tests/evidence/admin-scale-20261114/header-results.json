@@ -1,0 +1,15 @@
+{
+  "passed": 2,
+  "results": [
+    {
+      "name": "connections 顶部管理入口",
+      "passed": true,
+      "addedTabs": 0
+    },
+    {
+      "name": "defaults 顶部管理入口",
+      "passed": true,
+      "addedTabs": 0
+    }
+  ]
+}

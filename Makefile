@@ -7,11 +7,14 @@ export COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 COMPOSE := docker compose
 E2E_SPEC ?= $(SPEC)
 
-.PHONY: up down logs config config-contract release-contract test test-backend test-frontend check-complexity check-backend-complexity check-frontend-complexity backend-e2e e2e e2e-generic e2e-agent e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
+.PHONY: up dev down logs config config-contract release-contract test test-backend test-frontend check-complexity check-backend-complexity check-frontend-complexity backend-e2e e2e e2e-generic e2e-agent e2e-spec ai-smoke load-smoke load-peak load-resilience load-rate load-steady load-all failover backup restore-drill lock-backend
 
 up:
 	$(COMPOSE) stop frontend app
 	$(COMPOSE) up --build -d --wait --force-recreate meilisearch search-init search-worker app frontend
+
+dev:
+	$(COMPOSE) --profile dev up --build -d --no-deps frontend-dev
 
 down:
 	$(COMPOSE) down

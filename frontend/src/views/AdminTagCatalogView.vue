@@ -10,7 +10,6 @@ import "element-plus/es/components/tag/style/css";
 import { LoaderCircle, Pencil, Plus, RefreshCw, Tags } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { api } from "../api.js";
-import SiteHeader from "../components/SiteHeader.vue";
 import { session } from "../session.js";
 
 const groups = ref([]);
@@ -87,15 +86,8 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="admin-page">
-    <SiteHeader />
-    <main id="main-content" class="admin-main">
-      <header class="admin-heading">
-        <div><span>平台管理</span><h1>标签目录</h1></div>
-        <nav aria-label="管理工具">
-          <RouterLink :to="{ name: 'admin-dashboard' }"><Tags :size="16" />管理后台</RouterLink>
-        </nav>
-      </header>
+  <section class="admin-main admin-section">
+      <header class="admin-heading"><h1>标签目录</h1></header>
       <ElForm class="tag-group-create" @submit.prevent="createGroup">
         <ElFormItem class="tag-group-create-item">
           <ElInput
@@ -196,6 +188,5 @@ onMounted(load);
           <ElButton native-type="submit"><Plus :size="13" />添加标签</ElButton>
         </ElForm>
       </section>
-    </main>
-  </div>
+  </section>
 </template>

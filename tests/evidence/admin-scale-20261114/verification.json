@@ -1,0 +1,126 @@
+{
+  "date": "2026-11-14",
+  "implemented": [
+    "后台公共布局与持续显示的侧栏（包括审核页）",
+    "素材按文件名搜索、案例管理和 Skill 版本的服务端分页",
+    "每页 10/20/50 条、页码跳转、中文分页控件",
+    "Skill 取消红色顶边，后台统一标题与列表样式"
+  ],
+  "prototypeOnly": [
+    "多 API 接入、密钥替换、模型发现与手动添加",
+    "真实调用探测成功/失败状态、主模型与备用设置",
+    "Token 监控、模型分布、用户趋势与排行；均为演示数据"
+  ],
+  "integration": {
+    "database": "actual MongoDB replica set, isolated synthetic database",
+    "rows": {
+      "reviewCases": 10000,
+      "publishedCases": 10000,
+      "materialCandidates": 10000,
+      "skillVersions": 10000
+    },
+    "httpChecks": 51,
+    "result": "passed",
+    "checked": [
+      "first/middle/last page",
+      "bounded response",
+      "stable ordering",
+      "search and escaped regex",
+      "publication filter with missing publishedVersionId",
+      "empty results",
+      "422 pagination bounds",
+      "403 non-admin and 401 anonymous"
+    ],
+    "testDatabaseRemoved": true
+  },
+  "browser": {
+    "result": "passed",
+    "checks": [
+      {
+        "route": "material-imports",
+        "sidebarPersistent": true,
+        "mobileOverflow": false
+      },
+      {
+        "route": "skills",
+        "sidebarPersistent": true,
+        "mobileOverflow": false
+      },
+      {
+        "route": "tag-catalog",
+        "sidebarPersistent": true,
+        "mobileOverflow": false
+      },
+      {
+        "route": "ai-settings",
+        "sidebarPersistent": true,
+        "mobileOverflow": false
+      },
+      {
+        "route": "overview",
+        "sidebarPersistent": true,
+        "mobileOverflow": false
+      },
+      {
+        "route": "review",
+        "sidebarVisible": true
+      },
+      {
+        "route": "skills",
+        "lastPage": 500,
+        "total": 10000
+      },
+      {
+        "route": "material-imports",
+        "lastPage": 500,
+        "total": 10000
+      },
+      {
+        "route": "overview",
+        "lastPage": 500,
+        "total": 10000
+      }
+    ]
+  },
+  "reviewRoute": {
+    "result": "passed",
+    "caseChanged": true,
+    "sidebarPersistent": true,
+    "mobileOverflow": false
+  },
+  "unitRegression": {
+    "backend": 54,
+    "frontend": 18,
+    "note": "existing isolated unit tests; mocks in these tests are not counted as integration evidence"
+  },
+  "checks": {
+    "backendLint": "passed",
+    "backendComplexity": "passed",
+    "frontendComplexity": "passed",
+    "frontendBuild": "passed",
+    "rebuiltDemoFrontendAndBackend": "healthy",
+    "gitDiffCheck": "passed"
+  },
+  "prototypeClicks": {
+    "new": 19,
+    "existing": 5,
+    "headers": 2,
+    "addedTabs": 0
+  },
+  "design": {
+    "boards": 71,
+    "nativeInteractions": 532,
+    "components": 184,
+    "componentIdsPreserved": true,
+    "tokensPreserved": true,
+    "previousBoardIdsPreserved": true,
+    "allDestinationsExist": true,
+    "adminBoardsWithSidebar": 14,
+    "aiHeadersChecked": 13
+  },
+  "notVerified": [
+    "人工视觉确认",
+    "真实供应商凭据、模型调用和 Token 历史采集（本轮仅设计）",
+    "全量 E2E、生产负载测试"
+  ]
+}

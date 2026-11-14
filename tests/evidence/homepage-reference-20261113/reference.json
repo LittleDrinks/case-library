@@ -1,0 +1,42 @@
+{
+  "date": "2026-11-13",
+  "scope": "首页桌面视觉参考",
+  "reference": "reference.png",
+  "layout": [
+    "校园湖景大图",
+    "大图内搜索框与资源统计",
+    "近 7 天动态横栏",
+    "下方推荐案例与推荐素材双栏"
+  ],
+  "implementationSource": {
+    "branch": "wip/home-design-migration-20261111",
+    "commit": "aa71f042ef81fb8b9265697401f9983d8b213a40",
+    "paths": [
+      "frontend/public/shu-campus-lake.webp",
+      "frontend/src/App.vue",
+      "frontend/src/components/HomeCaseItem.vue",
+      "frontend/src/composables/useHomeMotion.js",
+      "frontend/src/styles/base.css",
+      "frontend/src/styles/home.css",
+      "frontend/src/views/HomeView.vue"
+    ]
+  },
+  "verification": {
+    "frontendAndBackendEqualToSource": false,
+    "visualAcceptance": "校园图方向已确认；最新稿移除资讯卡片并统一背景，等待人工细调",
+    "fullE2eAfterBranchReorganization": "未重跑；保留最近一次 CI 的已知失败",
+    "currentEvidence": "verification.json",
+    "changesSinceSource": "首页移除资讯卡片并复用全站背景色；后端未修改",
+    "prototypeNavigationEvidence": "../penpot-navigation-20261113/verification.json"
+  },
+  "knownFailures": {
+    "sourceRun": "https://github.com/LittleDrinks/case-library/actions/runs/43374052175",
+    "oldHomepageVisualAssertions": 0,
+    "workbenchHistoryInteractions": 4,
+    "note": "旧首页断言已替换，8 项布局与品牌测试通过，见 verification.json；历史版本交互未在本轮复测"
+  },
+  "pending": [
+    "人工细调首页字号、间距与图片效果",
+    "调查历史版本交互测试失败"
+  ]
+}
