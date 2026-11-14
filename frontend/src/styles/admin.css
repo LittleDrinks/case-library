@@ -61,3 +61,30 @@
   .admin-queue article { grid-template-columns: auto minmax(0, 1fr); gap: 12px; }
   .admin-queue article a { grid-column: 2; justify-self: start; }
 }
+
+.admin-content > .admin-section { width: 100%; margin: 0; padding: 0; min-width: 0; }
+.admin-shell .admin-section > header { min-height: 0; margin: 0 0 24px; padding: 4px 0 0; border: 0; }
+.admin-shell .admin-section > header h1 { margin: 0; font: 650 24px/1.4 var(--sans); }
+.admin-shell .tag-group { box-shadow: none; }
+.admin-shell .tag-group h2 { font-family: var(--sans); }
+.admin-shell .skills-list > header { justify-content: flex-start; gap: 10px; }
+.admin-shell .skills-list > header span { display: none; }
+.admin-shell-review .admin-dashboard { width: 100%; padding: 20px 20px 0; gap: 20px; grid-template-columns: 176px minmax(0, 1fr); }
+.admin-shell-review .workbench-page { height: calc(100dvh - var(--navigation-height) - 20px); }
+.admin-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+.admin-list-toolbar input, .admin-list-toolbar select { height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+.admin-list-toolbar input { flex: 1; min-width: 180px; }
+.admin-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 20px 0; color: var(--ink-3); font-size: 12px; }
+.admin-pagination .el-pagination { flex-wrap: wrap; gap: 8px; }
+.admin-pagination .el-pagination__sizes { margin: 0; }
+.admin-pagination .el-pagination__jump { margin-left: 8px; }
+.admin-pagination .el-select { width: 110px; }
+@media (max-width: 680px) {
+  .admin-shell-review .admin-dashboard { grid-template-columns: minmax(0, 1fr); padding: 16px 14px 0; }
+  .admin-shell-review .workbench-page { height: 100dvh; }
+  .admin-pagination { align-items: flex-start; }
+  .admin-pagination .el-pagination { justify-content: flex-start; }
+  .admin-pagination .el-pagination__jump { margin-left: 0; }
+}
+
+.admin-shell { --el-color-primary: var(--brand); --el-color-primary-light-3: #d56369; --el-color-primary-light-5: #e39ca0; --el-color-primary-light-7: #efc5c7; --el-color-primary-light-9: var(--brand-soft); }

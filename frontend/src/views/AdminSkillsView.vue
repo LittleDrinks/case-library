@@ -7,13 +7,14 @@ import "element-plus/es/components/popconfirm/style/css";
 import "element-plus/es/components/table/style/css";
 import "element-plus/es/components/tag/style/css";
 import "element-plus/es/components/upload/style/css";
-import { computed, onMounted, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { api } from "../api.js";
-import SiteHeader from "../components/SiteHeader.vue";
+import AdminPagination from "../components/AdminPagination.vue";
+import { useAdminPage } from "../composables/useAdminPage.js";
 import { session } from "../session.js";
 
-const skills = ref([]);
-const loading = ref(true);
+const catalog = reactive(useAdminPage(params => api.listAdminSkillVersions(params)));
+const searchInput = ref("");
 const error = ref("");
 const file = ref(null);
 const uploading = ref(false);
@@ -24,7 +25,7 @@ const deleting = ref("");
 const unpublishing = ref("");
 const busy = computed(() => Boolean(publishing.value || deleting.value || unpublishing.value));
 const actionError = ref("");
-const rows = computed(() => skills.value.flatMap((skill) =>
+const rows = computed(() => catalog.items.flatMap((skill) =>
   skill.versions.map((version) => ({ skill, version })),
 ));
 
@@ -42,13 +43,7 @@ function onFileChange(uploadFile) {
   uploaded.value = null;
 }
 
-async function load() {
-  loading.value = true;
-  error.value = "";
-  try { skills.value = await api.listAdminSkills(); }
-  catch (reason) { error.value = reason.message || "Skill 列表加载失败"; }
-  finally { loading.value = false; }
-}
+async function load() { await catalog.reload(); }
 
 async function submit() {
   if (!file.value || uploading.value) return;
@@ -109,17 +104,11 @@ async function unpublish(row) {
   }
 }
 
-onMounted(load);
 </script>
 
 <template>
-  <div class="admin-page">
-    <SiteHeader />
-    <main id="main-content" class="skills-main">
-      <header class="skills-heading">
-        <div><span>Skill 管理</span><h1>Skill 包发布</h1></div>
-        <RouterLink :to="{ name: 'admin-dashboard' }">返回管理后台</RouterLink>
-      </header>
+  <section class="skills-main admin-section">
+      <header class="skills-heading"><h1>Skill 管理</h1></header>
 
       <el-form class="skills-upload" aria-label="上传 Skill 包" @submit.prevent="submit">
         <el-form-item label="Skill 包">
@@ -169,10 +158,15 @@ onMounted(load);
       </section>
 
       <section class="skills-list" aria-labelledby="skills-list-title">
-        <header><div><span>已上传</span><h2 id="skills-list-title">Skill 列表</h2></div><b>{{ skills.length }}</b></header>
+        <header><h2 id="skills-list-title">Skill 版本</h2><b>{{ catalog.total }}</b></header>
+        <form class="admin-list-toolbar" role="search" aria-label="搜索 Skill" @submit.prevent="catalog.search(searchInput.trim())">
+          <input v-model="searchInput" aria-label="Skill 名称" placeholder="搜索 Skill 名称" maxlength="200" />
+          <select :value="catalog.status" aria-label="发布状态" @change="catalog.filter($event.target.value)"><option value="all">全部状态</option><option value="published">当前发布</option><option value="unpublished">未启用</option></select>
+          <button class="secondary-button" type="submit">搜索</button>
+        </form>
         <el-alert v-if="actionError" :title="actionError" type="error" role="alert" :closable="false" />
-        <div v-if="loading" class="skills-state">正在加载 Skill 列表</div>
-        <el-alert v-else-if="error" type="error" :title="error" role="alert" show-icon :closable="false">
+        <div v-if="catalog.loading" class="skills-state">正在加载 Skill 列表</div>
+        <el-alert v-else-if="error || catalog.error" type="error" :title="error || catalog.error" role="alert" show-icon :closable="false">
           <el-button size="small" @click="load">重试</el-button>
         </el-alert>
         <el-table v-else :data="rows" aria-label="Skill 版本列表">
@@ -242,10 +236,11 @@ onMounted(load);
             </template>
           </el-table-column>
           <template #empty>
-            <span class="skills-empty">暂无 Skill 包，请先上传</span>
+            <span class="skills-empty">{{ catalog.query || catalog.status !== "all" ? "没有匹配的 Skill 版本" : "暂无 Skill 包，请先上传" }}</span>
           </template>
         </el-table>
+        <AdminPagination :total="catalog.total" :page="catalog.page" :page-size="catalog.pageSize" :loading="catalog.loading" label="Skill 版本分页"
+                         @page="catalog.page = $event" @page-size="catalog.resize" />
       </section>
-    </main>
-  </div>
+  </section>
 </template>

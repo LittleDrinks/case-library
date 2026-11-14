@@ -330,3 +330,19 @@ def _apply_tags(database: Database, changes: dict, tag_ids: list) -> None:
 
     ensure_tags_exist(database, tag_ids)
     changes["tagIds"] = list(dict.fromkeys(tag_ids))[:50]
+
+
+def admin_case_page(database, user, queue, query, page, page_size):
+    if not user or user["role"] != "admin":
+        raise CaseError(403, "仅管理员可查看管理队列")
+    statuses = ["pending", "reviewing"] if queue == "review" else ["published"]
+    condition = {"workflowStatus": {"$in": statuses}}
+    if query.strip():
+        condition["title"] = {"$regex": re.escape(query.strip()), "$options": "i"}
+    fields = ("id", "title", "author", "workflowStatus", "publicationStatus", "updatedAt", "publishedAt")
+    projection = {**{field: 1 for field in fields}, "_id": 0}
+    rows = database.cases.find(condition, projection).sort(
+        [("updatedAt", -1), ("id", -1)]
+    ).skip((page - 1) * page_size).limit(page_size)
+    return {"items": list(rows), "total": database.cases.count_documents(condition),
+            "page": page, "pageSize": page_size}

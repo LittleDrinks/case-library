@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { Check, FilePlus2, LoaderCircle, Upload, X } from "@lucide/vue";
 import { api } from "../api.js";
-import SiteHeader from "../components/SiteHeader.vue";
+import AdminPagination from "../components/AdminPagination.vue";
 import { session } from "../session.js";
 
 const accessLevel = ref("campus");
@@ -17,9 +17,12 @@ const candidateLoading = ref(true);
 const deciding = ref("");
 const candidatePage = ref(1);
 const candidateTotal = ref(0);
-const candidatePageSize = 20;
+const candidatePageSize = ref(20);
+const candidateQuery = ref("");
+const candidateSearch = ref("");
+let candidateRequest = 0;
 const candidatePages = computed(() => Math.max(1, Math.ceil(
-  candidateTotal.value / candidatePageSize,
+  candidateTotal.value / candidatePageSize.value,
 )));
 const accessLabels = { public: "公开", campus: "校内", private: "私密" };
 const statusLabels = {
@@ -65,17 +68,19 @@ function reviewCandidate(candidate) {
 }
 
 async function loadCandidates(page = candidatePage.value) {
+  const requestId = ++candidateRequest;
   candidateError.value = "";
   candidateLoading.value = true;
   try {
-    const result = await api.listMaterialCandidates("candidate", page, candidatePageSize);
+    const result = await api.listMaterialCandidates("candidate", page, candidatePageSize.value, candidateQuery.value);
+    if (requestId !== candidateRequest) return;
     candidatePage.value = result.page;
     candidateTotal.value = result.total;
     candidates.value = result.items.map(reviewCandidate);
   } catch (reason) {
-    candidateError.value = reason.message || "待审核素材加载失败";
+    if (requestId === candidateRequest) candidateError.value = reason.message || "待审核素材加载失败";
   } finally {
-    candidateLoading.value = false;
+    if (requestId === candidateRequest) candidateLoading.value = false;
   }
 }
 
@@ -83,6 +88,12 @@ function changeCandidatePage(page) {
   if (page < 1 || page > candidatePages.value || candidateLoading.value) return;
   loadCandidates(page);
 }
+
+function searchCandidates() {
+  candidateQuery.value = candidateSearch.value.trim();
+  loadCandidates(1);
+}
+function resizeCandidates(value) { candidatePageSize.value = value; loadCandidates(1); }
 
 async function refreshAfterDecision() {
   const previous = candidatePage.value > 1 && candidates.value.length === 1;
@@ -130,15 +141,8 @@ onMounted(loadCandidates);
 </script>
 
 <template>
-  <div class="admin-page">
-    <SiteHeader />
-    <main id="main-content" class="material-import-main">
-      <header class="material-import-heading">
-        <div>
-          <p>素材管理</p>
-          <h1>资料批量导入</h1>
-        </div>
-      </header>
+  <section class="material-import-main admin-section">
+      <header class="material-import-heading"><h1>资料批量导入</h1></header>
 
       <form class="material-import-form" @submit.prevent="submit">
         <label class="material-file-button" title="选择资料">
@@ -168,6 +172,10 @@ onMounted(loadCandidates);
           <div><p>入库审核</p><h2 id="material-review-title">待审核素材</h2></div>
           <span>共 {{ candidateTotal }} 项</span>
         </header>
+        <form class="admin-list-toolbar" role="search" aria-label="搜索待审核素材" @submit.prevent="searchCandidates">
+          <input v-model="candidateSearch" aria-label="素材文件名" placeholder="搜索待审核文件名" maxlength="200" />
+          <button class="secondary-button" type="submit">搜索</button>
+        </form>
         <p v-if="candidateError" class="material-import-error" role="alert">{{ candidateError }}</p>
         <p v-else-if="candidateLoading" class="material-review-empty">正在加载待审核素材</p>
         <p v-else-if="!candidates.length" class="material-review-empty">暂无待审核素材</p>
@@ -184,10 +192,8 @@ onMounted(loadCandidates);
             </div>
           </article>
         </div>
-        <nav v-if="candidateTotal > candidatePageSize" class="material-review-pagination" aria-label="待审核素材分页">
-          <span>第 {{ candidatePage }} 页，共 {{ candidatePages }} 页</span>
-          <div><button type="button" :disabled="candidatePage === 1 || candidateLoading" @click="changeCandidatePage(candidatePage - 1)">上一页</button><button type="button" :disabled="candidatePage === candidatePages || candidateLoading" @click="changeCandidatePage(candidatePage + 1)">下一页</button></div>
-        </nav>
+        <AdminPagination :total="candidateTotal" :page="candidatePage" :page-size="candidatePageSize"
+                         :loading="candidateLoading" label="待审核素材分页" @page="changeCandidatePage" @page-size="resizeCandidates" />
       </section>
       <section
         v-if="job"
@@ -221,6 +227,5 @@ onMounted(loadCandidates);
           </table>
         </div>
       </section>
-    </main>
-  </div>
+  </section>
 </template>

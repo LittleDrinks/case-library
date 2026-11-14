@@ -1,0 +1,10 @@
+{
+  "boards": 71,
+  "nativeInteractions": 532,
+  "components": 184,
+  "componentIdsPreserved": true,
+  "tokensPreserved": true,
+  "previousBoardIdsPreserved": true,
+  "allDestinationsExist": true,
+  "adminBoardsWithSidebar": 14
+}

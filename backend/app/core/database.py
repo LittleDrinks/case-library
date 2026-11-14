@@ -36,6 +36,7 @@ def _initialize_cases(database: Database) -> None:
     database.cases.create_index(
         [("publishedVersionId", ASCENDING), ("publicationStatus", ASCENDING)]
     )
+    database.cases.create_index([("workflowStatus", ASCENDING), ("updatedAt", DESCENDING), ("id", DESCENDING)])
     _initialize_case_versions(database)
 
 

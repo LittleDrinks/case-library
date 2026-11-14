@@ -1,0 +1,312 @@
+{
+  "result": "passed",
+  "dependency": "real MongoDB replica set; isolated synthetic database; actual HTTP authentication and routes",
+  "checks": [
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&page=1&pageSize=20",
+      "status": 200,
+      "milliseconds": 42.1,
+      "bytes": 4408
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&page=250&pageSize=20",
+      "status": 200,
+      "milliseconds": 11.0,
+      "bytes": 4419
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&page=500&pageSize=20",
+      "status": 200,
+      "milliseconds": 12.9,
+      "bytes": 4419
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&pageSize=50",
+      "status": 200,
+      "milliseconds": 9.0,
+      "bytes": 10948
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&page=501",
+      "status": 200,
+      "milliseconds": 12.7,
+      "bytes": 51
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&q=%5B%E4%B8%93%E9%A2%98%5D",
+      "status": 200,
+      "milliseconds": 19.1,
+      "bytes": 4586
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&q=NOTFOUND",
+      "status": 200,
+      "milliseconds": 26.9,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&q=.*",
+      "status": 200,
+      "milliseconds": 26.8,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&page=0",
+      "status": 422,
+      "milliseconds": 2.6,
+      "bytes": 143
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review&pageSize=10000",
+      "status": 422,
+      "milliseconds": 2.2,
+      "bytes": 147
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review",
+      "status": 403,
+      "milliseconds": 2.5,
+      "bytes": 46
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=review",
+      "status": 401,
+      "milliseconds": 1.1,
+      "bytes": 25
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&page=1&pageSize=20",
+      "status": 200,
+      "milliseconds": 6.0,
+      "bytes": 4428
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&page=250&pageSize=20",
+      "status": 200,
+      "milliseconds": 7.7,
+      "bytes": 4439
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&page=500&pageSize=20",
+      "status": 200,
+      "milliseconds": 9.8,
+      "bytes": 4439
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&pageSize=50",
+      "status": 200,
+      "milliseconds": 6.4,
+      "bytes": 10998
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&page=501",
+      "status": 200,
+      "milliseconds": 9.4,
+      "bytes": 51
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&q=%5B%E4%B8%93%E9%A2%98%5D",
+      "status": 200,
+      "milliseconds": 18.5,
+      "bytes": 4606
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&q=NOTFOUND",
+      "status": 200,
+      "milliseconds": 26.3,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&q=.*",
+      "status": 200,
+      "milliseconds": 26.5,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&page=0",
+      "status": 422,
+      "milliseconds": 2.5,
+      "bytes": 143
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published&pageSize=10000",
+      "status": 422,
+      "milliseconds": 2.1,
+      "bytes": 147
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published",
+      "status": 403,
+      "milliseconds": 2.5,
+      "bytes": 46
+    },
+    {
+      "endpoint": "/api/cases/admin/queue?queue=published",
+      "status": 401,
+      "milliseconds": 1.2,
+      "bytes": 25
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&page=1&pageSize=20",
+      "status": 200,
+      "milliseconds": 35.5,
+      "bytes": 4228
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&page=250&pageSize=20",
+      "status": 200,
+      "milliseconds": 8.1,
+      "bytes": 4239
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&page=500&pageSize=20",
+      "status": 200,
+      "milliseconds": 9.7,
+      "bytes": 4239
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&pageSize=50",
+      "status": 200,
+      "milliseconds": 6.5,
+      "bytes": 10498
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&page=501",
+      "status": 200,
+      "milliseconds": 9.8,
+      "bytes": 51
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&q=%5B%E4%B8%93%E9%A2%98%5D",
+      "status": 200,
+      "milliseconds": 19.1,
+      "bytes": 4406
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&q=NOTFOUND",
+      "status": 200,
+      "milliseconds": 26.2,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&q=.*",
+      "status": 200,
+      "milliseconds": 26.1,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&page=0",
+      "status": 422,
+      "milliseconds": 2.7,
+      "bytes": 143
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate&pageSize=10000",
+      "status": 422,
+      "milliseconds": 2.3,
+      "bytes": 147
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate",
+      "status": 403,
+      "milliseconds": 2.3,
+      "bytes": 46
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=candidate",
+      "status": 401,
+      "milliseconds": 1.2,
+      "bytes": 25
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&page=1&pageSize=20",
+      "status": 200,
+      "milliseconds": 308.5,
+      "bytes": 9420
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&page=250&pageSize=20",
+      "status": 200,
+      "milliseconds": 298.1,
+      "bytes": 9512
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&page=500&pageSize=20",
+      "status": 200,
+      "milliseconds": 300.4,
+      "bytes": 9512
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&pageSize=50",
+      "status": 200,
+      "milliseconds": 295.3,
+      "bytes": 23393
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&page=501",
+      "status": 200,
+      "milliseconds": 297.6,
+      "bytes": 51
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&q=%5B%E4%B8%93%E9%A2%98%5D",
+      "status": 200,
+      "milliseconds": 430.8,
+      "bytes": 9768
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&q=NOTFOUND",
+      "status": 200,
+      "milliseconds": 434.8,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&q=.*",
+      "status": 200,
+      "milliseconds": 424.5,
+      "bytes": 45
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&page=0",
+      "status": 422,
+      "milliseconds": 4.6,
+      "bytes": 143
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all&pageSize=10000",
+      "status": 422,
+      "milliseconds": 3.4,
+      "bytes": 147
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all",
+      "status": 403,
+      "milliseconds": 3.7,
+      "bytes": 43
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=all",
+      "status": 401,
+      "milliseconds": 1.9,
+      "bytes": 25
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=published",
+      "status": 200,
+      "milliseconds": 307.7,
+      "bytes": 9606
+    },
+    {
+      "endpoint": "/api/admin/skills/versions?status=unpublished",
+      "status": 200,
+      "milliseconds": 320.6,
+      "bytes": 9402
+    },
+    {
+      "endpoint": "/api/admin/material-candidates?status=approved",
+      "status": 200,
+      "milliseconds": 4.5,
+      "bytes": 45
+    }
+  ]
+}

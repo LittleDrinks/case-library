@@ -1,0 +1,30 @@
+{
+  "passed": 5,
+  "results": [
+    {
+      "name": "截图中的案例检索 → 案例阅读",
+      "passed": true,
+      "addedTabs": 0
+    },
+    {
+      "name": "统一检索 → 案例阅读",
+      "passed": true,
+      "addedTabs": 0
+    },
+    {
+      "name": "演示入口 → 管理员后台",
+      "passed": true,
+      "addedTabs": 0
+    },
+    {
+      "name": "管理员后台 → 素材管理",
+      "passed": true,
+      "addedTabs": 0
+    },
+    {
+      "name": "演示入口 → 教师创作",
+      "passed": true,
+      "addedTabs": 0
+    }
+  ]
+}
